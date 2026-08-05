@@ -4,6 +4,8 @@
 
 The single reference for sequencing. Task detail lives in `streams/STREAM-*.md`; this document is only about **order and ownership**.
 
+> Slide version for walkthroughs and standups: [`decks/EduTrack-Dependencies.pptx`](decks/EduTrack-Dependencies.pptx)
+
 | | |
 |---|---|
 | 🔴 | **Cross-stream blocker** — another developer is waiting. Slipping it stalls somebody else |
