@@ -7,7 +7,7 @@ One page. Read it once, follow it every day.
 ## Before you write any code
 
 ```bash
-git clone <bitbucket-repo-url> && cd taskdesk
+git clone https://github.com/debashisedunext/EduTrack.git && cd EduTrack
 git checkout develop
 claude
 ```
@@ -75,7 +75,7 @@ chore(platform): pin Flyway to 10.17
 3. **Small pull requests** — target under 400 changed lines. A 3,000-line PR cannot be reviewed or cleanly conflict-resolved.
 4. **No merge commits inside a feature branch.** Rebase, so conflicts are resolved once rather than replayed.
 5. **Push at least once a day**, even work in progress. Unpushed work is invisible work.
-6. **Pipelines must be green** before requesting integration. A red branch is not merged.
+6. **CI must be green** before requesting integration. A red branch is not merged.
 7. **Never commit** `.env`, `application-local.yml`, credentials, `target/`, `node_modules/`, `.DS_Store`.
 
 ---
@@ -84,7 +84,7 @@ chore(platform): pin Flyway to 10.17
 
 Work only in your stream's owned paths — the map is in `docs/TEAM-PLAN.md` §6.
 
-Needing a change in another stream's directory means **saying so and coordinating**, not editing it quietly. Bitbucket adds the right default reviewer automatically; that reviewer is who signs off.
+Needing a change in another stream's directory means **saying so and coordinating**, not editing it quietly. `.github/CODEOWNERS` makes GitHub request the right reviewer automatically; that reviewer is who signs off.
 
 Backend uses **feature packaging, not layer packaging**: `api/feature/tickets/` holds its own controller, service, repository and DTOs. Never create shared `controllers/` or `services/` folders — that is precisely what makes four developers collide daily.
 
@@ -125,7 +125,7 @@ Backend uses **feature packaging, not layer packaging**: `api/feature/tickets/` 
 - [ ] OpenAPI spec updated; client regenerated
 - [ ] Storybook entry for any new shared component
 - [ ] No new lint or compiler warnings
-- [ ] Rebased on current `develop`, pipeline green
+- [ ] Rebased on current `develop`, CI green
 - [ ] Only your stream's paths touched, or sign-off obtained
 
 ---

@@ -125,7 +125,7 @@ frontend/src/
   features/chat|notifications/ → D
 ```
 
-On Bitbucket this map becomes **Default reviewers** (Repository settings → Default reviewers), configured per source-branch pattern so `feat/tickets/*` automatically requests Stream C's owner. Bitbucket Cloud has no GitHub-style `CODEOWNERS` file — path-level ownership is enforced by review discipline and the pre-merge checklist in §9.1, not by the platform.
+This map is committed as `.github/CODEOWNERS`, so GitHub requests the right reviewer automatically on every pull request. Keep the two in sync — the file is the enforceable version of this table.
 
 ---
 
@@ -216,21 +216,23 @@ chore(platform): pin Flyway to 10.17
 6. **CI must be green before requesting integration.** Claude does not merge a red branch.
 7. **Never commit** `.env`, credentials, `application-local.yml`, IDE folders, `target/`, `node_modules/`, or `.DS_Store`.
 
-### 8.5 Branch restrictions (Bitbucket)
+### 8.5 Branch protection (GitHub)
 
-Bitbucket calls this **Branch restrictions**, at Repository settings → Branch restrictions. Add one restriction per branch, for `main` and `develop`:
+Settings → Branches → Add branch protection rule. One rule each for `main` and `develop`:
 
-| Restriction | `main` | `develop` |
+| Setting | `main` | `develop` |
 |---|---|---|
-| Prevent changes without a pull request | ✔ | ✔ |
-| Prevent deletion | ✔ | ✔ |
-| Prevent rewriting history (force push) | ✔ | ✔ |
-| **Merge check:** minimum 1 approval | ✔ | ✔ |
-| **Merge check:** minimum 1 successful build | ✔ | ✔ |
-| **Merge check:** no unresolved PR tasks | ✔ | ✔ |
-| Write access | Claude / lead only | Claude / lead only |
+| Require a pull request before merging | ✔ | ✔ |
+| Required approvals | 1 | 1 |
+| Require review from Code Owners | ✔ | ✔ |
+| Require status checks to pass | ✔ all four jobs | ✔ all four jobs |
+| Require branches to be up to date before merging | ✔ | ✔ |
+| Require linear history | ✔ | ✔ |
+| Do not allow bypassing the above | ✔ | ✔ |
+| Allow force pushes | ✘ | ✘ |
+| Allow deletions | ✘ | ✘ |
 
-Merge checks live under the same restriction dialog. Without "minimum successful build", a red pipeline can still be merged — which defeats the point of having one.
+The setting people forget is **require status checks** — without it a red CI run can still be merged, which makes the whole pipeline decorative. Add all four job names: `Migration guard`, `Backend — build & test`, `Frontend — lint, test & build`, `OpenAPI contract — staleness check`.
 
 ---
 
@@ -304,14 +306,14 @@ The project is **not yet a git repository** and `gh` is not installed on this ma
 3. ✅ `.gitattributes` — `frontend/src/api/generated/** merge=ours`, plus `* text=auto eol=lf`
 4. ✅ Move the blueprint, `PLAN.md` and `TEAM-PLAN.md` into `docs/`; decks into `docs/decks/`
 5. ✅ `CONTRIBUTING.md` — §7 and §8 condensed to a page developers will actually read, with the PR description template appended
-6. ✅ `bitbucket-pipelines.yml` — backend build, frontend build, OpenAPI staleness check, migration guard
+6. ✅ `.github/workflows/ci.yml`, `.github/CODEOWNERS`, `.github/pull_request_template.md`
 7. ✅ Initial commit on `main`, branch `develop` from it
-8. ⬜ Add the Bitbucket remote and push both branches
-9. ⬜ Apply the §8.5 branch restrictions to `main` and `develop`
-10. ⬜ Configure Default reviewers per branch pattern; add the four developers with write access
-11. ⬜ Enable Pipelines (Repository settings → Pipelines → Settings)
+8. ⬜ Add the GitHub remote and push both branches
+9. ⬜ Apply the §8.5 branch protection to `main` and `develop`
+10. ⬜ Replace the @placeholders in CODEOWNERS with real usernames; add the four developers with write access
+11. ⬜ Set `develop` as the default branch (Settings → General → Default branch)
 
-Steps 1–7 are done. Steps 8–11 need the Bitbucket repository URL and workspace admin access.
+Steps 1–7 are done. Steps 8–11 need push credentials and repo admin access.
 
 ---
 

@@ -1,0 +1,60 @@
+# TaskDesk (EduTrack) — code ownership
+#
+# GitHub requests the right reviewer automatically from this file.
+# Derived from docs/TEAM-PLAN.md §6 — keep the two in sync.
+#
+# Replace the @placeholders with real GitHub usernames before this takes effect.
+#
+#   Stream A — Platform & Security   @stream-a
+#   Stream B — Masters & Clients     @stream-b
+#   Stream C — Tickets & Ribbon      @stream-c
+#   Stream D — Engines & Realtime    @stream-d
+
+# ---- Default: the lead sees anything not claimed below ----
+*                                       @debashisedunext
+
+# ---- Stream A · Platform & Security ----
+/backend/common/                        @stream-a
+/backend/domain/db/migration/           @stream-a
+/backend/api/security/                  @stream-a
+/backend/api/feature/auth/              @stream-a
+/backend/api/feature/dashboard/         @stream-a
+/backend/api/feature/reports/           @stream-a
+/frontend/src/features/auth/            @stream-a
+/frontend/src/features/dashboard/       @stream-a
+/frontend/src/features/reports/         @stream-a
+/docker-compose.yml                     @stream-a
+/.github/                               @stream-a
+
+# ---- Stream B · Masters & Clients ----
+/backend/api/feature/masters/           @stream-b
+/backend/api/feature/clients/           @stream-b
+/backend/api/feature/imports/           @stream-b
+/backend/api/feature/workflow/          @stream-b
+/frontend/src/features/masters/         @stream-b
+/frontend/src/features/clients/         @stream-b
+
+# ---- Stream C · Tickets & Ribbon ----
+/backend/api/feature/tickets/           @stream-c
+/backend/api/feature/transitions/       @stream-c
+/frontend/src/features/tickets/         @stream-c
+/frontend/src/components/ui/            @stream-c
+/frontend/src/components/ribbon/        @stream-c
+/frontend/src/styles/tokens.css         @stream-c
+
+# ---- Stream D · Engines & Realtime ----
+/backend/worker/                        @stream-d
+/backend/api/feature/notifications/     @stream-d
+/backend/api/feature/chat/              @stream-d
+/backend/api/realtime/                  @stream-d
+/frontend/src/features/chat/            @stream-d
+/frontend/src/features/notifications/   @stream-d
+
+# ---- Cross-cutting: the three append-only tables and the immutability core
+# always need Stream A's eyes, whoever is touching them.
+/backend/domain/**/history/             @stream-a
+/backend/domain/**/effort/              @stream-a
+/backend/domain/**/immutable/           @stream-a
+
+# ---- Generated: nobody owns it, nobody hand-edits it ----
+/frontend/src/api/generated/

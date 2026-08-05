@@ -2,7 +2,7 @@
 
 **Milestones:** M0 (foundation) · M1 (auth + scope guard) · M2 (immutability core) · M6 (dashboard + reports)
 **Branch prefix:** `feat/platform/…`
-**Owns:** `backend/common/`, `backend/domain/db/migration/`, `backend/api/security/`, `backend/api/feature/{auth,dashboard,reports}/`, `docker-compose.yml`, `bitbucket-pipelines.yml`, `frontend/src/features/{auth,dashboard,reports}/`
+**Owns:** `backend/common/`, `backend/domain/db/migration/`, `backend/api/security/`, `backend/api/feature/{auth,dashboard,reports}/`, `docker-compose.yml`, `.github/`, `frontend/src/features/{auth,dashboard,reports}/`
 
 > **You are the critical path.** Streams B, C and D are blocked on A-012 (`dev-noauth` profile, due day 10) and on the baseline schema. Ship those before anything else on this list.
 

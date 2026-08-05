@@ -72,7 +72,7 @@ Three things are the architectural spine. Everything else hangs off them, and ea
 | WebSocket client | **@stomp/stompjs + SockJS fallback** | |
 | Deploy | **Docker Compose → Kubernetes**, Nginx | Unchanged |
 | Observability | **Micrometer + Prometheus/Grafana · Sentry · Logback JSON** | Replaces Winston/pino |
-| CI/CD | **Bitbucket Pipelines** | Lint → test → build → Flyway migrate → deploy |
+| CI/CD | **GitHub Actions** | Lint → test → build → Flyway migrate → deploy |
 
 ### 2.2 Node-specific choices that had to be replaced
 
@@ -91,7 +91,7 @@ The blueprint assumes a Node/NestJS backend. Five of its technology choices have
 ```
 edunext-taskdesk/
 ├── docker-compose.yml              # mysql, redis, minio, mailpit
-├── bitbucket-pipelines.yml
+├── .github/workflows/ci.yml
 ├── backend/
 │   ├── pom.xml                     # parent, dependency management
 │   ├── common/                     # DTOs, enums, exceptions, OpenAPI config

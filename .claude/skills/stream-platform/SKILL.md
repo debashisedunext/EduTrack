@@ -15,7 +15,7 @@ You are working as **Stream A** on TaskDesk.
 
 ## Your scope
 
-**You own:** `backend/common/`, `backend/domain/db/migration/`, `backend/api/security/`, `backend/api/feature/{auth,dashboard,reports}/`, `docker-compose.yml`, `bitbucket-pipelines.yml`, `frontend/src/features/{auth,dashboard,reports}/`
+**You own:** `backend/common/`, `backend/domain/db/migration/`, `backend/api/security/`, `backend/api/feature/{auth,dashboard,reports}/`, `docker-compose.yml`, `.github/`, `frontend/src/features/{auth,dashboard,reports}/`
 
 **You do not touch:** `feature/{masters,clients,imports,workflow}` (B) · `feature/{tickets,transitions}`, `components/ui`, `styles/tokens.css` (C) · `worker/`, `feature/{notifications,chat}`, `realtime/` (D)
 

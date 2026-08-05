@@ -1,0 +1,139 @@
+# TaskDesk (EduTrack) — CI
+# Stream A owns this file (docs/TEAM-PLAN.md §6).
+
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------- guard
+  migration-guard:
+    name: Migration guard
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: No edits to applied migrations
+        run: |
+          # Flyway checksums applied migrations. Editing one breaks every
+          # other developer's database, so it is blocked here.
+          CHANGED=$(git diff --name-status \
+            origin/${{ github.base_ref }}...HEAD -- '**/db/migration/*.sql' \
+            | awk '$1 ~ /^(M|D|R)/ {print $2}')
+          if [ -n "$CHANGED" ]; then
+            echo "::error::An already-applied migration was modified or deleted:"
+            echo "$CHANGED"
+            echo "Corrections must be NEW migrations — see CONTRIBUTING.md."
+            exit 1
+          fi
+          echo "✓ No applied migrations were altered."
+
+      - name: Timestamp versioning enforced
+        run: |
+          BAD=$(git diff --name-only --diff-filter=A \
+            origin/${{ github.base_ref }}...HEAD -- '**/db/migration/*.sql' \
+            | grep -Ev '/V[0-9]{8}_[0-9]{4}__[a-z0-9_]+\.sql$' || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::Migrations must be named V<YYYYMMDD>_<HHMM>__<snake_case>.sql:"
+            echo "$BAD"
+            exit 1
+          fi
+          echo "✓ Migration naming is correct."
+
+  # ---------------------------------------------------------------- backend
+  backend:
+    name: Backend — build & test
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: taskdesk_test
+          MYSQL_ROOT_PASSWORD: rootpw
+          MYSQL_USER: taskdesk
+          MYSQL_PASSWORD: taskdesk
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -prootpw"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build and test
+        working-directory: backend
+        run: mvn -B verify
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-reports
+          path: backend/**/target/surefire-reports/**
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------- frontend
+  frontend:
+    name: Frontend — lint, test & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - working-directory: frontend
+        run: npm run lint
+      - working-directory: frontend
+        run: npm run test -- --run
+      - working-directory: frontend
+        run: npm run build
+
+  # ---------------------------------------------------------------- contract
+  contract:
+    name: OpenAPI contract — staleness check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - name: Regenerate client
+        working-directory: frontend
+        run: npm run api:generate
+      - name: Fail if the committed client is stale
+        run: |
+          # The ONLY thing preventing Java ⇄ TypeScript drift now that shared
+          # Zod schemas are off the table.
+          if [ -n "$(git status --porcelain frontend/src/api/generated)" ]; then
+            echo "::error::Generated API client is stale."
+            echo "Run 'npm run api:generate' in frontend/ and commit the result."
+            git --no-pager diff --stat frontend/src/api/generated
+            exit 1
+          fi
+          echo "✓ Generated client is up to date."
