@@ -1,0 +1,46 @@
+/* EduTrack design tokens — blueprint §12.1. Light theme only.
+   Owner: Stream C (Divyansh) · C-002. Frozen after Sprint 0.
+   Every token below passes WCAG AA on white. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-app:          #F7F8FC;
+  --bg-surface:      #FFFFFF;
+  --bg-subtle:       #F1F3F9;
+  --border:          #E5E8F0;
+  --primary:         #4F46E5;
+  --primary-soft:    #EEF2FF;
+  --text-primary:    #111827;
+  --text-secondary:  #6B7280;
+  --success:         #10B981;
+  --warning:         #F59E0B;
+  --danger:          #EF4444;
+  --info:            #3B82F6;
+
+  /* Level chips — soft tint + solid text, never a heavy solid block */
+  --level-low:       #10B981;
+  --level-medium:    #3B82F6;
+  --level-high:      #F59E0B;
+  --level-critical:  #EF4444;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: Inter, 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Accessibility is not optional — blueprint §12.2 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}

@@ -1,0 +1,103 @@
+# EduTrack — local development stack
+#
+#   docker compose up -d
+#
+# Owned by Stream A (Shivendra). NOT verified on the machine that authored it —
+# no Docker was available. First developer with Docker confirms it; that is the
+# Sprint 0 exit gate anyway.
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: edutrack-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpw}
+      MYSQL_DATABASE: ${DB_NAME:-edutrack}
+      MYSQL_USER: ${DB_USER:-edutrack_app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-edutrack}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      # UTC everywhere. DATETIME(6) columns carry no zone, so the server must
+      # not shift them. See PLAN.md §3.1.
+      - --default-time-zone=+00:00
+      # ONLY_FULL_GROUP_BY stays ON — it catches the class of bug described in
+      # PLAN.md §3.4. Do not remove it to make a query pass; fix the query.
+      - --sql-mode=ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+      - --log-bin-trust-function-creators=1   # required for the immutability triggers
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD:-rootpw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: edutrack-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: edutrack-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"      # S3 API
+      - "9001:9001"      # console — http://localhost:9001
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Creates the attachments bucket once MinIO is healthy, then exits.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin} &&
+      mc mb --ignore-existing local/${S3_BUCKET:-edutrack} &&
+      echo 'bucket ready — note: private, served only via signed URLs (blueprint §4B.4)'
+      "
+
+  # Catches every outbound mail in dev. Nothing reaches a real inbox.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: edutrack-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"      # SMTP
+      - "8025:8025"      # web UI — http://localhost:8025
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+volumes:
+  mysql-data:
+  redis-data:
+  minio-data:
