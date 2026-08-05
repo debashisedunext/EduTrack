@@ -1,0 +1,69 @@
+# ---- Java / Maven ----
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.ear
+dependency-reduced-pom.xml
+.mvn/timing.properties
+
+# ---- Node / frontend ----
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+*.tsbuildinfo
+storybook-static/
+
+# ---- Secrets & local config ----
+.env
+.env.*
+!.env.example
+application-local.yml
+application-local.yaml
+application-local.properties
+*-secrets.yml
+*.pem
+*.key
+*.p12
+*.jks
+
+# ---- IDE ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+!.vscode/extensions.json
+.settings/
+.project
+.classpath
+*.swp
+
+# ---- OS ----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+# ---- Logs & runtime ----
+*.log
+logs/
+hs_err_pid*
+replay_pid*
+
+# ---- Docker / local data ----
+docker/data/
+.mysql-data/
+.minio-data/
+.redis-data/
+
+# ---- Test output ----
+.pytest_cache/
+__pycache__/
+venv/

@@ -1,0 +1,37 @@
+# Normalise line endings so Windows developers don't reformat every file
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+mvnw.cmd text eol=crlf
+
+# Shell scripts and the Maven wrapper must stay LF
+*.sh text eol=lf
+mvnw text eol=lf
+
+# ---- Generated: never merge by hand, always regenerate ----
+frontend/src/api/generated/** merge=ours linguist-generated=true
+
+# ---- Lockfiles: regenerate on conflict, don't hand-merge ----
+package-lock.json merge=ours
+pnpm-lock.yaml    merge=ours
+
+# ---- Binary ----
+*.pptx binary
+*.xlsx binary
+*.xls  binary
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.jar  binary
+*.woff  binary
+*.woff2 binary
+
+# ---- Diff hints ----
+*.md   diff=markdown
+*.java diff=java
