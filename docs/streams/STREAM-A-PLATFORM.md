@@ -1,6 +1,7 @@
 # Stream A — Platform & Security · Task Backlog
 
 **Milestones:** M0 (foundation) · M1 (auth + scope guard) · M2 (immutability core) · M6 (dashboard + reports)
+**Owner:** Shivendra · `shivendra.edunext@gmail.com`
 **Branch prefix:** `feat/platform/…`
 **Owns:** `backend/common/`, `backend/domain/db/migration/`, `backend/api/security/`, `backend/api/feature/{auth,dashboard,reports}/`, `docker-compose.yml`, `.github/`, `frontend/src/features/{auth,dashboard,reports}/`
 

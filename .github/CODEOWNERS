@@ -5,10 +5,15 @@
 #
 # Replace the @placeholders with real GitHub usernames before this takes effect.
 #
-#   Stream A — Platform & Security   @stream-a
-#   Stream B — Masters & Clients     @stream-b
-#   Stream C — Tickets & Ribbon      @stream-c
-#   Stream D — Engines & Realtime    @stream-d
+#   Stream A — Platform & Security   Shivendra  shivendra.edunext@gmail.com       @stream-a
+#   Stream B — Masters & Clients     Ayush      ayush.edunext123@gmail.com        @stream-b
+#   Stream C — Tickets & Ribbon      Divyansh   divyansh.edunext@gmail.com        @stream-c
+#   Stream D — Engines & Realtime    Debashis   debashis@edunexttechnologies.com  @stream-d
+#
+# GitHub does NOT resolve email addresses here — only @handles. Until the four
+# placeholders below are replaced with real usernames, GitHub requests NO
+# reviewer on any pull request and branch protection's "require Code Owner
+# review" has nothing to require.
 
 # ---- Default: the lead sees anything not claimed below ----
 *                                       @debashisedunext

@@ -28,6 +28,17 @@ Ownership is **vertical** — each developer owns a slice of the product from da
 | **C** | Tickets & Ribbon | Ticket CRUD, detail page, cycles/reopen, comments, attachments, the Workflow Ribbon, handoff, Journey grid | M4 |
 | **D** | Engines & Realtime | SLA/escalation scanners, mail engine, notification centre, WebSocket infrastructure, chat | M5, M7 |
 
+### Assigned owners
+
+| Stream | Owner | Email | GitHub |
+|---|---|---|---|
+| **A** — Platform & Security | Shivendra | `shivendra.edunext@gmail.com` | _pending_ |
+| **B** — Masters & Clients | Ayush | `ayush.edunext123@gmail.com` | _pending_ |
+| **C** — Tickets & Ribbon | Divyansh | `divyansh.edunext@gmail.com` | _pending_ |
+| **D** — Engines & Realtime | Debashis | `debashis@edunexttechnologies.com` | _pending_ |
+
+GitHub handles are needed for `.github/CODEOWNERS` — emails do not resolve there. Until they are filled in, GitHub requests no reviewer on any pull request.
+
 ### Who should take which
 
 - **Stream A** needs the strongest backend and infrastructure person. Everything else depends on their first six weeks, and the scope guard is the single highest-risk component in the system. They are also the natural schema arbiter.

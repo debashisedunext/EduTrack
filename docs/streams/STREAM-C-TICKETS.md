@@ -1,6 +1,7 @@
 # Stream C — Tickets & Ribbon · Task Backlog
 
 **Milestones:** M0 (design system) · M4 (tickets + the Workflow Ribbon)
+**Owner:** Divyansh · `divyansh.edunext@gmail.com`
 **Branch prefix:** `feat/tickets/…`
 **Owns:** `backend/api/feature/{tickets,transitions}/`, `frontend/src/features/tickets/`, `frontend/src/components/{ui,ribbon}/`, `frontend/src/styles/tokens.css`
 

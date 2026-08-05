@@ -1,6 +1,7 @@
 # Stream B — Masters & Clients · Task Backlog
 
 **Milestones:** M0 (seed + entities) · M3 (all master screens) · then joins C on the ribbon, then M6 reports
+**Owner:** Ayush · `ayush.edunext123@gmail.com`
 **Branch prefix:** `feat/masters/…`
 **Owns:** `backend/api/feature/{masters,clients,imports,workflow}/`, `frontend/src/features/{masters,clients}/`
 
