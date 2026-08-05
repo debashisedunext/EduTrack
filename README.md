@@ -81,6 +81,7 @@ Start each session by loading your stream's context in Claude Code:
 | [`docs/PLAN.md`](docs/PLAN.md) | Build spec — authority on **implementation**, MySQL translation, milestones |
 | [`docs/TEAM-PLAN.md`](docs/TEAM-PLAN.md) | Streams, timeline, ownership map, git workflow |
 | [`docs/streams/`](docs/streams/) | Per-developer task backlogs, `A-001` … `D-059` |
+| [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) | **Who does what, what blocks what, what runs in parallel** |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Daily loop, branch naming, the seven rules |
 | [`CLAUDE.md`](CLAUDE.md) | Auto-loaded rules for every Claude Code session |
 

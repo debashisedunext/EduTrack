@@ -7,6 +7,8 @@
 
 > **You are the critical path.** Streams B, C and D are blocked on A-012 (`dev-noauth` profile, due day 10) and on the baseline schema. Ship those before anything else on this list.
 
+> Cross-stream sequencing — who is waiting on you and what to do if you are blocked — is in [`../DEPENDENCIES.md`](../DEPENDENCIES.md).
+
 ---
 
 ## Sprint 0 — weeks 1–2

@@ -7,6 +7,8 @@
 
 > **You own two decouplers the whole team depends on.** B-007 (ticket fixture corpus) unblocks D's SLA work and C's ribbon; B-021 (working-hours service) is a hard dependency for every SLA calculation D writes. Ship both early.
 
+> Cross-stream sequencing — who is waiting on you and what to do if you are blocked — is in [`../DEPENDENCIES.md`](../DEPENDENCIES.md).
+
 ---
 
 ## Sprint 0 — weeks 1–2

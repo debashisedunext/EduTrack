@@ -7,6 +7,8 @@
 
 > **Your Sprint 0 output unblocks the entire frontend.** D-004 (MSW mock server) is what lets Stream C build the whole ticket detail page before a single ticket endpoint exists. Ship the contract first, features second.
 
+> Cross-stream sequencing — who is waiting on you and what to do if you are blocked — is in [`../DEPENDENCIES.md`](../DEPENDENCIES.md).
+
 ---
 
 ## Sprint 0 — weeks 1–2

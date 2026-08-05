@@ -12,6 +12,7 @@ EduTrack: an organisation task and client ticketing platform. 34 screens, 6 role
 | `docs/PLAN.md` | Build spec — the authority on **implementation**. Stack, MySQL translation, milestones M0–M7. |
 | `docs/TEAM-PLAN.md` | Streams, timeline, ownership map, git workflow. |
 | `docs/streams/STREAM-*.md` | Live task backlogs, one per developer. |
+| `docs/DEPENDENCIES.md` | Ownership index, cross-stream dependency register, critical path, parallel bands. |
 
 Where the blueprint and PLAN.md disagree, the blueprint wins on behaviour and PLAN.md wins on implementation. PLAN.md §4 lists every intentional deviation — none are silent.
 

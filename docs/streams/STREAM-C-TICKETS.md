@@ -7,6 +7,8 @@
 
 > **You carry the largest slice — roughly 40% of the product surface and the hardest UI in it.** Stream B joins you from week 10 to take the ribbon's frontend. You also own the shared component library, which all three other streams consume: changes there are additive only, and Storybook is the contract.
 
+> Cross-stream sequencing — who is waiting on you and what to do if you are blocked — is in [`../DEPENDENCIES.md`](../DEPENDENCIES.md).
+
 ---
 
 ## Sprint 0 — weeks 1–2
