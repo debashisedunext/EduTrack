@@ -56,6 +56,41 @@ Other JDKs can stay installed — `java_home -v <version>` switches between them
 
 **Maven is not required.** The wrapper is committed: use `./mvnw` from `backend/`.
 
+### Installing Docker
+
+**With admin rights:** Docker Desktop from docker.com, or `brew install --cask docker`.
+
+**Without admin rights** — Colima runs a Linux VM on Apple's Virtualization framework entirely in user space. This is a verified working setup (macOS 26.5, Apple silicon):
+
+```bash
+mkdir -p ~/.local/bin ~/.docker/cli-plugins
+
+# Colima
+curl -sL -o ~/.local/bin/colima \
+  https://github.com/abiosoft/colima/releases/latest/download/colima-Darwin-arm64
+chmod +x ~/.local/bin/colima
+
+# Lima (Colima needs the `lima` wrapper on PATH, not just `limactl`)
+curl -sL https://github.com/lima-vm/lima/releases/download/v2.2.0/lima-2.2.0-Darwin-arm64.tar.gz \
+  | tar xz -C ~/.local/lima --one-top-level
+ln -sf ~/.local/lima/bin/* ~/.local/bin/
+
+# Docker CLI + Compose plugin
+curl -sL https://download.docker.com/mac/static/stable/aarch64/docker-29.7.1.tgz \
+  | tar xz -C /tmp && cp /tmp/docker/docker ~/.local/bin/
+curl -sL -o ~/.docker/cli-plugins/docker-compose \
+  https://github.com/docker/compose/releases/latest/download/docker-compose-darwin-aarch64
+chmod +x ~/.docker/cli-plugins/docker-compose ~/.local/bin/docker
+
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
+
+colima start --vm-type=vz --cpu 4 --memory 6 --disk 40 --runtime docker
+```
+
+*(Intel Mac: swap `arm64`/`aarch64` for `amd64`/`x86_64`.)*
+
+**After a reboot the VM is stopped** — run `colima start` again. `make up` alone will fail with "cannot connect to the Docker daemon" until it is running.
+
 ---
 
 ## Step 1 — Lead decisions · 30 minutes · **blocking**

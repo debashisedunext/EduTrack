@@ -19,6 +19,13 @@
 - [ ] **A-006** Flyway baseline 4/5 — clients & content: `clients`, `client_contacts`, `client_projects`, `ticket_comments`, `ticket_attachments`, `email_log`, `import_batches`. *(§4B.7)*
 - [ ] **A-007** Flyway baseline 5/5 — masters & ops: `task_types`, `priorities`, `statuses`, `workflow_transitions`, `holidays`, `resource_leaves`, `notification_templates`, `notifications`, `chat_threads`, `chat_participants`, `chat_messages`, `audit_logs`.
 - [ ] **A-008** Immutability triggers — two per table (MySQL needs separate UPDATE and DELETE triggers) on `ticket_history` and `ticket_effort_logs`; the seal-only trigger on `ticket_stage_transitions`. *(PLAN.md §3.5, §3.6)*
+  > **Verified working on MySQL 8.4** — a `BEFORE UPDATE`/`BEFORE DELETE` trigger raising `SIGNAL SQLSTATE '45000'` rejects both, and the row survives intact.
+  > **Delimiter gotcha:** a `BEGIN … END` body contains `;`, which terminates the statement early in `mysql -e` and in some Flyway configurations. The one-line form takes no delimiter handling at all and is preferred wherever the body is a single `SIGNAL`:
+  > ```sql
+  > CREATE TRIGGER trg_hist_no_update BEFORE UPDATE ON ticket_history
+  >   FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Immutable: cannot update';
+  > ```
+  > The seal-only trigger on `ticket_stage_transitions` **does** need `BEGIN … END` (it has conditional logic), so that migration needs Flyway's `SET statement_delimiter` or a dedicated `.sql` with explicit `DELIMITER`.
 - [ ] **A-009** Generated columns + indexes replacing PostgreSQL partial indexes: `pcd_open`, `current_ticket_id`. Plus `FULLTEXT` on `tickets(title, description)`. *(PLAN.md §3.3, §3.8)*
 - [ ] **A-010** Two DB users: `edutrack_app` (no DDL; **`INSERT, SELECT` only** on the three append-only tables) and `edutrack_migrate` (DDL, deploy step only).
 - [ ] **A-011** CI pipeline — build, test, Testcontainers integration tests, OpenAPI staleness check, frontend build.
