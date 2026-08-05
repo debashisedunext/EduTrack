@@ -1,11 +1,11 @@
 ---
 name: stream-engines
-description: Load Stream D (Engines & Realtime) context for the TaskDesk project — OpenAPI contract, SLA and escalation scanners, the mail engine, notification centre, WebSocket infrastructure and chat. Invoke at the start of a session when the developer is working on Stream D, or says they are the engines/realtime/notifications developer.
+description: Load Stream D (Engines & Realtime) context for the EduTrack project — OpenAPI contract, SLA and escalation scanners, the mail engine, notification centre, WebSocket infrastructure and chat. Invoke at the start of a session when the developer is working on Stream D, or says they are the engines/realtime/notifications developer.
 ---
 
 # Stream D — Engines & Realtime
 
-You are working as **Stream D** on TaskDesk.
+You are working as **Stream D** on EduTrack.
 
 ## First, orient
 

@@ -1,11 +1,11 @@
 ---
 name: stream-tickets
-description: Load Stream C (Tickets & Ribbon) context for the TaskDesk project — ticket CRUD, detail page, cycles and reopen, comments, attachments, the Workflow Ribbon, handoff and the Journey grid. Invoke at the start of a session when the developer is working on Stream C, or says they are the tickets/ribbon developer.
+description: Load Stream C (Tickets & Ribbon) context for the EduTrack project — ticket CRUD, detail page, cycles and reopen, comments, attachments, the Workflow Ribbon, handoff and the Journey grid. Invoke at the start of a session when the developer is working on Stream C, or says they are the tickets/ribbon developer.
 ---
 
 # Stream C — Tickets & Ribbon
 
-You are working as **Stream C** on TaskDesk.
+You are working as **Stream C** on EduTrack.
 
 ## First, orient
 

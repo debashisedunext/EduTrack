@@ -1,4 +1,4 @@
-# TaskDesk — Getting Started
+# EduTrack — Getting Started
 
 From an empty folder to four developers writing code. Follow in order.
 
@@ -31,7 +31,7 @@ Nothing else can start until these are answered.
 | **B — Masters & Clients** | Fastest at CRUD and forms | Broad but shallow; the import wizard is the one hard piece |
 | **D — Engines & Realtime** | Comfortable with async, queues, scheduling | Most independent; least damaged by a late start |
 
-**1b. Answer the directory question.** Is there an existing employee directory or SSO (Azure AD, Google Workspace) that the Resource Master should sync from, or is TaskDesk the system of record for users? If a directory exists, `users` needs an external ID **now** — retrofitting one after M3 means touching every master screen.
+**1b. Answer the directory question.** Is there an existing employee directory or SSO (Azure AD, Google Workspace) that the Resource Master should sync from, or is EduTrack the system of record for users? If a directory exists, `users` needs an external ID **now** — retrofitting one after M3 means touching every master screen.
 
 **1c. Confirm the four governance defaults** (PLAN.md §5). All four follow the blueprint's own recommendation; confirming now costs a minute, discovering a disagreement during M2 costs a week.
 
@@ -120,7 +120,7 @@ The prerequisites table above. Nobody is blocked on anybody for this — do it w
 ### 5.2 Clone and orient
 
 ```bash
-git clone <repo-url> && cd taskdesk
+git clone <repo-url> && cd edutrack
 git checkout develop
 claude
 ```

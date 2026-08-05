@@ -19,7 +19,7 @@
 - [ ] **A-007** Flyway baseline 5/5 — masters & ops: `task_types`, `priorities`, `statuses`, `workflow_transitions`, `holidays`, `resource_leaves`, `notification_templates`, `notifications`, `chat_threads`, `chat_participants`, `chat_messages`, `audit_logs`.
 - [ ] **A-008** Immutability triggers — two per table (MySQL needs separate UPDATE and DELETE triggers) on `ticket_history` and `ticket_effort_logs`; the seal-only trigger on `ticket_stage_transitions`. *(PLAN.md §3.5, §3.6)*
 - [ ] **A-009** Generated columns + indexes replacing PostgreSQL partial indexes: `pcd_open`, `current_ticket_id`. Plus `FULLTEXT` on `tickets(title, description)`. *(PLAN.md §3.3, §3.8)*
-- [ ] **A-010** Two DB users: `taskdesk_app` (no DDL; **`INSERT, SELECT` only** on the three append-only tables) and `taskdesk_migrate` (DDL, deploy step only).
+- [ ] **A-010** Two DB users: `edutrack_app` (no DDL; **`INSERT, SELECT` only** on the three append-only tables) and `edutrack_migrate` (DDL, deploy step only).
 - [ ] **A-011** CI pipeline — build, test, Testcontainers integration tests, OpenAPI staleness check, frontend build.
 - [ ] **A-012** 🔴 **`dev-noauth` Spring profile** — injects a configurable fake principal (role, projects, reportees). **Rejects startup outside `local`**; disabled in CI. *Due day 10 — B, C and D are blocked without it.*
 - [ ] **A-013** Negative tests proving triggers reject `UPDATE` and `DELETE` on each protected table.

@@ -1,4 +1,4 @@
-# TaskDesk — Team Structure, Work Division & Git Workflow
+# EduTrack — Team Structure, Work Division & Git Workflow
 
 **Companion to:** `PLAN.md` (milestones M0–M7) and `Ticketing-System-Blueprint.md` (product spec)
 **Team:** 4 developers

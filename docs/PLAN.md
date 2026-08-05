@@ -1,4 +1,4 @@
-# TaskDesk — Implementation Plan
+# EduTrack — Implementation Plan
 
 **Source of truth:** `Ticketing-System-Blueprint.md` (v1.2, 1,749 lines)
 **Stack decision:** Java backend · MySQL 8 · React frontend
@@ -89,7 +89,7 @@ The blueprint assumes a Node/NestJS backend. Five of its technology choices have
 ### 2.3 Repository layout
 
 ```
-edunext-taskdesk/
+edunext-edutrack/
 ├── docker-compose.yml              # mysql, redis, minio, mailpit
 ├── .github/workflows/ci.yml
 ├── backend/
@@ -338,7 +338,7 @@ Every intentional difference, in one place.
 
 The remaining nine (QA skipping, unassigned-stage ownership, comment default visibility, PCD edit rights, effort backdating window, timer vs self-report, client-contact inline creation, import upsert semantics, retention period) are configuration or UI decisions and are scheduled against M3–M6. All nine of the blueprint's recommendations are accepted as defaults unless overridden.
 
-**Open question for the team, not answered in the blueprint:** is there an existing employee directory / SSO (Azure AD, Google Workspace) that the Resource Master should sync from, or is TaskDesk the system of record for users? The blueprint puts SSO in phase 3, but if a directory already exists, `users` should carry an external ID from M1 rather than gaining one later.
+**Open question for the team, not answered in the blueprint:** is there an existing employee directory / SSO (Azure AD, Google Workspace) that the Resource Master should sync from, or is EduTrack the system of record for users? The blueprint puts SSO in phase 3, but if a directory already exists, `users` should carry an external ID from M1 rather than gaining one later.
 
 ---
 
@@ -354,7 +354,7 @@ Scaffold and schema. Nothing is demoable except a running stack, but everything 
 - `docker-compose.yml`: MySQL 8.4, Redis 7, MinIO, Mailpit (SMTP capture for dev)
 - **Complete Flyway migration set** for the whole model in one pass — blueprint §8.2 + §4A.5 + §4B.7, translated per §3. Building the schema piecemeal per feature is the main way an append-only model gets compromised.
 - Immutability triggers (§3.5), generated columns and indexes (§3.3), full-text index (§3.8)
-- Two DB users: `taskdesk_app` (`SELECT, INSERT, UPDATE, DELETE`, no DDL, and **`INSERT, SELECT` only** on the three append-only tables) and `taskdesk_migrate` (DDL, used only by the deploy step)
+- Two DB users: `edutrack_app` (`SELECT, INSERT, UPDATE, DELETE`, no DDL, and **`INSERT, SELECT` only** on the three append-only tables) and `edutrack_migrate` (DDL, used only by the deploy step)
 - Seed data: 6 roles + permission matrix, 11 task types, 4 priorities, statuses and the transition matrix, 3 workflow templates (Standard Dev Flow, Support Fast-Track, Infra Flow) with their stages
 - Design tokens from §12.1 into `tokens.css` and `tailwind.config.ts`; Inter/Plus Jakarta Sans; the 4px spacing scale; radius and shadow scales
 - CI: build → test → Testcontainers integration tests → OpenAPI client staleness check

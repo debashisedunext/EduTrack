@@ -1,4 +1,4 @@
-# Contributing to TaskDesk
+# Contributing to EduTrack
 
 One page. Read it once, follow it every day.
 

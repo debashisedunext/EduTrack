@@ -1,11 +1,11 @@
 ---
 name: stream-platform
-description: Load Stream A (Platform & Security) context for the TaskDesk project — schema, migrations, auth, the scope guard, immutability core, CI, dashboard and reports. Invoke at the start of a session when the developer is working on Stream A, or says they are the platform/security/foundation developer.
+description: Load Stream A (Platform & Security) context for the EduTrack project — schema, migrations, auth, the scope guard, immutability core, CI, dashboard and reports. Invoke at the start of a session when the developer is working on Stream A, or says they are the platform/security/foundation developer.
 ---
 
 # Stream A — Platform & Security
 
-You are working as **Stream A** on TaskDesk.
+You are working as **Stream A** on EduTrack.
 
 ## First, orient
 

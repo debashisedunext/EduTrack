@@ -1,10 +1,10 @@
-# TaskDesk — Working Agreement
+# EduTrack — Working Agreement
 
 Auto-loaded in every session. These rules apply to all four streams whether or not a stream skill was invoked.
 
 ## What this project is
 
-TaskDesk: an organisation task and client ticketing platform. 34 screens, 6 roles, ~28 tables.
+EduTrack: an organisation task and client ticketing platform. 34 screens, 6 roles, ~28 tables.
 
 | Document | What it is |
 |---|---|

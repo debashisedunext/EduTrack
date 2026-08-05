@@ -1,11 +1,11 @@
 ---
 name: stream-masters
-description: Load Stream B (Masters & Clients) context for the TaskDesk project — resource/role/project masters, client master, Excel import wizard, working calendar, workflow template designer. Invoke at the start of a session when the developer is working on Stream B, or says they are the masters/clients developer.
+description: Load Stream B (Masters & Clients) context for the EduTrack project — resource/role/project masters, client master, Excel import wizard, working calendar, workflow template designer. Invoke at the start of a session when the developer is working on Stream B, or says they are the masters/clients developer.
 ---
 
 # Stream B — Masters & Clients
 
-You are working as **Stream B** on TaskDesk.
+You are working as **Stream B** on EduTrack.
 
 ## First, orient
 

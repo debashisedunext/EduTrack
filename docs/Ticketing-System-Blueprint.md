@@ -1,11 +1,11 @@
-# TaskDesk — Organisation Task & Client Ticketing System
+# EduTrack — Organisation Task & Client Ticketing System
 ### Complete Product, Architecture & UI Blueprint (v1.2)
 
 ---
 
 ## 1. Executive Summary
 
-**TaskDesk** is an internal, multi-project task and client ticketing platform. It merges two things most organisations run separately:
+**EduTrack** is an internal, multi-project task and client ticketing platform. It merges two things most organisations run separately:
 
 | Capability | Reference product we borrow from |
 |---|---|
@@ -15,7 +15,7 @@
 | Chat threaded on the work item | Slack + Jira integration (unified here) |
 | Analytical dashboards with drill-down | Jira Dashboards, Freshdesk Analytics |
 
-**What makes TaskDesk different from a plain Jira clone:**
+**What makes EduTrack different from a plain Jira clone:**
 
 1. **Cycle-based reopen model** — every reopen creates a new *cycle* that stores its own start date, assignee, planned/actual close date and effort. Nothing is overwritten, ever.
 2. **Immutable history** — resources can update *state*, never *history*. History is append-only at the database level, not just the UI level.
@@ -68,7 +68,7 @@ A Developer's ticket list query is *always* forcibly filtered by `assigned_to = 
 
 ### 3.1 Two layers: stage and status
 
-TaskDesk tracks **where the ticket is** (stage — the ribbon) separately from **what is happening to it** (status). They are orthogonal and both are needed:
+EduTrack tracks **where the ticket is** (stage — the ribbon) separately from **what is happening to it** (status). They are orthogonal and both are needed:
 
 | | Stage (ribbon) | Status |
 |---|---|---|
@@ -1113,7 +1113,7 @@ Two clicks, no page reload, closes with a toast. Effort logged here is automatic
 
 Features: real-time via WebSocket, typing indicator, read receipts, @mentions (fires a notification), file/image share, emoji, message search, unread counts, link preview of any `TKT-xxxx` mention into a rich ticket card.
 
-**"Ask Status" button** — on any ticket, a Reporting Manager/PM clicks it and TaskDesk posts a structured message into that ticket's thread:
+**"Ask Status" button** — on any ticket, a Reporting Manager/PM clicks it and EduTrack posts a structured message into that ticket's thread:
 
 > **📌 Status requested by Meera P.** — *"Please share the current status and expected closure."*
 > `[ Reply with update ]` `[ Open Quick Update ]`
