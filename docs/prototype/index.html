@@ -1,0 +1,714 @@
+<title>EduTrack — Screen Prototype</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════
+   EduTrack prototype — design tokens are the project's own (blueprint
+   §12.1), not invented here. Light theme only, per §12: that is a
+   product decision, so the page commits to one visual world.
+   ══════════════════════════════════════════════════════════════════ */
+:root{
+  --bg-app:#F7F8FC; --bg-surface:#FFF; --bg-subtle:#F1F3F9; --border:#E5E8F0;
+  --primary:#4F46E5; --primary-soft:#EEF2FF;
+  --ink:#111827; --ink-2:#6B7280; --ink-3:#9CA3AF;
+  --success:#10B981; --warning:#F59E0B; --danger:#EF4444; --info:#3B82F6;
+  --success-soft:#ECFDF5; --warning-soft:#FFFBEB; --danger-soft:#FEF2F2;
+  /* validated chart hues — see the note panel */
+  --c1:#4F46E5; --c2:#F59E0B; --c3:#10B981;
+  --r-card:12px; --r-ctl:8px; --r-chip:999px;
+  --sh-rest:0 1px 2px rgba(16,24,40,.05);
+  --sh-pop:0 8px 24px rgba(16,24,40,.10);
+  --rail:236px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{color-scheme:light}
+body{
+  margin:0;background:var(--bg-app);color:var(--ink);
+  font:14px/20px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"Helvetica Neue",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{margin:0;text-wrap:balance}
+table{border-collapse:collapse;width:100%}
+.num{font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* ── banner ─────────────────────────────────────────────────────── */
+.banner{background:#1E1B33;color:#C7D2FE;padding:10px 20px;font-size:12.5px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.banner b{color:#fff}
+.banner .tag{background:rgba(165,180,252,.16);color:#C7D2FE;padding:2px 8px;border-radius:var(--r-chip);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+
+/* ── shell ──────────────────────────────────────────────────────── */
+.shell{display:grid;grid-template-columns:var(--rail) 1fr;min-height:calc(100vh - 40px)}
+.rail{background:var(--bg-surface);border-right:1px solid var(--border);padding:18px 12px;display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 10px 18px}
+.brand .mk{width:26px;height:26px;border-radius:7px;background:var(--primary);display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px}
+.brand span{font-weight:650;letter-spacing:-.01em;font-size:15px}
+.nav{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-ctl);color:var(--ink-2);font-size:13.5px;width:100%;text-align:left;transition:background .12s}
+.nav:hover{background:var(--bg-subtle);color:var(--ink)}
+.nav[aria-current="true"]{background:var(--primary-soft);color:var(--primary);font-weight:600}
+.nav .ic{width:16px;text-align:center;opacity:.85}
+.nav .cnt{margin-left:auto;font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.railcap{margin-top:auto;padding:12px 10px 0;border-top:1px solid var(--border);font-size:11.5px;color:var(--ink-3);line-height:1.45}
+
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border);padding:10px 22px;display:flex;align-items:center;gap:14px}
+.search{flex:1;max-width:400px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--r-ctl);padding:7px 11px;color:var(--ink-3);font-size:13px}
+.avatar{width:30px;height:30px;border-radius:var(--r-chip);background:var(--primary);color:#fff;display:grid;place-items:center;font-size:11.5px;font-weight:650}
+.bell{position:relative;font-size:15px;color:var(--ink-2)}
+.bell::after{content:"4";position:absolute;top:-5px;right:-7px;background:var(--danger);color:#fff;font-size:9.5px;font-weight:700;padding:1px 4px;border-radius:var(--r-chip);line-height:1.35}
+.page{padding:22px;flex:1}
+.screen{display:none}
+.screen.on{display:block}
+
+/* ── primitives ─────────────────────────────────────────────────── */
+.card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--sh-rest)}
+.pad{padding:16px 18px}
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+.h-page{font-size:21px;font-weight:650;letter-spacing:-.015em}
+.sub{color:var(--ink-2);font-size:13px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:var(--r-chip);font-size:11.5px;font-weight:600;white-space:nowrap}
+.chip.crit{background:var(--danger-soft);color:#B91C1C}
+.chip.high{background:var(--warning-soft);color:#B45309}
+.chip.med{background:#EFF6FF;color:#1D4ED8}
+.chip.low{background:var(--success-soft);color:#047857}
+.chip.gry{background:var(--bg-subtle);color:var(--ink-2)}
+.chip.ind{background:var(--primary-soft);color:var(--primary)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.btn{padding:7px 13px;border-radius:var(--r-ctl);font-size:13px;font-weight:550;border:1px solid var(--border);background:var(--bg-surface);transition:background .12s}
+.btn:hover{background:var(--bg-subtle)}
+.btn.pri{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.pri:hover{background:#4338CA}
+.btn.dgr{background:var(--bg-surface);border-color:#FECACA;color:#B91C1C}
+.btn.dgr:hover{background:var(--danger-soft)}
+.scroll-x{overflow-x:auto}
+
+/* ── ribbon ─────────────────────────────────────────────────────── */
+.ribbonwrap{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-card);padding:16px 18px 14px;box-shadow:var(--sh-rest)}
+.ribbonhead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.cyclesel{display:flex;gap:4px;background:var(--bg-subtle);padding:3px;border-radius:var(--r-ctl)}
+.cyclesel button{padding:4px 11px;border-radius:6px;font-size:12px;font-weight:600;color:var(--ink-2)}
+.cyclesel button[aria-pressed="true"]{background:var(--bg-surface);color:var(--primary);box-shadow:var(--sh-rest)}
+.ribbon{display:flex;align-items:stretch;gap:0;min-width:900px}
+.seg{flex:1;min-width:104px;position:relative;padding:0 3px}
+.segbox{border:1px solid var(--border);border-radius:10px;padding:9px 10px;height:100%;background:var(--bg-surface);cursor:pointer;transition:transform .14s,box-shadow .14s;text-align:left;width:100%;display:block}
+.seg:hover .segbox{transform:translateY(-2px);box-shadow:var(--sh-pop)}
+.seg.done .segbox{background:var(--success-soft);border-color:#A7F3D0}
+.seg.now .segbox{background:var(--primary-soft);border-color:var(--primary);box-shadow:0 0 0 3px rgba(79,70,229,.13)}
+.seg.rew .segbox{border-left:3px solid var(--warning)}
+.seg.skip .segbox{border-style:dashed;background:var(--bg-subtle)}
+.seg .st{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:650;margin-bottom:3px}
+.seg.done .st{color:#047857}
+.seg.now .st{color:var(--primary)}
+.seg.wait .st{color:var(--ink-3)}
+.seg .who{font-size:11.5px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg .mt{font-size:11px;color:var(--ink-3);margin-top:3px;font-variant-numeric:tabular-nums}
+.seg .eff{font-size:11.5px;font-weight:650;color:var(--ink);font-variant-numeric:tabular-nums}
+.seg .loop{display:inline-block;margin-top:4px;background:var(--warning-soft);color:#B45309;font-size:10px;font-weight:700;padding:1px 6px;border-radius:var(--r-chip)}
+.conn{position:absolute;top:-9px;right:-4px;width:8px;height:2px}
+.nowbar{margin-top:12px;background:var(--primary-soft);border-radius:var(--r-ctl);padding:10px 13px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.nowbar .lbl{font-size:12.5px;color:var(--primary);font-weight:600}
+
+/* ── tables ─────────────────────────────────────────────────────── */
+th{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg-subtle)}
+td{padding:9px 10px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr{transition:background .1s}
+tbody tr:hover{background:var(--bg-subtle)}
+tr.delayed td:first-child{box-shadow:inset 3px 0 0 var(--warning)}
+tr.critical td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
+tfoot td{background:var(--bg-subtle);font-weight:650;border-top:1px solid var(--border)}
+.tid{font-weight:600;color:var(--primary);font-variant-numeric:tabular-nums;white-space:nowrap}
+.who2{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.av{width:22px;height:22px;border-radius:var(--r-chip);display:grid;place-items:center;font-size:9.5px;font-weight:700;color:#fff;flex:none}
+
+/* compact ribbon dots in list rows */
+.dots{display:flex;gap:3px;align-items:center}
+.dots i{width:7px;height:7px;border-radius:50%;background:var(--border);display:block}
+.dots i.f{background:var(--success)}
+.dots i.c{background:var(--primary);box-shadow:0 0 0 2px var(--primary-soft)}
+.dots i.w{background:var(--warning)}
+
+/* ── KPI ────────────────────────────────────────────────────────── */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px}
+.kpi{padding:13px 15px}
+.kpi .k{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+.kpi .v{font-size:26px;font-weight:680;letter-spacing:-.02em;margin-top:4px;font-variant-numeric:tabular-nums;line-height:1.1}
+.kpi .d{font-size:11.5px;margin-top:3px;display:flex;align-items:center;gap:5px}
+.up{color:#047857}.dn{color:#B91C1C}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:2fr 1fr;gap:14px}
+@media(max-width:1100px){.grid2,.grid3{grid-template-columns:1fr}}
+
+/* ── slide-over ─────────────────────────────────────────────────── */
+.veil{position:fixed;inset:0;background:rgba(17,24,39,.34);opacity:0;pointer-events:none;transition:opacity .18s;z-index:40}
+.veil.on{opacity:1;pointer-events:auto}
+.over{position:fixed;top:0;right:0;bottom:0;width:392px;max-width:92vw;background:var(--bg-surface);box-shadow:var(--sh-pop);transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);z-index:50;display:flex;flex-direction:column}
+.over.on{transform:none}
+.over header{padding:15px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.over .body{padding:18px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:15px}
+.over footer{padding:13px 18px;border-top:1px solid var(--border);display:flex;gap:9px;justify-content:flex-end}
+.fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink-2);margin-bottom:5px}
+.inp{width:100%;border:1px solid var(--border);border-radius:var(--r-ctl);padding:8px 10px;font-size:13px;background:var(--bg-surface);color:var(--ink)}
+.req::after{content:" *";color:var(--danger)}
+.range{width:100%;accent-color:var(--primary)}
+
+/* ── misc ───────────────────────────────────────────────────────── */
+.grpttl{display:flex;align-items:center;gap:9px;margin:18px 0 9px}
+.grpttl h3{font-size:13px;font-weight:650}
+.grpttl .n{background:var(--bg-subtle);color:var(--ink-2);font-size:11px;font-weight:650;padding:1px 7px;border-radius:var(--r-chip)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:0}
+.tab{padding:9px 14px;font-size:13px;color:var(--ink-2);border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:550}
+.tab[aria-selected="true"]{color:var(--primary);border-bottom-color:var(--primary);font-weight:650}
+.note{background:var(--warning-soft);border:1px solid #FDE68A;border-radius:var(--r-card);padding:13px 15px;font-size:12.5px;color:#92400E;line-height:1.5}
+.note b{color:#78350F}
+.banner-crit{background:var(--danger-soft);border:1px solid #FECACA;border-radius:var(--r-card);padding:11px 15px;display:flex;align-items:center;gap:10px;font-size:13px;color:#991B1B}
+.sumrow{display:flex;justify-content:space-between;gap:12px;padding:6px 0;font-size:12.5px;border-bottom:1px solid var(--bg-subtle)}
+.sumrow:last-child{border-bottom:0}
+.sumrow .l{color:var(--ink-2)}
+.sumrow .r{font-weight:600;text-align:right}
+.lgd{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-2);margin-top:9px}
+.lgd span{display:flex;align-items:center;gap:5px}
+.tip{position:fixed;background:#111827;color:#fff;font-size:11.5px;padding:7px 10px;border-radius:6px;pointer-events:none;opacity:0;transition:opacity .12s;z-index:60;max-width:250px;line-height:1.45}
+.tip.on{opacity:1}
+.tip b{color:#fff;display:block;margin-bottom:2px}
+.tip i{color:#C7D2FE;font-style:normal}
+</style>
+
+<div class="banner">
+  <span class="tag">Prototype</span>
+  <b>EduTrack</b>
+  <span>Screen prototype for design review — sample data, no backend.</span>
+  <span style="margin-left:auto;opacity:.7">Blueprint v1.2 · screens S-05, S-17, S-18, S-20, S-21</span>
+</div>
+
+<div class="shell">
+  <!-- ══ rail ══ -->
+  <nav class="rail">
+    <div class="brand"><div class="mk">E</div><span>EduTrack</span></div>
+    <button class="nav" data-go="dash"><span class="ic">◧</span>Dashboard</button>
+    <button class="nav" data-go="mine"><span class="ic">◑</span>My Tasks<span class="cnt">7</span></button>
+    <button class="nav" data-go="list"><span class="ic">☰</span>Tickets<span class="cnt">263</span></button>
+    <button class="nav" aria-current="true" data-go="detail"><span class="ic">◈</span>Ticket detail</button>
+    <button class="nav" style="opacity:.45;cursor:default"><span class="ic">◇</span>Projects</button>
+    <button class="nav" style="opacity:.45;cursor:default"><span class="ic">◌</span>Chat</button>
+    <button class="nav" style="opacity:.45;cursor:default"><span class="ic">◍</span>Reports</button>
+    <button class="nav" style="opacity:.45;cursor:default"><span class="ic">⚙</span>Masters</button>
+    <div class="railcap">Sample data from blueprint §14, walkthrough A — the same ticket, end to end.</div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="search">Search tickets, people, clients…&nbsp; <span style="float:right;font-size:11px">⌘K</span></div>
+      <div style="flex:1"></div>
+      <span class="chip gry">CRM Portal ▾</span>
+      <span class="bell">◔</span>
+      <div class="avatar">MP</div>
+    </div>
+
+    <div class="page">
+
+      <!-- ══════════ S-20 TICKET DETAIL ══════════ -->
+      <section class="screen on" id="detail">
+        <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:6px">
+          <div>
+            <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+              <span class="eyebrow">S-20 · Ticket detail</span>
+              <span class="chip crit"><span class="dot" style="background:#EF4444"></span>Critical</span>
+              <span class="chip high">⚠ Delayed by 3 days</span>
+            </div>
+            <h1 class="h-page" style="margin-top:7px">CRM-26-00347 &nbsp;·&nbsp; Payment gateway timeout on checkout</h1>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn pri" data-qu>⚡ Quick update</button>
+            <button class="btn">Reassign</button>
+            <button class="btn">Ask status</button>
+            <button class="btn">⋯</button>
+          </div>
+        </div>
+
+        <div class="banner-crit" style="margin:12px 0 14px">
+          <b>Escalated automatically</b> — planned close date passed 13 Aug 00:15. Level raised High → Critical by System; reporting manager and PM notified.
+        </div>
+
+        <!-- RIBBON -->
+        <div class="ribbonwrap">
+          <div class="ribbonhead">
+            <span class="eyebrow">Workflow ribbon</span>
+            <div class="cyclesel">
+              <button data-cyc="1">Cycle 1</button>
+              <button data-cyc="2" aria-pressed="true">Cycle 2</button>
+            </div>
+            <span class="chip ind" id="iterChip">Iteration 2</span>
+            <span class="chip gry" id="reworkChip">↺ 1 rework</span>
+            <span style="margin-left:auto;font-size:12px;color:var(--ink-2)" id="cycNote">Cycle 2 of 2 — opened 08 Aug after reopen</span>
+          </div>
+          <div class="scroll-x"><div class="ribbon" id="ribbon"></div></div>
+          <div class="nowbar" id="nowbar"></div>
+        </div>
+
+        <div class="grid3" style="margin-top:14px">
+          <div>
+            <div class="card">
+              <div class="tabs" style="padding:0 6px">
+                <button class="tab" aria-selected="true">Journey</button>
+                <button class="tab">History</button>
+                <button class="tab">Comments</button>
+                <button class="tab">Effort</button>
+                <button class="tab">Attachments</button>
+                <button class="tab">Chat</button>
+              </div>
+              <div class="pad">
+                <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;flex-wrap:wrap">
+                  <span class="eyebrow">Effort by resource, by stage</span>
+                  <span id="filtNote" style="font-size:11.5px;color:var(--ink-3)">Click a ribbon segment to filter</span>
+                </div>
+                <div class="scroll-x">
+                  <table id="journey">
+                    <thead><tr>
+                      <th>It</th><th>Stage</th><th>Resource</th><th>Role</th>
+                      <th style="text-align:right">Duration</th>
+                      <th style="text-align:right">Active</th>
+                      <th style="text-align:right">Idle</th>
+                      <th></th>
+                    </tr></thead>
+                    <tbody></tbody>
+                    <tfoot></tfoot>
+                  </table>
+                </div>
+                <div class="note" style="margin-top:14px">
+                  <b>Idle vs active is the point.</b> Deployment shows 5h 30m elapsed against 1.5 h of logged effort —
+                  4 hours of that stage was queue time, not work. A stage that is slow because nobody picked it up is a
+                  different problem from one that is slow because the work is hard, and only this split tells them apart.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- summary -->
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div class="card pad">
+              <div class="eyebrow" style="margin-bottom:10px">Summary</div>
+              <div class="sumrow"><span class="l">Project</span><span class="r">CRM Portal</span></div>
+              <div class="sumrow"><span class="l">Client</span><span class="r">Acme Retail Ltd</span></div>
+              <div class="sumrow"><span class="l">Contact</span><span class="r">R. Menon</span></div>
+              <div class="sumrow"><span class="l">Type</span><span class="r">Production Bug</span></div>
+              <div class="sumrow"><span class="l">Level</span><span class="r"><span class="chip crit">Critical</span> <span style="color:var(--ink-3);font-weight:400">was High</span></span></div>
+              <div class="sumrow"><span class="l">Status</span><span class="r">In Progress</span></div>
+              <div class="sumrow"><span class="l">Assigned to</span><span class="r">Anil Sharma</span></div>
+              <div class="sumrow"><span class="l">Est. effort</span><span class="r num">8.0 h</span></div>
+              <div class="sumrow"><span class="l">Logged</span><span class="r num">24.5 h <span class="dn">+206%</span></span></div>
+              <div class="sumrow"><span class="l">Planned close</span><span class="r">12 Aug 2026 ⚠</span></div>
+              <div class="sumrow"><span class="l">Reopened</span><span class="r num">1×</span></div>
+              <div class="sumrow"><span class="l">Total, all cycles</span><span class="r num" style="color:var(--primary)">38.0 h</span></div>
+            </div>
+            <div class="card pad">
+              <div class="eyebrow" style="margin-bottom:9px">Contribution, all cycles</div>
+              <div id="contrib"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════ S-05 DASHBOARD ══════════ -->
+      <section class="screen" id="dash">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+          <div><span class="eyebrow">S-05 · Dashboard</span><h1 class="h-page" style="margin-top:5px">Good morning, Meera</h1></div>
+          <div style="margin-left:auto;display:flex;gap:8px"><span class="chip gry">Last 30 days ▾</span><span class="chip gry">All resources ▾</span></div>
+        </div>
+        <div class="kpis" id="kpis"></div>
+
+        <div class="grid2" style="margin-top:14px">
+          <div class="card pad">
+            <div class="eyebrow">Created vs closed vs reopened</div>
+            <div class="sub" style="margin:2px 0 10px">Last 30 days — net backlog is widening</div>
+            <div id="area"></div>
+            <div class="lgd">
+              <span><span class="dot" style="background:var(--c1)"></span>Created</span>
+              <span><span class="dot" style="background:var(--c3)"></span>Closed</span>
+              <span><span class="dot" style="background:var(--c2)"></span>Reopened</span>
+            </div>
+          </div>
+          <div class="card pad">
+            <div class="eyebrow">Work in progress by stage</div>
+            <div class="sub" style="margin:2px 0 10px">Deployment is the bottleneck — 34 waiting</div>
+            <div id="funnel"></div>
+          </div>
+        </div>
+
+        <div class="grid2" style="margin-top:14px">
+          <div class="card pad">
+            <div class="eyebrow">Volume by task type</div>
+            <div class="sub" style="margin:2px 0 10px">Production bugs dominate</div>
+            <div id="types"></div>
+          </div>
+          <div class="card pad">
+            <div class="eyebrow">Needs attention today</div>
+            <div class="sub" style="margin:2px 0 10px">Critical or overdue, across your projects</div>
+            <div class="scroll-x"><table id="attn"><tbody></tbody></table></div>
+          </div>
+        </div>
+
+        <div class="note" style="margin-top:14px">
+          <b>Two recommendations to review.</b>
+          The blueprint specifies a donut for task-type distribution; with 11 categories a donut is very hard to read, so
+          this shows horizontal bars instead — same data, ranked, directly labelled.
+          Separately, the §12.1 chart palette is labelled colour-blind safe but does not pass: teal and pink are
+          indistinguishable for deuteranopes, and green and cyan are close even in full colour. The charts here use a
+          validated subset. A corrected eight-hue set is in the handover notes.
+        </div>
+      </section>
+
+      <!-- ══════════ S-17 TICKET LIST ══════════ -->
+      <section class="screen" id="list">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+          <div><span class="eyebrow">S-17 · All tickets</span><h1 class="h-page" style="margin-top:5px">Tickets</h1></div>
+          <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+            <span class="chip gry">Saved views ▾</span><span class="chip gry">Columns</span>
+            <button class="btn pri">+ New ticket</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">
+          <span class="chip gry">Project ▾</span><span class="chip gry">Client ▾</span><span class="chip gry">Type ▾</span>
+          <span class="chip ind">Level: Critical, High ✕</span><span class="chip gry">Stage ▾</span>
+          <span class="chip ind">Status: Open ✕</span><span class="chip gry">Assignee ▾</span>
+        </div>
+        <div class="card scroll-x">
+          <table id="tickets">
+            <thead><tr>
+              <th>ID</th><th>Description</th><th>Journey</th><th>Type</th><th>Level</th>
+              <th>Assignee</th><th>Planned close</th><th style="text-align:right">Effort</th><th>Status</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:12px;font-size:12.5px;color:var(--ink-2)">
+          <span>Rows 1–8 of 263</span>
+          <div style="margin-left:auto;display:flex;gap:7px"><span class="chip gry">Export CSV</span><span class="chip gry">Export PDF</span></div>
+        </div>
+        <div class="note" style="margin-top:14px">
+          <b>The Journey column is the compact ribbon.</b> Eight dots per row — filled is complete, ringed is where the
+          ticket sits now, amber means it has been sent back. A manager can scan a whole grid and see where every ticket
+          is without opening any of them. Hover a row to read the stage.
+        </div>
+      </section>
+
+      <!-- ══════════ S-18 MY TASKS ══════════ -->
+      <section class="screen" id="mine">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap">
+          <div><span class="eyebrow">S-18 · My tasks</span><h1 class="h-page" style="margin-top:5px">Your work, Ravi</h1>
+            <div class="sub" style="margin-top:3px">7 open · 1 overdue · 2 due today · 1 came back from QA overnight</div></div>
+          <div style="margin-left:auto;display:flex;gap:8px"><span class="chip gry">List</span><span class="chip gry">Kanban</span></div>
+        </div>
+        <div id="mytasks"></div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ S-21 QUICK UPDATE ══════════ -->
+<div class="veil" id="veil"></div>
+<aside class="over" id="over" aria-hidden="true">
+  <header>
+    <div><span class="eyebrow">S-21 · Quick update</span>
+      <div style="font-weight:650;margin-top:3px">CRM-26-00347</div></div>
+    <button class="btn" data-close>✕</button>
+  </header>
+  <div class="body">
+    <div class="fld"><label>Status</label>
+      <select class="inp"><option>In Progress</option><option>On Hold</option><option>Awaiting Info</option><option>Resolved</option></select></div>
+    <div style="display:flex;gap:10px">
+      <div class="fld" style="flex:1"><label class="req">Log effort</label><input class="inp num" value="2.5"></div>
+      <div class="fld" style="flex:1"><label>On date</label><input class="inp" value="06 Aug 2026"></div>
+    </div>
+    <div class="fld"><label>Work note</label>
+      <textarea class="inp" rows="3">Retry timeout patched. Re-tested the checkout path on staging.</textarea></div>
+    <div class="fld"><label>Percent complete — <b id="pcv">60</b>%</label>
+      <input type="range" class="range" min="0" max="100" value="60" id="pc"></div>
+    <div class="fld"><label>Revised ETA <span style="color:var(--ink-3);font-weight:400">— reason required</span></label>
+      <input class="inp" value="14 Aug 2026"></div>
+    <div style="background:var(--primary-soft);border-radius:var(--r-ctl);padding:11px 13px;font-size:12px;color:var(--primary);line-height:1.5">
+      Effort is stamped automatically to <b>QA · iteration 2</b> — the stage this ticket is in right now.
+      Nobody has to remember to attribute it, which is why the journey grid can be trusted.
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-3);line-height:1.5">
+      Not editable here: ticket ID, reported by, assigned by, date reported, cycle history, the ribbon, or prior effort
+      entries. Those are append-only.
+    </div>
+  </div>
+  <footer><button class="btn" data-close>Cancel</button><button class="btn pri" data-close>Update ✓</button></footer>
+</aside>
+<div class="tip" id="tip"></div>
+
+<script>
+(function(){
+"use strict";
+const $=(s,r)=>(r||document).querySelector(s), $$=(s,r)=>[...(r||document).querySelectorAll(s)];
+const AV={Priya:"#0891B2",Meera:"#4F46E5",Ravi:"#9333EA",Anil:"#BE185D",Karan:"#9A3412",Neha:"#0891B2",Amit:"#84CC16",Sunil:"#4F46E5"};
+const ini=n=>n.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+const av=n=>`<span class="av" style="background:${AV[n.split(" ")[0]]||"#6B7280"}">${ini(n)}</span>`;
+
+/* ── ribbon data — blueprint §14 walkthrough A ─────────────────── */
+const CYC={
+ 2:{iter:2,rework:1,note:"Cycle 2 of 2 — opened 08 Aug after reopen",
+    seg:[
+     {s:"Intake",o:"Priya Nair",r:"SUP",st:"done",dur:"1h 10m",eff:0.5},
+     {s:"Triage",o:"Meera Prasad",r:"PM",st:"done",dur:"3h 20m",eff:1.0},
+     {s:"Development",o:"Ravi Kumar",r:"DEV",st:"done",dur:"3d 3h",eff:14.5,loop:2},
+     {s:"QA",o:"Anil Sharma",r:"QA",st:"now",dur:"6h 40m",eff:3.5},
+     {s:"Deployment",o:"—",r:"DEP",st:"wait"},
+     {s:"Verification",o:"—",r:"DEV",st:"wait"},
+     {s:"Sign-off",o:"—",r:"PM",st:"wait"},
+     {s:"Closed",o:"—",r:"",st:"wait"}],
+    rows:[
+     [1,"Intake","Priya Nair","SUP","1h 10m",0.5,0.67,""],
+     [1,"Triage","Meera Prasad","PM","3h 20m",1.0,2.33,""],
+     [1,"Development","Ravi Kumar","DEV","2d 1h",9.0,8.0,""],
+     [1,"QA","Anil Sharma","QA","6h 40m",3.5,3.17,"fail"],
+     [2,"Development","Ravi Kumar","DEV","1d 2h",5.5,4.5,"rework"],
+     [2,"QA","Anil Sharma","QA","4h 05m",2.0,2.08,"pass"],
+     [2,"Deployment","Karan Desai","DEP","5h 30m",1.5,4.0,""],
+     [2,"Verification","Ravi Kumar","DEV","2h 15m",1.0,1.25,""],
+     [2,"Sign-off","Meera Prasad","PM","1h 00m",0.5,0.5,""]],
+    tot:["5d 3h",24.5]},
+ 1:{iter:1,rework:0,note:"Cycle 1 — sealed 05 Aug, read-only",
+    seg:[
+     {s:"Intake",o:"Priya Nair",r:"SUP",st:"done",dur:"0h 40m",eff:0.5},
+     {s:"Triage",o:"Meera Prasad",r:"PM",st:"done",dur:"2h 10m",eff:0.5},
+     {s:"Development",o:"Ravi Kumar",r:"DEV",st:"done",dur:"1d 4h",eff:6.0},
+     {s:"QA",o:"Anil Sharma",r:"QA",st:"done",dur:"3h 15m",eff:2.5},
+     {s:"Deployment",o:"Karan Desai",r:"DEP",st:"skip"},
+     {s:"Verification",o:"Ravi Kumar",r:"DEV",st:"done",dur:"1h 05m",eff:1.0},
+     {s:"Sign-off",o:"Meera Prasad",r:"PM",st:"done",dur:"0h 50m",eff:0.5},
+     {s:"Closed",o:"Meera Prasad",r:"",st:"done",dur:"—",eff:0}],
+    rows:[
+     [1,"Intake","Priya Nair","SUP","0h 40m",0.5,0.17,""],
+     [1,"Triage","Meera Prasad","PM","2h 10m",0.5,1.67,""],
+     [1,"Development","Ravi Kumar","DEV","1d 4h",6.0,6.0,""],
+     [1,"QA","Anil Sharma","QA","3h 15m",2.5,0.75,"pass"],
+     [1,"Deployment","Karan Desai","DEP","—",0,0,"skipped"],
+     [1,"Verification","Ravi Kumar","DEV","1h 05m",1.0,0.08,""],
+     [1,"Sign-off","Meera Prasad","PM","0h 50m",0.5,0.33,""]],
+    tot:["7d 3h",13.5]}
+};
+let cyc=2, filt=null;
+
+const ICON={done:"✔",now:"●",wait:"○",skip:"⊘"};
+function ribbon(){
+  const d=CYC[cyc];
+  $("#ribbon").innerHTML=d.seg.map((g,i)=>{
+    const cls=["seg",g.st==="done"?"done":g.st==="now"?"now":g.st==="skip"?"skip":"wait",g.loop?"rew":""].join(" ");
+    return `<div class="${cls}"><button class="segbox" data-seg="${g.s}"
+      data-tip="<b>${g.s}</b><i>${g.o}${g.dur?" · "+g.dur:""}</i>${g.eff?"<i>"+g.eff.toFixed(1)+" h logged</i>":""}${g.st==="skip"?"<i>Skipped — no deployment needed, authorised by Meera P.</i>":""}">
+      <span class="st">${ICON[g.st]} ${g.s}</span>
+      <span class="who">${g.o}</span>
+      ${g.dur?`<div class="mt">${g.dur}</div>`:""}
+      ${g.eff?`<div class="eff">${g.eff.toFixed(1)} h</div>`:""}
+      ${g.loop?`<span class="loop">↺ ×${g.loop}</span>`:""}
+    </button></div>`;}).join("");
+  const now=d.seg.find(s=>s.st==="now");
+  $("#nowbar").innerHTML = now
+    ? `<span class="lbl">Now in ${now.s} — ${now.dur} elapsed, stage SLA 8 h</span>
+       <div style="margin-left:auto;display:flex;gap:8px"><button class="btn pri">Pass to Deployment →</button><button class="btn dgr">Fail — send for rework</button></div>`
+    : `<span class="lbl">Cycle sealed — this journey is read-only and preserved exactly as it happened.</span>`;
+  $("#iterChip").textContent="Iteration "+d.iter;
+  $("#reworkChip").textContent=d.rework?`↺ ${d.rework} rework`:"no rework";
+  $("#cycNote").textContent=d.note;
+  journey();
+}
+function journey(){
+  const d=CYC[cyc];
+  const rows=filt?d.rows.filter(r=>r[1]===filt):d.rows;
+  const badge={fail:'<span class="chip crit">✗ Failed</span>',pass:'<span class="chip low">✓ Passed</span>',
+               rework:'<span class="chip high">↺ rework</span>',skipped:'<span class="chip gry">skipped</span>'};
+  $("#journey tbody").innerHTML=rows.map(r=>`<tr>
+    <td class="num" style="color:var(--ink-3)">${r[0]}</td><td style="font-weight:550">${r[1]}</td>
+    <td><div class="who2">${av(r[2])}${r[2]}</div></td><td><span class="chip gry">${r[3]}</span></td>
+    <td class="num" style="text-align:right">${r[4]}</td>
+    <td class="num" style="text-align:right;font-weight:650">${r[5].toFixed(1)} h</td>
+    <td class="num" style="text-align:right;color:${r[6]>3?"var(--danger)":"var(--ink-3)"}">${r[6].toFixed(1)} h</td>
+    <td>${badge[r[7]]||""}</td></tr>`).join("");
+  const a=rows.reduce((s,r)=>s+r[5],0), i=rows.reduce((s,r)=>s+r[6],0);
+  $("#journey tfoot").innerHTML=`<tr><td colspan="4">${filt?filt+" only":"Total — cycle "+cyc}</td>
+    <td class="num" style="text-align:right">${filt?"":d.tot[0]}</td>
+    <td class="num" style="text-align:right">${a.toFixed(1)} h</td>
+    <td class="num" style="text-align:right">${i.toFixed(1)} h</td><td></td></tr>`;
+  $("#filtNote").innerHTML=filt?`Filtered to <b>${filt}</b> — <button id="clr" style="color:var(--primary);font-weight:600">show all</button>`:"Click a ribbon segment to filter";
+  const c=$("#clr"); if(c)c.onclick=()=>{filt=null;journey();};
+}
+/* contribution roll-up */
+const CONTRIB=[["Ravi Kumar","Developer",3,21.5],["Anil Sharma","QA",2,8.0],["Meera Prasad","PM",2,2.5],["Karan Desai","Deployment",1,1.5],["Priya Nair","Support",1,1.0]];
+$("#contrib").innerHTML=CONTRIB.map(c=>{
+  const w=(c[3]/21.5*100).toFixed(0);
+  return `<div style="margin-bottom:9px">
+    <div style="display:flex;align-items:center;gap:7px;font-size:12.5px">
+      ${av(c[0])}<span style="font-weight:550">${c[0]}</span>
+      <span style="margin-left:auto" class="num">${c[3].toFixed(1)} h</span></div>
+    <div style="height:5px;background:var(--bg-subtle);border-radius:3px;margin-top:5px;overflow:hidden">
+      <div style="height:100%;width:${w}%;background:var(--primary);border-radius:3px"></div></div>
+    <div style="font-size:11px;color:var(--ink-3);margin-top:3px">${c[1]} · ${c[2]} stage${c[2]>1?"s":""}</div>
+  </div>`;}).join("")+`<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:9px;display:flex;font-size:12.5px;font-weight:650">
+    <span>All cycles</span><span class="num" style="margin-left:auto;color:var(--primary)">38.0 h</span></div>`;
+
+/* ── dashboard ─────────────────────────────────────────────────── */
+const KPI=[["Total tickets","1,284","▲ 12%","up",[38,42,40,48,45,52,58,55,61,64]],
+ ["Open","263","▲ 6%","dn",[30,32,31,35,34,38,40,39,43,45]],
+ ["Closed","1,021","▲ 8%","up",[28,30,34,33,38,36,42,45,44,49]],
+ ["Critical","18","▲ 3","dn",[6,7,6,9,8,11,10,13,15,18]],
+ ["Delayed","26","▲ 5","dn",[12,14,13,17,16,19,21,20,24,26]],
+ ["Reopened","41","▼ 2","up",[9,11,10,13,12,11,10,9,8,7]]];
+function spark(v,col){
+  const w=112,h=26,mx=Math.max(...v),mn=Math.min(...v),rg=mx-mn||1;
+  const pt=v.map((d,i)=>[i/(v.length-1)*w,h-2-(d-mn)/rg*(h-6)]);
+  const ln=pt.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
+  const last=pt[pt.length-1];
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" style="display:block;margin-top:6px">
+    <path d="${ln} L ${w} ${h} L 0 ${h} Z" fill="${col}" opacity=".09"/>
+    <path d="${ln}" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="${col}" stroke="#fff" stroke-width="1.5"/></svg>`;
+}
+$("#kpis").innerHTML=KPI.map(k=>`<div class="card kpi">
+  <div class="k">${k[0]}</div><div class="v">${k[1]}</div>
+  <div class="d ${k[3]}">${k[2]}<span style="color:var(--ink-3)">vs prev</span></div>
+  ${spark(k[4],k[3]==="up"?"#10B981":"#EF4444")}</div>`).join("");
+
+/* stacked area */
+(function(){
+  const D=[], n=30;
+  for(let i=0;i<n;i++){D.push([12+Math.round(6*Math.sin(i/3.4)+(i>18?4:0)),9+Math.round(5*Math.sin(i/4+1)),1+(i%7===0?2:0)]);}
+  const w=520,h=176,pl=30,pb=22,pt2=8;
+  const iw=w-pl-6, ih=h-pb-pt2;
+  const mx=Math.max(...D.map(d=>d[0]+d[1]+d[2]));
+  const X=i=>pl+i/(n-1)*iw, Y=v=>pt2+ih-v/mx*ih;
+  const cols=["var(--c1)","var(--c3)","var(--c2)"];
+  let out=`<svg width="100%" viewBox="0 0 ${w} ${h}" role="img" aria-label="Created, closed and reopened tickets per day over 30 days"><g>`;
+  for(let g=0;g<=3;g++){const y=pt2+ih-g/3*ih;out+=`<line x1="${pl}" y1="${y}" x2="${w-6}" y2="${y}" stroke="#E5E8F0" stroke-width="1"/><text x="${pl-7}" y="${y+3.5}" font-size="9.5" fill="#9CA3AF" text-anchor="end">${Math.round(g/3*mx)}</text>`;}
+  let base=new Array(n).fill(0);
+  for(let s=0;s<3;s++){
+    const top=D.map((d,i)=>base[i]+d[s]);
+    const up=top.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+    const dn=base.map((v,i)=>`${X(n-1-i).toFixed(1)},${Y(base[n-1-i]).toFixed(1)}`).join(" ");
+    out+=`<polygon points="${up} ${dn}" fill="${cols[s]}" opacity=".85" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>`;
+    base=top;
+  }
+  out+=`<text x="${pl}" y="${h-6}" font-size="9.5" fill="#9CA3AF">07 Jul</text><text x="${w-6}" y="${h-6}" font-size="9.5" fill="#9CA3AF" text-anchor="end">05 Aug</text></g></svg>`;
+  $("#area").innerHTML=out;
+})();
+
+/* stage funnel */
+(function(){
+  const F=[["Intake",8],["Triage",14],["Development",71],["QA",29],["Deployment",34],["Verification",11],["Sign-off",6]];
+  const mx=Math.max(...F.map(f=>f[1]));
+  $("#funnel").innerHTML=F.map(f=>{
+    const bn=f[1]===mx||f[0]==="Deployment"&&f[1]>30;
+    const col=f[0]==="Deployment"?"var(--warning)":"var(--primary)";
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px">
+      <span style="width:88px;font-size:12px;color:var(--ink-2);flex:none">${f[0]}</span>
+      <div style="flex:1;height:19px;background:var(--bg-subtle);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${f[1]/mx*100}%;background:${col};border-radius:4px"></div></div>
+      <span class="num" style="width:30px;text-align:right;font-size:12.5px;font-weight:650">${f[1]}</span></div>`;
+  }).join("")+`<div style="font-size:11.5px;color:#B45309;background:var(--warning-soft);padding:8px 11px;border-radius:6px;margin-top:9px;line-height:1.45">
+    Deployment holds 34 tickets against a 4-hour stage SLA. Ticket-level SLA looks healthy — the queue is where the time goes.</div>`;
+})();
+
+/* task types */
+(function(){
+  const T=[["Production Bug",312],["Change Request",268],["Client Request",194],["Internal Bug",151],["Server Issue",96],["Browser Issue",84],["Performance Issue",63],["Network Issue",52],["Client Bug",34],["Future Release",21],["Other",9]];
+  const mx=T[0][1];
+  $("#types").innerHTML=T.map(t=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+    <span style="width:118px;font-size:12px;color:var(--ink-2);flex:none">${t[0]}</span>
+    <div style="flex:1;height:15px;background:var(--bg-subtle);border-radius:3px;overflow:hidden">
+      <div style="height:100%;width:${t[1]/mx*100}%;background:var(--primary);opacity:${.4+t[1]/mx*.6};border-radius:3px"></div></div>
+    <span class="num" style="width:32px;text-align:right;font-size:12px;font-weight:600">${t[1]}</span></div>`).join("");
+})();
+
+/* attention list */
+$("#attn tbody").innerHTML=[
+ ["CRM-26-00347","Payment gateway timeout","Anil Sharma","-3d","crit"],
+ ["CRM-26-00902","Login fails on Safari","Neha Singh","-1d","crit"],
+ ["CRM-26-00915","Export to CSV truncates","Amit Rao","today","high"],
+ ["CRM-26-00871","Invoice PDF blank for AU","Ravi Kumar","today","high"],
+ ["CRM-26-00844","Session drops after 20 min","Sunil Vaz","+1d","high"]
+].map(r=>`<tr><td class="tid">${r[0]}</td><td>${r[1]}</td>
+  <td><div class="who2">${av(r[2])}<span style="font-size:12px">${r[2]}</span></div></td>
+  <td><span class="chip ${r[4]}">${r[3]}</span></td></tr>`).join("");
+
+/* ── ticket list ───────────────────────────────────────────────── */
+const DOTS=(done,cur,rew)=>{let o="";for(let i=0;i<8;i++){o+=`<i class="${i<done?(rew&&i===2?"w":"f"):i===cur?"c":""}"></i>`;}return `<div class="dots">${o}</div>`;};
+$("#tickets tbody").innerHTML=[
+ ["CRM-26-00347","Payment gateway timeout on checkout","Prod Bug","crit","Critical","Anil Sharma","12 Aug ⚠","24.5","In Progress",3,3,1,"critical"],
+ ["CRM-26-00902","Login fails on Safari 17","Browser","crit","Critical","Neha Singh","14 Aug ⚠","3.0","Rework",2,2,1,"critical"],
+ ["CRM-26-00915","Export to CSV truncates long fields","CR","high","High","Amit Rao","20 Aug","6.5","In Progress",4,4,0,"delayed"],
+ ["CRM-26-00871","Invoice PDF renders blank for AU tax","Prod Bug","high","High","Ravi Kumar","20 Aug","11.0","In QA",3,3,0,""],
+ ["CRM-26-00844","Session drops after 20 minutes idle","Perf","high","High","Sunil Vaz","22 Aug","8.0","Deployment",4,4,0,""],
+ ["CRM-26-00933","Add bulk reassign to admin console","CR","med","Medium","Amit Rao","28 Aug","2.0","Assigned",1,1,0,""],
+ ["CRM-26-00951","Client portal shows stale ticket count","Client Bug","med","Medium","Neha Singh","30 Aug","0.0","New",0,0,0,""],
+ ["CRM-26-00962","Nightly backup job exceeds window","Server","low","Low","Karan Desai","04 Sep","1.5","Triage",1,1,0,""]
+].map(r=>`<tr class="${r[12]}">
+  <td class="tid">${r[0]}</td><td style="min-width:230px">${r[1]}</td>
+  <td>${DOTS(r[9],r[10],r[11])}</td><td><span class="chip gry">${r[2]}</span></td>
+  <td><span class="chip ${r[3]}">${r[4]}</span></td>
+  <td><div class="who2">${av(r[5])}<span style="font-size:12.5px">${r[5]}</span></div></td>
+  <td class="num" style="white-space:nowrap">${r[6]}</td>
+  <td class="num" style="text-align:right">${r[7]}</td>
+  <td><span class="chip gry">${r[8]}</span></td></tr>`).join("");
+
+/* ── my tasks ──────────────────────────────────────────────────── */
+const GRP=[["Overdue",1,"var(--danger)",[["CRM-26-00347","Payment gateway timeout on checkout","crit","Critical","QA","-3 days","24.5",1]]],
+ ["Due today",2,"var(--warning)",[
+  ["CRM-26-00871","Invoice PDF renders blank for AU tax","high","High","Development","today","11.0",0],
+  ["CRM-26-00915","Export to CSV truncates long fields","high","High","Development","today","6.5",0]]],
+ ["This week",2,"var(--info)",[
+  ["CRM-26-00844","Session drops after 20 minutes idle","high","High","Verification","22 Aug","8.0",0],
+  ["CRM-26-00933","Add bulk reassign to admin console","med","Medium","Development","28 Aug","2.0",0]]],
+ ["Later",2,"var(--ink-3)",[
+  ["CRM-26-00951","Client portal shows stale ticket count","med","Medium","Triage","30 Aug","0.0",0],
+  ["CRM-26-00962","Nightly backup job exceeds window","low","Low","Triage","04 Sep","1.5",0]]]];
+$("#mytasks").innerHTML=GRP.map(g=>`
+ <div class="grpttl"><span class="dot" style="background:${g[2]};width:8px;height:8px"></span><h3>${g[0]}</h3><span class="n">${g[1]}</span></div>
+ <div class="card">${g[3].map((t,i)=>`
+   <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;${i?"border-top:1px solid var(--border)":""}">
+     <div style="min-width:0;flex:1">
+       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+         <span class="tid">${t[0]}</span><span class="chip ${t[2]}">${t[3]}</span>
+         ${t[7]?'<span class="chip high">↺ back from QA</span>':""}
+       </div>
+       <div style="margin-top:4px;font-size:13.5px">${t[1]}</div>
+       <div style="margin-top:4px;font-size:11.5px;color:var(--ink-3)">In ${t[4]} · due ${t[5]} · ${t[6]} h logged</div>
+     </div>
+     <button class="btn pri" data-qu>⚡ Quick update</button>
+   </div>`).join("")}</div>`).join("");
+
+/* ── interactions ──────────────────────────────────────────────── */
+$$(".nav[data-go]").forEach(b=>b.onclick=()=>{
+  $$(".nav").forEach(n=>n.removeAttribute("aria-current"));
+  b.setAttribute("aria-current","true");
+  $$(".screen").forEach(s=>s.classList.toggle("on",s.id===b.dataset.go));
+  window.scrollTo({top:0,behavior:"smooth"});
+});
+$$(".cyclesel button").forEach(b=>b.onclick=()=>{
+  $$(".cyclesel button").forEach(x=>x.removeAttribute("aria-pressed"));
+  b.setAttribute("aria-pressed","true"); cyc=+b.dataset.cyc; filt=null; ribbon();
+});
+document.addEventListener("click",e=>{
+  const seg=e.target.closest("[data-seg]");
+  if(seg){filt=filt===seg.dataset.seg?null:seg.dataset.seg;journey();return;}
+  if(e.target.closest("[data-qu]")){$("#veil").classList.add("on");$("#over").classList.add("on");$("#over").setAttribute("aria-hidden","false");}
+  if(e.target.closest("[data-close]")||e.target.id==="veil"){$("#veil").classList.remove("on");$("#over").classList.remove("on");$("#over").setAttribute("aria-hidden","true");}
+  const tb=e.target.closest(".tab");
+  if(tb){$$(".tab",tb.parentElement).forEach(t=>t.setAttribute("aria-selected","false"));tb.setAttribute("aria-selected","true");}
+});
+$("#pc").addEventListener("input",e=>$("#pcv").textContent=e.target.value);
+/* tooltips */
+const tip=$("#tip");
+document.addEventListener("mouseover",e=>{
+  const t=e.target.closest("[data-tip]"); if(!t)return;
+  tip.innerHTML=t.dataset.tip; tip.classList.add("on");
+  const r=t.getBoundingClientRect();
+  tip.style.left=Math.min(r.left,innerWidth-266)+"px";
+  tip.style.top=(r.bottom+8)+"px";
+});
+document.addEventListener("mouseout",e=>{if(e.target.closest("[data-tip]"))tip.classList.remove("on");});
+ribbon();
+})();
+</script>
