@@ -5,61 +5,62 @@
 #
 # Replace the @placeholders with real GitHub usernames before this takes effect.
 #
-#   Stream A — Platform & Security   Shivendra  shivendra.edunext@gmail.com       @stream-a
-#   Stream B — Masters & Clients     Ayush      ayush.edunext123@gmail.com        @stream-b
-#   Stream C — Tickets & Ribbon      Divyansh   divyansh.edunext@gmail.com        @stream-c
-#   Stream D — Engines & Realtime    Debashis   debashis@edunexttechnologies.com  @stream-d
+#   Stream A — Platform & Security   Shivendra  shivendra.edunext@gmail.com       @shivendraedunext-18
+#   Stream B — Masters & Clients     Ayush      ayush.edunext123@gmail.com        @Ayushedunext
+#   Stream C — Tickets & Ribbon      Divyansh   divyansh.edunext@gmail.com        @Divyanshedunext
+#   Stream D — Engines & Realtime    Debashis   debashis@edunexttechnologies.com  @debashisedunext
 #
-# GitHub does NOT resolve email addresses here — only @handles. Until the four
-# placeholders below are replaced with real usernames, GitHub requests NO
-# reviewer on any pull request and branch protection's "require Code Owner
-# review" has nothing to require.
+# Every owner listed here must have WRITE access to the repository, or GitHub
+# silently ignores the rule and requests nobody. Add all four as collaborators
+# before relying on "require Code Owner review".
+#
+# Later rules override earlier ones, so the catch-all sits at the top.
 
 # ---- Default: the lead sees anything not claimed below ----
 *                                       @debashisedunext
 
 # ---- Stream A · Platform & Security ----
-/backend/common/                        @stream-a
-/backend/domain/db/migration/           @stream-a
-/backend/api/security/                  @stream-a
-/backend/api/feature/auth/              @stream-a
-/backend/api/feature/dashboard/         @stream-a
-/backend/api/feature/reports/           @stream-a
-/frontend/src/features/auth/            @stream-a
-/frontend/src/features/dashboard/       @stream-a
-/frontend/src/features/reports/         @stream-a
-/docker-compose.yml                     @stream-a
-/.github/                               @stream-a
+/backend/common/                        @shivendraedunext-18
+/backend/domain/db/migration/           @shivendraedunext-18
+/backend/api/security/                  @shivendraedunext-18
+/backend/api/feature/auth/              @shivendraedunext-18
+/backend/api/feature/dashboard/         @shivendraedunext-18
+/backend/api/feature/reports/           @shivendraedunext-18
+/frontend/src/features/auth/            @shivendraedunext-18
+/frontend/src/features/dashboard/       @shivendraedunext-18
+/frontend/src/features/reports/         @shivendraedunext-18
+/docker-compose.yml                     @shivendraedunext-18
+/.github/                               @shivendraedunext-18
 
 # ---- Stream B · Masters & Clients ----
-/backend/api/feature/masters/           @stream-b
-/backend/api/feature/clients/           @stream-b
-/backend/api/feature/imports/           @stream-b
-/backend/api/feature/workflow/          @stream-b
-/frontend/src/features/masters/         @stream-b
-/frontend/src/features/clients/         @stream-b
+/backend/api/feature/masters/           @Ayushedunext
+/backend/api/feature/clients/           @Ayushedunext
+/backend/api/feature/imports/           @Ayushedunext
+/backend/api/feature/workflow/          @Ayushedunext
+/frontend/src/features/masters/         @Ayushedunext
+/frontend/src/features/clients/         @Ayushedunext
 
 # ---- Stream C · Tickets & Ribbon ----
-/backend/api/feature/tickets/           @stream-c
-/backend/api/feature/transitions/       @stream-c
-/frontend/src/features/tickets/         @stream-c
-/frontend/src/components/ui/            @stream-c
-/frontend/src/components/ribbon/        @stream-c
-/frontend/src/styles/tokens.css         @stream-c
+/backend/api/feature/tickets/           @Divyanshedunext
+/backend/api/feature/transitions/       @Divyanshedunext
+/frontend/src/features/tickets/         @Divyanshedunext
+/frontend/src/components/ui/            @Divyanshedunext
+/frontend/src/components/ribbon/        @Divyanshedunext
+/frontend/src/styles/tokens.css         @Divyanshedunext
 
 # ---- Stream D · Engines & Realtime ----
-/backend/worker/                        @stream-d
-/backend/api/feature/notifications/     @stream-d
-/backend/api/feature/chat/              @stream-d
-/backend/api/realtime/                  @stream-d
-/frontend/src/features/chat/            @stream-d
-/frontend/src/features/notifications/   @stream-d
+/backend/worker/                        @debashisedunext
+/backend/api/feature/notifications/     @debashisedunext
+/backend/api/feature/chat/              @debashisedunext
+/backend/api/realtime/                  @debashisedunext
+/frontend/src/features/chat/            @debashisedunext
+/frontend/src/features/notifications/   @debashisedunext
 
 # ---- Cross-cutting: the three append-only tables and the immutability core
 # always need Stream A's eyes, whoever is touching them.
-/backend/domain/**/history/             @stream-a
-/backend/domain/**/effort/              @stream-a
-/backend/domain/**/immutable/           @stream-a
+/backend/domain/**/history/             @shivendraedunext-18
+/backend/domain/**/effort/              @shivendraedunext-18
+/backend/domain/**/immutable/           @shivendraedunext-18
 
 # ---- Generated: nobody owns it, nobody hand-edits it ----
 /frontend/src/api/generated/

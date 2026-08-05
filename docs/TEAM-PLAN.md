@@ -32,12 +32,12 @@ Ownership is **vertical** — each developer owns a slice of the product from da
 
 | Stream | Owner | Email | GitHub |
 |---|---|---|---|
-| **A** — Platform & Security | Shivendra | `shivendra.edunext@gmail.com` | _pending_ |
-| **B** — Masters & Clients | Ayush | `ayush.edunext123@gmail.com` | _pending_ |
-| **C** — Tickets & Ribbon | Divyansh | `divyansh.edunext@gmail.com` | _pending_ |
-| **D** — Engines & Realtime | Debashis | `debashis@edunexttechnologies.com` | _pending_ |
+| **A** — Platform & Security | Shivendra | `shivendra.edunext@gmail.com` | `@shivendraedunext-18` |
+| **B** — Masters & Clients | Ayush | `ayush.edunext123@gmail.com` | `@Ayushedunext` |
+| **C** — Tickets & Ribbon | Divyansh | `divyansh.edunext@gmail.com` | `@Divyanshedunext` |
+| **D** — Engines & Realtime | Debashis | `debashis@edunexttechnologies.com` | `@debashisedunext` |
 
-GitHub handles are needed for `.github/CODEOWNERS` — emails do not resolve there. Until they are filled in, GitHub requests no reviewer on any pull request.
+These handles are live in `.github/CODEOWNERS`. Each must have **Write** access to the repository, or GitHub silently ignores the rule and requests nobody.
 
 ### Who should take which
 

@@ -1,7 +1,7 @@
 # Stream D — Engines & Realtime · Task Backlog
 
 **Milestones:** M0 (contract + mocks) · M5 (SLA, escalation, mail, notifications) · M7 (chat, realtime)
-**Owner:** Debashis · `debashis@edunexttechnologies.com`
+**Owner:** Debashis · `debashis@edunexttechnologies.com` · @debashisedunext
 **Branch prefix:** `feat/engines/…`
 **Owns:** `backend/worker/`, `backend/api/feature/{notifications,chat}/`, `backend/api/realtime/`, `frontend/src/features/{chat,notifications}/`
 
