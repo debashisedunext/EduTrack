@@ -16,6 +16,46 @@ From an empty folder to four developers writing code. Follow in order.
 | Claude Code | current | `claude --version` |
 | GitHub account | — | with repo write access |
 
+### Installing JDK 21 — read this before you build
+
+**Spring Boot 3.3 does not run on Java 24+.** If `java -version` shows anything above 21, the build fails in ways that do not obviously point at the JDK. Install Temurin 21 and make it the default.
+
+**With Homebrew:**
+
+```bash
+brew install --cask temurin@21
+```
+
+**Without Homebrew** (no admin rights needed — macOS also looks in your home directory):
+
+```bash
+mkdir -p ~/Library/Java/JavaVirtualMachines
+curl -L -o /tmp/jdk21.tar.gz \
+  "https://api.adoptium.net/v3/binary/latest/21/ga/mac/aarch64/jdk/hotspot/normal/eclipse"
+tar xzf /tmp/jdk21.tar.gz -C /tmp
+mv /tmp/jdk-21* ~/Library/Java/JavaVirtualMachines/temurin-21.jdk
+```
+
+*(Intel Mac: swap `aarch64` for `x64`.)*
+
+**Then make it the default** — append to `~/.zshrc`:
+
+```bash
+export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
+export PATH="$JAVA_HOME/bin:$PATH"
+```
+
+Open a new terminal and confirm:
+
+```bash
+java -version        # must report 21.x
+/usr/libexec/java_home -V   # lists every JDK macOS can see
+```
+
+Other JDKs can stay installed — `java_home -v <version>` switches between them per shell.
+
+**Maven is not required.** The wrapper is committed: use `./mvnw` from `backend/`.
+
 ---
 
 ## Step 1 — Lead decisions · 30 minutes · **blocking**

@@ -8,7 +8,7 @@ Merges project task assignment (Jira-like) with client ticket intake and SLA (Ze
 
 ## Quick start
 
-**Prerequisites:** JDK 21 · Node 20+ · Docker. Maven is *not* needed — use the wrapper.
+**Prerequisites:** **JDK 21** (Spring Boot 3.3 does not run on Java 24+ — see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for a no-Homebrew install) · Node 20+ · Docker. Maven is *not* needed — the wrapper is committed.
 
 ```bash
 git clone https://github.com/debashisedunext/EduTrack.git && cd EduTrack
