@@ -225,7 +225,7 @@ const idx = d => Math.round((d - d0) / DAY);
 const fmt = d => d.toLocaleDateString(undefined, {weekday:'short', day:'2-digit', month:'short'});
 const byId = Object.fromEntries(TASKS.map(t => [t.id, t]));
 
-let Z = 11, devs = new Set(["A","B","C","D"]);
+let Z = 11, W = span * Z, devs = new Set(["A","B","C","D"]);
 
 /* ── summary tiles ─────────────────────────────────────────────────────────── */
 const done = TASKS.filter(t => t.st === "done");
@@ -293,7 +293,7 @@ function draw() {
     (!oc || t.cr) && (!ob || t.bl) &&
     (!q || t.id.toLowerCase().includes(q) || t.t.toLowerCase().includes(q)));
 
-  const W = span * Z;
+  W = span * Z;                         // module-scope: row() reads it too
   grid.style.setProperty("--lw", LW + "px");
   grid.style.width = (LW + W) + "px";
 
