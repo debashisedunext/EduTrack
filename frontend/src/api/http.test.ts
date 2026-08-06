@@ -6,6 +6,9 @@ import { http, ApiError, setAccessToken, newIdempotencyKey } from './http';
  * through. If it is wrong, all 79 endpoints are wrong in the same way.
  */
 
+/** The same base http.ts uses, so these assertions survive a config change. */
+const BASE = import.meta.env.VITE_API_BASE ?? '/api/v1';
+
 const ok = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), {
     status: 200,
@@ -46,7 +49,7 @@ describe('http', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/tickets/CRM-26-00347/full',
+      `${BASE}/tickets/CRM-26-00347/full`,
       expect.objectContaining({ method: 'GET' }),
     );
     expect(result.data.ticketId).toBe('CRM-26-00347');
@@ -78,7 +81,7 @@ describe('http', () => {
       method: 'GET',
       params: { cursor: undefined, limit: 50, status: '', level: null, stage: 'QA' },
     });
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/tickets?limit=50&stage=QA');
+    expect(fetchMock.mock.calls[0][0]).toBe(`${BASE}/tickets?limit=50&stage=QA`);
   });
 
   it('comma-joins array params, matching explode:false in the spec', async () => {
