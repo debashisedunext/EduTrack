@@ -203,13 +203,27 @@ jobs:
           java -jar "$JAR" \
             --spring.profiles.active=local \
             --spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration \
-            --server.port=8099 > /tmp/app.log 2>&1 &
+            --server.port=8099 \
+            --management.health.redis.enabled=false \
+            --management.health.mail.enabled=false > /tmp/app.log 2>&1 &
           APP=$!
+          # Readiness is `/`, not /actuator/health. Health aggregates the Redis
+          # and mail indicators, which are DOWN here by design — there is no
+          # infrastructure in this job, and there should not be: the question is
+          # whether the jar starts and serves, not whether docker-compose is up.
+          # Those two indicators are disabled above so the health assertion below
+          # is about the application rather than the environment.
+          up=0
           for i in $(seq 1 60); do
-            curl -fsS -o /dev/null http://localhost:8099/actuator/health && break
-            kill -0 $APP 2>/dev/null || { echo "::error::The app exited during startup."; tail -40 /tmp/app.log; exit 1; }
+            if curl -fsS -o /dev/null http://localhost:8099/; then up=1; break; fi
+            if ! kill -0 $APP 2>/dev/null; then
+              echo "::error::The app exited during startup."; tail -60 /tmp/app.log; exit 1
+            fi
             sleep 2
           done
+          if [ "$up" -ne 1 ]; then
+            echo "::error::The app never became healthy within 120s."; tail -60 /tmp/app.log; exit 1
+          fi
           fail=0
           check() {
             code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8099$1")
@@ -222,7 +236,7 @@ jobs:
           check /actuator/health      200
           check /api/v1/nope          404   # an honest 404, not the HTML shell
           kill $APP 2>/dev/null || true
-          [ $fail -eq 0 ] || { tail -40 /tmp/app.log; exit 1; }
+          if [ $fail -ne 0 ]; then tail -60 /tmp/app.log; exit 1; fi
           echo "✓ the packaged jar starts and serves"
       - uses: actions/upload-artifact@v4
         with:
