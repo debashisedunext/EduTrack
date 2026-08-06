@@ -18,7 +18,7 @@ Where the blueprint and PLAN.md disagree, the blueprint wins on behaviour and PL
 
 ## Stack
 
-Java 21 · Spring Boot 3.3 · MySQL 8.4 · Redis · React 18 + TypeScript + Vite · Tailwind + shadcn/ui.
+Java 25 · Spring Boot 3.5 · MySQL 8.4 · Redis · React 18 + TypeScript + Vite · Tailwind + shadcn/ui.
 
 **The blueprint recommends NestJS + PostgreSQL. We do not use that.** Its DDL, BullMQ, Socket.IO, SheetJS and shared-Zod guidance do not apply as written — PLAN.md §2.2 and §3 carry the substitutions.
 

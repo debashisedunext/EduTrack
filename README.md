@@ -10,7 +10,7 @@ Merges project task assignment (Jira-like) with client ticket intake and SLA (Ze
 
 **Prerequisites: JDK 25 and Docker.** That is the whole list.
 
-Maven and Node are *not* installed by hand — the Maven wrapper is committed, and Maven downloads a pinned Node itself. Spring Boot 3.3 does not run on Java 24+; see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for a no-admin JDK 25 install.
+Maven and Node are *not* installed by hand — the Maven wrapper is committed, and Maven downloads a pinned Node itself. The build targets Java 25, so an older JDK will not compile it; see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for a no-admin JDK 25 install.
 
 ```bash
 git clone https://github.com/debashisedunext/EduTrack.git && cd EduTrack
@@ -53,7 +53,7 @@ Or use the Makefile: `make up` · `make api` · `make web` · `make verify` · `
 ## Repository layout
 
 ```
-backend/                  Java 21 · Spring Boot 3.3 · Maven multi-module
+backend/                  Java 25 · Spring Boot 3.5 · Maven multi-module
   common/                 shared DTOs, hashing, canonical JSON          → Stream A
   domain/                 JPA entities, repositories, Flyway migrations → A (schema) / B (entities)
   api/                    REST, security, WebSocket — feature-packaged

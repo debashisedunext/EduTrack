@@ -18,7 +18,9 @@ From an empty folder to four developers writing code. Follow in order.
 
 ### Installing JDK 25 — read this before you build
 
-**Spring Boot 3.3 does not run on Java 24+.** If `java -version` shows anything above 25, the build fails in ways that do not obviously point at the JDK. Install Temurin 25 and make it the default.
+**JDK 25 is the minimum, not a suggestion.** `maven.compiler.release` is 25, so anything older fails to compile — and the error names a class file version, not a JDK, which is why it is worth stating up front.
+
+A newer JDK is fine: the build and unit tests are verified green on JDK 26. But **CI pins 25**, so 25 is what actually gates a merge. If a build passes locally on a newer JDK and fails in CI, that gap is the first thing to check.
 
 **With Homebrew:**
 

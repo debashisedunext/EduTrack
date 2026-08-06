@@ -45,8 +45,8 @@ Three things are the architectural spine. Everything else hangs off them, and ea
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Language / runtime | **Java 21 (LTS)** | Virtual threads available for the IMAP poller and mail workers |
-| Framework | **Spring Boot 3.3+** | Web, Security, Data JPA, Validation, Actuator |
+| Language / runtime | **Java 25 (LTS)** | Virtual threads for the IMAP poller and mail workers. Raised from 21 on 6 Aug 2026 — see §4 D-10 |
+| Framework | **Spring Boot 3.5** | Web, Security, Data JPA, Validation, Actuator. 3.5 is what supports Java 25; 3.3 does not |
 | Build | **Maven, multi-module** | `api`, `domain`, `worker`, `common` |
 | Persistence | **Spring Data JPA + Hibernate 6** | Plus JdbcTemplate for reporting queries |
 | Migrations | **Flyway** | Versioned SQL, with explicit delimiter handling for triggers |
@@ -73,7 +73,7 @@ Three things are the architectural spine. Everything else hangs off them, and ea
 | Deploy | **Docker Compose → Kubernetes**, Nginx | Unchanged |
 | Observability | **Micrometer + Prometheus/Grafana · Sentry · Logback JSON** | Replaces Winston/pino |
 | CI/CD | **GitHub Actions** | Lint → test → build → Flyway migrate → deploy |
-| Build | **Maven-managed Node** (`frontend-maven-plugin`) | Developers install only JDK 21; Maven downloads a pinned Node 22. `./mvnw verify` builds both halves |
+| Build | **Maven-managed Node** (`frontend-maven-plugin`) | Developers install only JDK 25; Maven downloads a pinned Node 22. `./mvnw verify` builds both halves |
 | Packaging | **Single Spring Boot jar** | `frontend/dist` is copied to `classpath:/static/`; one artifact, no separate web server |
 
 ### 2.2 Node-specific choices that had to be replaced
@@ -324,6 +324,7 @@ Every intentional difference, in one place.
 | D-7 | Effort roll-up query as written in §4A.5 | Rewritten for `ONLY_FULL_GROUP_BY`, **plus `e.cycle_no = t.cycle_no` added to the join** | The original double-counts cycle-1 effort into cycle 2 after a reopen; §3.4 |
 | D-8 | Ticket ID year behaviour unstated | Sequence does not reset at year rollover; `project_code` immutable after first ticket | Resetting creates a midnight collision window; §3.2 |
 | D-9 | Phases 0–6 by calendar | Milestones M0–M7 by dependency | Each milestone is independently demoable and testable |
+| D-10 | — (this plan originally specified Java 21 / Spring Boot 3.3) | **Java 25 / Spring Boot 3.5** | Raised 6 Aug 2026 in `0518564`. Both move together: Spring Boot 3.3 supports Java 17–22, so 25 requires 3.5. `maven.compiler.release` is 25, making it the hard minimum for every developer; CI pins 25 and is the gate. Verified building and testing green on JDK 25 and 26 |
 
 ---
 

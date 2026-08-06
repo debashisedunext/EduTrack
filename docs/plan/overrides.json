@@ -36,9 +36,12 @@
     "status": "done",
     "reason": ".github/workflows/ci.yml green — migration guard, backend verify, frontend build, OpenAPI staleness, single-jar packaging"
   },
+  "A-010": {
+    "status": "done",
+    "reason": "Shivendra, commit 0518564 — docker/grants/apply-app-grants.sql grants edutrack_app SELECT+INSERT only on the three append-only tables, and withholds GRANT OPTION from edutrack_migrate. Commit subject said 'A011' without the hyphen, so git could not match it"
+  },
   "A-013": {
-    "status": "in-progress",
-    "pct": 40,
-    "reason": "trigger rejection proven by hand against live MySQL, but no committed automated test yet — not done until it runs in CI"
+    "status": "done",
+    "reason": "Shivendra, commit 0518564 — SchemaIntegrationIT covers update/delete rejection on ticket_history and ticket_effort_logs, delete and non-seal update rejection on ticket_stage_transitions, and seal-succeeds-exactly-once, on Testcontainers. Supersedes the earlier hand-verification; commit subject said 'A011' without the hyphen"
   }
 }
