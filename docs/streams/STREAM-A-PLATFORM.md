@@ -35,7 +35,7 @@
 - [ ] **A-009** Generated columns + indexes replacing PostgreSQL partial indexes: `pcd_open`, `current_ticket_id`. Plus `FULLTEXT` on `tickets(title, description)`. *(PLAN.md §3.3, §3.8)*
 - [ ] **A-010** Two DB users: `edutrack_app` (no DDL; **`INSERT, SELECT` only** on the three append-only tables) and `edutrack_migrate` (DDL, deploy step only).
 - [ ] **A-011** CI pipeline — build, test, Testcontainers integration tests, OpenAPI staleness check, frontend build.
-- [ ] **A-012** 🔴 **`dev-noauth` Spring profile** — injects a configurable fake principal (role, projects, reportees). **Rejects startup outside `local`**; disabled in CI. *Due day 10 — B, C and D are blocked without it.*
+- [x] **A-012** 🔴 **`dev-noauth` Spring profile** — injects a configurable fake principal (role, projects, reportees). **Rejects startup outside `local`**; disabled in CI. *Due day 10 — B, C and D are blocked without it.* — *`api/security/dev/`, activate as `local,dev-noauth`; refusal + injection + dormancy all covered by tests*
 - [ ] **A-013** Negative tests proving triggers reject `UPDATE` and `DELETE` on each protected table.
 
 **Exit:** `docker compose up` yields a migrated DB; `mvn verify` green including A-013.
