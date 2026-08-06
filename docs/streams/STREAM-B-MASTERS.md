@@ -15,7 +15,7 @@
 
 *Starts day 3, once Stream A's baseline schema lands.*
 
-- [ ] **B-001** Seed: 6 roles + the full permission matrix from blueprint §2. QA and Deployment included — the ribbon cannot be represented without them.
+- [x] **B-001** Seed: 6 roles + the full permission matrix from blueprint §2. QA and Deployment included — the ribbon cannot be represented without them.
 - [ ] **B-002** Seed: 11 task types (Change Request, Production Bug, Client Request, Future Release, Internal Bug, Client Bug, Server Issue, Network Issue, Browser Issue, Performance Issue, Other) with icon, colour, default level, default SLA. Plus 4 priorities with colour and escalation flag.
 - [ ] **B-003** Seed: statuses (New, In Progress, On Hold, Awaiting Info, Rework, Resolved, Closed, Reopened) + the `workflow_transitions` allowed-transition matrix per role.
 - [ ] **B-004** Seed: 3 workflow templates with their stages — Standard Dev Flow (8 stages), Support Fast-Track (5), Infra Flow (5). *(§4A.9)*
