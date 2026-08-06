@@ -8,7 +8,9 @@ Merges project task assignment (Jira-like) with client ticket intake and SLA (Ze
 
 ## Quick start
 
-**Prerequisites:** **JDK 21** (Spring Boot 3.3 does not run on Java 24+ — see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for a no-Homebrew install) · Node 20+ · Docker. Maven is *not* needed — the wrapper is committed.
+**Prerequisites: JDK 21 and Docker.** That is the whole list.
+
+Maven and Node are *not* installed by hand — the Maven wrapper is committed, and Maven downloads a pinned Node itself. Spring Boot 3.3 does not run on Java 24+; see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for a no-admin JDK 21 install.
 
 ```bash
 git clone https://github.com/debashisedunext/EduTrack.git && cd EduTrack
@@ -16,10 +18,22 @@ cp .env.example .env
 
 docker compose up -d          # MySQL · Redis · MinIO · Mailpit
 
-cd backend && ./mvnw verify   # build + test
+cd backend && ./mvnw verify   # builds backend AND frontend, packages both
 ./mvnw -pl api spring-boot:run -Dspring-boot.run.profiles=local
+```
 
-cd ../frontend && npm ci && npm run dev
+That serves the whole app — API and UI — from one process on :8080.
+
+For frontend work you still want Vite's hot reload, which proxies to the API:
+
+```bash
+cd frontend && npm run dev     # :5173, proxies /api to :8080
+```
+
+Backend-only build, skipping the frontend entirely (about 4 seconds):
+
+```bash
+cd backend && ./mvnw verify -DskipFrontend
 ```
 
 | Service | URL |
@@ -27,7 +41,8 @@ cd ../frontend && npm ci && npm run dev
 | API | http://localhost:8080 |
 | Health | http://localhost:8080/actuator/health |
 | API docs | http://localhost:8080/swagger-ui.html |
-| Frontend | http://localhost:5173 |
+| Frontend (packaged) | http://localhost:8080 |
+| Frontend (Vite dev server) | http://localhost:5173 |
 | Mailpit (all dev mail lands here) | http://localhost:8025 |
 | MinIO console | http://localhost:9001 |
 

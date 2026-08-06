@@ -32,12 +32,76 @@
     <dependency><groupId>org.testcontainers</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 
+  <properties>
+    <!-- Node is an implementation detail of the build. Nobody installs it by
+         hand; frontend-maven-plugin downloads this exact version into
+         target/, so every developer and CI use the same one. -->
+    <node.version>v22.14.0</node.version>
+    <npm.version>10.9.0</npm.version>
+    <frontend.dir>${project.basedir}/../../frontend</frontend.dir>
+    <!-- Backend-only build:  ./mvnw verify -DskipFrontend  -->
+    <skipFrontend>false</skipFrontend>
+  </properties>
+
   <build>
     <plugins>
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
         <configuration><mainClass>com.edunext.edutrack.EduTrackApplication</mainClass></configuration>
+      </plugin>
+
+      <!-- ── frontend: build it, then package it into this jar ───────────── -->
+      <plugin>
+        <groupId>com.github.eirslett</groupId>
+        <artifactId>frontend-maven-plugin</artifactId>
+        <version>1.15.1</version>
+        <configuration>
+          <workingDirectory>${frontend.dir}</workingDirectory>
+          <installDirectory>${project.build.directory}</installDirectory>
+          <skip>${skipFrontend}</skip>
+        </configuration>
+        <executions>
+          <execution>
+            <id>install-node-and-npm</id>
+            <goals><goal>install-node-and-npm</goal></goals>
+            <phase>generate-resources</phase>
+            <configuration>
+              <nodeVersion>${node.version}</nodeVersion>
+              <npmVersion>${npm.version}</npmVersion>
+            </configuration>
+          </execution>
+          <execution>
+            <id>npm-ci</id>
+            <goals><goal>npm</goal></goals>
+            <phase>generate-resources</phase>
+            <configuration><arguments>ci --no-audit --no-fund</arguments></configuration>
+          </execution>
+          <execution>
+            <id>npm-build</id>
+            <goals><goal>npm</goal></goals>
+            <phase>generate-resources</phase>
+            <configuration><arguments>run build</arguments></configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <artifactId>maven-resources-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-frontend-dist</id>
+            <goals><goal>copy-resources</goal></goals>
+            <phase>process-resources</phase>
+            <configuration>
+              <skip>${skipFrontend}</skip>
+              <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+              <resources>
+                <resource><directory>${frontend.dir}/dist</directory></resource>
+              </resources>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

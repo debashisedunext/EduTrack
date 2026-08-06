@@ -73,6 +73,8 @@ Three things are the architectural spine. Everything else hangs off them, and ea
 | Deploy | **Docker Compose → Kubernetes**, Nginx | Unchanged |
 | Observability | **Micrometer + Prometheus/Grafana · Sentry · Logback JSON** | Replaces Winston/pino |
 | CI/CD | **GitHub Actions** | Lint → test → build → Flyway migrate → deploy |
+| Build | **Maven-managed Node** (`frontend-maven-plugin`) | Developers install only JDK 21; Maven downloads a pinned Node 22. `./mvnw verify` builds both halves |
+| Packaging | **Single Spring Boot jar** | `frontend/dist` is copied to `classpath:/static/`; one artifact, no separate web server |
 
 ### 2.2 Node-specific choices that had to be replaced
 

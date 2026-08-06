@@ -8,10 +8,10 @@ From an empty folder to four developers writing code. Follow in order.
 
 | Tool | Version | Check |
 |---|---|---|
-| Java (Temurin) | 21 LTS | `java -version` |
-| Maven | 3.9+ | `mvn -v` |
-| Node.js | 20 LTS+ | `node -v` |
-| Docker Desktop | current | `docker ps` |
+| Java (Temurin) | **21 LTS** | `java -version` |
+| Docker | current | `docker ps` |
+| ~~Maven~~ | — | not needed — `./mvnw` is committed |
+| ~~Node.js~~ | — | not needed — Maven downloads a pinned v22 into `target/` |
 | Git | 2.40+ | `git --version` |
 | Claude Code | current | `claude --version` |
 | GitHub account | — | with repo write access |
@@ -54,7 +54,9 @@ java -version        # must report 21.x
 
 Other JDKs can stay installed — `java_home -v <version>` switches between them per shell.
 
-**Maven is not required.** The wrapper is committed: use `./mvnw` from `backend/`.
+**Neither Maven nor Node is required.** The Maven wrapper is committed (`./mvnw`), and `frontend-maven-plugin` downloads a pinned Node 22 into `backend/api/target/` during the build — so every developer and CI use the identical version, and nothing is installed system-wide.
+
+Node is a **build-time tool only**. The frontend compiles to static files that are packaged into the Spring Boot jar; no Node process runs in production.
 
 ### Installing Docker
 

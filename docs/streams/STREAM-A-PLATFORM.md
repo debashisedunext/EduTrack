@@ -56,6 +56,8 @@
 
 ### The scope guard
 - [ ] **A-032** Spring Security filter chain — token valid and unrevoked.
+  > **Replaces `ScaffoldSecurityConfig`.** The scaffold ships a permit-all chain because `spring-boot-starter-security` with no `SecurityFilterChain` bean makes Spring's default lock *every* route — the packaged jar returns 401 for its own UI. That placeholder is `@ConditionalOnMissingBean`, so it disappears automatically the moment you define a real chain; you do not need to delete it.
+  > **Your chain must permit the static assets** `SpaResourceConfig` serves — `/`, `/index.html`, `/assets/**`, `/favicon.ico` and the SPA's client-side routes. Miss them and the UI fails to load even for authenticated users, which presents as a blank page rather than an auth error.
 - [ ] **A-033** Permission model + `@PreAuthorize` — `ticket.read`, `ticket.assign`, `master.write`, etc.
 - [ ] **A-034** 🔴 **`ScopeResolver`** producing a JPA `Specification` per role — Admin unrestricted; PM/Support `project_id IN projects`; Developer/QA/Deployment `assigned_to = me`. Composed centrally into every ticket query, never per-controller.
 - [ ] **A-035** Out-of-scope IDs return **404, not 403**, on `/tickets/{id}` and every detail route.
