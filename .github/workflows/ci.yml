@@ -193,6 +193,37 @@ jobs:
             exit 1
           fi
           echo "✓ $JAR contains the built frontend"
+      - name: Smoke-test the jar — start it and serve a request
+        run: |
+          # Inspecting the artifact is not the same as running it. A dependency
+          # declared at the wrong scope produces a jar that looks perfect and
+          # dies during context refresh; that shipped once, green, because this
+          # job only ever ran `unzip -l`.
+          JAR=$(ls backend/api/target/edutrack-api-*.jar | head -1)
+          java -jar "$JAR" \
+            --spring.profiles.active=local \
+            --spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration \
+            --server.port=8099 > /tmp/app.log 2>&1 &
+          APP=$!
+          for i in $(seq 1 60); do
+            curl -fsS -o /dev/null http://localhost:8099/actuator/health && break
+            kill -0 $APP 2>/dev/null || { echo "::error::The app exited during startup."; tail -40 /tmp/app.log; exit 1; }
+            sleep 2
+          done
+          fail=0
+          check() {
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8099$1")
+            if [ "$code" = "$2" ]; then echo "  ✓ $1 -> $code"
+            else echo "::error::$1 returned $code, expected $2"; fail=1; fi
+          }
+          check /                     200   # the SPA
+          check /tickets/CRM-26-00347 200   # a deep link must reach index.html
+          check /v3/api-docs/edutrack 200   # springdoc, which D-005 depends on
+          check /actuator/health      200
+          check /api/v1/nope          404   # an honest 404, not the HTML shell
+          kill $APP 2>/dev/null || true
+          [ $fail -eq 0 ] || { tail -40 /tmp/app.log; exit 1; }
+          echo "✓ the packaged jar starts and serves"
       - uses: actions/upload-artifact@v4
         with:
           name: edutrack-api-jar
