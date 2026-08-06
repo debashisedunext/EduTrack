@@ -114,15 +114,20 @@
   .row { display: flex; height: var(--row); }
   .row:hover .lab { background: var(--bg-2); }
   .row:hover .track { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+  /* The label column is fixed-width and must clip, never spill over the bars.
+     `min-width: 0` on the title is what makes that work — without it a flex
+     item refuses to shrink below its own text and overflows its container. */
   .lab { position: sticky; left: 0; z-index: 2; flex: 0 0 var(--lw);
-         display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px;
+         width: var(--lw); max-width: var(--lw); overflow: hidden;
+         display: flex; align-items: center; gap: 6px; padding: 0 10px 0 12px;
          background: var(--bg); border-right: 1px solid var(--line);
          border-bottom: 1px solid var(--line-2); }
   .lab code { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2);
               flex: none; }
-  .lab .t { font-size: 12px; color: var(--ink); white-space: nowrap; overflow: hidden;
-            text-overflow: ellipsis; }
+  .lab .t { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--ink);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lab .m { font-size: 11px; flex: none; }
+  .lane-h > span { max-width: 100vw; overflow: hidden; text-overflow: ellipsis; }
   .track { position: relative; flex: 0 0 auto; height: var(--row);
            border-bottom: 1px solid var(--line-2); }
 
@@ -188,6 +193,10 @@
     <label class="chip" id="blkL"><input type="checkbox" id="blk"> Cross-stream blockers only</label>
     <input type="search" id="q" placeholder="Search task or ID…" aria-label="Search tasks">
     <span class="sep"></span>
+    <span class="zoom" role="group" aria-label="Task name column width">
+      <button data-w="240">Narrow</button><button data-w="360" aria-pressed="true">Names</button>
+      <button data-w="560">Wide</button>
+    </span>
     <span class="zoom" role="group" aria-label="Zoom">
       <button data-z="3">Quarter</button><button data-z="6">Month</button>
       <button data-z="11" aria-pressed="true">Week</button><button data-z="22">Day</button>
@@ -219,13 +228,12 @@ const dT = new Date(META.today + "T00:00:00");
 const dEnd = new Date(META.finish + "T00:00:00");
 const pad = 14 * DAY;
 const span = Math.ceil((dEnd - d0 + pad) / DAY);
-const LW = 300;
 const parse = s => s ? new Date(s + "T00:00:00") : null;
 const idx = d => Math.round((d - d0) / DAY);
 const fmt = d => d.toLocaleDateString(undefined, {weekday:'short', day:'2-digit', month:'short'});
 const byId = Object.fromEntries(TASKS.map(t => [t.id, t]));
 
-let Z = 11, W = span * Z, devs = new Set(["A","B","C","D"]);
+let Z = 11, W = span * Z, LW = 360, devs = new Set(["A","B","C","D"]);
 
 /* ── summary tiles ─────────────────────────────────────────────────────────── */
 const done = TASKS.filter(t => t.st === "done");
@@ -271,8 +279,12 @@ const msSet = [...new Set(TASKS.map(t => t.m))].filter(Boolean).sort();
 document.getElementById("ms").innerHTML += msSet.map(m =>
   `<option value="${m.replace(/"/g,'&quot;')}">${m}</option>`).join("");
 document.querySelectorAll(".zoom button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".zoom button").forEach(x => x.removeAttribute("aria-pressed"));
-  b.setAttribute("aria-pressed","true"); Z = +b.dataset.z; draw();
+  const group = b.dataset.z ? "z" : "w";
+  document.querySelectorAll(`.zoom button[data-${group}]`)
+    .forEach(x => x.removeAttribute("aria-pressed"));
+  b.setAttribute("aria-pressed", "true");
+  if (group === "z") Z = +b.dataset.z; else LW = +b.dataset.w;
+  draw();
 });
 ["status","ms","crit","blk","q"].forEach(id =>
   document.getElementById(id).addEventListener("input", draw));

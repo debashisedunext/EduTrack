@@ -47,20 +47,38 @@ COLUMNS = [
 ]
 
 
+TITLE_MAX = 68
+SEPARATORS = (" — ", " – ", ": ", ". ", " (")
+
+
 def clean_title(text):
-    """Strip markdown emphasis and trailing screen/section refs from a title."""
-    t = text
-    t = re.sub(r"🔴\s*", "", t)
+    """
+    Reduce a backlog line to a label that fits a Gantt row.
+
+    A backlog entry carries the task *and* its rationale — "Flyway baseline 1/5
+    — identity: users, roles, permissions, role_permissions, user_roles,
+    projects, project_members". All of that belongs in the stream file; a chart
+    row needs the name. So cut at the last natural break that still fits, which
+    keeps "Flyway baseline 1/5 — identity" rather than either the bare
+    "Flyway baseline 1/5" or the full column list. The complete text is still on
+    the row's `title` attribute and in the chart tooltip.
+    """
+    t = re.sub(r"🔴\s*", "", text)
     t = re.sub(r"\*\*(S-\d{2})\*\*", "", t)
     t = re.sub(r"\*\*|`|\*", "", t)
     t = re.sub(r"\s+", " ", t).strip()
-    # The first sentence is the task; the rest is rationale that belongs in the
-    # stream file, not in a Gantt row.
-    for stop in [". ", " — ", " – "]:
-        if stop in t and len(t) > 90:
-            t = t.split(stop)[0].strip()
-            break
-    return t[:120].rstrip(" .:—–")
+    if len(t) <= TITLE_MAX:
+        return t.rstrip(" .:—–")
+
+    cuts = sorted({t.find(s) for s in SEPARATORS if 0 < t.find(s)})
+    fitting = [c for c in cuts if c <= TITLE_MAX]
+    if fitting:
+        return t[:max(fitting)].rstrip(" .:—–,(")
+    # No natural break fits — trim on a word boundary so nothing is cut mid-word.
+    head = t[:cuts[0]] if cuts else t
+    if len(head) <= TITLE_MAX:
+        return head.rstrip(" .:—–,(")
+    return head[:TITLE_MAX].rsplit(" ", 1)[0].rstrip(" .:—–,(") + "…"
 
 
 def parse_stream(letter):
