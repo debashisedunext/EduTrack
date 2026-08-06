@@ -13,12 +13,16 @@
 
 ## Sprint 0 — weeks 1–2
 
-- [ ] **A-001** Maven multi-module skeleton: `common`, `domain`, `api`, `worker`. `api` and `worker` both depend on `domain`; neither depends on the other.
-- [ ] **A-002** `docker-compose.yml` — MySQL 8.4, Redis 7, MinIO, Mailpit. `utf8mb4`, `connectionTimeZone=UTC`.
-- [ ] **A-003** Flyway baseline 1/5 — identity: `users`, `roles`, `permissions`, `role_permissions`, `user_roles`, `projects`, `project_members`. *(blueprint §8.2)*
+- [x] **A-001** Maven multi-module skeleton: `common`, `domain`, `api`, `worker`. `api` and `worker` both depend on `domain`; neither depends on the other.
+- [ ] **A-002** `docker-compose.yml` — MySQL 8.4, Redis 7, MinIO, Mailpit. `utf8mb4`, `connectionTimeZone=UTC`. *(written; unverified — needs one `docker compose up`)*
+- [ ] **A-003** Flyway baseline 1/5 — identity: `users`, `roles`, `permissions`, `role_permissions`, `user_roles`, `projects`, `project_members`. *(blueprint §8.2)* — *DDL written in `V20260805_1024__baseline_identity.sql`; unverified until Flyway runs it*
 - [ ] **A-004** Flyway baseline 2/5 — tickets: `tickets`, `ticket_cycles`, `ticket_history`, `ticket_effort_logs`, `ticket_watchers`, `ticket_links`.
 - [ ] **A-005** Flyway baseline 3/5 — workflow: `workflow_templates`, `workflow_stages`, `ticket_stage_transitions`. *(§4A.5 — note `can_return_to` becomes `JSON`)*
-- [ ] **A-006** Flyway baseline 4/5 — clients & content: `clients`, `client_contacts`, `client_projects`, `ticket_comments`, `ticket_attachments`, `email_log`, `import_batches`. *(§4B.7)*
+- [ ] **A-006** Flyway baseline 4/5 — clients & content: `clients`, `client_contacts`, `client_projects`, `ticket_comments`, `ticket_attachments`, `email_log`, `import_batches`. *(§4B.7)* — *DDL written in `V20260805_1530__baseline_clients_content.sql`; unverified until Flyway runs it*
+
+  > **Runs fifth, not fourth.** `clients.sla_policy_id` and `email_log.template_id` reference `sla_policies` and `notification_templates`, both created by A-007 (`V20260805_1106`). The timestamp is therefore later than A-007's, which is what Flyway orders on — the task number is not the run order.
+  > **`email_log` carries a `next_attempt_at` column that blueprint §4B.7 does not.** PLAN.md §2.2 makes this table the outbox queue in place of BullMQ, and backoff needs somewhere to live. Without it D-010 has a log, not a queue.
+  > **No immutability trigger on `ticket_comments`, deliberately.** The 5-minute edit window (C-033) and the tombstone flag both need `UPDATE`. `original_body` preserves the pre-edit text and the service layer enforces the rest. The trigger-protected set stays exactly `ticket_history`, `ticket_effort_logs`, `ticket_stage_transitions`.
 - [ ] **A-007** Flyway baseline 5/5 — masters & ops: `task_types`, `priorities`, `statuses`, `workflow_transitions`, `holidays`, `resource_leaves`, `notification_templates`, `notifications`, `chat_threads`, `chat_participants`, `chat_messages`, `audit_logs`.
 - [ ] **A-008** Immutability triggers — two per table (MySQL needs separate UPDATE and DELETE triggers) on `ticket_history` and `ticket_effort_logs`; the seal-only trigger on `ticket_stage_transitions`. *(PLAN.md §3.5, §3.6)*
   > **Verified working on MySQL 8.4** — a `BEFORE UPDATE`/`BEFORE DELETE` trigger raising `SIGNAL SQLSTATE '45000'` rejects both, and the row survives intact.
