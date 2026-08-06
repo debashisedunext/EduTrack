@@ -115,10 +115,22 @@ jobs:
 
   # ---------------------------------------------------------------- contract
   contract:
-    name: OpenAPI contract — staleness check
+    name: OpenAPI contract — conventions & staleness
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate the OpenAPI document
+        run: npx --yes @redocly/cli@latest lint contracts/openapi.yaml
+      - name: Enforce the API conventions
+        run: |
+          # Redocly checks it is valid OpenAPI. This checks it is *our* OpenAPI —
+          # the envelope, problem+json, idempotency, ETag/If-Match, cursor
+          # pagination, 404-not-403, and no mutation verb on append-only paths.
+          pip install --quiet pyyaml
+          python3 contracts/check-conventions.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

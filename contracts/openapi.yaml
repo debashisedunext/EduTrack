@@ -30,6 +30,9 @@ info:
     - **Pagination** — `?cursor=&limit=`, never offset. Offset paging over a table
       that is being written to skips and repeats rows.
 
+    `contracts/CONVENTIONS.md` is the normative version (D-002), including the
+    endpoints that deliberately opt out of `If-Match` or pagination and why.
+
     ## Two rules the API shape itself enforces
 
     **Row scoping returns 404, not 403.** Out-of-scope IDs are indistinguishable
@@ -383,6 +386,8 @@ paths:
       summary: Direct and indirect reportees
       parameters:
         - { name: depth, in: query, schema: { type: integer, minimum: 1, maximum: 10, default: 1 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
       responses:
         '200':
           description: OK.
@@ -437,6 +442,8 @@ paths:
         is the prefix of every ticket ID already issued, and changing it would
         orphan every reference in mail, chat and history. Attempting it returns
         `409`.
+      parameters:
+        - { $ref: '#/components/parameters/IfMatch' }
       requestBody:
         required: true
         content:
@@ -450,6 +457,7 @@ paths:
               schema: { $ref: '#/components/schemas/ProjectResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
 
   /projects/{projectId}/members:
     parameters: [{ $ref: '#/components/parameters/ProjectId' }]
@@ -516,6 +524,8 @@ paths:
 
         **Changing a policy never retrospectively moves an existing ticket's
         planned close date.** Tickets carry the policy they were created under.
+      parameters:
+        - { $ref: '#/components/parameters/IfMatch' }
       requestBody:
         required: true
         content:
@@ -530,6 +540,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SlaPolicyListResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
 
   # ────────────────────────────────────────────────────────── tickets ────────
   /tickets:
@@ -815,6 +826,8 @@ paths:
         - { name: cycle, in: query, schema: { type: integer, minimum: 1 } }
         - { name: stage, in: query, schema: { type: string } }
         - { name: iteration, in: query, schema: { type: integer, minimum: 1 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
       responses:
         '200':
           description: OK.
@@ -946,6 +959,9 @@ paths:
         Proves what was sent and what bounced. **Nobody should assume a mail
         arrived that never did**, which is why delivery status is visible in the
         product rather than buried in a provider dashboard.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
       responses:
         '200':
           description: OK.
@@ -1353,6 +1369,8 @@ paths:
       tags: [clients]
       operationId: updateClient
       summary: Update a client
+      parameters:
+        - { $ref: '#/components/parameters/IfMatch' }
       requestBody:
         required: true
         content:
@@ -1366,6 +1384,7 @@ paths:
               schema: { $ref: '#/components/schemas/ClientResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
 
   /clients/{clientId}/status:
     parameters: [{ $ref: '#/components/parameters/ClientId' }]
@@ -1563,12 +1582,19 @@ paths:
         Reason column, so the user fixes and re-uploads those rows rather than the
         whole file. Every import is identified, which makes a bad one reversible
         as a set.
+
+        Polled while a job runs, so it returns an `ETag` — a client checking every
+        two seconds should transfer a body only when something actually changed.
+      parameters: [{ $ref: '#/components/parameters/IfNoneMatch' }]
       responses:
         '200':
           description: OK.
+          headers:
+            ETag: { schema: { type: string } }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ImportBatchResponse' }
+        '304': { description: Not modified. }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ───────────────────────────────────────────────────────── masters ─────────
@@ -1700,16 +1726,23 @@ paths:
         Every series point carries a `drillDown` query string. **Every card and
         chart segment deep-links to a pre-filtered list** — a number nobody can
         click is a number nobody trusts.
+
+        Returns an `ETag`. The summary tables refresh every five minutes, so a
+        dashboard polling faster than that gets `304` and costs nothing.
       parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
         - { name: projectId, in: query, schema: { type: integer, format: int64 } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
       responses:
         '200':
           description: OK.
+          headers:
+            ETag: { schema: { type: string } }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/WidgetResponse' }
+        '304': { description: Not modified. }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /reports/{reportKey}:
@@ -1722,7 +1755,11 @@ paths:
       description: |
         Eighteen reports share one parameterised runner. `?export=` streams the
         file instead of returning JSON.
+
+        Returns an `ETag`. Reports are expensive to compute and are re-run every
+        time somebody changes a filter and changes it back.
       parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
         - { name: export, in: query, schema: { type: string, enum: [xlsx, csv, pdf] } }
         - { name: projectId, in: query, schema: { type: integer, format: int64 } }
         - { name: clientId, in: query, schema: { type: integer, format: int64 } }
@@ -1731,11 +1768,14 @@ paths:
       responses:
         '200':
           description: Rows and columns, or the exported file.
+          headers:
+            ETag: { schema: { type: string } }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReportResponse' }
             application/octet-stream:
               schema: { type: string, format: binary }
+        '304': { description: Not modified. }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /reports/schedule:
