@@ -13,7 +13,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 12 of 222 (5%) | 13.0 of 342.0 (4%) |
-| In flight | 4 | 8.5 |
+| In flight | 5 | 9.5 |
 | On the driving chain | 61 | 94.5 |
 | Zero float (no slack at all) | 130 | 202.0 |
 
@@ -376,9 +376,9 @@ gantt
 |---|---|---|---:|---|---|---|---:|---|
 | 🔴 | `D-001` | OpenAPI contract for every endpoint in blueprint §13 | 3 | — | Thu 06 Aug | Thu 06 Aug | 0 | 🔵 in review |
 |  | `D-002` | Conventions baked into the spec | 1 | `D-001` | Thu 06 Aug | Thu 06 Aug | 0 | 🟡 50% |
-|  | `D-003` | springdoc config + codegen pipeline | 2 | `D-002` | Fri 07 Aug | Mon 10 Aug | 4 | 🟡 50% |
-| 🔴 | `D-004` | MSW mock server returning realistic fixtures for every endpoint | 2.5 | `D-002` | Fri 07 Aug | Fri 07 Aug | 0 | 🔵 in review |
-|  | `D-005` | CI staleness check | 1 | `D-003` | Mon 10 Aug | Tue 11 Aug | 5 | ▫️ to do |
+|  | `D-003` | springdoc config + codegen pipeline | 2 | `D-002` | Mon 10 Aug | Mon 10 Aug | 5 | 🟡 50% |
+| 🔴 | `D-004` | MSW mock server returning realistic fixtures for every endpoint | 2.5 | `D-002` | Fri 07 Aug | Fri 07 Aug | 0 | 🟡 50% |
+|  | `D-005` | CI staleness check | 1 | `D-003` | Tue 11 Aug | Tue 11 Aug | 5 | 🔵 in review |
 | 🔴 | `D-010` | Outbox worker pattern | 2.5 | `A-006` `A-012` | Tue 11 Aug | Thu 13 Aug | 6 | ▫️ to do |
 |  | `D-011` | @Scheduled + ShedLock | 1 | `D-010` ᶦ | Fri 14 Aug | Fri 14 Aug | 6 | ▫️ to do |
 |  | `D-012` | Spring WebSocket + STOMP config, Redis pub/sub relay for… | 2 | `A-012` ᶦ | Thu 20 Aug | Fri 21 Aug | 6 | ▫️ to do |
