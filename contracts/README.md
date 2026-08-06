@@ -25,15 +25,49 @@ When the generated spec and this one disagree after D-003, that disagreement is 
 bug in one of them — not something to reconcile by editing whichever is more
 convenient.
 
-## Checking it
+## Checking it — the D-005 gate
+
+Four checks, in CI on every pull request. Each was verified to actually fail by
+breaking it on purpose, because a green check that cannot go red is decoration.
+
+| Check | Catches | Where |
+|---|---|---|
+| `redocly lint` | Invalid OpenAPI | contract job |
+| `check-conventions.py` | Valid OpenAPI that is not *ours* — envelope, problem+json, idempotency, ETag/If-Match, cursor, 404-not-403, append-only | contract job |
+| Regenerate + `git status` | The committed TypeScript client drifting from the spec | contract job |
+| `tsc --noEmit` after regenerating | A spec change that generates a client which does not compile | contract job |
+| `ContractConformanceTest` | The **backend** serving anything the contract does not describe | backend job |
 
 ```bash
 npx @redocly/cli lint contracts/openapi.yaml
-npx openapi-typescript contracts/openapi.yaml -o /tmp/t.d.ts   # must compile strict
+python3 contracts/check-conventions.py
+cd frontend && npm run api:generate && git status --porcelain src/api/generated
+cd backend  && ./mvnw test -DskipFrontend        # includes the conformance test
 ```
 
 Currently: **valid, 1 warning** — the `localhost` dev server entry, which is
 deliberate and useful.
+
+### Two kinds of drift, only one is a failure
+
+**Serving an endpoint the contract does not describe fails the build.** It has
+no agreed error shape, no generated client, no permission-matrix entry and no
+scoping decision — and the frontend cannot call it anyway, because the client is
+generated from the contract.
+
+**Not having implemented a contract endpoint yet does not.** Seventy-nine
+operations arrive over four months; failing for the ones not written yet would
+mean the check is red until December, and a check that is always red is a check
+nobody reads. It is reported as coverage instead, per area:
+
+```
+Contract coverage — 0 of 79 operations implemented (0%)
+  auth                    0 /  5
+  tickets                 0 / 28
+  …
+```
+
+That turns the contract into a progress meter rather than a nag.
 
 ## What the shape itself enforces
 
