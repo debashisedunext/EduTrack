@@ -1,0 +1,423 @@
+<title>EduTrack — Master Schedule</title>
+<style>
+  :root {
+    --ink: #0B1220; --ink-2: #475069; --ink-3: #7C859C;
+    --bg: #FFFFFF; --bg-2: #F7F8FB; --bg-3: #EEF0F6;
+    --line: #DFE3ED; --line-2: #ECEFF6;
+    --accent: #4F46E5;
+    --weekend: #F3F5FA; --today: #DC2626;
+    --good: #15803D; --warn: #B45309; --crit: #B91C1C;
+    --sA: #4F46E5; --sB: #F59E0B; --sC: #BE185D; --sD: #06B6D4;
+    --shadow: 0 1px 2px rgba(11,18,32,.06), 0 8px 24px rgba(11,18,32,.06);
+    --row: 26px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #EEF1F8; --ink-2: #A6AEC4; --ink-3: #78819A;
+      --bg: #0C1017; --bg-2: #131824; --bg-3: #1B2130;
+      --line: #262D3D; --line-2: #1C2231;
+      --accent: #8B84F8;
+      --weekend: #10151F; --today: #F87171;
+      --good: #4ADE80; --warn: #FBBF24; --crit: #F87171;
+      --sA: #8B84F8; --sB: #FBBF24; --sC: #F472B6; --sD: #38BDF8;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --ink: #0B1220; --ink-2: #475069; --ink-3: #7C859C;
+    --bg: #FFFFFF; --bg-2: #F7F8FB; --bg-3: #EEF0F6;
+    --line: #DFE3ED; --line-2: #ECEFF6; --accent: #4F46E5;
+    --weekend: #F3F5FA; --today: #DC2626;
+    --good: #15803D; --warn: #B45309; --crit: #B91C1C;
+    --sA: #4F46E5; --sB: #F59E0B; --sC: #BE185D; --sD: #06B6D4;
+  }
+  :root[data-theme="dark"] {
+    --ink: #EEF1F8; --ink-2: #A6AEC4; --ink-3: #78819A;
+    --bg: #0C1017; --bg-2: #131824; --bg-3: #1B2130;
+    --line: #262D3D; --line-2: #1C2231; --accent: #8B84F8;
+    --weekend: #10151F; --today: #F87171;
+    --good: #4ADE80; --warn: #FBBF24; --crit: #F87171;
+    --sA: #8B84F8; --sB: #FBBF24; --sC: #F472B6; --sD: #38BDF8;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+    font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1600px; margin: 0 auto; padding: 28px 20px 64px; }
+
+  header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 4px; }
+  h1 { font-size: 21px; font-weight: 650; letter-spacing: -.015em; margin: 0; }
+  .sub { color: var(--ink-2); font-size: 13px; }
+  .sub b { color: var(--ink); font-weight: 600; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+           gap: 10px; margin: 18px 0 16px; }
+  .tile { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; }
+  .tile .k { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
+  .tile .v { font-size: 21px; font-weight: 640; letter-spacing: -.02em; margin-top: 3px; }
+  .tile .n { font-size: 11.5px; color: var(--ink-2); margin-top: 1px; }
+
+  .bar { height: 5px; border-radius: 999px; background: var(--bg-3); overflow: hidden; margin-top: 7px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+              padding: 10px; background: var(--bg-2); border: 1px solid var(--line);
+              border-radius: 10px; margin-bottom: 12px; }
+  .chip { border: 1px solid var(--line); background: var(--bg); color: var(--ink-2);
+          border-radius: 999px; padding: 4px 11px; font-size: 12.5px; cursor: pointer;
+          display: inline-flex; align-items: center; gap: 6px; }
+  .chip .dot { width: 8px; height: 8px; border-radius: 999px; }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .chip:focus-visible, select:focus-visible, input:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; }
+  select, input[type="search"] {
+    font: inherit; font-size: 12.5px; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; }
+  input[type="search"] { min-width: 190px; }
+  .sep { flex: 1 1 auto; }
+  .zoom { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .zoom button { font: inherit; font-size: 12.5px; border: 0; background: var(--bg);
+                 color: var(--ink-2); padding: 4px 10px; cursor: pointer; }
+  .zoom button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+
+  .chart { position: relative; border: 1px solid var(--line); border-radius: 10px;
+           overflow: auto; max-height: 78vh; background: var(--bg); }
+  .grid { position: relative; }
+
+  .ruler { position: sticky; top: 0; z-index: 6; display: flex; height: 42px;
+           background: var(--bg); border-bottom: 1px solid var(--line); }
+  .ruler .pad { position: sticky; left: 0; z-index: 7; flex: 0 0 var(--lw); height: 41px;
+                background: var(--bg); border-right: 1px solid var(--line); }
+  .ruler .rtrack { position: relative; flex: 0 0 auto; height: 41px; }
+  .mon { position: absolute; top: 0; height: 21px; font-size: 11px; font-weight: 600;
+         color: var(--ink-2); padding-left: 6px; border-left: 1px solid var(--line);
+         white-space: nowrap; }
+  .wk  { position: absolute; top: 22px; height: 19px; font-size: 10px; color: var(--ink-3);
+         padding-left: 4px; border-left: 1px solid var(--line-2); white-space: nowrap; }
+
+  .layer { position: absolute; left: var(--lw); top: 42px; pointer-events: none; }
+  .layer.back { z-index: 0; }
+  .layer.front { z-index: 3; }
+  .rows { position: relative; z-index: 1; }
+
+  .lane-h { position: relative; height: 31px; background: var(--bg-3);
+            border-block: 1px solid var(--line); }
+  .lane-h > span { position: sticky; left: 0; display: inline-flex; align-items: center;
+                   gap: 8px; height: 31px; padding: 0 12px; font-size: 12px;
+                   font-weight: 650; white-space: nowrap; }
+  .lane-h .dot { width: 9px; height: 9px; border-radius: 999px; flex: none; }
+  .lane-h .meta { font-weight: 500; color: var(--ink-2); }
+
+  .row { display: flex; height: var(--row); }
+  .row:hover .lab { background: var(--bg-2); }
+  .row:hover .track { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+  .lab { position: sticky; left: 0; z-index: 2; flex: 0 0 var(--lw);
+         display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px;
+         background: var(--bg); border-right: 1px solid var(--line);
+         border-bottom: 1px solid var(--line-2); }
+  .lab code { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2);
+              flex: none; }
+  .lab .t { font-size: 12px; color: var(--ink); white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; }
+  .lab .m { font-size: 11px; flex: none; }
+  .track { position: relative; flex: 0 0 auto; height: var(--row);
+           border-bottom: 1px solid var(--line-2); }
+
+  .base { position: absolute; height: 4px; top: 3px; border-radius: 2px;
+          background: var(--line); }
+  .b { position: absolute; height: 12px; top: 8px; border-radius: 4px; cursor: pointer;
+       min-width: 4px; overflow: visible; }
+  .b .fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; opacity: .95; }
+  .b.done { opacity: .55; }
+  .b.crit { box-shadow: 0 0 0 1.5px var(--crit); }
+  .b .tag { position: absolute; left: calc(100% + 6px); top: -1px; font-size: 10.5px;
+            color: var(--ink-3); white-space: nowrap; pointer-events: none; }
+
+  .zebra { position: absolute; top: 0; bottom: 0; background: var(--weekend); }
+  .tline { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--today); }
+  .tline > b { position: absolute; top: 2px; left: 4px; font-size: 10px; font-weight: 700;
+               color: var(--today); background: var(--bg); padding: 0 3px; border-radius: 3px; }
+
+  .tip { position: fixed; z-index: 40; max-width: 380px; pointer-events: none; opacity: 0;
+         transition: opacity .1s; background: var(--bg); color: var(--ink);
+         border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+         padding: 11px 13px; font-size: 12.5px; }
+  .tip h4 { margin: 0 0 5px; font-size: 13px; font-weight: 650; }
+  .tip code { font: 600 11.5px ui-monospace, Menlo, monospace; color: var(--accent); }
+  .tip dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 7px 0 0; }
+  .tip dt { color: var(--ink-3); font-size: 11.5px; }
+  .tip dd { margin: 0; }
+  .tip .warn { color: var(--crit); font-weight: 600; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px;
+            font-size: 12px; color: var(--ink-2); align-items: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 22px; height: 8px; border-radius: 3px; background: var(--accent); }
+  .swatch.base { height: 4px; background: var(--line); }
+  .swatch.crit { box-shadow: 0 0 0 1.5px var(--crit); }
+
+  footer { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line);
+           font-size: 12px; color: var(--ink-3); }
+  footer code { font-size: 11.5px; }
+  .empty { padding: 30px; text-align: center; color: var(--ink-3); font-size: 13px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>EduTrack — Master Schedule</h1>
+    <div class="sub" id="head"></div>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="controls">
+    <span id="devs" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span>
+    <select id="status" aria-label="Filter by status">
+      <option value="">All statuses</option>
+      <option value="todo">To do</option>
+      <option value="in-progress">In progress</option>
+      <option value="in-review">In review</option>
+      <option value="done">Done</option>
+    </select>
+    <select id="ms" aria-label="Filter by milestone"><option value="">All milestones</option></select>
+    <label class="chip" id="critL"><input type="checkbox" id="crit"> Critical path only</label>
+    <label class="chip" id="blkL"><input type="checkbox" id="blk"> Cross-stream blockers only</label>
+    <input type="search" id="q" placeholder="Search task or ID…" aria-label="Search tasks">
+    <span class="sep"></span>
+    <span class="zoom" role="group" aria-label="Zoom">
+      <button data-z="3">Quarter</button><button data-z="6">Month</button>
+      <button data-z="11" aria-pressed="true">Week</button><button data-z="22">Day</button>
+    </span>
+  </div>
+
+  <div class="chart" id="chart"><div class="grid" id="grid"></div></div>
+
+  <div class="legend">
+    <span><i class="swatch"></i> forecast</span>
+    <span><i class="swatch base"></i> baseline</span>
+    <span><i class="swatch crit"></i> critical path — zero float</span>
+    <span>🔴 another developer is waiting</span>
+    <span>ᶦ inferred dependency, not yet confirmed by its owner</span>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+const TASKS = /*__TASKS__*/;
+const META  = /*__META__*/;
+
+const DAY = 864e5;
+const d0 = new Date(META.start + "T00:00:00");
+const dT = new Date(META.today + "T00:00:00");
+const dEnd = new Date(META.finish + "T00:00:00");
+const pad = 14 * DAY;
+const span = Math.ceil((dEnd - d0 + pad) / DAY);
+const LW = 300;
+const parse = s => s ? new Date(s + "T00:00:00") : null;
+const idx = d => Math.round((d - d0) / DAY);
+const fmt = d => d.toLocaleDateString(undefined, {weekday:'short', day:'2-digit', month:'short'});
+const byId = Object.fromEntries(TASKS.map(t => [t.id, t]));
+
+let Z = 11, devs = new Set(["A","B","C","D"]);
+
+/* ── summary tiles ─────────────────────────────────────────────────────────── */
+const done = TASKS.filter(t => t.st === "done");
+const effAll = TASKS.reduce((a,t) => a + t.e, 0);
+const effDone = done.reduce((a,t) => a + t.e, 0);
+const crit = TASKS.filter(t => t.cr);
+const slipped = TASKS.filter(t => t.be && t.fe > t.be);
+const wdays = (a,b) => { let n=0, d=new Date(a); while (d<=b) { const w=d.getDay();
+  if (w>0 && w<6 && !META.holidays.includes(d.toISOString().slice(0,10))) n++;
+  d=new Date(+d+DAY);} return n; };
+
+document.getElementById("head").innerHTML =
+  `generated <b>${fmt(dT)}</b> · day <b>${wdays(d0,dT)}</b> · finish forecast <b>${fmt(dEnd)}</b>`;
+
+const tiles = [
+  {k:"Tasks complete", v:`${done.length} / ${TASKS.length}`,
+   n:`${(100*done.length/TASKS.length).toFixed(0)}% of the backlog`, p:100*done.length/TASKS.length},
+  {k:"Effort complete", v:`${effDone.toFixed(1)}d`,
+   n:`of ${effAll.toFixed(0)} developer-days`, p:100*effDone/effAll},
+  {k:"On critical path", v:String(crit.length),
+   n:`${crit.reduce((a,t)=>a+t.e,0).toFixed(0)}d — slipping any of these moves go-live`},
+  {k:"Behind baseline", v:String(slipped.length),
+   n: slipped.length ? `worst +${Math.max(...slipped.map(t=>wdays(parse(t.be),parse(t.fe))-1))}d`
+                     : "everything on plan"},
+];
+document.getElementById("tiles").innerHTML = tiles.map(t => `
+  <div class="tile"><div class="k">${t.k}</div><div class="v">${t.v}</div>
+  <div class="n">${t.n}</div>
+  ${t.p!=null ? `<div class="bar"><i style="width:${t.p.toFixed(1)}%"></i></div>` : ""}</div>`).join("");
+
+/* ── filters ───────────────────────────────────────────────────────────────── */
+document.getElementById("devs").innerHTML = ["A","B","C","D"].map(s => {
+  const m = META.streams[s], n = TASKS.filter(t=>t.s===s).length;
+  return `<button class="chip" data-s="${s}" aria-pressed="true">
+    <i class="dot" style="background:var(--s${s})"></i>${m.owner}
+    <span style="opacity:.6">${n}</span></button>`;
+}).join("");
+document.querySelectorAll("[data-s]").forEach(b => b.onclick = () => {
+  const s = b.dataset.s, on = b.getAttribute("aria-pressed") === "true";
+  b.setAttribute("aria-pressed", String(!on)); on ? devs.delete(s) : devs.add(s); draw();
+});
+const msSet = [...new Set(TASKS.map(t => t.m))].filter(Boolean).sort();
+document.getElementById("ms").innerHTML += msSet.map(m =>
+  `<option value="${m.replace(/"/g,'&quot;')}">${m}</option>`).join("");
+document.querySelectorAll(".zoom button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".zoom button").forEach(x => x.removeAttribute("aria-pressed"));
+  b.setAttribute("aria-pressed","true"); Z = +b.dataset.z; draw();
+});
+["status","ms","crit","blk","q"].forEach(id =>
+  document.getElementById(id).addEventListener("input", draw));
+
+/* ── chart ─────────────────────────────────────────────────────────────────── */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const grid = document.getElementById("grid");
+
+function draw() {
+  const st = document.getElementById("status").value;
+  const ms = document.getElementById("ms").value;
+  const oc = document.getElementById("crit").checked;
+  const ob = document.getElementById("blk").checked;
+  const q  = document.getElementById("q").value.trim().toLowerCase();
+
+  const keep = TASKS.filter(t =>
+    devs.has(t.s) && (!st || t.st === st) && (!ms || t.m === ms) &&
+    (!oc || t.cr) && (!ob || t.bl) &&
+    (!q || t.id.toLowerCase().includes(q) || t.t.toLowerCase().includes(q)));
+
+  const W = span * Z;
+  grid.style.setProperty("--lw", LW + "px");
+  grid.style.width = (LW + W) + "px";
+
+  /* ruler */
+  let ticks = "";
+  let d = new Date(d0), lastM = -1;
+  while (idx(d) < span) {
+    const x = idx(d) * Z;
+    if (d.getMonth() !== lastM) {
+      lastM = d.getMonth();
+      ticks += `<div class="mon" style="left:${x}px">${d.toLocaleDateString(undefined,{month:"long"})}
+            <span style="opacity:.55">'${String(d.getFullYear()).slice(2)}</span></div>`;
+    }
+    if (Z >= 6 || d.getDate() === 1)
+      ticks += `<div class="wk" style="left:${x}px">${Z >= 16 ? d.getDate() : "w" + (Math.floor(idx(d)/7)+1)}</div>`;
+    d = new Date(+d + (Z >= 16 ? DAY : 7 * DAY));
+    if (Z < 16) d.setDate(d.getDate() - d.getDay() + 1);
+  }
+  const ruler = `<div class="ruler"><div class="pad"></div>
+    <div class="rtrack" style="width:${W}px">${ticks}</div></div>`;
+
+  /* lanes */
+  let body = "", rowsH = 0;
+  for (const s of ["A","B","C","D"]) {
+    if (!devs.has(s)) continue;
+    const ts = keep.filter(t => t.s === s)
+      .sort((a,b) => (a.fs < b.fs ? -1 : a.fs > b.fs ? 1 : a.id < b.id ? -1 : 1));
+    if (!ts.length) continue;
+    const m = META.streams[s], dn = ts.filter(t => t.st === "done").length;
+    const eff = ts.reduce((a,t) => a + t.e, 0);
+    const last = ts.reduce((a,t) => t.fe > a ? t.fe : a, "");
+    body += `<div class="lane-h" style="width:${LW+W}px"><span>
+      <i class="dot" style="background:var(--s${s})"></i>
+      Stream ${s} · ${esc(m.title)} — ${esc(m.owner)}
+      <span class="meta">${ts.length} tasks · ${dn} done · ${eff.toFixed(1)}d effort
+      · finishes ${fmt(parse(last))}</span></span></div>`;
+    rowsH += 33;
+    for (const t of ts) body += row(t);
+    rowsH += ts.length * 26;
+  }
+  if (!body) { body = `<div class="empty">No tasks match these filters.</div>`; rowsH = 90; }
+
+  /* weekend + holiday shading behind the rows, today line in front of them */
+  let z = "";
+  for (let i = 0; i < span; i++) {
+    const dd = new Date(+d0 + i * DAY), w = dd.getDay();
+    if (w === 0 || w === 6 || META.holidays.includes(dd.toISOString().slice(0,10)))
+      z += `<div class="zebra" style="left:${i*Z}px;width:${Z}px"></div>`;
+  }
+
+  grid.innerHTML = ruler
+    + `<div class="layer back" style="width:${W}px;height:${rowsH}px">${z}</div>`
+    + `<div class="rows">${body}</div>`
+    + `<div class="layer front" style="width:${W}px;height:${rowsH}px">
+         <div class="tline" style="left:${idx(dT)*Z}px"><b>today</b></div></div>`;
+  bindTips();
+}
+
+function row(t) {
+  const fs = parse(t.fs), fe = parse(t.fe);
+  const x = idx(fs) * Z, w = Math.max(3, (idx(fe) - idx(fs) + 1) * Z);
+  let base = "";
+  if (t.bs && (t.bs !== t.fs || t.be !== t.fe)) {
+    const bx = idx(parse(t.bs)) * Z, bw = Math.max(3, (idx(parse(t.be)) - idx(parse(t.bs)) + 1) * Z);
+    base = `<div class="base" style="left:${bx}px;width:${bw}px"></div>`;
+  }
+  const col = `var(--s${t.s})`;
+  const late = t.be && t.fe > t.be;
+  const mark = t.st === "done" ? "✓" : (t.cr ? "▲" : "");
+  const tag = (Z >= 11 && (mark || late))
+    ? `<span class="tag">${mark}${late ? " late" : ""}</span>` : "";
+  return `<div class="row">
+    <div class="lab">
+      <code>${t.id}</code>${t.bl ? '<span class="m">🔴</span>' : ""}
+      <span class="t" title="${esc(t.t)}">${esc(t.t)}</span></div>
+    <div class="track" style="width:${W}px">
+      ${base}
+      <div class="b ${t.st === "done" ? "done" : ""} ${t.cr ? "crit" : ""}"
+           data-id="${t.id}" tabindex="0" role="button"
+           aria-label="${esc(t.id + " " + t.t)}"
+           style="left:${x}px;width:${w}px;background:color-mix(in srgb, ${col} 20%, transparent)">
+        <i class="fill" style="width:${t.pct}%;background:${col}"></i>${tag}</div>
+    </div></div>`;
+}
+
+/* ── tooltip ───────────────────────────────────────────────────────────────── */
+const tip = document.getElementById("tip");
+function bindTips() {
+  grid.querySelectorAll(".b").forEach(el => {
+    const show = e => {
+      const t = byId[el.dataset.id];
+      const late = t.be && t.fe > t.be;
+      const preds = t.p.map(p => byId[p]
+        ? `<code>${p}</code> ${byId[p].st === "done" ? "✓" : "· " + byId[p].o}` : p).join("<br>");
+      tip.innerHTML = `<h4><code>${t.id}</code> ${esc(t.t)}</h4>
+        <div style="color:var(--ink-2)">${esc(t.o)} · ${esc(t.m)}${t.ref ? " · blueprint " + t.ref : ""}${t.scr ? " · " + t.scr : ""}</div>
+        <dl>
+          <dt>Status</dt><dd>${t.st}${t.pct && t.st!=="done" ? " · " + t.pct + "%" : ""}</dd>
+          <dt>Estimate</dt><dd>${t.e} day${t.e === 1 ? "" : "s"}</dd>
+          <dt>Forecast</dt><dd>${fmt(parse(t.fs))} → ${fmt(parse(t.fe))}</dd>
+          ${t.bs ? `<dt>Baseline</dt><dd>${fmt(parse(t.bs))} → ${fmt(parse(t.be))}
+            ${late ? `<span class="warn">· slipped</span>` : ""}</dd>` : ""}
+          <dt>Float</dt><dd>${t.cr ? `<span class="warn">0 — critical path</span>` : t.fl + " working days"}</dd>
+          ${t.p.length ? `<dt>After</dt><dd>${preds}${t.pc === "inferred" ? ' <span style="color:var(--ink-3)">ᶦ inferred</span>' : ""}</dd>` : ""}
+          ${t.ev ? `<dt>Evidence</dt><dd style="color:var(--ink-2)">${esc(t.ev)}</dd>` : ""}
+        </dl>${t.bl ? `<div style="margin-top:7px" class="warn">🔴 Another stream is waiting on this.</div>` : ""}`;
+      tip.style.opacity = 1;
+      const r = el.getBoundingClientRect(), tr = tip.getBoundingClientRect();
+      tip.style.left = Math.min(r.left, innerWidth - tr.width - 12) + "px";
+      tip.style.top = (r.bottom + tr.height + 12 > innerHeight ? r.top - tr.height - 8 : r.bottom + 8) + "px";
+    };
+    el.addEventListener("mouseenter", show);
+    el.addEventListener("focus", show);
+    el.addEventListener("mouseleave", () => tip.style.opacity = 0);
+    el.addEventListener("blur", () => tip.style.opacity = 0);
+  });
+}
+
+draw();
+document.getElementById("chart").scrollLeft = Math.max(0, idx(dT) * Z - 240);
+document.getElementById("foot").innerHTML =
+  `Generated by <code>tools/plan/schedule.py</code> at 09:00 each working day. Status is derived
+   from git — merged to <code>develop</code> = done, open PR = in review, pushed branch = in
+   progress. Estimates and dependencies live in <code>docs/plan/tasks.csv</code>; a status git
+   cannot see goes in <code>docs/plan/overrides.json</code> with a reason.
+   Baseline dates are frozen at milestone boundaries and never regenerated, so slip stays visible.`;
+</script>
