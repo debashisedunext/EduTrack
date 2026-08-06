@@ -1,0 +1,3155 @@
+openapi: 3.1.0
+
+info:
+  title: EduTrack API
+  version: 1.0.0-draft
+  summary: Organisation task and client ticketing platform.
+  description: |
+    The agreed contract between all four streams. Every endpoint in blueprint §13.
+
+    **This file is hand-authored and under review (D-001).** It is the design
+    contract, not yet the generated one. From D-003 onwards `springdoc` emits the
+    real spec from the Java DTOs — Bean Validation annotations are the single
+    source of truth for validation rules — and D-005's CI check fails the build
+    when the committed TypeScript client drifts from it. Until then this file is
+    what the frontend generates against and what the backend must implement.
+
+    ## Conventions that apply to every operation
+
+    - **Prefix** — every path is served under `/api/v1`.
+    - **Envelope** — success responses are `{ data, meta? }`. Errors are
+      `{ error }` carrying an RFC 9457 problem object. Nothing returns a bare
+      array or a bare scalar; adding a field later must never be a breaking change.
+    - **Errors** — `application/problem+json`, RFC 9457. `type` is a stable URI
+      the frontend may switch on; `detail` is for humans and may change.
+    - **Idempotency** — every POST that creates something accepts
+      `Idempotency-Key`. Replaying a key within 24 h returns the original response
+      rather than creating a second row.
+    - **ETag** — detail reads return `ETag`; send `If-None-Match` to get `304`,
+      and `If-Match` on the corresponding `PATCH` to avoid a lost update.
+    - **Pagination** — `?cursor=&limit=`, never offset. Offset paging over a table
+      that is being written to skips and repeats rows.
+
+    `contracts/CONVENTIONS.md` is the normative version (D-002), including the
+    endpoints that deliberately opt out of `If-Match` or pagination and why.
+
+    ## Two rules the API shape itself enforces
+
+    **Row scoping returns 404, not 403.** Out-of-scope IDs are indistinguishable
+    from non-existent ones. A `403` on `/tickets/{id}` would confirm the ticket
+    exists, which is an existence leak. Scoping is applied server-side by
+    `ScopeResolver` on every ticket query — never by a frontend filter.
+
+    **History and effort logs are append-only.** `GET` and `POST` exist;
+    `PUT`, `PATCH` and `DELETE` deliberately do not, on `/history`,
+    `/effort-logs`, and stage transitions. This is not an oversight to be fixed
+    later — the routes must never be added. A correction is a new compensating
+    entry (`isCorrection`, `correctsEntryId`), like an accounting reversal, and
+    the database rejects mutation independently via triggers and grants.
+
+  contact:
+    name: Stream D — Engines & Realtime
+  license:
+    name: Proprietary
+    identifier: LicenseRef-EduNext-Proprietary
+
+servers:
+  - url: /api/v1
+    description: Same origin as the SPA — the app ships as a single jar.
+  - url: http://localhost:8080/api/v1
+    description: Local development.
+
+tags:
+  - name: auth
+    description: Login, tokens, password lifecycle.
+  - name: users
+    description: Resource master. Blueprint §7.2, screens S-07/S-08.
+  - name: projects
+    description: Project master, members, per-project SLA policies.
+  - name: tickets
+    description: |
+      Ticket CRUD, assignment, closure and the reopen cycle.
+      **`cycleNo` and `iterationNo` are two independent counters.** `iterationNo`
+      increments when a ticket is pushed *backwards* within a cycle (a QA
+      rejection); `cycleNo` increments when a *closed* ticket is reopened.
+      Confusing them is the single most likely defect in this domain.
+  - name: ribbon
+    description: The Workflow Ribbon — stage transitions, handoff, rework, skip. §4A.
+  - name: journey
+    description: Per-stage, per-resource effort roll-up with the active/idle split. §4A.4.
+  - name: comments
+    description: Ticket comments — internal by default, five-minute edit window, tombstoned deletes.
+  - name: attachments
+    description: Upload, scan, thumbnail and serve files by short-lived signed URL. §4B.4.
+  - name: clients
+    description: Client master and the client 360 view. §4B.2, §4B.7.
+  - name: imports
+    description: Excel import — one engine, two registered schemas. §4B.3.
+  - name: masters
+    description: Task types, priorities, statuses, holidays, workflow templates.
+  - name: dashboard
+    description: Twenty widgets over pre-aggregated summary tables, every one deep-linkable. S-05.
+  - name: reports
+    description: Eighteen reports through one parameterised runner, with xlsx/csv/pdf export. S-27.
+  - name: notifications
+    description: Twenty-four events across in-app, bell and email, with a per-user preference matrix. §11.
+  - name: chat
+    description: Ticket thread, direct message and project channel — three surfaces, one engine. S-25.
+  - name: webhooks
+    description: Inbound from the mail provider. Unauthenticated; signature-verified.
+  - name: audit
+    description: Every login, permission change, master change and ticket action. Export only. S-16.
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ───────────────────────────────────────────────────────────── auth ────────
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Exchange credentials for an access token
+      description: |
+        Sets the refresh token as an `HttpOnly; Secure; SameSite=Strict` cookie —
+        it is never in the response body, where script could read it.
+
+        **Failures are deliberately indistinguishable.** Wrong username, wrong
+        password and unknown user all return the same `invalid-credentials`
+        problem. Saying which field was wrong is a username-enumeration oracle.
+        Lockout after 5 failures for 15 minutes is reported as `account-locked`
+        only *after* correct credentials, for the same reason.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: '`refresh_token=…; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '423':
+          description: Account locked after repeated failures.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refreshSession
+      summary: Rotate the refresh token and issue a new access token
+      description: |
+        Reads the refresh cookie; takes no body. The consumed token is revoked and
+        replaced on every call.
+
+        **Reuse of an already-consumed token means the token was stolen** — the
+        entire token family is revoked and the user must log in again. A silent
+        re-issue here would let an attacker keep a parallel session alive
+        indefinitely.
+      security: []
+      responses:
+        '200':
+          description: Rotated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+        '401':
+          description: Missing, expired, or reused token. On reuse the whole family is revoked.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: End the session
+      description: |
+        Deletes the refresh token and blacklists the access token's `jti` in Redis
+        until its natural expiry — otherwise a logged-out access token stays valid
+        for up to 15 minutes.
+      responses:
+        '204': { description: Logged out. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/forgot-password:
+    post:
+      tags: [auth]
+      operationId: forgotPassword
+      summary: Request a password-reset link
+      description: |
+        **Always returns 202**, whether or not the address is known. A different
+        response for unknown addresses is a user-enumeration oracle. The token is
+        single-use, 30-minute TTL, and stored hashed.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '202': { description: 'If the address exists, a reset mail has been queued.' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/reset-password:
+    post:
+      tags: [auth]
+      operationId: resetPassword
+      summary: Complete a password reset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token: { type: string, minLength: 32 }
+                newPassword: { $ref: '#/components/schemas/Password' }
+      responses:
+        '204': { description: Password changed; all sessions revoked. }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '410':
+          description: Token expired or already used.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: The authenticated user, with resolved permissions and scope
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MeResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /me/password:
+    patch:
+      tags: [auth]
+      operationId: changeOwnPassword
+      summary: Change own password
+      description: Rejects reuse of the last three passwords. Clears `mustChangePassword`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string }
+                newPassword: { $ref: '#/components/schemas/Password' }
+      responses:
+        '204': { description: Changed. }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ──────────────────────────────────────────────────────────── users ────────
+  /users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: List resources
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: q, in: query, schema: { type: string }, description: 'Name, username, email or employee code.' }
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/RoleCode' } }
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: managerId, in: query, schema: { type: integer, format: int64 } }
+        - { name: isActive, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: Create a resource
+      description: |
+        Generates a temporary password and sets `mustChangePassword`. Username,
+        email and employee code are each unique.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /users/{userId}:
+    parameters: [{ $ref: '#/components/parameters/UserId' }]
+    patch:
+      tags: [users]
+      operationId: updateUser
+      summary: Update a resource
+      description: |
+        **A reporting-manager change is rejected if it creates a cycle at any
+        depth**, not merely self-reference. A→B→C→A is as broken as A→A, and the
+        database `CHECK` only catches the latter.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  /users/{userId}/status:
+    parameters: [{ $ref: '#/components/parameters/UserId' }]
+    patch:
+      tags: [users]
+      operationId: setUserStatus
+      summary: Activate or deactivate
+      description: |
+        Deactivating a resource holding open tickets returns `409` with
+        `openTicketCount`. The caller must reassign them first — via
+        `POST /tickets/bulk-reassign` — because silently orphaning live tickets is
+        how work disappears.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isActive]
+              properties:
+                isActive: { type: boolean }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '204': { description: Changed. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Open tickets must be reassigned first.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/OpenTicketsProblem' }
+
+  /users/{userId}/profile-360:
+    parameters: [{ $ref: '#/components/parameters/UserId' }]
+    get:
+      tags: [users]
+      operationId: getUserProfile360
+      summary: Resource 360° profile (S-28)
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile360Response' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{userId}/reportees:
+    parameters: [{ $ref: '#/components/parameters/UserId' }]
+    get:
+      tags: [users]
+      operationId: listReportees
+      summary: Direct and indirect reportees
+      parameters:
+        - { name: depth, in: query, schema: { type: integer, minimum: 1, maximum: 10, default: 1 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────────────────────────────────── projects ────────
+  /projects:
+    get:
+      tags: [projects]
+      operationId: listProjects
+      summary: List projects
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: isActive, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [projects]
+      operationId: createProject
+      summary: Create a project
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponse' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /projects/{projectId}:
+    parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    patch:
+      tags: [projects]
+      operationId: updateProject
+      summary: Update a project
+      description: |
+        **`projectCode` is immutable once any ticket exists on the project** — it
+        is the prefix of every ticket ID already issued, and changing it would
+        orphan every reference in mail, chat and history. Attempting it returns
+        `409`.
+      parameters:
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  /projects/{projectId}/members:
+    parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    post:
+      tags: [projects]
+      operationId: addProjectMember
+      summary: Add a member with a per-project role and allocation
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, projectRole]
+              properties:
+                userId: { type: integer, format: int64 }
+                projectRole: { $ref: '#/components/schemas/RoleCode' }
+                allocationPct: { type: integer, minimum: 0, maximum: 100, default: 100 }
+      responses:
+        '201': { description: Added. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /projects/{projectId}/members/{userId}:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+      - { $ref: '#/components/parameters/UserId' }
+    delete:
+      tags: [projects]
+      operationId: removeProjectMember
+      summary: Remove a member
+      description: Rejected with `409` while that member holds open tickets on the project.
+      responses:
+        '204': { description: Removed. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Member holds open tickets here.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/OpenTicketsProblem' }
+
+  /projects/{projectId}/sla-policies:
+    parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    get:
+      tags: [projects]
+      operationId: getSlaPolicies
+      summary: SLA matrix — task type × level
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SlaPolicyListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [projects]
+      operationId: replaceSlaPolicies
+      summary: Replace the SLA matrix
+      description: |
+        Replaces the whole matrix in one transaction — a partial update would
+        leave a task type × level combination silently unmapped, and the first
+        ticket to hit it would get no planned close date at all.
+
+        **Changing a policy never retrospectively moves an existing ticket's
+        planned close date.** Tickets carry the policy they were created under.
+      parameters:
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '#/components/schemas/SlaPolicyWrite' }
+      responses:
+        '200':
+          description: Replaced.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SlaPolicyListResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  # ────────────────────────────────────────────────────────── tickets ────────
+  /tickets:
+    get:
+      tags: [tickets]
+      operationId: listTickets
+      summary: List tickets — row-scoped server-side
+      description: |
+        `ScopeResolver` narrows this per role before any filter the caller sent:
+        Admin unrestricted; PM and Support to their projects; Developer, QA and
+        Deployment to `assignedTo = me`. The caller cannot widen it.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: q, in: query, schema: { type: string }, description: Full-text over title and description. }
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: clientId, in: query, schema: { type: integer, format: int64 } }
+        - { name: taskTypeId, in: query, schema: { type: integer, format: int64 } }
+        - { name: level, in: query, schema: { $ref: '#/components/schemas/Level' } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/StatusCode' } }
+        - { name: stage, in: query, schema: { type: string, examples: [QA] } }
+        - { name: assigneeId, in: query, schema: { type: integer, format: int64 } }
+        - { name: isDelayed, in: query, schema: { type: boolean } }
+        - { name: isClientRaised, in: query, schema: { type: boolean } }
+        - { name: reopenedOnly, in: query, schema: { type: boolean } }
+        - { name: dueFrom, in: query, schema: { type: string, format: date } }
+        - { name: dueTo, in: query, schema: { type: string, format: date } }
+        - { name: sort, in: query, schema: { type: string, default: '-createdAt' } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [tickets]
+      operationId: createTicket
+      summary: Create a ticket
+      description: |
+        The ticket ID is generated server-side as `{PROJECT_CODE}-{YY}-{NNNNN}`
+        using `UPDATE projects SET ticket_seq = LAST_INSERT_ID(ticket_seq + 1)`.
+        **Never a `COUNT(*)`** — that produces duplicate IDs under concurrency and
+        fails silently. The sequence does not reset at year rollover.
+
+        On success: the ID is issued, a `CREATED` history row is written, the
+        assignee is notified, and mail is queued in the same transaction.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TicketCreateRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Location: { schema: { type: string }, description: '`/api/v1/tickets/{ticketId}/full`' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404':
+          description: Project, client or assignee not visible to the caller.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /tickets/bulk-reassign:
+    post:
+      tags: [tickets]
+      operationId: bulkReassignTickets
+      summary: Reassign many tickets from one resource to another (S-24)
+      description: |
+        **Each ticket gets its own history entry** — a bulk operation that writes
+        one summary row destroys the per-ticket audit trail, which is the point of
+        having one.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketIds, toUserId, reason]
+              properties:
+                ticketIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { $ref: '#/components/schemas/TicketId' }
+                toUserId: { type: integer, format: int64 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Per-ticket outcome; partial success is possible and reported.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+
+  /tickets/{ticketId}:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    patch:
+      tags: [tickets]
+      operationId: updateTicket
+      summary: Update ticket fields
+      description: |
+        Which fields a caller may change is role-dependent and enforced
+        server-side. Every accepted change writes a `FIELD_CHANGED` history entry
+        with the old and new value.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TicketPatchRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  /tickets/{ticketId}/full:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [tickets]
+      operationId: getTicketDetail
+      summary: Ticket detail in one call
+      description: |
+        Ticket, cycles, ribbon, history, effort logs, comments, attachments and
+        watchers together. Deliberately one aggregated call rather than the six
+        the detail page would otherwise fire — the waterfall is what makes the
+        page feel slow, not the payload size.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+        - name: cycle
+          in: query
+          schema: { type: integer, minimum: 1 }
+          description: Defaults to the current cycle. Earlier cycles are read-only.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketDetailResponse' }
+        '304': { description: Not modified. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tickets/{ticketId}/assign:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [tickets]
+      operationId: assignTicket
+      summary: Assign or reassign within the current stage
+      description: |
+        **This does not create a new ribbon segment.** Reassignment inside a stage
+        writes `STAGE_REASSIGNED` and splits effort attribution so both resources
+        appear in the journey roll-up. Only a handoff advances the ribbon.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assigneeId]
+              properties:
+                assigneeId: { type: integer, format: int64 }
+                note: { type: string, maxLength: 2000 }
+      responses:
+        '200':
+          description: Assigned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+
+  /tickets/{ticketId}/priority:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    patch:
+      tags: [tickets]
+      operationId: changeTicketPriority
+      summary: Change the priority level
+      description: |
+        **`reason` is mandatory once the ticket is assigned.** Recomputes and
+        returns the new planned close date.
+
+        **`originalLevel` is never overwritten.** It is what makes "born critical
+        versus became critical" reportable, and it is the first thing a manager
+        asks. Writes `LEVEL_CHANGED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [level]
+              properties:
+                level: { $ref: '#/components/schemas/Level' }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tickets/{ticketId}/quick-update:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [tickets]
+      operationId: quickUpdateTicket
+      summary: Status, effort, note and ETA in one call (S-21)
+      description: |
+        The two-click update from the list and My Tasks. Effort logged here is
+        auto-stamped with the current stage and iteration, so it lands in the
+        right journey row with no user action.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuickUpdateRequest' }
+      responses:
+        '200':
+          description: Applied.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tickets/{ticketId}/effort:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [tickets]
+      operationId: logEffort
+      summary: Append an effort log
+      description: |
+        **Append-only. There is no update or delete route, and there never will
+        be.** A correction is a new entry with `isCorrection` and
+        `correctsEntryId`, exactly like an accounting reversal. The database
+        rejects mutation independently via triggers and grants, so a bug in this
+        layer cannot silently rewrite history.
+
+        Stage, iteration and cycle are stamped server-side from the ticket's
+        current position — never sent by the client, which would let a stale tab
+        attribute effort to the wrong stage.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EffortLogRequest' }
+      responses:
+        '201':
+          description: Logged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffortLogResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tickets/{ticketId}/effort-logs:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [tickets]
+      operationId: listEffortLogs
+      summary: Effort log — read only
+      description: |
+        `GET` only. **No `PUT`, `PATCH` or `DELETE` route is defined for this path
+        by design.** See `POST /tickets/{ticketId}/effort`.
+      parameters:
+        - { name: cycle, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: stage, in: query, schema: { type: string } }
+        - { name: iteration, in: query, schema: { type: integer, minimum: 1 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffortLogListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tickets/{ticketId}/history:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [tickets]
+      operationId: listTicketHistory
+      summary: History — read only, cycle-grouped
+      description: |
+        `GET` only. **No mutation route exists for this path by design**, and the
+        API rejects mutation even if the DOM is manipulated to attempt it.
+
+        Comments, field changes, handoffs and attachments interleave into one
+        chronological stream when `include=comments` — two separate lists that the
+        reader has to reconcile by timestamp is the thing this avoids.
+      parameters:
+        - { name: cycle, in: query, schema: { type: integer, minimum: 1 } }
+        - name: include
+          in: query
+          schema: { type: array, items: { type: string, enum: [comments, attachments] } }
+          style: form
+          explode: false
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HistoryListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tickets/{ticketId}/resolve:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [tickets]
+      operationId: resolveTicket
+      summary: Mark resolved
+      description: |
+        Resolved is not closed. Closure belongs to the sign-off stage owner —
+        governance decision G-3.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolutionSummary]
+              properties:
+                resolutionSummary: { type: string, minLength: 3, maxLength: 4000 }
+                rootCauseCategory: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: Resolved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+
+  /tickets/{ticketId}/close:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [tickets]
+      operationId: closeTicket
+      summary: Close the current cycle (S-23)
+      description: Stamps `actualCloseDate` and seals the open stage transition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CloseRequest' }
+      responses:
+        '200':
+          description: Closed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+
+  /tickets/{ticketId}/reopen:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [tickets]
+      operationId: reopenTicket
+      summary: Reopen — seal cycle N, open cycle N+1 (S-22)
+      description: |
+        One transaction: seal cycle N, insert cycle N+1 with a fresh start date,
+        planned close date and assignee, increment `reopenCount`, clear
+        `actualCloseDate`, write history.
+
+        **Cycle N's effort is never touched.** Each cycle keeps its own ribbon and
+        its own effort; the journey roll-up joins on `cycleNo` as well as stage
+        and iteration precisely so cycle 1's hours cannot leak into cycle 2's
+        totals.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReopenRequest' }
+      responses:
+        '200':
+          description: Reopened into a new cycle.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Ticket is not closed, so there is nothing to reopen.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /tickets/{ticketId}/emails:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [tickets]
+      operationId: listTicketEmails
+      summary: Mail delivery log for this ticket
+      description: |
+        Proves what was sent and what bounced. **Nobody should assume a mail
+        arrived that never did**, which is why delivery status is visible in the
+        product rather than buried in a provider dashboard.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmailLogListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tickets/{ticketId}/ask-status:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [tickets, chat]
+      operationId: askTicketStatus
+      summary: Request a status update from the assignee
+      description: |
+        Posts a structured message into the ticket thread with
+        `[Reply with update]` and `[Open Quick Update]` actions. **The manager's
+        response time is recorded as a reportable metric** — the round trip is the
+        thing worth measuring, not just the ask.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 1000 }
+      responses:
+        '202': { description: Requested. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────────────────────────────────────── ribbon ────────
+  /tickets/{ticketId}/ribbon:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [ribbon]
+      operationId: getRibbon
+      summary: Ribbon segments for a cycle
+      description: |
+        One ribbon per cycle. `?cycle=1` renders that completed journey read-only.
+      parameters:
+        - name: cycle
+          in: query
+          schema: { type: integer, minimum: 1 }
+          description: Defaults to the current cycle.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RibbonResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tickets/{ticketId}/handoff:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [ribbon]
+      operationId: handoffTicket
+      summary: Advance to the next stage (S-29)
+      description: |
+        **Only the current stage owner — plus PM and Admin — may advance a
+        ticket.** A developer cannot push a ticket into Deployment while it sits
+        with QA. Enforced server-side; a client that offers the button anyway gets
+        `422`.
+
+        One transaction seals the current transition (`exitedAt`, `durationMins`
+        **in working minutes**, not wall-clock), inserts the next, notifies the
+        receiving owner, and pushes `stage.changed` to `/topic/ticket.{id}` so
+        anyone viewing sees it land.
+
+        `effortHours` is mandatory when the project requires effort confirmation
+        at handoff (governance decision G-1, default blocking). Without it the
+        per-resource roll-up is fiction within a month.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HandoffRequest' }
+      responses:
+        '200':
+          description: Advanced.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RibbonResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+
+  /tickets/{ticketId}/rework:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [ribbon]
+      operationId: reworkTicket
+      summary: Send the ticket backwards
+      description: |
+        `reason` is mandatory; a defect list is expected on a QA failure.
+
+        **`iterationNo` increments for every subsequent transition in this
+        cycle** — that is what makes rework measurable and what the ping-pong flag
+        counts at `iterationNo >= 3`. It does **not** touch `cycleNo`, and by
+        default it does not move the planned close date (decision G-2): the
+        original commitment stands, and rework is what `iterationNo` measures.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReworkRequest' }
+      responses:
+        '200':
+          description: Moved back.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RibbonResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+
+  /tickets/{ticketId}/skip-stage:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [ribbon]
+      operationId: skipStage
+      summary: Skip an optional stage — PM and Admin only
+      description: |
+        `reason` mandatory. The segment renders struck-through with the reason on
+        hover, rather than disappearing — a stage that silently vanishes from the
+        ribbon makes the history unreadable later.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+                toStageCode: { type: string, description: Defaults to the next stage in the template. }
+      responses:
+        '200':
+          description: Skipped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RibbonResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+
+  /tickets/{ticketId}/journey:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [journey]
+      operationId: getJourney
+      summary: Per-stage, per-resource effort roll-up (§4A.4)
+      description: |
+        **The active/idle split is the point of this endpoint.**
+        `idleMins = durationMins − Σ effort in that stage and iteration`. A stage
+        showing two days of duration against two hours of effort is a queue
+        problem, not a capacity problem — and no other view in the product can
+        tell you that.
+
+        The underlying query joins effort logs on `cycleNo` as well as stage and
+        iteration. Without that, cycle 1's effort double-counts into cycle 2 after
+        a reopen — a defect in the blueprint's own query, corrected in PLAN.md §3.4.
+      parameters:
+        - { name: cycle, in: query, schema: { type: integer, minimum: 1 } }
+        - name: groupBy
+          in: query
+          schema: { type: string, enum: [hop, resource, stage], default: hop }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JourneyResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /stages/queue:
+    get:
+      tags: [ribbon]
+      operationId: getStageQueue
+      summary: Team inbox for a stage (S-31)
+      description: |
+        "Waiting in QA", "Waiting in Deployment" — the landing page for QA and
+        Deployment roles. Sorted by time-in-stage descending, so the ticket
+        rotting longest is first.
+      parameters:
+        - { name: stage, in: query, required: true, schema: { type: string, examples: [QA] } }
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: unassignedOnly, in: query, schema: { type: boolean } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StageQueueResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────────────────────────────────────────────────────── comments ────────
+  /tickets/{ticketId}/comments:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [comments]
+      operationId: listComments
+      summary: List comments
+      parameters:
+        - { name: cycle, in: query, schema: { type: integer, minimum: 1 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommentListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [comments]
+      operationId: createComment
+      summary: Post a comment
+      description: |
+        **`isClientVisible` defaults to false, always.** An accidental leak to a
+        client costs far more than an extra click (decision recorded in §16).
+
+        Stamped server-side with the author's role and the stage and iteration at
+        time of writing, so the comment stays meaningful when read months later.
+        `@mentions` fire a notification and an email.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommentWriteRequest' }
+      responses:
+        '201':
+          description: Posted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommentResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tickets/{ticketId}/comments/{commentId}:
+    parameters:
+      - { $ref: '#/components/parameters/TicketId' }
+      - { name: commentId, in: path, required: true, schema: { type: integer, format: int64 } }
+    patch:
+      tags: [comments]
+      operationId: editComment
+      summary: Edit within the five-minute window
+      description: |
+        Author only, within five minutes of posting. After that the comment is
+        locked and this returns `422`.
+
+        An edited comment keeps `originalBody` and renders an "edited" marker.
+        **No role, including Admin, can silently rewrite a comment** — that is what
+        keeps the thread admissible as evidence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 20000 }
+      responses:
+        '200':
+          description: Edited.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommentResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Edit window has closed, or the caller is not the author.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    delete:
+      tags: [comments]
+      operationId: deleteComment
+      summary: Delete a comment, leaving a tombstone
+      description: The row survives with `isDeleted`; the body is cleared. Nothing vanishes.
+      responses:
+        '204': { description: Tombstoned. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────── attachments ────────
+  /tickets/{ticketId}/attachments:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [attachments]
+      operationId: listAttachments
+      summary: List attachments
+      parameters:
+        - { name: cycle, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: clientVisibleOnly, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachmentListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [attachments]
+      operationId: uploadAttachment
+      summary: Upload an attachment
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Multipart. Accepts drag-drop, file picker **and clipboard paste** — paste
+        is what decides whether support agents actually attach screenshots.
+
+        Validated by extension allow-list **and** MIME sniffing — the extension
+        alone is trivially wrong. EXIF is stripped, the file is virus-scanned, and
+        it becomes visible only after the scan passes. Stored at
+        `tickets/{ticketId}/{uuid}`; downloads use short-lived signed URLs and the
+        bucket is never public.
+
+        Limits, all configurable: 10 MB per file, 50 MB and 20 files per ticket.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                isClientVisible: { type: boolean, default: false }
+                commentId: { type: integer, format: int64 }
+      responses:
+        '201':
+          description: Accepted; `scanStatus` is `PENDING` until the scan completes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachmentResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: File or ticket limit exceeded.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '415':
+          description: Extension or sniffed MIME type not allowed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /tickets/{ticketId}/attachments/{attachmentId}:
+    parameters:
+      - { $ref: '#/components/parameters/TicketId' }
+      - { name: attachmentId, in: path, required: true, schema: { type: integer, format: int64 } }
+    delete:
+      tags: [attachments]
+      operationId: deleteAttachment
+      summary: Delete an attachment
+      description: |
+        Hard delete by the uploader within 15 minutes. After that it is a soft
+        delete leaving a tombstone, so the history still shows something was
+        attached and removed.
+      responses:
+        '204': { description: Deleted or tombstoned. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ──────────────────────────────────────────────────────────  clients ───────
+  /clients:
+    get:
+      tags: [clients]
+      operationId: listClients
+      summary: List clients
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: q, in: query, schema: { type: string }, description: 'Name, code or domain.' }
+        - { name: isActive, in: query, schema: { type: boolean } }
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [clients]
+      operationId: createClient
+      summary: Create a client
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientResponse' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /clients/{clientId}:
+    parameters: [{ $ref: '#/components/parameters/ClientId' }]
+    patch:
+      tags: [clients]
+      operationId: updateClient
+      summary: Update a client
+      parameters:
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  /clients/{clientId}/status:
+    parameters: [{ $ref: '#/components/parameters/ClientId' }]
+    patch:
+      tags: [clients]
+      operationId: setClientStatus
+      summary: Activate or deactivate a client
+      description: |
+        Deactivating a client with open tickets warns and blocks *new* tickets.
+        **It never hides historical ones** — the record of work done for a client
+        does not disappear because the relationship ended.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isActive]
+              properties:
+                isActive: { type: boolean }
+      responses:
+        '200':
+          description: Changed; `openTicketCount` reported for the warning.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /clients/{clientId}/contacts:
+    parameters: [{ $ref: '#/components/parameters/ClientId' }]
+    get:
+      tags: [clients]
+      operationId: listClientContacts
+      summary: List contacts
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContactListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [clients]
+      operationId: createClientContact
+      summary: Add a contact
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Callable inline from the ticket form. Without that, the desk picks the
+        wrong existing contact rather than taking the detour to the client master.
+
+        **A client is not selectable on a ticket until it has one primary
+        contact.** Setting a new primary demotes the previous one in the same
+        transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContactWriteRequest' }
+      responses:
+        '201':
+          description: Added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContactResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /clients/{clientId}/tickets:
+    parameters: [{ $ref: '#/components/parameters/ClientId' }]
+    get:
+      tags: [clients]
+      operationId: getClient360
+      summary: Client 360 view (S-32)
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/StatusCode' } }
+      responses:
+        '200':
+          description: Tickets plus rolled-up client metrics.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client360Response' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────────────────────────────────── imports ─────────
+  /imports/{schema}/template:
+    parameters: [{ $ref: '#/components/parameters/ImportSchema' }]
+    get:
+      tags: [imports]
+      operationId: downloadImportTemplate
+      summary: Download the .xlsx template for a schema
+      description: |
+        Generated with Apache POI SXSSF, carrying data-validation dropdowns on
+        Status and Support Plan plus one filled example row. A template with a
+        worked example produces far fewer rejected rows than one with only headers.
+      responses:
+        '200':
+          description: The workbook.
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /imports/{schema}/upload:
+    parameters: [{ $ref: '#/components/parameters/ImportSchema' }]
+    post:
+      tags: [imports]
+      operationId: uploadImportFile
+      summary: Step 2 — upload and parse headers
+      description: |
+        Max 5 MB and 5,000 rows. Parsed with the **event-driven SAX reader**, not
+        the DOM reader — the DOM reader loads the entire workbook into memory per
+        concurrent import and will not survive two users at once.
+
+        Returns detected sheets and headers for the mapping step. Nothing is
+        written.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Parsed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportUploadResponse' }
+        '413':
+          description: Over the size or row limit.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /imports/{schema}/validate:
+    parameters: [{ $ref: '#/components/parameters/ImportSchema' }]
+    post:
+      tags: [imports]
+      operationId: validateImport
+      summary: Step 4 — dry run
+      description: |
+        **Nothing is written.** Returns a per-row verdict — will create, will
+        update, duplicate within the file, or rejected with a reason — plus
+        summary counts. This is the step that makes a bulk import safe to run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ImportValidateRequest' }
+      responses:
+        '200':
+          description: Preview.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportPreviewResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+
+  /imports/{schema}/commit:
+    parameters: [{ $ref: '#/components/parameters/ImportSchema' }]
+    post:
+      tags: [imports]
+      operationId: commitImport
+      summary: Step 5 — commit as a background job
+      description: |
+        **Upsert on the schema's natural key — update, never duplicate.** For
+        clients that is the client code. Re-uploading a corrected file must not
+        create a second copy of every row.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ImportCommitRequest' }
+      responses:
+        '202':
+          description: Job started.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportBatchResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /import-batches/{batchId}:
+    parameters:
+      - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [imports]
+      operationId: getImportBatch
+      summary: Batch progress and error report
+      description: |
+        The error report is an `.xlsx` of only the rejected rows with an appended
+        Reason column, so the user fixes and re-uploads those rows rather than the
+        whole file. Every import is identified, which makes a bad one reversible
+        as a set.
+
+        Polled while a job runs, so it returns an `ETag` — a client checking every
+        two seconds should transfer a body only when something actually changed.
+      parameters: [{ $ref: '#/components/parameters/IfNoneMatch' }]
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportBatchResponse' }
+        '304': { description: Not modified. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────────────────────────────────── masters ─────────
+  /masters/task-types:
+    get:
+      tags: [masters]
+      operationId: listTaskTypes
+      summary: Task types
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskTypeListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /masters/priorities:
+    get:
+      tags: [masters]
+      operationId: listPriorities
+      summary: Priority levels
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PriorityListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /masters/holidays:
+    get:
+      tags: [masters]
+      operationId: getWorkingCalendar
+      summary: Working calendar — org holidays and weekly-off pattern
+      description: |
+        Consumed by the working-hours service that **every** SLA, duration and
+        utilisation figure routes through. A Friday-18:00 ticket with a four-hour
+        SLA must not breach on Saturday morning, and four private implementations
+        of "working hours" produce four different answers to the same question.
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HolidayListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /masters/workflow-templates:
+    get:
+      tags: [masters]
+      operationId: listWorkflowTemplates
+      summary: Workflow templates with their stages
+      parameters:
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: taskTypeId, in: query, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowTemplateListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [masters]
+      operationId: createWorkflowTemplate
+      summary: Create or version a workflow template (S-30)
+      description: |
+        **Stages in use are deprecated, never deleted** — deleting one breaks every
+        historical ribbon that referenced it. Live tickets keep the template
+        version they started on, so editing a template never rewrites a journey
+        already in flight.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkflowTemplateWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowTemplateResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ─────────────────────────────────────────────────────── dashboard ─────────
+  /dashboard/summary:
+    get:
+      tags: [dashboard]
+      operationId: getDashboardSummary
+      summary: KPI cards (S-05)
+      description: |
+        Served from the pre-aggregated summary tables, refreshed every five
+        minutes. **Never a live `COUNT(*)`** — at 50,000 tickets that is the
+        difference between a dashboard and a timeout.
+      parameters:
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: assigneeId, in: query, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardSummaryResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /dashboard/widget/{widgetKey}:
+    parameters:
+      - name: widgetKey
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+            [type-donut, daily-stacked, velocity, resource-load, priority-bar,
+             aging-buckets, calendar-heatmap, sla-gauge, project-treemap,
+             stage-funnel, rework, stage-duration, handoff-latency, client-volume]
+    get:
+      tags: [dashboard]
+      operationId: getDashboardWidget
+      summary: One widget's series
+      description: |
+        Every series point carries a `drillDown` query string. **Every card and
+        chart segment deep-links to a pre-filtered list** — a number nobody can
+        click is a number nobody trusts.
+
+        Returns an `ETag`. The summary tables refresh every five minutes, so a
+        dashboard polling faster than that gets `304` and costs nothing.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WidgetResponse' }
+        '304': { description: Not modified. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reports/{reportKey}:
+    parameters:
+      - { name: reportKey, in: path, required: true, schema: { type: string, examples: [resource-scorecard] } }
+    get:
+      tags: [reports]
+      operationId: runReport
+      summary: Run a report (S-27)
+      description: |
+        Eighteen reports share one parameterised runner. `?export=` streams the
+        file instead of returning JSON.
+
+        Returns an `ETag`. Reports are expensive to compute and are re-run every
+        time somebody changes a filter and changes it back.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+        - { name: export, in: query, schema: { type: string, enum: [xlsx, csv, pdf] } }
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: clientId, in: query, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Rows and columns, or the exported file.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportResponse' }
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '304': { description: Not modified. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reports/schedule:
+    post:
+      tags: [reports]
+      operationId: scheduleReport
+      summary: Schedule a recurring report email
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportScheduleRequest' }
+      responses:
+        '201': { description: Scheduled. }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+
+  # ─────────────────────────────────────────────────── notifications ─────────
+  /notifications:
+    get:
+      tags: [notifications]
+      operationId: listNotifications
+      summary: Notification centre (S-26)
+      parameters:
+        - name: tab
+          in: query
+          schema: { type: string, enum: [all, mentions, assignments, escalations, status-requests], default: all }
+        - { name: unreadOnly, in: query, schema: { type: boolean } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK. `meta.unreadCount` drives the bell badge.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/{notificationId}/read:
+    parameters:
+      - { name: notificationId, in: path, required: true, schema: { type: integer, format: int64 } }
+    patch:
+      tags: [notifications]
+      operationId: markNotificationRead
+      summary: Mark one as read
+      responses:
+        '204': { description: Marked. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notifications/read-all:
+    patch:
+      tags: [notifications]
+      operationId: markAllNotificationsRead
+      summary: Mark all as read
+      responses:
+        '204': { description: Marked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ──────────────────────────────────────────────────────────── chat ─────────
+  /chat/threads:
+    get:
+      tags: [chat]
+      operationId: listChatThreads
+      summary: Threads — ticket, direct message and project channel (S-25)
+      description: Three surfaces, one engine.
+      parameters:
+        - { name: kind, in: query, schema: { type: string, enum: [TICKET, DIRECT, PROJECT] } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatThreadListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /chat/threads/{threadId}/messages:
+    parameters:
+      - { name: threadId, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [chat]
+      operationId: listChatMessages
+      summary: Messages, newest first
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatMessageListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [chat]
+      operationId: postChatMessage
+      summary: Post a message
+      description: |
+        Editable for five minutes, then locked; deletions leave a tombstone.
+        **This is what keeps chat admissible as project evidence** — a thread
+        anybody can quietly rewrite proves nothing.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 20000 }
+                attachmentIds:
+                  type: array
+                  items: { type: integer, format: int64 }
+      responses:
+        '201':
+          description: Posted; broadcast on the thread's STOMP topic.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatMessageResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ──────────────────────────────────────────────────────── webhooks ─────────
+  /webhooks/email/inbound:
+    post:
+      tags: [webhooks]
+      operationId: inboundEmailWebhook
+      summary: Inbound mail — reply becomes a comment
+      description: |
+        Unauthenticated but **signature-verified**; an unverified signature is a
+        `401`, never a silently-accepted comment. Quoted text is stripped before
+        the body becomes a comment. Email-to-ticket creation is phase 6.
+      security: []
+      parameters:
+        - { name: X-Webhook-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '202': { description: Accepted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /webhooks/email/bounce:
+    post:
+      tags: [webhooks]
+      operationId: bounceEmailWebhook
+      summary: Bounce and complaint notifications
+      description: Marks the address invalid and alerts Admin.
+      security: []
+      parameters:
+        - { name: X-Webhook-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '202': { description: Accepted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ─────────────────────────────────────────────────────────── audit ─────────
+  /audit-logs:
+    get:
+      tags: [audit]
+      operationId: listAuditLogs
+      summary: Audit log viewer — Admin only (S-16)
+      description: |
+        Every login, permission change, master change and ticket action.
+        **Export only; there is no edit or delete route, and there never will be.**
+      parameters:
+        - { name: actorId, in: query, schema: { type: integer, format: int64 } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: entityType, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: export, in: query, schema: { type: string, enum: [xlsx, csv] } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditLogListResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+# ══════════════════════════════════════════════════════════ components ═══════
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        15-minute access token. Claims: `sub`, `role`, `permissions[]`,
+        `projects[]`, `reportees[]`, `iat`, `exp`, `jti`. The refresh token is a
+        separate opaque value in an HttpOnly cookie and is never sent here.
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+      description: Opaque cursor from `meta.nextCursor`. Never an offset.
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    TicketId:
+      name: ticketId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/TicketId' }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    ClientId:
+      name: clientId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    ImportSchema:
+      name: schema
+      in: path
+      required: true
+      schema: { type: string, enum: [clients, users] }
+      description: |
+        Which registered schema to import. **One engine, registered twice** —
+        `users` is a registration, not a second implementation (B-030, B-038).
+        Bolting `import` under `/clients/…` instead would collide with
+        `/clients/{clientId}/…` on any three-segment path.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, format: uuid }
+      description: |
+        Replaying a key within 24 hours returns the original response instead of
+        creating a second row. Send one on every create — a retried request after
+        a network timeout is the normal case, not the exception.
+    IfMatch:
+      name: If-Match
+      in: header
+      schema: { type: string }
+      description: The `ETag` from the last read. Prevents a lost update; `412` if stale.
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Missing, expired or revoked token.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: |
+        Authenticated but not permitted **for a reason that does not leak row
+        existence** — an Admin-only screen, for example. Row-level scope failures
+        return `404`, never this.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: |
+        Not found — **or out of the caller's scope**. The two are deliberately
+        indistinguishable. Returning `403` here would confirm the row exists.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: Unique constraint or an immutable field.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ValidationFailed:
+      description: Bean Validation failure; `errors` is field-keyed.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ValidationProblem' }
+    PreconditionFailed:
+      description: '`If-Match` did not match — the row changed since you read it.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnprocessableTransition:
+      description: |
+        The workflow forbids this move. Most often: the caller is not the current
+        stage owner, the target stage is not reachable from here, or mandatory
+        effort confirmation is missing.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    TooManyRequests:
+      description: Rate limited.
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    # ── envelope ──────────────────────────────────────────────────────────
+    Meta:
+      type: object
+      properties:
+        nextCursor: { type: [string, 'null'] }
+        hasMore: { type: boolean }
+        totalCount:
+          type: [integer, 'null']
+          description: Present only where a count is cheap. Never computed live over tickets.
+    Problem:
+      type: object
+      description: RFC 9457. `type` is stable and switchable; `detail` is for humans.
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, examples: ['https://edutrack/errors/invalid-credentials'] }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        traceId: { type: string, description: Correlates with server logs and Sentry. }
+    ValidationProblem:
+      allOf:
+        - { $ref: '#/components/schemas/Problem' }
+        - type: object
+          properties:
+            errors:
+              type: object
+              additionalProperties: { type: array, items: { type: string } }
+              examples: [{ title: ['must not be blank'] }]
+    OpenTicketsProblem:
+      allOf:
+        - { $ref: '#/components/schemas/Problem' }
+        - type: object
+          properties:
+            openTicketCount: { type: integer }
+            reassignUrl: { type: string, examples: ['/api/v1/tickets/bulk-reassign'] }
+
+    # ── primitives ────────────────────────────────────────────────────────
+    TicketId:
+      type: string
+      pattern: '^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5}$'
+      examples: ['CRM-26-00347']
+      description: '`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'
+    Password:
+      type: string
+      minLength: 8
+      maxLength: 128
+      description: Upper, lower, digit and symbol required; the last three are not reusable.
+    RoleCode:
+      type: string
+      enum: [ADMIN, PM, DEVELOPER, QA, DEPLOYMENT, SUPPORT]
+    Level:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, CRITICAL]
+    StatusCode:
+      type: string
+      enum: [NEW, IN_PROGRESS, ON_HOLD, AWAITING_INFO, REWORK, RESOLVED, CLOSED, REOPENED]
+    SegmentState:
+      type: string
+      enum: [COMPLETED, CURRENT, PENDING, REWORKED, SKIPPED, BLOCKED]
+    TransitionAction:
+      type: string
+      enum: [FORWARD, REWORK, DEPLOY_FAILED, VERIFY_FAILED, SIGNOFF_REJECTED, CLARIFICATION, SKIP, OVERRIDE, STAGE_REASSIGNED]
+    UserRef:
+      type: object
+      required: [id, displayName]
+      properties:
+        id: { type: integer, format: int64 }
+        displayName: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        role: { $ref: '#/components/schemas/RoleCode' }
+
+    # ── auth ──────────────────────────────────────────────────────────────
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 100 }
+        password: { type: string, minLength: 1 }
+        totpCode: { type: string, pattern: '^\d{6}$', description: Required when 2FA is enabled. }
+    Session:
+      type: object
+      required: [accessToken, expiresIn, user]
+      properties:
+        accessToken: { type: string }
+        expiresIn: { type: integer, examples: [900] }
+        mustChangePassword: { type: boolean }
+        landingRoute:
+          type: string
+          description: |
+            Role-based post-login destination, decided server-side — Admin and PM
+            to the dashboard, Developer to My Tasks, Support to the ticket queue,
+            QA and Deployment to the stage queue.
+        user: { $ref: '#/components/schemas/Me' }
+    SessionResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Session' }
+    Me:
+      allOf:
+        - { $ref: '#/components/schemas/UserRef' }
+        - type: object
+          properties:
+            username: { type: string }
+            email: { type: string, format: email }
+            permissions: { type: array, items: { type: string } }
+            projectIds: { type: array, items: { type: integer, format: int64 } }
+            reporteeIds: { type: array, items: { type: integer, format: int64 } }
+            timezone: { type: string, examples: ['Asia/Kolkata'] }
+    MeResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Me' }
+
+    # ── users ─────────────────────────────────────────────────────────────
+    User:
+      allOf:
+        - { $ref: '#/components/schemas/UserRef' }
+        - type: object
+          properties:
+            username: { type: string }
+            email: { type: string, format: email }
+            employeeCode: { type: string }
+            reportingManager: { $ref: '#/components/schemas/UserRef' }
+            projectIds: { type: array, items: { type: integer, format: int64 } }
+            isActive: { type: boolean }
+            openTicketCount: { type: integer }
+            createdAt: { type: string, format: date-time }
+    UserWriteRequest:
+      type: object
+      required: [displayName, username, email, role]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 150 }
+        username: { type: string, minLength: 3, maxLength: 100 }
+        email: { type: string, format: email }
+        employeeCode: { type: string, maxLength: 50 }
+        role: { $ref: '#/components/schemas/RoleCode' }
+        reportingManagerId:
+          type: [integer, 'null']
+          format: int64
+          description: Rejected with `409` if it would create a cycle at any depth.
+        projectIds: { type: array, items: { type: integer, format: int64 } }
+        timezone: { type: string }
+    UserResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/User' } }
+    UserListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/User' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    Profile360Response:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            user: { $ref: '#/components/schemas/User' }
+            openTickets: { type: integer }
+            closedThisMonth: { type: integer }
+            effortHoursThisMonth: { type: number, format: double }
+            slaCompliancePct: { type: number, format: double }
+            reworkRatePct: { type: number, format: double }
+            currentStages: { type: array, items: { type: string } }
+
+    # ── projects ──────────────────────────────────────────────────────────
+    Project:
+      type: object
+      required: [id, projectCode, name]
+      properties:
+        id: { type: integer, format: int64 }
+        projectCode:
+          type: string
+          description: Ticket-ID prefix. Immutable once any ticket exists.
+        name: { type: string }
+        projectManager: { $ref: '#/components/schemas/UserRef' }
+        colourTag: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        startDate: { type: [string, 'null'], format: date }
+        endDate: { type: [string, 'null'], format: date }
+        isActive: { type: boolean }
+        autoAssignRule: { type: string, enum: [ROUND_ROBIN, LEAST_LOADED, MANUAL] }
+    ProjectWriteRequest:
+      type: object
+      required: [projectCode, name]
+      properties:
+        projectCode: { type: string, pattern: '^[A-Z][A-Z0-9]{1,9}$' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        projectManagerId: { type: integer, format: int64 }
+        colourTag: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        startDate: { type: [string, 'null'], format: date }
+        endDate: { type: [string, 'null'], format: date }
+        allowedTaskTypeIds: { type: array, items: { type: integer, format: int64 } }
+        autoAssignRule: { type: string, enum: [ROUND_ROBIN, LEAST_LOADED, MANUAL] }
+    ProjectResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/Project' } }
+    ProjectListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Project' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    SlaPolicyWrite:
+      type: object
+      required: [taskTypeId, level, responseHrs, resolutionHrs]
+      properties:
+        taskTypeId: { type: integer, format: int64 }
+        level: { $ref: '#/components/schemas/Level' }
+        responseHrs: { type: number, format: double, minimum: 0 }
+        resolutionHrs: { type: number, format: double, minimum: 0 }
+        l1EscalationUserId: { type: [integer, 'null'], format: int64 }
+        l2EscalationUserId: { type: [integer, 'null'], format: int64 }
+    SlaPolicyListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/SlaPolicyWrite' } }
+
+    # ── tickets ───────────────────────────────────────────────────────────
+    Ticket:
+      type: object
+      required: [ticketId, title, level, status, cycleNo]
+      properties:
+        ticketId: { $ref: '#/components/schemas/TicketId' }
+        title: { type: string }
+        description: { type: string }
+        project: { $ref: '#/components/schemas/Project' }
+        client: { $ref: '#/components/schemas/ClientRef' }
+        clientContactId: { type: [integer, 'null'], format: int64 }
+        isClientRaised: { type: boolean }
+        taskTypeId: { type: integer, format: int64 }
+        level: { $ref: '#/components/schemas/Level' }
+        originalLevel:
+          $ref: '#/components/schemas/Level'
+          description: Set once at creation and never overwritten — see `PATCH .../priority`.
+        status: { $ref: '#/components/schemas/StatusCode' }
+        currentStageCode: { type: [string, 'null'] }
+        assignee: { $ref: '#/components/schemas/UserRef' }
+        reportedBy: { $ref: '#/components/schemas/UserRef' }
+        cycleNo:
+          type: integer
+          minimum: 1
+          description: Increments on reopen after closure. Independent of `iterationNo`.
+        iterationNo:
+          type: integer
+          minimum: 1
+          description: Increments on a backward move within the current cycle. Independent of `cycleNo`.
+        reopenCount: { type: integer }
+        plannedCloseDate: { type: [string, 'null'], format: date-time }
+        actualCloseDate: { type: [string, 'null'], format: date-time }
+        isDelayed: { type: boolean }
+        delayedSince: { type: [string, 'null'], format: date-time }
+        totalEffortHrs: { type: number, format: double }
+        estimatedHrs: { type: [number, 'null'], format: double }
+        pctComplete: { type: integer, minimum: 0, maximum: 100 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TicketCreateRequest:
+      type: object
+      required: [projectId, title, taskTypeId, level]
+      properties:
+        projectId: { type: integer, format: int64 }
+        title: { type: string, minLength: 3, maxLength: 300 }
+        description: { type: string, maxLength: 20000 }
+        taskTypeId: { type: integer, format: int64 }
+        level: { $ref: '#/components/schemas/Level' }
+        clientId: { type: [integer, 'null'], format: int64 }
+        clientContactId: { type: [integer, 'null'], format: int64 }
+        isClientRaised: { type: boolean, default: false }
+        assigneeId: { type: [integer, 'null'], format: int64 }
+        watcherIds: { type: array, items: { type: integer, format: int64 } }
+        estimatedHrs: { type: [number, 'null'], format: double }
+        plannedCloseDate:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Omit to have it computed from the SLA policy against the working
+            calendar. Supplying it requires PM or Admin.
+        saveAsDraft: { type: boolean, default: false }
+    TicketPatchRequest:
+      type: object
+      properties:
+        title: { type: string, minLength: 3, maxLength: 300 }
+        description: { type: string, maxLength: 20000 }
+        estimatedHrs: { type: [number, 'null'], format: double }
+        pctComplete: { type: integer, minimum: 0, maximum: 100 }
+        watcherIds: { type: array, items: { type: integer, format: int64 } }
+        plannedCloseDate: { type: [string, 'null'], format: date-time }
+        plannedCloseDateReason:
+          type: string
+          description: Mandatory when moving the date after assignment; PM and Admin only.
+    QuickUpdateRequest:
+      type: object
+      description: |
+        Deliberately narrow. It must **not** expose ticket ID, reported by,
+        assigned by, date reported, cycle history, the ribbon, prior effort logs,
+        project, or level unless the caller is a PM — the whole point is two
+        clicks, not a second detail page.
+      properties:
+        status: { $ref: '#/components/schemas/StatusCode' }
+        effortHours: { type: number, format: double, minimum: 0, maximum: 24 }
+        effortDate: { type: string, format: date }
+        workNote: { type: string, maxLength: 4000 }
+        pctComplete: { type: integer, minimum: 0, maximum: 100 }
+        revisedEta: { type: [string, 'null'], format: date-time }
+        revisedEtaReason: { type: string, maxLength: 500 }
+        attachmentIds: { type: array, items: { type: integer, format: int64 } }
+    CloseRequest:
+      type: object
+      required: [resolutionSummary]
+      properties:
+        resolutionSummary: { type: string, minLength: 3, maxLength: 4000 }
+        rootCauseCategory: { type: string, maxLength: 100 }
+        actualCloseDate: { type: [string, 'null'], format: date-time }
+        finalEffortHours: { type: [number, 'null'], format: double }
+        requestClientVerification: { type: boolean, default: false }
+    ReopenRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 1000 }
+        restartStageCode: { type: string, default: TRIAGE }
+        assigneeId: { type: [integer, 'null'], format: int64 }
+        plannedCloseDate: { type: [string, 'null'], format: date-time }
+        estimatedHrs: { type: [number, 'null'], format: double }
+    TicketResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/Ticket' } }
+    TicketListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Ticket' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    TicketDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [ticket]
+          properties:
+            ticket: { $ref: '#/components/schemas/Ticket' }
+            cycles: { type: array, items: { $ref: '#/components/schemas/Cycle' } }
+            ribbon: { $ref: '#/components/schemas/Ribbon' }
+            history: { type: array, items: { $ref: '#/components/schemas/HistoryEntry' } }
+            effortLogs: { type: array, items: { $ref: '#/components/schemas/EffortLog' } }
+            comments: { type: array, items: { $ref: '#/components/schemas/Comment' } }
+            attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+            watchers: { type: array, items: { $ref: '#/components/schemas/UserRef' } }
+            availableActions:
+              type: array
+              items: { type: string }
+              description: |
+                What this caller may do right now, decided server-side. The client
+                renders buttons from this rather than re-deriving permissions —
+                two implementations of the same rule always diverge.
+    Cycle:
+      type: object
+      properties:
+        cycleNo: { type: integer }
+        isSealed: { type: boolean }
+        startedAt: { type: string, format: date-time }
+        closedAt: { type: [string, 'null'], format: date-time }
+        reason: { type: [string, 'null'] }
+        totalEffortHrs: { type: number, format: double }
+    BulkResultResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            succeeded: { type: integer }
+            failed: { type: integer }
+            results:
+              type: array
+              items:
+                type: object
+                properties:
+                  ticketId: { $ref: '#/components/schemas/TicketId' }
+                  ok: { type: boolean }
+                  reason: { type: [string, 'null'] }
+
+    # ── history & effort ──────────────────────────────────────────────────
+    HistoryEntry:
+      type: object
+      description: Append-only. Hash-chained per ticket; never updated or deleted.
+      properties:
+        id: { type: integer, format: int64 }
+        action: { type: string, examples: [FIELD_CHANGED] }
+        actor: { $ref: '#/components/schemas/UserRef' }
+        actorType: { type: string, enum: [USER, SYSTEM], description: '`SYSTEM` for auto-escalation.' }
+        fieldName: { type: [string, 'null'] }
+        oldValue: { type: [string, 'null'] }
+        newValue: { type: [string, 'null'] }
+        note: { type: [string, 'null'] }
+        stageCode: { type: [string, 'null'] }
+        cycleNo: { type: integer }
+        iterationNo: { type: integer }
+        isCorrection: { type: boolean }
+        correctsEntryId: { type: [integer, 'null'], format: int64 }
+        entryHash: { type: string, description: Chained to the previous entry for this ticket. }
+        createdAt: { type: string, format: date-time }
+    HistoryListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/HistoryEntry' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    EffortLog:
+      type: object
+      description: Append-only. Corrections are new rows, never edits.
+      properties:
+        id: { type: integer, format: int64 }
+        user: { $ref: '#/components/schemas/UserRef' }
+        hours: { type: number, format: double }
+        workDate: { type: string, format: date }
+        note: { type: [string, 'null'] }
+        stageCode: { type: [string, 'null'], description: Stamped server-side. }
+        cycleNo: { type: integer }
+        iterationNo: { type: integer }
+        isCorrection: { type: boolean }
+        correctsEntryId: { type: [integer, 'null'], format: int64 }
+        createdAt: { type: string, format: date-time }
+    EffortLogRequest:
+      type: object
+      required: [hours, workDate]
+      properties:
+        hours: { type: number, format: double, minimum: 0.25, maximum: 24 }
+        workDate:
+          type: string
+          format: date
+          description: |
+            Backdating is allowed within the configured window (default 7 days);
+            beyond that it needs manager approval.
+        note: { type: string, maxLength: 2000 }
+        isCorrection: { type: boolean, default: false }
+        correctsEntryId: { type: [integer, 'null'], format: int64 }
+    EffortLogResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/EffortLog' } }
+    EffortLogListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/EffortLog' } }
+        meta:
+          allOf:
+            - { $ref: '#/components/schemas/Meta' }
+            - type: object
+              properties:
+                cycleTotalHrs: { type: number, format: double }
+                grandTotalHrs: { type: number, format: double }
+
+    # ── ribbon & journey ──────────────────────────────────────────────────
+    RibbonSegment:
+      type: object
+      properties:
+        stageCode: { type: string }
+        displayName: { type: string }
+        icon: { type: [string, 'null'] }
+        state: { $ref: '#/components/schemas/SegmentState' }
+        sequence: { type: integer }
+        owner: { $ref: '#/components/schemas/UserRef' }
+        ownerRole: { $ref: '#/components/schemas/RoleCode' }
+        enteredAt: { type: [string, 'null'], format: date-time }
+        exitedAt: { type: [string, 'null'], format: date-time }
+        durationMins:
+          type: [integer, 'null']
+          description: Working minutes, not wall-clock. Weekends and holidays excluded.
+        effortHrs: { type: number, format: double }
+        idleMins:
+          type: [integer, 'null']
+          description: '`durationMins − effort`. High idle against low effort is a queue problem.'
+        iterationNo: { type: integer }
+        loopBackCount: { type: integer, description: Drives the loop-back badge. }
+        skipReason: { type: [string, 'null'] }
+        handoffNote: { type: [string, 'null'] }
+    Ribbon:
+      type: object
+      properties:
+        cycleNo: { type: integer }
+        iterationNo: { type: integer }
+        isSealed: { type: boolean, description: True for a past cycle — renders read-only. }
+        currentStageCode: { type: [string, 'null'] }
+        canAdvance:
+          type: boolean
+          description: |
+            Whether **this caller** may advance the ticket — the golden rule,
+            resolved server-side. The contextual action button is hidden for
+            everyone else.
+        segments: { type: array, items: { $ref: '#/components/schemas/RibbonSegment' } }
+    RibbonResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/Ribbon' } }
+    HandoffRequest:
+      type: object
+      required: [toStageCode, toUserId]
+      properties:
+        toStageCode: { type: string, description: Pre-filled from the workflow template. }
+        toUserId:
+          type: integer
+          format: int64
+          description: |
+            Must hold the receiving stage's owner role on this project. The picker
+            shows each candidate's current open load, so work is not handed to
+            whoever is already drowning.
+        note: { type: string, maxLength: 4000 }
+        effortHours:
+          type: [number, 'null']
+          format: double
+          minimum: 0
+          description: Effort for the stage being left. Mandatory unless the project allows warn-only.
+        attachmentIds: { type: array, items: { type: integer, format: int64 } }
+    ReworkRequest:
+      type: object
+      required: [toStageCode, reason]
+      properties:
+        toStageCode: { type: string, description: Must be in the current stage's allowed return targets. }
+        reason: { type: string, minLength: 3, maxLength: 2000 }
+        action: { $ref: '#/components/schemas/TransitionAction' }
+        defects:
+          type: array
+          items: { type: string }
+          description: Expected on a QA failure.
+        toUserId: { type: [integer, 'null'], format: int64 }
+        effortHours: { type: [number, 'null'], format: double }
+    JourneyRow:
+      type: object
+      properties:
+        iterationNo: { type: integer }
+        cycleNo: { type: integer }
+        stageCode: { type: string }
+        resource: { $ref: '#/components/schemas/UserRef' }
+        role: { $ref: '#/components/schemas/RoleCode' }
+        enteredAt: { type: string, format: date-time }
+        exitedAt: { type: [string, 'null'], format: date-time }
+        durationMins: { type: [integer, 'null'] }
+        effortHrs: { type: number, format: double }
+        idleMins: { type: [integer, 'null'] }
+    JourneyResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            rows: { type: array, items: { $ref: '#/components/schemas/JourneyRow' } }
+            perResource:
+              type: array
+              items:
+                type: object
+                properties:
+                  resource: { $ref: '#/components/schemas/UserRef' }
+                  effortHrs: { type: number, format: double }
+            cycleTotalHrs: { type: number, format: double }
+            allCyclesTotalHrs: { type: number, format: double }
+    StageQueueResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              ticket: { $ref: '#/components/schemas/Ticket' }
+              enteredStageAt: { type: string, format: date-time }
+              timeInStageMins: { type: integer, description: Working minutes. }
+              stageSlaBreached: { type: boolean }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    # ── comments & attachments ────────────────────────────────────────────
+    Comment:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        body: { type: string }
+        originalBody: { type: [string, 'null'], description: Preserved when edited. }
+        author: { $ref: '#/components/schemas/UserRef' }
+        authorRole: { $ref: '#/components/schemas/RoleCode' }
+        isClientVisible: { type: boolean }
+        isEdited: { type: boolean }
+        isDeleted: { type: boolean, description: Tombstone; the row survives. }
+        editableUntil: { type: [string, 'null'], format: date-time }
+        stageCode: { type: [string, 'null'], description: Stage at time of writing. }
+        cycleNo: { type: integer }
+        iterationNo: { type: integer }
+        mentions: { type: array, items: { $ref: '#/components/schemas/UserRef' } }
+        attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+        createdAt: { type: string, format: date-time }
+    CommentWriteRequest:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 20000 }
+        isClientVisible: { type: boolean, default: false }
+        mentionUserIds: { type: array, items: { type: integer, format: int64 } }
+        attachmentIds: { type: array, items: { type: integer, format: int64 } }
+    CommentResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/Comment' } }
+    CommentListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Comment' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    Attachment:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        fileName: { type: string }
+        contentType: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        scanStatus:
+          type: string
+          enum: [PENDING, CLEAN, INFECTED]
+          description: Not downloadable until `CLEAN`.
+        downloadUrl: { type: [string, 'null'], description: Short-lived signed URL. Never a public bucket path. }
+        thumbnailUrl: { type: [string, 'null'] }
+        isClientVisible: { type: boolean }
+        isDeleted: { type: boolean }
+        uploadedBy: { $ref: '#/components/schemas/UserRef' }
+        stageCode: { type: [string, 'null'] }
+        cycleNo: { type: integer }
+        createdAt: { type: string, format: date-time }
+    AttachmentResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/Attachment' } }
+    AttachmentListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    # ── clients ───────────────────────────────────────────────────────────
+    ClientRef:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        clientCode: { type: string }
+        name: { type: string }
+    Client:
+      allOf:
+        - { $ref: '#/components/schemas/ClientRef' }
+        - type: object
+          properties:
+            domain: { type: [string, 'null'] }
+            accountManager: { $ref: '#/components/schemas/UserRef' }
+            supportPlan: { type: [string, 'null'] }
+            slaPolicyId: { type: [integer, 'null'], format: int64 }
+            timezone: { type: [string, 'null'] }
+            isActive: { type: boolean }
+            openTicketCount: { type: integer }
+            primaryContact: { $ref: '#/components/schemas/Contact' }
+    ClientWriteRequest:
+      type: object
+      required: [clientCode, name]
+      properties:
+        clientCode: { type: string, minLength: 2, maxLength: 50 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        domain: { type: [string, 'null'] }
+        accountManagerId: { type: [integer, 'null'], format: int64 }
+        supportPlan: { type: [string, 'null'] }
+        slaPolicyId: { type: [integer, 'null'], format: int64 }
+        timezone: { type: [string, 'null'] }
+        projectIds: { type: array, items: { type: integer, format: int64 } }
+    Contact:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: [string, 'null'] }
+        isPrimary: { type: boolean }
+        notificationOptIn: { type: boolean }
+        portalAccess: { type: boolean }
+    ContactWriteRequest:
+      type: object
+      required: [name, email]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 150 }
+        email: { type: string, format: email }
+        phone: { type: [string, 'null'] }
+        isPrimary: { type: boolean, default: false }
+        notificationOptIn: { type: boolean, default: true }
+        portalAccess: { type: boolean, default: false }
+    ClientResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/Client' } }
+    ClientListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Client' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ContactResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/Contact' } }
+    ContactListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Contact' } }
+    Client360Response:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            client: { $ref: '#/components/schemas/Client' }
+            tickets: { type: array, items: { $ref: '#/components/schemas/Ticket' } }
+            openCount: { type: integer }
+            closedCount: { type: integer }
+            slaCompliancePct: { type: number, format: double }
+            avgResolutionHrs: { type: number, format: double }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    # ── imports ───────────────────────────────────────────────────────────
+    ImportUploadResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            uploadId: { type: string, format: uuid }
+            sheets: { type: array, items: { type: string } }
+            headers: { type: array, items: { type: string } }
+            rowCount: { type: integer }
+            suggestedMapping:
+              type: object
+              additionalProperties: { type: string }
+              description: Auto-matched by header; every column stays manually overridable.
+    ImportValidateRequest:
+      type: object
+      required: [uploadId, mapping]
+      properties:
+        uploadId: { type: string, format: uuid }
+        sheet: { type: string }
+        mapping:
+          type: object
+          additionalProperties: { type: string }
+          description: Target field → source column.
+    ImportRowVerdict:
+      type: object
+      properties:
+        rowNumber: { type: integer }
+        verdict: { type: string, enum: [WILL_CREATE, WILL_UPDATE, DUPLICATE_IN_FILE, REJECTED] }
+        reason: { type: [string, 'null'] }
+        values: { type: object, additionalProperties: true }
+    ImportPreviewResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            willCreate: { type: integer }
+            willUpdate: { type: integer }
+            duplicates: { type: integer }
+            rejected: { type: integer }
+            rows: { type: array, items: { $ref: '#/components/schemas/ImportRowVerdict' } }
+    ImportCommitRequest:
+      type: object
+      required: [uploadId, mapping]
+      properties:
+        uploadId: { type: string, format: uuid }
+        sheet: { type: string }
+        mapping: { type: object, additionalProperties: { type: string } }
+        skipRejected: { type: boolean, default: true }
+    ImportBatchResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            batchId: { type: string, format: uuid }
+            status: { type: string, enum: [QUEUED, RUNNING, COMPLETED, FAILED] }
+            processed: { type: integer }
+            total: { type: integer }
+            created: { type: integer }
+            updated: { type: integer }
+            rejected: { type: integer }
+            errorReportUrl:
+              type: [string, 'null']
+              description: '`.xlsx` of rejected rows with an appended Reason column.'
+
+    # ── masters ───────────────────────────────────────────────────────────
+    TaskType:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        icon: { type: [string, 'null'] }
+        colour: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        defaultLevel: { $ref: '#/components/schemas/Level' }
+        defaultSlaHrs: { type: [number, 'null'], format: double }
+        isActive: { type: boolean }
+    TaskTypeListResponse:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/TaskType' } } }
+    Priority:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        level: { $ref: '#/components/schemas/Level' }
+        colour: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        defaultSlaHrs: { type: [number, 'null'], format: double }
+        autoEscalates: { type: boolean }
+    PriorityListResponse:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/Priority' } } }
+    HolidayListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            holidays:
+              type: array
+              items:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  name: { type: string }
+            weeklyOff:
+              type: array
+              items: { type: integer, minimum: 0, maximum: 6 }
+              description: ISO day numbers that are non-working.
+            workDayStart: { type: string, examples: ['09:30'] }
+            workDayEnd: { type: string, examples: ['18:30'] }
+    WorkflowStage:
+      type: object
+      properties:
+        stageCode: { type: string }
+        displayName: { type: string }
+        sequence: { type: integer }
+        ownerRole: { $ref: '#/components/schemas/RoleCode' }
+        icon: { type: [string, 'null'] }
+        stageSlaHrs: { type: [number, 'null'], format: double }
+        isOptional: { type: boolean }
+        canReturnTo:
+          type: array
+          items: { type: string }
+          description: Allowed backward targets. Stored as JSON — MySQL has no array type.
+        isDeprecated: { type: boolean, description: 'Deprecated, never deleted — historical ribbons depend on it.' }
+    WorkflowTemplate:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        version: { type: integer }
+        projectId: { type: [integer, 'null'], format: int64 }
+        taskTypeId: { type: [integer, 'null'], format: int64 }
+        isActive: { type: boolean }
+        stages: { type: array, items: { $ref: '#/components/schemas/WorkflowStage' } }
+    WorkflowTemplateWriteRequest:
+      type: object
+      required: [name, stages]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 150 }
+        projectId: { type: [integer, 'null'], format: int64 }
+        taskTypeId: { type: [integer, 'null'], format: int64 }
+        stages: { type: array, minItems: 1, items: { $ref: '#/components/schemas/WorkflowStage' } }
+    WorkflowTemplateResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/WorkflowTemplate' } }
+    WorkflowTemplateListResponse:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/WorkflowTemplate' } } }
+
+    # ── dashboard & reports ───────────────────────────────────────────────
+    DashboardSummaryResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            asOf: { type: string, format: date-time, description: Summary tables refresh every five minutes. }
+            cards:
+              type: array
+              items:
+                type: object
+                properties:
+                  key: { type: string, examples: [open] }
+                  label: { type: string }
+                  value: { type: number }
+                  deltaPct: { type: [number, 'null'] }
+                  sparkline: { type: array, items: { type: number } }
+                  drillDown: { type: string, examples: ['/tickets?status=OPEN&level=CRITICAL'] }
+    WidgetResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            key: { type: string }
+            asOf: { type: string, format: date-time }
+            series:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  points:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        x: { type: [string, number] }
+                        y: { type: number }
+                        drillDown: { type: [string, 'null'] }
+    ReportResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            reportKey: { type: string }
+            columns:
+              type: array
+              items:
+                type: object
+                properties:
+                  key: { type: string }
+                  label: { type: string }
+                  type: { type: string, enum: [string, number, date, duration, percent] }
+            rows: { type: array, items: { type: object, additionalProperties: true } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ReportScheduleRequest:
+      type: object
+      required: [reportKey, cadence, recipients]
+      properties:
+        reportKey: { type: string }
+        cadence: { type: string, enum: [DAILY, WEEKLY, MONTHLY] }
+        format: { type: string, enum: [xlsx, csv, pdf], default: xlsx }
+        recipients: { type: array, minItems: 1, items: { type: string, format: email } }
+        parameters: { type: object, additionalProperties: true }
+
+    # ── notifications, chat, mail, audit ──────────────────────────────────
+    Notification:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        eventKey: { type: string, examples: [TICKET_HANDED_OFF] }
+        title: { type: string }
+        body: { type: string }
+        ticketId: { type: [string, 'null'] }
+        isRead: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        deepLink: { type: string }
+    NotificationListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+        meta:
+          allOf:
+            - { $ref: '#/components/schemas/Meta' }
+            - type: object
+              properties:
+                unreadCount: { type: integer }
+    ChatThread:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { type: string, enum: [TICKET, DIRECT, PROJECT] }
+        title: { type: string }
+        ticketId: { type: [string, 'null'] }
+        unreadCount: { type: integer }
+        lastMessageAt: { type: [string, 'null'], format: date-time }
+        participants: { type: array, items: { $ref: '#/components/schemas/UserRef' } }
+    ChatThreadListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ChatThread' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        body: { type: string }
+        author: { $ref: '#/components/schemas/UserRef' }
+        kind: { type: string, enum: [TEXT, STATUS_REQUEST, SYSTEM], default: TEXT }
+        isEdited: { type: boolean }
+        isDeleted: { type: boolean }
+        editableUntil: { type: [string, 'null'], format: date-time }
+        attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+        readBy: { type: array, items: { type: integer, format: int64 } }
+        createdAt: { type: string, format: date-time }
+    ChatMessageResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ChatMessage' } }
+    ChatMessageListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ChatMessage' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    EmailLogEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        toAddress: { type: string, format: email }
+        subject: { type: string }
+        eventKey: { type: string }
+        status: { type: string, enum: [QUEUED, SENT, BOUNCED, FAILED] }
+        retryCount: { type: integer }
+        nextAttemptAt: { type: [string, 'null'], format: date-time }
+        providerMessageId: { type: [string, 'null'] }
+        sentAt: { type: [string, 'null'], format: date-time }
+    EmailLogListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/EmailLogEntry' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    AuditLogEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        actor: { $ref: '#/components/schemas/UserRef' }
+        action: { type: string }
+        entityType: { type: string }
+        entityId: { type: string }
+        ipAddress: { type: [string, 'null'] }
+        userAgent: { type: [string, 'null'] }
+        detail: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+    AuditLogListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/AuditLogEntry' } }
+        meta: { $ref: '#/components/schemas/Meta' }

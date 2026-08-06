@@ -114,11 +114,27 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------------------- contract
+  # Note: the backend half of the contract gate lives in the `backend` job.
+  # ContractConformanceTest fails if the running app serves an operation the
+  # contract does not describe, or any mutation verb on an append-only path,
+  # and prints per-area coverage of the contract.
   contract:
-    name: OpenAPI contract — staleness check
+    name: OpenAPI contract — validity, conventions, staleness
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate the OpenAPI document
+        run: npx --yes @redocly/cli@latest lint contracts/openapi.yaml
+      - name: Enforce the API conventions
+        run: |
+          # Redocly checks it is valid OpenAPI. This checks it is *our* OpenAPI —
+          # the envelope, problem+json, idempotency, ETag/If-Match, cursor
+          # pagination, 404-not-403, and no mutation verb on append-only paths.
+          pip install --quiet pyyaml
+          python3 contracts/check-conventions.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -131,8 +147,11 @@ jobs:
         run: npm run api:generate
       - name: Fail if the committed client is stale
         run: |
-          # The ONLY thing preventing Java ⇄ TypeScript drift now that shared
-          # Zod schemas are off the table.
+          # The ONLY thing preventing Java <-> TypeScript drift now that shared
+          # Zod schemas are off the table (PLAN.md §2.2, deviation D-4).
+          #
+          # Verified to actually fire: adding one field to a schema in
+          # contracts/openapi.yaml dirties four generated files.
           if [ -n "$(git status --porcelain frontend/src/api/generated)" ]; then
             echo "::error::Generated API client is stale."
             echo "Run 'npm run api:generate' in frontend/ and commit the result."
@@ -140,6 +159,14 @@ jobs:
             exit 1
           fi
           echo "✓ Generated client is up to date."
+      - name: Type-check the regenerated client
+        working-directory: frontend
+        run: |
+          # A spec change can generate a client that does not compile — an enum
+          # narrowed to a name TypeScript reserves, a schema that recurses. The
+          # frontend job only type-checks what was committed, so without this the
+          # break surfaces in whichever unrelated PR next touches the frontend.
+          npx tsc --noEmit -p tsconfig.app.json
 
   # ---------------------------------------------------------------- package
   package:

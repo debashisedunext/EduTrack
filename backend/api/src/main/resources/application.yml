@@ -79,8 +79,23 @@ management:
 springdoc:
   api-docs:
     path: /v3/api-docs
+    # Stable ordering. springdoc emits reflection order otherwise, so the
+    # generated client churns between runs and CI's staleness check (D-005)
+    # fails on a diff that means nothing.
+    version: openapi_3_1
   swagger-ui:
     path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+    display-request-duration: true
+  writer-with-order-by-keys: true
+  writer-with-default-pretty-printer: true
+  # Bean Validation annotations on the DTOs become minLength/pattern/required in
+  # the schema — the single source of truth for validation, executed on both
+  # sides via generated Zod. PLAN.md §2.2, deviation D-4.
+  model-converters:
+    pageable-converter:
+      enabled: false
 
 edutrack:
   storage:
