@@ -31,6 +31,13 @@ spring:
     baseline-on-migrate: false
     # Timestamp versioning: V20260812_1430__description.sql — CONTRIBUTING.md
     validate-on-migrate: true
+    # Migrations run as edutrack_migrate, NOT as the runtime user (A-010).
+    # edutrack_app holds no DDL and only INSERT+SELECT on the append-only
+    # tables, so it cannot create a schema even if asked to. Keeping the two
+    # credentials separate is what lets the runtime user stay that narrow.
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:edutrack}?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC&characterEncoding=utf8&serverTimezone=UTC
+    user: ${DB_MIGRATE_USER:edutrack_migrate}
+    password: ${DB_MIGRATE_PASSWORD:edutrack_migrate}
 
   data:
     redis:

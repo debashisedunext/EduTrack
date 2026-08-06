@@ -1,6 +1,6 @@
 # EduTrack — common tasks. Run `make` for the list.
 .DEFAULT_GOAL := help
-.PHONY: help up down logs reset api web verify test clean
+.PHONY: help up down logs reset grants api web verify test clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -20,6 +20,11 @@ logs: ## Tail the stack
 
 reset: ## Stop the stack and DELETE all local data
 	docker compose down -v
+
+grants: ## Apply edutrack_app runtime grants (run AFTER the first migration)
+	@docker exec -i edutrack-mysql mysql -uroot -p$${MYSQL_ROOT_PASSWORD:-rootpw} \
+	  < docker/grants/apply-app-grants.sql
+	@echo "  edutrack_app re-granted per table — INSERT+SELECT only on the append-only tables"
 
 api: ## Run the API on :8080 with the local profile
 	cd backend && ./mvnw -pl api spring-boot:run -Dspring-boot.run.profiles=local

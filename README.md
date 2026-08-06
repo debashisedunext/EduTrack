@@ -8,9 +8,9 @@ Merges project task assignment (Jira-like) with client ticket intake and SLA (Ze
 
 ## Quick start
 
-**Prerequisites: JDK 21 and Docker.** That is the whole list.
+**Prerequisites: JDK 25 and Docker.** That is the whole list.
 
-Maven and Node are *not* installed by hand — the Maven wrapper is committed, and Maven downloads a pinned Node itself. Spring Boot 3.3 does not run on Java 24+; see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for a no-admin JDK 21 install.
+Maven and Node are *not* installed by hand — the Maven wrapper is committed, and Maven downloads a pinned Node itself. Spring Boot 3.3 does not run on Java 24+; see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for a no-admin JDK 25 install.
 
 ```bash
 git clone https://github.com/debashisedunext/EduTrack.git && cd EduTrack
