@@ -78,7 +78,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
           cache: maven
       - name: Build and test
         working-directory: backend
@@ -114,11 +114,27 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------------------- contract
+  # Note: the backend half of the contract gate lives in the `backend` job.
+  # ContractConformanceTest fails if the running app serves an operation the
+  # contract does not describe, or any mutation verb on an append-only path,
+  # and prints per-area coverage of the contract.
   contract:
-    name: OpenAPI contract — staleness check
+    name: OpenAPI contract — validity, conventions, staleness
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate the OpenAPI document
+        run: npx --yes @redocly/cli@latest lint contracts/openapi.yaml
+      - name: Enforce the API conventions
+        run: |
+          # Redocly checks it is valid OpenAPI. This checks it is *our* OpenAPI —
+          # the envelope, problem+json, idempotency, ETag/If-Match, cursor
+          # pagination, 404-not-403, and no mutation verb on append-only paths.
+          pip install --quiet pyyaml
+          python3 contracts/check-conventions.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -131,8 +147,11 @@ jobs:
         run: npm run api:generate
       - name: Fail if the committed client is stale
         run: |
-          # The ONLY thing preventing Java ⇄ TypeScript drift now that shared
-          # Zod schemas are off the table.
+          # The ONLY thing preventing Java <-> TypeScript drift now that shared
+          # Zod schemas are off the table (PLAN.md §2.2, deviation D-4).
+          #
+          # Verified to actually fire: adding one field to a schema in
+          # contracts/openapi.yaml dirties four generated files.
           if [ -n "$(git status --porcelain frontend/src/api/generated)" ]; then
             echo "::error::Generated API client is stale."
             echo "Run 'npm run api:generate' in frontend/ and commit the result."
@@ -140,6 +159,14 @@ jobs:
             exit 1
           fi
           echo "✓ Generated client is up to date."
+      - name: Type-check the regenerated client
+        working-directory: frontend
+        run: |
+          # A spec change can generate a client that does not compile — an enum
+          # narrowed to a name TypeScript reserves, a schema that recurses. The
+          # frontend job only type-checks what was committed, so without this the
+          # break surfaces in whichever unrelated PR next touches the frontend.
+          npx tsc --noEmit -p tsconfig.app.json
 
   # ---------------------------------------------------------------- package
   package:
@@ -152,7 +179,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
           cache: maven
       - name: Full build — Maven downloads its own Node
         working-directory: backend
@@ -166,6 +193,51 @@ jobs:
             exit 1
           fi
           echo "✓ $JAR contains the built frontend"
+      - name: Smoke-test the jar — start it and serve a request
+        run: |
+          # Inspecting the artifact is not the same as running it. A dependency
+          # declared at the wrong scope produces a jar that looks perfect and
+          # dies during context refresh; that shipped once, green, because this
+          # job only ever ran `unzip -l`.
+          JAR=$(ls backend/api/target/edutrack-api-*.jar | head -1)
+          java -jar "$JAR" \
+            --spring.profiles.active=local \
+            --spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration \
+            --server.port=8099 \
+            --management.health.redis.enabled=false \
+            --management.health.mail.enabled=false > /tmp/app.log 2>&1 &
+          APP=$!
+          # Readiness is `/`, not /actuator/health. Health aggregates the Redis
+          # and mail indicators, which are DOWN here by design — there is no
+          # infrastructure in this job, and there should not be: the question is
+          # whether the jar starts and serves, not whether docker-compose is up.
+          # Those two indicators are disabled above so the health assertion below
+          # is about the application rather than the environment.
+          up=0
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://localhost:8099/; then up=1; break; fi
+            if ! kill -0 $APP 2>/dev/null; then
+              echo "::error::The app exited during startup."; tail -60 /tmp/app.log; exit 1
+            fi
+            sleep 2
+          done
+          if [ "$up" -ne 1 ]; then
+            echo "::error::The app never became healthy within 120s."; tail -60 /tmp/app.log; exit 1
+          fi
+          fail=0
+          check() {
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8099$1")
+            if [ "$code" = "$2" ]; then echo "  ✓ $1 -> $code"
+            else echo "::error::$1 returned $code, expected $2"; fail=1; fi
+          }
+          check /                     200   # the SPA
+          check /tickets/CRM-26-00347 200   # a deep link must reach index.html
+          check /v3/api-docs/edutrack 200   # springdoc, which D-005 depends on
+          check /actuator/health      200
+          check /api/v1/nope          404   # an honest 404, not the HTML shell
+          kill $APP 2>/dev/null || true
+          if [ $fail -ne 0 ]; then tail -60 /tmp/app.log; exit 1; fi
+          echo "✓ the packaged jar starts and serves"
       - uses: actions/upload-artifact@v4
         with:
           name: edutrack-api-jar

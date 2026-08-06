@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "Manual status overrides. Status is normally DERIVED from git — merged to",
+    "develop = done, open PR = in-review, pushed branch = in-progress. Use this",
+    "file only when reality and git genuinely disagree.",
+    "",
+    "Every override needs a reason. An override without one is how a plan starts",
+    "reporting what people wish were true.",
+    "",
+    "  \"A-013\": { \"status\": \"in-progress\", \"pct\": 50, \"reason\": \"...\" }",
+    "",
+    "Valid status values: todo | in-progress | in-review | done | blocked"
+  ],
+
+  "A-001": {
+    "status": "done",
+    "reason": "Maven multi-module skeleton (common/domain/api/worker) builds green; landed before the task-ID commit convention"
+  },
+  "A-002": {
+    "status": "done",
+    "reason": "docker-compose.yml verified running MySQL 8.4 + Redis + MinIO + Mailpit; predates the task-ID commit convention"
+  },
+  "A-007": {
+    "status": "done",
+    "reason": "V20260805_1106__baseline_masters_ops.sql applied and verified; landed inside the A-004/A-005 commit"
+  },
+  "A-008": {
+    "status": "done",
+    "reason": "V20260805_1107__immutability_triggers.sql applied; all six triggers verified rejecting UPDATE/DELETE against live MySQL 8.4"
+  },
+  "A-009": {
+    "status": "done",
+    "reason": "V20260805_1108__generated_columns_and_indexes.sql applied; pcd_open and current_ticket_id generated columns plus FULLTEXT confirmed"
+  },
+  "A-011": {
+    "status": "done",
+    "reason": ".github/workflows/ci.yml green — migration guard, backend verify, frontend build, OpenAPI staleness, single-jar packaging"
+  },
+  "A-010": {
+    "status": "done",
+    "reason": "Shivendra, commit 0518564 — docker/grants/apply-app-grants.sql grants edutrack_app SELECT+INSERT only on the three append-only tables, and withholds GRANT OPTION from edutrack_migrate. Commit subject said 'A011' without the hyphen, so git could not match it"
+  },
+  "A-013": {
+    "status": "done",
+    "reason": "Shivendra, commit 0518564 — SchemaIntegrationIT covers update/delete rejection on ticket_history and ticket_effort_logs, delete and non-seal update rejection on ticket_stage_transitions, and seal-succeeds-exactly-once, on Testcontainers. Supersedes the earlier hand-verification; commit subject said 'A011' without the hyphen"
+  }
+}

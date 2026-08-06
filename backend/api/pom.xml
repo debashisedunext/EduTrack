@@ -27,6 +27,14 @@
     <dependency><groupId>software.amazon.awssdk</groupId><artifactId>s3</artifactId></dependency>
     <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></dependency>
     <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
+    <!-- Runtime, NOT test. springdoc instantiates a YAMLFactory during context
+         refresh, so without this on the runtime classpath the packaged jar does
+         not start at all. It arrives transitively via swagger-core, but an
+         explicit declaration overrides the transitive scope — declaring it
+         `test` silently removed it from the jar and CI stayed green, because the
+         package job inspects the artifact without ever starting it.
+         ContractConformanceTest also reads contracts/openapi.yaml with it. -->
+    <dependency><groupId>com.fasterxml.jackson.dataformat</groupId><artifactId>jackson-dataformat-yaml</artifactId></dependency>
     <dependency><groupId>com.tngtech.archunit</groupId><artifactId>archunit-junit5</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.testcontainers</groupId><artifactId>mysql</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.testcontainers</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>

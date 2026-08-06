@@ -8,7 +8,7 @@ From an empty folder to four developers writing code. Follow in order.
 
 | Tool | Version | Check |
 |---|---|---|
-| Java (Temurin) | **21 LTS** | `java -version` |
+| Java (Temurin) | **25 LTS** | `java -version` |
 | Docker | current | `docker ps` |
 | ~~Maven~~ | — | not needed — `./mvnw` is committed |
 | ~~Node.js~~ | — | not needed — Maven downloads a pinned v22 into `target/` |
@@ -16,24 +16,26 @@ From an empty folder to four developers writing code. Follow in order.
 | Claude Code | current | `claude --version` |
 | GitHub account | — | with repo write access |
 
-### Installing JDK 21 — read this before you build
+### Installing JDK 25 — read this before you build
 
-**Spring Boot 3.3 does not run on Java 24+.** If `java -version` shows anything above 21, the build fails in ways that do not obviously point at the JDK. Install Temurin 21 and make it the default.
+**JDK 25 is the minimum, not a suggestion.** `maven.compiler.release` is 25, so anything older fails to compile — and the error names a class file version, not a JDK, which is why it is worth stating up front.
+
+A newer JDK is fine: the build and unit tests are verified green on JDK 26. But **CI pins 25**, so 25 is what actually gates a merge. If a build passes locally on a newer JDK and fails in CI, that gap is the first thing to check.
 
 **With Homebrew:**
 
 ```bash
-brew install --cask temurin@21
+brew install --cask temurin@25
 ```
 
 **Without Homebrew** (no admin rights needed — macOS also looks in your home directory):
 
 ```bash
 mkdir -p ~/Library/Java/JavaVirtualMachines
-curl -L -o /tmp/jdk21.tar.gz \
-  "https://api.adoptium.net/v3/binary/latest/21/ga/mac/aarch64/jdk/hotspot/normal/eclipse"
-tar xzf /tmp/jdk21.tar.gz -C /tmp
-mv /tmp/jdk-21* ~/Library/Java/JavaVirtualMachines/temurin-21.jdk
+curl -L -o /tmp/jdk25.tar.gz \
+  "https://api.adoptium.net/v3/binary/latest/25/ga/mac/aarch64/jdk/hotspot/normal/eclipse"
+tar xzf /tmp/jdk25.tar.gz -C /tmp
+mv /tmp/jdk-25* ~/Library/Java/JavaVirtualMachines/temurin-25.jdk
 ```
 
 *(Intel Mac: swap `aarch64` for `x64`.)*
@@ -41,14 +43,14 @@ mv /tmp/jdk-21* ~/Library/Java/JavaVirtualMachines/temurin-21.jdk
 **Then make it the default** — append to `~/.zshrc`:
 
 ```bash
-export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
+export JAVA_HOME="$(/usr/libexec/java_home -v 25)"
 export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
 Open a new terminal and confirm:
 
 ```bash
-java -version        # must report 21.x
+java -version        # must report 25.x
 /usr/libexec/java_home -V   # lists every JDK macOS can see
 ```
 

@@ -31,6 +31,13 @@ spring:
     baseline-on-migrate: false
     # Timestamp versioning: V20260812_1430__description.sql — CONTRIBUTING.md
     validate-on-migrate: true
+    # Migrations run as edutrack_migrate, NOT as the runtime user (A-010).
+    # edutrack_app holds no DDL and only INSERT+SELECT on the append-only
+    # tables, so it cannot create a schema even if asked to. Keeping the two
+    # credentials separate is what lets the runtime user stay that narrow.
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:edutrack}?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC&characterEncoding=utf8&serverTimezone=UTC
+    user: ${DB_MIGRATE_USER:edutrack_migrate}
+    password: ${DB_MIGRATE_PASSWORD:edutrack_migrate}
 
   data:
     redis:
@@ -72,8 +79,23 @@ management:
 springdoc:
   api-docs:
     path: /v3/api-docs
+    # Stable ordering. springdoc emits reflection order otherwise, so the
+    # generated client churns between runs and CI's staleness check (D-005)
+    # fails on a diff that means nothing.
+    version: openapi_3_1
   swagger-ui:
     path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+    display-request-duration: true
+  writer-with-order-by-keys: true
+  writer-with-default-pretty-printer: true
+  # Bean Validation annotations on the DTOs become minLength/pattern/required in
+  # the schema — the single source of truth for validation, executed on both
+  # sides via generated Zod. PLAN.md §2.2, deviation D-4.
+  model-converters:
+    pageable-converter:
+      enabled: false
 
 edutrack:
   storage:
@@ -88,11 +110,7 @@ logging:
 
 ---
 # ---------------------------------------------------------------------------
-# Local development profile.
-#
-# Stream A replaces the placeholder below with the real dev-noauth principal
-# injection (task A-012, due day 10). It MUST refuse to start outside `local`,
-# and CI runs the full suite with it disabled.
+# Local development profile. Safe on its own — no principal is injected here.
 # ---------------------------------------------------------------------------
 spring:
   config:
@@ -104,3 +122,39 @@ spring:
 logging:
   level:
     com.edunext.edutrack: DEBUG
+
+---
+# ---------------------------------------------------------------------------
+# A-012 · dev-noauth. Opt-in on top of `local` — activate BOTH together:
+#
+#     ./mvnw -pl api spring-boot:run -Dspring-boot.run.profiles=local,dev-noauth
+#
+# Never alone: DevNoAuthConfig refuses to start the application if `local`
+# is not also active, so this fake principal can never reach a real
+# environment. CI activates neither profile, so none of this code loads there.
+#
+# Injects ONE configurable fake principal so Streams B, C and D can develop
+# against a realistic Authentication before A-020's real login exists. The
+# values below are the org-wide defaults (Admin, unscoped). To develop as a
+# scoped role, override in your own gitignored application-local.yml:
+#
+#   edutrack:
+#     dev-noauth:
+#       user-id: 4
+#       role: DEVELOPER
+#       project-ids: [1, 2]
+#       reportee-ids: []
+# ---------------------------------------------------------------------------
+spring:
+  config:
+    activate:
+      on-profile: dev-noauth
+
+edutrack:
+  dev-noauth:
+    user-id: 1
+    username: dev.admin
+    full-name: "Dev Admin (fake principal — A-012)"
+    role: ADMIN
+    project-ids: []
+    reportee-ids: []

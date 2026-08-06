@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "Read by plan-tracker (https://github.com/debashisedunext/plan-tracker).",
+    "Run `plan refresh` to rebuild the schedule, `plan cron status` to check",
+    "the 09:00 job. See docs/plan/README.md for how the whole thing works."
+  ],
+
+  "project": "EduTrack",
+  "repo": "debashisedunext/EduTrack",
+  "start": "2026-08-03",
+  "branch": "develop",
+  "plan_dir": "docs/plan",
+  "task_id": "[A-D]-\\d{3}",
+  "title_max": 68,
+  "blocked_hint": "See `docs/DEPENDENCIES.md` §5 for what to pick up instead.",
+
+  "streams": {
+    "A": {
+      "title": "Platform & Security",
+      "owner": "Shivendra",
+      "github": "shivendraedunext-18",
+      "backlog": "docs/streams/STREAM-A-PLATFORM.md",
+      "color": "#4F46E5"
+    },
+    "B": {
+      "title": "Masters & Clients",
+      "owner": "Ayush",
+      "github": "Ayushedunext",
+      "backlog": "docs/streams/STREAM-B-MASTERS.md",
+      "color": "#F59E0B"
+    },
+    "C": {
+      "title": "Tickets & Ribbon",
+      "owner": "Divyansh",
+      "github": "Divyanshedunext",
+      "backlog": "docs/streams/STREAM-C-TICKETS.md",
+      "color": "#BE185D"
+    },
+    "D": {
+      "title": "Engines & Realtime",
+      "owner": "Debashis",
+      "github": "debashisedunext",
+      "backlog": "docs/streams/STREAM-D-ENGINES.md",
+      "color": "#06B6D4"
+    }
+  }
+}
