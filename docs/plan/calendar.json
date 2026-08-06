@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "The working calendar every date in the plan is computed against.",
+    "Weekends are always non-working. Add org holidays to `holidays` as",
+    "YYYY-MM-DD, and per-developer time off under `leave`. Anything listed",
+    "here shifts the forecast on the next 09:00 run.",
+    "",
+    "The same holiday list is the input Ayush needs for B-023/B-024 — the",
+    "working-hours service every SLA calculation routes through. Keep one",
+    "list, not two, or the Gantt and the SLA engine will disagree."
+  ],
+
+  "project_start": "2026-08-03",
+  "working_weekdays": [0, 1, 2, 3, 4],
+  "hours_per_day": 8,
+
+  "holidays": [],
+
+  "leave": {
+    "Shivendra": [],
+    "Ayush": [],
+    "Divyansh": [],
+    "Debashis": []
+  }
+}

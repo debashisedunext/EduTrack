@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "Manual status overrides. Status is normally DERIVED from git — merged to",
+    "develop = done, open PR = in-review, pushed branch = in-progress. Use this",
+    "file only when reality and git genuinely disagree.",
+    "",
+    "Every override needs a reason. An override without one is how a plan starts",
+    "reporting what people wish were true.",
+    "",
+    "  \"A-013\": { \"status\": \"in-progress\", \"pct\": 50, \"reason\": \"...\" }",
+    "",
+    "Valid status values: todo | in-progress | in-review | done | blocked"
+  ],
+
+  "A-001": {
+    "status": "done",
+    "reason": "Maven multi-module skeleton (common/domain/api/worker) builds green; landed before the task-ID commit convention"
+  },
+  "A-002": {
+    "status": "done",
+    "reason": "docker-compose.yml verified running MySQL 8.4 + Redis + MinIO + Mailpit; predates the task-ID commit convention"
+  },
+  "A-007": {
+    "status": "done",
+    "reason": "V20260805_1106__baseline_masters_ops.sql applied and verified; landed inside the A-004/A-005 commit"
+  },
+  "A-008": {
+    "status": "done",
+    "reason": "V20260805_1107__immutability_triggers.sql applied; all six triggers verified rejecting UPDATE/DELETE against live MySQL 8.4"
+  },
+  "A-009": {
+    "status": "done",
+    "reason": "V20260805_1108__generated_columns_and_indexes.sql applied; pcd_open and current_ticket_id generated columns plus FULLTEXT confirmed"
+  },
+  "A-011": {
+    "status": "done",
+    "reason": ".github/workflows/ci.yml green — migration guard, backend verify, frontend build, OpenAPI staleness, single-jar packaging"
+  },
+  "A-013": {
+    "status": "in-progress",
+    "pct": 40,
+    "reason": "trigger rejection proven by hand against live MySQL, but no committed automated test yet — not done until it runs in CI"
+  }
+}
