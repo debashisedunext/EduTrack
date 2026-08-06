@@ -85,7 +85,7 @@ finish date. That is the one to defend.
 
 ## Every morning at 09:00
 
-`tools/plan/daily.sh` runs, and:
+`plan daily` runs, and:
 
 1. fetches and fast-forwards (never clobbers a dirty tree)
 2. re-extracts tasks from the four stream backlogs
@@ -97,10 +97,16 @@ finish date. That is the one to defend.
 Run it by hand any time:
 
 ```bash
-tools/plan/daily.sh --dry-run    # recompute and print, change nothing
-tools/plan/daily.sh              # the real thing
-EDUTRACK_NOTIFY=0 tools/plan/daily.sh   # refresh, but message nobody
+plan refresh                 # recompute the schedule and rebuild the outputs
+plan daily                   # what the 09:00 job runs — refresh, commit, push, brief
+PLAN_NOTIFY=0 plan daily     # refresh, but message nobody
+plan cron status             # is it scheduled, when did it last run
+plan check                   # prove the chart renders
 ```
+
+The engine lives in [plan-tracker](https://github.com/debashisedunext/plan-tracker),
+not in this repo — the same code runs every project's plan. This project's
+settings are in [`../../plan.config.json`](../../plan.config.json).
 
 ---
 
@@ -108,12 +114,12 @@ EDUTRACK_NOTIFY=0 tools/plan/daily.sh   # refresh, but message nobody
 
 | To change | Edit | Then |
 |---|---|---|
-| An estimate | `estimate_days` in `tasks.csv` | `tools/plan/schedule.py` |
+| An estimate | `estimate_days` in `tasks.csv` | `plan refresh` |
 | A dependency | `predecessors` in `tasks.csv` | same |
 | Confirm an inferred edge | `pred_confidence` → `confirmed` | same |
 | Add a holiday or leave | `calendar.json` | same |
 | Correct a status | `overrides.json`, with a reason | same |
-| Add or reword a task | the `docs/streams/STREAM-*.md` backlog | `tools/plan/extract_tasks.py` first |
+| Add or reword a task | the `docs/streams/STREAM-*.md` backlog | `plan refresh` |
 
 `tasks.csv` is the source of truth. Re-running the extractor never overwrites
 what is already in it — it only appends genuinely new task IDs, and a task
