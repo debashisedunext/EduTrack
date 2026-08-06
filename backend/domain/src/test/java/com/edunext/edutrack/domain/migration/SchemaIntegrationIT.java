@@ -1,0 +1,284 @@
+package com.edunext.edutrack.domain.migration;
+
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/**
+ * A-011 · Testcontainers integration test.
+ *
+ * Runs every migration in db/migration against a real, disposable MySQL 8.4
+ * container — same image and flags as docker-compose.yml — then proves the
+ * immutability guarantee (A-008) holds. This is also A-013's negative-test
+ * suite: every assertion below is a mutation attempt already verified by
+ * hand against the real stack on 2026-08-06; this makes that proof
+ * permanent and re-run on every `mvn verify`, in CI and locally.
+ *
+ * No entities exist yet (Stream B, M3), so this speaks raw JDBC to the
+ * container rather than going through Spring/JPA — it is testing the
+ * database, not the application.
+ */
+@Testcontainers
+class SchemaIntegrationIT {
+
+    @Container
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4")
+            .withDatabaseName("edutrack_it")
+            .withCommand(
+                    "--character-set-server=utf8mb4",
+                    "--collation-server=utf8mb4_0900_ai_ci",
+                    "--default-time-zone=+00:00",
+                    "--sql-mode=ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,"
+                            + "ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION",
+                    "--log-bin-trust-function-creators=1")
+            .withUrlParam("allowPublicKeyRetrieval", "true")
+            .withUrlParam("useSSL", "false")
+            .withUrlParam("connectionTimeZone", "UTC");
+
+    private static long roleId;
+    private static long userId;
+    private static long projectId;
+
+    @BeforeAll
+    static void migrateAndSeedReferenceData() throws SQLException {
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+
+        try (Connection c = connect(); Statement s = c.createStatement()) {
+            s.execute("INSERT INTO roles (code, name) VALUES ('DEVELOPER', 'Developer')");
+            roleId = lastInsertId(s);
+            s.execute("INSERT INTO users (emp_code, username, email, password_hash, full_name, role_id) "
+                    + "VALUES ('IT001', 'it-probe', 'it-probe@test.local', 'x', 'IT Probe', " + roleId + ")");
+            userId = lastInsertId(s);
+            s.execute("INSERT INTO projects (project_code, name) VALUES ('ITP', 'IT Probe Project')");
+            projectId = lastInsertId(s);
+        }
+    }
+
+    private static Connection connect() throws SQLException {
+        return DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+    }
+
+    private static long lastInsertId(Statement s) throws SQLException {
+        try (ResultSet rs = s.executeQuery("SELECT LAST_INSERT_ID()")) {
+            rs.next();
+            return rs.getLong(1);
+        }
+    }
+
+    /** Fresh ticket per test, so tests never share mutable state with each other. */
+    private long seedTicket(Connection c, String code) throws SQLException {
+        try (Statement s = c.createStatement()) {
+            s.execute("INSERT INTO tickets (ticket_code, project_id, title, level, original_level) "
+                    + "VALUES ('" + code + "', " + projectId + ", 'probe', 'LOW', 'LOW')");
+            return lastInsertId(s);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // A-011 — the migrations themselves
+    // ------------------------------------------------------------------
+
+    @Test
+    void allSevenMigrationsAppliedSuccessfully() throws SQLException {
+        try (Connection c = connect();
+             Statement s = c.createStatement();
+             ResultSet rs = s.executeQuery("SELECT COUNT(*) FROM flyway_schema_history WHERE success = 0")) {
+            rs.next();
+            assertThat(rs.getInt(1)).as("no migration recorded a failed run").isZero();
+        }
+        try (Connection c = connect();
+             Statement s = c.createStatement();
+             ResultSet rs = s.executeQuery("SELECT COUNT(*) FROM flyway_schema_history")) {
+            rs.next();
+            assertThat(rs.getInt(1)).as("all 7 baseline migrations ran").isEqualTo(7);
+        }
+    }
+
+    @Test
+    void schemaHasExpectedShape() throws SQLException {
+        try (Connection c = connect(); Statement s = c.createStatement()) {
+            try (ResultSet rs = s.executeQuery(
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()")) {
+                rs.next();
+                // 36 domain tables (A-003..A-007) + flyway_schema_history itself
+                assertThat(rs.getInt(1)).isEqualTo(37);
+            }
+            try (ResultSet rs = s.executeQuery(
+                    "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()")) {
+                rs.next();
+                // A-008: 2 on ticket_history, 2 on ticket_effort_logs,
+                // 2 on ticket_stage_transitions (seal + no-delete)
+                assertThat(rs.getInt(1)).isEqualTo(8);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // A-013 — ticket_history: fully immutable
+    // ------------------------------------------------------------------
+
+    @Test
+    void ticketHistoryRejectsUpdate() throws SQLException {
+        try (Connection c = connect()) {
+            long ticketId = seedTicket(c, "IT-HU-001");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ticket_history (ticket_id, event_type, new_value) "
+                        + "VALUES (" + ticketId + ", 'CREATED', 'original')");
+            }
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("UPDATE ticket_history SET new_value = 'tampered' WHERE ticket_id = " + ticketId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be updated");
+        }
+    }
+
+    @Test
+    void ticketHistoryRejectsDelete() throws SQLException {
+        try (Connection c = connect()) {
+            long ticketId = seedTicket(c, "IT-HD-001");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ticket_history (ticket_id, event_type, new_value) "
+                        + "VALUES (" + ticketId + ", 'CREATED', 'original')");
+            }
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("DELETE FROM ticket_history WHERE ticket_id = " + ticketId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be deleted");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // A-013 — ticket_effort_logs: fully immutable
+    // ------------------------------------------------------------------
+
+    @Test
+    void effortLogRejectsUpdate() throws SQLException {
+        try (Connection c = connect()) {
+            long ticketId = seedTicket(c, "IT-EU-001");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ticket_effort_logs (ticket_id, cycle_no, user_id, work_date, hours) "
+                        + "VALUES (" + ticketId + ", 1, " + userId + ", CURDATE(), 2.5)");
+            }
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("UPDATE ticket_effort_logs SET hours = 99 WHERE ticket_id = " + ticketId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be updated");
+        }
+    }
+
+    @Test
+    void effortLogRejectsDelete() throws SQLException {
+        try (Connection c = connect()) {
+            long ticketId = seedTicket(c, "IT-ED-001");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ticket_effort_logs (ticket_id, cycle_no, user_id, work_date, hours) "
+                        + "VALUES (" + ticketId + ", 1, " + userId + ", CURDATE(), 2.5)");
+            }
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("DELETE FROM ticket_effort_logs WHERE ticket_id = " + ticketId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be deleted");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // A-013 — ticket_stage_transitions: immutable except the one seal
+    // ------------------------------------------------------------------
+
+    @Test
+    void stageTransitionRejectsDelete() throws SQLException {
+        try (Connection c = connect()) {
+            long ticketId = seedTicket(c, "IT-SD-001");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ticket_stage_transitions "
+                        + "(ticket_id, cycle_no, seq_no, to_stage, action_code, entered_at) "
+                        + "VALUES (" + ticketId + ", 1, 1, 'DEV', 'FORWARD', NOW(6))");
+            }
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("DELETE FROM ticket_stage_transitions WHERE ticket_id = " + ticketId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be deleted");
+        }
+    }
+
+    @Test
+    void stageTransitionRejectsChangingAnythingButTheSealColumns() throws SQLException {
+        try (Connection c = connect()) {
+            long ticketId = seedTicket(c, "IT-SC-001");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ticket_stage_transitions "
+                        + "(ticket_id, cycle_no, seq_no, to_stage, action_code, entered_at) "
+                        + "VALUES (" + ticketId + ", 1, 1, 'DEV', 'FORWARD', NOW(6))");
+            }
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("UPDATE ticket_stage_transitions SET to_stage = 'QA' "
+                            + "WHERE ticket_id = " + ticketId + " AND seq_no = 1");
+                }
+            }).isInstanceOf(SQLException.class)
+              .hasMessageContaining("Only exited_at, duration_mins and is_current");
+        }
+    }
+
+    @Test
+    void stageTransitionSealSucceedsExactlyOnce() throws SQLException {
+        try (Connection c = connect()) {
+            long ticketId = seedTicket(c, "IT-SE-001");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ticket_stage_transitions "
+                        + "(ticket_id, cycle_no, seq_no, to_stage, action_code, entered_at) "
+                        + "VALUES (" + ticketId + ", 1, 1, 'DEV', 'FORWARD', NOW(6))");
+            }
+
+            // the one permitted mutation: exited_at NULL -> timestamp
+            try (Statement s = c.createStatement()) {
+                int updated = s.executeUpdate(
+                        "UPDATE ticket_stage_transitions "
+                                + "SET exited_at = NOW(6), duration_mins = 90, is_current = 0 "
+                                + "WHERE ticket_id = " + ticketId + " AND seq_no = 1");
+                assertThat(updated).isEqualTo(1);
+            }
+
+            // A-009's generated column must recompute once is_current drops
+            try (Statement s = c.createStatement();
+                 ResultSet rs = s.executeQuery(
+                         "SELECT current_ticket_id FROM ticket_stage_transitions "
+                                 + "WHERE ticket_id = " + ticketId + " AND seq_no = 1")) {
+                rs.next();
+                rs.getLong(1);
+                assertThat(rs.wasNull()).as("current_ticket_id clears once the stage is sealed").isTrue();
+            }
+
+            // sealing twice must be rejected — this is the guard that stops
+            // a stray second write from rewriting the duration the whole
+            // ribbon exists to report
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("UPDATE ticket_stage_transitions SET duration_mins = 1 "
+                            + "WHERE ticket_id = " + ticketId + " AND seq_no = 1");
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("already sealed");
+        }
+    }
+}
