@@ -1,6 +1,9 @@
 /* EduTrack design tokens — blueprint §12.1. Light theme only.
    Owner: Stream C (Divyansh) · C-002. Frozen after Sprint 0.
-   Every token below passes WCAG AA on white. */
+   The blueprint's literal semantic/level hex values pass WCAG AA (3:1) for icons,
+   borders, chart series and large text, but NOT the 4.5:1 normal-text threshold —
+   use the *-text tokens below for chip/badge labels and any small coloured text.
+   Logged as an intentional, documented deviation per CLAUDE.md / PLAN.md §4. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -19,11 +22,56 @@
   --danger:          #EF4444;
   --info:            #3B82F6;
 
+  /* AA-safe (4.5:1+) darkened text variants — blueprint's literal hex above are
+     for icons/borders/charts/large text only, not small coloured text. */
+  --success-text:    #047857;
+  --warning-text:    #B45309;
+  --danger-text:     #B91C1C;
+  --info-text:       #1D4ED8;
+
   /* Level chips — soft tint + solid text, never a heavy solid block */
   --level-low:       #10B981;
   --level-medium:    #3B82F6;
   --level-high:      #F59E0B;
   --level-critical:  #EF4444;
+
+  --level-low-soft:      #ECFDF5;
+  --level-medium-soft:   #EFF6FF;
+  --level-high-soft:     #FFFBEB;
+  --level-critical-soft: #FEF2F2;
+
+  /* Level chip label text — AA-safe on both white and the -soft backgrounds above */
+  --level-low-text:      #047857;
+  --level-medium-text:   #1D4ED8;
+  --level-high-text:     #B45309;
+  --level-critical-text: #B91C1C;
+
+  /* Chart palette — colour-blind safe, blueprint §12.1 */
+  --chart-1: #4F46E5;
+  --chart-2: #06B6D4;
+  --chart-3: #10B981;
+  --chart-4: #F59E0B;
+  --chart-5: #EF4444;
+  --chart-6: #8B5CF6;
+  --chart-7: #EC4899;
+  --chart-8: #14B8A6;
+
+  /* Ribbon segment states — colour is never the only signal; pair with an icon + text label.
+     -fg tokens are for icons/ticks/borders/connectors (3:1 UI-component threshold) — for the
+     segment's text label, use the matching -text token below (AA 4.5:1). */
+  --ribbon-done-fg:     #10B981;
+  --ribbon-done-bg:     #ECFDF5;
+  --ribbon-done-text:   #047857;
+  --ribbon-current-fg:  #4F46E5;
+  --ribbon-current-bg:  #EEF2FF;
+  --ribbon-current-text: #4F46E5;
+  --ribbon-pending-fg:  #9CA3AF;
+  --ribbon-pending-bg:  #FFFFFF;
+  --ribbon-pending-text: #6B7280;
+  --ribbon-reworked:      #F59E0B;
+  --ribbon-reworked-text: #B45309;
+  --ribbon-breached:      #EF4444;
+  --ribbon-breached-text: #B91C1C;
 }
 
 html, body, #root { height: 100%; }
