@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss'
+import tailwindcssAnimate from 'tailwindcss-animate'
 
 /**
  * Design tokens come from blueprint §12.1 and are owned by Stream C (Divyansh),
@@ -63,5 +64,5 @@ export default {
       transitionTimingFunction: { DEFAULT: 'cubic-bezier(0, 0, 0.2, 1)' },
     },
   },
-  plugins: [],
+  plugins: [tailwindcssAnimate],
 } satisfies Config
