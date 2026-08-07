@@ -1,0 +1,81 @@
+import { NavLink } from 'react-router-dom'
+import {
+  LayoutDashboard, ListChecks, Ticket, FolderKanban, MessageSquare,
+  BarChart3, Database, Settings, ChevronsLeft, ChevronsRight,
+} from 'lucide-react'
+import { useGetMe } from '@/api/generated/auth/auth'
+import { useSidebarStore } from './sidebarStore'
+import { cn } from '@/lib/utils'
+
+interface NavItem {
+  to: string
+  label: string
+  icon: typeof LayoutDashboard
+  adminOnly?: boolean
+}
+
+// Left sidebar, collapsible 240px — blueprint §7.2.
+const NAV_ITEMS: NavItem[] = [
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/my-tasks', label: 'My Tasks', icon: ListChecks },
+  { to: '/tickets', label: 'Tickets', icon: Ticket },
+  { to: '/projects', label: 'Projects', icon: FolderKanban },
+  { to: '/chat', label: 'Chat', icon: MessageSquare },
+  { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/masters', label: 'Masters', icon: Database, adminOnly: true },
+  { to: '/settings', label: 'Settings', icon: Settings },
+]
+
+export function Sidebar() {
+  const collapsed = useSidebarStore((s) => s.collapsed)
+  const toggle = useSidebarStore((s) => s.toggle)
+  const { data: me } = useGetMe()
+  const isAdmin = me?.data.role === 'ADMIN'
+
+  const items = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin)
+
+  return (
+    <aside
+      className={cn(
+        'flex h-full flex-col border-r border-border bg-surface transition-[width]',
+        collapsed ? 'w-[72px]' : 'w-[240px]',
+      )}
+    >
+      <div className="flex h-14 items-center gap-2 border-b border-border px-4">
+        <div className="h-6 w-6 shrink-0 rounded bg-primary" aria-hidden />
+        {!collapsed && <span className="text-sm font-semibold tracking-wide text-content">EDUTRACK</span>}
+      </div>
+
+      <nav className="flex-1 space-y-1 overflow-y-auto p-2" aria-label="Main">
+        {items.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            title={collapsed ? label : undefined}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 rounded-control px-3 py-2 text-sm font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                isActive
+                  ? 'bg-primary-soft text-primary'
+                  : 'text-content-muted hover:bg-subtle hover:text-content',
+              )
+            }
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            {!collapsed && <span className="truncate">{label}</span>}
+          </NavLink>
+        ))}
+      </nav>
+
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        className="flex h-10 items-center justify-center gap-2 border-t border-border text-content-muted transition-colors hover:bg-subtle hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+      </button>
+    </aside>
+  )
+}
