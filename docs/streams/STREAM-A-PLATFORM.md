@@ -14,29 +14,30 @@
 ## Sprint 0 — weeks 1–2
 
 - [x] **A-001** Maven multi-module skeleton: `common`, `domain`, `api`, `worker`. `api` and `worker` both depend on `domain`; neither depends on the other.
-- [ ] **A-002** `docker-compose.yml` — MySQL 8.4, Redis 7, MinIO, Mailpit. `utf8mb4`, `connectionTimeZone=UTC`. *(written; unverified — needs one `docker compose up`)*
-- [ ] **A-003** Flyway baseline 1/5 — identity: `users`, `roles`, `permissions`, `role_permissions`, `user_roles`, `projects`, `project_members`. *(blueprint §8.2)* — *DDL written in `V20260805_1024__baseline_identity.sql`; unverified until Flyway runs it*
-- [ ] **A-004** Flyway baseline 2/5 — tickets: `tickets`, `ticket_cycles`, `ticket_history`, `ticket_effort_logs`, `ticket_watchers`, `ticket_links`.
-- [ ] **A-005** Flyway baseline 3/5 — workflow: `workflow_templates`, `workflow_stages`, `ticket_stage_transitions`. *(§4A.5 — note `can_return_to` becomes `JSON`)*
-- [ ] **A-006** Flyway baseline 4/5 — clients & content: `clients`, `client_contacts`, `client_projects`, `ticket_comments`, `ticket_attachments`, `email_log`, `import_batches`. *(§4B.7)* — *DDL written in `V20260805_1530__baseline_clients_content.sql`; unverified until Flyway runs it*
+- [x] **A-002** `docker-compose.yml` — MySQL 8.4, Redis 7, MinIO, Mailpit. `utf8mb4`, `connectionTimeZone=UTC`. *(verified 2026-08-07 — `docker compose ps` shows all four services healthy, `minio-init` ran to completion)*
+- [x] **A-003** Flyway baseline 1/5 — identity: `users`, `roles`, `permissions`, `role_permissions`, `user_roles`, `projects`, `project_members`. *(blueprint §8.2)* — *`V20260805_1024__baseline_identity.sql`; confirmed applied (`flyway_schema_history.success = 1`) against the live MySQL container*
+- [x] **A-004** Flyway baseline 2/5 — tickets: `tickets`, `ticket_cycles`, `ticket_history`, `ticket_effort_logs`, `ticket_watchers`, `ticket_links`. *(`V20260805_1041__baseline_tickets.sql`; confirmed applied)*
+- [x] **A-005** Flyway baseline 3/5 — workflow: `workflow_templates`, `workflow_stages`, `ticket_stage_transitions`. *(§4A.5 — note `can_return_to` becomes `JSON`)* — *(`V20260805_1042__baseline_workflow.sql`; confirmed applied)*
+- [x] **A-006** Flyway baseline 4/5 — clients & content: `clients`, `client_contacts`, `client_projects`, `ticket_comments`, `ticket_attachments`, `email_log`, `import_batches`. *(§4B.7)* — *`V20260805_1530__baseline_clients_content.sql`; confirmed applied (runs last by version, as designed)*
 
   > **Runs fifth, not fourth.** `clients.sla_policy_id` and `email_log.template_id` reference `sla_policies` and `notification_templates`, both created by A-007 (`V20260805_1106`). The timestamp is therefore later than A-007's, which is what Flyway orders on — the task number is not the run order.
   > **`email_log` carries a `next_attempt_at` column that blueprint §4B.7 does not.** PLAN.md §2.2 makes this table the outbox queue in place of BullMQ, and backoff needs somewhere to live. Without it D-010 has a log, not a queue.
   > **No immutability trigger on `ticket_comments`, deliberately.** The 5-minute edit window (C-033) and the tombstone flag both need `UPDATE`. `original_body` preserves the pre-edit text and the service layer enforces the rest. The trigger-protected set stays exactly `ticket_history`, `ticket_effort_logs`, `ticket_stage_transitions`.
-- [ ] **A-007** Flyway baseline 5/5 — masters & ops: `task_types`, `priorities`, `statuses`, `workflow_transitions`, `holidays`, `resource_leaves`, `notification_templates`, `notifications`, `chat_threads`, `chat_participants`, `chat_messages`, `audit_logs`.
-- [ ] **A-008** Immutability triggers — two per table (MySQL needs separate UPDATE and DELETE triggers) on `ticket_history` and `ticket_effort_logs`; the seal-only trigger on `ticket_stage_transitions`. *(PLAN.md §3.5, §3.6)*
+- [x] **A-007** Flyway baseline 5/5 — masters & ops: `task_types`, `priorities`, `statuses`, `workflow_transitions`, `holidays`, `resource_leaves`, `notification_templates`, `notifications`, `chat_threads`, `chat_participants`, `chat_messages`, `audit_logs`. *(`V20260805_1106__baseline_masters_ops.sql`; confirmed applied)*
+- [x] **A-008** Immutability triggers — two per table (MySQL needs separate UPDATE and DELETE triggers) on `ticket_history` and `ticket_effort_logs`; the seal-only trigger on `ticket_stage_transitions`. *(PLAN.md §3.5, §3.6)*
   > **Verified working on MySQL 8.4** — a `BEFORE UPDATE`/`BEFORE DELETE` trigger raising `SIGNAL SQLSTATE '45000'` rejects both, and the row survives intact.
+  > **Re-verified 2026-08-07** directly against the live container: UPDATE and DELETE on `ticket_history` both rejected; the seal-only trigger on `ticket_stage_transitions` let `exited_at` NULL→timestamp through once, then rejected a second write. All probes run inside a transaction that was never committed, so no test data was left behind.
   > **Delimiter gotcha:** a `BEGIN … END` body contains `;`, which terminates the statement early in `mysql -e` and in some Flyway configurations. The one-line form takes no delimiter handling at all and is preferred wherever the body is a single `SIGNAL`:
   > ```sql
   > CREATE TRIGGER trg_hist_no_update BEFORE UPDATE ON ticket_history
   >   FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Immutable: cannot update';
   > ```
   > The seal-only trigger on `ticket_stage_transitions` **does** need `BEGIN … END` (it has conditional logic), so that migration needs Flyway's `SET statement_delimiter` or a dedicated `.sql` with explicit `DELIMITER`.
-- [ ] **A-009** Generated columns + indexes replacing PostgreSQL partial indexes: `pcd_open`, `current_ticket_id`. Plus `FULLTEXT` on `tickets(title, description)`. *(PLAN.md §3.3, §3.8)*
-- [ ] **A-010** Two DB users: `edutrack_app` (no DDL; **`INSERT, SELECT` only** on the three append-only tables) and `edutrack_migrate` (DDL, deploy step only).
-- [ ] **A-011** CI pipeline — build, test, Testcontainers integration tests, OpenAPI staleness check, frontend build.
+- [x] **A-009** Generated columns + indexes replacing PostgreSQL partial indexes: `pcd_open`, `current_ticket_id`. Plus `FULLTEXT` on `tickets(title, description)`. *(PLAN.md §3.3, §3.8)* — *confirmed present via `SHOW CREATE TABLE` on the live schema, 2026-08-07*
+- [x] **A-010** Two DB users: `edutrack_app` (no DDL; **`INSERT, SELECT` only** on the three append-only tables) and `edutrack_migrate` (DDL, deploy step only). — *`docker/mysql-init/01-users.sql` + `docker/grants/apply-app-grants.sql`; confirmed live 2026-08-07: `edutrack_app` holds no DB-level grant (fail-closed), table-level grants are `Select,Insert` on `ticket_history`/`ticket_effort_logs`, `Select,Insert,Update` on `ticket_stage_transitions`; `edutrack_migrate` has full DDL on `edutrack.*` with no GRANT OPTION*
+- [x] **A-011** CI pipeline — build, test, Testcontainers integration tests, OpenAPI staleness check, frontend build. — *`.github/workflows/ci.yml` covers migration-guard, backend (`mvn verify`, runs `SchemaIntegrationIT`), frontend, OpenAPI contract staleness, and a packaged-jar smoke test*
 - [x] **A-012** 🔴 **`dev-noauth` Spring profile** — injects a configurable fake principal (role, projects, reportees). **Rejects startup outside `local`**; disabled in CI. *Due day 10 — B, C and D are blocked without it.* — *`api/security/dev/`, activate as `local,dev-noauth`; refusal + injection + dormancy all covered by tests*
-- [ ] **A-013** Negative tests proving triggers reject `UPDATE` and `DELETE` on each protected table.
+- [x] **A-013** Negative tests proving triggers reject `UPDATE` and `DELETE` on each protected table. — *`SchemaIntegrationIT.java` covers update/delete rejection on `ticket_history` and `ticket_effort_logs`, delete rejection and non-seal-column rejection on `ticket_stage_transitions`, and the exactly-once seal; recently hardened by Debashis's `9de2ed1` fix so its fixtures don't collide with Stream B's upcoming role seed data. Not re-run here (no local `mvn`), but nothing in this session contradicts it.*
 
 **Exit:** `docker compose up` yields a migrated DB; `mvn verify` green including A-013.
 
@@ -45,7 +46,13 @@
 ## M1 — Authentication & the scope guard · weeks 3–7
 
 ### Authentication
-- [ ] **A-020** Login endpoint — Argon2id (64 MB, 3 iterations), constant-time, **generic error messages** that never reveal which field failed. *(§10.1)*
+- [x] **A-020** Login endpoint — Argon2id (64 MB, 3 iterations), constant-time, **generic error messages** that never reveal which field failed. *(§10.1)*
+  > `POST /api/v1/auth/login` in `api/feature/auth/`; hashing in `common/security/PasswordHashing` per TEAM-PLAN §6. Argon2id parameters are constants, not configuration — they are baked into every stored hash, so changing them is a re-hash migration rather than a config edit, and a tunable invites someone to lower it.
+  > **Uniform timing.** An unknown username is verified against a decoy hash built once at startup, so every outcome costs one full KDF. Without it the endpoint answers "does this account exist?" in microseconds versus ~100 ms and becomes a staff directory. Asserted structurally (the encoder is invoked on both paths) rather than with a stopwatch, which would be flaky on a loaded runner and get muted.
+  > **One failure mode.** Unknown user, wrong password and deactivated account all raise `InvalidCredentialsException`, which carries no field, and map to one `https://edutrack/errors/invalid-credentials` problem. `AuthLoginIT` asserts the bodies are byte-identical.
+  > **No JPA entity.** B-005 (Ayush) owns the object model and has not started; auth reads a flat projection through `JdbcClient` instead of defining `User` first and making Stream A the de-facto owner of Stream B's mapping.
+  > **Deliberately not included:** no token is issued (A-022) — the response omits `accessToken`/`expiresIn` rather than sending null, so A-022 is purely additive. No refresh cookie (A-023), no `failed_attempts`/lockout or per-IP rate limit (A-021), no forced-change redirect (A-026), no TOTP (A-029), no `last_login_at` or `LOGIN_SUCCESS` audit row (A-021/A-071). **Until A-021 lands there is no cap on guess volume — Argon2id's cost is the only brake.** S-01 (A-030) cannot complete a login against this endpoint yet.
+  > **Two changes outside Stream A, both flagged for sign-off rather than made quietly:** springdoc 2.6.0 → 2.8.9 in `backend/pom.xml` (2.6.0 calls a `ControllerAdviceBean` constructor Spring 6.2 removed, so building the OpenAPI document throws `NoSuchMethodError` as soon as the app contains any `@ControllerAdvice` — latent for everyone, not just here), and the datasource exclusions dropped from `ContractConformanceTest` (Stream D) so the context can build a bean that reads the database. Both need Debashis.
 - [ ] **A-021** `failed_attempts` counter, 15-minute lockout at 5, email to Admin on lockout.
 - [ ] **A-022** JWT access token, 15 min, claims `sub`, `role`, `permissions[]`, `projects[]`, `reportees[]`, `iat`, `exp`, `jti`.
 - [ ] **A-023** Opaque refresh token, 7 days, HttpOnly + Secure + SameSite=Strict cookie, `jti` in Redis, device-bound.

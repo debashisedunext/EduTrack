@@ -72,12 +72,24 @@ public class OpenApiConfig {
                                 the database rejects mutation independently.""")
                         .contact(new Contact().name("Stream D — Engines & Realtime"))
                         .license(new License().name("Proprietary")))
-                // Relative, because the app ships as a single jar and the SPA is
-                // served from the same origin. An absolute URL here would break
+                // A-020 fix. This was "/api/v1" — correct for the hand-authored
+                // contract, where operations are written *without* the prefix
+                // (`/auth/login`) and rely on the server entry to supply it. But
+                // springdoc does not author operations; it reads them off the real
+                // Spring mappings, and GroupedOpenApi.pathsToMatch("/api/v1/**")
+                // below only matches a controller whose @RequestMapping already
+                // includes "/api/v1" — which is also the only way the live server
+                // actually serves the route under /api/v1, per CONVENTIONS.md §1.
+                // So every operation path springdoc emits already carries the
+                // prefix, and declaring it again here doubles it: Swagger UI's
+                // "Try it out" resolved to /api/v1/api/v1/auth/login and 404'd —
+                // caught testing A-020 by hand. Relative, still, and still no
+                // absolute host baked in: the app ships as a single jar with the
+                // SPA on the same origin, and an absolute URL here would break
                 // every generated client the moment the host changed.
                 .servers(List.of(new Server()
-                        .url("/api/v1")
-                        .description("Same origin as the SPA.")))
+                        .url("/")
+                        .description("Same origin as the SPA. Operation paths already carry /api/v1.")))
                 .components(new Components().addSecuritySchemes(BEARER,
                         new SecurityScheme()
                                 .type(SecurityScheme.Type.HTTP)

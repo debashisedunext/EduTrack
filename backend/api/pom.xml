@@ -60,6 +60,10 @@
       </plugin>
 
       <!--
+        A-020. Same reason as domain/pom.xml: failsafe is not inherited from
+        spring-boot-starter-parent and must be declared per module. It runs
+        *IT.java apart from surefire's unit tests — AuthLoginIT needs a real
+        MySQL through Testcontainers — and still fails `mvn verify` if one fails.
         A-011. Was missing from this module while domain and worker had it,
         so any *IT class placed here was compiled and silently never run —
         a green build that proved nothing. Added with D-012's RealtimeRelayIT,

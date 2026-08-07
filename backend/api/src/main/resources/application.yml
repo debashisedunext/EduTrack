@@ -61,6 +61,19 @@ spring:
       max-file-size: 10MB            # blueprint §4B.4
       max-request-size: 50MB
 
+  mvc:
+    problemdetails:
+      # A-020. Framework-raised failures — malformed body, unreadable request,
+      # wrong media type, Bean Validation — are emitted as RFC 9457
+      # application/problem+json instead of Spring's default error JSON.
+      # contracts/CONVENTIONS.md §3 records this as the reason we did NOT adopt
+      # the blueprint's { data, meta, error } envelope for errors (PLAN.md §4,
+      # deviation D-12): Spring Boot 3 already produces the conformant shape, so
+      # a hand-written handler would be fighting the framework to produce a
+      # worse one. Application-specific problems still set their own stable
+      # `type` URI — see AuthExceptionHandler.
+      enabled: true
+
 server:
   port: ${SERVER_PORT:8080}
   error:
