@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: edutrack-worker
+
+  main:
+    web-application-type: none
+
+  # Java 25 virtual threads (PLAN.md §2.1 — the reason the runtime was raised
+  # from 21). A batch of mail sends is almost entirely blocked on SMTP I/O, so
+  # carrying one platform thread per in-flight message buys nothing.
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    # DATETIME(6) stored as UTC — never TIMESTAMP. See PLAN.md §3.1.
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:edutrack}?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC&characterEncoding=utf8&serverTimezone=UTC
+    username: ${DB_USER:edutrack_app}
+    password: ${DB_PASSWORD:edutrack}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      # One connection per concurrently-sending message, plus headroom for the
+      # claim transaction. Keep at or above edutrack.outbox.batch-size.
+      maximum-pool-size: 15
+      pool-name: edutrack-worker-pool
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+
+  # api owns migration. See WorkerApplication's javadoc.
+  flyway:
+    enabled: false
+
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}          # Mailpit in local dev
+    properties:
+      mail.smtp.auth: false
+      mail.smtp.starttls.enable: false
+
+edutrack:
+  outbox:
+    enabled: true
+    poll-interval: PT5S
+    batch-size: 10
+    # How long a claimed row stays invisible to other workers. Must exceed the
+    # slowest realistic send, or a slow SMTP round-trip becomes a double send.
+    lease: PT2M
+    # D-033: three retries, then an in-app failure notification.
+    max-attempts: 4
+    backoff-base: PT1M
+    backoff-cap: PT1H
+    # `logging` records what would have been sent without touching SMTP, and
+    # is the default until D-029 lands the Thymeleaf templates that render a
+    # body — email_log carries a subject but no body column. Switch to `smtp`
+    # only alongside a real template master.
+    transport: logging

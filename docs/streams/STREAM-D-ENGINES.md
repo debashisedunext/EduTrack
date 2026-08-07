@@ -27,7 +27,7 @@
 
 ## Infrastructure — weeks 3–5
 
-- [ ] **D-010** 🔴 **Outbox worker pattern** — claim rows with `SELECT … FOR UPDATE SKIP LOCKED`, send, stamp the result. `email_log` **is** the queue: `status ∈ {QUEUED, SENT, BOUNCED, FAILED}`, `retry_count`, plus a `next_attempt_at` column for backoff. Enqueue is atomic with the business transaction, so a rolled-back handoff cannot leave a phantom mail queued. *(Replaces BullMQ — PLAN.md §2.2)*
+- [x] **D-010** 🔴 **Outbox worker pattern** — claim rows with `SELECT … FOR UPDATE SKIP LOCKED`, send, stamp the result. `email_log` **is** the queue: `status ∈ {QUEUED, SENT, BOUNCED, FAILED}`, `retry_count`, plus a `next_attempt_at` column for backoff. Enqueue is atomic with the business transaction, so a rolled-back handoff cannot leave a phantom mail queued. *(Replaces BullMQ — PLAN.md §2.2)* — *`worker/outbox/` + `domain/outbox/OutboxEnqueuer`; claim leases via `next_attempt_at` rather than adding a fifth `status`; no ShedLock by design, `SKIP LOCKED` is what allows horizontal scaling. `OutboxWorkerIT` proves disjoint concurrent claims, backoff, retry exhaustion and rollback atomicity against MySQL 8.4. Transport defaults to `logging` until D-029 renders bodies.*
 - [ ] **D-011** `@Scheduled` + **ShedLock** (Redis or JDBC provider) so scanners don't double-fire across instances.
 - [ ] **D-012** Spring WebSocket + STOMP config, Redis pub/sub relay for multi-instance fan-out. *(Replaces Socket.IO)*
 - [ ] **D-013** 🔴 **Channel interceptor authorising subscriptions with the same scope rules as REST** — a Developer must not be able to subscribe to a ticket topic they could not `GET`. This is the socket-layer equivalent of the scope guard and is easy to forget.
