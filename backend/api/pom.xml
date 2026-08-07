@@ -59,6 +59,26 @@
         <configuration><mainClass>com.edunext.edutrack.EduTrackApplication</mainClass></configuration>
       </plugin>
 
+      <!--
+        A-011. Was missing from this module while domain and worker had it,
+        so any *IT class placed here was compiled and silently never run —
+        a green build that proved nothing. Added with D-012's RealtimeRelayIT,
+        which is the first integration test in api.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <version>3.5.2</version>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
       <!-- ── frontend: build it, then package it into this jar ───────────── -->
       <plugin>
         <groupId>com.github.eirslett</groupId>
