@@ -1,6 +1,7 @@
 package com.edunext.edutrack.domain.migration;
 
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.output.MigrateResult;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.MySQLContainer;
@@ -47,20 +48,27 @@ class SchemaIntegrationIT {
             .withUrlParam("useSSL", "false")
             .withUrlParam("connectionTimeZone", "UTC");
 
+    private static int migrationsExecuted;
     private static long roleId;
     private static long userId;
     private static long projectId;
 
     @BeforeAll
-    static void migrateAndSeedReferenceData() throws SQLException {
-        Flyway.configure()
+    static void migrateAndSeedProbeRows() throws SQLException {
+        MigrateResult result = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
+        migrationsExecuted = result.migrationsExecuted;
 
         try (Connection c = connect(); Statement s = c.createStatement()) {
-            s.execute("INSERT INTO roles (code, name) VALUES ('DEVELOPER', 'Developer')");
+            // Probe rows carry codes no migration will ever seed. This suite
+            // exercises the schema, not the reference data, so its fixtures must
+            // not compete with Stream B's seeds for a real code — 'DEVELOPER'
+            // collided with uq_roles_code the day B-001 seeded the six system
+            // roles, and took the whole class down in @BeforeAll.
+            s.execute("INSERT INTO roles (code, name) VALUES ('IT_PROBE', 'IT Probe Role')");
             roleId = lastInsertId(s);
             s.execute("INSERT INTO users (emp_code, username, email, password_hash, full_name, role_id) "
                     + "VALUES ('IT001', 'it-probe', 'it-probe@test.local', 'x', 'IT Probe', " + roleId + ")");
@@ -95,7 +103,7 @@ class SchemaIntegrationIT {
     // ------------------------------------------------------------------
 
     @Test
-    void allSevenMigrationsAppliedSuccessfully() throws SQLException {
+    void everyMigrationOnTheClasspathApplied() throws SQLException {
         try (Connection c = connect();
              Statement s = c.createStatement();
              ResultSet rs = s.executeQuery("SELECT COUNT(*) FROM flyway_schema_history WHERE success = 0")) {
@@ -106,8 +114,18 @@ class SchemaIntegrationIT {
              Statement s = c.createStatement();
              ResultSet rs = s.executeQuery("SELECT COUNT(*) FROM flyway_schema_history")) {
             rs.next();
-            assertThat(rs.getInt(1)).as("all 7 baseline migrations ran").isEqualTo(7);
+            // Counted from the MigrateResult rather than hard-coded. A literal
+            // (it was 7) turns every new migration into an unrelated red build,
+            // which trains people to edit the assertion instead of reading it.
+            // What this actually needs to prove is that history reflects exactly
+            // what Flyway ran — and that holds at any number.
+            assertThat(rs.getInt(1))
+                    .as("flyway_schema_history reflects exactly the migrations Flyway executed")
+                    .isEqualTo(migrationsExecuted);
         }
+        assertThat(migrationsExecuted)
+                .as("the A-003..A-009 baseline is present at minimum")
+                .isGreaterThanOrEqualTo(7);
     }
 
     @Test
