@@ -1,5 +1,6 @@
 package com.edunext.edutrack.worker.outbox;
 
+import com.edunext.edutrack.domain.mail.EmailSuppressions;
 import com.edunext.edutrack.domain.outbox.NewMail;
 import com.edunext.edutrack.domain.outbox.OutboxEnqueuer;
 import com.edunext.edutrack.worker.WorkerApplication;
@@ -30,6 +31,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -81,6 +83,9 @@ class OutboxWorkerIT {
     MailFailureNotifier failureNotifier;
 
     @Autowired
+    EmailSuppressions suppressions;
+
+    @Autowired
     OutboxProperties shippedProperties;
 
     @Autowired
@@ -97,6 +102,7 @@ class OutboxWorkerIT {
         jdbc.update("DELETE FROM notifications");
         jdbc.update("DELETE FROM email_log");
         jdbc.update("DELETE FROM users");
+        jdbc.update("DELETE FROM email_suppressions");
         clock = new MutableClock(Instant.parse("2026-08-07T10:00:00Z"));
     }
 
@@ -353,6 +359,76 @@ class OutboxWorkerIT {
                 .isEqualTo(4);
     }
 
+    // ------------------------------ D-034 · suppressed addresses are skipped
+
+    /**
+     * Suppression is only worth recording if something consults it. Every
+     * avoidable send to a dead address costs sender reputation, which is what
+     * decides whether the <em>next</em> escalation mail reaches anyone.
+     */
+    @Test
+    void aSuppressedAddressIsNeverSentTo() {
+        long assignee = insertUser("ravi", "DEVELOPER");
+        long id = insert("QUEUED", clock.instant().minusSeconds(1), assignee);
+        suppressions.suppress("dev@example.com",
+                EmailSuppressions.SuppressionReason.BOUNCE, "550 mailbox unavailable", null);
+
+        AtomicInteger sendsAttempted = new AtomicInteger();
+        workerWith(m -> {
+            sendsAttempted.incrementAndGet();
+            return new SendOutcome.Sent("should-not-happen");
+        }).pollOnce();
+
+        assertThat(sendsAttempted).hasValue(0);
+        Map<String, Object> row = row(id);
+        assertThat(row.get("status")).isEqualTo("FAILED");
+        assertThat((String) row.get("error_text")).contains("suppressed");
+    }
+
+    @Test
+    void aSuppressedAddressStillNotifiesTheRecipientInApp() {
+        long assignee = insertUser("ravi", "DEVELOPER");
+        insert("QUEUED", clock.instant().minusSeconds(1), assignee);
+        suppressions.suppress("dev@example.com",
+                EmailSuppressions.SuppressionReason.COMPLAINT, "reported as spam", null);
+
+        workerWith(m -> new SendOutcome.Sent("should-not-happen")).pollOnce();
+
+        assertThat(notifications())
+                .as("email is the one channel that does not work for them — the bell is all that is left")
+                .singleElement()
+                .extracting(row -> row.get("user_id"))
+                .isEqualTo(assignee);
+    }
+
+    @Test
+    void anUnsuppressedAddressIsUnaffected() {
+        insertUser("ravi", "DEVELOPER");
+        long id = insert("QUEUED", clock.instant().minusSeconds(1));
+        suppressions.suppress("someone.else@example.com",
+                EmailSuppressions.SuppressionReason.BOUNCE, null, null);
+
+        workerWith(m -> new SendOutcome.Sent("provider-abc")).pollOnce();
+
+        assertThat(row(id).get("status")).isEqualTo("SENT");
+    }
+
+    @Test
+    void suppressionIsCaseInsensitiveAndReportsWhetherItWasNew() {
+        assertThat(suppressions.suppress("Ravi@Example.com",
+                EmailSuppressions.SuppressionReason.BOUNCE, "hard bounce", "msg-1"))
+                .as("first suppression of this address")
+                .isTrue();
+
+        assertThat(suppressions.suppress("ravi@example.com",
+                EmailSuppressions.SuppressionReason.BOUNCE, "hard bounce again", "msg-2"))
+                .as("a replayed bounce must not re-alert the Admin")
+                .isFalse();
+
+        assertThat(suppressions.isSuppressed("RAVI@EXAMPLE.COM")).isTrue();
+        assertThat(suppressions.isSuppressed("other@example.com")).isFalse();
+    }
+
     // -------------------------------------------------------------- enqueue
 
     /**
@@ -391,7 +467,8 @@ class OutboxWorkerIT {
         OutboxProperties properties = new OutboxProperties(
                 true, Duration.ofSeconds(5), 10, Duration.ofMinutes(2),
                 3, Duration.ofMinutes(1), Duration.ofHours(1), "test");
-        return new OutboxWorker(repository, transport, properties, failureNotifier, clock);
+        return new OutboxWorker(
+                repository, transport, properties, failureNotifier, suppressions, clock);
     }
 
     private long insert(String status, Instant nextAttemptAt) {

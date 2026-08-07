@@ -104,6 +104,18 @@ edutrack:
     access-key: ${S3_ACCESS_KEY:minioadmin}
     secret-key: ${S3_SECRET_KEY:minioadmin}
 
+  webhooks:
+    email:
+      # D-034/D-039. The provider webhooks are unauthenticated by necessity —
+      # the provider holds no EduTrack session — so this HMAC secret is the
+      # only thing stopping anyone who can reach the URL from suppressing an
+      # arbitrary address and silencing that person's mail.
+      #
+      # Deliberately empty by default: with no secret configured the verifier
+      # rejects every request. An open endpoint is a worse default than a
+      # temporarily unreachable one.
+      secret: ${EMAIL_WEBHOOK_SECRET:}
+
 logging:
   level:
     com.edunext.edutrack: ${LOG_LEVEL:INFO}
