@@ -2,7 +2,8 @@
   "_comment": [
     "Read by plan-tracker (https://github.com/debashisedunext/plan-tracker).",
     "Run `plan refresh` to rebuild the schedule, `plan cron status` to check",
-    "the 09:00 job. See docs/plan/README.md for how the whole thing works."
+    "the 09:00 job, `plan watch status` to check the push watcher.",
+    "See docs/plan/README.md for how the whole thing works."
   ],
 
   "project": "EduTrack",
@@ -13,6 +14,13 @@
   "task_id": "[A-D]-\\d{3}",
   "title_max": 68,
   "blocked_hint": "See `docs/DEPENDENCIES.md` §5 for what to pick up instead.",
+
+  "artifact": {
+    "url": "https://claude.ai/code/artifact/3d96e4c6-7008-45ba-aeb5-01ce1e7e2483",
+    "favicon": "📊",
+    "model": "haiku",
+    "description": "EduTrack master schedule — 222 tasks, 4 streams, status derived from git."
+  },
 
   "streams": {
     "A": {

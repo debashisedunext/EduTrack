@@ -117,6 +117,25 @@ edutrack:
     access-key: ${S3_ACCESS_KEY:minioadmin}
     secret-key: ${S3_SECRET_KEY:minioadmin}
 
+  webhooks:
+    email:
+      # D-034/D-039. The provider webhooks are unauthenticated by necessity —
+      # the provider holds no EduTrack session — so this HMAC secret is the
+      # only thing stopping anyone who can reach the URL from suppressing an
+      # arbitrary address and silencing that person's mail.
+      #
+      # Deliberately empty by default: with no secret configured the verifier
+      # rejects every request. An open endpoint is a worse default than a
+      # temporarily unreachable one.
+      secret: ${EMAIL_WEBHOOK_SECRET:}
+
+  # D-035 · at most one mail per recipient per ticket in this window
+  # (blueprint §4B.6). A ticket edited five times in a minute must not put
+  # five mails in the assignee's inbox. The throttled mail is dropped, not
+  # delayed — spreading a burst out still delivers every mail.
+  mail:
+    rate-limit-window: ${MAIL_RATE_LIMIT_WINDOW:PT1M}
+
 logging:
   level:
     com.edunext.edutrack: ${LOG_LEVEL:INFO}
