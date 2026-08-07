@@ -18,7 +18,7 @@
 - [x] **C-001** Vite + React 18 + TypeScript scaffold, TanStack Query, Zustand, React Hook Form.
 - [x] **C-002** 🔴 **Design tokens** from blueprint §12.1 → `tokens.css` + `tailwind.config.ts`. All 12 colour tokens, level chips, the colour-blind-safe chart palette, ribbon segment states. Type scale (Inter / Plus Jakarta Sans, base 14/20), 4px spacing scale, radius 12/8/999, the two shadow levels. **Frozen after Sprint 0** — other streams request tokens rather than adding them.
 - [x] **C-003** Shared component library — button, input, select, searchable dropdown, chip, table, modal, slide-over, toast, skeleton loader, empty state, avatar stack.
-- [ ] **C-004** Storybook, with every shared component documented. If it isn't in Storybook, it isn't shared.
+- [x] **C-004** Storybook, with every shared component documented. If it isn't in Storybook, it isn't shared.
 - [ ] **C-005** App shell — collapsible 240px sidebar, top bar with global search, project switcher, notification bell, chat badge, avatar menu. Toast layer bottom-right.
 - [ ] **C-006** Command palette on `Ctrl+K` for jump-to-ticket.
 
