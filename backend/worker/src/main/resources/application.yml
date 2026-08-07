@@ -36,6 +36,13 @@ spring:
   flyway:
     enabled: false
 
+  # D-011 holds the scheduler locks here. Redis is already required by api for
+  # refresh tokens and the JWT blacklist, so this adds no new infrastructure.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
   mail:
     host: ${MAIL_HOST:localhost}
     port: ${MAIL_PORT:1025}          # Mailpit in local dev

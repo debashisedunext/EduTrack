@@ -17,8 +17,21 @@
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-mail</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-thymeleaf</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-redis</artifactId></dependency>
     <dependency><groupId>net.javacrumbs.shedlock</groupId><artifactId>shedlock-spring</artifactId></dependency>
-    <dependency><groupId>net.javacrumbs.shedlock</groupId><artifactId>shedlock-provider-jdbc-template</artifactId></dependency>
+    <!--
+      D-011. Redis provider rather than the JDBC one the skeleton assumed.
+      The JDBC provider needs its own `shedlock` table, which means a Flyway
+      migration — Stream A's territory — for a lock that holds no business
+      data. Redis is already a hard dependency (refresh tokens, JWT blacklist,
+      dashboard cache), and PLAN.md §2.1 sanctions either. Version comes from
+      the parent's shedlock.version so this module does not pin its own.
+    -->
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-provider-redis-spring</artifactId>
+      <version>${shedlock.version}</version>
+    </dependency>
 
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.testcontainers</groupId><artifactId>mysql</artifactId><scope>test</scope></dependency>
