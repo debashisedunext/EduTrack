@@ -51,6 +51,13 @@ spring:
       mail.smtp.starttls.enable: false
 
 edutrack:
+  # D-035 · at most one mail per recipient per ticket in this window
+  # (blueprint §4B.6). A ticket edited five times in a minute must not put
+  # five mails in the assignee's inbox. The throttled mail is dropped, not
+  # delayed — spreading a burst out still delivers every mail.
+  mail:
+    rate-limit-window: ${MAIL_RATE_LIMIT_WINDOW:PT1M}
+
   outbox:
     enabled: true
     poll-interval: PT5S

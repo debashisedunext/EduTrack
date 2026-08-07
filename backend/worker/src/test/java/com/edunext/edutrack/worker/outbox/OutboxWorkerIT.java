@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -98,9 +99,12 @@ class OutboxWorkerIT {
 
     @BeforeEach
     void reset() {
-        // notifications and email_log both reference users, so they go first.
+        // Child rows first: notifications and email_log reference users and
+        // tickets, tickets reference projects.
         jdbc.update("DELETE FROM notifications");
         jdbc.update("DELETE FROM email_log");
+        jdbc.update("DELETE FROM tickets");
+        jdbc.update("DELETE FROM projects");
         jdbc.update("DELETE FROM users");
         jdbc.update("DELETE FROM email_suppressions");
         clock = new MutableClock(Instant.parse("2026-08-07T10:00:00Z"));
@@ -429,6 +433,69 @@ class OutboxWorkerIT {
         assertThat(suppressions.isSuppressed("other@example.com")).isFalse();
     }
 
+    // ------------------------------------------ D-035 · per-recipient limit
+
+    /**
+     * Blueprint §4B.6: a ticket edited five times in a minute must not put five
+     * mails in the assignee's inbox — the assignee who gets that stops reading
+     * any of them.
+     */
+    @Test
+    void aSecondMailToTheSameRecipientAndTicketWithinTheWindowIsDropped() {
+        long ticket = insertTicket("CRM-26-00001");
+
+        assertThat(enqueueFor(ticket, "ravi@example.com")).isPresent();
+        assertThat(enqueueFor(ticket, "ravi@example.com"))
+                .as("the burst is throttled, not merely delayed")
+                .isEmpty();
+
+        assertThat(count()).isEqualTo(1);
+    }
+
+    @Test
+    void theSameRecipientOnADifferentTicketIsNotThrottled() {
+        long first = insertTicket("CRM-26-00001");
+        long second = insertTicket("CRM-26-00002");
+
+        assertThat(enqueueFor(first, "ravi@example.com")).isPresent();
+        assertThat(enqueueFor(second, "ravi@example.com"))
+                .as("a different ticket is a different conversation")
+                .isPresent();
+    }
+
+    @Test
+    void aDifferentRecipientOnTheSameTicketIsNotThrottled() {
+        long ticket = insertTicket("CRM-26-00001");
+
+        assertThat(enqueueFor(ticket, "ravi@example.com")).isPresent();
+        assertThat(enqueueFor(ticket, "asha@example.com")).isPresent();
+    }
+
+    @Test
+    void theLimitLapsesOnceTheWindowHasPassed() {
+        long ticket = insertTicket("CRM-26-00001");
+
+        assertThat(enqueueFor(ticket, "ravi@example.com")).isPresent();
+        // Backdate rather than sleep for a minute.
+        jdbc.update("UPDATE email_log SET queued_at = queued_at - INTERVAL 2 MINUTE");
+
+        assertThat(enqueueFor(ticket, "ravi@example.com"))
+                .as("a genuinely later update must still reach them")
+                .isPresent();
+    }
+
+    /**
+     * Non-ticket mail has {@code ticket_id IS NULL}, and plain {@code =} never
+     * matches NULL to NULL — without NULL-safe equality every system mail would
+     * skip the limit entirely.
+     */
+    @Test
+    void systemMailWithNoTicketIsStillThrottledPerRecipient() {
+        assertThat(enqueueFor(null, "ravi@example.com")).isPresent();
+        assertThat(enqueueFor(null, "ravi@example.com")).isEmpty();
+        assertThat(enqueueFor(null, "asha@example.com")).isPresent();
+    }
+
     // -------------------------------------------------------------- enqueue
 
     /**
@@ -481,6 +548,33 @@ class OutboxWorkerIT {
                                        retry_count, next_attempt_at, to_user_id)
                 VALUES ('TICKET_ASSIGNED', 'dev@example.com', 'subject', ?, 0, ?, ?)
                 """, status, java.sql.Timestamp.from(nextAttemptAt), toUserId);
+        Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        return id == null ? 0L : id;
+    }
+
+    private OptionalLong enqueueFor(Long ticketId, String toEmail) {
+        return transactions.execute(status -> enqueuer.enqueue(
+                new NewMail(ticketId, "TICKET_ASSIGNED", null, null, toEmail, "subject")));
+    }
+
+    /** email_log.ticket_id is a real foreign key, so the rate-limit tests
+     *  need real tickets rather than invented ids. */
+    private long insertTicket(String ticketCode) {
+        jdbc.update("""
+                INSERT INTO tickets (ticket_code, project_id, title, level, original_level)
+                VALUES (?, ?, 'rate limit fixture', 'MEDIUM', 'MEDIUM')
+                """, ticketCode, fixtureProjectId());
+        Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        return id == null ? 0L : id;
+    }
+
+    private long fixtureProjectId() {
+        List<Long> existing =
+                jdbc.queryForList("SELECT id FROM projects WHERE project_code = 'RL'", Long.class);
+        if (!existing.isEmpty()) {
+            return existing.getFirst();
+        }
+        jdbc.update("INSERT INTO projects (project_code, name) VALUES ('RL', 'Rate limit fixture')");
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         return id == null ? 0L : id;
     }
