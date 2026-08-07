@@ -11,7 +11,8 @@ Everything in this folder is **generated**, except three files you edit.
 | **[`calendar.json`](calendar.json)** | **no** | Working days, org holidays, developer leave |
 | **[`overrides.json`](overrides.json)** | **no** | Status that git cannot see, each with a reason |
 
-Never hand-edit `GANTT.md` or `gantt.html` — the 09:00 job overwrites them.
+Never hand-edit `GANTT.md` or `gantt.html` — they are regenerated on every push
+and again at 09:00, so an edit survives about a minute.
 
 ---
 
@@ -103,6 +104,32 @@ PLAN_NOTIFY=0 plan daily     # refresh, but message nobody
 plan cron status             # is it scheduled, when did it last run
 plan check                   # prove the chart renders
 ```
+
+---
+
+## And within 60 seconds of any push
+
+A watcher polls the remote every minute. When any branch moves it pulls,
+reschedules, and republishes the shareable chart:
+
+**[EduTrack — Master Schedule](https://claude.ai/code/artifact/3d96e4c6-7008-45ba-aeb5-01ce1e7e2483)**
+
+```bash
+plan watch status            # is it watching, what did it last do
+plan publish                 # push the current chart to that link by hand
+```
+
+That link is a **snapshot, not a live view**. A published artifact cannot fetch
+anything — its CSP blocks every external host, and this repo is private, so a
+token embedded in a shareable page would be a credential leak. It is pushed to,
+never pulled from. `GANTT.md` in this repo is the source of truth; the link is a
+copy of it for people who will never clone.
+
+Publishing is skipped when the chart is byte-identical to what was last
+published, so a refresh that changes nothing costs nothing.
+
+**The watcher sees pushes, not PR open/close.** Those usually follow a push
+within minutes, and the 09:00 job catches whatever slipped through.
 
 The engine lives in [plan-tracker](https://github.com/debashisedunext/plan-tracker),
 not in this repo — the same code runs every project's plan. This project's
