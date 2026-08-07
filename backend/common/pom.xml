@@ -17,5 +17,13 @@
     <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
     <dependency><groupId>com.fasterxml.jackson.datatype</groupId><artifactId>jackson-datatype-jsr310</artifactId></dependency>
     <dependency><groupId>org.mapstruct</groupId><artifactId>mapstruct</artifactId></dependency>
+    <!-- A-020 · Argon2id. Hashing lives in `common` per TEAM-PLAN.md §6 because
+         A-026/A-027/A-028 and Stream B's Resource Master all set passwords: a
+         second encoder configured with different parameters would silently
+         write hashes the login path cannot verify. -->
+    <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-crypto</artifactId></dependency>
+    <!-- Argon2PasswordEncoder delegates to BouncyCastle's Argon2BytesGenerator.
+         Compile scope, not runtime: `common` instantiates the encoder itself. -->
+    <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId></dependency>
   </dependencies>
 </project>

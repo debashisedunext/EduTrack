@@ -59,6 +59,26 @@
         <configuration><mainClass>com.edunext.edutrack.EduTrackApplication</mainClass></configuration>
       </plugin>
 
+      <!--
+        A-020. Same reason as domain/pom.xml: failsafe is not inherited from
+        spring-boot-starter-parent and must be declared per module. It runs
+        *IT.java apart from surefire's unit tests — AuthLoginIT needs a real
+        MySQL through Testcontainers — and still fails `mvn verify` if one fails.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <version>3.5.2</version>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
       <!-- ── frontend: build it, then package it into this jar ───────────── -->
       <plugin>
         <groupId>com.github.eirslett</groupId>
