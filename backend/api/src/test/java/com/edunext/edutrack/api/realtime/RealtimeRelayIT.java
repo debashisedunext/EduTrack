@@ -6,9 +6,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -43,15 +42,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  * destination prefixes, the relay's serialisation — and every one of those is
  * invisible to a test that calls {@code SimpMessagingTemplate} directly.
  *
- * <p>The datasource is excluded: realtime touches no tables, and requiring
- * MySQL would make this slower and couple it to schema work it does not use.
+ * <p><b>The datasource is no longer excluded.</b> It was, because realtime
+ * touches no tables — until A-020 added {@code AuthUserRepository}, which needs
+ * a {@code JdbcClient}, which needs a {@code DataSource}. Excluding it made
+ * this context unbuildable, the same breakage A-020 fixed in
+ * {@code ApplicationSmokeTest}.
+ *
+ * <p>It still costs nothing and still needs no MySQL: Spring Boot builds the
+ * {@code HikariDataSource} without starting its pool, and the pool opens on the
+ * first {@code getConnection()}, which nothing here performs. Only Hibernate
+ * and Flyway have to stay excluded — those two do dial the database during
+ * context refresh.
  */
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @EnableAutoConfiguration(exclude = {
-        DataSourceAutoConfiguration.class,
-        DataSourceTransactionManagerAutoConfiguration.class,
         HibernateJpaAutoConfiguration.class,
+        JpaRepositoriesAutoConfiguration.class,
         FlywayAutoConfiguration.class
 })
 class RealtimeRelayIT {
