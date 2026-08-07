@@ -1,5 +1,6 @@
 package com.edunext.edutrack.worker.outbox;
 
+import com.edunext.edutrack.domain.mail.EmailSuppressions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -35,17 +36,20 @@ public class OutboxWorker {
     private final MailTransport transport;
     private final OutboxProperties properties;
     private final MailFailureNotifier failureNotifier;
+    private final EmailSuppressions suppressions;
     private final Clock clock;
 
     public OutboxWorker(OutboxRepository repository,
                         MailTransport transport,
                         OutboxProperties properties,
                         MailFailureNotifier failureNotifier,
+                        EmailSuppressions suppressions,
                         Clock clock) {
         this.repository = repository;
         this.transport = transport;
         this.properties = properties;
         this.failureNotifier = failureNotifier;
+        this.suppressions = suppressions;
         this.clock = clock;
     }
 
@@ -89,6 +93,22 @@ public class OutboxWorker {
     }
 
     private void process(OutboxMessage message) {
+        // D-034: never send to an address the provider has told us is dead.
+        // Suppression is only useful if something consults it, and every
+        // avoidable send to a bounced address costs sender reputation — which
+        // is what decides whether the *next* escalation mail reaches anyone.
+        if (suppressions.isSuppressed(message.toEmail())) {
+            log.info("outbox: {} is suppressed, not sending mail {}",
+                    message.toEmail(), message.id());
+            String reason = "Address suppressed after an earlier bounce or complaint";
+            repository.markFailed(message.id(), message.retryCount() + 1, reason);
+            // Still notify in-app. Email is precisely the channel that does not
+            // work for this person, so the bell is the only way they learn a
+            // handoff was assigned to them.
+            failureNotifier.notifyDeliveryFailed(message, reason);
+            return;
+        }
+
         SendOutcome outcome;
         try {
             outcome = transport.send(message);
