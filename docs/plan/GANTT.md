@@ -51,7 +51,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `D-022` Stale-task nudge — no update for 3 working days, | Debashis | Thu 19 Nov | Mon 23 Nov | +2d |
 | `D-023` Stage-SLA scanner, separate from ticket SLA | Debashis | Thu 26 Nov | Mon 30 Nov | +2d |
 
-*…and 37 more — see the interactive chart.*
+*…and 38 more — see the interactive chart.*
 
 ---
 
@@ -203,12 +203,12 @@ gantt
 |  | `A-005` | Flyway baseline 3/5 — workflow | 1 | `A-004` | Wed 05 Aug | Wed 05 Aug | 0 | ✅ done |
 |  | `A-006` | Flyway baseline 4/5 — clients & content | 1.5 | `A-007` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
 |  | `A-007` | Flyway baseline 5/5 — masters & ops | 1.5 | `A-005` | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
-|  | `A-008` | Immutability triggers — two per table | 1 | `A-004` `A-005` | Fri 07 Aug | Fri 07 Aug | 92 | ✅ done |
+|  | `A-008` | Immutability triggers — two per table | 1 | `A-004` `A-005` | Fri 07 Aug | Fri 07 Aug | 91 | ✅ done |
 |  | `A-009` | Generated columns + indexes replacing PostgreSQL partial indexes | 0.5 | `A-006` | Fri 07 Aug | Fri 07 Aug | 41 | ✅ done |
 |  | `A-010` | Two DB users: edutrack_app | 0.5 | `A-009` ᶦ | Thu 06 Aug | Thu 06 Aug | 9 | ✅ done |
 |  | `A-011` | CI pipeline | 1.5 | `A-001` | Fri 07 Aug | Fri 07 Aug | 93 | ✅ done |
 | 🔴 | `A-012` | dev-noauth Spring profile — injects a configurable fake principal | 1.5 | `A-003` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
-|  | `A-013` | Negative tests proving triggers reject UPDATE and DELETE on each… | 1 | `A-008` | Thu 06 Aug | Thu 06 Aug | 9 | ✅ done |
+|  | `A-013` | Negative tests proving triggers reject UPDATE and DELETE on each… | 1 | `A-008` | Thu 06 Aug | Fri 07 Aug | 8 | ✅ done |
 |  | `A-020` | Login endpoint — Argon2id | 1.5 | `A-003` `A-012` ᶦ | Fri 07 Aug | Mon 10 Aug | 0 | ▫️ to do |
 |  | `A-021` | failed_attempts counter, 15-minute lockout at 5, email to Admin on… | 0.5 | `A-020` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ▫️ to do |
 |  | `A-022` | JWT access token, 15 min, claims sub, role, permissions[]… | 1 | `A-020` ᶦ | Tue 11 Aug | Tue 11 Aug | 0 | ▫️ to do |
