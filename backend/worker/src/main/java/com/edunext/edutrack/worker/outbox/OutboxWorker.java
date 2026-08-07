@@ -34,15 +34,18 @@ public class OutboxWorker {
     private final OutboxRepository repository;
     private final MailTransport transport;
     private final OutboxProperties properties;
+    private final MailFailureNotifier failureNotifier;
     private final Clock clock;
 
     public OutboxWorker(OutboxRepository repository,
                         MailTransport transport,
                         OutboxProperties properties,
+                        MailFailureNotifier failureNotifier,
                         Clock clock) {
         this.repository = repository;
         this.transport = transport;
         this.properties = properties;
+        this.failureNotifier = failureNotifier;
         this.clock = clock;
     }
 
@@ -110,6 +113,9 @@ public class OutboxWorker {
                 log.warn("outbox: permanent failure for id={} to={}: {}",
                         message.id(), message.toEmail(), failure.reason());
                 repository.markFailed(message.id(), attempts, failure.reason());
+                // D-033: stamping FAILED is not enough — somebody has to be
+                // told, or the recipient goes on assuming the mail arrived.
+                failureNotifier.notifyDeliveryFailed(message, failure.reason());
             }
 
             case SendOutcome.TransientFailure failure -> {
@@ -117,6 +123,7 @@ public class OutboxWorker {
                     log.warn("outbox: giving up on id={} after {} attempts: {}",
                             message.id(), attempts, failure.reason());
                     repository.markFailed(message.id(), attempts, failure.reason());
+                    failureNotifier.notifyDeliveryFailed(message, failure.reason());
                 } else {
                     Duration backoff = properties.backoffFor(attempts);
                     Instant nextAttempt = clock.instant().plus(backoff);

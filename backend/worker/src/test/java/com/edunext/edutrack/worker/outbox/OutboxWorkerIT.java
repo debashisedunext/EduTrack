@@ -78,6 +78,12 @@ class OutboxWorkerIT {
     OutboxEnqueuer enqueuer;
 
     @Autowired
+    MailFailureNotifier failureNotifier;
+
+    @Autowired
+    OutboxProperties shippedProperties;
+
+    @Autowired
     JdbcTemplate jdbc;
 
     @Autowired
@@ -87,7 +93,10 @@ class OutboxWorkerIT {
 
     @BeforeEach
     void reset() {
+        // notifications and email_log both reference users, so they go first.
+        jdbc.update("DELETE FROM notifications");
         jdbc.update("DELETE FROM email_log");
+        jdbc.update("DELETE FROM users");
         clock = new MutableClock(Instant.parse("2026-08-07T10:00:00Z"));
     }
 
@@ -249,6 +258,101 @@ class OutboxWorkerIT {
         assertThat(row(id).get("retry_count")).isEqualTo(1);
     }
 
+    // --------------------------------------- D-033 · failure is not silent
+
+    /**
+     * Blueprint §17 wants a missed alert "provable rather than deniable". The
+     * {@code email_log} row already proves it to anyone who looks; this is what
+     * tells the person who was waiting on the mail.
+     */
+    @Test
+    void exhaustedRetriesNotifyTheIntendedRecipientInApp() {
+        long assignee = insertUser("ravi", "DEVELOPER");
+        insert("QUEUED", clock.instant().minusSeconds(1), assignee);
+        OutboxWorker worker = workerWith(m -> new SendOutcome.TransientFailure("smtp down"));
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            worker.pollOnce();
+            clock.advance(Duration.ofHours(1));
+        }
+
+        List<Map<String, Object>> raised = notifications();
+        assertThat(raised).hasSize(1);
+        assertThat(raised.getFirst().get("user_id")).isEqualTo(assignee);
+        assertThat(raised.getFirst().get("event_code")).isEqualTo("MAIL_DELIVERY_FAILED");
+        assertThat((String) raised.getFirst().get("body"))
+                .contains("dev@example.com")
+                .contains("2 retries")
+                .contains("smtp down");
+    }
+
+    @Test
+    void aPermanentFailureNotifiesImmediatelyWithoutClaimingRetries() {
+        long assignee = insertUser("ravi", "DEVELOPER");
+        insert("QUEUED", clock.instant().minusSeconds(1), assignee);
+
+        workerWith(m -> new SendOutcome.PermanentFailure("invalid address")).pollOnce();
+
+        List<Map<String, Object>> raised = notifications();
+        assertThat(raised).hasSize(1);
+        assertThat((String) raised.getFirst().get("body"))
+                .as("giving up on the first attempt means zero retries, not 'after 0 retries'")
+                .doesNotContain("retries")
+                .contains("invalid address");
+    }
+
+    /**
+     * A client contact has no login, so there is no bell to put this in. It
+     * goes to the Admins instead — the audience D-034 also alerts on a bounce.
+     */
+    @Test
+    void aFailedClientContactMailFallsBackToAdmins() {
+        long admin = insertUser("asha", "ADMIN");
+        insertUser("ravi", "DEVELOPER");                    // must not be told
+        insert("QUEUED", clock.instant().minusSeconds(1));  // to_user_id is null
+
+        workerWith(m -> new SendOutcome.PermanentFailure("mailbox unavailable")).pollOnce();
+
+        assertThat(notifications())
+                .singleElement()
+                .extracting(row -> row.get("user_id"))
+                .isEqualTo(admin);
+    }
+
+    @Test
+    void aRetryThatHasNotExhaustedYetNotifiesNobody() {
+        long assignee = insertUser("ravi", "DEVELOPER");
+        insert("QUEUED", clock.instant().minusSeconds(1), assignee);
+
+        workerWith(m -> new SendOutcome.TransientFailure("smtp refused")).pollOnce();
+
+        assertThat(notifications())
+                .as("the mail may still arrive — crying wolf on attempt one trains people to ignore this")
+                .isEmpty();
+    }
+
+    @Test
+    void aSuccessfulSendNotifiesNobody() {
+        long assignee = insertUser("ravi", "DEVELOPER");
+        insert("QUEUED", clock.instant().minusSeconds(1), assignee);
+
+        workerWith(m -> new SendOutcome.Sent("provider-abc")).pollOnce();
+
+        assertThat(notifications()).isEmpty();
+    }
+
+    /**
+     * Pins the product rule to the shipped configuration rather than to a value
+     * invented by the tests: §4B.6 says three retries, and max-attempts counts
+     * the first send too.
+     */
+    @Test
+    void theShippedConfigurationIsThreeRetries() {
+        assertThat(shippedProperties.maxAttempts())
+                .as("one initial attempt plus three retries")
+                .isEqualTo(4);
+    }
+
     // -------------------------------------------------------------- enqueue
 
     /**
@@ -287,17 +391,37 @@ class OutboxWorkerIT {
         OutboxProperties properties = new OutboxProperties(
                 true, Duration.ofSeconds(5), 10, Duration.ofMinutes(2),
                 3, Duration.ofMinutes(1), Duration.ofHours(1), "test");
-        return new OutboxWorker(repository, transport, properties, clock);
+        return new OutboxWorker(repository, transport, properties, failureNotifier, clock);
     }
 
     private long insert(String status, Instant nextAttemptAt) {
+        return insert(status, nextAttemptAt, null);
+    }
+
+    private long insert(String status, Instant nextAttemptAt, Long toUserId) {
         jdbc.update("""
                 INSERT INTO email_log (event_code, to_email, subject, status,
-                                       retry_count, next_attempt_at)
-                VALUES ('TICKET_ASSIGNED', 'dev@example.com', 'subject', ?, 0, ?)
-                """, status, java.sql.Timestamp.from(nextAttemptAt));
+                                       retry_count, next_attempt_at, to_user_id)
+                VALUES ('TICKET_ASSIGNED', 'dev@example.com', 'subject', ?, 0, ?, ?)
+                """, status, java.sql.Timestamp.from(nextAttemptAt), toUserId);
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         return id == null ? 0L : id;
+    }
+
+    /** Roles are seeded by migration; users are not, so tests make their own. */
+    private long insertUser(String username, String roleCode) {
+        Long roleId = jdbc.queryForObject(
+                "SELECT id FROM roles WHERE code = ?", Long.class, roleCode);
+        jdbc.update("""
+                INSERT INTO users (emp_code, username, email, password_hash, full_name, role_id)
+                VALUES (?, ?, ?, 'not-a-real-hash', ?, ?)
+                """, username, username, username + "@example.com", username, roleId);
+        Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        return id == null ? 0L : id;
+    }
+
+    private List<Map<String, Object>> notifications() {
+        return jdbc.queryForList("SELECT * FROM notifications ORDER BY id");
     }
 
     private Map<String, Object> row(long id) {
