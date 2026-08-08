@@ -51,11 +51,16 @@ class RefreshTokenIssuerTest {
     @BeforeEach
     void setUp() {
         store = mock(RefreshTokenStore.class);
-        issuer = new RefreshTokenIssuer(store, properties());
+        issuer = new RefreshTokenIssuer(store, properties(), session());
     }
 
     private static RefreshTokenProperties properties() {
         return new RefreshTokenProperties(null, null, null, null);
+    }
+
+    /** A-025 · production defaults — 30-minute idle, 12-hour absolute. */
+    private static SessionProperties session() {
+        return new SessionProperties(null, null);
     }
 
     private ResponseCookie issueCookie() {
@@ -151,7 +156,7 @@ class RefreshTokenIssuerTest {
 
         for (int i = 0; i < 1000; i++) {
             RefreshTokenStore freshStore = mock(RefreshTokenStore.class);
-            RefreshTokenIssuer freshIssuer = new RefreshTokenIssuer(freshStore, properties());
+            RefreshTokenIssuer freshIssuer = new RefreshTokenIssuer(freshStore, properties(), session());
 
             values.add(freshIssuer.issue(USER, CHROME).orElseThrow().getValue());
 
@@ -258,8 +263,16 @@ class RefreshTokenIssuerTest {
         Instant now = Instant.now();
         return new StoredRefreshToken("jti-1", 42L, "family-abc",
                 StoredRefreshToken.fingerprintOf(CHROME),
-                now.minus(Duration.ofDays(7).minus(remaining)), now.plus(remaining));
+                now.minus(Duration.ofDays(7).minus(remaining)), now.plus(remaining),
+                SESSION_DEADLINE);
     }
+
+    /**
+     * A-025 · a fixed absolute deadline, so a test can assert the successor
+     * inherited <i>this exact instant</i> rather than something recomputed that
+     * merely looks close.
+     */
+    private static final Instant SESSION_DEADLINE = Instant.parse("2026-12-31T00:00:00Z");
 
     /**
      * The family is the unit revocation operates on. A successor in a fresh
@@ -304,6 +317,48 @@ class RefreshTokenIssuerTest {
      * had drifted to another browser silently re-bind itself there — a binding
      * that only ever matches is the same as no binding.
      */
+    /**
+     * A-025 · the absolute cap must survive rotation untouched. Recomputing it
+     * from "now" on each refresh would push the 12-hour deadline forward every
+     * fifteen minutes, so an active session would never reach it — the bound
+     * would exist in the code and never once fire.
+     */
+    @Test
+    @DisplayName("the 12-hour absolute deadline is inherited, never recomputed")
+    void rotationInheritsTheAbsoluteSessionDeadline() {
+        issuer.rotate(consumed(Duration.ofDays(5)));
+
+        assertThat(capturedRecord().sessionExpiresAt()).isEqualTo(SESSION_DEADLINE);
+    }
+
+    /**
+     * A-025 · the counterpart — {@code issuedAt} <b>is</b> re-stamped, because it
+     * doubles as "last activity" for the idle window. Inheriting it would freeze
+     * the idle clock at login and every session would trip the 30-minute timeout
+     * half an hour in, no matter how actively it was being used.
+     */
+    @Test
+    @DisplayName("issuedAt IS re-stamped on rotation — it is the idle clock")
+    void rotationRestampsTheActivityClock() {
+        StoredRefreshToken predecessor = consumed(Duration.ofDays(5));
+
+        issuer.rotate(predecessor);
+
+        assertThat(capturedRecord().issuedAt())
+                .as("the successor's issuedAt is 'last used', and must move with each refresh")
+                .isAfter(predecessor.issuedAt());
+    }
+
+    @Test
+    @DisplayName("a login stamps the absolute deadline 12 hours out")
+    void loginStampsTheAbsoluteDeadline() {
+        issueCookie();
+        StoredRefreshToken record = capturedRecord();
+
+        assertThat(Duration.between(record.issuedAt(), record.sessionExpiresAt()))
+                .isEqualTo(Duration.ofHours(12));
+    }
+
     @Test
     @DisplayName("the device binding is inherited, never re-stamped from the new request")
     void rotationInheritsTheDeviceBinding() {
@@ -366,7 +421,7 @@ class RefreshTokenIssuerTest {
     @DisplayName("no token is minted before there is somewhere to record it")
     void nothingIsIssuedWithoutAStore() {
         RefreshTokenStore unused = mock(RefreshTokenStore.class);
-        new RefreshTokenIssuer(unused, properties());
+        new RefreshTokenIssuer(unused, properties(), session());
 
         // Construction must not touch the store — a bean that dials Redis while
         // the context is refreshing is how the api came to die on startup once

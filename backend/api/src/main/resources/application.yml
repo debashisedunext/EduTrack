@@ -140,6 +140,16 @@ edutrack:
       # cookie and therefore cannot hold a session at all.
       secure-cookie: true
 
+    # A-025 · the two bounds §10.1 puts on a session's life. These are NOT the
+    # same thing as refresh-token.ttl above, and the difference is deliberate:
+    # the TTL is how long the server REMEMBERS a token, these are how long it
+    # will HONOUR one. Remembering for longer is what lets A-024 refuse a
+    # replayed day-three token as detected THEFT (revoking the family, raising
+    # an alert) rather than shrugging at an unrecognised value.
+    session:
+      idle-timeout: PT30M         # measured from the last successful refresh
+      absolute-timeout: PT12H     # measured from login; never extended by use
+
   storage:
     endpoint: ${S3_ENDPOINT:http://localhost:9000}
     bucket: ${S3_BUCKET:edutrack}

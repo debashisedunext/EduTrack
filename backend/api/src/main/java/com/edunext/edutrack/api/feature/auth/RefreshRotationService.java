@@ -83,17 +83,20 @@ class RefreshRotationService {
     private final RefreshTokenStore store;
     private final RefreshTokenIssuer issuer;
     private final RefreshTokenProperties properties;
+    private final SessionProperties session;
     private final AuthenticationService authentication;
     private final AccessTokenIssuer accessTokens;
 
     RefreshRotationService(RefreshTokenStore store,
                            RefreshTokenIssuer issuer,
                            RefreshTokenProperties properties,
+                           SessionProperties session,
                            AuthenticationService authentication,
                            AccessTokenIssuer accessTokens) {
         this.store = store;
         this.issuer = issuer;
         this.properties = properties;
+        this.session = session;
         this.authentication = authentication;
         this.accessTokens = accessTokens;
     }
@@ -160,6 +163,31 @@ class RefreshRotationService {
         //      non-positive TTL and fail deeper in, as a 500 rather than a 401.
         if (!token.expiresAt().isAfter(Instant.now())) {
             store.discard(tokenValue);
+            throw new InvalidRefreshTokenException();
+        }
+
+        // 4b ── A-025 · the two §10.1 session bounds. Both refuse without
+        //       revoking: an idle session and a day-long one are the most
+        //       ordinary things that happen to a session, and treating either as
+        //       theft would fire the alert constantly and teach everyone to
+        //       ignore it. Checked after the device binding and before any write,
+        //       so an expired session leaves no trace beyond its own removal.
+        //
+        //       Order between them does not affect the outcome — both produce the
+        //       same refusal — but absolute is checked first because it is the
+        //       one that cannot be argued with: idle is measured from a timestamp
+        //       rotation maintains, absolute from a fact fixed at login.
+        if (token.isSessionExpiredAt(Instant.now())) {
+            store.discard(tokenValue);
+            log.info("auth: refresh refused for user {} — session reached the {}h absolute cap",
+                    token.userId(), session.absoluteTimeout().toHours());
+            throw new InvalidRefreshTokenException();
+        }
+
+        if (token.isIdleAt(Instant.now(), session.idleTimeout())) {
+            store.discard(tokenValue);
+            log.info("auth: refresh refused for user {} — session idle longer than {} minutes",
+                    token.userId(), session.idleTimeout().toMinutes());
             throw new InvalidRefreshTokenException();
         }
 

@@ -69,7 +69,12 @@ class RefreshTokenStoreIT {
                 UUID.randomUUID().toString(),
                 StoredRefreshToken.fingerprintOf("Mozilla/5.0 Chrome/131.0.0.0"),
                 now,
-                now.plus(ttl));
+                now.plus(ttl),
+                // A-025 · the absolute session cap. Irrelevant to this suite,
+                // which tests storage rather than policy, so it is set beyond any
+                // TTL used here — a value in the past would silently make every
+                // record look like an expired session to a future reader.
+                now.plus(Duration.ofDays(30)));
     }
 
     @Test

@@ -68,14 +68,31 @@ class RefreshRotationServiceTest {
         accessTokens = mock(AccessTokenIssuer.class);
         rotation = new RefreshRotationService(
                 store, issuer, new RefreshTokenProperties(null, null, null, null),
-                authentication, accessTokens);
+                new SessionProperties(null, null), authentication, accessTokens);
     }
 
-    /** A live token, seven days out, bound to Chrome. */
+    /** A live token, seven days out, bound to Chrome, well inside both session bounds. */
     private static StoredRefreshToken live() {
         Instant now = Instant.now();
         return new StoredRefreshToken("jti-1", 42L, FAMILY,
-                StoredRefreshToken.fingerprintOf(CHROME), now, now.plus(Duration.ofDays(7)));
+                StoredRefreshToken.fingerprintOf(CHROME), now, now.plus(Duration.ofDays(7)),
+                now.plus(Duration.ofHours(12)));
+    }
+
+    /**
+     * A token whose own expiry and family are fine, but whose session has run
+     * out one way or the other — the A-025 cases.
+     *
+     * @param lastUsedAgo     how long since the last refresh (drives the idle window)
+     * @param sessionStartAgo how long since login (drives the absolute cap)
+     */
+    private static StoredRefreshToken session(Duration lastUsedAgo, Duration sessionStartAgo) {
+        Instant now = Instant.now();
+        return new StoredRefreshToken("jti-1", 42L, FAMILY,
+                StoredRefreshToken.fingerprintOf(CHROME),
+                now.minus(lastUsedAgo),
+                now.plus(Duration.ofDays(7)),
+                now.minus(sessionStartAgo).plus(Duration.ofHours(12)));
     }
 
     /** Wires the whole happy path so each test only has to break one link. */
@@ -296,13 +313,97 @@ class RefreshRotationServiceTest {
         verify(store, never()).claim(anyString());
     }
 
+    // ── A-025 · the two session bounds ──────────────────────────────────────
+
+    /**
+     * §10.1's absolute cap. Without it rotation is an unbounded chain — a token
+     * used inside every idle window lives forever, and so does a stolen chain
+     * being kept warm, leaving explicit logout as the only thing that ever ends
+     * a session.
+     */
+    @Test
+    @DisplayName("a session past 12 hours is refused however recently it was used")
+    void theAbsoluteCapEndsEvenAnActiveSession() {
+        // Used one minute ago — nowhere near idle — but logged in 13 hours ago.
+        when(store.find(TOKEN)).thenReturn(Optional.of(
+                session(Duration.ofMinutes(1), Duration.ofHours(13))));
+        when(store.isFamilyRevoked(FAMILY)).thenReturn(false);
+
+        assertThatExceptionOfType(InvalidRefreshTokenException.class)
+                .isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+
+        verify(store).discard(TOKEN);
+        verify(store, never()).claim(anyString());
+        verify(issuer, never()).rotate(any());
+    }
+
+    /** §10.1's idle window, measured from the last successful refresh. */
+    @Test
+    @DisplayName("a session idle longer than 30 minutes is refused")
+    void theIdleWindowEndsAnAbandonedSession() {
+        // Logged in an hour ago (well inside 12h) but untouched for 45 minutes.
+        when(store.find(TOKEN)).thenReturn(Optional.of(
+                session(Duration.ofMinutes(45), Duration.ofHours(1))));
+        when(store.isFamilyRevoked(FAMILY)).thenReturn(false);
+
+        assertThatExceptionOfType(InvalidRefreshTokenException.class)
+                .isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+
+        verify(store).discard(TOKEN);
+        verify(issuer, never()).rotate(any());
+    }
+
+    /**
+     * The ordinary case, and the one a too-eager idle check would break: a client
+     * renewing on the natural 15-minute access-token cadence must never trip a
+     * 30-minute window.
+     */
+    @Test
+    @DisplayName("the normal 15-minute refresh cadence never trips the idle window")
+    void aNormallyActiveSessionIsUnaffected() {
+        StoredRefreshToken token = session(Duration.ofMinutes(15), Duration.ofHours(3));
+        when(store.find(TOKEN)).thenReturn(Optional.of(token));
+        when(store.isFamilyRevoked(FAMILY)).thenReturn(false);
+        when(store.claim(TOKEN)).thenReturn(true);
+        when(authentication.resolveActiveUser(42L)).thenReturn(USER);
+        when(accessTokens.issue(USER)).thenReturn(new AccessToken("t", 900));
+        when(issuer.rotate(any(StoredRefreshToken.class))).thenReturn(SUCCESSOR);
+
+        assertThatNoException().isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+
+        verify(issuer).rotate(token);
+    }
+
+    /**
+     * Both are the most ordinary things that happen to a session. Treating
+     * either as theft would fire the alert constantly and teach everyone to
+     * ignore the one signal that matters.
+     */
+    @Test
+    @DisplayName("neither timeout revokes the family — an idle session is not a stolen one")
+    void sessionTimeoutsAreNotTreatedAsTheft() {
+        when(store.isFamilyRevoked(FAMILY)).thenReturn(false);
+
+        when(store.find(TOKEN)).thenReturn(Optional.of(
+                session(Duration.ofMinutes(45), Duration.ofHours(1))));
+        assertThatExceptionOfType(InvalidRefreshTokenException.class)
+                .isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+
+        when(store.find(TOKEN)).thenReturn(Optional.of(
+                session(Duration.ofMinutes(1), Duration.ofHours(13))));
+        assertThatExceptionOfType(InvalidRefreshTokenException.class)
+                .isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+
+        verify(store, never()).revokeFamily(anyString(), any());
+    }
+
     @Test
     @DisplayName("an expired record is refused rather than rotated into a negative TTL")
     void anExpiredRecordIsRefused() {
         Instant past = Instant.now().minus(Duration.ofMinutes(1));
         when(store.find(TOKEN)).thenReturn(Optional.of(new StoredRefreshToken(
                 "jti-1", 42L, FAMILY, StoredRefreshToken.fingerprintOf(CHROME),
-                past.minus(Duration.ofDays(7)), past)));
+                past.minus(Duration.ofDays(7)), past, past.plus(Duration.ofHours(12)))));
         when(store.isFamilyRevoked(FAMILY)).thenReturn(false);
 
         assertThatExceptionOfType(InvalidRefreshTokenException.class)
