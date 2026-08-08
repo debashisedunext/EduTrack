@@ -1,6 +1,7 @@
 package com.edunext.edutrack.worker.outbox;
 
 import com.edunext.edutrack.domain.notifications.NewNotification;
+import com.edunext.edutrack.domain.notifications.NotificationEvent;
 import com.edunext.edutrack.domain.notifications.NotificationWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +32,7 @@ import java.util.List;
 public class MailFailureNotifier {
 
     /** §11 event code for the bell entry. */
-    static final String EVENT_CODE = "MAIL_DELIVERY_FAILED";
+    static final NotificationEvent EVENT_CODE = NotificationEvent.MAIL_DELIVERY_FAILED;
 
     private static final String ADMIN_ROLE = "ADMIN";
 
