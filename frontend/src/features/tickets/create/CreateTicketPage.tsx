@@ -1,0 +1,550 @@
+import * as React from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useForm, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { format } from 'date-fns'
+
+import { useGetMe } from '@/api/generated/auth/auth'
+import { useListProjects } from '@/api/generated/projects/projects'
+import { useListClients, useListClientContacts } from '@/api/generated/clients/clients'
+import { useListUsers } from '@/api/generated/users/users'
+import { useListTaskTypes, useListPriorities } from '@/api/generated/masters/masters'
+import { newIdempotencyKey, ApiError } from '@/api/http'
+import type { Level } from '@/api/generated/model/level'
+import type { Project } from '@/api/generated/model/project'
+import type { Client } from '@/api/generated/model/client'
+import type { Contact } from '@/api/generated/model/contact'
+import type { User } from '@/api/generated/model/user'
+
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Chip } from '@/components/ui/chip'
+import { SearchableDropdown } from '@/components/ui/searchable-dropdown'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
+import { toast } from '@/components/ui/use-toast'
+import { useCurrentProjectStore } from '@/app/currentProjectStore'
+import { cn } from '@/lib/utils'
+
+import { FieldGroup, FormField, ReadOnlyField } from './FormField'
+import { LevelPicker } from './LevelPicker'
+import { WatcherPicker } from './WatcherPicker'
+import { useCreateTicket } from './createTicketMutation'
+import {
+  clientRequiringTaskTypeIds,
+  emptyTicketForm,
+  ticketFormSchema,
+  toCreateRequest,
+  type TicketFormValues,
+} from './ticketForm'
+
+/**
+ * S-19 Create Ticket — C-010.
+ *
+ * All five blueprint §7.5 field groups. What is deliberately *not* here, and
+ * why, is in this folder's README: the inline planned-close-date preview is
+ * C-012, the three save actions are C-013, attachments are C-023/C-024 and the
+ * opening comment is C-029.
+ */
+export function CreateTicketPage() {
+  const navigate = useNavigate()
+  const currentProject = useCurrentProjectStore((s) => s.project)
+  const setCurrentProject = useCurrentProjectStore((s) => s.setProject)
+
+  const { data: me } = useGetMe()
+  const { data: projectsData, isPending: projectsPending } = useListProjects({ isActive: true, limit: 200 })
+  const { data: taskTypesData, isPending: taskTypesPending } = useListTaskTypes()
+  const { data: prioritiesData } = useListPriorities()
+
+  const projects = React.useMemo(() => projectsData?.data ?? [], [projectsData])
+  const taskTypes = React.useMemo(
+    () => (taskTypesData?.data ?? []).filter((t) => t.isActive !== false),
+    [taskTypesData],
+  )
+  const levels = React.useMemo(
+    () => (prioritiesData?.data ?? []).map((p) => p.level).filter((l): l is Level => l != null),
+    [prioritiesData],
+  )
+
+  const clientRequiredIds = React.useMemo(() => clientRequiringTaskTypeIds(taskTypes), [taskTypes])
+  const resolver = React.useMemo(() => zodResolver(ticketFormSchema(clientRequiredIds)), [clientRequiredIds])
+
+  const {
+    control,
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<TicketFormValues>({
+    resolver,
+    defaultValues: { ...emptyTicketForm, projectId: currentProject?.id ?? null },
+    mode: 'onBlur',
+  })
+
+  const projectId = watch('projectId')
+  const taskTypeId = watch('taskTypeId')
+  const clientId = watch('clientId')
+
+  // Only the project's members can be assigned or watch — §7.5. Both lists wait
+  // for a project rather than showing everyone and filtering after the fact.
+  const { data: membersData } = useListUsers(
+    { projectId: projectId ?? undefined, isActive: true, limit: 200 },
+    { query: { enabled: projectId != null } },
+  )
+  const members = React.useMemo(() => membersData?.data ?? [], [membersData])
+
+  // `projectId` is sent per §4B.2 ("filtered to clients mapped to the project").
+  // D-004's mock ignores the parameter today and returns every client, so in
+  // `npm run dev` the list looks unfiltered; against the real API it is not.
+  const { data: clientsData } = useListClients(
+    { projectId: projectId ?? undefined, isActive: true, limit: 200 },
+    { query: { enabled: projectId != null } },
+  )
+  const clients = React.useMemo(() => clientsData?.data ?? [], [clientsData])
+
+  const { data: contactsData } = useListClientContacts(clientId ?? 0, {
+    query: { enabled: clientId != null },
+  })
+  const contacts = React.useMemo(
+    () => (contactsData?.data ?? []).filter((c): c is Contact & { id: number } => c.id != null),
+    [contactsData],
+  )
+
+  const canBackdateOrOverride = me?.data.role === 'ADMIN' || me?.data.role === 'PM'
+
+  // One key per logical ticket, minted before the first attempt and rotated only
+  // once a ticket actually exists. A key regenerated per click would make the
+  // resubmit-after-timeout case — the one it is for — look like a new ticket.
+  const idempotencyKey = React.useRef(newIdempotencyKey())
+  const createTicket = useCreateTicket()
+
+  // Level is pre-filled from the task type's default and stays pre-filled until
+  // the user picks one themselves; after that, changing the task type must not
+  // silently overwrite their choice.
+  const levelTouched = React.useRef(false)
+  React.useEffect(() => {
+    if (levelTouched.current || taskTypeId == null) return
+    const fallback = taskTypes.find((t) => t.id === taskTypeId)?.defaultLevel
+    if (fallback) setValue('level', fallback, { shouldValidate: false })
+  }, [taskTypeId, taskTypes, setValue])
+
+  // A contact belongs to exactly one client, so it cannot survive the client changing.
+  const previousClientId = React.useRef(clientId)
+  React.useEffect(() => {
+    if (previousClientId.current !== clientId) {
+      previousClientId.current = clientId
+      setValue('clientContactId', null)
+    }
+  }, [clientId, setValue])
+
+  async function onSubmit(values: TicketFormValues) {
+    try {
+      const response = await createTicket.mutateAsync({
+        data: toCreateRequest(values),
+        idempotencyKey: idempotencyKey.current,
+      })
+      const ticketId = response.data.ticketId
+      idempotencyKey.current = newIdempotencyKey()
+      toast({ variant: 'success', title: `${ticketId} created`, description: values.title.trim() })
+      navigate(`/tickets/${ticketId}`)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 400) {
+        // Server-side field messages land on the fields they belong to rather
+        // than in a banner the user has to map back onto the form themselves.
+        for (const [field, messages] of Object.entries(error.fieldErrors)) {
+          if (field in emptyTicketForm) {
+            setError(field as keyof TicketFormValues, { type: 'server', message: messages.join('. ') })
+          }
+        }
+      }
+      toast({
+        variant: 'danger',
+        title: 'The ticket was not created',
+        description: error instanceof ApiError ? error.problem.detail ?? error.message : 'Try again in a moment.',
+      })
+    }
+  }
+
+  if (projectsPending || taskTypesPending) {
+    return (
+      <div className="mx-auto flex max-w-4xl flex-col gap-4 p-8" aria-busy>
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    )
+  }
+
+  const selectedProject = projects.find((p) => p.id === projectId) ?? null
+  const selectedClient = clients.find((c) => c.id === clientId) ?? null
+  const selectedContact = contacts.find((c) => c.id === watch('clientContactId')) ?? null
+  const selectedAssignee = members.find((u) => u.id === watch('assigneeId')) ?? null
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} noValidate className="mx-auto max-w-4xl p-8 pb-28">
+      <header className="mb-6">
+        <h1 className="text-h1 text-content">New ticket</h1>
+        <p className="mt-1 text-sm text-content-muted">
+          Fields marked <span className="text-danger-text">*</span> are required.
+        </p>
+      </header>
+
+      <div className="flex flex-col gap-6">
+        {/* ── Identity ─────────────────────────────────────────────────── */}
+        <FieldGroup
+          title="Identity"
+          description="The ticket ID is issued by the server when you save, from the project's own sequence."
+        >
+          <ReadOnlyField
+            label="Ticket ID"
+            value={
+              selectedProject ? (
+                <span className="font-mono">
+                  {selectedProject.projectCode}-{format(new Date(), 'yy')}-·····
+                </span>
+              ) : (
+                'Select a project'
+              )
+            }
+            hint="Generated on save — never reused, never reset at year rollover."
+          />
+        </FieldGroup>
+
+        {/* ── Core ─────────────────────────────────────────────────────── */}
+        <FieldGroup title="Core">
+          <FormField id="projectId" label="Project" required error={errors.projectId?.message}>
+            {(aria) => (
+              <Controller
+                control={control}
+                name="projectId"
+                render={({ field }) => (
+                  <SearchableDropdown<Project>
+                    {...aria}
+                    options={projects}
+                    value={selectedProject}
+                    onChange={(project) => {
+                      field.onChange(project.id)
+                      // Everything below the project depends on it.
+                      setValue('clientId', null)
+                      setValue('clientContactId', null)
+                      setValue('assigneeId', null)
+                      setValue('watcherIds', [])
+                      setCurrentProject(project)
+                    }}
+                    getKey={(project) => String(project.id)}
+                    getLabel={(project) => `${project.projectCode} — ${project.name}`}
+                    getSearchable={(project) => [project.projectCode, project.name]}
+                    placeholder="Search projects…"
+                  />
+                )}
+              />
+            )}
+          </FormField>
+
+          <FormField
+            id="taskTypeId"
+            label="Task type"
+            required
+            error={errors.taskTypeId?.message}
+            hint="Sets the default priority and the SLA the close date is computed from."
+          >
+            {(aria) => (
+              <Controller
+                control={control}
+                name="taskTypeId"
+                render={({ field }) => (
+                  <Select
+                    value={field.value != null ? String(field.value) : undefined}
+                    onValueChange={(value) => field.onChange(Number(value))}
+                  >
+                    <SelectTrigger {...aria}>
+                      <SelectValue placeholder="Select a task type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {taskTypes.map((type) => (
+                        <SelectItem key={type.id} value={String(type.id)}>
+                          {type.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            )}
+          </FormField>
+
+          <FormField
+            id="clientId"
+            label="Client"
+            error={errors.clientId?.message}
+            hint={
+              taskTypeId != null && clientRequiredIds.has(taskTypeId)
+                ? 'Required for this task type.'
+                : 'Clients mapped to the selected project.'
+            }
+          >
+            {(aria) => (
+              <Controller
+                control={control}
+                name="clientId"
+                render={({ field }) => (
+                  <SearchableDropdown<Client>
+                    {...aria}
+                    options={clients}
+                    value={selectedClient}
+                    onChange={(client) => field.onChange(client.id)}
+                    getKey={(client) => String(client.id)}
+                    getLabel={(client) => `${client.clientCode} — ${client.name}`}
+                    getSearchable={(client) => [client.clientCode ?? '', client.name ?? '', client.domain ?? '']}
+                    placeholder={projectId == null ? 'Select a project first' : 'Search name, code or domain…'}
+                    disabled={projectId == null}
+                  />
+                )}
+              />
+            )}
+          </FormField>
+
+          <FormField
+            id="clientContactId"
+            label="Client contact"
+            error={errors.clientContactId?.message}
+            hint="The person who reported it. Adding one without leaving the form is C-021."
+          >
+            {(aria) => (
+              <Controller
+                control={control}
+                name="clientContactId"
+                render={({ field }) => (
+                  <SearchableDropdown<Contact & { id: number }>
+                    {...aria}
+                    options={contacts}
+                    value={(selectedContact as (Contact & { id: number }) | null) ?? null}
+                    onChange={(contact) => field.onChange(contact.id)}
+                    getKey={(contact) => String(contact.id)}
+                    getLabel={(contact) => contact.name ?? contact.email ?? `Contact ${contact.id}`}
+                    getSearchable={(contact) => [contact.email ?? '']}
+                    placeholder={clientId == null ? 'Select a client first' : 'Search contacts…'}
+                    emptyText="This client has no contacts yet"
+                    disabled={clientId == null}
+                  />
+                )}
+              />
+            )}
+          </FormField>
+
+          <FormField
+            id="title"
+            label="Title / summary"
+            required
+            error={errors.title?.message}
+            className="sm:col-span-2"
+          >
+            {(aria) => <Input {...aria} {...register('title')} placeholder="One line a manager can scan" />}
+          </FormField>
+
+          <FormField
+            id="description"
+            label="Task description"
+            required
+            error={errors.description?.message}
+            hint="Rich text — bold, lists, code blocks and inline images — arrives with the shared editor built for the comment box (C-029)."
+            className="sm:col-span-2"
+          >
+            {(aria) => (
+              <textarea
+                {...aria}
+                {...register('description')}
+                rows={6}
+                placeholder="What happened, what was expected, and how to reproduce it."
+                className={cn(
+                  'w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-content',
+                  'placeholder:text-content-muted',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
+                  'aria-[invalid=true]:border-danger aria-[invalid=true]:focus-visible:ring-danger',
+                )}
+              />
+            )}
+          </FormField>
+
+          <FormField
+            id="level"
+            label="Level (priority)"
+            required
+            error={errors.level?.message}
+            hint="Pre-filled from the task type's default until you choose one."
+            className="sm:col-span-2"
+          >
+            {(aria) => (
+              <Controller
+                control={control}
+                name="level"
+                render={({ field }) => (
+                  <LevelPicker
+                    {...aria}
+                    levels={levels}
+                    value={field.value}
+                    onChange={(level) => {
+                      levelTouched.current = true
+                      field.onChange(level)
+                    }}
+                  />
+                )}
+              />
+            )}
+          </FormField>
+        </FieldGroup>
+
+        {/* ── People ───────────────────────────────────────────────────── */}
+        <FieldGroup title="People">
+          <ReadOnlyField
+            label="Date reported"
+            value={format(new Date(), 'dd MMM yyyy, HH:mm')}
+            hint="Stamped by the server on save. Backdating for Admin and PM needs a contract field — see the README."
+          />
+          <ReadOnlyField
+            label="Reported by"
+            value={me?.data.displayName ?? '—'}
+            hint="You. A Support Desk agent reporting on a client contact's behalf needs a contract field — see the README."
+          />
+
+          <FormField
+            id="assigneeId"
+            label="Assigned to"
+            error={errors.assigneeId?.message}
+            hint="Open-ticket load shown per person, so you can see who is free."
+          >
+            {(aria) => (
+              <Controller
+                control={control}
+                name="assigneeId"
+                render={({ field }) => (
+                  <SearchableDropdown<User>
+                    {...aria}
+                    options={members}
+                    value={selectedAssignee}
+                    onChange={(user) => field.onChange(user.id)}
+                    getKey={(user) => String(user.id)}
+                    getLabel={(user) =>
+                      user.openTicketCount != null
+                        ? `${user.displayName} · ${user.openTicketCount} open`
+                        : user.displayName
+                    }
+                    getSearchable={(user) => [user.email ?? '', user.role ?? '']}
+                    placeholder={projectId == null ? 'Select a project first' : 'Search project members…'}
+                    emptyText="No active members on this project"
+                    disabled={projectId == null}
+                  />
+                )}
+              />
+            )}
+          </FormField>
+
+          <ReadOnlyField label="Assigned by" value={me?.data.displayName ?? '—'} hint="Always the current user." />
+
+          <FormField
+            id="watcherIds"
+            label="Watchers"
+            error={errors.watcherIds?.message}
+            hint="They get the notifications too."
+            className="sm:col-span-2"
+          >
+            {(aria) => (
+              <Controller
+                control={control}
+                name="watcherIds"
+                render={({ field }) => (
+                  <WatcherPicker
+                    {...aria}
+                    candidates={members}
+                    value={field.value}
+                    onChange={field.onChange}
+                    disabled={projectId == null}
+                  />
+                )}
+              />
+            )}
+          </FormField>
+        </FieldGroup>
+
+        {/* ── Effort ───────────────────────────────────────────────────── */}
+        <FieldGroup title="Effort">
+          <FormField
+            id="estimatedHrs"
+            label="Estimated effort (hrs)"
+            required
+            error={errors.estimatedHrs?.message}
+          >
+            {(aria) => (
+              <Input {...aria} {...register('estimatedHrs')} inputMode="decimal" placeholder="4.5" />
+            )}
+          </FormField>
+
+          {canBackdateOrOverride ? (
+            <FormField
+              id="plannedCloseDate"
+              label="Planned close date"
+              error={errors.plannedCloseDate?.message}
+              hint="Leave blank to compute it from the SLA policy against the working calendar. The inline preview is C-012."
+            >
+              {(aria) => <Input {...aria} {...register('plannedCloseDate')} type="datetime-local" />}
+            </FormField>
+          ) : (
+            <ReadOnlyField
+              label="Planned close date"
+              value="Computed from the SLA policy on save"
+              hint="Weekends, holidays and resource leave are taken out of the clock. Overriding it requires PM or Admin."
+            />
+          )}
+
+          <ReadOnlyField label="Actual close date" value="—" hint="Set at closure, never here." />
+        </FieldGroup>
+
+        {/* ── Extra ────────────────────────────────────────────────────── */}
+        <FieldGroup title="Extra">
+          <FormField
+            id="isClientRaised"
+            label="Client-raised"
+            error={errors.isClientRaised?.message}
+            hint="Drives the client-wise reports, the CSAT survey and the client-visible default on comments."
+            className="sm:col-span-2"
+          >
+            {(aria) => (
+              <label className="flex h-10 items-center gap-2 text-sm text-content">
+                <input
+                  {...aria}
+                  {...register('isClientRaised')}
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+                />
+                This ticket was raised by the client
+              </label>
+            )}
+          </FormField>
+
+          <div className="sm:col-span-2 flex flex-wrap items-center gap-2 rounded-control bg-subtle px-3 py-2.5">
+            <span className="text-caption text-content-muted">Arriving in their own tasks:</span>
+            <Chip>Attachments · C-023</Chip>
+            <Chip>Clipboard paste · C-024</Chip>
+            <Chip>First comment · C-029</Chip>
+          </div>
+        </FieldGroup>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 border-t border-border bg-surface px-8 py-4 shadow-modal">
+        <div className="mx-auto flex max-w-4xl items-center justify-end gap-2">
+          <span className="mr-auto text-caption text-content-muted">
+            Save as Draft, Save &amp; Assign and Save &amp; Create Another arrive with C-013.
+          </span>
+          <Button type="button" variant="secondary" onClick={() => navigate(-1)}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Creating…' : 'Create ticket'}
+          </Button>
+        </div>
+      </div>
+    </form>
+  )
+}

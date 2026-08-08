@@ -15,6 +15,15 @@ export interface SearchableDropdownProps<T> {
   emptyText?: string
   disabled?: boolean
   className?: string
+  /**
+   * Wired to a `<label htmlFor>`. A `button` is a labelable element, so the
+   * label associates with the trigger the same way it would with an `input`.
+   * Without it the control reaches a screen reader unnamed, which fails AA.
+   */
+  id?: string
+  'aria-labelledby'?: string
+  'aria-describedby'?: string
+  'aria-invalid'?: boolean
 }
 
 export function SearchableDropdown<T>({
@@ -28,6 +37,10 @@ export function SearchableDropdown<T>({
   emptyText = 'No results',
   disabled,
   className,
+  id,
+  'aria-labelledby': ariaLabelledBy,
+  'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
 }: SearchableDropdownProps<T>) {
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState('')
@@ -70,10 +83,15 @@ export function SearchableDropdown<T>({
         <button
           type="button"
           disabled={disabled}
+          id={id}
+          aria-labelledby={ariaLabelledBy}
+          aria-describedby={ariaDescribedBy}
+          aria-invalid={ariaInvalid}
           className={cn(
             'flex h-10 w-full items-center justify-between rounded-control border border-border bg-surface px-3 text-sm text-content',
             'focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1',
             'disabled:cursor-not-allowed disabled:opacity-50',
+            'aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger',
             className,
           )}
         >
