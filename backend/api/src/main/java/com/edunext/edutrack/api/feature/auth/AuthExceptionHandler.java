@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.auth;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +30,14 @@ class AuthExceptionHandler {
 
     private static final URI INVALID_CREDENTIALS = URI.create("https://edutrack/errors/invalid-credentials");
     private static final URI ACCOUNT_LOCKED = URI.create("https://edutrack/errors/account-locked");
+    private static final URI INVALID_REFRESH_TOKEN = URI.create("https://edutrack/errors/invalid-refresh-token");
+    private static final URI REFRESH_TOKEN_REUSE = URI.create("https://edutrack/errors/refresh-token-reuse");
+
+    private final RefreshTokenIssuer refreshTokens;
+
+    AuthExceptionHandler(RefreshTokenIssuer refreshTokens) {
+        this.refreshTokens = refreshTokens;
+    }
 
     /**
      * One handler, one status, one body — for unknown users, wrong passwords
@@ -66,5 +75,61 @@ class AuthExceptionHandler {
             problem.setProperty("lockedUntil", exception.lockedUntil().toString());
         }
         return ResponseEntity.status(HttpStatus.LOCKED).body(problem);
+    }
+
+    // ── A-024 · refresh refusals ────────────────────────────────────────────
+
+    /**
+     * A-024 · the ordinary refusal — missing, expired, unknown, revoked family,
+     * different device, or a deactivated account, all with one body.
+     *
+     * <p>The same {@code detail} for all of them, for the same reason the login
+     * refusal has one: a caller who cannot tell "expired" from "never issued"
+     * learns nothing about which random values happen to be real tokens. See
+     * {@link InvalidRefreshTokenException}.
+     */
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    ResponseEntity<ProblemDetail> handleInvalidRefreshToken(InvalidRefreshTokenException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNAUTHORIZED);
+        problem.setType(INVALID_REFRESH_TOKEN);
+        problem.setTitle("Session expired");
+        problem.setDetail("This session can no longer be renewed. Please sign in again.");
+        return clearingCookie(HttpStatus.UNAUTHORIZED).body(problem);
+    }
+
+    /**
+     * A-024 · reuse, and the only auth failure that says what actually happened.
+     *
+     * <p>By the time this runs {@link RefreshRotationService} has already revoked
+     * the family — the revocation is the response, and this is only its
+     * reporting. The distinct {@code type} exists so S-01 can tell the user
+     * <i>why</i> they were signed out; a generic "session expired" would hide a
+     * security event from the one person able to act on it, and reveals nothing
+     * to an attacker who already knows the token they replayed was real.
+     */
+    @ExceptionHandler(RefreshTokenReuseException.class)
+    ResponseEntity<ProblemDetail> handleRefreshTokenReuse(RefreshTokenReuseException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNAUTHORIZED);
+        problem.setType(REFRESH_TOKEN_REUSE);
+        problem.setTitle("Session ended for your security");
+        problem.setDetail("This session was signed out because its sign-in token was used more "
+                + "than once, which can mean it was copied. Please sign in again.");
+        return clearingCookie(HttpStatus.UNAUTHORIZED).body(problem);
+    }
+
+    /**
+     * Every refresh refusal takes the dead cookie away with it.
+     *
+     * <p>Left in place, a browser holding a token from a revoked family replays
+     * it on every attempt: a 401 loop the user cannot break without clearing
+     * cookies by hand, and a useless credential on the wire until it expires.
+     * Built by {@link RefreshTokenIssuer} rather than assembled here, so the
+     * name and {@code Path} are guaranteed to match the cookie being replaced —
+     * a clearing cookie that differs in either is a second cookie, not a
+     * replacement, and clears nothing.
+     */
+    private ResponseEntity.BodyBuilder clearingCookie(HttpStatus status) {
+        return ResponseEntity.status(status)
+                .header(HttpHeaders.SET_COOKIE, refreshTokens.clearing().toString());
     }
 }

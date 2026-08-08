@@ -46,6 +46,29 @@ class AuthUserRepository {
              WHERE u.username = ?
             """;
 
+    /**
+     * A-024 · the same projection reached by surrogate id, for a caller who has
+     * already been authenticated once and is renewing.
+     *
+     * <p>Separate from {@link #FIND_BY_USERNAME} rather than a shared statement
+     * with a swapped predicate, because the two are governed by different rules:
+     * that one must not filter on {@code is_active} (doing so would answer
+     * without hashing and reopen the timing oracle), while this one has no
+     * password step to protect and could. It still does not filter, for a
+     * different reason — {@link AuthenticationService#resolveActiveUser} needs to
+     * tell "deactivated" from "deleted" in its log line, and a WHERE clause
+     * throws that away.
+     */
+    private static final String FIND_BY_ID = """
+            SELECT u.id, u.username, u.email, u.full_name, u.password_hash,
+                   u.role_id, r.code AS role_code, u.timezone,
+                   u.is_active, u.must_change_password,
+                   u.failed_attempts, u.locked_until
+              FROM users u
+              JOIN roles r ON r.id = u.role_id
+             WHERE u.id = ?
+            """;
+
     /** The §2 permission matrix for one role — the {@code permissions[]} of §10.1. */
     private static final String PERMISSIONS_FOR_ROLE = """
             SELECT p.code
@@ -154,6 +177,11 @@ class AuthUserRepository {
      */
     Optional<AuthUserRow> findByUsername(String username) {
         return jdbc.sql(FIND_BY_USERNAME).param(username).query(ROW_MAPPER).optional();
+    }
+
+    /** A-024 · the refresh path, which holds an id rather than a username. */
+    Optional<AuthUserRow> findById(long userId) {
+        return jdbc.sql(FIND_BY_ID).param(userId).query(ROW_MAPPER).optional();
     }
 
     List<String> findPermissionCodesByRoleId(int roleId) {

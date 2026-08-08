@@ -8,13 +8,16 @@ import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.ResponseCookie;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
@@ -120,13 +123,24 @@ class RefreshTokenIssuerTest {
 
         // 32 bytes, base64url without padding.
         assertThat(value).hasSize(43).matches("[A-Za-z0-9_-]+");
+        assertThat(Base64.getUrlDecoder().decode(value))
+                .as("exactly 32 bytes of SecureRandom — a value with spare room for a claim "
+                        + "is a value that will eventually be given one")
+                .hasSize(32);
         assertThat(value)
                 .as("an opaque token is a lookup key; anything readable in it is a claim "
                         + "the server would be trusting the client to hold")
-                .doesNotContain("42")
                 .doesNotContainIgnoringCase("asha")
                 .doesNotContainIgnoringCase("developer")
                 .doesNotContain(".");
+
+        // The user id is deliberately NOT probed as a substring. "42" turns up by
+        // chance in about one random 43-character base64url string in a hundred —
+        // the assertion tested the random number generator, not the code, and
+        // reddened CI roughly every hundredth run (it did, on 2026-08-08, during
+        // A-024). What it was reaching for is that the value does not encode the
+        // user, which the 32-random-bytes check above and the thousand distinct
+        // values below establish without depending on luck.
     }
 
     @Test
@@ -236,6 +250,116 @@ class RefreshTokenIssuerTest {
         assertThat(issuer.issue(USER, CHROME))
                 .as("no cookie, but the caller still gets its access token")
                 .isEmpty();
+    }
+
+    // ── A-024 · rotation ────────────────────────────────────────────────────
+
+    private static StoredRefreshToken consumed(Duration remaining) {
+        Instant now = Instant.now();
+        return new StoredRefreshToken("jti-1", 42L, "family-abc",
+                StoredRefreshToken.fingerprintOf(CHROME),
+                now.minus(Duration.ofDays(7).minus(remaining)), now.plus(remaining));
+    }
+
+    /**
+     * The family is the unit revocation operates on. A successor in a fresh
+     * family would make "revoke the family" reach only as far back as the last
+     * refresh — an attacker who rotates once has escaped it entirely.
+     */
+    @Test
+    @DisplayName("the successor stays in the predecessor's family")
+    void rotationInheritsTheFamily() {
+        StoredRefreshToken predecessor = consumed(Duration.ofDays(5));
+
+        issuer.rotate(predecessor);
+
+        assertThat(capturedRecord().familyId()).isEqualTo("family-abc");
+        assertThat(capturedRecord().userId()).isEqualTo(42L);
+    }
+
+    /**
+     * The alternative — a fresh seven days on every rotation — makes the session
+     * unbounded: a token used once a week never expires, and neither does a
+     * stolen chain being kept warm. A-025's absolute 12 h tightens this further.
+     */
+    @Test
+    @DisplayName("the deadline is inherited, so expiry does not slide on every refresh")
+    void rotationDoesNotExtendTheDeadline() {
+        StoredRefreshToken predecessor = consumed(Duration.ofDays(2));
+
+        ResponseCookie successor = issuer.rotate(predecessor);
+
+        assertThat(capturedRecord().expiresAt())
+                .as("a sliding deadline means the only thing that ever ends a session is a "
+                        + "logout, which an attacker has no reason to perform")
+                .isEqualTo(predecessor.expiresAt());
+        assertThat(successor.getMaxAge())
+                .as("the cookie must expire with the family, not seven days after it")
+                .isLessThanOrEqualTo(Duration.ofDays(2))
+                .isGreaterThan(Duration.ofDays(2).minusMinutes(1));
+    }
+
+    /**
+     * Re-reading the fingerprint from the current request would let a token that
+     * had drifted to another browser silently re-bind itself there — a binding
+     * that only ever matches is the same as no binding.
+     */
+    @Test
+    @DisplayName("the device binding is inherited, never re-stamped from the new request")
+    void rotationInheritsTheDeviceBinding() {
+        issuer.rotate(consumed(Duration.ofDays(5)));
+
+        assertThat(capturedRecord().matchesDevice(CHROME)).isTrue();
+    }
+
+    @Test
+    @DisplayName("the successor is a new value with a new jti — not the old one re-dated")
+    void rotationMintsAGenuinelyNewToken() {
+        StoredRefreshToken predecessor = consumed(Duration.ofDays(5));
+
+        ResponseCookie successor = issuer.rotate(predecessor);
+
+        assertThat(successor.getValue()).hasSize(43).matches("[A-Za-z0-9_-]+");
+        assertThat(capturedRecord().jti())
+                .as("two links in one chain must be distinguishable in a log and to A-025's logout")
+                .isNotEqualTo(predecessor.jti());
+        assertThat(capturedTokenValue()).isEqualTo(successor.getValue());
+    }
+
+    /**
+     * Unlike {@link RefreshTokenIssuer#issue}, rotation must not degrade. The
+     * predecessor is already destroyed by the time this runs, so there is no
+     * session left to preserve — failing ends it, which is the safe direction.
+     */
+    @Test
+    @DisplayName("rotation does NOT degrade when the store is unreachable")
+    void rotationFailsRatherThanDegrading() {
+        doThrow(new QueryTimeoutException("redis is down"))
+                .when(store).save(anyString(), any(StoredRefreshToken.class));
+
+        assertThatExceptionOfType(QueryTimeoutException.class)
+                .isThrownBy(() -> issuer.rotate(consumed(Duration.ofDays(5))));
+    }
+
+    // ── A-024 · the clearing cookie ─────────────────────────────────────────
+
+    /**
+     * A clearing cookie that differs in name or Path is a <i>second</i> cookie
+     * rather than a replacement, and clears nothing — the browser keeps replaying
+     * the dead one.
+     */
+    @Test
+    @DisplayName("the clearing cookie matches the one it replaces in name and path")
+    void clearingCookieReplacesRatherThanAdds() {
+        ResponseCookie clearing = issuer.clearing();
+        ResponseCookie live = issueCookie();
+
+        assertThat(clearing.getName()).isEqualTo(live.getName());
+        assertThat(clearing.getPath()).isEqualTo(live.getPath());
+        assertThat(clearing.getMaxAge()).isEqualTo(Duration.ZERO);
+        assertThat(clearing.getValue()).isEmpty();
+        assertThat(clearing.isHttpOnly()).isTrue();
+        assertThat(clearing.getSameSite()).isEqualTo("Strict");
     }
 
     @Test

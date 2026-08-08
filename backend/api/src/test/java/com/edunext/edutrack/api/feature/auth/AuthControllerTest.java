@@ -54,6 +54,9 @@ class AuthControllerTest {
     @MockitoBean
     RefreshTokenIssuer refreshTokens;
 
+    @MockitoBean
+    RefreshRotationService rotation;
+
     private static final String VALID_BODY = """
             {"username":"asha.rao","password":"Correct-Horse-1!"}
             """;
@@ -62,9 +65,15 @@ class AuthControllerTest {
             .httpOnly(true).secure(true).sameSite("Strict").path("/api/v1/auth")
             .maxAge(Duration.ofDays(7)).build();
 
+    /** A-024 · what {@code AuthExceptionHandler} attaches to every refresh refusal. */
+    private static final ResponseCookie CLEARING = ResponseCookie.from("refresh_token", "")
+            .httpOnly(true).secure(true).sameSite("Strict").path("/api/v1/auth")
+            .maxAge(Duration.ZERO).build();
+
     @BeforeEach
     void issueARefreshCookieByDefault() {
         when(refreshTokens.issue(any(), any())).thenReturn(Optional.of(REFRESH_COOKIE));
+        when(refreshTokens.clearing()).thenReturn(CLEARING);
     }
 
     @Test
@@ -254,5 +263,134 @@ class AuthControllerTest {
                                 {"username":"asha.rao"}
                                 """))
                 .andExpect(status().isBadRequest());
+    }
+
+    // ── A-024 · POST /auth/refresh ───────────────────────────────────────────
+
+    private static final ResponseCookie SUCCESSOR = ResponseCookie.from("refresh_token", "successor-value")
+            .httpOnly(true).secure(true).sameSite("Strict").path("/api/v1/auth")
+            .maxAge(Duration.ofDays(6)).build();
+
+    private static RefreshRotationService.Rotation aRotation() {
+        AuthenticatedUser user = new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
+                "DEVELOPER", "Asia/Kolkata", false, List.of("ticket.read"), List.of(11L), List.of());
+        return new RefreshRotationService.Rotation(
+                Session.issue(user, new AccessToken("rotated.access.token", 900)), SUCCESSOR);
+    }
+
+    @Test
+    @DisplayName("a rotation returns a new session and replaces the cookie")
+    void refreshReturnsTheRotatedSession() throws Exception {
+        when(rotation.rotate(anyString(), anyString())).thenReturn(aRotation());
+
+        mvc.perform(post("/api/v1/auth/refresh")
+                        .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 Chrome/131.0.0.0")
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "opaque-value")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessToken").value("rotated.access.token"))
+                .andExpect(jsonPath("$.data.user.id").value(7))
+                .andExpect(header().string(HttpHeaders.SET_COOKIE,
+                        org.hamcrest.Matchers.containsString("refresh_token=successor-value")));
+    }
+
+    /**
+     * The endpoint's entire input. Reading it from the body or a header instead
+     * would mean script could supply it, which is the whole thing {@code
+     * HttpOnly} exists to prevent.
+     */
+    @Test
+    @DisplayName("the token comes from the cookie and the User-Agent from the header")
+    void refreshReadsTheCookieAndTheUserAgent() throws Exception {
+        when(rotation.rotate(anyString(), anyString())).thenReturn(aRotation());
+
+        mvc.perform(post("/api/v1/auth/refresh")
+                        .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 Chrome/131.0.0.0")
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "opaque-value")))
+                .andExpect(status().isOk());
+
+        verify(rotation).rotate("opaque-value", "Mozilla/5.0 Chrome/131.0.0.0");
+    }
+
+    @Test
+    @DisplayName("the successor never appears in the body, only in the header")
+    void theSuccessorIsNeverInTheBody() throws Exception {
+        when(rotation.rotate(any(), any())).thenReturn(aRotation());
+
+        String body = mvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "opaque-value")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).doesNotContain("successor-value").doesNotContain("refresh");
+    }
+
+    /**
+     * 401 rather than the 400 Spring would produce for a required cookie. The
+     * frontend interceptor branches on 401 to send the user to the login screen;
+     * a 400 reads as an application bug and gets surfaced as one.
+     */
+    @Test
+    @DisplayName("no cookie at all is a 401, not a 400")
+    void refreshWithoutACookieIs401() throws Exception {
+        when(rotation.rotate(any(), any())).thenThrow(new InvalidRefreshTokenException());
+
+        mvc.perform(post("/api/v1/auth/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("https://edutrack/errors/invalid-refresh-token"));
+    }
+
+    /**
+     * The distinct type is the point: S-01 can tell the user their session was
+     * ended because the token was used twice, rather than showing a generic
+     * "session expired" that hides a security event from the only person who
+     * can act on it.
+     */
+    @Test
+    @DisplayName("reuse is reported with its own type URI, distinct from an ordinary expiry")
+    void reuseHasItsOwnTypeUri() throws Exception {
+        when(rotation.rotate(any(), any())).thenThrow(new RefreshTokenReuseException());
+
+        mvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "stolen-value")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("https://edutrack/errors/refresh-token-reuse"))
+                .andExpect(jsonPath("$.status").value(401));
+    }
+
+    /**
+     * Without this the browser replays a dead token on every attempt — against a
+     * revoked family that is a 401 loop the user cannot escape without clearing
+     * cookies by hand.
+     */
+    @Test
+    @DisplayName("every refusal takes the dead cookie away with it")
+    void refusalsClearTheCookie() throws Exception {
+        when(rotation.rotate(any(), any())).thenThrow(new RefreshTokenReuseException());
+
+        mvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "stolen-value")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.SET_COOKIE,
+                        org.hamcrest.Matchers.containsString("Max-Age=0")));
+    }
+
+    @Test
+    @DisplayName("a refusal body names neither the token nor which check failed")
+    void refreshRefusalLeaksNothing() throws Exception {
+        when(rotation.rotate(any(), any())).thenThrow(new InvalidRefreshTokenException());
+
+        String body = mvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "some-token-value")))
+                .andExpect(status().isUnauthorized())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body)
+                .as("a caller who can tell 'expired' from 'never issued' has a validity oracle")
+                .doesNotContain("some-token-value")
+                .doesNotContainIgnoringCase("deactivated")
+                .doesNotContainIgnoringCase("device")
+                .doesNotContainIgnoringCase("revoked");
     }
 }

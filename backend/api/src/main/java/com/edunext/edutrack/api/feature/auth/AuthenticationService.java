@@ -139,6 +139,46 @@ class AuthenticationService {
     }
 
     /**
+     * A-024 · re-resolves an already-authenticated caller's identity and scope
+     * from the database, for the refresh endpoint.
+     *
+     * <p><b>No password, and no lock check.</b> Refreshing is not a login: the
+     * caller proved who they were up to seven days ago and holds a credential
+     * this server issued. Running A-021's lockout here would let any outsider
+     * end an active session by typing a wrong password five times against that
+     * username — a trivial denial of service against any employee, delivered by
+     * the very control meant to protect them. The lock governs the login form,
+     * where guessing happens.
+     *
+     * <p><b>Deactivation, on the other hand, does take effect here</b>, and this
+     * is the whole reason the refresh path re-queries instead of trusting the
+     * claims already sitting in the stored token. An account disabled on Monday
+     * would otherwise keep minting fresh access tokens until its refresh token
+     * expired on Sunday. Role changes and project membership changes land the
+     * same way — at the next refresh, so at most fifteen minutes stale rather
+     * than seven days.
+     *
+     * @throws InvalidRefreshTokenException if the user is gone or deactivated
+     */
+    @Transactional(readOnly = true)
+    AuthenticatedUser resolveActiveUser(long userId) {
+        AuthUserRow user = users.findById(userId).orElse(null);
+
+        if (user == null || !user.active()) {
+            // Logged, unlike a failed login, because this is not someone
+            // guessing: a refresh token exists, so a real session is being cut
+            // short and someone will ask why. The id is safe to record — it is
+            // not a credential and this line is reachable only for an account
+            // that genuinely held a session.
+            log.info("auth: refresh refused for user {} — {}",
+                    userId, user == null ? "no such user" : "account deactivated");
+            throw new InvalidRefreshTokenException();
+        }
+
+        return resolveScope(user);
+    }
+
+    /**
      * Loads the §10.1 claim set. Runs only after the password verified, so a
      * failed attempt costs one indexed lookup and one hash — never these three
      * queries.

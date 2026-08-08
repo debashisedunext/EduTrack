@@ -11,6 +11,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -42,13 +43,16 @@ class AuthController {
     private final AuthenticationService authentication;
     private final AccessTokenIssuer tokens;
     private final RefreshTokenIssuer refreshTokens;
+    private final RefreshRotationService rotation;
 
     AuthController(AuthenticationService authentication,
                    AccessTokenIssuer tokens,
-                   RefreshTokenIssuer refreshTokens) {
+                   RefreshTokenIssuer refreshTokens,
+                   RefreshRotationService rotation) {
         this.authentication = authentication;
         this.tokens = tokens;
         this.refreshTokens = refreshTokens;
+        this.rotation = rotation;
     }
 
     @PostMapping(path = "/login", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -99,5 +103,68 @@ class AuthController {
                         .header(HttpHeaders.SET_COOKIE, cookie.toString())
                         .body(body))
                 .orElseGet(() -> ResponseEntity.ok(body));
+    }
+
+    /**
+     * A-024 · {@code POST /api/v1/auth/refresh}. Blueprint §10.1.
+     *
+     * <p><b>No request body and no {@code Authorization} header.</b> The only
+     * input is the cookie, which is why {@link SecurityRequirements} opts out of
+     * the global bearer requirement here as it does for login: a caller whose
+     * access token has expired — the only caller who ever needs this — has no
+     * bearer token left to send.
+     *
+     * <p>The cookie name comes from the same property that
+     * {@link RefreshTokenIssuer} writes with, so renaming it cannot leave the
+     * endpoint reading a name nothing sets.
+     *
+     * <p>{@code required = false} rather than letting Spring return 400 on a
+     * missing cookie. A caller with no cookie needs to log in, and 400 says
+     * "your request was malformed" — the frontend's interceptor branches on 401
+     * to redirect, and would treat a 400 as an application bug and surface it.
+     */
+    @PostMapping(path = "/refresh")
+    @SecurityRequirements
+    @Operation(
+            operationId = "refreshSession",
+            summary = "Rotate the refresh token and issue a new access token",
+            description = """
+                    Reads the refresh cookie; takes no body. The consumed token is revoked \
+                    and replaced on every call, and the successor inherits the original \
+                    login's deadline rather than restarting it — expiry does not slide.
+
+                    **Reuse of an already-consumed token means the token was stolen.** The \
+                    entire token family is revoked and the user must log in again. A silent \
+                    re-issue here would let an attacker keep a parallel session alive \
+                    indefinitely.
+
+                    The identity and scope in the returned token are re-read from the \
+                    database, not carried over — so a deactivation, a role change or a \
+                    project reassignment takes effect at the next refresh rather than when \
+                    the refresh token finally expires.""")
+    @ApiResponse(
+            responseCode = "200",
+            description = "Rotated. The successor cookie replaces the consumed one.",
+            headers = @Header(
+                    name = HttpHeaders.SET_COOKIE,
+                    description = "`refresh_token=…; Path=/api/v1/auth; HttpOnly; Secure; "
+                            + "SameSite=Strict`. `Max-Age` is what remains of the original "
+                            + "login's seven days, not a fresh seven.",
+                    schema = @Schema(type = "string")))
+    @ApiResponse(
+            responseCode = "401",
+            description = "Missing, expired, unknown or reused token, or a deactivated account. "
+                    + "On reuse the whole family is revoked and the type is `refresh-token-reuse`.",
+            content = @Content)
+    ResponseEntity<SessionResponse> refresh(
+            @CookieValue(name = "${edutrack.auth.refresh-token.cookie-name:refresh_token}",
+                    required = false) String refreshToken,
+            @RequestHeader(value = HttpHeaders.USER_AGENT, required = false) String userAgent) {
+
+        RefreshRotationService.Rotation rotated = rotation.rotate(refreshToken, userAgent);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, rotated.cookie().toString())
+                .body(new SessionResponse(rotated.session()));
     }
 }
