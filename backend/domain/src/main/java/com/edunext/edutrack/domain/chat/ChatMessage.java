@@ -53,12 +53,44 @@ public class ChatMessage {
     @Column(name = "mentioned_user_ids")
     private List<Long> mentionedUserIds;
 
+    /**
+     * TEXT | STATUS_REQUEST | SYSTEM (D-050).
+     *
+     * <p>This supersedes {@link #isSystem}, which predates it and answers the
+     * same question for SYSTEM rows only — D-050 backfilled them and left the
+     * older column in place rather than dropping a column from Stream A's
+     * baseline. Write both until that is resolved, or the two disagree.
+     *
+     * <p>"Ask Status" sets {@code STATUS_REQUEST} here. The baseline models
+     * that flow as a {@code thread_type} instead; blueprint §7.6 puts the
+     * structured message into the ticket's own thread, so the behaviour follows
+     * this column and {@code thread_type = 'ASK_STATUS'} stays unwritten.
+     */
+    @Column(name = "kind", nullable = false, length = 20)
+    private String kind = "TEXT";
+
     @Column(name = "is_system", nullable = false)
     private boolean isSystem;
 
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
+
+    /** Null means never edited. The five-minute window is a service concern. */
+    @Column(name = "edited_at")
+    private Instant editedAt;
+
+    /**
+     * The tombstone. The row stays and the body is withheld on read — a message
+     * that vanished entirely would leave a conversation reading as though it
+     * never happened, which is what keeps chat admissible as project evidence
+     * (§7.6).
+     */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    @Column(name = "deleted_by")
+    private Long deletedBy;
 
     public Long getId() {
         return id;
@@ -100,6 +132,14 @@ public class ChatMessage {
         this.mentionedUserIds = mentionedUserIds;
     }
 
+    public String getKind() {
+        return kind;
+    }
+
+    public void setKind(String kind) {
+        this.kind = kind;
+    }
+
     public boolean isSystem() {
         return isSystem;
     }
@@ -110,5 +150,29 @@ public class ChatMessage {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Instant getEditedAt() {
+        return editedAt;
+    }
+
+    public void setEditedAt(Instant editedAt) {
+        this.editedAt = editedAt;
+    }
+
+    public Instant getDeletedAt() {
+        return deletedAt;
+    }
+
+    public void setDeletedAt(Instant deletedAt) {
+        this.deletedAt = deletedAt;
+    }
+
+    public Long getDeletedBy() {
+        return deletedBy;
+    }
+
+    public void setDeletedBy(Long deletedBy) {
+        this.deletedBy = deletedBy;
     }
 }

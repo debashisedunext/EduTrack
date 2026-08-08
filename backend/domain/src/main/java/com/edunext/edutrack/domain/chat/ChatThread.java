@@ -32,7 +32,24 @@ public class ChatThread {
     @Column(name = "ticket_id")
     private Long ticketId;
 
-    /** TICKET | DIRECT | ASK_STATUS. */
+    /**
+     * The project channel anchor (D-050). Null unless
+     * {@code threadType = 'PROJECT'}.
+     */
+    @Column(name = "project_id")
+    private Long projectId;
+
+    /**
+     * TICKET | DIRECT | ASK_STATUS | PROJECT.
+     *
+     * <p><b>{@code ck_chat_threads_one_anchor} makes this a discriminator, not
+     * a label.</b> A thread hangs off exactly one thing: PROJECT needs
+     * {@code projectId} and no {@code ticketId}, TICKET and ASK_STATUS the
+     * reverse, DIRECT neither. Setting the pair inconsistently is rejected by
+     * the database, and deliberately so — a project channel carrying a ticket
+     * id would be delivered to the wrong STOMP destination, which is a
+     * disclosure rather than a display bug.
+     */
     @Column(name = "thread_type", nullable = false, length = 20)
     private String threadType = "TICKET";
 
@@ -55,6 +72,14 @@ public class ChatThread {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getProjectId() {
+        return projectId;
+    }
+
+    public void setProjectId(Long projectId) {
+        this.projectId = projectId;
     }
 
     public Long getTicketId() {
