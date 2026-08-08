@@ -200,9 +200,32 @@ jobs:
           # dies during context refresh; that shipped once, green, because this
           # job only ever ran `unzip -l`.
           JAR=$(ls backend/api/target/edutrack-api-*.jar | head -1)
+
+          # What is excluded here, and why the datasource is not.
+          #
+          # Hibernate and Flyway both open a connection during context refresh,
+          # and this job runs no database — so they stay excluded.
+          #
+          # The DataSource does NOT. A-020 gave the app its first bean that
+          # reads the database (AuthUserRepository needs a JdbcClient, which
+          # needs a DataSource), so excluding it stopped the jar starting at all
+          # and this job asserted nothing. Keeping it costs nothing: Spring Boot
+          # builds the HikariDataSource without opening its pool, and the pool
+          # opens on the first getConnection() — which none of the routes
+          # checked below performs.
+          #
+          # JpaRepositoriesAutoConfiguration takes its place in the list. Once a
+          # DataSource exists, Spring Data JPA starts wiring repositories and
+          # demands an entityManagerFactory that Hibernate, excluded above, is
+          # not there to supply.
+          #
+          # Comments cannot live inside the command: a `#` after a line
+          # continuation ends it, taking the trailing backslash with it.
+          EXCLUDE=org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration,org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+
           java -jar "$JAR" \
             --spring.profiles.active=local \
-            --spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration \
+            --spring.autoconfigure.exclude="$EXCLUDE" \
             --server.port=8099 \
             --management.health.redis.enabled=false \
             --management.health.mail.enabled=false > /tmp/app.log 2>&1 &
