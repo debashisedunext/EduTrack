@@ -42,17 +42,27 @@ import static org.assertj.core.api.Assertions.assertThat;
  * destination prefixes, the relay's serialisation — and every one of those is
  * invisible to a test that calls {@code SimpMessagingTemplate} directly.
  *
- * <p><b>The datasource is no longer excluded.</b> It was, because realtime
- * touches no tables — until A-020 added {@code AuthUserRepository}, which needs
- * a {@code JdbcClient}, which needs a {@code DataSource}. Excluding it made
- * this context unbuildable, the same breakage A-020 fixed in
- * {@code ApplicationSmokeTest}.
+ * <p>Realtime touches no tables, and this test still starts no MySQL — but the
+ * datasource <i>bean</i> can no longer be excluded, only the things that
+ * connect. See below.
  *
- * <p>It still costs nothing and still needs no MySQL: Spring Boot builds the
+ * <p><b>Stream A edit, A-021 — flagged for Debashis rather than changed
+ * quietly (CLAUDE.md, code ownership).</b> {@code DataSourceAutoConfiguration}
+ * and its transaction manager were dropped from this exclusion list. A-020's
+ * {@code AuthUserRepository} needs a {@code JdbcClient}, which needs a
+ * {@code JdbcTemplate}, which needs a {@code DataSource}; with the datasource
+ * excluded the whole context fails to refresh on a bean this test never uses.
+ * That break landed the moment A-020 merged and is Stream A's to fix — the same
+ * three-line change is already in {@code ApplicationSmokeTest} and
+ * {@code ContractConformanceTest}.
+ *
+ * <p>Nothing dials MySQL as a result: Spring Boot builds the
  * {@code HikariDataSource} without starting its pool, and the pool opens on the
- * first {@code getConnection()}, which nothing here performs. Only Hibernate
- * and Flyway have to stay excluded — those two do dial the database during
- * context refresh.
+ * first {@code getConnection()}, which no test here triggers. JPA and Flyway
+ * stay excluded because both <i>do</i> connect during context refresh, and
+ * {@code JpaRepositoriesAutoConfiguration} joins them — with a datasource
+ * present it registers a shared {@code EntityManagerFactory} whose backing bean
+ * {@code HibernateJpaAutoConfiguration} is no longer there to supply.
  */
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
