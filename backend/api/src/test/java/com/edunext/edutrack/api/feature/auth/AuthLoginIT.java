@@ -20,6 +20,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -122,6 +123,21 @@ class AuthLoginIT {
                         ?, 'Asia/Kolkata', 0, 0)
                 """, hash, roleId);
 
+        // A-021 fixtures. One per scenario rather than one shared account,
+        // because these tests mutate failed_attempts and locked_until and would
+        // otherwise depend on each other's execution order.
+        for (String[] fixture : new String[][]{
+                {"ITA003", "it.counter", "it.counter@edunext.test", "Counter Probe"},
+                {"ITA004", "it.locker", "it.locker@edunext.test", "Locker Probe"},
+                {"ITA005", "it.lockedout", "it.lockedout@edunext.test", "Lockedout Probe"},
+                {"ITA006", "it.lapsed", "it.lapsed@edunext.test", "Lapsed Probe"}}) {
+            jdbc.update("""
+                    INSERT INTO users (emp_code, username, email, password_hash, full_name,
+                                       role_id, timezone, is_active, must_change_password)
+                    VALUES (?, ?, ?, ?, ?, ?, 'Asia/Kolkata', 1, 0)
+                    """, fixture[0], fixture[1], fixture[2], hash, fixture[3], roleId);
+        }
+
         jdbc.update("INSERT INTO projects (project_code, name) VALUES ('ITAP', 'IT Auth Project')");
         Long projectId = jdbc.queryForObject("SELECT id FROM projects WHERE project_code = 'ITAP'", Long.class);
         jdbc.update("INSERT INTO project_members (project_id, user_id) VALUES (?, ?)", projectId, userId);
@@ -212,6 +228,94 @@ class AuthLoginIT {
                 .doesNotContain("Wrong-Horse-9!")
                 .doesNotContainIgnoringCase("not found")
                 .doesNotContainIgnoringCase("inactive");
+    }
+
+    // ── A-021 · the counter, against a real database ────────────────────────
+
+    /**
+     * The test that catches the two mistakes {@code LoginAttemptRecorder}'s
+     * javadoc warns about. Both — rolling the increment back with the thrown
+     * exception, and losing {@code @Transactional} to self-invocation — leave
+     * every unit test green and the counter permanently at zero. Only a real
+     * transaction manager and a real database show it.
+     */
+    @Test
+    @DisplayName("a failed attempt is persisted, not rolled back with the exception")
+    void failedAttemptSurvivesTheRollback() {
+        seedOnce();
+        jdbc.update("UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE username = 'it.counter'");
+
+        login("it.counter", "Wrong-Horse-9!");
+
+        Integer attempts = jdbc.queryForObject(
+                "SELECT failed_attempts FROM users WHERE username = 'it.counter'", Integer.class);
+        assertThat(attempts).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("the fifth failure locks the account and zeroes the counter")
+    void fifthFailureLocks() {
+        seedOnce();
+        jdbc.update("UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE username = 'it.locker'");
+
+        for (int i = 0; i < 5; i++) {
+            assertThat(login("it.locker", "Wrong-Horse-9!").getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        Integer attempts = jdbc.queryForObject(
+                "SELECT failed_attempts FROM users WHERE username = 'it.locker'", Integer.class);
+        Object lockedUntil = jdbc.queryForObject(
+                "SELECT locked_until FROM users WHERE username = 'it.locker'", Object.class);
+
+        assertThat(lockedUntil).as("locked_until is stamped on the fifth failure").isNotNull();
+        assertThat(attempts).as("the counter resets so the next window is a fresh five").isZero();
+    }
+
+    @Test
+    @DisplayName("a locked account returns 423 to the CORRECT password, and 401 to a wrong one")
+    void lockedAccountReportsOnlyToTheRightPassword() throws Exception {
+        seedOnce();
+        jdbc.update("""
+                UPDATE users SET locked_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 15 MINUTE)
+                 WHERE username = 'it.lockedout'
+                """);
+
+        ResponseEntity<String> wrongPassword = login("it.lockedout", "Wrong-Horse-9!");
+        assertThat(wrongPassword.getStatusCode())
+                .as("a wrong password must not reveal the lock")
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        ResponseEntity<String> correctPassword = login("it.lockedout", PASSWORD);
+        assertThat(correctPassword.getStatusCode()).isEqualTo(HttpStatus.LOCKED);
+
+        JsonNode problem = json(correctPassword);
+        assertThat(problem.path("type").asText()).isEqualTo("https://edutrack/errors/account-locked");
+        assertThat(problem.path("lockedUntil").asText()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("a lapsed lock lets the user back in with no cleanup job")
+    void lapsedLockSelfHeals() {
+        seedOnce();
+        jdbc.update("""
+                UPDATE users SET locked_until = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE)
+                 WHERE username = 'it.lapsed'
+                """);
+
+        assertThat(login("it.lapsed", PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    @DisplayName("a successful login clears a partial counter")
+    void successResetsTheCounter() {
+        seedOnce();
+        jdbc.update("UPDATE users SET failed_attempts = 3, locked_until = NULL WHERE username = 'it.asha'");
+
+        assertThat(login("it.asha", PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        Integer attempts = jdbc.queryForObject(
+                "SELECT failed_attempts FROM users WHERE username = 'it.asha'", Integer.class);
+        assertThat(attempts).isZero();
     }
 
     // ── the A-022 seam ──────────────────────────────────────────────────────

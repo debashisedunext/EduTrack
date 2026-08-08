@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.auth;
 
+import java.time.Instant;
+
 /**
  * A-020 · exactly the columns authenticating a login needs, and no others.
  *
@@ -16,10 +18,17 @@ package com.edunext.edutrack.api.feature.auth;
  *
  * @param passwordHash Argon2id, written by {@code PasswordHashing.argon2id()}.
  *                     Never leaves this package.
- * @param active       {@code users.is_active}. A deactivated account is
- *                     rejected, and is rejected with the same generic failure
- *                     as a wrong password so that deactivation is not
- *                     observable to an outsider.
+ * @param active         {@code users.is_active}. A deactivated account is
+ *                       rejected, and is rejected with the same generic failure
+ *                       as a wrong password so that deactivation is not
+ *                       observable to an outsider.
+ * @param failedAttempts A-021. Consecutive failures since the last success or
+ *                       lock. Reset to zero both on a successful login and at
+ *                       the moment a lock is applied, so the counter always
+ *                       means "failures within the current window".
+ * @param lockedUntil    A-021. When the lock lapses, or null if not locked.
+ *                       Read but never acted on before the password verifies —
+ *                       see {@link AuthenticationService}.
  */
 record AuthUserRow(
         long id,
@@ -31,6 +40,18 @@ record AuthUserRow(
         int roleId,
         String timezone,
         boolean active,
-        boolean mustChangePassword
+        boolean mustChangePassword,
+        int failedAttempts,
+        Instant lockedUntil
 ) {
+
+    /**
+     * A lock in the past is no lock at all — it lapses on its own, with no
+     * scheduled job to clear it. Storing the expiry rather than a boolean is
+     * what makes that true: nothing has to run for a locked account to become
+     * usable again fifteen minutes later.
+     */
+    boolean isLockedAt(Instant now) {
+        return lockedUntil != null && lockedUntil.isAfter(now);
+    }
 }

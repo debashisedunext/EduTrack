@@ -28,6 +28,7 @@ import java.net.URI;
 class AuthExceptionHandler {
 
     private static final URI INVALID_CREDENTIALS = URI.create("https://edutrack/errors/invalid-credentials");
+    private static final URI ACCOUNT_LOCKED = URI.create("https://edutrack/errors/account-locked");
 
     /**
      * One handler, one status, one body — for unknown users, wrong passwords
@@ -43,5 +44,27 @@ class AuthExceptionHandler {
         problem.setTitle("Invalid credentials");
         problem.setDetail("The username or password is incorrect.");
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem);
+    }
+
+    /**
+     * A-021 · {@code 423 Locked}, and the only login response that says
+     * anything specific — reachable only once the password has verified.
+     *
+     * <p>{@code lockedUntil} is an extension property rather than prose in
+     * {@code detail}: a client that wants to render "try again in 12 minutes"
+     * should read a timestamp, not parse an English sentence that A-030 may
+     * reword. RFC 9457 allows extra members on the problem object for exactly
+     * this.
+     */
+    @ExceptionHandler(AccountLockedException.class)
+    ResponseEntity<ProblemDetail> handleAccountLocked(AccountLockedException exception) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.LOCKED);
+        problem.setType(ACCOUNT_LOCKED);
+        problem.setTitle("Account locked");
+        problem.setDetail("Too many failed sign-in attempts. Try again later, or ask an administrator.");
+        if (exception.lockedUntil() != null) {
+            problem.setProperty("lockedUntil", exception.lockedUntil().toString());
+        }
+        return ResponseEntity.status(HttpStatus.LOCKED).body(problem);
     }
 }
