@@ -23,9 +23,10 @@ import org.springframework.web.bind.annotation.RestController;
  * public — but login is one of the handful that genuinely opts out.
  *
  * <p>The controller does no security thinking of its own: it validates the
- * request shape and delegates. That is what lets A-021's lockout, A-022's token
- * and A-029's TOTP challenge all land in {@link AuthenticationService} without
- * this class changing.
+ * request shape and delegates. Credential verification and scope resolution
+ * are {@link AuthenticationService}'s concern; minting the token for an
+ * identity it has already vouched for is {@link AccessTokenIssuer}'s. This
+ * class only sequences the two — verify, then mint, then wrap the pair.
  */
 @RestController
 @RequestMapping(path = "/api/v1/auth", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -33,9 +34,11 @@ import org.springframework.web.bind.annotation.RestController;
 class AuthController {
 
     private final AuthenticationService authentication;
+    private final AccessTokenIssuer tokens;
 
-    AuthController(AuthenticationService authentication) {
+    AuthController(AuthenticationService authentication, AccessTokenIssuer tokens) {
         this.authentication = authentication;
+        this.tokens = tokens;
     }
 
     @PostMapping(path = "/login", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -50,14 +53,15 @@ class AuthController {
                     to answer. Saying — or timing — which one it was turns the login form \
                     into a username oracle.
 
-                    A-020 establishes identity only. The access token (A-022) and the \
-                    refresh cookie (A-023) are not issued here yet.""")
+                    Returns a 15-minute JWT access token (A-022). The refresh cookie \
+                    (A-023) is not issued here yet.""")
     @ApiResponse(responseCode = "200", description = "Credentials accepted.")
     @ApiResponse(responseCode = "400", description = "Malformed request body.", content = @Content)
     @ApiResponse(responseCode = "401", description = "Invalid credentials.", content = @Content)
     @ApiResponse(responseCode = "423", description = "Account locked after repeated failures.", content = @Content)
     SessionResponse login(@Valid @RequestBody LoginRequest request) {
         AuthenticatedUser user = authentication.authenticate(request.username(), request.password());
-        return new SessionResponse(Session.withoutToken(user));
+        AccessToken token = tokens.issue(user);
+        return new SessionResponse(Session.issue(user, token));
     }
 }

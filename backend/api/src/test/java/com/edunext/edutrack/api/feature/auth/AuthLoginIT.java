@@ -318,14 +318,46 @@ class AuthLoginIT {
         assertThat(attempts).isZero();
     }
 
-    // ── the A-022 seam ──────────────────────────────────────────────────────
+    // ── A-022 · the access token ─────────────────────────────────────────────
+
+    /**
+     * Decodes the JWT payload without verifying the signature — signature
+     * correctness against the configured secret is {@code AccessTokenIssuerTest}'s
+     * job. What only a real login can prove is that the claims embedded in the
+     * token match the scope this same request just resolved from the database.
+     */
+    private static JsonNode decodePayload(String jwt) throws Exception {
+        String[] parts = jwt.split("\\.");
+        assertThat(parts).as("a compact JWS has three segments").hasSize(3);
+        byte[] payload = java.util.Base64.getUrlDecoder().decode(parts[1]);
+        return new com.fasterxml.jackson.databind.ObjectMapper().readTree(payload);
+    }
 
     @Test
-    @DisplayName("no access token is issued yet — that is A-022")
-    void issuesNoTokenYet() throws Exception {
+    @DisplayName("a successful login returns a JWT whose claims match the resolved scope")
+    void issuesAccessTokenWithResolvedScope() throws Exception {
         JsonNode session = json(login("it.asha", PASSWORD)).path("data");
 
-        assertThat(session.has("accessToken")).isFalse();
-        assertThat(session.has("expiresIn")).isFalse();
+        assertThat(session.path("expiresIn").asInt()).isEqualTo(900);
+        String token = session.path("accessToken").asText();
+        assertThat(token).isNotBlank();
+
+        JsonNode claims = decodePayload(token);
+        assertThat(claims.path("role").asText()).isEqualTo("IT_AUTH_DEV");
+        assertThat(claims.path("permissions").size()).isEqualTo(2);
+        assertThat(claims.path("projects").size()).isEqualTo(1);
+        assertThat(claims.path("jti").asText()).isNotBlank();
+        assertThat(claims.path("exp").asLong() - claims.path("iat").asLong()).isEqualTo(900);
+    }
+
+    @Test
+    @DisplayName("two logins mint two different token ids")
+    void eachLoginMintsAFreshJti() throws Exception {
+        String first = decodePayload(json(login("it.asha", PASSWORD)).path("data").path("accessToken").asText())
+                .path("jti").asText();
+        String second = decodePayload(json(login("it.asha", PASSWORD)).path("data").path("accessToken").asText())
+                .path("jti").asText();
+
+        assertThat(first).isNotEqualTo(second);
     }
 }
