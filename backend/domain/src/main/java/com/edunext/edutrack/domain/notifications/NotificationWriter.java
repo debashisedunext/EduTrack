@@ -3,6 +3,8 @@ package com.edunext.edutrack.domain.notifications;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -47,14 +49,29 @@ public class NotificationWriter {
         this.jdbc = jdbc;
     }
 
-    public void write(NewNotification notification) {
+    /**
+     * @return the id of the row just written
+     *
+     * <p>Returned rather than discarded because a realtime push has to name the
+     * notification it is announcing: D-043's toast offers Open, Snooze and
+     * Dismiss, and every one of those is an action on a specific row. A push
+     * carrying only the text would leave the client with nothing to mark read.
+     */
+    public long write(NewNotification notification) {
+        KeyHolder key = new GeneratedKeyHolder();
         jdbc.update(INSERT, new MapSqlParameterSource()
                 .addValue("userId", notification.userId())
                 .addValue("ticketId", notification.ticketId())
                 .addValue("eventCode", notification.eventCode())
                 .addValue("title", notification.title())
                 .addValue("body", notification.body())
-                .addValue("linkUrl", notification.linkUrl()));
+                .addValue("linkUrl", notification.linkUrl()), key);
+        Number id = key.getKey();
+        if (id == null) {
+            throw new IllegalStateException(
+                    "notifications: no generated key for " + notification.eventCode());
+        }
+        return id.longValue();
     }
 
     /** @return ids of every active user with {@code roleCode}, possibly empty */

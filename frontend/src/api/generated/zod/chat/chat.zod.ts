@@ -76,7 +76,8 @@ export const listChatThreadsResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 })).optional()
 })),
   "meta": zod.object({
@@ -113,7 +114,8 @@ export const listChatMessagesResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "kind": zod.enum(['TEXT', 'STATUS_REQUEST', 'SYSTEM']).default(listChatMessagesResponseDataItemKindDefault),
   "isEdited": zod.boolean().optional(),
@@ -133,13 +135,21 @@ export const listChatMessagesResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "stageCode": zod.string().nullish(),
   "cycleNo": zod.number().optional(),
   "createdAt": zod.string().datetime({}).optional()
 })).optional(),
   "readBy": zod.array(zod.number()).optional(),
+  "mentions": zod.array(zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+})).optional().describe('Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.\n'),
   "createdAt": zod.string().datetime({}).optional()
 })),
   "meta": zod.object({
@@ -213,7 +223,8 @@ export const editChatMessageResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "kind": zod.enum(['TEXT', 'STATUS_REQUEST', 'SYSTEM']).default(editChatMessageResponseDataKindDefault),
   "isEdited": zod.boolean().optional(),
@@ -233,13 +244,21 @@ export const editChatMessageResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "stageCode": zod.string().nullish(),
   "cycleNo": zod.number().optional(),
   "createdAt": zod.string().datetime({}).optional()
 })).optional(),
   "readBy": zod.array(zod.number()).optional(),
+  "mentions": zod.array(zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+})).optional().describe('Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.\n'),
   "createdAt": zod.string().datetime({}).optional()
 })
 })
@@ -273,7 +292,8 @@ export const deleteChatMessageResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "kind": zod.enum(['TEXT', 'STATUS_REQUEST', 'SYSTEM']).default(deleteChatMessageResponseDataKindDefault),
   "isEdited": zod.boolean().optional(),
@@ -293,13 +313,21 @@ export const deleteChatMessageResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "stageCode": zod.string().nullish(),
   "cycleNo": zod.number().optional(),
   "createdAt": zod.string().datetime({}).optional()
 })).optional(),
   "readBy": zod.array(zod.number()).optional(),
+  "mentions": zod.array(zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+})).optional().describe('Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.\n'),
   "createdAt": zod.string().datetime({}).optional()
 })
 })

@@ -2222,6 +2222,14 @@ components:
         displayName: { type: string }
         avatarUrl: { type: [string, 'null'] }
         role: { $ref: '#/components/schemas/RoleCode' }
+        # Kept to one line: UserRef is inlined into every schema that references
+        # it, so a paragraph here is a paragraph in ten generated zod files.
+        handle:
+          type: [string, 'null']
+          description: >
+            `@mention` handle (`users.username`). Populated only where a mention
+            is composed or resolved — see `ChatMessage.mentions`.
+          examples: [ravi.kumar]
 
     # ── auth ──────────────────────────────────────────────────────────────
     LoginRequest:
@@ -3168,6 +3176,14 @@ components:
         editableUntil: { type: [string, 'null'], format: date-time }
         attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
         readBy: { type: array, items: { type: integer, format: int64 } }
+        mentions:
+          type: array
+          items: { $ref: '#/components/schemas/UserRef' }
+          description: >
+            Resolved server-side from the body; the request never supplies it, or
+            a caller could aim the notification fan-out at anybody. Only thread
+            participants resolve — any other `@handle` stays plain text. Retained
+            on a deleted message, whose body is withheld.
         createdAt: { type: string, format: date-time }
     ChatMessageResponse:
       type: object

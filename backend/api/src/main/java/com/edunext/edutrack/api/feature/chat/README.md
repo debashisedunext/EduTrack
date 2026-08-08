@@ -93,9 +93,57 @@ exists and who is active in it. Smaller than leaking a message, not absent.
 > when the principal is missing, so the failure is visible rather than silent.
 > Confirm this when D-013 wires socket authentication properly.
 
+## Mentions (D-052)
+
+A mention is `@username` and it is stored in the body verbatim. The alternative
+— a structured token like `@[42]` that a renderer expands — makes the stored
+message unreadable without our own UI, and §7.6 keeps chat as evidence. A
+username also survives a change of display name, which a name match would not.
+
+**The server parses the body; the request never says who it mentioned.** A
+caller-supplied recipient list is a way to aim the notification fan-out at
+anybody, with no membership check in front of it.
+
+| Rule | Why |
+|---|---|
+| Only thread participants resolve | Notifying an outsider deep-links them to a thread that answers 404, and makes `@` a probe for which usernames exist |
+| Inactive users do not resolve | A bell entry nobody will ever open is not a notification |
+| Anything else stays plain text | An unknown handle is not an error — it looks like text to a reader too |
+| Self-mentions store but do not notify | Naming yourself addresses the room; it is not a request to be told |
+| `ravi@edunext.com` is not a mention | The regex lookbehind rejects a handle preceded by a word character |
+
+**The notification carries no message text** — only who, and where. §7.6 lets an
+author delete what they said and have the words withheld from then on; a bell
+entry quoting the body would be the one copy the tombstone cannot reach, and it
+would sit in the recipient's list indefinitely. The blueprint's own example
+subject, `[CRM-26-00347] You were mentioned`, carries no preview either.
+
+**On an edit, only the newly named are notified.** Fixing a typo must not ring
+everybody's bell a second time. Nobody is un-notified either: a delivered
+notification is a record, and quietly retracting it is the same kind of rewrite
+the five-minute window exists to prevent.
+
+`mentioned_user_ids` is expanded with `JSON_TABLE` — one query per page, not per
+message, and no hand-rolled parser for a format we would then have to keep
+honest. `hasMentions` on the row means a page with no mentions on it skips that
+query entirely, which is nearly every page.
+
+> **Email is deliberately not sent.** §11 lists @mention on the email channel,
+> but §4B.6 marks that mail optional and the per-user preference matrix that
+> makes it optional is **D-042**. Shipping an unsuppressible mail for an event
+> the spec says users may switch off is worse than shipping it late. **D-037**
+> wires it once there is something to consult — the enqueue belongs next to
+> `MentionNotifier.raise`.
+
+> **The push happens inside the transaction**, as every other chat broadcast has
+> since D-050. A post that fails after the insert would leave a toast for a
+> message that rolled back. Redis is best-effort and the database is the record,
+> so this is cosmetic rather than a correctness hole — but the fix is
+> `afterCommit`, and it should be applied to all of chat's broadcasts at once
+> rather than to this one.
+
 ## Not done yet
 
-- **D-052** `@mentions`. The column exists (`mentioned_user_ids`); nothing parses.
 - **D-053** attachments. `attachmentIds` is accepted and ignored — it is in the
   contract, and rejecting it would break the generated client.
 - **D-055** Ask Status. `MessageKind.STATUS_REQUEST` exists for it.
