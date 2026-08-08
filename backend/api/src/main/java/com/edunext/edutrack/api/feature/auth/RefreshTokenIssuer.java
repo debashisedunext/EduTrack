@@ -53,11 +53,15 @@ class RefreshTokenIssuer {
 
     private final RefreshTokenStore store;
     private final RefreshTokenProperties properties;
+    private final SessionProperties session;
     private final SecureRandom random = new SecureRandom();
 
-    RefreshTokenIssuer(RefreshTokenStore store, RefreshTokenProperties properties) {
+    RefreshTokenIssuer(RefreshTokenStore store,
+                       RefreshTokenProperties properties,
+                       SessionProperties session) {
         this.store = store;
         this.properties = properties;
+        this.session = session;
     }
 
     /**
@@ -94,7 +98,13 @@ class RefreshTokenIssuer {
                 UUID.randomUUID().toString(),
                 StoredRefreshToken.fingerprintOf(userAgent),
                 issuedAt,
-                issuedAt.plus(properties.ttl()));
+                issuedAt.plus(properties.ttl()),
+                // A-025 · the §10.1 absolute cap, born here with the session and
+                // carried unchanged through every rotation. Login is the only
+                // place it can be set — a value computed later would be computed
+                // from a rotation, which is precisely the thing it must not move
+                // with.
+                issuedAt.plus(session.absoluteTimeout()));
 
         try {
             store.save(value, token);
@@ -154,8 +164,15 @@ class RefreshTokenIssuer {
                 consumed.userId(),
                 consumed.familyId(),
                 consumed.deviceFingerprint(),
+                // Doubles as "last activity" — A-025's idle window is measured
+                // from here, which is exact precisely because rotation mints a
+                // new record rather than touching the old one.
                 Instant.now(),
-                consumed.expiresAt()));
+                consumed.expiresAt(),
+                // A-025 · inherited, never recomputed. Recomputing would push the
+                // 12-hour cap forward on every refresh, so an active session
+                // would never reach it and the bound would be decorative.
+                consumed.sessionExpiresAt()));
 
         return cookieFor(value, remaining);
     }

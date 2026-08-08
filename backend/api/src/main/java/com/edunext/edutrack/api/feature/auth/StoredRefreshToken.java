@@ -32,10 +32,20 @@ import java.time.Instant;
  *                          one could never be joined to its siblings afterwards.
  * @param deviceFingerprint {@link #fingerprintOf(String)} of the {@code
  *                          User-Agent} that logged in.
- * @param issuedAt          UTC, per CLAUDE.md.
+ * @param issuedAt          UTC, per CLAUDE.md. For a rotated token this is when
+ *                          <i>this link</i> was minted, which is also the
+ *                          session's last activity — see
+ *                          {@link #isIdleAt(Instant, java.time.Duration)}.
  * @param expiresAt         UTC. Redis expires the key on its own at this
  *                          instant, so the field is for A-024's benefit rather
  *                          than a thing anything has to sweep.
+ * @param sessionExpiresAt  A-025 · UTC, the §10.1 absolute cap — login plus 12
+ *                          hours. Stamped at login and <b>inherited unchanged by
+ *                          every rotation</b>, exactly like {@code familyId}: it
+ *                          describes the session, not the token. A successor
+ *                          that recomputed it would push the deadline forward on
+ *                          every refresh and the cap would never be reached,
+ *                          which is the same as not having one.
  */
 record StoredRefreshToken(
         String jti,
@@ -43,7 +53,8 @@ record StoredRefreshToken(
         String familyId,
         String deviceFingerprint,
         Instant issuedAt,
-        Instant expiresAt
+        Instant expiresAt,
+        Instant sessionExpiresAt
 ) {
 
     /**
@@ -81,5 +92,33 @@ record StoredRefreshToken(
      */
     boolean matchesDevice(String userAgent) {
         return deviceFingerprint.equals(fingerprintOf(userAgent));
+    }
+
+    /**
+     * A-025 · has the session passed §10.1's 12-hour absolute cap?
+     *
+     * <p>Separate from {@link #expiresAt}, which bounds this one token. This
+     * bounds the whole chain and cannot be extended by using it.
+     */
+    boolean isSessionExpiredAt(Instant now) {
+        return !sessionExpiresAt.isAfter(now);
+    }
+
+    /**
+     * A-025 · has the session been idle past §10.1's 30-minute window?
+     *
+     * <p><b>Measured from {@link #issuedAt}, which for a rotated token is the
+     * moment of the last successful refresh</b> — so the field doubles as "last
+     * activity" without a second one to keep in step. That equivalence holds
+     * only because rotation mints a fresh record on every use; if a future change
+     * ever updates a token in place instead, this needs its own {@code lastUsedAt}
+     * and the two must not be conflated.
+     *
+     * <p>A client renewing on the natural 15-minute access-token cadence never
+     * approaches this. Reaching it means nobody used the session for half an
+     * hour, which is the case §10.1 wants closed.
+     */
+    boolean isIdleAt(Instant now, java.time.Duration idleTimeout) {
+        return issuedAt.plus(idleTimeout).isBefore(now);
     }
 }

@@ -32,6 +32,7 @@ class AuthExceptionHandler {
     private static final URI ACCOUNT_LOCKED = URI.create("https://edutrack/errors/account-locked");
     private static final URI INVALID_REFRESH_TOKEN = URI.create("https://edutrack/errors/invalid-refresh-token");
     private static final URI REFRESH_TOKEN_REUSE = URI.create("https://edutrack/errors/refresh-token-reuse");
+    private static final URI INVALID_ACCESS_TOKEN = URI.create("https://edutrack/errors/invalid-access-token");
 
     private final RefreshTokenIssuer refreshTokens;
 
@@ -115,6 +116,28 @@ class AuthExceptionHandler {
         problem.setDetail("This session was signed out because its sign-in token was used more "
                 + "than once, which can mean it was copied. Please sign in again.");
         return clearingCookie(HttpStatus.UNAUTHORIZED).body(problem);
+    }
+
+    /**
+     * A-025 · the access token on an authenticated route was missing, malformed,
+     * forged, or expired.
+     *
+     * <p>Uniform across all of those — see {@link InvalidAccessTokenException}
+     * for why naming the failed check would help a forger more than a user.
+     *
+     * <p><b>No cookie is cleared here</b>, unlike the refresh refusals above. A
+     * logout that could not authenticate has not ended anything, and stripping
+     * the refresh cookie on the way out would half-end a session the caller was
+     * never proven to own — an unauthenticated request that logs someone out by
+     * failing. The cookie is only cleared on a logout that actually succeeded.
+     */
+    @ExceptionHandler(InvalidAccessTokenException.class)
+    ResponseEntity<ProblemDetail> handleInvalidAccessToken(InvalidAccessTokenException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNAUTHORIZED);
+        problem.setType(INVALID_ACCESS_TOKEN);
+        problem.setTitle("Not signed in");
+        problem.setDetail("A valid access token is required for this request.");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem);
     }
 
     /**

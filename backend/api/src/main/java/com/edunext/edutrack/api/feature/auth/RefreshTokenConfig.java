@@ -23,7 +23,7 @@ import org.springframework.core.env.Environment;
  * setting that only {@code local} is allowed to hold.
  */
 @Configuration
-@EnableConfigurationProperties(RefreshTokenProperties.class)
+@EnableConfigurationProperties({RefreshTokenProperties.class, SessionProperties.class})
 class RefreshTokenConfig {
 
     RefreshTokenConfig(RefreshTokenProperties properties, Environment environment) {

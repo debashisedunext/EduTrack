@@ -57,6 +57,9 @@ class AuthControllerTest {
     @MockitoBean
     RefreshRotationService rotation;
 
+    @MockitoBean
+    LogoutService logout;
+
     private static final String VALID_BODY = """
             {"username":"asha.rao","password":"Correct-Horse-1!"}
             """;
@@ -392,5 +395,110 @@ class AuthControllerTest {
                 .doesNotContainIgnoringCase("deactivated")
                 .doesNotContainIgnoringCase("device")
                 .doesNotContainIgnoringCase("revoked");
+    }
+
+    // ── A-025 · POST /auth/logout ────────────────────────────────────────────
+
+    private static final String BEARER = "Bearer header.payload.signature";
+
+    @Test
+    @DisplayName("a logout returns 204 with no body")
+    void logoutReturnsNoContent() throws Exception {
+        mvc.perform(post("/api/v1/auth/logout")
+                        .header(HttpHeaders.AUTHORIZATION, BEARER)
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "opaque-value")))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+    }
+
+    /**
+     * Both inputs reach the service. Dropping either silently halves the logout:
+     * without the header nothing is blacklisted, without the cookie the refresh
+     * token survives and mints a replacement on the next tick.
+     */
+    @Test
+    @DisplayName("the Authorization header and the refresh cookie are both passed through")
+    void logoutForwardsBothCredentials() throws Exception {
+        mvc.perform(post("/api/v1/auth/logout")
+                        .header(HttpHeaders.AUTHORIZATION, BEARER)
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "opaque-value")))
+                .andExpect(status().isNoContent());
+
+        verify(logout).logout(BEARER, "opaque-value");
+    }
+
+    /**
+     * A session whose cookie has already expired or rotated must still be able
+     * to sign out — otherwise the access token is left live by the very request
+     * trying to revoke it.
+     */
+    @Test
+    @DisplayName("logout works with no refresh cookie present")
+    void logoutWorksWithoutTheCookie() throws Exception {
+        mvc.perform(post("/api/v1/auth/logout")
+                        .header(HttpHeaders.AUTHORIZATION, BEARER))
+                .andExpect(status().isNoContent());
+
+        verify(logout).logout(BEARER, null);
+    }
+
+    @Test
+    @DisplayName("a successful logout clears the refresh cookie")
+    void logoutClearsTheCookie() throws Exception {
+        mvc.perform(post("/api/v1/auth/logout")
+                        .header(HttpHeaders.AUTHORIZATION, BEARER)
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "opaque-value")))
+                .andExpect(status().isNoContent())
+                .andExpect(header().string(HttpHeaders.SET_COOKIE,
+                        org.hamcrest.Matchers.containsString("Max-Age=0")));
+    }
+
+    @Test
+    @DisplayName("no access token is a 401 with the stable type URI")
+    void logoutWithoutATokenIs401() throws Exception {
+        org.mockito.Mockito.doThrow(new InvalidAccessTokenException())
+                .when(logout).logout(any(), any());
+
+        mvc.perform(post("/api/v1/auth/logout"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("https://edutrack/errors/invalid-access-token"))
+                .andExpect(jsonPath("$.status").value(401));
+    }
+
+    /**
+     * The asymmetry with the refresh refusals above. A logout that could not
+     * authenticate has ended nothing, so stripping the cookie would half-end a
+     * session the caller was never proven to own.
+     */
+    @Test
+    @DisplayName("a refused logout does NOT clear the cookie")
+    void arefusedLogoutLeavesTheCookieAlone() throws Exception {
+        org.mockito.Mockito.doThrow(new InvalidAccessTokenException())
+                .when(logout).logout(any(), any());
+
+        mvc.perform(post("/api/v1/auth/logout")
+                        .cookie(new jakarta.servlet.http.Cookie("refresh_token", "opaque-value")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+    }
+
+    @Test
+    @DisplayName("a refused logout names neither the token nor which check failed")
+    void logoutRefusalLeaksNothing() throws Exception {
+        org.mockito.Mockito.doThrow(new InvalidAccessTokenException())
+                .when(logout).logout(any(), any());
+
+        String body = mvc.perform(post("/api/v1/auth/logout")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer forged.token.value"))
+                .andExpect(status().isUnauthorized())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body)
+                .as("naming the failed check turns the endpoint into a forging tutor")
+                .doesNotContain("forged.token.value")
+                .doesNotContainIgnoringCase("signature")
+                .doesNotContainIgnoringCase("expired")
+                .doesNotContainIgnoringCase("issuer");
     }
 }
