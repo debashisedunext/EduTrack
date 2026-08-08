@@ -75,7 +75,8 @@ export const listProjectsResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "colourTag": zod.string().regex(listProjectsResponseDataItemColourTagRegExp).optional(),
   "startDate": zod.string().date().nullish(),
@@ -159,7 +160,8 @@ export const updateProjectResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "colourTag": zod.string().regex(updateProjectResponseDataColourTagRegExp).optional(),
   "startDate": zod.string().date().nullish(),

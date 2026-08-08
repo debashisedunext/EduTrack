@@ -331,6 +331,7 @@ export * from './userAllOf';
 export * from './userListResponse';
 export * from './userRef';
 export * from './userRefAvatarUrl';
+export * from './userRefHandle';
 export * from './userResponse';
 export * from './userWriteRequest';
 export * from './userWriteRequestReportingManagerId';

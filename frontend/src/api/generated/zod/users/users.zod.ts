@@ -72,7 +72,8 @@ export const listUsersResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).and(zod.object({
   "username": zod.string().optional(),
   "email": zod.string().email().optional(),
@@ -81,7 +82,8 @@ export const listUsersResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "projectIds": zod.array(zod.number()).optional(),
   "isActive": zod.boolean().optional(),
@@ -165,7 +167,8 @@ export const updateUserResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).and(zod.object({
   "username": zod.string().optional(),
   "email": zod.string().email().optional(),
@@ -174,7 +177,8 @@ export const updateUserResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "projectIds": zod.array(zod.number()).optional(),
   "isActive": zod.boolean().optional(),
@@ -217,7 +221,8 @@ export const getUserProfile360Response = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).and(zod.object({
   "username": zod.string().optional(),
   "email": zod.string().email().optional(),
@@ -226,7 +231,8 @@ export const getUserProfile360Response = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "projectIds": zod.array(zod.number()).optional(),
   "isActive": zod.boolean().optional(),
@@ -268,7 +274,8 @@ export const listReporteesResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).and(zod.object({
   "username": zod.string().optional(),
   "email": zod.string().email().optional(),
@@ -277,7 +284,8 @@ export const listReporteesResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "projectIds": zod.array(zod.number()).optional(),
   "isActive": zod.boolean().optional(),

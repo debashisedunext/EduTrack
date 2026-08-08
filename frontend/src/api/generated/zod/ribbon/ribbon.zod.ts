@@ -85,7 +85,8 @@ export const getRibbonResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "ownerRole": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "enteredAt": zod.string().datetime({}).nullish(),
@@ -160,7 +161,8 @@ export const handoffTicketResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "ownerRole": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "enteredAt": zod.string().datetime({}).nullish(),
@@ -225,7 +227,8 @@ export const reworkTicketResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "ownerRole": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "enteredAt": zod.string().datetime({}).nullish(),
@@ -282,7 +285,8 @@ export const skipStageResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "ownerRole": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "enteredAt": zod.string().datetime({}).nullish(),
@@ -341,7 +345,8 @@ export const getStageQueueResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "colourTag": zod.string().regex(getStageQueueResponseDataItemTicketProjectColourTagRegExp).optional(),
   "startDate": zod.string().date().nullish(),
@@ -365,13 +370,15 @@ export const getStageQueueResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "reportedBy": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "cycleNo": zod.number().min(1).describe('Increments on reopen after closure. Independent of `iterationNo`.'),
   "iterationNo": zod.number().min(1).optional().describe('Increments on a backward move within the current cycle. Independent of `cycleNo`.'),

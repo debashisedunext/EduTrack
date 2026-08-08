@@ -93,6 +93,7 @@ class ChatEngineIT {
 
     @BeforeEach
     void seed() {
+        jdbc.update("DELETE FROM notifications");
         jdbc.update("DELETE FROM chat_messages");
         jdbc.update("DELETE FROM chat_participants");
         jdbc.update("DELETE FROM chat_threads");
@@ -101,9 +102,9 @@ class ChatEngineIT {
         jdbc.update("DELETE FROM projects WHERE project_code = 'ITC'");
 
         projectId = insertProject();
-        ravi = insertUser("it_chat_ravi");
-        meera = insertUser("it_chat_meera");
-        outsider = insertUser("it_chat_outsider");
+        ravi = insertUser("it_chat_ravi", "Ravi Kumar");
+        meera = insertUser("it_chat_meera", "Meera Prasad");
+        outsider = insertUser("it_chat_outsider", "Nobody Here");
         ticketId = insertTicket("ITC-26-00001");
 
         ticketThread = insertThread("TICKET", ticketId, null, "Ticket thread");
@@ -516,7 +517,200 @@ class ChatEngineIT {
         }
     }
 
+    // ---------------------------------------------------- D-052 · @mentions
+
+    /**
+     * §7.6 — "@mentions (fires a notification)"; §11 puts the mentioned user on
+     * the popup, bell and email channels.
+     *
+     * <p>The property that matters is not that a mention notifies. It is
+     * <em>who</em> it can notify: the fan-out is driven entirely by the message
+     * body, and the only thing standing between {@code @anybody} and a
+     * notification is thread membership.
+     */
+    @org.junit.jupiter.api.Nested
+    class Mentions {
+
+        @Test
+        void mentioningAParticipantNotifiesThem() {
+            chat.post(ticketThread, ravi, "can you take a look @it_chat_meera");
+
+            assertThat(notificationsFor(meera)).singleElement().satisfies(row -> {
+                assertThat(row.get("event_code")).isEqualTo("MENTIONED");
+                assertThat(row.get("title")).isEqualTo("Ravi Kumar mentioned you");
+            });
+        }
+
+        @Test
+        @DisplayName("the resolved mention is stored on the message and surfaces on read")
+        void theMentionIsStoredAndReturned() {
+            chat.post(ticketThread, ravi, "over to you @it_chat_meera");
+
+            assertThat(onlyMessageFor(ravi).mentions()).singleElement().satisfies(mentioned -> {
+                assertThat(mentioned.id()).isEqualTo(meera);
+                assertThat(mentioned.displayName()).isEqualTo("Meera Prasad");
+                // The handle is what the client highlights in the body; without
+                // it there is no way to find the substring to mark up.
+                assertThat(mentioned.handle()).isEqualTo("it_chat_meera");
+            });
+        }
+
+        @Test
+        @DisplayName("mentioning somebody who is not in the thread notifies nobody")
+        void aNonParticipantIsNotMentionable() {
+            chat.post(ticketThread, ravi, "what do you think @it_chat_outsider");
+
+            // Notifying them would deep-link to a thread that answers 404, and
+            // would make @ a probe for which usernames exist.
+            assertThat(notificationsFor(outsider)).isEmpty();
+            assertThat(onlyMessageFor(ravi).mentions()).isEmpty();
+            assertThat(onlyMessageFor(ravi).body())
+                    .as("the message still posts — the handle is simply text")
+                    .contains("@it_chat_outsider");
+        }
+
+        @Test
+        void mentioningYourselfDoesNotNotifyYou() {
+            chat.post(ticketThread, ravi, "note to self @it_chat_ravi");
+
+            // Naming yourself addresses the room, it is not a request to be told.
+            assertThat(notificationsFor(ravi)).isEmpty();
+        }
+
+        @Test
+        void anUnknownHandleIsJustText() {
+            chat.post(ticketThread, ravi, "@nobody_at_all are you there");
+
+            assertThat(allNotifications()).isEmpty();
+            assertThat(onlyMessageFor(ravi).mentions()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("an email address in the body is not a mention")
+        void emailAddressesDoNotNotify() {
+            chat.post(ticketThread, ravi, "forward it to it_chat_meera@example.com");
+
+            assertThat(notificationsFor(meera)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a deactivated colleague is not mentionable")
+        void inactiveUsersAreNotMentionable() {
+            jdbc.update("UPDATE users SET is_active = 0 WHERE id = ?", meera);
+
+            chat.post(ticketThread, ravi, "@it_chat_meera one more thing");
+
+            // A bell entry nobody will ever open is not a notification.
+            assertThat(notificationsFor(meera)).isEmpty();
+        }
+
+        @Test
+        void namingSomebodyTwiceNotifiesThemOnce() {
+            chat.post(ticketThread, ravi, "@it_chat_meera and again @IT_CHAT_MEERA");
+
+            assertThat(notificationsFor(meera)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("the notification says where, and never quotes what was said")
+        void theNotificationCarriesNoMessageText() {
+            chat.post(ticketThread, ravi, "@it_chat_meera the password is hunter2");
+
+            // §7.6 lets an author delete their words. A bell entry quoting the
+            // body would be the one copy the tombstone cannot reach.
+            assertThat(notificationsFor(meera)).singleElement().satisfies(row -> {
+                assertThat(row.get("body")).isEqualTo("in ticket ITC-26-00001");
+                assertThat(String.valueOf(row.get("body"))).doesNotContain("hunter2");
+                assertThat(String.valueOf(row.get("title"))).doesNotContain("hunter2");
+                assertThat(row.get("ticket_id")).isEqualTo(ticketId);
+                assertThat(row.get("link_url")).isEqualTo("/chat/threads/" + ticketThread);
+            });
+        }
+
+        @Test
+        void aMentionOnAProjectChannelNamesTheChannelAndCarriesNoTicket() {
+            chat.post(projectThread, ravi, "@it_chat_meera standup in five");
+
+            assertThat(notificationsFor(meera)).singleElement().satisfies(row -> {
+                assertThat(row.get("body")).isEqualTo("in the Chat fixture channel");
+                assertThat(row.get("ticket_id")).isNull();
+            });
+        }
+
+        @Test
+        void aMentionInADirectMessageSaysSoWithoutNamingTheThread() {
+            chat.post(directThread, ravi, "@it_chat_meera got a minute?");
+
+            assertThat(notificationsFor(meera)).singleElement()
+                    .satisfies(row -> assertThat(row.get("body")).isEqualTo("in a direct message"));
+        }
+
+        @Test
+        @DisplayName("a mention pushes to the mentioned user's own queue, separately from the thread broadcast")
+        void aMentionPushesToTheirQueue() {
+            chat.post(ticketThread, ravi, "@it_chat_meera please look");
+
+            assertThat(published()).containsExactly(
+                    "/topic/ticket." + ticketId,
+                    "/user/" + meera + "/queue/events");
+            // A toast is a different surface with a different lifetime from the
+            // message landing in the thread, so it is its own event.
+            assertThat(publishedEvents()).containsExactly("chat.message", "notification.created");
+        }
+
+        @Test
+        @DisplayName("an edit that adds a mention notifies only the person it added")
+        void editingInAMentionNotifiesOnlyTheNewPerson() {
+            chat.post(ticketThread, ravi, "@it_chat_meera have a look");
+            long id = idOfLatest();
+            join(ticketThread, outsider);
+
+            chat.edit(ticketThread, id, ravi, "@it_chat_meera @it_chat_outsider have a look");
+
+            assertThat(notificationsFor(outsider)).hasSize(1);
+            assertThat(notificationsFor(meera))
+                    .as("fixing a typo must not ring everybody's bell a second time")
+                    .hasSize(1);
+        }
+
+        @Test
+        @DisplayName("removing a mention by editing does not retract the notification")
+        void anEditCannotUnNotify() {
+            chat.post(ticketThread, ravi, "@it_chat_meera have a look");
+            long id = idOfLatest();
+
+            chat.edit(ticketThread, id, ravi, "never mind");
+
+            // A delivered notification is a record. Quietly withdrawing it is
+            // the same kind of rewrite the five-minute window exists to stop.
+            assertThat(notificationsFor(meera)).hasSize(1);
+            assertThat(onlyMessageFor(ravi).mentions())
+                    .as("the message itself no longer mentions anyone")
+                    .isEmpty();
+        }
+
+        @Test
+        void aDeletedMessageWithholdsTheBodyButKeepsWhoWasCalledIn() {
+            chat.post(ticketThread, ravi, "@it_chat_meera urgent");
+            long id = idOfLatest();
+
+            chat.delete(ticketThread, id, ravi);
+
+            ChatDtos.ChatMessage tombstone = onlyMessageFor(meera);
+            assertThat(tombstone.body()).isNull();
+            assertThat(tombstone.mentions()).extracting(ChatDtos.UserRef::id).containsExactly(meera);
+        }
+    }
+
     // -------------------------------------------------------------------- helpers
+
+    private List<java.util.Map<String, Object>> notificationsFor(long userId) {
+        return jdbc.queryForList("SELECT * FROM notifications WHERE user_id = ? ORDER BY id", userId);
+    }
+
+    private List<java.util.Map<String, Object>> allNotifications() {
+        return jdbc.queryForList("SELECT * FROM notifications ORDER BY id");
+    }
 
     @SuppressWarnings("unchecked")
     private List<String> publishedEvents() {
@@ -583,12 +777,12 @@ class ChatEngineIT {
         return lastId();
     }
 
-    private long insertUser(String username) {
+    private long insertUser(String username, String fullName) {
         Long roleId = jdbc.queryForObject("SELECT id FROM roles ORDER BY id LIMIT 1", Long.class);
         jdbc.update("""
                 INSERT INTO users (emp_code, username, email, password_hash, full_name, role_id)
                 VALUES (?, ?, ?, 'not-a-real-hash', ?, ?)
-                """, username, username, username + "@example.com", username, roleId);
+                """, username, username, username + "@example.com", fullName, roleId);
         return lastId();
     }
 

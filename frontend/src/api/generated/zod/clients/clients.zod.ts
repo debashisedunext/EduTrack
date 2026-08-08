@@ -76,7 +76,8 @@ export const listClientsResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "supportPlan": zod.string().nullish(),
   "slaPolicyId": zod.number().nullish(),
@@ -165,7 +166,8 @@ export const updateClientResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "supportPlan": zod.string().nullish(),
   "slaPolicyId": zod.number().nullish(),
@@ -210,7 +212,8 @@ export const setClientStatusResponse = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "supportPlan": zod.string().nullish(),
   "slaPolicyId": zod.number().nullish(),
@@ -318,7 +321,8 @@ export const getClient360Response = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "supportPlan": zod.string().nullish(),
   "slaPolicyId": zod.number().nullish(),
@@ -347,7 +351,8 @@ export const getClient360Response = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "colourTag": zod.string().regex(getClient360ResponseDataTicketsItemProjectColourTagRegExp).optional(),
   "startDate": zod.string().date().nullish(),
@@ -371,13 +376,15 @@ export const getClient360Response = zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "reportedBy": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
   "cycleNo": zod.number().min(1).describe('Increments on reopen after closure. Independent of `iterationNo`.'),
   "iterationNo": zod.number().min(1).optional().describe('Increments on a backward move within the current cycle. Independent of `cycleNo`.'),

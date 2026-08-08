@@ -46,16 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { UserRefAvatarUrl } from './userRefAvatarUrl';
-import type { RoleCode } from './roleCode';
-import type { UserRefHandle } from './userRefHandle';
 
-export interface UserRef {
-  id: number;
-  displayName: string;
-  avatarUrl?: UserRefAvatarUrl;
-  role?: RoleCode;
-  /** `@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.
+/**
+ * `@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.
+
  */
-  handle?: UserRefHandle;
-}
+export type UserRefHandle = string | null;

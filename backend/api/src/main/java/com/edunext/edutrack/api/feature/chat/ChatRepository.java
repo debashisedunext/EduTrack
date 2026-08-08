@@ -5,8 +5,12 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.StringJoiner;
 
 /**
  * D-050 · the read and write side of chat.
@@ -56,7 +60,8 @@ class ChatRepository {
 
     private static final String MESSAGES_PAGE = """
             SELECT m.id, m.thread_id, m.body, m.kind, m.sender_id, m.created_at,
-                   m.edited_at, m.deleted_at, u.full_name AS sender_name
+                   m.edited_at, m.deleted_at, u.full_name AS sender_name,
+                   m.mentioned_user_ids IS NOT NULL AS hasMentions
               FROM chat_messages m
               LEFT JOIN users u ON u.id = m.sender_id
              WHERE m.thread_id = :threadId
@@ -67,11 +72,11 @@ class ChatRepository {
 
     private static final String INSERT_MESSAGE = """
             INSERT INTO chat_messages (thread_id, sender_id, body, kind, is_system, mentioned_user_ids)
-            VALUES (:threadId, :senderId, :body, :kind, :isSystem, NULL)
+            VALUES (:threadId, :senderId, :body, :kind, :isSystem, :mentions)
             """;
 
     private static final String PARTICIPANTS = """
-            SELECT cp.thread_id, cp.user_id, u.full_name
+            SELECT cp.thread_id, cp.user_id, u.full_name, u.username
               FROM chat_participants cp
               JOIN users u ON u.id = cp.user_id
              WHERE cp.thread_id IN (:threadIds)
@@ -85,10 +90,13 @@ class ChatRepository {
      * rejected.
      */
     private static final String THREAD_FOR_PARTICIPANT = """
-            SELECT t.id, t.thread_type, t.ticket_id, t.project_id
+            SELECT t.id, t.thread_type, t.ticket_id, t.project_id,
+                   tk.ticket_code, p.name AS project_name
               FROM chat_threads t
               JOIN chat_participants cp
                 ON cp.thread_id = t.id AND cp.user_id = :userId
+              LEFT JOIN tickets  tk ON tk.id = t.ticket_id
+              LEFT JOIN projects p  ON p.id  = t.project_id
              WHERE t.id = :threadId AND t.is_active = 1
             """;
 
@@ -150,7 +158,7 @@ class ChatRepository {
      */
     private static final String EDIT_BODY = """
             UPDATE chat_messages
-               SET body = :body, edited_at = NOW(6)
+               SET body = :body, edited_at = NOW(6), mentioned_user_ids = :mentions
              WHERE id = :messageId
                AND thread_id = :threadId
                AND sender_id = :userId
@@ -177,9 +185,62 @@ class ChatRepository {
 
     private static final String MESSAGE_BY_ID = """
             SELECT m.id, m.thread_id, m.body, m.kind, m.sender_id, m.created_at,
-                   m.edited_at, m.deleted_at, u.full_name AS sender_name
+                   m.edited_at, m.deleted_at, u.full_name AS sender_name,
+                   m.mentioned_user_ids IS NOT NULL AS hasMentions
               FROM chat_messages m
               LEFT JOIN users u ON u.id = m.sender_id
+             WHERE m.id = :messageId
+            """;
+
+    /**
+     * D-052 · which of these handles belong to somebody actually in the thread.
+     *
+     * <p><strong>The join to {@code chat_participants} is the whole security
+     * property.</strong> Without it, {@code @someone} would notify a person who
+     * then follows the link and receives a 404 — a notification about a
+     * conversation they cannot read, which is both useless and a probe for
+     * whether a username exists. Mentioning a non-participant is not an error;
+     * it simply stays plain text, which is what it looks like to a reader too.
+     *
+     * <p>{@code is_active = 1} keeps a departed employee's handle from raising
+     * bell entries nobody will ever clear.
+     */
+    private static final String MENTIONABLE_PARTICIPANTS = """
+            SELECT u.id, u.username, u.full_name
+              FROM users u
+              JOIN chat_participants cp
+                ON cp.user_id = u.id AND cp.thread_id = :threadId
+             WHERE u.username IN (:handles)
+               AND u.is_active = 1
+            """;
+
+    /**
+     * The stored mention set for a page of messages, expanded by MySQL.
+     *
+     * <p>{@code JSON_TABLE} rather than reading the column and parsing it in
+     * Java: the array is already a set of ids the database can join on, and
+     * pulling it out to reassemble it here would mean a second round trip plus a
+     * hand-rolled parser for a format we would then have to keep honest.
+     *
+     * <p>One query for the page, not one per message — the same discipline as
+     * {@link #READ_CURSORS}.
+     */
+    private static final String MENTIONS_FOR_MESSAGES = """
+            SELECT m.id AS messageId, u.id AS userId, u.username, u.full_name
+              FROM chat_messages m
+              JOIN JSON_TABLE(m.mentioned_user_ids, '$[*]'
+                     COLUMNS (mentioned_id BIGINT PATH '$')) j
+              JOIN users u ON u.id = j.mentioned_id
+             WHERE m.id IN (:messageIds)
+             ORDER BY m.id, u.id
+            """;
+
+    /** The mention set as it stands, read before an edit replaces it. */
+    private static final String MENTIONED_IDS = """
+            SELECT j.mentioned_id
+              FROM chat_messages m
+              JOIN JSON_TABLE(m.mentioned_user_ids, '$[*]'
+                     COLUMNS (mentioned_id BIGINT PATH '$')) j
              WHERE m.id = :messageId
             """;
 
@@ -237,13 +298,14 @@ class ChatRepository {
                 .list();
     }
 
-    long insertMessage(long threadId, Long senderId, String body, MessageKind kind) {
+    long insertMessage(long threadId, Long senderId, String body, MessageKind kind, List<Long> mentionedIds) {
         jdbc.sql(INSERT_MESSAGE)
                 .param("threadId", threadId)
                 .param("senderId", senderId)
                 .param("body", body)
                 .param("kind", kind.name())
                 .param("isSystem", kind == MessageKind.SYSTEM ? 1 : 0)
+                .param("mentions", jsonArray(mentionedIds))
                 .update();
         // LAST_INSERT_ID() is per-connection and JdbcClient holds one for the
         // duration of the transaction, so this is the row just written even
@@ -274,13 +336,69 @@ class ChatRepository {
     }
 
     /** @return true if the row was actually updated */
-    boolean editBody(long threadId, long messageId, long userId, String body) {
+    boolean editBody(long threadId, long messageId, long userId, String body, List<Long> mentionedIds) {
         return jdbc.sql(EDIT_BODY)
                 .param("threadId", threadId)
                 .param("messageId", messageId)
                 .param("userId", userId)
                 .param("body", body)
+                .param("mentions", jsonArray(mentionedIds))
                 .update() == 1;
+    }
+
+    /** Participants among {@code handles}. Empty when none of them are in the thread. */
+    List<MentionedUser> mentionableParticipants(long threadId, List<String> handles) {
+        if (handles.isEmpty()) {
+            // An empty IN (…) list is a syntax error, and there is nothing to ask.
+            return List.of();
+        }
+        return jdbc.sql(MENTIONABLE_PARTICIPANTS)
+                .param("threadId", threadId)
+                .param("handles", handles)
+                .query(MentionedUser.class)
+                .list();
+    }
+
+    /** Mentions on each of these messages, keyed by message id. */
+    Map<Long, List<MentionedUser>> mentionsFor(List<Long> messageIds) {
+        if (messageIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<MentionedUser>> byMessage = new LinkedHashMap<>();
+        for (MentionRow row : jdbc.sql(MENTIONS_FOR_MESSAGES)
+                .param("messageIds", messageIds)
+                .query(MentionRow.class)
+                .list()) {
+            byMessage.computeIfAbsent(row.messageId(), key -> new ArrayList<>())
+                    .add(new MentionedUser(row.userId(), row.username(), row.fullName()));
+        }
+        return byMessage;
+    }
+
+    /** Who this message mentions right now — read before an edit overwrites it. */
+    List<Long> mentionedIds(long messageId) {
+        return jdbc.sql(MENTIONED_IDS)
+                .param("messageId", messageId)
+                .query(Long.class)
+                .list();
+    }
+
+    /**
+     * The mention set as JSON text, or null for none.
+     *
+     * <p>Built by hand rather than through Jackson because the elements are
+     * {@code long} — there is no value that can escape the array and no encoding
+     * decision to get wrong. NULL rather than {@code []} keeps "nobody was
+     * mentioned" to a single representation, which is what
+     * {@code hasMentions} then tests for.
+     */
+    private static String jsonArray(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return null;
+        }
+        StringJoiner json = new StringJoiner(",", "[", "]");
+        ids.forEach(id -> json.add(Long.toString(id)));
+        return json.toString();
     }
 
     /** @return true if this call was the one that deleted it */
@@ -326,7 +444,7 @@ class ChatRepository {
         }
     }
 
-    record ParticipantRow(long threadId, long userId, String fullName) {
+    record ParticipantRow(long threadId, long userId, String fullName, String username) {
     }
 
     record MessageRow(
@@ -338,7 +456,21 @@ class ChatRepository {
             Timestamp createdAt,
             Timestamp editedAt,
             Timestamp deletedAt,
-            String senderName) {
+            String senderName,
+            /*
+             * Selected so a page with no mentions on it — which is nearly every
+             * page — skips the JSON_TABLE expansion entirely rather than paying
+             * a round trip to learn there was nothing to expand.
+             */
+            boolean hasMentions) {
+    }
+
+    /** D-052 · somebody a message mentions, resolved to a real user. */
+    record MentionedUser(long id, String username, String fullName) {
+    }
+
+    /** One (message, mentioned user) pair as {@code JSON_TABLE} returns it. */
+    record MentionRow(long messageId, long userId, String username, String fullName) {
     }
 
     /** How far one participant has read. Zero means never opened. */
@@ -349,8 +481,21 @@ class ChatRepository {
     record Editability(long id, boolean deleted, boolean withinWindow) {
     }
 
-    /** Just enough of a thread to authorise a post and address its broadcast. */
-    record ThreadAnchor(long id, String threadType, Long ticketId, Long projectId) {
+    /**
+     * Just enough of a thread to authorise a post, address its broadcast and
+     * name it.
+     *
+     * <p>{@code ticketCode} and {@code projectName} are here rather than looked
+     * up later because D-052's notification has to say <em>where</em> somebody
+     * was mentioned, and a bell entry reading "you were mentioned in thread 47"
+     * is not worth sending. They come free from the membership query's joins.
+     */
+    record ThreadAnchor(long id,
+                        String threadType,
+                        Long ticketId,
+                        Long projectId,
+                        String ticketCode,
+                        String projectName) {
 
         ChatKind kind() {
             // ASK_STATUS threads predate the contract's model and behave as

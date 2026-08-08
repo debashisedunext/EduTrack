@@ -41,10 +41,12 @@ public class ChatService {
 
     private final ChatRepository repository;
     private final RealtimePublisher realtime;
+    private final MentionNotifier mentionNotifier;
 
-    ChatService(ChatRepository repository, RealtimePublisher realtime) {
+    ChatService(ChatRepository repository, RealtimePublisher realtime, MentionNotifier mentionNotifier) {
         this.repository = repository;
         this.realtime = realtime;
+        this.mentionNotifier = mentionNotifier;
     }
 
     // --------------------------------------------------------------- threads
@@ -64,7 +66,10 @@ public class ChatService {
                 : repository.participantsOf(rows.stream().map(ChatRepository.ThreadRow::id).toList())) {
             participants
                     .computeIfAbsent(row.threadId(), key -> new ArrayList<>())
-                    .add(new ChatDtos.UserRef(row.userId(), row.fullName()));
+                    // The handle is carried here because this list is what a
+                    // mention type-ahead offers: without it the client can
+                    // display a name it has no way to turn into an @mention.
+                    .add(new ChatDtos.UserRef(row.userId(), row.fullName(), row.username()));
         }
 
         return rows.stream()
@@ -109,7 +114,10 @@ public class ChatService {
         // Cursors are read after the advance, so the caller sees their own read
         // reflected rather than a snapshot that is already one request stale.
         List<ChatRepository.ReadCursor> cursors = repository.readCursors(threadId);
-        return Optional.of(rows.stream().map(row -> toMessage(row, userId, cursors)).toList());
+        Map<Long, List<ChatRepository.MentionedUser>> mentions = mentionsFor(rows);
+        return Optional.of(rows.stream()
+                .map(row -> toMessage(row, userId, cursors, mentions))
+                .toList());
     }
 
     /**
@@ -128,7 +136,13 @@ public class ChatService {
             return Optional.empty();
         }
 
-        long messageId = repository.insertMessage(threadId, senderId, body, MessageKind.TEXT);
+        // D-052. Resolved from the body alone: the request never says who it
+        // mentioned, because a caller-supplied recipient list is a way to make
+        // the notification fan-out point at anybody.
+        List<ChatRepository.MentionedUser> mentions = resolveMentions(threadId, body);
+
+        long messageId = repository.insertMessage(
+                threadId, senderId, body, MessageKind.TEXT, idsOf(mentions));
 
         // The author has self-evidently read their own message. Without this
         // the sender's own post counts as unread to them.
@@ -137,13 +151,31 @@ public class ChatService {
         List<ChatRepository.MessageRow> written = repository.messages(threadId, messageId + 1, 1);
         ChatDtos.ChatMessage message = written.isEmpty()
                 ? null
-                : toMessage(written.getFirst(), senderId);
+                : toMessage(written.getFirst(), senderId, List.of(), Map.of(messageId, mentions));
         if (message == null) {
             throw new IllegalStateException("chat: message " + messageId + " vanished immediately after insert");
         }
 
         broadcast(anchor.get(), message, "chat.message");
+        mentionNotifier.mentioned(anchor.get(), messageId, senderId,
+                message.author() == null ? null : message.author().displayName(), mentions);
         return Optional.of(message);
+    }
+
+    /**
+     * Handles in the body that belong to somebody actually in this thread.
+     *
+     * <p>Anything else stays plain text — an unknown handle, a departed
+     * colleague, a person who is simply not in the conversation. Notifying a
+     * non-participant would deep-link them to a thread that answers 404, and
+     * would turn {@code @} into a probe for which usernames exist.
+     */
+    private List<ChatRepository.MentionedUser> resolveMentions(long threadId, String body) {
+        return repository.mentionableParticipants(threadId, MentionParser.handles(body));
+    }
+
+    private static List<Long> idsOf(List<ChatRepository.MentionedUser> mentions) {
+        return mentions.stream().map(ChatRepository.MentionedUser::id).toList();
     }
 
     // ----------------------------------------------------- D-057 · evidence
@@ -192,14 +224,38 @@ public class ChatService {
             return new Outcome.Immutable("the five-minute edit window has closed");
         }
 
-        if (!repository.editBody(threadId, messageId, userId, body)) {
+        // D-052. Read before the write, so the delta is against what the message
+        // said rather than what it is about to say.
+        List<Long> alreadyMentioned = repository.mentionedIds(messageId);
+        List<ChatRepository.MentionedUser> mentions = resolveMentions(threadId, body);
+
+        if (!repository.editBody(threadId, messageId, userId, body, idsOf(mentions))) {
             // The row moved between the two statements — the window closed
             // mid-request, or a concurrent delete landed. Reporting it as
             // immutable is truthful; reporting success would not be.
             return new Outcome.Immutable("the message is no longer editable");
         }
 
+        // Only the people the edit newly named. Somebody already mentioned must
+        // not be notified twice for one message — a fixed typo would otherwise
+        // ring everybody's bell again. Nobody is ever un-notified either: a
+        // delivered notification is a record, and quietly retracting it is the
+        // same kind of rewrite §7.6 exists to prevent.
+        List<ChatRepository.MentionedUser> newlyMentioned = mentions.stream()
+                .filter(mentioned -> !alreadyMentioned.contains(mentioned.id()))
+                .toList();
+        if (!newlyMentioned.isEmpty()) {
+            repository.threadForParticipant(threadId, userId).ifPresent(anchor ->
+                    mentionNotifier.mentioned(anchor, messageId, userId, authorName(messageId), newlyMentioned));
+        }
+
         return applied(threadId, messageId, userId, "chat.message.edited");
+    }
+
+    private String authorName(long messageId) {
+        return repository.messageById(messageId)
+                .map(ChatRepository.MessageRow::senderName)
+                .orElse(null);
     }
 
     /**
@@ -287,12 +343,25 @@ public class ChatService {
     // --------------------------------------------------------------- mapping
 
     private ChatDtos.ChatMessage toMessage(ChatRepository.MessageRow row, long viewerId) {
-        return toMessage(row, viewerId, List.of());
+        return toMessage(row, viewerId, List.of(), mentionsFor(List.of(row)));
+    }
+
+    /**
+     * Mentions for a whole page in one query, and none at all when no row on the
+     * page has any — which is nearly every page.
+     */
+    private Map<Long, List<ChatRepository.MentionedUser>> mentionsFor(List<ChatRepository.MessageRow> rows) {
+        List<Long> withMentions = rows.stream()
+                .filter(ChatRepository.MessageRow::hasMentions)
+                .map(ChatRepository.MessageRow::id)
+                .toList();
+        return repository.mentionsFor(withMentions);
     }
 
     private ChatDtos.ChatMessage toMessage(ChatRepository.MessageRow row,
                                            long viewerId,
-                                           List<ChatRepository.ReadCursor> cursors) {
+                                           List<ChatRepository.ReadCursor> cursors,
+                                           Map<Long, List<ChatRepository.MentionedUser>> mentions) {
         boolean deleted = row.deletedAt() != null;
         Instant createdAt = row.createdAt().toInstant();
         boolean mine = row.senderId() != null && row.senderId() == viewerId;
@@ -303,7 +372,7 @@ public class ChatService {
                 deleted ? null : row.body(),
                 row.senderId() == null
                         ? null
-                        : new ChatDtos.UserRef(row.senderId(), row.senderName()),
+                        : ChatDtos.UserRef.of(row.senderId(), row.senderName()),
                 MessageKind.valueOf(row.kind()),
                 row.editedAt() != null,
                 deleted,
@@ -311,6 +380,10 @@ public class ChatService {
                 // is already gone.
                 mine && !deleted ? createdAt.plus(EDIT_WINDOW) : null,
                 readersOf(row, cursors),
+                mentions.getOrDefault(row.id(), List.of()).stream()
+                        .map(mentioned -> new ChatDtos.UserRef(
+                                mentioned.id(), mentioned.fullName(), mentioned.username()))
+                        .toList(),
                 createdAt);
     }
 

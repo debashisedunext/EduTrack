@@ -18,8 +18,20 @@ public final class ChatDtos {
     private ChatDtos() {
     }
 
-    /** {@code UserRef} in the contract. */
-    public record UserRef(long id, String displayName) {
+    /**
+     * {@code UserRef} in the contract.
+     *
+     * <p>{@code handle} is the {@code @mention} name — {@code users.username}.
+     * It is populated where the client has to compose or resolve a mention: the
+     * participant list a type-ahead offers, and the mentions on a message it
+     * highlights in the body. It is null on a message author, who is identified
+     * by an avatar rather than typed.
+     */
+    public record UserRef(long id, String displayName, String handle) {
+
+        static UserRef of(long id, String displayName) {
+            return new UserRef(id, displayName, null);
+        }
     }
 
     /**
@@ -57,6 +69,16 @@ public final class ChatDtos {
             boolean isDeleted,
             Instant editableUntil,
             List<Long> readBy,
+            /*
+             * D-052. UserRef rather than bare ids, matching Comment.mentions in
+             * the contract — a client rendering a highlight needs the handle to
+             * find the substring and the display name to show on hover, and
+             * neither is derivable from an id.
+             *
+             * Kept on a deleted message: the body is withheld, but who was
+             * called into the conversation is part of the record that survives.
+             */
+            List<UserRef> mentions,
             Instant createdAt) {
     }
 

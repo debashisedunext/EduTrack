@@ -61,5 +61,8 @@ export interface ChatMessage {
   editableUntil?: ChatMessageEditableUntil;
   attachments?: Attachment[];
   readBy?: number[];
+  /** Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.
+ */
+  mentions?: UserRef[];
   createdAt?: string;
 }
