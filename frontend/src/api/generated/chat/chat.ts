@@ -69,6 +69,8 @@ import type {
   ChatMessageListResponse,
   ChatMessageResponse,
   ChatThreadListResponse,
+  ConflictResponse,
+  EditChatMessageBody,
   ListChatMessagesParams,
   ListChatThreadsParams,
   NotFoundResponse,
@@ -341,6 +343,158 @@ export const usePostChatMessage = <TError = NotFoundResponse,
       > => {
 
       const mutationOptions = getPostChatMessageMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Author only, and only for five minutes after posting. After that the
+message is immutable and this returns `409`.
+
+**This is what keeps chat admissible as project evidence.** A thread
+anybody can quietly rewrite proves nothing, so the window is a hard
+limit rather than a UI affordance — the client hides the control after
+`editableUntil`, and the server refuses regardless.
+
+No `If-Match`: the author is the only person who can edit, so there is
+no second writer to lose an update to.
+
+Not the author, not a participant, or no such message all return `404`.
+A `403` would confirm the message exists and who wrote it.
+
+ * @summary Edit a message, inside the five-minute window
+ */
+export const editChatMessage = (
+    threadId: number,
+    messageId: number,
+    editChatMessageBody: EditChatMessageBody,
+ ) => {
+      
+      
+      return http<ChatMessageResponse>(
+      {url: `/chat/threads/${threadId}/messages/${messageId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: editChatMessageBody
+    },
+      );
+    }
+  
+
+
+export const getEditChatMessageMutationOptions = <TError = NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof editChatMessage>>, TError,{threadId: number;messageId: number;data: EditChatMessageBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof editChatMessage>>, TError,{threadId: number;messageId: number;data: EditChatMessageBody}, TContext> => {
+
+const mutationKey = ['editChatMessage'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof editChatMessage>>, {threadId: number;messageId: number;data: EditChatMessageBody}> = (props) => {
+          const {threadId,messageId,data} = props ?? {};
+
+          return  editChatMessage(threadId,messageId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EditChatMessageMutationResult = NonNullable<Awaited<ReturnType<typeof editChatMessage>>>
+    export type EditChatMessageMutationBody = EditChatMessageBody
+    export type EditChatMessageMutationError = NotFoundResponse | ConflictResponse
+
+    /**
+ * @summary Edit a message, inside the five-minute window
+ */
+export const useEditChatMessage = <TError = NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof editChatMessage>>, TError,{threadId: number;messageId: number;data: EditChatMessageBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof editChatMessage>>,
+        TError,
+        {threadId: number;messageId: number;data: EditChatMessageBody},
+        TContext
+      > => {
+
+      const mutationOptions = getEditChatMessageMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The row survives and the body is withheld — `isDeleted` becomes true and
+`body` becomes null. A conversation that silently loses a message reads
+as though it never happened, which is exactly what §7.6 guards against.
+
+Returns the tombstone rather than `204`, so the caller can render the
+new state without a refetch.
+
+Unlike editing, this is **not** limited to five minutes: the point of
+the window is that nobody can rewrite history, and a tombstone adds to
+the record rather than altering it.
+
+ * @summary Delete a message, leaving a tombstone
+ */
+export const deleteChatMessage = (
+    threadId: number,
+    messageId: number,
+ ) => {
+      
+      
+      return http<ChatMessageResponse>(
+      {url: `/chat/threads/${threadId}/messages/${messageId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteChatMessageMutationOptions = <TError = NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteChatMessage>>, TError,{threadId: number;messageId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteChatMessage>>, TError,{threadId: number;messageId: number}, TContext> => {
+
+const mutationKey = ['deleteChatMessage'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteChatMessage>>, {threadId: number;messageId: number}> = (props) => {
+          const {threadId,messageId} = props ?? {};
+
+          return  deleteChatMessage(threadId,messageId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteChatMessageMutationResult = NonNullable<Awaited<ReturnType<typeof deleteChatMessage>>>
+    
+    export type DeleteChatMessageMutationError = NotFoundResponse
+
+    /**
+ * @summary Delete a message, leaving a tombstone
+ */
+export const useDeleteChatMessage = <TError = NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteChatMessage>>, TError,{threadId: number;messageId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteChatMessage>>,
+        TError,
+        {threadId: number;messageId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteChatMessageMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

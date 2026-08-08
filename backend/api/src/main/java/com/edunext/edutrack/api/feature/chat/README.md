@@ -31,15 +31,38 @@ two named people are talking, which is the private part.
 This does not wait for A-034: chat membership is explicit in
 `chat_participants`, so it needs no role reasoning.
 
-## Chat is evidence
+## Chat is evidence (D-057)
 
 Messages are immutable after a five-minute window and deletions leave a
-tombstone — the row survives, the body is withheld. A thread anybody can quietly
-rewrite proves nothing.
+tombstone. A thread anybody can quietly rewrite proves nothing.
 
-This module *publishes* `editableUntil` so the UI knows when to stop offering
-"edit". **Enforcing it is D-057**, which is not written yet — there is no edit
-or delete endpoint at all today, so nothing can currently violate the rule.
+| Rule | Where it is enforced |
+|---|---|
+| Author only | `sender_id = :userId` in the SQL, not in Java |
+| Five-minute window | `created_at > NOW(6) - INTERVAL 5 MINUTE`, **in the database** |
+| Deleted stays deleted | `deleted_at IS NULL` guard on both statements |
+| Body is never destroyed | `deleted_at` is set; `body` is left intact |
+
+**The window is evaluated by the database on purpose.** An application clock
+makes five minutes mean something slightly different on every instance, and a
+message that is editable on one pod and frozen on another is the kind of
+inconsistency that only appears in production.
+
+It is checked twice — once to decide the response, once in the `UPDATE`'s `WHERE`
+clause. That is not redundant caution: they are two statements, and a later
+refactor that reorders them still cannot widen the window.
+
+**Deletion has no time limit, and that is not an inconsistency.** The window
+exists so nobody can rewrite what was said; a tombstone *adds* to the record
+rather than altering it. The body stays in the database and is withheld on read.
+
+Deletion is author-only. Moderator deletion is not in §7.6, and an authority to
+erase other people's words is not a gap to fill quietly.
+
+**404, not 403, when it is not yours.** A conflict answer would confirm the
+message exists and that someone else wrote it. `409` is reserved for *your own*
+message that has passed the window — the conflict is with the resource's state,
+not with your authority over it.
 
 ## Not done yet
 
@@ -48,7 +71,6 @@ or delete endpoint at all today, so nothing can currently violate the rule.
 - **D-053** attachments. `attachmentIds` is accepted and ignored — it is in the
   contract, and rejecting it would break the generated client.
 - **D-055** Ask Status. `MessageKind.STATUS_REQUEST` exists for it.
-- **D-057** the edit window and tombstones, as endpoints.
 - **Subscriptions are not authorised** — D-013. Chat's *REST* side is scoped by
   membership, but anyone can currently subscribe to any topic and see messages
   broadcast to it. This must not reach real data before D-013.

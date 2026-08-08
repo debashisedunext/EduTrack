@@ -96,6 +96,75 @@ class ChatRepository {
             SELECT user_id FROM chat_participants WHERE thread_id = :threadId
             """;
 
+    /**
+     * D-057 · everything needed to decide whether an edit is allowed, in one
+     * query, evaluated by the database.
+     *
+     * <p><strong>The window is computed in SQL on purpose.</strong> Comparing
+     * {@code created_at} against an application clock makes the five minutes
+     * mean something slightly different on every instance, and a message that
+     * is editable on one pod and frozen on another is the kind of inconsistency
+     * that only shows up in production. The row's own clock decides.
+     *
+     * <p>{@code sender_id = :userId} is the author check and the join to
+     * {@code chat_participants} is the membership check. Both are here rather
+     * than in Java so that "no such message" and "not yours" come back
+     * indistinguishable — the caller cannot tell them apart, and neither can
+     * anyone probing for message ids.
+     */
+    private static final String EDITABILITY = """
+            SELECT m.id,
+                   m.deleted_at IS NOT NULL                                AS deleted,
+                   m.created_at > NOW(6) - INTERVAL 5 MINUTE               AS withinWindow
+              FROM chat_messages m
+              JOIN chat_participants cp
+                ON cp.thread_id = m.thread_id AND cp.user_id = :userId
+             WHERE m.id = :messageId
+               AND m.thread_id = :threadId
+               AND m.sender_id = :userId
+            """;
+
+    /**
+     * The window is re-checked here, not just in {@link #EDITABILITY}. The two
+     * run in the same transaction so nothing can change between them today —
+     * but a later refactor that splits them would silently lose the limit, and
+     * this is the guarantee that must not erode.
+     */
+    private static final String EDIT_BODY = """
+            UPDATE chat_messages
+               SET body = :body, edited_at = NOW(6)
+             WHERE id = :messageId
+               AND thread_id = :threadId
+               AND sender_id = :userId
+               AND deleted_at IS NULL
+               AND created_at > NOW(6) - INTERVAL 5 MINUTE
+            """;
+
+    /**
+     * The tombstone. {@code body} is deliberately left intact: withholding it
+     * on read is a presentation decision, and destroying it would throw away
+     * the evidence §7.6 exists to preserve.
+     *
+     * <p>{@code deleted_at IS NULL} makes a repeat delete a no-op rather than
+     * restamping the time, so the record shows when it was actually removed.
+     */
+    private static final String SOFT_DELETE = """
+            UPDATE chat_messages
+               SET deleted_at = NOW(6), deleted_by = :userId
+             WHERE id = :messageId
+               AND thread_id = :threadId
+               AND sender_id = :userId
+               AND deleted_at IS NULL
+            """;
+
+    private static final String MESSAGE_BY_ID = """
+            SELECT m.id, m.thread_id, m.body, m.kind, m.sender_id, m.created_at,
+                   m.edited_at, m.deleted_at, u.full_name AS sender_name
+              FROM chat_messages m
+              LEFT JOIN users u ON u.id = m.sender_id
+             WHERE m.id = :messageId
+            """;
+
     /** Advance the read cursor. Never rewinds — see the WHERE clause. */
     private static final String ADVANCE_READ_CURSOR = """
             UPDATE chat_participants
@@ -169,6 +238,42 @@ class ChatRepository {
         return jdbc.sql(PARTICIPANT_IDS).param("threadId", threadId).query(Long.class).list();
     }
 
+    /** Empty when there is no such message, or it is not the caller's own. */
+    Optional<Editability> editability(long threadId, long messageId, long userId) {
+        return jdbc.sql(EDITABILITY)
+                .param("threadId", threadId)
+                .param("messageId", messageId)
+                .param("userId", userId)
+                .query(Editability.class)
+                .optional();
+    }
+
+    /** @return true if the row was actually updated */
+    boolean editBody(long threadId, long messageId, long userId, String body) {
+        return jdbc.sql(EDIT_BODY)
+                .param("threadId", threadId)
+                .param("messageId", messageId)
+                .param("userId", userId)
+                .param("body", body)
+                .update() == 1;
+    }
+
+    /** @return true if this call was the one that deleted it */
+    boolean softDelete(long threadId, long messageId, long userId) {
+        return jdbc.sql(SOFT_DELETE)
+                .param("threadId", threadId)
+                .param("messageId", messageId)
+                .param("userId", userId)
+                .update() == 1;
+    }
+
+    Optional<MessageRow> messageById(long messageId) {
+        return jdbc.sql(MESSAGE_BY_ID)
+                .param("messageId", messageId)
+                .query(MessageRow.class)
+                .optional();
+    }
+
     void advanceReadCursor(long threadId, long userId, long messageId) {
         jdbc.sql(ADVANCE_READ_CURSOR)
                 .param("threadId", threadId)
@@ -208,6 +313,10 @@ class ChatRepository {
             Timestamp editedAt,
             Timestamp deletedAt,
             String senderName) {
+    }
+
+    /** Why an edit may or may not proceed, as the database sees it. */
+    record Editability(long id, boolean deleted, boolean withinWindow) {
     }
 
     /** Just enough of a thread to authorise a post and address its broadcast. */

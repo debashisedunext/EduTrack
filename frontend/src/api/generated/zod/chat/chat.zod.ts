@@ -173,3 +173,134 @@ export const postChatMessageBody = zod.object({
   "attachmentIds": zod.array(zod.number()).optional()
 })
 
+/**
+ * Author only, and only for five minutes after posting. After that the
+message is immutable and this returns `409`.
+
+**This is what keeps chat admissible as project evidence.** A thread
+anybody can quietly rewrite proves nothing, so the window is a hard
+limit rather than a UI affordance — the client hides the control after
+`editableUntil`, and the server refuses regardless.
+
+No `If-Match`: the author is the only person who can edit, so there is
+no second writer to lose an update to.
+
+Not the author, not a participant, or no such message all return `404`.
+A `403` would confirm the message exists and who wrote it.
+
+ * @summary Edit a message, inside the five-minute window
+ */
+export const editChatMessageParams = zod.object({
+  "threadId": zod.number(),
+  "messageId": zod.number()
+})
+
+export const editChatMessageBodyBodyMax = 20000;
+
+
+
+export const editChatMessageBody = zod.object({
+  "body": zod.string().min(1).max(editChatMessageBodyBodyMax)
+})
+
+export const editChatMessageResponseDataKindDefault = "TEXT";
+
+export const editChatMessageResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "body": zod.string().optional(),
+  "author": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+}).optional(),
+  "kind": zod.enum(['TEXT', 'STATUS_REQUEST', 'SYSTEM']).default(editChatMessageResponseDataKindDefault),
+  "isEdited": zod.boolean().optional(),
+  "isDeleted": zod.boolean().optional(),
+  "editableUntil": zod.string().datetime({}).nullish(),
+  "attachments": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "fileName": zod.string().optional(),
+  "contentType": zod.string().optional(),
+  "sizeBytes": zod.number().optional(),
+  "scanStatus": zod.enum(['PENDING', 'CLEAN', 'INFECTED']).optional().describe('Not downloadable until `CLEAN`.'),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL. Never a public bucket path.'),
+  "thumbnailUrl": zod.string().nullish(),
+  "isClientVisible": zod.boolean().optional(),
+  "isDeleted": zod.boolean().optional(),
+  "uploadedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+}).optional(),
+  "stageCode": zod.string().nullish(),
+  "cycleNo": zod.number().optional(),
+  "createdAt": zod.string().datetime({}).optional()
+})).optional(),
+  "readBy": zod.array(zod.number()).optional(),
+  "createdAt": zod.string().datetime({}).optional()
+})
+})
+
+/**
+ * The row survives and the body is withheld — `isDeleted` becomes true and
+`body` becomes null. A conversation that silently loses a message reads
+as though it never happened, which is exactly what §7.6 guards against.
+
+Returns the tombstone rather than `204`, so the caller can render the
+new state without a refetch.
+
+Unlike editing, this is **not** limited to five minutes: the point of
+the window is that nobody can rewrite history, and a tombstone adds to
+the record rather than altering it.
+
+ * @summary Delete a message, leaving a tombstone
+ */
+export const deleteChatMessageParams = zod.object({
+  "threadId": zod.number(),
+  "messageId": zod.number()
+})
+
+export const deleteChatMessageResponseDataKindDefault = "TEXT";
+
+export const deleteChatMessageResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "body": zod.string().optional(),
+  "author": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+}).optional(),
+  "kind": zod.enum(['TEXT', 'STATUS_REQUEST', 'SYSTEM']).default(deleteChatMessageResponseDataKindDefault),
+  "isEdited": zod.boolean().optional(),
+  "isDeleted": zod.boolean().optional(),
+  "editableUntil": zod.string().datetime({}).nullish(),
+  "attachments": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "fileName": zod.string().optional(),
+  "contentType": zod.string().optional(),
+  "sizeBytes": zod.number().optional(),
+  "scanStatus": zod.enum(['PENDING', 'CLEAN', 'INFECTED']).optional().describe('Not downloadable until `CLEAN`.'),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL. Never a public bucket path.'),
+  "thumbnailUrl": zod.string().nullish(),
+  "isClientVisible": zod.boolean().optional(),
+  "isDeleted": zod.boolean().optional(),
+  "uploadedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional()
+}).optional(),
+  "stageCode": zod.string().nullish(),
+  "cycleNo": zod.number().optional(),
+  "createdAt": zod.string().datetime({}).optional()
+})).optional(),
+  "readBy": zod.array(zod.number()).optional(),
+  "createdAt": zod.string().datetime({}).optional()
+})
+})
+

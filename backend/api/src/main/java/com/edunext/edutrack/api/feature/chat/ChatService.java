@@ -134,8 +134,106 @@ public class ChatService {
             throw new IllegalStateException("chat: message " + messageId + " vanished immediately after insert");
         }
 
-        broadcast(anchor.get(), message);
+        broadcast(anchor.get(), message, "chat.message");
         return Optional.of(message);
+    }
+
+    // ----------------------------------------------------- D-057 · evidence
+
+    /**
+     * What happened to an edit or a delete.
+     *
+     * <p>Sealed rather than {@code Optional} because the two failures must not
+     * collapse into one answer: "not yours" is a 404 and "too late" is a 409,
+     * and a caller that cannot tell them apart shows the author a message
+     * saying their own post does not exist.
+     */
+    public sealed interface Outcome {
+
+        /** No such message, not in this thread, or not written by the caller. */
+        record NotFound() implements Outcome {
+        }
+
+        /** It exists and it is yours, but it is no longer yours to change. */
+        record Immutable(String reason) implements Outcome {
+        }
+
+        record Applied(ChatDtos.ChatMessage message) implements Outcome {
+        }
+    }
+
+    /**
+     * Edit inside the five-minute window (blueprint §7.6).
+     *
+     * <p>The window is enforced here <em>and</em> in the UPDATE's WHERE clause.
+     * That is not redundant caution: the check and the write are two statements,
+     * and the whole point of this task is that the limit cannot be talked
+     * around. A refactor that reorders them still cannot widen the window.
+     */
+    @Transactional
+    public Outcome edit(long threadId, long messageId, long userId, String body) {
+        Optional<ChatRepository.Editability> state =
+                repository.editability(threadId, messageId, userId);
+        if (state.isEmpty()) {
+            return new Outcome.NotFound();
+        }
+        if (state.get().deleted()) {
+            return new Outcome.Immutable("the message was deleted");
+        }
+        if (!state.get().withinWindow()) {
+            return new Outcome.Immutable("the five-minute edit window has closed");
+        }
+
+        if (!repository.editBody(threadId, messageId, userId, body)) {
+            // The row moved between the two statements — the window closed
+            // mid-request, or a concurrent delete landed. Reporting it as
+            // immutable is truthful; reporting success would not be.
+            return new Outcome.Immutable("the message is no longer editable");
+        }
+
+        return applied(threadId, messageId, userId, "chat.message.edited");
+    }
+
+    /**
+     * Delete, leaving a tombstone.
+     *
+     * <p>Not limited to five minutes, and that is not an inconsistency. The
+     * window exists so nobody can rewrite what was said; a tombstone adds to
+     * the record rather than altering it, and the body is retained in the
+     * database — only withheld on read. Removing the row, or blanking the
+     * column, would destroy the evidence this rule exists to keep.
+     *
+     * <p>Author only. Moderator deletion is not in §7.6, and inventing an
+     * authority to erase other people's words is not a gap to fill quietly.
+     */
+    @Transactional
+    public Outcome delete(long threadId, long messageId, long userId) {
+        Optional<ChatRepository.Editability> state =
+                repository.editability(threadId, messageId, userId);
+        if (state.isEmpty()) {
+            return new Outcome.NotFound();
+        }
+        if (state.get().deleted()) {
+            // Already a tombstone. Idempotent rather than a conflict — the
+            // caller asked for a state that already holds.
+            return applied(threadId, messageId, userId, null);
+        }
+
+        repository.softDelete(threadId, messageId, userId);
+        return applied(threadId, messageId, userId, "chat.message.deleted");
+    }
+
+    private Outcome applied(long threadId, long messageId, long viewerId, String event) {
+        ChatDtos.ChatMessage message = repository.messageById(messageId)
+                .map(row -> toMessage(row, viewerId))
+                .orElseThrow(() -> new IllegalStateException(
+                        "chat: message " + messageId + " vanished mid-transaction"));
+
+        if (event != null) {
+            repository.threadForParticipant(threadId, viewerId)
+                    .ifPresent(anchor -> broadcast(anchor, message, event));
+        }
+        return new Outcome.Applied(message);
     }
 
     // ---------------------------------------------------------------- rooms
@@ -160,9 +258,17 @@ public class ChatService {
         };
     }
 
-    private void broadcast(ChatRepository.ThreadAnchor anchor, ChatDtos.ChatMessage message) {
+    /**
+     * @param eventName {@code chat.message}, {@code chat.message.edited} or
+     *                  {@code chat.message.deleted} — a viewer has to be told
+     *                  which, because an edit that arrives looking like a new
+     *                  message appends a duplicate to everyone's scrollback.
+     */
+    private void broadcast(ChatRepository.ThreadAnchor anchor,
+                           ChatDtos.ChatMessage message,
+                           String eventName) {
         Map<String, Object> event = Map.of(
-                "event", "chat.message",
+                "event", eventName,
                 "threadId", anchor.id(),
                 "message", message);
         for (String destination : destinationsFor(anchor)) {
