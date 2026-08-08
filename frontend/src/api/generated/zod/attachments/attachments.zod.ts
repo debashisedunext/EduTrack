@@ -52,7 +52,7 @@ import * as zod from 'zod';
 /**
  * @summary List attachments
  */
-export const listAttachmentsPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const listAttachmentsPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const listAttachmentsParams = zod.object({
@@ -110,7 +110,7 @@ Limits, all configurable: 10 MB per file, 50 MB and 20 files per ticket.
 
  * @summary Upload an attachment
  */
-export const uploadAttachmentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const uploadAttachmentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const uploadAttachmentParams = zod.object({
@@ -136,7 +136,7 @@ attached and removed.
 
  * @summary Delete an attachment
  */
-export const deleteAttachmentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const deleteAttachmentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const deleteAttachmentParams = zod.object({

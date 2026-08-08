@@ -300,7 +300,7 @@ export const getClient360QueryParams = zod.object({
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']).optional()
 })
 
-export const getClient360ResponseDataTicketsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const getClient360ResponseDataTicketsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const getClient360ResponseDataTicketsItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -340,7 +340,7 @@ export const getClient360Response = zod.object({
 }).optional()
 })).optional(),
   "tickets": zod.array(zod.object({
-  "ticketId": zod.string().regex(getClient360ResponseDataTicketsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(getClient360ResponseDataTicketsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
