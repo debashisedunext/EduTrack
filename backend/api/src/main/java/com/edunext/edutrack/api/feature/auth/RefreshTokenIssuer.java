@@ -6,6 +6,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Optional;
@@ -33,11 +34,12 @@ import java.util.UUID;
  * stores it in — {@code localStorage}, most likely — where a single XSS turns
  * a fifteen-minute exposure into a seven-day one.
  *
- * <p><b>Not in this task:</b> {@code POST /auth/refresh} and rotation with
- * family revocation (A-024), logout and the access-token blacklist (A-025), and
- * enforcement of the device binding — this records the fingerprint, and the
- * only place it can be <i>checked</i> is the refresh endpoint that does not
- * exist yet. Same shape as A-022, which minted a token nothing verified.
+ * <p><b>A-024 adds {@link #rotate}</b> — the same minting, but into an existing
+ * family and under that family's existing deadline. {@link #issue} is now
+ * precisely "a new login starts a new session"; rotation is "the same session
+ * continues".
+ *
+ * <p><b>Not in this task:</b> logout and the access-token blacklist (A-025).
  */
 @Component
 class RefreshTokenIssuer {
@@ -104,7 +106,71 @@ class RefreshTokenIssuer {
             return Optional.empty();
         }
 
-        return Optional.of(cookieFor(value));
+        return Optional.of(cookieFor(value, properties.ttl()));
+    }
+
+    /**
+     * A-024 · mints the successor to a token that has just been consumed.
+     *
+     * <p><b>The family is inherited, never renewed.</b> A successor in a new
+     * family would be a new session, and "revoke the family" would then reach
+     * only as far back as the last refresh — an attacker who rotates once has
+     * escaped it. The family is the unit revocation operates on, so it has to
+     * span the whole chain from login.
+     *
+     * <p><b>The deadline is inherited too: expiry does not slide.</b> Handing
+     * the successor a fresh seven days is the more common design and is wrong
+     * here. It makes the session unbounded — a token used once a week never
+     * expires, and neither does a stolen chain being kept warm — so the only
+     * thing that ever ends a session is an explicit logout, which an attacker
+     * has no reason to perform. Inheriting {@code expiresAt} gives the family a
+     * hard deadline set at login, which is what §10.1's "7 days" most naturally
+     * means and what A-025's "absolute session 12 h" will tighten. The cost is
+     * real and accepted: an actively working user is signed out at the deadline
+     * rather than carried past it.
+     *
+     * <p><b>The device fingerprint is inherited rather than re-read</b> from the
+     * current request. Re-stamping it would let a token that had drifted to a
+     * different browser quietly re-bind itself to that browser — the binding
+     * would then only ever match, which is the same as not having one.
+     *
+     * <p>Unlike {@link #issue} this does <b>not</b> degrade when the store is
+     * unreachable. By the time it is called the predecessor has already been
+     * destroyed, so there is no session left to preserve; the exception
+     * propagates, the caller gets a server error, and the user re-logs in. That
+     * fails towards less access, which is the only acceptable direction.
+     *
+     * @throws IllegalArgumentException if the family deadline has already passed
+     */
+    ResponseCookie rotate(StoredRefreshToken consumed) {
+        String value = mint();
+        Duration remaining = Duration.between(Instant.now(), consumed.expiresAt());
+
+        store.save(value, new StoredRefreshToken(
+                // A fresh jti. A-025's logout and every audit line identify one
+                // link in the chain, not the chain — reusing the predecessor's
+                // would make two distinct credentials indistinguishable in a log.
+                UUID.randomUUID().toString(),
+                consumed.userId(),
+                consumed.familyId(),
+                consumed.deviceFingerprint(),
+                Instant.now(),
+                consumed.expiresAt()));
+
+        return cookieFor(value, remaining);
+    }
+
+    /**
+     * A-024 · the cookie that removes the cookie, sent with every refusal.
+     *
+     * <p>Without it a browser holding a dead token replays it on every attempt:
+     * against a revoked family that is a permanent 401 loop the user cannot
+     * escape without clearing cookies by hand, and it keeps a useless credential
+     * on the wire. Same name, same {@code Path} — a clearing cookie that differs
+     * in either is a <i>second</i> cookie rather than a replacement.
+     */
+    ResponseCookie clearing() {
+        return cookieFor("", Duration.ZERO);
     }
 
     /**
@@ -120,13 +186,13 @@ class RefreshTokenIssuer {
      * where an occasional extra click is cheaper than a second defence to
      * maintain.
      */
-    private ResponseCookie cookieFor(String value) {
+    private ResponseCookie cookieFor(String value, Duration maxAge) {
         return ResponseCookie.from(properties.cookieName(), value)
                 .httpOnly(true)
                 .secure(properties.secureCookie())
                 .sameSite("Strict")
                 .path(properties.cookiePath())
-                .maxAge(properties.ttl())
+                .maxAge(maxAge)
                 .build();
     }
 
