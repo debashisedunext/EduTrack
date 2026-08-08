@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './app/AppShell'
 import { ScreenPlaceholder } from './app/ScreenPlaceholder'
+import { TicketDetailPlaceholder } from './app/TicketDetailPlaceholder'
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
           <Route path="/dashboard" element={<ScreenPlaceholder title="Dashboard" />} />
           <Route path="/my-tasks" element={<ScreenPlaceholder title="My Tasks" />} />
           <Route path="/tickets" element={<ScreenPlaceholder title="Tickets" />} />
+          <Route path="/tickets/:ticketId" element={<TicketDetailPlaceholder />} />
           <Route path="/projects" element={<ScreenPlaceholder title="Projects" />} />
           <Route path="/chat" element={<ScreenPlaceholder title="Chat" />} />
           <Route path="/reports" element={<ScreenPlaceholder title="Reports" />} />
