@@ -97,6 +97,24 @@ class ChatRepository {
             """;
 
     /**
+     * D-051 · every participant's read cursor for one thread.
+     *
+     * <p>Read receipts are derived from the cursor rather than stored per
+     * message: "who has read message 42" is "whose cursor is at least 42". A
+     * row per reader per message would be the same information at hundreds of
+     * times the write cost, and the baseline chose the cursor deliberately.
+     *
+     * <p>One query per page, not per message. The alternative — a correlated
+     * subquery inside the message list — turns a fifty-message page into fifty
+     * extra reads for information the client renders as a row of small avatars.
+     */
+    private static final String READ_CURSORS = """
+            SELECT user_id, COALESCE(last_read_message_id, 0) AS lastReadMessageId
+              FROM chat_participants
+             WHERE thread_id = :threadId
+            """;
+
+    /**
      * D-057 · everything needed to decide whether an edit is allowed, in one
      * query, evaluated by the database.
      *
@@ -234,6 +252,13 @@ class ChatRepository {
         return id;
     }
 
+    List<ReadCursor> readCursors(long threadId) {
+        return jdbc.sql(READ_CURSORS)
+                .param("threadId", threadId)
+                .query(ReadCursor.class)
+                .list();
+    }
+
     List<Long> participantIds(long threadId) {
         return jdbc.sql(PARTICIPANT_IDS).param("threadId", threadId).query(Long.class).list();
     }
@@ -274,12 +299,13 @@ class ChatRepository {
                 .optional();
     }
 
-    void advanceReadCursor(long threadId, long userId, long messageId) {
-        jdbc.sql(ADVANCE_READ_CURSOR)
+    /** @return true if the cursor actually moved, so callers can avoid a needless broadcast */
+    boolean advanceReadCursor(long threadId, long userId, long messageId) {
+        return jdbc.sql(ADVANCE_READ_CURSOR)
                 .param("threadId", threadId)
                 .param("userId", userId)
                 .param("messageId", messageId)
-                .update();
+                .update() == 1;
     }
 
     // ------------------------------------------------------------------ rows
@@ -313,6 +339,10 @@ class ChatRepository {
             Timestamp editedAt,
             Timestamp deletedAt,
             String senderName) {
+    }
+
+    /** How far one participant has read. Zero means never opened. */
+    record ReadCursor(long userId, long lastReadMessageId) {
     }
 
     /** Why an edit may or may not proceed, as the database sees it. */

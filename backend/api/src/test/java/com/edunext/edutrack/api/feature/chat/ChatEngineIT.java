@@ -420,6 +420,102 @@ class ChatEngineIT {
         }
     }
 
+    // ------------------------------------------- D-051 · receipts and typing
+
+    @org.junit.jupiter.api.Nested
+    class ReceiptsAndTyping {
+
+        @Test
+        void nobodyHasReadAMessageThatHasJustBeenPosted() {
+            chat.post(ticketThread, ravi, "hello");
+
+            assertThat(onlyMessageFor(ravi).readBy())
+                    .as("the author reading their own page must not count as a receipt")
+                    .isEmpty();
+        }
+
+        @Test
+        void aReaderAppearsOnTheReceipt() {
+            chat.post(ticketThread, ravi, "hello");
+
+            chat.messages(ticketThread, meera, null, 50);
+
+            assertThat(onlyMessageFor(ravi).readBy()).containsExactly(meera);
+        }
+
+        @Test
+        @DisplayName("the author is never in their own readBy")
+        void theAuthorIsExcluded() {
+            chat.post(ticketThread, ravi, "hello");
+            chat.messages(ticketThread, ravi, null, 50);
+            chat.messages(ticketThread, meera, null, 50);
+
+            // Ravi's cursor is past his own message — he posted it — but
+            // rendering your own avatar on everything you send is noise.
+            assertThat(onlyMessageFor(meera).readBy()).containsExactly(meera);
+        }
+
+        @Test
+        @DisplayName("a receipt is announced once, not on every glance at the thread")
+        void readIsBroadcastOnlyWhenTheCursorMoves() {
+            chat.post(ticketThread, ravi, "hello");
+
+            chat.messages(ticketThread, meera, null, 50);
+            chat.messages(ticketThread, meera, null, 50);
+            chat.messages(ticketThread, meera, null, 50);
+
+            assertThat(publishedEvents().stream().filter("chat.read"::equals).toList())
+                    .as("re-opening a thread you have read must not spray receipts at everyone")
+                    .hasSize(1);
+        }
+
+        @Test
+        void anOlderPageDoesNotAnnounceAread() {
+            chat.post(ticketThread, ravi, "one");
+            long first = idOfLatest();
+            chat.post(ticketThread, ravi, "two");
+
+            chat.messages(ticketThread, meera, first, 50);
+
+            assertThat(publishedEvents()).doesNotContain("chat.read");
+        }
+
+        @Test
+        void typingReachesTheThreadsOwnRoom() {
+            chat.typing(ticketThread, ravi, true);
+
+            assertThat(published()).containsExactly("/topic/ticket." + ticketId);
+            assertThat(publishedEvents()).containsExactly("chat.typing");
+        }
+
+        @Test
+        void typingOnADirectMessageReachesBothQueues() {
+            chat.typing(directThread, ravi, true);
+
+            assertThat(published()).containsExactlyInAnyOrder(
+                    "/user/" + ravi + "/queue/events",
+                    "/user/" + meera + "/queue/events");
+        }
+
+        @Test
+        @DisplayName("a non-participant cannot announce that they are typing")
+        void typingIsMembershipChecked() {
+            chat.typing(ticketThread, outsider, true);
+
+            // Two leaks avoided: that the thread exists, and who is active in it.
+            verify(realtime, never()).publish(anyString(), any());
+        }
+
+        @Test
+        void typingWritesNothing() {
+            chat.typing(ticketThread, ravi, true);
+
+            assertThat(messageCount(ticketThread))
+                    .as("an indicator true for two seconds does not belong in an evidence table")
+                    .isZero();
+        }
+    }
+
     // -------------------------------------------------------------------- helpers
 
     @SuppressWarnings("unchecked")

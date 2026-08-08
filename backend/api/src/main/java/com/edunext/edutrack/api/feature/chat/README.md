@@ -64,9 +64,37 @@ message exists and that someone else wrote it. `409` is reserved for *your own*
 message that has passed the window — the conflict is with the resource's state,
 not with your authority over it.
 
+## Receipts and typing (D-051)
+
+**Read receipts are derived, not stored.** "Who has read message 42" is "whose
+cursor is at least 42", so the existing `last_read_message_id` answers it with
+one query per page. A row per reader per message would be the same information
+at hundreds of times the write cost.
+
+The author is excluded from their own `readBy` — a UI that renders it puts your
+avatar on every message you send.
+
+`chat.read` is broadcast **only when the cursor actually moves**. Re-opening a
+thread you have already read would otherwise spray a receipt at everyone each
+time you glanced at it.
+
+**Typing is the one part of chat that persists nothing.** It is true for about
+two seconds and worthless afterwards, and a row per keystroke burst does not
+belong in a table that exists to hold evidence. If the socket drops the
+indicator simply stops, which is the correct behaviour anyway.
+
+It is still membership-checked: an unauthorised typing event leaks that a thread
+exists and who is active in it. Smaller than leaking a message, not absent.
+
+> **Unverified:** typing is the first consumer of the `/app` prefix, and whether
+> a `Principal` actually reaches a STOMP message under `dev-noauth` has **not**
+> been proven end to end — the test profile has no such filter, so an IT would
+> exercise the null path, not the real one. The handler fails closed and logs
+> when the principal is missing, so the failure is visible rather than silent.
+> Confirm this when D-013 wires socket authentication properly.
+
 ## Not done yet
 
-- **D-051** typing indicators, read receipts. `readBy` is always empty for now.
 - **D-052** `@mentions`. The column exists (`mentioned_user_ids`); nothing parses.
 - **D-053** attachments. `attachmentIds` is accepted and ignored — it is in the
   contract, and rejecting it would break the generated client.

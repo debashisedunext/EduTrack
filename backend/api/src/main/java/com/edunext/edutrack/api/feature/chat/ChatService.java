@@ -98,10 +98,18 @@ public class ChatService {
         List<ChatRepository.MessageRow> rows = repository.messages(threadId, cursor, limit);
         if (cursor == null && !rows.isEmpty()) {
             long newest = rows.stream().mapToLong(ChatRepository.MessageRow::id).max().orElseThrow();
-            repository.advanceReadCursor(threadId, userId, newest);
+            if (repository.advanceReadCursor(threadId, userId, newest)) {
+                // D-051. Only when the cursor actually moved — re-opening a
+                // thread you have already read would otherwise spray a receipt
+                // at everyone every time you glanced at it.
+                announceRead(threadId, userId, newest);
+            }
         }
 
-        return Optional.of(rows.stream().map(row -> toMessage(row, userId)).toList());
+        // Cursors are read after the advance, so the caller sees their own read
+        // reflected rather than a snapshot that is already one request stale.
+        List<ChatRepository.ReadCursor> cursors = repository.readCursors(threadId);
+        return Optional.of(rows.stream().map(row -> toMessage(row, userId, cursors)).toList());
     }
 
     /**
@@ -279,6 +287,12 @@ public class ChatService {
     // --------------------------------------------------------------- mapping
 
     private ChatDtos.ChatMessage toMessage(ChatRepository.MessageRow row, long viewerId) {
+        return toMessage(row, viewerId, List.of());
+    }
+
+    private ChatDtos.ChatMessage toMessage(ChatRepository.MessageRow row,
+                                           long viewerId,
+                                           List<ChatRepository.ReadCursor> cursors) {
         boolean deleted = row.deletedAt() != null;
         Instant createdAt = row.createdAt().toInstant();
         boolean mine = row.senderId() != null && row.senderId() == viewerId;
@@ -296,8 +310,66 @@ public class ChatService {
                 // Only ever offered to the author, and never on a message that
                 // is already gone.
                 mine && !deleted ? createdAt.plus(EDIT_WINDOW) : null,
-                List.of(),
+                readersOf(row, cursors),
                 createdAt);
+    }
+
+    /**
+     * D-051 · who has read this message.
+     *
+     * <p>Derived from each participant's cursor: a reader has seen message 42
+     * if their cursor is at or past 42. The author is excluded — "the person
+     * who wrote it has read it" is noise, and a UI that renders it puts your
+     * own avatar on every message you send.
+     */
+    private static List<Long> readersOf(ChatRepository.MessageRow row,
+                                        List<ChatRepository.ReadCursor> cursors) {
+        return cursors.stream()
+                .filter(cursor -> cursor.lastReadMessageId() >= row.id())
+                .map(ChatRepository.ReadCursor::userId)
+                .filter(userId -> row.senderId() == null || userId != row.senderId())
+                .sorted()
+                .toList();
+    }
+
+    /**
+     * D-051 · fan out a typing indicator, if the sender is really in the thread.
+     *
+     * <p>Read-only and writes nothing: the indicator is true for a couple of
+     * seconds and then worthless, and a row per keystroke burst does not belong
+     * in a table that exists to hold evidence.
+     *
+     * <p>A non-participant is dropped silently rather than answered. There is
+     * no caller waiting on a status here, and the two facts an error would
+     * confirm — that the thread exists, and that someone is active in it — are
+     * exactly what the membership check is protecting.
+     */
+    @Transactional(readOnly = true)
+    public void typing(long threadId, long userId, boolean typing) {
+        repository.threadForParticipant(threadId, userId).ifPresent(anchor -> {
+            Map<String, Object> event = Map.of(
+                    "event", "chat.typing",
+                    "threadId", threadId,
+                    "userId", userId,
+                    "typing", typing);
+            for (String destination : destinationsFor(anchor)) {
+                realtime.publish(destination, event);
+            }
+        });
+    }
+
+    /** Tell the room that somebody's cursor moved, so receipts update live. */
+    private void announceRead(long threadId, long userId, long lastReadMessageId) {
+        repository.threadForParticipant(threadId, userId).ifPresent(anchor -> {
+            Map<String, Object> event = Map.of(
+                    "event", "chat.read",
+                    "threadId", threadId,
+                    "userId", userId,
+                    "lastReadMessageId", lastReadMessageId);
+            for (String destination : destinationsFor(anchor)) {
+                realtime.publish(destination, event);
+            }
+        });
     }
 
     private String title(ChatRepository.ThreadRow row) {
