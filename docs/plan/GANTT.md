@@ -12,8 +12,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 44 of 222 (20%) | 62.0 of 342.0 (18%) |
-| In flight | 1 | 1.5 |
+| Complete | 45 of 222 (20%) | 63.5 of 342.0 (19%) |
+| In flight | 0 | 0.0 |
 | On the driving chain | 52 | 87.0 |
 | Zero float (no slack at all) | 110 | 169.0 |
 
@@ -24,7 +24,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | **A** | Shivendra | 63 | 16 | 92.0 | 92 | 100% | Wed 02 Dec |
 | **B** | Ayush | 50 | 6 | 84.5 | 92 | 92% | Tue 24 Nov |
 | **C** | Divyansh | 61 | 6 | 94.5 | 92 | 103% ⚠️ | Tue 08 Dec |
-| **D** | Debashis | 48 | 16 | 71.0 | 92 | 77% | Wed 18 Nov |
+| **D** | Debashis | 48 | 17 | 71.0 | 92 | 77% | Wed 18 Nov |
 
 ### Slipping
 
@@ -39,6 +39,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `D-050` Chat engine, three surfaces one engine | Debashis | Tue 08 Sep | Sat 08 Aug | +66d |
 | `D-057` Chat immutable after a 5-minute edit window; del | Debashis | Wed 09 Sep | Sat 08 Aug | +65d |
 | `D-051` Typing indicator, read receipts, unread counts | Debashis | Fri 11 Sep | Sat 08 Aug | +63d |
+| `D-052` @mentions firing notifications | Debashis | Tue 15 Sep | Sat 08 Aug | +61d |
 | `B-031` Step 1 — template download | Ayush | Tue 25 Aug | Mon 05 Oct | +29d |
 | `B-032` Step 2 — upload, max 5 MB / 5,000 rows, event-dr | Ayush | Thu 27 Aug | Wed 07 Oct | +29d |
 | `B-033` Step 3 | Ayush | Mon 31 Aug | Fri 09 Oct | +29d |
@@ -49,9 +50,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `B-038` Resource bulk import — the second registration,  | Ayush | Wed 09 Sep | Tue 20 Oct | +29d |
 | `A-063` Reports hub | Shivendra | Wed 07 Oct | Fri 16 Oct | +7d |
 | `A-064` Export engine — Excel, CSV, PDF | Shivendra | Fri 09 Oct | Tue 20 Oct | +7d |
-| `A-066` Reports 1–6 | Shivendra | Wed 14 Oct | Fri 23 Oct | +7d |
 
-*…and 15 more — see the interactive chart.*
+*…and 16 more — see the interactive chart.*
 
 ---
 
@@ -396,9 +396,9 @@ gantt
 |  | `D-005` | CI staleness check | 1 | `D-003` | Thu 06 Aug | Thu 06 Aug | 88 | ✅ done |
 | 🔴 | `D-010` | Outbox worker pattern | 2.5 | `A-006` `A-012` | Fri 07 Aug | Fri 07 Aug | 39 | ✅ done |
 |  | `D-011` | @Scheduled + ShedLock | 1 | `D-010` ᶦ | Fri 07 Aug | Fri 07 Aug | 70 | ✅ done |
-|  | `D-012` | Spring WebSocket + STOMP config, Redis pub/sub relay for… | 2 | `A-012` ᶦ | Fri 07 Aug | Fri 07 Aug | 31 | ✅ done |
+|  | `D-012` | Spring WebSocket + STOMP config, Redis pub/sub relay for… | 2 | `A-012` ᶦ | Fri 07 Aug | Fri 07 Aug | 32 | ✅ done |
 | 🔴 | `D-013` | Channel interceptor authorising subscriptions with the same scope… | 2 | `D-012` `A-034` | Fri 28 Aug | Mon 31 Aug | 23 | ▫️ to do |
-|  | `D-014` | Destination map per blueprint §9.3 | 1 | `D-012` | Fri 07 Aug | Fri 07 Aug | 32 | ✅ done |
+|  | `D-014` | Destination map per blueprint §9.3 | 1 | `D-012` | Fri 07 Aug | Fri 07 Aug | 33 | ✅ done |
 |  | `D-015` | Frontend STOMP client | 1.5 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 | 🔴 | `D-020` | SLA scanner, every 15 minutes | 2 | `D-011` `B-024` `A-009` | Thu 15 Oct | Fri 16 Oct | 22 | ▫️ to do |
 |  | `D-021` | 80%-of-SLA pre-breach warning to the assignee | 1 | `D-020` ᶦ | Tue 20 Oct | Tue 20 Oct | 22 | ▫️ to do |
@@ -429,9 +429,9 @@ gantt
 | 🔴 | `D-046` | Offline queueing | 1.5 | `D-043` | Fri 09 Oct | Mon 12 Oct | 21 | ▫️ to do |
 |  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
-|  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Mon 10 Aug | Mon 10 Aug | 33 | 🟡 50% |
-|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Tue 11 Aug | Wed 12 Aug | 33 | ▫️ to do |
-|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Thu 13 Aug | Thu 13 Aug | 33 | ▫️ to do |
+|  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
+|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Mon 10 Aug | Tue 11 Aug | 34 | ▫️ to do |
+|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Wed 12 Aug | Wed 12 Aug | 34 | ▫️ to do |
 | 🔴 | `D-055` | Ask Status | 1.5 | `D-050` `C-036` | Tue 27 Oct | Wed 28 Oct | 23 | ▫️ to do |
 |  | `D-056` | Manager response time recorded as a reportable metric; status… | 1 | `D-055` ᶦ | Thu 29 Oct | Thu 29 Oct | 23 | ▫️ to do |
 | 🔴 | `D-057` | Chat immutable after a 5-minute edit window; deletions leave… | 1.5 | `D-050` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
