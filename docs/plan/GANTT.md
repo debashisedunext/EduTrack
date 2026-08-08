@@ -12,10 +12,10 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 41 of 222 (18%) | 58.0 of 342.0 (17%) |
-| In flight | 2 | 3.5 |
+| Complete | 43 of 222 (19%) | 61.5 of 342.0 (18%) |
+| In flight | 1 | 0.5 |
 | On the driving chain | 53 | 87.5 |
-| Zero float (no slack at all) | 110 | 168.5 |
+| Zero float (no slack at all) | 109 | 168.0 |
 
 ### By developer
 
@@ -24,7 +24,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | **A** | Shivendra | 63 | 16 | 92.0 | 93 | 99% | Thu 03 Dec |
 | **B** | Ayush | 50 | 5 | 84.5 | 93 | 91% | Wed 25 Nov |
 | **C** | Divyansh | 61 | 6 | 94.5 | 93 | 102% ⚠️ | Wed 09 Dec |
-| **D** | Debashis | 48 | 14 | 71.0 | 93 | 76% | Thu 19 Nov |
+| **D** | Debashis | 48 | 16 | 71.0 | 93 | 76% | Thu 19 Nov |
 
 ### Slipping
 
@@ -36,6 +36,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `C-006` Command palette on Ctrl+K for jump-to-ticket | Divyansh | Wed 19 Aug | Sat 08 Aug | +81d |
 | `D-015` Frontend STOMP client | Debashis | Thu 03 Sep | Sat 08 Aug | +70d |
 | `D-050` Chat engine, three surfaces one engine | Debashis | Tue 08 Sep | Sat 08 Aug | +67d |
+| `D-057` Chat immutable after a 5-minute edit window; del | Debashis | Wed 09 Sep | Sat 08 Aug | +66d |
+| `D-051` Typing indicator, read receipts, unread counts | Debashis | Fri 11 Sep | Sat 08 Aug | +64d |
 | `B-034` Step 4 — dry-run validation preview | Ayush | Wed 02 Sep | Wed 14 Oct | +30d |
 | `B-035` Step 5 — commit as a background job with progres | Ayush | Fri 04 Sep | Fri 16 Oct | +30d |
 | `B-036` Error report generation | Ayush | Mon 07 Sep | Mon 19 Oct | +30d |
@@ -48,10 +50,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `A-064` Export engine — Excel, CSV, PDF | Shivendra | Fri 09 Oct | Tue 20 Oct | +7d |
 | `A-066` Reports 1–6 | Shivendra | Wed 14 Oct | Fri 23 Oct | +7d |
 | `A-067` Reports 7–12 | Shivendra | Mon 19 Oct | Wed 28 Oct | +7d |
-| `A-041` Canonical JSON serialiser — fixed key order, fix | Shivendra | Fri 28 Aug | Mon 07 Sep | +6d |
-| `A-045` Concurrency test | Shivendra | Tue 08 Sep | Wed 16 Sep | +6d |
 
-*…and 13 more — see the interactive chart.*
+*…and 14 more — see the interactive chart.*
 
 ---
 
@@ -61,12 +61,12 @@ Each of these is held up either by the one before it or by the fact that the sam
 
 | # | Task | Owner | Title | Est | Start | End | Held up by |
 |---:|---|---|---|---:|---|---|---|
-| 1 | `B-005` | Ayush | JPA entities + repositories for the full model, buil | 3 | Sat 08 Aug | Sat 08 Aug | — |
-| 2 | `B-007` | Ayush | Ticket fixture corpus | 2 | Mon 10 Aug | Tue 11 Aug | `B-005` finished |
-| 3 | `B-030` | Ayush | Import engine as a schema registry — built once, reg | 2 | Wed 12 Aug | Thu 13 Aug | Ayush was busy on `B-007` |
-| 4 | `B-006` | Ayush | MapStruct base configuration | 0.5 | Fri 14 Aug | Fri 14 Aug | Ayush was busy on `B-030` |
-| 5 | `B-008` | Ayush | Seed manifest with fixed load order | 0.5 | Fri 14 Aug | Fri 14 Aug | Ayush was busy on `B-006` |
-| 6 | `B-010` | Ayush | Resource list | 2 | Mon 17 Aug | Tue 18 Aug | Ayush was busy on `B-008` |
+| 1 | `B-004` | Ayush | Seed: 3 workflow templates with their stages — Stand | 1 | Fri 07 Aug | Fri 07 Aug | — |
+| 2 | `B-008` | Ayush | Seed manifest with fixed load order | 0.5 | Mon 10 Aug | Mon 10 Aug | `B-004` finished |
+| 3 | `B-007` | Ayush | Ticket fixture corpus | 2 | Mon 10 Aug | Wed 12 Aug | Ayush was busy on `B-008` |
+| 4 | `B-030` | Ayush | Import engine as a schema registry — built once, reg | 2 | Wed 12 Aug | Fri 14 Aug | Ayush was busy on `B-007` |
+| 5 | `B-006` | Ayush | MapStruct base configuration | 0.5 | Fri 14 Aug | Fri 14 Aug | Ayush was busy on `B-030` |
+| 6 | `B-010` | Ayush | Resource list | 2 | Mon 17 Aug | Tue 18 Aug | Ayush was busy on `B-006` |
 | 7 | `B-011` | Ayush | Resource create/edit | 2.5 | Wed 19 Aug | Fri 21 Aug | `B-010` finished |
 | 8 | `B-012` | Ayush | Reporting-manager cycle detection | 1 | Fri 21 Aug | Mon 24 Aug | `B-011` finished |
 | 9 | `B-013` | Ayush | Validations | 1 | Mon 24 Aug | Tue 25 Aug | Ayush was busy on `B-012` |
@@ -265,12 +265,12 @@ gantt
 |---|---|---|---:|---|---|---|---:|---|
 |  | `B-001` | Seed: 6 roles + the full permission matrix from blueprint §2 | 1 | `A-003` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
 |  | `B-002` | Seed: 11 task types | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
-|  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
+|  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 40 | ✅ done |
 |  | `B-004` | Seed: 3 workflow templates with their stages — Standard Dev Flow | 1 | `A-005` | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
 |  | `B-005` | JPA entities + repositories for the full model, built on A's schema | 3 | `A-006` `A-007` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 | ▲ | `B-006` | MapStruct base configuration | 0.5 | `B-005` ᶦ | Fri 14 Aug | Fri 14 Aug | 0 | ▫️ to do |
-| ▲🔴 | `B-007` | Ticket fixture corpus | 2 | `B-004` `B-005` | Mon 10 Aug | Tue 11 Aug | 0 | ▫️ to do |
-| ▲ | `B-008` | Seed manifest with fixed load order | 0.5 | `B-001` `B-002` `B-003` `B-004` ᶦ | Fri 14 Aug | Fri 14 Aug | 0 | ▫️ to do |
+| ▲🔴 | `B-007` | Ticket fixture corpus | 2 | `B-004` `B-005` | Mon 10 Aug | Wed 12 Aug | 0 | ▫️ to do |
+| ▲ | `B-008` | Seed manifest with fixed load order | 0.5 | `B-001` `B-002` `B-003` `B-004` ᶦ | Mon 10 Aug | Mon 10 Aug | 84 | 🟡 50% |
 | ▲ | `B-010` | Resource list | 2 | `B-005` `C-003` `A-012` | Mon 17 Aug | Tue 18 Aug | 0 | ▫️ to do |
 | ▲ | `B-011` | Resource create/edit | 2.5 | `B-010` ᶦ | Wed 19 Aug | Fri 21 Aug | 0 | ▫️ to do |
 | ▲🔴 | `B-012` | Reporting-manager cycle detection | 1 | `B-011` ᶦ | Fri 21 Aug | Mon 24 Aug | 0 | ▫️ to do |
@@ -291,7 +291,7 @@ gantt
 | ▲ | `B-027` | client_contacts child grid | 1.5 | `B-026` ᶦ | Tue 29 Sep | Wed 30 Sep | 0 | ▫️ to do |
 | ▲ | `B-028` | Validation | 1 | `B-027` | Wed 30 Sep | Thu 01 Oct | 0 | ▫️ to do |
 | ▲ | `B-029` | Deactivating a client with open tickets warns and blocks new… | 1 | `B-026` ᶦ | Thu 01 Oct | Fri 02 Oct | 0 | ▫️ to do |
-| ▲🔴 | `B-030` | Import engine as a schema registry — built once, registered twice | 2 | `B-005` | Wed 12 Aug | Thu 13 Aug | 0 | ▫️ to do |
+| ▲🔴 | `B-030` | Import engine as a schema registry — built once, registered twice | 2 | `B-005` | Wed 12 Aug | Fri 14 Aug | 0 | ▫️ to do |
 | ▲ | `B-031` | Step 1 — template download | 1.5 | `B-030` ᶦ | Fri 02 Oct | Mon 05 Oct | 0 | ▫️ to do |
 | ▲ | `B-032` | Step 2 — upload, max 5 MB / 5,000 rows, event-driven SAX parse | 2 | `B-030` ᶦ | Tue 06 Oct | Wed 07 Oct | 0 | ▫️ to do |
 | ▲ | `B-033` | Step 3 | 2 | `B-032` ᶦ | Thu 08 Oct | Fri 09 Oct | 0 | ▫️ to do |
@@ -429,13 +429,13 @@ gantt
 |  | `D-045` | Browser push via the Web Push API for users who opt in | 1.5 | `D-043` ᶦ | Tue 13 Oct | Wed 14 Oct | 23 | ▫️ to do |
 | 🔴 | `D-046` | Offline queueing | 1.5 | `D-043` | Fri 09 Oct | Mon 12 Oct | 22 | ▫️ to do |
 |  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
-|  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Mon 10 Aug | Tue 11 Aug | 31 | 🟡 50% |
-|  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Tue 11 Aug | Wed 12 Aug | 32 | ▫️ to do |
-|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Thu 13 Aug | Fri 14 Aug | 32 | ▫️ to do |
-|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Mon 17 Aug | Mon 17 Aug | 32 | ▫️ to do |
+|  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
+|  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Mon 10 Aug | Tue 11 Aug | 31 | ▫️ to do |
+|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Tue 11 Aug | Thu 13 Aug | 32 | ▫️ to do |
+|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Thu 13 Aug | Fri 14 Aug | 33 | ▫️ to do |
 | 🔴 | `D-055` | Ask Status | 1.5 | `D-050` `C-036` | Tue 27 Oct | Wed 28 Oct | 24 | ▫️ to do |
 |  | `D-056` | Manager response time recorded as a reportable metric; status… | 1 | `D-055` ᶦ | Thu 29 Oct | Thu 29 Oct | 24 | ▫️ to do |
-| 🔴 | `D-057` | Chat immutable after a 5-minute edit window; deletions leave… | 1.5 | `D-050` | Mon 10 Aug | Mon 10 Aug | 85 | 🔵 in review |
+| 🔴 | `D-057` | Chat immutable after a 5-minute edit window; deletions leave… | 1.5 | `D-050` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `D-058` | Live ribbon advance | 1 | `D-014` `C-045` | Mon 09 Nov | Mon 09 Nov | 21 | ▫️ to do |
 |  | `D-059` | Team inbox live updates | 1 | `D-058` `C-062` | Thu 19 Nov | Thu 19 Nov | 14 | ▫️ to do |
 
