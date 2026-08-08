@@ -16,10 +16,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -61,6 +63,16 @@ class AuthLoginIT {
             .withUrlParam("connectionTimeZone", "UTC");
 
     /**
+     * A-023. The login response now sets a refresh cookie backed by Redis, and
+     * {@code RefreshTokenIssuer} degrades to <em>no</em> cookie when the store
+     * is unreachable — so without a real broker here the A-023 assertions below
+     * would fail against a login that is otherwise working perfectly.
+     */
+    @Container
+    static final GenericContainer<?> REDIS =
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+
+    /**
      * Flyway is redirected here as well as the datasource. application.yml runs
      * migrations as {@code edutrack_migrate} (A-010), which exists only in the
      * docker-compose stack — the container's own user holds the DDL rights this
@@ -74,6 +86,8 @@ class AuthLoginIT {
         registry.add("spring.flyway.url", MYSQL::getJdbcUrl);
         registry.add("spring.flyway.user", MYSQL::getUsername);
         registry.add("spring.flyway.password", MYSQL::getPassword);
+        registry.add("spring.data.redis.host", REDIS::getHost);
+        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
     }
 
     @Autowired
@@ -81,6 +95,9 @@ class AuthLoginIT {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @Autowired
+    RefreshTokenStore refreshTokens;
 
     private static boolean seeded;
 
@@ -145,10 +162,18 @@ class AuthLoginIT {
         seeded = true;
     }
 
+    private static final String USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0";
+
     private ResponseEntity<String> login(String username, String password) {
+        return login(username, password, USER_AGENT);
+    }
+
+    private ResponseEntity<String> login(String username, String password, String userAgent) {
         seedOnce();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set(HttpHeaders.USER_AGENT, userAgent);
         String body = """
                 {"username":"%s","password":"%s"}""".formatted(username, password);
         return rest.postForEntity("/api/v1/auth/login", new HttpEntity<>(body, headers), String.class);
@@ -359,5 +384,101 @@ class AuthLoginIT {
                 .path("jti").asText();
 
         assertThat(first).isNotEqualTo(second);
+    }
+
+    // ── A-023 · the refresh cookie ───────────────────────────────────────────
+
+    /**
+     * The {@code Set-Cookie} header as the server actually wrote it.
+     *
+     * <p>Read raw rather than through {@code HttpCookie.parse}, because the
+     * attributes are the substance of this task — a parser that normalises
+     * {@code SameSite} away would let the assertion pass on a cookie that no
+     * browser would treat as strict.
+     */
+    private static String setCookieHeader(ResponseEntity<String> response) {
+        List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
+        assertThat(cookies).as("the login response must set exactly one cookie").hasSize(1);
+        return cookies.getFirst();
+    }
+
+    private static String cookieValue(ResponseEntity<String> response) {
+        String header = setCookieHeader(response);
+        String withoutName = header.substring(header.indexOf('=') + 1);
+        return withoutName.substring(0, withoutName.indexOf(';'));
+    }
+
+    @Test
+    @DisplayName("a real login sets the refresh cookie with every documented attribute")
+    void loginSetsTheRefreshCookie() {
+        String header = setCookieHeader(login("it.asha", PASSWORD));
+
+        assertThat(header)
+                .startsWith("refresh_token=")
+                .contains("Max-Age=604800")
+                .contains("Path=/api/v1/auth")
+                .contains("HttpOnly")
+                .contains("Secure")
+                .contains("SameSite=Strict");
+    }
+
+    /**
+     * The guarantee the cookie exists for. A refresh token in the JSON body
+     * would be stored by the frontend somewhere script can reach, which turns
+     * a fifteen-minute XSS exposure into a seven-day one.
+     */
+    @Test
+    @DisplayName("the refresh token appears in the header and nowhere in the body")
+    void theRefreshTokenIsNeverInTheBody() {
+        ResponseEntity<String> response = login("it.asha", PASSWORD);
+
+        assertThat(response.getBody())
+                .doesNotContain(cookieValue(response))
+                .doesNotContainIgnoringCase("refresh");
+    }
+
+    @Test
+    @DisplayName("the token in the cookie resolves to a Redis record for the user who logged in")
+    void theCookieIsBackedByAStoredRecord() {
+        ResponseEntity<String> response = login("it.asha", PASSWORD);
+        Long expectedUserId = jdbc.queryForObject(
+                "SELECT id FROM users WHERE username = 'it.asha'", Long.class);
+
+        StoredRefreshToken stored = refreshTokens.find(cookieValue(response)).orElseThrow();
+
+        assertThat(stored.userId()).isEqualTo(expectedUserId);
+        assertThat(stored.jti()).isNotBlank();
+        assertThat(stored.familyId()).isNotBlank();
+        assertThat(stored.matchesDevice(USER_AGENT))
+                .as("the fingerprint must be of the User-Agent that actually logged in — "
+                        + "this is the check A-024 runs on every refresh")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("the same account logging in from two browsers gets two independent families")
+    void twoLoginsAreTwoIndependentSessions() {
+        String firstToken = cookieValue(login("it.asha", PASSWORD, USER_AGENT));
+        String secondToken = cookieValue(login("it.asha", PASSWORD, "curl/8.4.0"));
+
+        StoredRefreshToken first = refreshTokens.find(firstToken).orElseThrow();
+        StoredRefreshToken second = refreshTokens.find(secondToken).orElseThrow();
+
+        assertThat(firstToken).isNotEqualTo(secondToken);
+        assertThat(first.familyId())
+                .as("A-024 revokes a family on reuse; sharing one across logins would log "
+                        + "the user out of every device instead of the compromised one")
+                .isNotEqualTo(second.familyId());
+        assertThat(second.matchesDevice("curl/8.4.0")).isTrue();
+        assertThat(second.matchesDevice(USER_AGENT)).isFalse();
+    }
+
+    @Test
+    @DisplayName("a refused login sets no cookie at all")
+    void aRefusedLoginIssuesNothing() {
+        assertThat(login("it.asha", "Wrong-Horse-9!").getHeaders().get(HttpHeaders.SET_COOKIE))
+                .as("a refresh token handed out on a failed login is a session handed to a stranger")
+                .isNull();
+        assertThat(login("it.nobody", PASSWORD).getHeaders().get(HttpHeaders.SET_COOKIE)).isNull();
     }
 }

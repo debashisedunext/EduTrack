@@ -123,6 +123,23 @@ edutrack:
     issuer: https://edutrack
     access-token-ttl: PT15M       # 900s, per blueprint §10.1
 
+  auth:
+    # A-023 · the opaque refresh token. Nothing here needs an environment
+    # override — unlike the JWT secret there is no key to rotate, because the
+    # token is random per issue and Redis holds only its SHA-256.
+    refresh-token:
+      ttl: P7D                    # 604800s, per blueprint §10.1
+      cookie-name: refresh_token
+      # Narrower than "/" deliberately: only /auth/refresh (A-024) and
+      # /auth/logout (A-025) read this cookie. Scoping it to the whole API
+      # would attach a seven-day credential to every ticket list request.
+      cookie-path: /api/v1/auth
+      # RefreshTokenConfig REFUSES TO START if this is false outside `local`.
+      # It exists only for Safari on http://localhost and for plain-http LAN
+      # addresses used to test on a real phone, both of which reject a Secure
+      # cookie and therefore cannot hold a session at all.
+      secure-cookie: true
+
   storage:
     endpoint: ${S3_ENDPOINT:http://localhost:9000}
     bucket: ${S3_BUCKET:edutrack}

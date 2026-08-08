@@ -1,23 +1,30 @@
 package com.edunext.edutrack.api.feature.auth;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -44,9 +51,21 @@ class AuthControllerTest {
     @MockitoBean
     AccessTokenIssuer tokens;
 
+    @MockitoBean
+    RefreshTokenIssuer refreshTokens;
+
     private static final String VALID_BODY = """
             {"username":"asha.rao","password":"Correct-Horse-1!"}
             """;
+
+    private static final ResponseCookie REFRESH_COOKIE = ResponseCookie.from("refresh_token", "opaque-value")
+            .httpOnly(true).secure(true).sameSite("Strict").path("/api/v1/auth")
+            .maxAge(Duration.ofDays(7)).build();
+
+    @BeforeEach
+    void issueARefreshCookieByDefault() {
+        when(refreshTokens.issue(any(), any())).thenReturn(Optional.of(REFRESH_COOKIE));
+    }
 
     @Test
     @DisplayName("a valid login returns the session inside the { data } envelope")
@@ -125,6 +144,75 @@ class AuthControllerTest {
                 .doesNotContainIgnoringCase("not found")
                 .doesNotContainIgnoringCase("disabled")
                 .doesNotContainIgnoringCase("inactive");
+    }
+
+    // ── A-023 · the refresh cookie ───────────────────────────────────────────
+
+    @Test
+    @DisplayName("a valid login sets the refresh cookie, and never puts it in the body")
+    void setsTheRefreshCookie() throws Exception {
+        when(authentication.authenticate(anyString(), anyString()))
+                .thenReturn(new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
+                        "DEVELOPER", "Asia/Kolkata", false, List.of(), List.of(), List.of()));
+        when(tokens.issue(any(AuthenticatedUser.class)))
+                .thenReturn(new AccessToken("header.payload.signature", 900));
+
+        String body = mvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.SET_COOKIE,
+                        org.hamcrest.Matchers.containsString("refresh_token=opaque-value")))
+                .andExpect(header().string(HttpHeaders.SET_COOKIE,
+                        org.hamcrest.Matchers.containsString("HttpOnly")))
+                .andExpect(header().string(HttpHeaders.SET_COOKIE,
+                        org.hamcrest.Matchers.containsString("Secure")))
+                .andExpect(header().string(HttpHeaders.SET_COOKIE,
+                        org.hamcrest.Matchers.containsString("SameSite=Strict")))
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body)
+                .as("a refresh token in the body is a refresh token in localStorage — "
+                        + "one XSS away from a seven-day session")
+                .doesNotContain("opaque-value")
+                .doesNotContain("refresh");
+    }
+
+    @Test
+    @DisplayName("the User-Agent is passed through for the device binding")
+    void forwardsTheUserAgentToTheIssuer() throws Exception {
+        AuthenticatedUser user = new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
+                "DEVELOPER", "Asia/Kolkata", false, List.of(), List.of(), List.of());
+        when(authentication.authenticate(anyString(), anyString())).thenReturn(user);
+        when(tokens.issue(any(AuthenticatedUser.class))).thenReturn(new AccessToken("t", 900));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 Chrome/131.0.0.0")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isOk());
+
+        // Dropped here, the fingerprint would be the hash of "" for every user
+        // on every device — a binding that exists and binds nothing, which is
+        // worse than none because it reads as done.
+        verify(refreshTokens).issue(user, "Mozilla/5.0 Chrome/131.0.0.0");
+    }
+
+    @Test
+    @DisplayName("an unreachable token store shortens the session; the login still returns 200")
+    void loginSucceedsWithoutARefreshCookie() throws Exception {
+        when(authentication.authenticate(anyString(), anyString()))
+                .thenReturn(new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
+                        "DEVELOPER", "Asia/Kolkata", false, List.of(), List.of(), List.of()));
+        when(tokens.issue(any(AuthenticatedUser.class))).thenReturn(new AccessToken("t", 900));
+        when(refreshTokens.issue(any(), any())).thenReturn(Optional.empty());
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessToken").value("t"))
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
     }
 
     // ── A-021 · account lockout ──────────────────────────────────────────────
