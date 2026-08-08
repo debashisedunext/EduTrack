@@ -20,7 +20,7 @@
 - [x] **B-003** Seed: statuses (New, In Progress, On Hold, Awaiting Info, Rework, Resolved, Closed, Reopened) + the `workflow_transitions` allowed-transition matrix per role.
 - [x] **B-004** Seed: 3 workflow templates with their stages — Standard Dev Flow (8 stages), Support Fast-Track (5), Infra Flow (5). *(§4A.9)* — *`V20260807_1700`; 3 templates, 18 stages*
 - [x] **B-005** JPA entities + repositories for the full model, built on A's schema. Feature-packaged, not layer-packaged. — *merged in PR #34*
-- [ ] **B-006** MapStruct base configuration.
+- [x] **B-006** MapStruct base configuration. — *`api/config/BaseMapperConfig.java`; mappers opt in with `@Mapper(config = BaseMapperConfig.class)` and inherit Spring component model, constructor injection, and two compile-time gates: an unmapped target property and a lossy numeric conversion are both build errors. Partial updates ignore null source properties, so a `PATCH` cannot blank a field it never sent. Shared by all four streams — additive, no existing file behaviour changed.*
 - [ ] **B-007** 🔴 **Ticket fixture corpus** — 200 tickets across 3 projects, varied stages, iterations, cycles, breach states, effort logs and client attribution. *This is what lets D test the SLA scanner and C test the ribbon before either feature exists.*
 - [x] **B-008** Seed manifest with fixed load order. One seed file per stream, never a shared file. — *`db/migration/SEED-MANIFEST.md`, held by `SeedManifestTest` (a migration with no manifest row fails the build) and `SeedDataIT` (referential integrity across the string references MySQL does not enforce).*
 

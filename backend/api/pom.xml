@@ -14,6 +14,15 @@
 
   <dependencies>
     <dependency><groupId>com.edunext.edutrack</groupId><artifactId>edutrack-domain</artifactId></dependency>
+    <!-- B-006. The mapper annotations. They already arrive transitively through
+         edutrack-common → edutrack-domain, but this is the module that writes
+         @Mapper, and the jackson-dataformat-yaml note below is this pom's own
+         record of what a transitive coordinate costs when the module using it
+         does not declare it. The *processor* is deliberately not here: it is an
+         annotationProcessorPath in the parent pom, so it never reaches the
+         runtime classpath and the generated *Impl classes are MapStruct's only
+         trace in the packaged jar. -->
+    <dependency><groupId>org.mapstruct</groupId><artifactId>mapstruct</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
     <!-- A-022. NimbusJwtEncoder lives here, not in the resource-server starter —
