@@ -12,8 +12,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 41 of 222 (18%) | 58.0 of 342.0 (17%) |
-| In flight | 2 | 3.5 |
+| Complete | 43 of 222 (19%) | 61.5 of 342.0 (18%) |
+| In flight | 0 | 0.0 |
 | On the driving chain | 53 | 87.5 |
 | Zero float (no slack at all) | 110 | 168.5 |
 
@@ -24,7 +24,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | **A** | Shivendra | 63 | 16 | 92.0 | 93 | 99% | Thu 03 Dec |
 | **B** | Ayush | 50 | 5 | 84.5 | 93 | 91% | Wed 25 Nov |
 | **C** | Divyansh | 61 | 6 | 94.5 | 93 | 102% ⚠️ | Wed 09 Dec |
-| **D** | Debashis | 48 | 14 | 71.0 | 93 | 76% | Thu 19 Nov |
+| **D** | Debashis | 48 | 16 | 71.0 | 93 | 76% | Thu 19 Nov |
 
 ### Slipping
 
@@ -36,6 +36,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `C-006` Command palette on Ctrl+K for jump-to-ticket | Divyansh | Wed 19 Aug | Sat 08 Aug | +81d |
 | `D-015` Frontend STOMP client | Debashis | Thu 03 Sep | Sat 08 Aug | +70d |
 | `D-050` Chat engine, three surfaces one engine | Debashis | Tue 08 Sep | Sat 08 Aug | +67d |
+| `D-057` Chat immutable after a 5-minute edit window; del | Debashis | Wed 09 Sep | Sat 08 Aug | +66d |
+| `D-051` Typing indicator, read receipts, unread counts | Debashis | Fri 11 Sep | Sat 08 Aug | +64d |
 | `B-034` Step 4 — dry-run validation preview | Ayush | Wed 02 Sep | Wed 14 Oct | +30d |
 | `B-035` Step 5 — commit as a background job with progres | Ayush | Fri 04 Sep | Fri 16 Oct | +30d |
 | `B-036` Error report generation | Ayush | Mon 07 Sep | Mon 19 Oct | +30d |
@@ -48,10 +50,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `A-064` Export engine — Excel, CSV, PDF | Shivendra | Fri 09 Oct | Tue 20 Oct | +7d |
 | `A-066` Reports 1–6 | Shivendra | Wed 14 Oct | Fri 23 Oct | +7d |
 | `A-067` Reports 7–12 | Shivendra | Mon 19 Oct | Wed 28 Oct | +7d |
-| `A-041` Canonical JSON serialiser — fixed key order, fix | Shivendra | Fri 28 Aug | Mon 07 Sep | +6d |
-| `A-045` Concurrency test | Shivendra | Tue 08 Sep | Wed 16 Sep | +6d |
 
-*…and 13 more — see the interactive chart.*
+*…and 15 more — see the interactive chart.*
 
 ---
 
@@ -429,13 +429,13 @@ gantt
 |  | `D-045` | Browser push via the Web Push API for users who opt in | 1.5 | `D-043` ᶦ | Tue 13 Oct | Wed 14 Oct | 23 | ▫️ to do |
 | 🔴 | `D-046` | Offline queueing | 1.5 | `D-043` | Fri 09 Oct | Mon 12 Oct | 22 | ▫️ to do |
 |  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
-|  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Mon 10 Aug | Tue 11 Aug | 31 | 🟡 50% |
-|  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Tue 11 Aug | Wed 12 Aug | 32 | ▫️ to do |
-|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Thu 13 Aug | Fri 14 Aug | 32 | ▫️ to do |
-|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Mon 17 Aug | Mon 17 Aug | 32 | ▫️ to do |
+|  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
+|  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Mon 10 Aug | Tue 11 Aug | 31 | ▫️ to do |
+|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Tue 11 Aug | Thu 13 Aug | 32 | ▫️ to do |
+|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Thu 13 Aug | Fri 14 Aug | 33 | ▫️ to do |
 | 🔴 | `D-055` | Ask Status | 1.5 | `D-050` `C-036` | Tue 27 Oct | Wed 28 Oct | 24 | ▫️ to do |
 |  | `D-056` | Manager response time recorded as a reportable metric; status… | 1 | `D-055` ᶦ | Thu 29 Oct | Thu 29 Oct | 24 | ▫️ to do |
-| 🔴 | `D-057` | Chat immutable after a 5-minute edit window; deletions leave… | 1.5 | `D-050` | Mon 10 Aug | Mon 10 Aug | 85 | 🔵 in review |
+| 🔴 | `D-057` | Chat immutable after a 5-minute edit window; deletions leave… | 1.5 | `D-050` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `D-058` | Live ribbon advance | 1 | `D-014` `C-045` | Mon 09 Nov | Mon 09 Nov | 21 | ▫️ to do |
 |  | `D-059` | Team inbox live updates | 1 | `D-058` `C-062` | Thu 19 Nov | Thu 19 Nov | 14 | ▫️ to do |
 
