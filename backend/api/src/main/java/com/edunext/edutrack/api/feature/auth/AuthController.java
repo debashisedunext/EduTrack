@@ -55,6 +55,7 @@ class AuthController {
     @ApiResponse(responseCode = "200", description = "Credentials accepted.")
     @ApiResponse(responseCode = "400", description = "Malformed request body.", content = @Content)
     @ApiResponse(responseCode = "401", description = "Invalid credentials.", content = @Content)
+    @ApiResponse(responseCode = "423", description = "Account locked after repeated failures.", content = @Content)
     SessionResponse login(@Valid @RequestBody LoginRequest request) {
         AuthenticatedUser user = authentication.authenticate(request.username(), request.password());
         return new SessionResponse(Session.withoutToken(user));

@@ -5,11 +5,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -42,19 +45,26 @@ class AuthenticationServiceTest {
 
     private AuthUserRepository users;
     private PasswordEncoder encoder;
+    private LoginAttemptRecorder attempts;
     private AuthenticationService service;
 
     @BeforeEach
     void setUp() {
         users = mock(AuthUserRepository.class);
         encoder = mock(PasswordEncoder.class);
+        attempts = mock(LoginAttemptRecorder.class);
         when(encoder.encode(anyString())).thenReturn(DECOY_HASH);
-        service = new AuthenticationService(users, encoder);
+        service = new AuthenticationService(users, encoder, attempts);
     }
 
     private static AuthUserRow row(boolean active) {
+        return row(active, 0, null);
+    }
+
+    private static AuthUserRow row(boolean active, int failedAttempts, Instant lockedUntil) {
         return new AuthUserRow(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
-                STORED_HASH, "DEVELOPER", 3, "Asia/Kolkata", active, false);
+                STORED_HASH, "DEVELOPER", 3, "Asia/Kolkata", active, false,
+                failedAttempts, lockedUntil);
     }
 
     // ── the enumeration oracle this task exists to close ────────────────────
@@ -156,6 +166,97 @@ class AuthenticationServiceTest {
         assertThat(user.permissions()).containsExactly("ticket.read", "ticket.update");
         assertThat(user.projectIds()).containsExactly(11L, 12L);
         assertThat(user.reporteeIds()).isEmpty();
+    }
+
+    // ── A-021 · lockout ─────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a wrong password against a real user is counted")
+    void wrongPasswordIsRecorded() {
+        AuthUserRow user = row(true);
+        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(user));
+        when(encoder.matches("wrong", STORED_HASH)).thenReturn(false);
+
+        assertThatExceptionOfType(InvalidCredentialsException.class)
+                .isThrownBy(() -> service.authenticate("asha.rao", "wrong"));
+
+        verify(attempts).recordFailure(eq(user), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("an unknown username is never counted — there is no row, and counting one would leak existence")
+    void unknownUserIsNotRecorded() {
+        when(users.findByUsername("ghost")).thenReturn(Optional.empty());
+
+        assertThatExceptionOfType(InvalidCredentialsException.class)
+                .isThrownBy(() -> service.authenticate("ghost", "whatever"));
+
+        verify(attempts, never()).recordFailure(any(), any());
+    }
+
+    @Test
+    @DisplayName("a deactivated account is not counted towards a lock it cannot benefit from")
+    void deactivatedAccountIsNotRecorded() {
+        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(false)));
+        when(encoder.matches("right", STORED_HASH)).thenReturn(true);
+
+        assertThatExceptionOfType(InvalidCredentialsException.class)
+                .isThrownBy(() -> service.authenticate("asha.rao", "right"));
+
+        verify(attempts, never()).recordFailure(any(), any());
+    }
+
+    @Test
+    @DisplayName("a locked account with the CORRECT password gets 423, carrying the expiry")
+    void lockedAccountWithCorrectPasswordIsReported() {
+        Instant lockedUntil = Instant.now().plus(Duration.ofMinutes(10));
+        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true, 0, lockedUntil)));
+        when(encoder.matches("right", STORED_HASH)).thenReturn(true);
+
+        assertThatExceptionOfType(AccountLockedException.class)
+                .isThrownBy(() -> service.authenticate("asha.rao", "right"))
+                .satisfies(e -> assertThat(e.lockedUntil()).isEqualTo(lockedUntil));
+    }
+
+    @Test
+    @DisplayName("a locked account with the WRONG password is still just 401 — the lock is never revealed")
+    void lockedAccountWithWrongPasswordStaysGeneric() {
+        Instant lockedUntil = Instant.now().plus(Duration.ofMinutes(10));
+        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true, 3, lockedUntil)));
+        when(encoder.matches("wrong", STORED_HASH)).thenReturn(false);
+
+        // Revealing the lock here would confirm the account exists to someone
+        // who has not proved they own it — the enumeration oracle again.
+        assertThatExceptionOfType(InvalidCredentialsException.class)
+                .isThrownBy(() -> service.authenticate("asha.rao", "wrong"));
+    }
+
+    @Test
+    @DisplayName("a lapsed lock lets the user straight back in, with no job needed to clear it")
+    void expiredLockDoesNotBlock() {
+        Instant expired = Instant.now().minus(Duration.ofMinutes(1));
+        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true, 0, expired)));
+        when(encoder.matches("right", STORED_HASH)).thenReturn(true);
+        when(users.findPermissionCodesByRoleId(3)).thenReturn(List.of());
+        when(users.findProjectIdsByUserId(7L)).thenReturn(List.of());
+        when(users.findReporteeIdsByManagerId(7L)).thenReturn(List.of());
+
+        assertThat(service.authenticate("asha.rao", "right").id()).isEqualTo(7L);
+    }
+
+    @Test
+    @DisplayName("a successful login clears the counter")
+    void successClearsTheCounter() {
+        AuthUserRow user = row(true, 3, null);
+        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(user));
+        when(encoder.matches("right", STORED_HASH)).thenReturn(true);
+        when(users.findPermissionCodesByRoleId(3)).thenReturn(List.of());
+        when(users.findProjectIdsByUserId(7L)).thenReturn(List.of());
+        when(users.findReporteeIdsByManagerId(7L)).thenReturn(List.of());
+
+        service.authenticate("asha.rao", "right");
+
+        verify(attempts).recordSuccess(user);
     }
 
     @Test

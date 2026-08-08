@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -119,6 +120,24 @@ class AuthControllerTest {
                 .doesNotContainIgnoringCase("not found")
                 .doesNotContainIgnoringCase("disabled")
                 .doesNotContainIgnoringCase("inactive");
+    }
+
+    // ── A-021 · account lockout ──────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a locked account gets 423 with the lockedUntil timestamp")
+    void lockedAccountGets423() throws Exception {
+        Instant lockedUntil = Instant.parse("2026-08-07T16:05:00Z");
+        when(authentication.authenticate(anyString(), anyString()))
+                .thenThrow(new AccountLockedException(lockedUntil));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isLocked())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("https://edutrack/errors/account-locked"))
+                .andExpect(jsonPath("$.lockedUntil").value(lockedUntil.toString()));
     }
 
     @Test

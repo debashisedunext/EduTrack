@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 
@@ -30,13 +31,28 @@ import java.util.List;
  *       the exception, not into the returned object.</li>
  * </ol>
  *
- * <p><b>Not in this task, deliberately.</b> A-021 owns {@code failed_attempts},
- * the 15-minute lockout and the admin alert; A-022 owns the access token; A-023
+ * <p><b>Not in this task, deliberately.</b> A-022 owns the access token; A-023
  * the refresh cookie; A-026 the forced-change redirect; A-029 the TOTP
- * challenge. §10.1 also opens with a per-IP rate limit, which is Redis-backed
- * and pairs naturally with A-021's counter — building half of it here would
- * mean two throttles to reason about. Until A-021 lands there is <b>no limit on
- * guess volume</b>; Argon2id's cost is the only brake.
+ * challenge.
+ *
+ * <p><b>Two gaps remain after A-021, both belonging to A-074.</b>
+ *
+ * <p>First, <b>nothing caps guess volume.</b> §10.1 opens with a "10 attempts /
+ * 15 min / IP" limit that does not exist here. A-021's counter stops repeated
+ * guessing against <i>one</i> account; it does nothing about one common password
+ * sprayed across a thousand usernames, where no single account ever reaches five
+ * failures. A purely per-IP limit was built and removed — it puts an entire
+ * office behind one NAT address into a shared budget, so one colleague's typos
+ * lock out everyone around them. The shape that fits is two-dimensional: cap
+ * attempts per {@code (IP, username)} and separately cap how many <i>distinct</i>
+ * usernames one address tries.
+ *
+ * <p>Second, and consequently, <b>a rejected attempt is expensive</b> — every
+ * one costs a full Argon2id verification (~175 ms and 64 MB, measured), because
+ * the lock is checked after the hash rather than before it. That ordering is
+ * deliberate and must not be "optimised": checking the lock first would make a
+ * locked account answer faster than an unlocked one, which leaks exactly what
+ * the uniform timing above exists to hide.
  */
 @Service
 class AuthenticationService {
@@ -45,6 +61,7 @@ class AuthenticationService {
 
     private final AuthUserRepository users;
     private final PasswordEncoder passwordEncoder;
+    private final LoginAttemptRecorder attempts;
 
     /**
      * A real Argon2id hash of a value nobody knows, verified against whenever
@@ -61,9 +78,12 @@ class AuthenticationService {
      */
     private final String decoyHash;
 
-    AuthenticationService(AuthUserRepository users, PasswordEncoder passwordEncoder) {
+    AuthenticationService(AuthUserRepository users,
+                          PasswordEncoder passwordEncoder,
+                          LoginAttemptRecorder attempts) {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
+        this.attempts = attempts;
         this.decoyHash = passwordEncoder.encode(randomSecret());
     }
 
@@ -87,6 +107,12 @@ class AuthenticationService {
         boolean passwordMatches = passwordEncoder.matches(rawPassword, hashToVerify);
 
         if (user == null || !passwordMatches || !user.active()) {
+            if (user != null && !passwordMatches) {
+                // A-021. Only a real user with a wrong password counts. A
+                // deactivated account is not counted towards a lock it can
+                // never benefit from, and an unknown username has no row.
+                attempts.recordFailure(user, Instant.now());
+            }
             // Logged at DEBUG and without the username: an INFO-level record of
             // every failed attempt writes a list of valid usernames — and
             // eventually a mistyped password — into a file with far wider read
@@ -96,6 +122,19 @@ class AuthenticationService {
             throw new InvalidCredentialsException();
         }
 
+        // A-021. Reached only with the correct password, which is the entire
+        // point of checking the lock HERE and not before the hash comparison.
+        // The contract: lockout "is reported as account-locked only *after*
+        // correct credentials, for the same reason" — a 423 handed to someone
+        // who has not authenticated confirms the account exists, which is the
+        // enumeration oracle in different words. Moving this check above the
+        // verification would also make a locked account answer faster than an
+        // unlocked one, leaking the same fact through timing.
+        if (user.isLockedAt(Instant.now())) {
+            throw new AccountLockedException(user.lockedUntil());
+        }
+
+        attempts.recordSuccess(user);
         return resolveScope(user);
     }
 

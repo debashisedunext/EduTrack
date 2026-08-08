@@ -4,6 +4,9 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,7 +39,8 @@ class AuthUserRepository {
     private static final String FIND_BY_USERNAME = """
             SELECT u.id, u.username, u.email, u.full_name, u.password_hash,
                    u.role_id, r.code AS role_code, u.timezone,
-                   u.is_active, u.must_change_password
+                   u.is_active, u.must_change_password,
+                   u.failed_attempts, u.locked_until
               FROM users u
               JOIN roles r ON r.id = u.role_id
              WHERE u.username = ?
@@ -70,6 +74,45 @@ class AuthUserRepository {
              ORDER BY u.id
             """;
 
+    /** A-021 · the failure counter, incremented atomically in the database. */
+    private static final String INCREMENT_FAILED_ATTEMPTS = """
+            UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id = ?
+            """;
+
+    private static final String READ_FAILED_ATTEMPTS = """
+            SELECT failed_attempts FROM users WHERE id = ?
+            """;
+
+    /**
+     * A-021 · applying the lock also zeroes the counter, so the fifteen minutes
+     * after a lock lapses start a fresh window of five rather than locking
+     * again on the very next mistake.
+     */
+    private static final String APPLY_LOCK = """
+            UPDATE users SET locked_until = ?, failed_attempts = 0 WHERE id = ?
+            """;
+
+    private static final String CLEAR_LOCKOUT_STATE = """
+            UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?
+            """;
+
+    /**
+     * A-021 · who hears about a lockout. Blueprint §S-01 says "email to Admin"
+     * without naming one, so every active Admin is told.
+     *
+     * <p>Returns empty until Stream B's B-001 seeds the six system roles — there
+     * is no ADMIN role to match yet. The caller logs that case rather than
+     * failing the login, because a lockout that cannot be announced must still
+     * be a lockout.
+     */
+    private static final String ACTIVE_ADMINS = """
+            SELECT u.id, u.email
+              FROM users u
+              JOIN roles r ON r.id = u.role_id
+             WHERE r.code = 'ADMIN' AND u.is_active = 1 AND u.email IS NOT NULL
+             ORDER BY u.id
+            """;
+
     private static final RowMapper<AuthUserRow> ROW_MAPPER = (rs, rowNum) -> new AuthUserRow(
             rs.getLong("id"),
             rs.getString("username"),
@@ -80,7 +123,22 @@ class AuthUserRepository {
             rs.getInt("role_id"),
             rs.getString("timezone"),
             rs.getBoolean("is_active"),
-            rs.getBoolean("must_change_password"));
+            rs.getBoolean("must_change_password"),
+            rs.getInt("failed_attempts"),
+            toInstant(rs.getObject("locked_until", LocalDateTime.class)));
+
+    private static final RowMapper<AdminRecipient> ADMIN_MAPPER = (rs, rowNum) ->
+            new AdminRecipient(rs.getLong("id"), rs.getString("email"));
+
+    /**
+     * {@code DATETIME(6)} carries no zone and PLAN.md §3.1 stores UTC, so the
+     * column is read as a {@link LocalDateTime} and stamped UTC explicitly.
+     * Reading it as a {@code Timestamp} would let the driver reinterpret it in
+     * the JVM's default zone and shift every lock expiry by the offset.
+     */
+    private static Instant toInstant(LocalDateTime utc) {
+        return utc == null ? null : utc.toInstant(ZoneOffset.UTC);
+    }
 
     private final JdbcClient jdbc;
 
@@ -108,5 +166,34 @@ class AuthUserRepository {
 
     List<Long> findReporteeIdsByManagerId(long managerId) {
         return jdbc.sql(REPORTEE_IDS_FOR_USER).param(managerId).query(Long.class).list();
+    }
+
+    // ── A-021 · lockout state ───────────────────────────────────────────────
+
+    /**
+     * Increments in the database rather than writing back a count read earlier,
+     * so two simultaneous wrong guesses cannot both read 3 and both write 4.
+     *
+     * @return the count after this failure
+     */
+    int incrementFailedAttempts(long userId) {
+        jdbc.sql(INCREMENT_FAILED_ATTEMPTS).param(userId).update();
+        Integer attempts = jdbc.sql(READ_FAILED_ATTEMPTS).param(userId).query(Integer.class).single();
+        return attempts == null ? 0 : attempts;
+    }
+
+    void applyLock(long userId, Instant until) {
+        jdbc.sql(APPLY_LOCK)
+                .param(LocalDateTime.ofInstant(until, ZoneOffset.UTC))
+                .param(userId)
+                .update();
+    }
+
+    void clearLockoutState(long userId) {
+        jdbc.sql(CLEAR_LOCKOUT_STATE).param(userId).update();
+    }
+
+    List<AdminRecipient> findActiveAdmins() {
+        return jdbc.sql(ACTIVE_ADMINS).query(ADMIN_MAPPER).list();
     }
 }
