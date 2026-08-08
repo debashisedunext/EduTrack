@@ -1,0 +1,78 @@
+package com.edunext.edutrack.domain.workflow;
+
+import com.edunext.edutrack.domain.appendonly.AppendOnly;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.Repository;
+import org.springframework.data.repository.query.Param;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * The ribbon's repository. <b>Append-only</b> — see
+ * {@link com.edunext.edutrack.domain.appendonly.AppendOnly} for why this
+ * extends the bare {@link Repository} marker instead of {@code JpaRepository}.
+ *
+ * <p>There is no {@code save}, no {@code delete}, no {@code deleteAll}. The
+ * only write is {@code insert}, plus {@link #seal} — the single mutation the
+ * A-008 trigger permits.
+ */
+public interface TicketStageTransitionRepository
+        extends Repository<TicketStageTransition, Long>, AppendOnly<TicketStageTransition> {
+
+    Optional<TicketStageTransition> findById(Long id);
+
+    /** The ribbon, in order. Served by {@code ix_stage_ticket_id}. */
+    List<TicketStageTransition> findByTicketIdOrderBySeqNoAsc(Long ticketId);
+
+    /** One cycle's journey — cycle 2 renders without cycle 1's hops. */
+    List<TicketStageTransition> findByTicketIdAndCycleNoOrderBySeqNoAsc(Long ticketId, short cycleNo);
+
+    /**
+     * "Where is this ticket right now?" Queries A-009's generated column rather
+     * than {@code is_current}, so it resolves on {@code ix_stage_current} —
+     * exactly one row per ticket, no matter how long the history grows.
+     */
+    Optional<TicketStageTransition> findByCurrentTicketId(Long ticketId);
+
+    /**
+     * The tail of the hash chain for one ticket — the {@code prev_hash} of the
+     * next append. PLAN.md §3.7: the chain is <b>per-ticket</b>, and the caller
+     * must already hold {@code SELECT … FOR UPDATE} on the parent ticket row,
+     * or two concurrent appends read the same tail and fork the chain.
+     */
+    Optional<TicketStageTransition> findFirstByTicketIdOrderByIdDesc(Long ticketId);
+
+    /**
+     * Seal an open stage — <b>the only mutation this table permits</b>.
+     *
+     * <p>An explicit JPQL update on exactly the three columns the A-008 trigger
+     * allows, rather than mutating a loaded instance. That is the difference
+     * PLAN.md §3.6 is drawing: a dirty-checked entity emits an {@code UPDATE}
+     * touching every column, which the trigger rejects wholesale even though
+     * the developer only meant to change one.
+     *
+     * <p>{@code exitedAt is null} in the predicate makes a double-seal a no-op
+     * that returns 0 rather than a database error. The trigger rejects it too
+     * ("already sealed"), but a caller that can distinguish "I sealed it" from
+     * "someone else got there first" does not need an exception to do it.
+     *
+     * @param durationMins <b>working</b> minutes from the calendar service
+     *                     (B-024), never wall-clock
+     * @return 1 if this call sealed the row, 0 if it was already sealed
+     */
+    @Modifying
+    @Query("""
+            update TicketStageTransition t
+               set t.exitedAt = :exitedAt,
+                   t.durationMins = :durationMins,
+                   t.isCurrent = false
+             where t.id = :id
+               and t.exitedAt is null
+            """)
+    int seal(@Param("id") Long id,
+             @Param("exitedAt") Instant exitedAt,
+             @Param("durationMins") Integer durationMins);
+}
