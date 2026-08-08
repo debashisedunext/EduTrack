@@ -1,0 +1,78 @@
+-- =====================================================================
+-- B-008 · Correction — align workflow_transitions.role_code with `roles`
+--
+-- Table corrected: workflow_transitions (13 rows)
+-- Found by: building the B-008 load-order register (SEED-MANIFEST.md).
+--           Laying the seed files out in the order Flyway actually runs
+--           them is what made this visible; reading any one file alone
+--           does not show it.
+--
+-- WHAT IS WRONG
+--
+-- V20260807_1030 renamed the Support role code SUPPORT_DESK -> SUPPORT,
+-- to match contracts/openapi.yaml's RoleCode enum. V20260807_1100 (B-003)
+-- carries a LATER timestamp, so Flyway runs it AFTER that rename — and it
+-- seeds 13 workflow_transitions rows whose role_code is the literal
+-- string 'SUPPORT_DESK'. The correction was undone by the next file in
+-- the queue.
+--
+-- Verified on a clean database with every migration applied in version
+-- order: `roles` holds SUPPORT, and 13 workflow_transitions rows join to
+-- no role at all.
+--
+-- WHY IT WAS SILENT
+--
+-- workflow_transitions.role_code is a plain VARCHAR(20) with no FK to
+-- roles.code (see the baseline_masters_ops.sql DDL). A role code that
+-- does not exist is therefore not a constraint violation — it is simply
+-- a row that never matches a caller. Exactly the failure shape B-004's
+-- header warned about for workflow_stages.owner_role. B-004 (1700) was
+-- written after the rename was noticed and got it right; B-003 (1100)
+-- was written before and did not.
+--
+-- WHAT IT BREAKS
+--
+-- workflow_transitions is a WHITELIST (B-003's header): a missing
+-- (from, to, role) row means the move is impossible for that role. With
+-- all 13 of its rows unmatchable, the Support Desk role can make no
+-- status transition whatsoever — it cannot raise a ticket, start one,
+-- pause it, resolve it, or reopen it. Two of the losses are governance
+-- decisions rather than convenience:
+--
+--   * RESOLVED -> CLOSED. G-3 (PLAN.md §5) puts closure with the Sign-off
+--     stage owner and grants it to exactly Admin / PM / Support Desk. On
+--     Support Fast-Track the Sign-off AND Closed stages are both owned by
+--     SUPPORT (B-004) — so the client-facing flow's own closing role
+--     could not close anything.
+--   * CLOSED -> REOPENED. Blueprint §2 grants reopen to the same three.
+--
+-- Nothing has caught it yet because C-014 (the transition service) is the
+-- first code that reads this table and has not landed.
+--
+-- SCOPE — what is deliberately NOT touched
+--
+-- B-001's role_permissions grants are correct and are left alone. That
+-- seed ran at 0900, BEFORE the rename, and resolves codes to role_ids
+-- through a JOIN at insert time; the ids never moved. Confirmed on the
+-- clean database — SUPPORT still holds its 10 grants. Only the literal
+-- string in workflow_transitions went stale.
+--
+-- V20260807_1100 is NOT edited. Flyway has checksummed it and other
+-- developers have applied it. This is the compensating migration, per
+-- CLAUDE.md — the same shape as V20260807_1030 before it.
+--
+-- workflow_transitions is ordinary master data, not one of the three
+-- append-only tables, so UPDATE is legal here.
+--
+-- No unique-key collision: uq_workflow_transitions is
+-- (from_status, to_status, role_code) and no SUPPORT row exists to
+-- collide with — the 13 rows below are the only Support rows in the
+-- table.
+--
+-- SeedDataIT.noTransitionReferencesARoleThatDoesNotExist is the
+-- regression test, and it fails without this file.
+-- =====================================================================
+
+UPDATE workflow_transitions
+   SET role_code = 'SUPPORT'
+ WHERE role_code = 'SUPPORT_DESK';

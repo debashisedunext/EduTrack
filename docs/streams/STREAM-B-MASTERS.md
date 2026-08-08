@@ -18,11 +18,13 @@
 - [x] **B-001** Seed: 6 roles + the full permission matrix from blueprint §2. QA and Deployment included — the ribbon cannot be represented without them.
 - [x] **B-002** Seed: 11 task types (Change Request, Production Bug, Client Request, Future Release, Internal Bug, Client Bug, Server Issue, Network Issue, Browser Issue, Performance Issue, Other) with icon, colour, default level, default SLA. Plus 4 priorities with colour and escalation flag.
 - [x] **B-003** Seed: statuses (New, In Progress, On Hold, Awaiting Info, Rework, Resolved, Closed, Reopened) + the `workflow_transitions` allowed-transition matrix per role.
-- [ ] **B-004** Seed: 3 workflow templates with their stages — Standard Dev Flow (8 stages), Support Fast-Track (5), Infra Flow (5). *(§4A.9)*
-- [ ] **B-005** JPA entities + repositories for the full model, built on A's schema. Feature-packaged, not layer-packaged.
+- [x] **B-004** Seed: 3 workflow templates with their stages — Standard Dev Flow (8 stages), Support Fast-Track (5), Infra Flow (5). *(§4A.9)* — *`V20260807_1700`; 3 templates, 18 stages*
+- [x] **B-005** JPA entities + repositories for the full model, built on A's schema. Feature-packaged, not layer-packaged. — *merged in PR #34*
 - [ ] **B-006** MapStruct base configuration.
 - [ ] **B-007** 🔴 **Ticket fixture corpus** — 200 tickets across 3 projects, varied stages, iterations, cycles, breach states, effort logs and client attribution. *This is what lets D test the SLA scanner and C test the ribbon before either feature exists.*
-- [ ] **B-008** Seed manifest with fixed load order. One seed file per stream, never a shared file.
+- [x] **B-008** Seed manifest with fixed load order. One seed file per stream, never a shared file. — *`db/migration/SEED-MANIFEST.md`, held by `SeedManifestTest` (a migration with no manifest row fails the build) and `SeedDataIT` (referential integrity across the string references MySQL does not enforce).*
+
+  > **Building the register found a live defect, fixed in `V20260808_1400`.** `V20260807_1030` renamed the Support role code to `SUPPORT`; `V20260807_1100` (B-003) runs *after* it and re-seeded the old `SUPPORT_DESK` string into 13 `workflow_transitions` rows. `role_code` has no FK, so the rows inserted cleanly and simply matched nobody — the Support Desk role could make **no status transition at all**, including the `RESOLVED → CLOSED` and `CLOSED → REOPENED` moves that G-3 and blueprint §2 reserve for exactly Admin/PM/Support Desk. Undetected because C-014, the first code to read that table, has not landed. B-001's grants were unaffected (that seed ran before the rename and resolves codes to ids through a JOIN).
 
 **Exit:** a migrated DB loads full seed data; entities compile against it; the fixture corpus renders realistic ribbons.
 
