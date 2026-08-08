@@ -82,6 +82,30 @@ public final class ChatDtos {
             Instant createdAt) {
     }
 
+    /**
+     * D-053 · one search hit.
+     *
+     * <p>A distinct shape rather than a reused {@link ChatMessage}: a hit is
+     * read out of context, so it has to name its thread — and it has no
+     * {@code readBy}, {@code mentions} or {@code editableUntil}, which would
+     * cost a query each to populate honestly and would be empty lies if they
+     * were not.
+     */
+    public record ChatSearchHit(
+            long messageId,
+            long threadId,
+            ChatKind threadKind,
+            String threadTitle,
+            String ticketId,
+            String body,
+            UserRef author,
+            Instant createdAt) {
+    }
+
+    /** Cursor pagination for search, matching {@code Meta} in the contract. */
+    public record SearchMeta(String nextCursor, boolean hasMore) {
+    }
+
     /** Request body for {@code PATCH …/messages/{messageId}} (D-057). */
     public record EditMessage(
             @NotBlank

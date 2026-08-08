@@ -1864,6 +1864,48 @@ paths:
               schema: { $ref: '#/components/schemas/ChatThreadListResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /chat/messages/search:
+    get:
+      tags: [chat]
+      operationId: searchChatMessages
+      summary: Search your own conversations (S-25)
+      description: >
+        Scoped to threads the caller participates in — search is the one chat
+        surface with no thread id in the request, so nothing else narrows it.
+        Deleted messages never match: their body survives in the row and is
+        withheld on read, and a search that returned it would be the one path
+        around the tombstone.
+
+
+        Results are ordered by recency, not relevance. Chat search is "find the
+        thing we said", and a relevance order would need an offset cursor since
+        a score is not monotonic in id.
+
+
+        Words shorter than the server's `innodb_ft_min_token_size` (3 by
+        default) are not indexed and are ignored. A query with nothing longer
+        than that returns an empty page rather than an error.
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, examples: [deployment rollback] }
+          description: >
+            Free text. Every word must appear and a partial word matches;
+            boolean-mode operators are stripped rather than honoured.
+        - name: threadId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: Restrict to one conversation. Omit to search all of yours.
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK. Empty when nothing usable was typed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatSearchResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /chat/threads/{threadId}/messages:
     parameters:
       - { name: threadId, in: path, required: true, schema: { type: integer, format: int64 } }
@@ -3210,6 +3252,28 @@ components:
       type: object
       required: [data]
       properties: { data: { $ref: '#/components/schemas/ChatMessage' } }
+    ChatSearchHit:
+      type: object
+      description: >
+        A message found out of context, so it names its thread. Deliberately not
+        a `ChatMessage`: a hit carries no `readBy`, `mentions` or `editableUntil`
+        — each would cost a query to populate honestly, and would be an empty
+        lie otherwise.
+      properties:
+        messageId: { type: integer, format: int64 }
+        threadId: { type: integer, format: int64 }
+        threadKind: { type: string, enum: [TICKET, DIRECT, PROJECT] }
+        threadTitle: { type: [string, 'null'] }
+        ticketId: { type: [string, 'null'], description: 'Ticket code, not the row id.' }
+        body: { type: string }
+        author: { $ref: '#/components/schemas/UserRef' }
+        createdAt: { type: string, format: date-time }
+    ChatSearchResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ChatSearchHit' } }
+        meta: { $ref: '#/components/schemas/Meta' }
     ChatMessageListResponse:
       type: object
       required: [data]

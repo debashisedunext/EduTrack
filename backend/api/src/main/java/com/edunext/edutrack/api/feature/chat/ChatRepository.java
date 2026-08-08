@@ -235,6 +235,50 @@ class ChatRepository {
              ORDER BY m.id, u.id
             """;
 
+    /**
+     * D-053 · message search (blueprint §7.6).
+     *
+     * <p>Two clauses here are the whole feature, and both are easy to leave out
+     * without anything looking broken.
+     *
+     * <p><strong>The join to {@code chat_participants} is the scope.</strong>
+     * Without it this query reads every conversation in the company, including
+     * direct messages, and returns them to whoever typed a common word. Search
+     * is the one chat surface with no thread id in the request, so nothing else
+     * narrows it.
+     *
+     * <p><strong>{@code deleted_at IS NULL} is what stops search defeating the
+     * tombstone.</strong> §7.6 keeps a deleted message's body in the row and
+     * withholds it on read; a search that matched on that body would hand it
+     * straight back, and it would be the one path the tombstone does not cover.
+     * The same reasoning as D-052's notification carrying no message text.
+     *
+     * <p>Ordered by {@code id}, not by relevance. Two reasons: chat search is
+     * "find the thing we said", where recency is the strongest signal — and a
+     * relevance order would need an offset cursor, since a score is not
+     * monotonic in id. {@code MATCH} is used here as a filter, not a sort.
+     */
+    private static final String SEARCH = """
+            SELECT m.id, m.thread_id, m.body, m.kind, m.sender_id, m.created_at,
+                   u.full_name AS sender_name,
+                   t.thread_type, t.subject,
+                   tk.ticket_code, p.name AS project_name
+              FROM chat_messages m
+              JOIN chat_threads t
+                ON t.id = m.thread_id AND t.is_active = 1
+              JOIN chat_participants cp
+                ON cp.thread_id = m.thread_id AND cp.user_id = :userId
+              LEFT JOIN users    u  ON u.id  = m.sender_id
+              LEFT JOIN tickets  tk ON tk.id = t.ticket_id
+              LEFT JOIN projects p  ON p.id  = t.project_id
+             WHERE MATCH(m.body) AGAINST (:query IN BOOLEAN MODE)
+               AND m.deleted_at IS NULL
+               AND (:threadId IS NULL OR m.thread_id = :threadId)
+               AND (:cursor IS NULL OR m.id < :cursor)
+             ORDER BY m.id DESC
+             LIMIT :limit
+            """;
+
     /** The mention set as it stands, read before an edit replaces it. */
     private static final String MENTIONED_IDS = """
             SELECT j.mentioned_id
@@ -375,6 +419,23 @@ class ChatRepository {
         return byMessage;
     }
 
+    /**
+     * @param query a boolean-mode expression from {@link ChatSearch}, never raw
+     *              user input
+     * @param limit pass one more than the page size; the extra row answers
+     *              {@code hasMore} without a second COUNT over a FULLTEXT scan
+     */
+    List<SearchRow> search(long userId, String query, Long threadId, Long cursor, int limit) {
+        return jdbc.sql(SEARCH)
+                .param("userId", userId)
+                .param("query", query)
+                .param("threadId", threadId)
+                .param("cursor", cursor)
+                .param("limit", limit)
+                .query(SearchRow.class)
+                .list();
+    }
+
     /** Who this message mentions right now — read before an edit overwrites it. */
     List<Long> mentionedIds(long messageId) {
         return jdbc.sql(MENTIONED_IDS)
@@ -463,6 +524,25 @@ class ChatRepository {
              * a round trip to learn there was nothing to expand.
              */
             boolean hasMentions) {
+    }
+
+    /**
+     * D-053 · a search hit, carrying enough of its thread to be shown out of
+     * context. A result that says only "someone said this" is unusable — the
+     * whole point of searching is to find where a thing was said.
+     */
+    record SearchRow(
+            long id,
+            long threadId,
+            String body,
+            String kind,
+            Long senderId,
+            Timestamp createdAt,
+            String senderName,
+            String threadType,
+            String subject,
+            String ticketCode,
+            String projectName) {
     }
 
     /** D-052 · somebody a message mentions, resolved to a real user. */

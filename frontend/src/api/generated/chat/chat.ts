@@ -68,6 +68,7 @@ import type {
 import type {
   ChatMessageListResponse,
   ChatMessageResponse,
+  ChatSearchResponse,
   ChatThreadListResponse,
   ConflictResponse,
   EditChatMessageBody,
@@ -75,6 +76,7 @@ import type {
   ListChatThreadsParams,
   NotFoundResponse,
   PostChatMessageBody,
+  SearchChatMessagesParams,
   UnauthorizedResponse
 } from '.././model';
 
@@ -166,6 +168,105 @@ export function useListChatThreads<TData = Awaited<ReturnType<typeof listChatThr
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getListChatThreadsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Scoped to threads the caller participates in — search is the one chat surface with no thread id in the request, so nothing else narrows it. Deleted messages never match: their body survives in the row and is withheld on read, and a search that returned it would be the one path around the tombstone.
+
+Results are ordered by recency, not relevance. Chat search is "find the thing we said", and a relevance order would need an offset cursor since a score is not monotonic in id.
+
+Words shorter than the server's `innodb_ft_min_token_size` (3 by default) are not indexed and are ignored. A query with nothing longer than that returns an empty page rather than an error.
+
+ * @summary Search your own conversations (S-25)
+ */
+export const searchChatMessages = (
+    params?: SearchChatMessagesParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ChatSearchResponse>(
+      {url: `/chat/messages/search`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getSearchChatMessagesQueryKey = (params?: SearchChatMessagesParams,) => {
+    return [
+    `/chat/messages/search`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getSearchChatMessagesQueryOptions = <TData = Awaited<ReturnType<typeof searchChatMessages>>, TError = UnauthorizedResponse>(params?: SearchChatMessagesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof searchChatMessages>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSearchChatMessagesQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof searchChatMessages>>> = ({ signal }) => searchChatMessages(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof searchChatMessages>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SearchChatMessagesQueryResult = NonNullable<Awaited<ReturnType<typeof searchChatMessages>>>
+export type SearchChatMessagesQueryError = UnauthorizedResponse
+
+
+export function useSearchChatMessages<TData = Awaited<ReturnType<typeof searchChatMessages>>, TError = UnauthorizedResponse>(
+ params: undefined |  SearchChatMessagesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof searchChatMessages>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof searchChatMessages>>,
+          TError,
+          Awaited<ReturnType<typeof searchChatMessages>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSearchChatMessages<TData = Awaited<ReturnType<typeof searchChatMessages>>, TError = UnauthorizedResponse>(
+ params?: SearchChatMessagesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof searchChatMessages>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof searchChatMessages>>,
+          TError,
+          Awaited<ReturnType<typeof searchChatMessages>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSearchChatMessages<TData = Awaited<ReturnType<typeof searchChatMessages>>, TError = UnauthorizedResponse>(
+ params?: SearchChatMessagesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof searchChatMessages>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Search your own conversations (S-25)
+ */
+
+export function useSearchChatMessages<TData = Awaited<ReturnType<typeof searchChatMessages>>, TError = UnauthorizedResponse>(
+ params?: SearchChatMessagesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof searchChatMessages>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getSearchChatMessagesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

@@ -178,6 +178,76 @@ public class ChatService {
         return mentions.stream().map(ChatRepository.MentionedUser::id).toList();
     }
 
+    // ------------------------------------------------------- D-053 · search
+
+    /**
+     * Search the caller's own conversations (blueprint §7.6).
+     *
+     * <p>Scoped by participation in the query itself, not here — search is the
+     * one chat surface with no thread id in the request, so there is nothing
+     * else to narrow it and a forgotten filter would return the company's
+     * direct messages to anybody who typed a common word.
+     *
+     * <p>Deleted messages never match. Their body survives in the row and is
+     * withheld on read; a search that returned it would be the one path around
+     * the tombstone.
+     *
+     * @param threadId optional — search one conversation instead of all of them
+     */
+    @Transactional(readOnly = true)
+    public SearchPage search(long userId, String rawQuery, Long threadId, Long cursor, int limit) {
+        String query = ChatSearch.toBooleanQuery(rawQuery);
+        if (query.isEmpty()) {
+            // Nothing usable was typed — punctuation only, or words shorter
+            // than the index stores. An empty page is the truthful answer; a
+            // 400 would blame the caller for a limit they cannot see.
+            return new SearchPage(List.of(), new ChatDtos.SearchMeta(null, false));
+        }
+
+        List<ChatRepository.SearchRow> rows =
+                repository.search(userId, query, threadId, cursor, limit + 1);
+
+        boolean hasMore = rows.size() > limit;
+        List<ChatRepository.SearchRow> page = hasMore ? rows.subList(0, limit) : rows;
+
+        return new SearchPage(
+                page.stream().map(ChatService::toHit).toList(),
+                new ChatDtos.SearchMeta(
+                        hasMore ? String.valueOf(page.getLast().id()) : null, hasMore));
+    }
+
+    public record SearchPage(List<ChatDtos.ChatSearchHit> data, ChatDtos.SearchMeta meta) {
+    }
+
+    private static ChatDtos.ChatSearchHit toHit(ChatRepository.SearchRow row) {
+        ChatKind kind = kindOf(row.threadType());
+        return new ChatDtos.ChatSearchHit(
+                row.id(),
+                row.threadId(),
+                kind,
+                threadTitle(row, kind),
+                row.ticketCode(),
+                row.body(),
+                row.senderId() == null ? null : ChatDtos.UserRef.of(row.senderId(), row.senderName()),
+                row.createdAt().toInstant());
+    }
+
+    /**
+     * A hit is read away from its thread, so it must name one. A direct message
+     * has no anchor to name it after and the participant list is not loaded
+     * here, so it says what it is rather than inventing a title.
+     */
+    private static String threadTitle(ChatRepository.SearchRow row, ChatKind kind) {
+        if (row.subject() != null && !row.subject().isBlank()) {
+            return row.subject();
+        }
+        return switch (kind) {
+            case TICKET -> row.ticketCode();
+            case PROJECT -> row.projectName();
+            case DIRECT -> "Direct message";
+        };
+    }
+
     // ----------------------------------------------------- D-057 · evidence
 
     /**
@@ -397,10 +467,17 @@ public class ChatService {
      */
     private static List<Long> readersOf(ChatRepository.MessageRow row,
                                         List<ChatRepository.ReadCursor> cursors) {
+        // Compared as primitives, and the author is excluded before boxing.
+        // The obvious spelling — mapping to Long first, then `userId !=
+        // row.senderId()` — compares two references, which the Long cache makes
+        // accidentally correct for ids below 128 and wrong for every id above
+        // it. A system-generated SYSTEM message has no author, and -1 matches no
+        // user because ids are a positive AUTO_INCREMENT.
+        long author = row.senderId() == null ? -1L : row.senderId();
         return cursors.stream()
                 .filter(cursor -> cursor.lastReadMessageId() >= row.id())
+                .filter(cursor -> cursor.userId() != author)
                 .map(ChatRepository.ReadCursor::userId)
-                .filter(userId -> row.senderId() == null || userId != row.senderId())
                 .sorted()
                 .toList();
     }

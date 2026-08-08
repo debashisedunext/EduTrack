@@ -142,10 +142,52 @@ query entirely, which is nearly every page.
 > `afterCommit`, and it should be applied to all of chat's broadcasts at once
 > rather than to this one.
 
+## Search (D-053)
+
+`GET /chat/messages/search?q=…` — across your threads, or one of them.
+
+Two clauses in `ChatRepository.SEARCH` are the whole feature, and both fail
+silently if dropped:
+
+| Clause | What it stops |
+|---|---|
+| `JOIN chat_participants … cp.user_id = :userId` | Search is the one chat surface with **no thread id in the request**, so nothing else narrows it. Without this, typing a common word returns the company's direct messages |
+| `m.deleted_at IS NULL` | **Search must not defeat the tombstone.** §7.6 keeps a deleted body in the row and withholds it on read; a search that matched on it would hand it straight back |
+
+**FULLTEXT, not `LIKE '%term%'`.** A leading wildcard cannot use an index, so
+every search would scan a table that grows for as long as the product is used.
+It keeps returning the right answer while getting slower forever, which is the
+kind of problem nobody notices until it is expensive.
+
+**Ordered by recency, not relevance.** Chat search is "find the thing we said",
+and a relevance order would need an offset cursor because a score is not
+monotonic in id. `MATCH` is a filter here, not a sort.
+
+**Raw input never reaches `AGAINST`.** In boolean mode `+ - * " ( ) ~ < > @` are
+operators, and pasting part of a message into the search box — which is what
+people do — would otherwise be a query nobody intended or a syntax error they
+cannot read. `ChatSearch` keeps word characters and adds the operators itself.
+
+> **Two-letter words are unfindable.** `innodb_ft_min_token_size` is 3 by
+> default, so "QA" and "UI" are not indexed. Terms below the floor are *dropped*
+> rather than required — requiring one would make "QA fix" match nothing at all.
+> Lowering the floor is a server variable plus an index rebuild, so it is
+> Stream A's call; `ChatEngineIT` asserts our constant still matches the
+> server's.
+
 ## Not done yet
 
-- **D-053** attachments. `attachmentIds` is accepted and ignored — it is in the
-  contract, and rejecting it would break the generated client.
+- **D-053 file and image share** — **blocked, and not on effort.** There is no
+  storage layer yet (C-024/C-025: no MinIO client, no upload route, no MIME
+  sniffing or AV scan), and building a second one here would put two answers
+  next to each other for "is this file safe". There is also nowhere to put the
+  row: `ticket_attachments.ticket_id` is `NOT NULL`, so a file dropped in a
+  direct message or a project channel is unrepresentable. That anchor is a
+  decision to make with Stream C — see `docs/streams/STREAM-D-ENGINES.md`
+  D-053. `attachmentIds` stays accepted and ignored until then.
+- **D-053 emoji** — no backend exists to write. It is the composer's emoji
+  picker; there is no reactions table in the baseline and no shape for one in
+  the contract, so it is frontend work under S-25.
 - **D-055** Ask Status. `MessageKind.STATUS_REQUEST` exists for it.
 - **Subscriptions are not authorised** — D-013. Chat's *REST* side is scoped by
   membership, but anyone can currently subscribe to any topic and see messages

@@ -101,6 +101,13 @@ class ChatEngineIT {
         jdbc.update("DELETE FROM users WHERE username LIKE 'it_chat_%'");
         jdbc.update("DELETE FROM projects WHERE project_code = 'ITC'");
 
+        // Fixture ids are forced past 127 deliberately. Java caches boxed Long
+        // values in -128..127, so comparing two boxed ids with `==` is
+        // accidentally correct below that and wrong above it. D-051's readBy
+        // shipped exactly that bug and every test passed, because a fresh
+        // fixture never got past user id 20.
+        jdbc.update("ALTER TABLE users AUTO_INCREMENT = 100000");
+
         projectId = insertProject();
         ravi = insertUser("it_chat_ravi", "Ravi Kumar");
         meera = insertUser("it_chat_meera", "Meera Prasad");
@@ -699,6 +706,164 @@ class ChatEngineIT {
             ChatDtos.ChatMessage tombstone = onlyMessageFor(meera);
             assertThat(tombstone.body()).isNull();
             assertThat(tombstone.mentions()).extracting(ChatDtos.UserRef::id).containsExactly(meera);
+        }
+    }
+
+    // ------------------------------------------------------ D-053 · search
+
+    /**
+     * §7.6 message search.
+     *
+     * <p>Two properties carry this feature, and both fail silently if dropped:
+     * a search must not reach conversations the caller is not in, and it must
+     * not return the body of a message somebody deleted.
+     */
+    @org.junit.jupiter.api.Nested
+    class Search {
+
+        @Test
+        void aWordInAMessageFindsIt() {
+            chat.post(ticketThread, ravi, "the deployment rolled back overnight");
+            chat.post(ticketThread, ravi, "nothing to do with that");
+
+            assertThat(bodies(search(ravi, "deployment")))
+                    .containsExactly("the deployment rolled back overnight");
+        }
+
+        @Test
+        @DisplayName("every word must appear, and a partial word matches")
+        void allTermsAreRequiredAndPrefixesMatch() {
+            chat.post(ticketThread, ravi, "deployment finished");
+            chat.post(ticketThread, ravi, "deployment failed on staging");
+
+            assertThat(bodies(search(ravi, "deployment stag")))
+                    .containsExactly("deployment failed on staging");
+        }
+
+        @Test
+        @DisplayName("you cannot search a conversation you are not in")
+        void searchIsScopedToYourOwnThreads() {
+            chat.post(ticketThread, ravi, "confidential deployment plans");
+
+            // Search is the one chat surface with no thread id in the request,
+            // so the participant join is all that narrows it. Without it this
+            // returns the company's direct messages to anyone typing a common
+            // word.
+            assertThat(search(outsider, "deployment")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a deleted message is not findable — search must not defeat the tombstone")
+        void deletedMessagesNeverMatch() {
+            chat.post(ticketThread, ravi, "the deployment password is hunter2");
+            long id = idOfLatest();
+            chat.delete(ticketThread, id, ravi);
+
+            // §7.6 keeps the body in the row and withholds it on read. A search
+            // that matched on it would hand it straight back, and would be the
+            // one path the tombstone does not cover.
+            assertThat(search(ravi, "deployment")).isEmpty();
+            assertThat(rawBody(id))
+                    .as("the evidence is still in the database, only unfindable")
+                    .contains("hunter2");
+        }
+
+        @Test
+        void anEditedMessageIsFoundByItsNewText() {
+            chat.post(ticketThread, ravi, "the depolyment failed");
+            long id = idOfLatest();
+
+            chat.edit(ticketThread, id, ravi, "the deployment failed");
+
+            assertThat(bodies(search(ravi, "deployment"))).containsExactly("the deployment failed");
+            assertThat(search(ravi, "depolyment")).isEmpty();
+        }
+
+        @Test
+        void searchSpansEverySurfaceYouAreIn() {
+            chat.post(ticketThread, ravi, "deployment on the ticket");
+            chat.post(directThread, ravi, "deployment in a DM");
+            chat.post(projectThread, ravi, "deployment in the channel");
+
+            assertThat(search(ravi, "deployment")).hasSize(3);
+        }
+
+        @Test
+        void searchCanBeNarrowedToOneThread() {
+            chat.post(ticketThread, ravi, "deployment on the ticket");
+            chat.post(directThread, ravi, "deployment in a DM");
+
+            assertThat(bodies(chat.search(ravi, "deployment", directThread, null, 25).data()))
+                    .containsExactly("deployment in a DM");
+        }
+
+        @Test
+        @DisplayName("a hit names its thread, because it is read out of context")
+        void aHitCarriesItsThread() {
+            chat.post(ticketThread, ravi, "deployment done");
+
+            assertThat(search(ravi, "deployment")).singleElement().satisfies(hit -> {
+                assertThat(hit.threadId()).isEqualTo(ticketThread);
+                assertThat(hit.threadKind()).isEqualTo(ChatKind.TICKET);
+                assertThat(hit.ticketId()).isEqualTo("ITC-26-00001");
+                assertThat(hit.author().displayName()).isEqualTo("Ravi Kumar");
+            });
+        }
+
+        @Test
+        @DisplayName("a direct message says what it is rather than inventing a title")
+        void directMessagesAreNamedHonestly() {
+            chat.post(directThread, ravi, "deployment chat");
+
+            assertThat(search(ravi, "deployment")).singleElement()
+                    .satisfies(hit -> assertThat(hit.threadTitle()).isEqualTo("Direct message"));
+        }
+
+        @Test
+        void resultsAreNewestFirstAndPageBackwards() {
+            chat.post(ticketThread, ravi, "deployment one");
+            chat.post(ticketThread, ravi, "deployment two");
+            chat.post(ticketThread, ravi, "deployment three");
+
+            ChatService.SearchPage first = chat.search(ravi, "deployment", null, null, 2);
+            assertThat(bodies(first.data())).containsExactly("deployment three", "deployment two");
+            assertThat(first.meta().hasMore()).isTrue();
+
+            ChatService.SearchPage second = chat.search(
+                    ravi, "deployment", null, Long.valueOf(first.meta().nextCursor()), 2);
+            assertThat(bodies(second.data())).containsExactly("deployment one");
+            assertThat(second.meta().hasMore()).isFalse();
+            assertThat(second.meta().nextCursor()).isNull();
+        }
+
+        @Test
+        @DisplayName("a query this index cannot serve is empty, not an error")
+        void anUnusableQueryReturnsNothing() {
+            chat.post(ticketThread, ravi, "deployment done");
+
+            assertThat(search(ravi, "")).isEmpty();
+            assertThat(search(ravi, "!!!")).isEmpty();
+            assertThat(search(ravi, null)).isEmpty();
+            // Below innodb_ft_min_token_size, so unfindable rather than absent.
+            assertThat(search(ravi, "qa")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("our minimum term length still matches the server's")
+        void theTermFloorMatchesTheServer() {
+            // If somebody lowers innodb_ft_min_token_size in my.cnf and
+            // ChatSearch stays at 3, search silently keeps discarding words it
+            // could now find — and nothing else would ever report it.
+            assertThat(ChatSearch.MIN_TERM_LENGTH).isEqualTo(
+                    jdbc.queryForObject("SELECT @@innodb_ft_min_token_size", Integer.class));
+        }
+
+        private List<ChatDtos.ChatSearchHit> search(long userId, String query) {
+            return chat.search(userId, query, null, null, 25).data();
+        }
+
+        private List<String> bodies(List<ChatDtos.ChatSearchHit> hits) {
+            return hits.stream().map(ChatDtos.ChatSearchHit::body).toList();
         }
     }
 

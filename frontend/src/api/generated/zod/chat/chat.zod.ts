@@ -88,6 +88,51 @@ export const listChatThreadsResponse = zod.object({
 })
 
 /**
+ * Scoped to threads the caller participates in — search is the one chat surface with no thread id in the request, so nothing else narrows it. Deleted messages never match: their body survives in the row and is withheld on read, and a search that returned it would be the one path around the tombstone.
+
+Results are ordered by recency, not relevance. Chat search is "find the thing we said", and a relevance order would need an offset cursor since a score is not monotonic in id.
+
+Words shorter than the server's `innodb_ft_min_token_size` (3 by default) are not indexed and are ignored. A query with nothing longer than that returns an empty page rather than an error.
+
+ * @summary Search your own conversations (S-25)
+ */
+export const searchChatMessagesQueryLimitDefault = 50;
+export const searchChatMessagesQueryLimitMax = 200;
+
+
+
+export const searchChatMessagesQueryParams = zod.object({
+  "q": zod.string().optional().describe('Free text. Every word must appear and a partial word matches; boolean-mode operators are stripped rather than honoured.\n'),
+  "threadId": zod.number().optional().describe('Restrict to one conversation. Omit to search all of yours.'),
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(searchChatMessagesQueryLimitMax).default(searchChatMessagesQueryLimitDefault)
+})
+
+export const searchChatMessagesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "messageId": zod.number().optional(),
+  "threadId": zod.number().optional(),
+  "threadKind": zod.enum(['TICKET', 'DIRECT', 'PROJECT']).optional(),
+  "threadTitle": zod.string().nullish(),
+  "ticketId": zod.string().nullish().describe('Ticket code, not the row id.'),
+  "body": zod.string().optional(),
+  "author": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "createdAt": zod.string().datetime({}).optional()
+}).describe('A message found out of context, so it names its thread. Deliberately not a `ChatMessage`: a hit carries no `readBy`, `mentions` or `editableUntil` — each would cost a query to populate honestly, and would be an empty lie otherwise.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+}).optional()
+})
+
+/**
  * @summary Messages, newest first
  */
 export const listChatMessagesParams = zod.object({
