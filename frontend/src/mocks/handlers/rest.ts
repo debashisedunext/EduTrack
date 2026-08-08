@@ -472,8 +472,8 @@ export const restHandlers = [
       unreadCount: db.notifications.filter((n) => n.userId === db.currentUserId && !n.isRead).length,
     });
   }),
-  http.patch(url('/notifications/:id/read'), ({ params }) => {
-    const n = getDb().notifications.find((x) => x.id === Number(params.id));
+  http.patch(url('/notifications/:notificationId/read'), ({ params }) => {
+    const n = getDb().notifications.find((x) => x.id === Number(params.notificationId));
     if (!n) return notFound('Notification');
     n.isRead = true;
     return noContent();
@@ -524,6 +524,84 @@ export const restHandlers = [
     db.chatMessages.push(m);
     thread.lastMessageAt = m.createdAt;
     return ok(messageDto(m), undefined, { status: 201 });
+  }),
+
+  /**
+   * D-053 search. Mirrors the two rules the backend enforces, because a mock
+   * that is more permissive than the server teaches the UI a behaviour it will
+   * later lose: **deleted messages never match**, and words shorter than
+   * `innodb_ft_min_token_size` are ignored.
+   */
+  http.get(url('/chat/messages/search'), ({ request }) => {
+    const db = getDb();
+    const query = new URL(request.url).searchParams;
+    const threadId = query.get('threadId');
+    const terms = (query.get('q') ?? '')
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}\p{M}_]+/u)
+      .filter((term) => term.length >= 3);
+
+    const hits = terms.length === 0 ? [] : db.chatMessages
+      .filter((m) => !m.isDeleted)
+      .filter((m) => !threadId || m.threadId === Number(threadId))
+      .filter((m) => terms.every((term) => m.body.toLowerCase().includes(term)))
+      .sort((a, b) => b.id - a.id)
+      .map((m) => {
+        const thread = db.chatThreads.find((t) => t.id === m.threadId);
+        return {
+          messageId: m.id,
+          threadId: m.threadId,
+          threadKind: thread?.kind ?? 'TICKET',
+          threadTitle: thread?.title ?? 'Direct message',
+          ticketId: thread?.ticketId ?? null,
+          body: m.body,
+          author: userRef(m.authorId, db),
+          createdAt: m.createdAt,
+        };
+      });
+
+    const { page, meta } = paginate(hits, new URL(request.url));
+    return ok(page, meta);
+  }),
+
+  /**
+   * D-057. Author-only inside five minutes — 404 when it is not yours (a 409
+   * would confirm the message exists and who wrote it), 409 only once your own
+   * message has aged out.
+   */
+  http.patch(url('/chat/threads/:threadId/messages/:messageId'), async ({ params, request }) => {
+    const db = getDb();
+    const m = db.chatMessages.find(
+      (x) => x.id === Number(params.messageId) && x.threadId === Number(params.threadId),
+    );
+    if (!m || m.authorId !== db.currentUserId) return notFound('Message');
+
+    const { body } = (await request.json()) as { body: string };
+    if (!body?.trim()) return validationFailed({ body: ['must not be blank'] });
+    if (m.isDeleted) {
+      return problem(409, 'chat-message-immutable', 'the message was deleted');
+    }
+    if (Date.now() - Date.parse(m.createdAt) > 5 * 60_000) {
+      return problem(409, 'chat-message-immutable', 'the five-minute edit window has closed');
+    }
+
+    m.body = body;
+    m.isEdited = true;
+    return ok(messageDto(m));
+  }),
+
+  /** D-057. A tombstone: the row survives, the words are withheld on read. */
+  http.delete(url('/chat/threads/:threadId/messages/:messageId'), ({ params }) => {
+    const db = getDb();
+    const m = db.chatMessages.find(
+      (x) => x.id === Number(params.messageId) && x.threadId === Number(params.threadId),
+    );
+    if (!m || m.authorId !== db.currentUserId) return notFound('Message');
+
+    // Idempotent, and deliberately not time-limited: the window stops anyone
+    // rewriting what was said, while a tombstone adds to the record.
+    m.isDeleted = true;
+    return ok(messageDto(m));
   }),
 
   // ── webhooks & audit ──────────────────────────────────────────────────────
@@ -588,7 +666,10 @@ function clientDto(c: import('../db').Client) {
 
 function messageDto(m: import('../db').ChatMessage) {
   return {
-    id: m.id, body: m.body, author: userRef(m.authorId), kind: m.kind,
+    // The tombstone: the row is still here, the words are not (D-057). A mock
+    // that kept returning the body would let the UI render deleted messages
+    // and only break against the real server.
+    id: m.id, body: m.isDeleted ? null : m.body, author: userRef(m.authorId), kind: m.kind,
     isEdited: m.isEdited, isDeleted: m.isDeleted,
     editableUntil: new Date(Date.parse(m.createdAt) + 5 * 60_000).toISOString(),
     attachments: [], readBy: m.readBy, createdAt: m.createdAt,
