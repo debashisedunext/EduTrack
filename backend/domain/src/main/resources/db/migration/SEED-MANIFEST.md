@@ -43,6 +43,7 @@ environment, always.
 | 12 | `V20260807_1500__email_suppressions.sql` | D | D-034 | schema | `email_suppressions` |
 | 13 | `V20260807_1700__seed_workflow_templates_stages.sql` | B | B-004 | **seed** | 3 templates · 18 stages |
 | 14 | `V20260808_1000__chat_project_channels_and_message_lifecycle.sql` | D | D-050 | schema | Project channels; the message edit window and tombstones |
+| 15 | `V20260808_1200__chat_message_search.sql` | D | D-053 | schema | `FULLTEXT` on `chat_messages.body` |
 | 15 | `V20260808_1400__fix_workflow_transitions_support_role_code.sql` | B | B-003 | correction | `workflow_transitions`: 13 rows, `SUPPORT_DESK` → `SUPPORT` |
 
 <!-- load-order:end -->

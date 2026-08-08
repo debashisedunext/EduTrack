@@ -66,6 +66,19 @@ class ChatController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @GetMapping(path = "/messages/search", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "searchChatMessages",
+            summary = "Search your own conversations (S-25)")
+    SearchResponse search(Authentication authentication,
+                          @RequestParam(name = "q", required = false) String q,
+                          @RequestParam(required = false) Long threadId,
+                          @RequestParam(required = false) String cursor,
+                          @RequestParam(required = false) Integer limit) {
+        ChatService.SearchPage page = chat.search(
+                CurrentUser.idOf(authentication), q, threadId, parseCursor(cursor), clamp(limit));
+        return new SearchResponse(page.data(), page.meta());
+    }
+
     @PostMapping(path = "/threads/{threadId}/messages",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
@@ -150,5 +163,24 @@ class ChatController {
     }
 
     record MessageResponse(ChatDtos.ChatMessage data) {
+    }
+
+    record SearchResponse(List<ChatDtos.ChatSearchHit> data, ChatDtos.SearchMeta meta) {
+    }
+
+    /**
+     * A cursor we did not issue is treated as no cursor rather than a 400.
+     * Search is a place people arrive with a hand-edited URL, and starting from
+     * the top is a better answer there than an error page.
+     */
+    private static Long parseCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(cursor.trim());
+        } catch (NumberFormatException malformed) {
+            return null;
+        }
     }
 }
