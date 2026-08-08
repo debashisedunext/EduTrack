@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -40,6 +41,9 @@ class AuthControllerTest {
     @MockitoBean
     AuthenticationService authentication;
 
+    @MockitoBean
+    AccessTokenIssuer tokens;
+
     private static final String VALID_BODY = """
             {"username":"asha.rao","password":"Correct-Horse-1!"}
             """;
@@ -51,6 +55,8 @@ class AuthControllerTest {
                 .thenReturn(new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                         "DEVELOPER", "Asia/Kolkata", false,
                         List.of("ticket.read"), List.of(11L), List.of()));
+        when(tokens.issue(any(AuthenticatedUser.class)))
+                .thenReturn(new AccessToken("header.payload.signature", 900));
 
         mvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -61,25 +67,24 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.data.user.role").value("DEVELOPER"))
                 .andExpect(jsonPath("$.data.user.permissions[0]").value("ticket.read"))
                 .andExpect(jsonPath("$.data.user.projectIds[0]").value(11))
-                .andExpect(jsonPath("$.data.mustChangePassword").value(false));
+                .andExpect(jsonPath("$.data.mustChangePassword").value(false))
+                .andExpect(jsonPath("$.data.accessToken").value("header.payload.signature"))
+                .andExpect(jsonPath("$.data.expiresIn").value(900));
     }
 
     @Test
-    @DisplayName("no token field is present until A-022 issues one")
-    void omitsTheTokenFieldEntirely() throws Exception {
-        when(authentication.authenticate(anyString(), anyString()))
-                .thenReturn(new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
-                        "DEVELOPER", "Asia/Kolkata", false, List.of(), List.of(), List.of()));
+    @DisplayName("the token minted for this login, not a stale one, is what the response carries")
+    void carriesExactlyTheMintedToken() throws Exception {
+        AuthenticatedUser user = new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
+                "DEVELOPER", "Asia/Kolkata", false, List.of(), List.of(), List.of());
+        when(authentication.authenticate(anyString(), anyString())).thenReturn(user);
+        when(tokens.issue(user)).thenReturn(new AccessToken("this-users-token", 900));
 
-        // Absent, not null. A client that sees `"accessToken": null` has to
-        // special-case it; a client that sees no key at all fails at the point
-        // it reads the field, which is where the missing task is visible.
         mvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.accessToken").doesNotExist())
-                .andExpect(jsonPath("$.data.expiresIn").doesNotExist());
+                .andExpect(jsonPath("$.data.accessToken").value("this-users-token"));
     }
 
     @Test

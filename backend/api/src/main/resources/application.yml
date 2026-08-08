@@ -111,6 +111,18 @@ springdoc:
       enabled: false
 
 edutrack:
+  jwt:
+    # A-022 · HS256. NimbusJwtEncoder rejects anything under 256 bits, so this
+    # placeholder is deliberately long — shortening it fails startup, not login.
+    # Committed default is fine for `local`/CI; every other environment MUST
+    # override via JWT_SIGNING_SECRET, the same way DB and mail credentials do.
+    secret: ${JWT_SIGNING_SECRET:local-dev-only-jwt-signing-secret-change-me-in-every-other-environment}
+    # A URL, not a bare word — Jwt.getIssuer() parses `iss` as one, and this
+    # matches the stable https://edutrack/... identifiers AuthExceptionHandler
+    # already uses for problem `type` URIs.
+    issuer: https://edutrack
+    access-token-ttl: PT15M       # 900s, per blueprint §10.1
+
   storage:
     endpoint: ${S3_ENDPOINT:http://localhost:9000}
     bucket: ${S3_BUCKET:edutrack}
