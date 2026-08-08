@@ -105,6 +105,31 @@ class ChatRepository {
             """;
 
     /**
+     * D-013 · does this user have a thread anchored to this room?
+     *
+     * <p>{@code EXISTS} rather than {@code COUNT}: the question is whether there
+     * is at least one, and this runs on every SUBSCRIBE. A user in forty threads
+     * on a ticket should not cost forty rows to answer once.
+     */
+    private static final String PARTICIPATES_IN_TICKET_THREAD = """
+            SELECT EXISTS (
+              SELECT 1
+                FROM chat_threads t
+                JOIN chat_participants cp
+                  ON cp.thread_id = t.id AND cp.user_id = :userId
+               WHERE t.ticket_id = :ticketId AND t.is_active = 1)
+            """;
+
+    private static final String PARTICIPATES_IN_PROJECT_THREAD = """
+            SELECT EXISTS (
+              SELECT 1
+                FROM chat_threads t
+                JOIN chat_participants cp
+                  ON cp.thread_id = t.id AND cp.user_id = :userId
+               WHERE t.project_id = :projectId AND t.is_active = 1)
+            """;
+
+    /**
      * D-051 · every participant's read cursor for one thread.
      *
      * <p>Read receipts are derived from the cursor rather than stored per
@@ -367,6 +392,22 @@ class ChatRepository {
 
     List<Long> participantIds(long threadId) {
         return jdbc.sql(PARTICIPANT_IDS).param("threadId", threadId).query(Long.class).list();
+    }
+
+    boolean participatesInTicketThread(long userId, long ticketId) {
+        return Boolean.TRUE.equals(jdbc.sql(PARTICIPATES_IN_TICKET_THREAD)
+                .param("userId", userId)
+                .param("ticketId", ticketId)
+                .query(Boolean.class)
+                .single());
+    }
+
+    boolean participatesInProjectThread(long userId, long projectId) {
+        return Boolean.TRUE.equals(jdbc.sql(PARTICIPATES_IN_PROJECT_THREAD)
+                .param("userId", userId)
+                .param("projectId", projectId)
+                .query(Boolean.class)
+                .single());
     }
 
     /** Empty when there is no such message, or it is not the caller's own. */

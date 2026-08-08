@@ -66,6 +66,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.test.context.ActiveProfiles({"local", "dev-noauth"})
 @EnableAutoConfiguration(exclude = {
         HibernateJpaAutoConfiguration.class,
         JpaRepositoriesAutoConfiguration.class,
@@ -74,6 +75,29 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RealtimeRelayIT {
 
     private static final String TICKET_TOPIC = "/topic/ticket.4471";
+
+    /**
+     * D-013 · this test now has to get past the subscription guard to do its
+     * own job, which makes it a second, independent proof of two things: that
+     * the {@code dev-noauth} principal survives the WebSocket handshake, and
+     * that the interceptor is genuinely wired onto the inbound channel.
+     *
+     * <p>Granting exactly one ticket rather than everything, so the allow path
+     * is a real decision and not a bypass.
+     */
+    @org.springframework.boot.test.context.TestConfiguration
+    static class GrantTheTestRoom {
+
+        @org.springframework.context.annotation.Bean
+        SubscriptionScope grantTicket4471() {
+            return new SubscriptionScope() {
+                @Override
+                public boolean mayObserveTicket(long userId, long ticketId) {
+                    return ticketId == 4471L;
+                }
+            };
+        }
+    }
 
     @Container
     static final GenericContainer<?> REDIS =

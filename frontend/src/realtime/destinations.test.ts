@@ -3,8 +3,8 @@ import {
   managerTopic,
   projectTopic,
   stageTopic,
+  ownQueue,
   ticketTopic,
-  userQueue,
 } from './destinations';
 
 /**
@@ -14,7 +14,7 @@ import {
  */
 describe('destinations', () => {
   it('builds every §9.3 room', () => {
-    expect(userQueue(12)).toBe('/user/12/queue/events');
+    expect(ownQueue()).toBe('/user/queue/events');
     expect(ticketTopic(4471)).toBe('/topic/ticket.4471');
     expect(stageTopic('QA', 7)).toBe('/topic/stage.QA.7');
     expect(projectTopic(7)).toBe('/topic/project.7');
@@ -34,6 +34,6 @@ describe('destinations', () => {
     expect(() => ticketTopic(0)).toThrow(/positive/);
     expect(() => ticketTopic(-1)).toThrow(/positive/);
     expect(() => projectTopic(1.5)).toThrow(/positive/);
-    expect(() => userQueue(Number.NaN)).toThrow(/positive/);
+    expect(() => managerTopic(Number.NaN)).toThrow(/positive/);
   });
 });
