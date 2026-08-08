@@ -77,7 +77,7 @@
 
 ## M7 — Chat & realtime · weeks 12–16
 
-- [ ] **D-050** Chat engine, three surfaces one engine: ticket thread, direct message, project channel. **S-25**
+- [x] **D-050** Chat engine, three surfaces one engine: ticket thread, direct message, project channel. **S-25** — *`api/feature/chat/`. `ChatService.destinationsFor` is the only place the three surfaces differ — ticket → `/topic/ticket.{id}`, project → `/topic/project.{id}`, DM → one `/user/{id}/queue/events` per participant, because there is no room only those two people are in and inventing one means either a topic anybody can subscribe to or a second rule for D-013 to get wrong. **Membership is the authorisation**: every entry point resolves the thread and the caller together, so a thread you are not in is indistinguishable from one that does not exist — 404, never 403, since a 403 on a DM confirms two named people are talking. Needs no ScopeResolver; `chat_participants` is explicit. Migration adds `project_id` (two of three surfaces were unrepresentable) and `edited_at`/`deleted_at`/`kind`, plus a CHECK that a thread has exactly one anchor — without it a project channel could carry a ticket and be delivered to the wrong room. `ChatEngineIT` proves all three addressings, non-participant blindness, unread counts including the never-opened-thread NULL trap, that paging backwards does not mark the tail read, and the tombstone. **Backend only** — the React surfaces need D-015 merged.*
 - [ ] **D-051** Typing indicator, read receipts, unread counts.
 - [ ] **D-052** `@mentions` firing notifications.
 - [ ] **D-053** File and image share, emoji, message search.
