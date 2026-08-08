@@ -54,7 +54,7 @@ import * as zod from 'zod';
 
  * @summary Ribbon segments for a cycle
  */
-export const getRibbonPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const getRibbonPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const getRibbonParams = zod.object({
@@ -119,7 +119,7 @@ per-resource roll-up is fiction within a month.
 
  * @summary Advance to the next stage (S-29)
  */
-export const handoffTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const handoffTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const handoffTicketParams = zod.object({
@@ -189,7 +189,7 @@ original commitment stands, and rework is what `iterationNo` measures.
 
  * @summary Send the ticket backwards
  */
-export const reworkTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const reworkTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const reworkTicketParams = zod.object({
@@ -251,7 +251,7 @@ ribbon makes the history unreadable later.
 
  * @summary Skip an optional stage — PM and Admin only
  */
-export const skipStagePathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const skipStagePathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const skipStageParams = zod.object({
@@ -322,7 +322,7 @@ export const getStageQueueQueryParams = zod.object({
   "limit": zod.number().min(1).max(getStageQueueQueryLimitMax).default(getStageQueueQueryLimitDefault)
 })
 
-export const getStageQueueResponseDataItemTicketTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const getStageQueueResponseDataItemTicketTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const getStageQueueResponseDataItemTicketProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -334,7 +334,7 @@ export const getStageQueueResponseDataItemTicketPctCompleteMax = 100;
 export const getStageQueueResponse = zod.object({
   "data": zod.array(zod.object({
   "ticket": zod.object({
-  "ticketId": zod.string().regex(getStageQueueResponseDataItemTicketTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(getStageQueueResponseDataItemTicketTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({

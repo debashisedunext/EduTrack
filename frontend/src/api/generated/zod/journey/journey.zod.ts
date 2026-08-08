@@ -62,7 +62,7 @@ a reopen — a defect in the blueprint's own query, corrected in PLAN.md §3.4.
 
  * @summary Per-stage, per-resource effort roll-up (§4A.4)
  */
-export const getJourneyPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const getJourneyPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const getJourneyParams = zod.object({

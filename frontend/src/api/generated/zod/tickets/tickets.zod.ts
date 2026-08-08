@@ -80,7 +80,7 @@ export const listTicketsQueryParams = zod.object({
   "sort": zod.string().default(listTicketsQuerySortDefault)
 })
 
-export const listTicketsResponseDataItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const listTicketsResponseDataItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const listTicketsResponseDataItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -91,7 +91,7 @@ export const listTicketsResponseDataItemPctCompleteMax = 100;
 
 export const listTicketsResponse = zod.object({
   "data": zod.array(zod.object({
-  "ticketId": zod.string().regex(listTicketsResponseDataItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(listTicketsResponseDataItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
@@ -206,7 +206,7 @@ export const bulkReassignTicketsHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
 })
 
-export const bulkReassignTicketsBodyTicketIdsItemRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const bulkReassignTicketsBodyTicketIdsItemRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const bulkReassignTicketsBodyTicketIdsMax = 500;
 
 export const bulkReassignTicketsBodyReasonMin = 3;
@@ -215,12 +215,12 @@ export const bulkReassignTicketsBodyReasonMax = 500;
 
 
 export const bulkReassignTicketsBody = zod.object({
-  "ticketIds": zod.array(zod.string().regex(bulkReassignTicketsBodyTicketIdsItemRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.')).min(1).max(bulkReassignTicketsBodyTicketIdsMax),
+  "ticketIds": zod.array(zod.string().regex(bulkReassignTicketsBodyTicketIdsItemRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n')).min(1).max(bulkReassignTicketsBodyTicketIdsMax),
   "toUserId": zod.number(),
   "reason": zod.string().min(bulkReassignTicketsBodyReasonMin).max(bulkReassignTicketsBodyReasonMax)
 })
 
-export const bulkReassignTicketsResponseDataResultsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const bulkReassignTicketsResponseDataResultsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const bulkReassignTicketsResponse = zod.object({
@@ -228,7 +228,7 @@ export const bulkReassignTicketsResponse = zod.object({
   "succeeded": zod.number().optional(),
   "failed": zod.number().optional(),
   "results": zod.array(zod.object({
-  "ticketId": zod.string().regex(bulkReassignTicketsResponseDataResultsItemTicketIdRegExp).optional().describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(bulkReassignTicketsResponseDataResultsItemTicketIdRegExp).optional().describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "ok": zod.boolean().optional(),
   "reason": zod.string().nullish()
 })).optional()
@@ -242,7 +242,7 @@ with the old and new value.
 
  * @summary Update ticket fields
  */
-export const updateTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const updateTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const updateTicketParams = zod.object({
@@ -273,7 +273,7 @@ export const updateTicketBody = zod.object({
   "plannedCloseDateReason": zod.string().optional().describe('Mandatory when moving the date after assignment; PM and Admin only.')
 })
 
-export const updateTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const updateTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const updateTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -284,7 +284,7 @@ export const updateTicketResponseDataPctCompleteMax = 100;
 
 export const updateTicketResponse = zod.object({
   "data": zod.object({
-  "ticketId": zod.string().regex(updateTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(updateTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
@@ -353,7 +353,7 @@ page feel slow, not the payload size.
 
  * @summary Ticket detail in one call
  */
-export const getTicketDetailPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const getTicketDetailPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const getTicketDetailParams = zod.object({
@@ -371,7 +371,7 @@ export const getTicketDetailHeader = zod.object({
   "If-None-Match": zod.string().optional()
 })
 
-export const getTicketDetailResponseDataTicketTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const getTicketDetailResponseDataTicketTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const getTicketDetailResponseDataTicketProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -383,7 +383,7 @@ export const getTicketDetailResponseDataTicketPctCompleteMax = 100;
 export const getTicketDetailResponse = zod.object({
   "data": zod.object({
   "ticket": zod.object({
-  "ticketId": zod.string().regex(getTicketDetailResponseDataTicketTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(getTicketDetailResponseDataTicketTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
@@ -611,7 +611,7 @@ appear in the journey roll-up. Only a handoff advances the ribbon.
 
  * @summary Assign or reassign within the current stage
  */
-export const assignTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const assignTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const assignTicketParams = zod.object({
@@ -627,7 +627,7 @@ export const assignTicketBody = zod.object({
   "note": zod.string().max(assignTicketBodyNoteMax).optional()
 })
 
-export const assignTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const assignTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const assignTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -638,7 +638,7 @@ export const assignTicketResponseDataPctCompleteMax = 100;
 
 export const assignTicketResponse = zod.object({
   "data": zod.object({
-  "ticketId": zod.string().regex(assignTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(assignTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
@@ -709,7 +709,7 @@ asks. Writes `LEVEL_CHANGED`.
 
  * @summary Change the priority level
  */
-export const changeTicketPriorityPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const changeTicketPriorityPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const changeTicketPriorityParams = zod.object({
@@ -725,7 +725,7 @@ export const changeTicketPriorityBody = zod.object({
   "reason": zod.string().max(changeTicketPriorityBodyReasonMax).optional()
 })
 
-export const changeTicketPriorityResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const changeTicketPriorityResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const changeTicketPriorityResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -736,7 +736,7 @@ export const changeTicketPriorityResponseDataPctCompleteMax = 100;
 
 export const changeTicketPriorityResponse = zod.object({
   "data": zod.object({
-  "ticketId": zod.string().regex(changeTicketPriorityResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(changeTicketPriorityResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
@@ -804,7 +804,7 @@ right journey row with no user action.
 
  * @summary Status, effort, note and ETA in one call (S-21)
  */
-export const quickUpdateTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const quickUpdateTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const quickUpdateTicketParams = zod.object({
@@ -838,7 +838,7 @@ export const quickUpdateTicketBody = zod.object({
   "attachmentIds": zod.array(zod.number()).optional()
 }).describe('Deliberately narrow. It must \*\*not\*\* expose ticket ID, reported by,\nassigned by, date reported, cycle history, the ribbon, prior effort logs,\nproject, or level unless the caller is a PM — the whole point is two\nclicks, not a second detail page.\n')
 
-export const quickUpdateTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const quickUpdateTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const quickUpdateTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -849,7 +849,7 @@ export const quickUpdateTicketResponseDataPctCompleteMax = 100;
 
 export const quickUpdateTicketResponse = zod.object({
   "data": zod.object({
-  "ticketId": zod.string().regex(quickUpdateTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(quickUpdateTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
@@ -923,7 +923,7 @@ attribute effort to the wrong stage.
 
  * @summary Append an effort log
  */
-export const logEffortPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const logEffortPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const logEffortParams = zod.object({
@@ -955,7 +955,7 @@ by design.** See `POST /tickets/{ticketId}/effort`.
 
  * @summary Effort log — read only
  */
-export const listEffortLogsPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const listEffortLogsPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const listEffortLogsParams = zod.object({
@@ -1017,7 +1017,7 @@ reader has to reconcile by timestamp is the thing this avoids.
 
  * @summary History — read only, cycle-grouped
  */
-export const listTicketHistoryPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const listTicketHistoryPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const listTicketHistoryParams = zod.object({
@@ -1074,7 +1074,7 @@ governance decision G-3.
 
  * @summary Mark resolved
  */
-export const resolveTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const resolveTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const resolveTicketParams = zod.object({
@@ -1093,7 +1093,7 @@ export const resolveTicketBody = zod.object({
   "rootCauseCategory": zod.string().max(resolveTicketBodyRootCauseCategoryMax).optional()
 })
 
-export const resolveTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const resolveTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const resolveTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -1104,7 +1104,7 @@ export const resolveTicketResponseDataPctCompleteMax = 100;
 
 export const resolveTicketResponse = zod.object({
   "data": zod.object({
-  "ticketId": zod.string().regex(resolveTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(resolveTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
@@ -1169,7 +1169,7 @@ export const resolveTicketResponse = zod.object({
  * Stamps `actualCloseDate` and seals the open stage transition.
  * @summary Close the current cycle (S-23)
  */
-export const closeTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const closeTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const closeTicketParams = zod.object({
@@ -1191,7 +1191,7 @@ export const closeTicketBody = zod.object({
   "requestClientVerification": zod.boolean().optional()
 })
 
-export const closeTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const closeTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const closeTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -1202,7 +1202,7 @@ export const closeTicketResponseDataPctCompleteMax = 100;
 
 export const closeTicketResponse = zod.object({
   "data": zod.object({
-  "ticketId": zod.string().regex(closeTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(closeTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
@@ -1275,7 +1275,7 @@ totals.
 
  * @summary Reopen — seal cycle N, open cycle N+1 (S-22)
  */
-export const reopenTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const reopenTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const reopenTicketParams = zod.object({
@@ -1299,7 +1299,7 @@ export const reopenTicketBody = zod.object({
   "estimatedHrs": zod.number().nullish()
 })
 
-export const reopenTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const reopenTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const reopenTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -1310,7 +1310,7 @@ export const reopenTicketResponseDataPctCompleteMax = 100;
 
 export const reopenTicketResponse = zod.object({
   "data": zod.object({
-  "ticketId": zod.string().regex(reopenTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.'),
+  "ticketId": zod.string().regex(reopenTicketResponseDataTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
   "description": zod.string().optional(),
   "project": zod.object({
@@ -1378,7 +1378,7 @@ product rather than buried in a provider dashboard.
 
  * @summary Mail delivery log for this ticket
  */
-export const listTicketEmailsPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const listTicketEmailsPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const listTicketEmailsParams = zod.object({
@@ -1422,7 +1422,7 @@ thing worth measuring, not just the ask.
 
  * @summary Request a status update from the assignee
  */
-export const askTicketStatusPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const askTicketStatusPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const askTicketStatusParams = zod.object({

@@ -52,7 +52,7 @@ import * as zod from 'zod';
 /**
  * @summary List comments
  */
-export const listCommentsPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const listCommentsPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const listCommentsParams = zod.object({
@@ -138,7 +138,7 @@ time of writing, so the comment stays meaningful when read months later.
 
  * @summary Post a comment
  */
-export const createCommentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const createCommentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const createCommentParams = zod.object({
@@ -170,7 +170,7 @@ keeps the thread admissible as evidence.
 
  * @summary Edit within the five-minute window
  */
-export const editCommentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const editCommentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const editCommentParams = zod.object({
@@ -242,7 +242,7 @@ export const editCommentResponse = zod.object({
  * The row survives with `isDeleted`; the body is cleared. Nothing vanishes.
  * @summary Delete a comment, leaving a tombstone
  */
-export const deleteCommentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5}$');
+export const deleteCommentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const deleteCommentParams = zod.object({

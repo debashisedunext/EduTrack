@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { getDb, resetDb } from './db';
 import { http, ApiError } from '../api/http';
+import { getTicketDetailPathTicketIdRegExp } from '../api/generated/zod/tickets/tickets.zod';
 
 /**
  * The mock API is what Streams B and C build against for the next four weeks.
@@ -240,7 +241,16 @@ describe('conventions hold at runtime, not just in the document', () => {
     const created = await post<Envelope<{ ticketId: string; originalLevel: string }>>('/tickets', {
       projectId: 1, title: 'Mock-created ticket', taskTypeId: 2, level: 'HIGH',
     });
-    expect(created.data.ticketId).toMatch(/^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5}$/);
+    // The generated constant, not a copied literal. This assertion claims to
+    // check "the contract format", so it must fail when the contract moves — a
+    // hand-written copy silently keeps asserting last month's rules, and this
+    // one did: \d{5}, exactly five digits, which C-011 widened to \d{5,}
+    // because ticket_seq never resets at year rollover.
+    //
+    // Deliberately the *path* pattern. A new ticket whose ID the detail route
+    // cannot address is created, stored, and unreachable — which is the failure
+    // the widening exists to prevent, and the one worth asserting here.
+    expect(created.data.ticketId).toMatch(getTicketDetailPathTicketIdRegExp);
     expect(created.data.originalLevel).toBe('HIGH');
 
     // And it is really in the list, not just echoed back.

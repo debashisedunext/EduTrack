@@ -49,6 +49,16 @@ the database rejects mutation independently via triggers and grants.
 
 /**
  * `{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.
- * @pattern ^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5}$
+
+**Five digits is a minimum width, not a maximum** (`\d{5,}`, not `\d{5}`).
+`projects.ticket_seq` is a per-project counter that does not reset at year
+rollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually
+issues `CRM-30-100000`. Because this schema also types the `ticketId`
+**path parameter**, an exact `\d{5}` would have made every attachment,
+comment and history call for that ticket fail client-side in the generated
+Zod — the ticket would be created and stored correctly and then be
+unreachable. Narrowing this back is a breaking change, not a tidy-up.
+
+ * @pattern ^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$
  */
 export type TicketId = string;
