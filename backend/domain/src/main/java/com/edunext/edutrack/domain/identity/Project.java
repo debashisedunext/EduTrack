@@ -67,8 +67,25 @@ public class Project {
      * race under concurrency — the allocation is the atomic
      * {@code LAST_INSERT_ID(expr)} statement in PLAN.md §3.2, issued by Stream
      * C's ticket-code generator.
+     *
+     * <p><b>{@code updatable = false} is what makes the sentence above true, and
+     * it must stay.</b> Having no setter does not protect this column: Hibernate
+     * writes <i>every</i> updatable column of a dirty entity, not only the ones
+     * that were touched. So a transaction that loads a Project, renames it, and
+     * allocates a ticket code would flush {@code ticket_seq} back to the value
+     * read <i>before</i> the increment — silently undoing the allocation and
+     * making the next ticket reuse the ID, which then dies on
+     * {@code uq_tickets_code}. Hibernate cannot see the conflict, because the
+     * allocation deliberately runs as raw SQL on the same connection.
+     *
+     * <p>The consequence to know: after an allocation, a managed instance holds
+     * a stale value here. Nothing may act on it — read the counter through
+     * Stream C's {@code TicketSequenceRepository}, never through this getter.
+     *
+     * <p>Guarded by {@code ProjectTicketSeqMappingTest} and reproduced end-to-end
+     * by {@code TicketIdGenerationIT.jpaFlushCannotRevertTheAllocation}.
      */
-    @Column(name = "ticket_seq", nullable = false)
+    @Column(name = "ticket_seq", nullable = false, updatable = false)
     private Long ticketSeq = 0L;
 
     @Generated(event = EventType.INSERT)
