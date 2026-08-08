@@ -1808,10 +1808,21 @@ paths:
         - { $ref: '#/components/parameters/Limit' }
       responses:
         '200':
-          description: OK. `meta.unreadCount` drives the bell badge.
+          description: >
+            OK. `meta.unreadCount` is the caller's total unread, never the count
+            within the current tab — it drives the bell badge, which must not
+            change as you click between tabs.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/NotificationListResponse' }
+        '400':
+          description: >
+            Unknown `tab`, or a `cursor` that did not come from `meta.nextCursor`.
+            An unrecognised tab is rejected rather than treated as `all`, which
+            would show a caller who mistyped it everything and look correct.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /notifications/{notificationId}/read:

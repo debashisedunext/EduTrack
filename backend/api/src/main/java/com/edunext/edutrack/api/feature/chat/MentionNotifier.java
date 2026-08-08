@@ -3,6 +3,7 @@ package com.edunext.edutrack.api.feature.chat;
 import com.edunext.edutrack.api.realtime.RealtimeDestinations;
 import com.edunext.edutrack.api.realtime.RealtimePublisher;
 import com.edunext.edutrack.domain.notifications.NewNotification;
+import com.edunext.edutrack.domain.notifications.NotificationEvent;
 import com.edunext.edutrack.domain.notifications.NotificationWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +34,7 @@ import java.util.Map;
 class MentionNotifier {
 
     /** §11's "@mention in chat/comment". Also the {@code tab=mentions} filter in S-26. */
-    static final String EVENT_CODE = "MENTIONED";
+    static final NotificationEvent EVENT_CODE = NotificationEvent.MENTIONED;
 
     private static final Logger log = LoggerFactory.getLogger(MentionNotifier.class);
 
@@ -93,7 +94,7 @@ class MentionNotifier {
         Map<String, Object> event = new HashMap<>();
         event.put("event", "notification.created");
         event.put("id", notificationId);
-        event.put("eventCode", EVENT_CODE);
+        event.put("eventCode", EVENT_CODE.name());
         event.put("title", title);
         event.put("body", where);
         event.put("link", link);

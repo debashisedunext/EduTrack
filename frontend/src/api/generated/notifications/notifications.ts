@@ -69,6 +69,7 @@ import type {
   ListNotificationsParams,
   NotFoundResponse,
   NotificationListResponse,
+  Problem,
   UnauthorizedResponse
 } from '.././model';
 
@@ -103,7 +104,7 @@ export const getListNotificationsQueryKey = (params?: ListNotificationsParams,) 
     }
 
     
-export const getListNotificationsQueryOptions = <TData = Awaited<ReturnType<typeof listNotifications>>, TError = UnauthorizedResponse>(params?: ListNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>>, }
+export const getListNotificationsQueryOptions = <TData = Awaited<ReturnType<typeof listNotifications>>, TError = Problem | UnauthorizedResponse>(params?: ListNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
@@ -122,10 +123,10 @@ const {query: queryOptions} = options ?? {};
 }
 
 export type ListNotificationsQueryResult = NonNullable<Awaited<ReturnType<typeof listNotifications>>>
-export type ListNotificationsQueryError = UnauthorizedResponse
+export type ListNotificationsQueryError = Problem | UnauthorizedResponse
 
 
-export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = UnauthorizedResponse>(
+export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = Problem | UnauthorizedResponse>(
  params: undefined |  ListNotificationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listNotifications>>,
@@ -135,7 +136,7 @@ export function useListNotifications<TData = Awaited<ReturnType<typeof listNotif
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = UnauthorizedResponse>(
+export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = Problem | UnauthorizedResponse>(
  params?: ListNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listNotifications>>,
@@ -145,7 +146,7 @@ export function useListNotifications<TData = Awaited<ReturnType<typeof listNotif
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = UnauthorizedResponse>(
+export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = Problem | UnauthorizedResponse>(
  params?: ListNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -153,7 +154,7 @@ export function useListNotifications<TData = Awaited<ReturnType<typeof listNotif
  * @summary Notification centre (S-26)
  */
 
-export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = UnauthorizedResponse>(
+export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = Problem | UnauthorizedResponse>(
  params?: ListNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

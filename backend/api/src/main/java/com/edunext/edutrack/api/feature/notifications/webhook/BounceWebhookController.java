@@ -3,6 +3,7 @@ package com.edunext.edutrack.api.feature.notifications.webhook;
 import com.edunext.edutrack.domain.mail.EmailSuppressions;
 import com.edunext.edutrack.domain.mail.EmailSuppressions.SuppressionReason;
 import com.edunext.edutrack.domain.notifications.NewNotification;
+import com.edunext.edutrack.domain.notifications.NotificationEvent;
 import com.edunext.edutrack.domain.notifications.NotificationWriter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -36,7 +37,7 @@ import java.util.Locale;
 @RequestMapping("/api/v1/webhooks/email")
 public class BounceWebhookController {
 
-    static final String EVENT_CODE = "EMAIL_ADDRESS_SUPPRESSED";
+    static final NotificationEvent EVENT_CODE = NotificationEvent.EMAIL_ADDRESS_SUPPRESSED;
     private static final String ADMIN_ROLE = "ADMIN";
 
     private static final Logger log = LoggerFactory.getLogger(BounceWebhookController.class);

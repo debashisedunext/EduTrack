@@ -62,14 +62,14 @@ public class NotificationWriter {
         jdbc.update(INSERT, new MapSqlParameterSource()
                 .addValue("userId", notification.userId())
                 .addValue("ticketId", notification.ticketId())
-                .addValue("eventCode", notification.eventCode())
+                .addValue("eventCode", notification.event().name())
                 .addValue("title", notification.title())
                 .addValue("body", notification.body())
                 .addValue("linkUrl", notification.linkUrl()), key);
         Number id = key.getKey();
         if (id == null) {
             throw new IllegalStateException(
-                    "notifications: no generated key for " + notification.eventCode());
+                    "notifications: no generated key for " + notification.event());
         }
         return id.longValue();
     }
