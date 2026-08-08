@@ -18,6 +18,7 @@ import java.time.Instant;
  * @param lockedUntil when the lock lapses, so the response can say how long
  */
 class AccountLockedException extends RuntimeException {
+    
 
     private final transient Instant lockedUntil;
 
