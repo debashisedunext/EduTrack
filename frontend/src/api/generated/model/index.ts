@@ -122,6 +122,7 @@ export * from './dashboardSummaryResponse';
 export * from './dashboardSummaryResponseData';
 export * from './dashboardSummaryResponseDataCardsItem';
 export * from './dashboardSummaryResponseDataCardsItemDeltaPct';
+export * from './editChatMessageBody';
 export * from './editCommentBody';
 export * from './effortLog';
 export * from './effortLogCorrectsEntryId';

@@ -1899,6 +1899,68 @@ paths:
               schema: { $ref: '#/components/schemas/ChatMessageResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /chat/threads/{threadId}/messages/{messageId}:
+    parameters:
+      - { name: threadId, in: path, required: true, schema: { type: integer, format: int64 } }
+      - { name: messageId, in: path, required: true, schema: { type: integer, format: int64 } }
+    patch:
+      tags: [chat]
+      operationId: editChatMessage
+      summary: Edit a message, inside the five-minute window
+      description: |
+        Author only, and only for five minutes after posting. After that the
+        message is immutable and this returns `409`.
+
+        **This is what keeps chat admissible as project evidence.** A thread
+        anybody can quietly rewrite proves nothing, so the window is a hard
+        limit rather than a UI affordance — the client hides the control after
+        `editableUntil`, and the server refuses regardless.
+
+        No `If-Match`: the author is the only person who can edit, so there is
+        no second writer to lose an update to.
+
+        Not the author, not a participant, or no such message all return `404`.
+        A `403` would confirm the message exists and who wrote it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 20000 }
+      responses:
+        '200':
+          description: Edited. `isEdited` is now true.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatMessageResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [chat]
+      operationId: deleteChatMessage
+      summary: Delete a message, leaving a tombstone
+      description: |
+        The row survives and the body is withheld — `isDeleted` becomes true and
+        `body` becomes null. A conversation that silently loses a message reads
+        as though it never happened, which is exactly what §7.6 guards against.
+
+        Returns the tombstone rather than `204`, so the caller can render the
+        new state without a refetch.
+
+        Unlike editing, this is **not** limited to five minutes: the point of
+        the window is that nobody can rewrite history, and a tombstone adds to
+        the record rather than altering it.
+      responses:
+        '200':
+          description: Deleted. The tombstone.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatMessageResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # ──────────────────────────────────────────────────────── webhooks ─────────
   /webhooks/email/inbound:
     post:

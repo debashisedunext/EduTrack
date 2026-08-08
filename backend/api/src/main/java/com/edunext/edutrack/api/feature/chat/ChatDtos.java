@@ -60,6 +60,13 @@ public final class ChatDtos {
             Instant createdAt) {
     }
 
+    /** Request body for {@code PATCH …/messages/{messageId}} (D-057). */
+    public record EditMessage(
+            @NotBlank
+            @Size(min = 1, max = 20_000)
+            String body) {
+    }
+
     /** Request body for {@code POST /chat/threads/{id}/messages}. */
     public record PostMessage(
             @NotBlank

@@ -276,7 +276,275 @@ class ChatEngineIT {
                 .hasMessageContaining("ck_chat_threads_one_anchor");
     }
 
+    // ------------------------------------------------------ D-057 · immutability
+
+    /**
+     * §7.6 — "immutable after five minutes, deletions leave a tombstone. This
+     * keeps chat admissible as project evidence."
+     *
+     * <p>The property under test is not "editing works". It is that editing
+     * <em>stops</em> working, on time, for everyone, and that nothing removes
+     * what was said.
+     */
+    @org.junit.jupiter.api.Nested
+    class Immutability {
+
+        @Test
+        void theAuthorCanEditInsideTheWindow() {
+            long id = postAndId("frist");
+
+            ChatService.Outcome outcome = chat.edit(ticketThread, id, ravi, "first");
+
+            assertThat(outcome).isInstanceOf(ChatService.Outcome.Applied.class);
+            ChatDtos.ChatMessage edited = ((ChatService.Outcome.Applied) outcome).message();
+            assertThat(edited.body()).isEqualTo("first");
+            assertThat(edited.isEdited()).isTrue();
+        }
+
+        @Test
+        @DisplayName("five minutes later the message is frozen")
+        void theWindowCloses() {
+            long id = postAndId("said in haste");
+            backdate(id, 6);
+
+            ChatService.Outcome outcome = chat.edit(ticketThread, id, ravi, "rewritten at leisure");
+
+            assertThat(outcome).isInstanceOf(ChatService.Outcome.Immutable.class);
+            assertThat(rawBody(id))
+                    .as("a rejected edit must not have written anything")
+                    .isEqualTo("said in haste");
+        }
+
+        @Test
+        @DisplayName("the boundary is the database's clock, not the caller's")
+        void justInsideTheWindowStillEdits() {
+            long id = postAndId("original");
+            backdate(id, 4);
+
+            assertThat(chat.edit(ticketThread, id, ravi, "amended"))
+                    .isInstanceOf(ChatService.Outcome.Applied.class);
+        }
+
+        @Test
+        void nobodyElseCanEditYourMessage() {
+            long id = postAndId("mine");
+
+            // 404, not 403 — a conflict answer would confirm the message
+            // exists and that Ravi wrote it.
+            assertThat(chat.edit(ticketThread, id, meera, "not mine to change"))
+                    .isInstanceOf(ChatService.Outcome.NotFound.class);
+            assertThat(chat.edit(ticketThread, id, outsider, "nor mine"))
+                    .isInstanceOf(ChatService.Outcome.NotFound.class);
+            assertThat(rawBody(id)).isEqualTo("mine");
+        }
+
+        @Test
+        void aDeletedMessageCannotBeEdited() {
+            long id = postAndId("regrettable");
+            chat.delete(ticketThread, id, ravi);
+
+            assertThat(chat.edit(ticketThread, id, ravi, "less regrettable"))
+                    .isInstanceOf(ChatService.Outcome.Immutable.class);
+        }
+
+        @Test
+        @DisplayName("deletion withholds the body but keeps the evidence")
+        void deletionLeavesEverythingButTheWords() {
+            long id = postAndId("something said");
+
+            ChatService.Outcome outcome = chat.delete(ticketThread, id, ravi);
+
+            ChatDtos.ChatMessage tombstone = ((ChatService.Outcome.Applied) outcome).message();
+            assertThat(tombstone.isDeleted()).isTrue();
+            assertThat(tombstone.body()).isNull();
+
+            // The row survives and so does the original text. Withholding it on
+            // read is presentation; destroying it would throw away the record
+            // this rule exists to preserve.
+            assertThat(rawBody(id)).isEqualTo("something said");
+            assertThat(deletedBy(id)).isEqualTo(ravi);
+        }
+
+        @Test
+        @DisplayName("deleting is not limited to five minutes — a tombstone adds to the record")
+        void deletionHasNoWindow() {
+            long id = postAndId("an old message");
+            backdate(id, 120);
+
+            assertThat(chat.delete(ticketThread, id, ravi))
+                    .isInstanceOf(ChatService.Outcome.Applied.class);
+        }
+
+        @Test
+        void deletingTwiceDoesNotRestampTheTime() {
+            long id = postAndId("once");
+            chat.delete(ticketThread, id, ravi);
+            String first = deletedAt(id);
+
+            ChatService.Outcome second = chat.delete(ticketThread, id, ravi);
+
+            assertThat(second)
+                    .as("the caller asked for a state that already holds")
+                    .isInstanceOf(ChatService.Outcome.Applied.class);
+            assertThat(deletedAt(id))
+                    .as("the record must show when it was actually removed")
+                    .isEqualTo(first);
+        }
+
+        @Test
+        void nobodyElseCanDeleteYourMessage() {
+            long id = postAndId("mine");
+
+            assertThat(chat.delete(ticketThread, id, meera))
+                    .isInstanceOf(ChatService.Outcome.NotFound.class);
+            assertThat(deletedAt(id)).isNull();
+        }
+
+        @Test
+        @DisplayName("an edit is broadcast as an edit, not as a new message")
+        void editAndDeleteAnnounceThemselvesDistinctly() {
+            long id = postAndId("draft");
+
+            chat.edit(ticketThread, id, ravi, "final");
+            chat.delete(ticketThread, id, ravi);
+
+            // A viewer that cannot tell an edit from a new message appends a
+            // duplicate to everyone's scrollback.
+            assertThat(publishedEvents())
+                    .containsExactly("chat.message", "chat.message.edited", "chat.message.deleted");
+        }
+
+        private long postAndId(String body) {
+            chat.post(ticketThread, ravi, body);
+            return idOfLatest();
+        }
+    }
+
+    // ------------------------------------------- D-051 · receipts and typing
+
+    @org.junit.jupiter.api.Nested
+    class ReceiptsAndTyping {
+
+        @Test
+        void nobodyHasReadAMessageThatHasJustBeenPosted() {
+            chat.post(ticketThread, ravi, "hello");
+
+            assertThat(onlyMessageFor(ravi).readBy())
+                    .as("the author reading their own page must not count as a receipt")
+                    .isEmpty();
+        }
+
+        @Test
+        void aReaderAppearsOnTheReceipt() {
+            chat.post(ticketThread, ravi, "hello");
+
+            chat.messages(ticketThread, meera, null, 50);
+
+            assertThat(onlyMessageFor(ravi).readBy()).containsExactly(meera);
+        }
+
+        @Test
+        @DisplayName("the author is never in their own readBy")
+        void theAuthorIsExcluded() {
+            chat.post(ticketThread, ravi, "hello");
+            chat.messages(ticketThread, ravi, null, 50);
+            chat.messages(ticketThread, meera, null, 50);
+
+            // Ravi's cursor is past his own message — he posted it — but
+            // rendering your own avatar on everything you send is noise.
+            assertThat(onlyMessageFor(meera).readBy()).containsExactly(meera);
+        }
+
+        @Test
+        @DisplayName("a receipt is announced once, not on every glance at the thread")
+        void readIsBroadcastOnlyWhenTheCursorMoves() {
+            chat.post(ticketThread, ravi, "hello");
+
+            chat.messages(ticketThread, meera, null, 50);
+            chat.messages(ticketThread, meera, null, 50);
+            chat.messages(ticketThread, meera, null, 50);
+
+            assertThat(publishedEvents().stream().filter("chat.read"::equals).toList())
+                    .as("re-opening a thread you have read must not spray receipts at everyone")
+                    .hasSize(1);
+        }
+
+        @Test
+        void anOlderPageDoesNotAnnounceAread() {
+            chat.post(ticketThread, ravi, "one");
+            long first = idOfLatest();
+            chat.post(ticketThread, ravi, "two");
+
+            chat.messages(ticketThread, meera, first, 50);
+
+            assertThat(publishedEvents()).doesNotContain("chat.read");
+        }
+
+        @Test
+        void typingReachesTheThreadsOwnRoom() {
+            chat.typing(ticketThread, ravi, true);
+
+            assertThat(published()).containsExactly("/topic/ticket." + ticketId);
+            assertThat(publishedEvents()).containsExactly("chat.typing");
+        }
+
+        @Test
+        void typingOnADirectMessageReachesBothQueues() {
+            chat.typing(directThread, ravi, true);
+
+            assertThat(published()).containsExactlyInAnyOrder(
+                    "/user/" + ravi + "/queue/events",
+                    "/user/" + meera + "/queue/events");
+        }
+
+        @Test
+        @DisplayName("a non-participant cannot announce that they are typing")
+        void typingIsMembershipChecked() {
+            chat.typing(ticketThread, outsider, true);
+
+            // Two leaks avoided: that the thread exists, and who is active in it.
+            verify(realtime, never()).publish(anyString(), any());
+        }
+
+        @Test
+        void typingWritesNothing() {
+            chat.typing(ticketThread, ravi, true);
+
+            assertThat(messageCount(ticketThread))
+                    .as("an indicator true for two seconds does not belong in an evidence table")
+                    .isZero();
+        }
+    }
+
     // -------------------------------------------------------------------- helpers
+
+    @SuppressWarnings("unchecked")
+    private List<String> publishedEvents() {
+        ArgumentCaptor<Object> payloads = ArgumentCaptor.forClass(Object.class);
+        verify(realtime, atLeastOnce()).publish(anyString(), payloads.capture());
+        return payloads.getAllValues().stream()
+                .map(p -> String.valueOf(((java.util.Map<String, Object>) p).get("event")))
+                .toList();
+    }
+
+    private void backdate(long messageId, int minutes) {
+        jdbc.update("UPDATE chat_messages SET created_at = created_at - INTERVAL ? MINUTE WHERE id = ?",
+                minutes, messageId);
+    }
+
+    private String rawBody(long messageId) {
+        return jdbc.queryForObject("SELECT body FROM chat_messages WHERE id = ?", String.class, messageId);
+    }
+
+    private Long deletedBy(long messageId) {
+        return jdbc.queryForObject("SELECT deleted_by FROM chat_messages WHERE id = ?", Long.class, messageId);
+    }
+
+    private String deletedAt(long messageId) {
+        return jdbc.queryForObject(
+                "SELECT CAST(deleted_at AS CHAR) FROM chat_messages WHERE id = ?", String.class, messageId);
+    }
+
 
     private List<String> published() {
         ArgumentCaptor<String> destinations = ArgumentCaptor.forClass(String.class);

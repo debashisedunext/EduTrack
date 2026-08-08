@@ -34,6 +34,7 @@ NO_IF_MATCH = {
     "/notifications/read-all":             "idempotent, a race is harmless",
     "/tickets/{ticketId}/priority":        "reason mandatory and every change logged, so concurrent changes are visible not lost",
     "/tickets/{ticketId}/comments/{commentId}": "author-only inside a 5-minute window",
+    "/chat/threads/{threadId}/messages/{messageId}": "author-only inside a 5-minute window",
 }
 
 # §6 — bounded by a constraint the product already enforces.

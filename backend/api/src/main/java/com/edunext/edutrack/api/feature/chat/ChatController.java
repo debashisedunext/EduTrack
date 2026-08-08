@@ -7,7 +7,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * D-050 · {@code /chat} per {@code contracts/openapi.yaml}.
@@ -73,6 +76,59 @@ class ChatController {
         return chat.post(threadId, CurrentUser.idOf(authentication), request.body())
                 .map(message -> ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponse(message)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @PatchMapping(path = "/threads/{threadId}/messages/{messageId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "editChatMessage", summary = "Edit a message, inside the five-minute window")
+    ResponseEntity<?> edit(Authentication authentication,
+                           @PathVariable long threadId,
+                           @PathVariable long messageId,
+                           @Valid @RequestBody ChatDtos.EditMessage request) {
+        return respond(chat.edit(threadId, messageId, CurrentUser.idOf(authentication), request.body()));
+    }
+
+    @DeleteMapping(path = "/threads/{threadId}/messages/{messageId}",
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "deleteChatMessage", summary = "Delete a message, leaving a tombstone")
+    ResponseEntity<?> delete(Authentication authentication,
+                             @PathVariable long threadId,
+                             @PathVariable long messageId) {
+        return respond(chat.delete(threadId, messageId, CurrentUser.idOf(authentication)));
+    }
+
+    /**
+     * The three outcomes, mapped to the three statuses the contract promises.
+     *
+     * <p>{@code NotFound} covers "no such message" and "not yours" alike — a
+     * 403 would confirm the message exists and that someone else wrote it,
+     * which is the same existence leak CLAUDE.md forbids on tickets.
+     *
+     * <p>{@code Immutable} is 409 rather than 403: the caller has every right
+     * to edit their own message, and did until five minutes ago. The conflict
+     * is with the state of the resource, not with their authority over it.
+     */
+    private ResponseEntity<?> respond(ChatService.Outcome outcome) {
+        return switch (outcome) {
+            case ChatService.Outcome.Applied applied ->
+                    ResponseEntity.ok(new MessageResponse(applied.message()));
+            case ChatService.Outcome.NotFound ignored ->
+                    ResponseEntity.notFound().build();
+            case ChatService.Outcome.Immutable immutable ->
+                    ResponseEntity.status(HttpStatus.CONFLICT)
+                            .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                            .body(problem(immutable.reason()));
+        };
+    }
+
+    /** RFC 9457, per CONVENTIONS.md §3. */
+    private static Map<String, Object> problem(String detail) {
+        return Map.of(
+                "type", "https://edutrack/errors/chat-message-immutable",
+                "title", "This message can no longer be changed",
+                "status", HttpStatus.CONFLICT.value(),
+                "detail", detail);
     }
 
     /**

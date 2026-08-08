@@ -98,10 +98,18 @@ public class ChatService {
         List<ChatRepository.MessageRow> rows = repository.messages(threadId, cursor, limit);
         if (cursor == null && !rows.isEmpty()) {
             long newest = rows.stream().mapToLong(ChatRepository.MessageRow::id).max().orElseThrow();
-            repository.advanceReadCursor(threadId, userId, newest);
+            if (repository.advanceReadCursor(threadId, userId, newest)) {
+                // D-051. Only when the cursor actually moved — re-opening a
+                // thread you have already read would otherwise spray a receipt
+                // at everyone every time you glanced at it.
+                announceRead(threadId, userId, newest);
+            }
         }
 
-        return Optional.of(rows.stream().map(row -> toMessage(row, userId)).toList());
+        // Cursors are read after the advance, so the caller sees their own read
+        // reflected rather than a snapshot that is already one request stale.
+        List<ChatRepository.ReadCursor> cursors = repository.readCursors(threadId);
+        return Optional.of(rows.stream().map(row -> toMessage(row, userId, cursors)).toList());
     }
 
     /**
@@ -134,8 +142,106 @@ public class ChatService {
             throw new IllegalStateException("chat: message " + messageId + " vanished immediately after insert");
         }
 
-        broadcast(anchor.get(), message);
+        broadcast(anchor.get(), message, "chat.message");
         return Optional.of(message);
+    }
+
+    // ----------------------------------------------------- D-057 · evidence
+
+    /**
+     * What happened to an edit or a delete.
+     *
+     * <p>Sealed rather than {@code Optional} because the two failures must not
+     * collapse into one answer: "not yours" is a 404 and "too late" is a 409,
+     * and a caller that cannot tell them apart shows the author a message
+     * saying their own post does not exist.
+     */
+    public sealed interface Outcome {
+
+        /** No such message, not in this thread, or not written by the caller. */
+        record NotFound() implements Outcome {
+        }
+
+        /** It exists and it is yours, but it is no longer yours to change. */
+        record Immutable(String reason) implements Outcome {
+        }
+
+        record Applied(ChatDtos.ChatMessage message) implements Outcome {
+        }
+    }
+
+    /**
+     * Edit inside the five-minute window (blueprint §7.6).
+     *
+     * <p>The window is enforced here <em>and</em> in the UPDATE's WHERE clause.
+     * That is not redundant caution: the check and the write are two statements,
+     * and the whole point of this task is that the limit cannot be talked
+     * around. A refactor that reorders them still cannot widen the window.
+     */
+    @Transactional
+    public Outcome edit(long threadId, long messageId, long userId, String body) {
+        Optional<ChatRepository.Editability> state =
+                repository.editability(threadId, messageId, userId);
+        if (state.isEmpty()) {
+            return new Outcome.NotFound();
+        }
+        if (state.get().deleted()) {
+            return new Outcome.Immutable("the message was deleted");
+        }
+        if (!state.get().withinWindow()) {
+            return new Outcome.Immutable("the five-minute edit window has closed");
+        }
+
+        if (!repository.editBody(threadId, messageId, userId, body)) {
+            // The row moved between the two statements — the window closed
+            // mid-request, or a concurrent delete landed. Reporting it as
+            // immutable is truthful; reporting success would not be.
+            return new Outcome.Immutable("the message is no longer editable");
+        }
+
+        return applied(threadId, messageId, userId, "chat.message.edited");
+    }
+
+    /**
+     * Delete, leaving a tombstone.
+     *
+     * <p>Not limited to five minutes, and that is not an inconsistency. The
+     * window exists so nobody can rewrite what was said; a tombstone adds to
+     * the record rather than altering it, and the body is retained in the
+     * database — only withheld on read. Removing the row, or blanking the
+     * column, would destroy the evidence this rule exists to keep.
+     *
+     * <p>Author only. Moderator deletion is not in §7.6, and inventing an
+     * authority to erase other people's words is not a gap to fill quietly.
+     */
+    @Transactional
+    public Outcome delete(long threadId, long messageId, long userId) {
+        Optional<ChatRepository.Editability> state =
+                repository.editability(threadId, messageId, userId);
+        if (state.isEmpty()) {
+            return new Outcome.NotFound();
+        }
+        if (state.get().deleted()) {
+            // Already a tombstone. Idempotent rather than a conflict — the
+            // caller asked for a state that already holds.
+            return applied(threadId, messageId, userId, null);
+        }
+
+        repository.softDelete(threadId, messageId, userId);
+        return applied(threadId, messageId, userId, "chat.message.deleted");
+    }
+
+    private Outcome applied(long threadId, long messageId, long viewerId, String event) {
+        ChatDtos.ChatMessage message = repository.messageById(messageId)
+                .map(row -> toMessage(row, viewerId))
+                .orElseThrow(() -> new IllegalStateException(
+                        "chat: message " + messageId + " vanished mid-transaction"));
+
+        if (event != null) {
+            repository.threadForParticipant(threadId, viewerId)
+                    .ifPresent(anchor -> broadcast(anchor, message, event));
+        }
+        return new Outcome.Applied(message);
     }
 
     // ---------------------------------------------------------------- rooms
@@ -160,9 +266,17 @@ public class ChatService {
         };
     }
 
-    private void broadcast(ChatRepository.ThreadAnchor anchor, ChatDtos.ChatMessage message) {
+    /**
+     * @param eventName {@code chat.message}, {@code chat.message.edited} or
+     *                  {@code chat.message.deleted} — a viewer has to be told
+     *                  which, because an edit that arrives looking like a new
+     *                  message appends a duplicate to everyone's scrollback.
+     */
+    private void broadcast(ChatRepository.ThreadAnchor anchor,
+                           ChatDtos.ChatMessage message,
+                           String eventName) {
         Map<String, Object> event = Map.of(
-                "event", "chat.message",
+                "event", eventName,
                 "threadId", anchor.id(),
                 "message", message);
         for (String destination : destinationsFor(anchor)) {
@@ -173,6 +287,12 @@ public class ChatService {
     // --------------------------------------------------------------- mapping
 
     private ChatDtos.ChatMessage toMessage(ChatRepository.MessageRow row, long viewerId) {
+        return toMessage(row, viewerId, List.of());
+    }
+
+    private ChatDtos.ChatMessage toMessage(ChatRepository.MessageRow row,
+                                           long viewerId,
+                                           List<ChatRepository.ReadCursor> cursors) {
         boolean deleted = row.deletedAt() != null;
         Instant createdAt = row.createdAt().toInstant();
         boolean mine = row.senderId() != null && row.senderId() == viewerId;
@@ -190,8 +310,66 @@ public class ChatService {
                 // Only ever offered to the author, and never on a message that
                 // is already gone.
                 mine && !deleted ? createdAt.plus(EDIT_WINDOW) : null,
-                List.of(),
+                readersOf(row, cursors),
                 createdAt);
+    }
+
+    /**
+     * D-051 · who has read this message.
+     *
+     * <p>Derived from each participant's cursor: a reader has seen message 42
+     * if their cursor is at or past 42. The author is excluded — "the person
+     * who wrote it has read it" is noise, and a UI that renders it puts your
+     * own avatar on every message you send.
+     */
+    private static List<Long> readersOf(ChatRepository.MessageRow row,
+                                        List<ChatRepository.ReadCursor> cursors) {
+        return cursors.stream()
+                .filter(cursor -> cursor.lastReadMessageId() >= row.id())
+                .map(ChatRepository.ReadCursor::userId)
+                .filter(userId -> row.senderId() == null || userId != row.senderId())
+                .sorted()
+                .toList();
+    }
+
+    /**
+     * D-051 · fan out a typing indicator, if the sender is really in the thread.
+     *
+     * <p>Read-only and writes nothing: the indicator is true for a couple of
+     * seconds and then worthless, and a row per keystroke burst does not belong
+     * in a table that exists to hold evidence.
+     *
+     * <p>A non-participant is dropped silently rather than answered. There is
+     * no caller waiting on a status here, and the two facts an error would
+     * confirm — that the thread exists, and that someone is active in it — are
+     * exactly what the membership check is protecting.
+     */
+    @Transactional(readOnly = true)
+    public void typing(long threadId, long userId, boolean typing) {
+        repository.threadForParticipant(threadId, userId).ifPresent(anchor -> {
+            Map<String, Object> event = Map.of(
+                    "event", "chat.typing",
+                    "threadId", threadId,
+                    "userId", userId,
+                    "typing", typing);
+            for (String destination : destinationsFor(anchor)) {
+                realtime.publish(destination, event);
+            }
+        });
+    }
+
+    /** Tell the room that somebody's cursor moved, so receipts update live. */
+    private void announceRead(long threadId, long userId, long lastReadMessageId) {
+        repository.threadForParticipant(threadId, userId).ifPresent(anchor -> {
+            Map<String, Object> event = Map.of(
+                    "event", "chat.read",
+                    "threadId", threadId,
+                    "userId", userId,
+                    "lastReadMessageId", lastReadMessageId);
+            for (String destination : destinationsFor(anchor)) {
+                realtime.publish(destination, event);
+            }
+        });
     }
 
     private String title(ChatRepository.ThreadRow row) {
