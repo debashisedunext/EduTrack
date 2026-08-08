@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
+import { CommandPalette } from './CommandPalette'
 import { Toaster } from '@/components/ui/toaster'
 
 // The chrome every screen renders inside — blueprint §7.2. Owned by C-005.
@@ -15,6 +16,7 @@ export function AppShell() {
         </main>
       </div>
       <Toaster />
+      <CommandPalette />
     </div>
   )
 }
