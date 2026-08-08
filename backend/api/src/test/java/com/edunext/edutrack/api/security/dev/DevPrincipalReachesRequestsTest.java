@@ -1,0 +1,82 @@
+package com.edunext.edutrack.api.security.dev;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
+import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
+import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.security.core.Authentication;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.security.Principal;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * Does the {@code dev-noauth} principal actually survive the security chain?
+ *
+ * <p>Nothing proved this before. {@link DevNoAuthFilterTest} exercises the
+ * filter alone, and every feature test so far — {@code ChatEngineIT},
+ * {@code NotificationCentreIT} — calls its service directly and never travels
+ * through HTTP. So the whole identity path was assumed rather than checked,
+ * which is what D-051 recorded as unverified.
+ *
+ * <p>It matters beyond tidiness. {@code DevNoAuthFilter} is registered as a
+ * servlet filter ahead of Spring Security's chain, and
+ * {@code SecurityContextHolderFilter} <em>replaces</em> the held context with a
+ * deferred one loaded from its repository. If that wins, every call into
+ * {@code CurrentUser.idOf} throws and chat and notifications are unusable in
+ * the only profile that has an identity at all.
+ *
+ * <p>This is also the prerequisite for D-013: a subscription cannot be
+ * authorised against a principal that never arrives.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles({"local", "dev-noauth"})
+@EnableAutoConfiguration(exclude = {
+        HibernateJpaAutoConfiguration.class,
+        JpaRepositoriesAutoConfiguration.class,
+        FlywayAutoConfiguration.class
+})
+class DevPrincipalReachesRequestsTest {
+
+    @TestConfiguration
+    static class Probe {
+
+        /** Reports what a controller actually receives, by both routes. */
+        @RestController
+        static class WhoAmIController {
+
+            @GetMapping("/__test__/whoami")
+            String whoAmI(Authentication authentication, Principal principal) {
+                String fromAuthentication = authentication == null
+                        ? "none"
+                        : authentication.getPrincipal().getClass().getSimpleName();
+                String fromPrincipal = principal == null ? "none" : "present";
+                return fromAuthentication + "/" + fromPrincipal;
+            }
+        }
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    MockMvc mockMvc;
+
+    @Test
+    void theFakePrincipalReachesAController() throws Exception {
+        mockMvc.perform(get("/__test__/whoami"))
+                .andExpect(status().isOk())
+                // Both matter: `Authentication` is what CurrentUser reads, and
+                // `Principal` is what the STOMP handshake resolves the socket
+                // user from.
+                .andExpect(content().string("DevPrincipal/present"));
+    }
+}
