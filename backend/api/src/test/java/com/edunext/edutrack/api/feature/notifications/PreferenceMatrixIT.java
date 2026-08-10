@@ -76,11 +76,19 @@ class PreferenceMatrixIT {
 
     private long ravi;
 
+    /**
+     * Users are not deleted between tests — notifications and email_log point
+     * at them — so each test gets its own rather than colliding on the unique
+     * username.
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger SEQ =
+            new java.util.concurrent.atomic.AtomicInteger();
+
     @BeforeEach
     void seed() {
         jdbc.update("DELETE FROM notification_preferences");
         jdbc.update("DELETE FROM email_log");
-        ravi = insertUser("ravi.pref");
+        ravi = insertUser("ravi.pref." + SEQ.incrementAndGet());
     }
 
     // ------------------------------------------------------- the default
@@ -232,7 +240,7 @@ class PreferenceMatrixIT {
 
     @Test
     void preferencesAreYourOwn() {
-        long meera = insertUser("meera.pref");
+        long meera = insertUser("meera.pref." + SEQ.incrementAndGet());
         service.save(ravi, request("COMMENT_ADDED", null, false));
 
         assertThat(preferences.allows(meera, "COMMENT_ADDED", NotificationChannel.EMAIL)).isTrue();
