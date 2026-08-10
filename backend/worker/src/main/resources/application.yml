@@ -87,6 +87,11 @@ edutrack:
     # the two questions have no reason to be asked on the same schedule.
     stage-scan-interval: ${STAGE_SLA_SCAN_INTERVAL:PT15M}
 
+    # D-021 · the pre-breach sweep. Same cadence as the breach scan, because
+    # the useful moment to warn somebody is "soon after they cross 80%", and a
+    # slower sweep spends the remaining fifth of the window before speaking.
+    pre-breach-scan-interval: ${PRE_BREACH_SCAN_INTERVAL:PT15M}
+
   outbox:
     enabled: true
     poll-interval: PT5S
