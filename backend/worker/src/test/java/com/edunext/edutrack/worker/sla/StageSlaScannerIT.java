@@ -32,9 +32,20 @@ import static org.assertj.core.api.Assertions.assertThat;
  * global count is shared state: a pass that returns 1 may be announcing
  * somebody else's ticket, which makes a green test mean nothing and a red one
  * point at the wrong place.
+
+/**
+ * <b>{@code @Import(FixedClock.class)} is not decoration.</b> A nested
+ * {@code @TestConfiguration} is auto-detected only when {@code @SpringBootTest}
+ * declares no {@code classes}; this one does, so without the explicit import
+ * the fixed clock is silently ignored and every assertion runs against the real
+ * one. That is exactly how it was written first — the suite passed, and it
+ * passed because the tickets were old enough to breach under any clock, not
+ * because the clock was fixed.
  */
 @Testcontainers
 @SpringBootTest(classes = com.edunext.edutrack.worker.WorkerApplication.class)
+@org.springframework.context.annotation.Import(StageSlaScannerIT.FixedClock.class)
+@org.springframework.context.annotation.Import(StageSlaScannerIT.FixedClock.class)
 class StageSlaScannerIT {
 
     /**
@@ -74,7 +85,7 @@ class StageSlaScannerIT {
     }
 
     @TestConfiguration
-    static class FixedClock {
+    public static class FixedClock {
         @Bean
         @Primary
         Clock fixedClock() {
