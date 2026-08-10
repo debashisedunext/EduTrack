@@ -43,4 +43,19 @@ public final class NotificationDtos {
      */
     public record Meta(String nextCursor, boolean hasMore, int unreadCount) {
     }
+
+    /**
+     * D-046 · the ids the client has actually put on screen.
+     *
+     * <p>Ids the caller does not own are ignored rather than rejected. This is
+     * a report, not a command: there is nothing useful a client can do about
+     * "one of those was not yours", and answering 404 would turn the ack into
+     * a way to probe which notification ids exist.
+     */
+    public record DeliveredRequest(java.util.List<Long> ids) {
+
+        public DeliveredRequest {
+            ids = ids == null ? java.util.List.of() : java.util.List.copyOf(ids);
+        }
+    }
 }

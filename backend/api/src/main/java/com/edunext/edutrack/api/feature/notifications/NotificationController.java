@@ -29,6 +29,10 @@ class NotificationController {
     private static final int DEFAULT_LIMIT = 25;
     private static final int MAX_LIMIT = 100;
 
+    /** D-046 · queued popups. Small, because each one becomes a toast. */
+    private static final int DEFAULT_PENDING_LIMIT = 5;
+    private static final int MAX_PENDING_LIMIT = 20;
+
     private final NotificationService notifications;
 
     NotificationController(NotificationService notifications) {
@@ -93,6 +97,43 @@ class NotificationController {
     }
 
     /**
+     * D-046 · what to pop on login.
+     *
+     * <p>A separate route from {@code GET /notifications} rather than another
+     * filter on it, because it is a different thing: the list is browsed
+     * newest-first and paged, this is a queue drained oldest-first and
+     * acknowledged. Folding it into the list would mean a {@code cursor} that
+     * means nothing here and an ordering that flips on a query parameter.
+     */
+    @org.springframework.web.bind.annotation.GetMapping(
+            path = "/pending", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "listPendingNotifications",
+            summary = "Queued popups not yet shown to this user (D-046)")
+    ResponseEntity<?> pending(Authentication authentication,
+                              @RequestParam(required = false) Integer limit) {
+        return ResponseEntity.ok(
+                notifications.pending(CurrentUser.idOf(authentication), clampPending(limit)));
+    }
+
+    /**
+     * D-046 · the client reporting what it has shown.
+     *
+     * <p>204 whatever the count. "None of these were still pending" is not a
+     * client error — two tabs racing to pop the same queue is normal, and the
+     * loser has nothing to fix.
+     */
+    @org.springframework.web.bind.annotation.PostMapping(
+            path = "/delivered", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "markNotificationsDelivered",
+            summary = "Acknowledge notifications shown to the user (D-046)")
+    ResponseEntity<Void> markDelivered(Authentication authentication,
+                                       @org.springframework.web.bind.annotation.RequestBody
+                                       NotificationDtos.DeliveredRequest request) {
+        notifications.markDelivered(CurrentUser.idOf(authentication), request.ids());
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * The cursor is opaque to the client and an id to us. Keeping it a string on
      * the wire is what lets it become something else later — a composite key,
      * an encoded timestamp — without a contract change.
@@ -102,6 +143,17 @@ class NotificationController {
             return null;
         }
         return Long.valueOf(cursor.trim());
+    }
+
+    /**
+     * D-046. Tighter than the list's cap: these become toasts, and a client
+     * asking for a hundred popups is asking for a screen nobody can read.
+     */
+    private static int clampPending(Integer limit) {
+        if (limit == null || limit <= 0) {
+            return DEFAULT_PENDING_LIMIT;
+        }
+        return Math.min(limit, MAX_PENDING_LIMIT);
     }
 
     private static int clamp(Integer limit) {

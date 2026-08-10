@@ -45,6 +45,7 @@ NO_PAGINATION = {
     "/projects/{projectId}/sla-policies": "task types x 4 levels",
     "/clients/{clientId}/contacts":      "a short list per client",
     "/tickets/{ticketId}/attachments":   "capped at 20 per ticket",
+    "/notifications/pending":            "a queue drained by acknowledging, not paged; a cursor would outlive the rows it points past",
 }
 
 # §8 — GET only. No mutation verb, ever.

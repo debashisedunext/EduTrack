@@ -70,6 +70,40 @@ public class NotificationService {
         return repository.exists(id, userId) ? ReadOutcome.ALREADY_READ : ReadOutcome.NOT_FOUND;
     }
 
+    /**
+     * D-046 · what the user missed while they were away.
+     *
+     * <p>Capped rather than complete. Somebody back from a week's leave has a
+     * hundred queued notifications and popping all of them is indistinguishable
+     * from popping none — the UI shows the first few and points at the full
+     * page for the rest. The cap is why the reply says whether more remain.
+     */
+    @Transactional(readOnly = true)
+    public Pending pending(long userId, int limit) {
+        List<NotificationReadRepository.NotificationRow> rows =
+                repository.undelivered(userId, limit + 1);
+
+        boolean hasMore = rows.size() > limit;
+        List<NotificationReadRepository.NotificationRow> page =
+                hasMore ? rows.subList(0, limit) : rows;
+
+        return new Pending(page.stream().map(NotificationService::toDto).toList(), hasMore);
+    }
+
+    /**
+     * D-046 · the client reporting what it actually put on screen.
+     *
+     * <p>Deliberately client-driven. Realtime delivery is fire-and-forget, so
+     * the server stamping on publish would record that it <em>sent</em> a
+     * toast, which is exactly the claim §17 says must not be taken on trust.
+     * The cost is at-least-once: a browser that dies between receiving and
+     * rendering re-pops on next login, which is the right way to be wrong.
+     */
+    @Transactional
+    public int markDelivered(long userId, List<Long> ids) {
+        return repository.markDelivered(userId, ids);
+    }
+
     @Transactional
     public int markAllRead(long userId) {
         int marked = repository.markAllRead(userId);
@@ -92,5 +126,14 @@ public class NotificationService {
     }
 
     public record Page(List<NotificationDtos.Notification> data, NotificationDtos.Meta meta) {
+    }
+
+    /**
+     * D-046 · the queued popups, and whether the cap hid any.
+     *
+     * @param hasMore more were queued than the cap allowed; the UI says so
+     *                rather than quietly dropping them
+     */
+    public record Pending(List<NotificationDtos.Notification> data, boolean hasMore) {
     }
 }

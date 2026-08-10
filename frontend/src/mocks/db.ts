@@ -117,6 +117,8 @@ export interface Attachment {
 export interface Notification {
   id: number; userId: number; eventKey: string; title: string; body: string;
   ticketId: string | null; isRead: boolean; deepLink: string; createdAt: string;
+  /** D-046. Null means still queued to pop — distinct from unread. */
+  deliveredAt?: string | null;
 }
 export interface EmailLogEntry {
   id: number; ticketId: string; toAddress: string; subject: string; eventKey: string;

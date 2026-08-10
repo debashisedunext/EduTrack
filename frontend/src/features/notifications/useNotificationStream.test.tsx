@@ -7,6 +7,9 @@ import { Toaster } from '@/components/ui/toaster'
 import { useToast } from '@/components/ui/use-toast'
 import { realtime } from '@/realtime/client'
 import { ownQueue } from '@/realtime/destinations'
+import { http, HttpResponse } from 'msw'
+import { getDb } from '@/mocks/db'
+import { server } from '@/mocks/server'
 import { NotificationStream } from './NotificationStream'
 
 /**
@@ -230,6 +233,82 @@ describe('Snooze', () => {
     })
 
     expect(screen.getAllByText(MENTION.title)[0]).toBeVisible()
+  })
+})
+
+describe('D-046 · what was raised while nobody was watching', () => {
+  /** Queue one for the current mock user, undelivered. */
+  function queue(id: number, title: string) {
+    const db = getDb()
+    db.notifications.push({
+      id,
+      userId: db.currentUserId,
+      eventKey: 'TICKET_HANDED_OFF',
+      title,
+      body: 'while you were away',
+      ticketId: 'CRM-26-00347',
+      isRead: false,
+      deepLink: '/tickets/CRM-26-00347',
+      createdAt: new Date().toISOString(),
+      deliveredAt: null,
+    })
+  }
+
+  beforeEach(() => {
+    // The seeded rows have no deliveredAt, so they would all pop and drown the
+    // assertions. Start from a drained queue and add exactly what each test
+    // is about.
+    getDb().notifications.forEach((n) => { n.deliveredAt = new Date().toISOString() })
+  })
+
+  it('pops a notification raised while the user was offline', async () => {
+    queue(9001, 'Queued while you were offline')
+    renderStream()
+
+    expect(await screen.findAllByText('Queued while you were offline')).not.toHaveLength(0)
+  })
+
+  it('acknowledges what it popped, so it does not pop again', async () => {
+    queue(9002, 'Popped once')
+    renderStream()
+    await screen.findAllByText('Popped once')
+
+    await waitFor(() =>
+      expect(getDb().notifications.find((n) => n.id === 9002)?.deliveredAt).not.toBeNull(),
+    )
+  })
+
+  it('says so when the cap hid some, rather than dropping them quietly', async () => {
+    for (let i = 0; i < 8; i++) queue(9100 + i, `Missed ${i}`)
+    renderStream()
+
+    expect(await screen.findAllByText('More while you were away')).not.toHaveLength(0)
+  })
+
+  it('pops nothing when the queue is empty', async () => {
+    renderStream()
+
+    await waitFor(() => expect(noToastShowing()).toBe(true))
+  })
+
+  it('acknowledges a live toast too, so it is not replayed at next login', async () => {
+    // The replay is forced to return nothing, so the only thing that can
+    // acknowledge id 91 is the live frame. Without this the drain would
+    // acknowledge it on mount and the assertion would hold either way — a test
+    // that passes whether or not the behaviour exists.
+    server.use(
+      http.get('*/notifications/pending', () =>
+        HttpResponse.json({ data: [], hasMore: false }),
+      ),
+    )
+    queue(91, MENTION.title)
+    renderStream()
+
+    push(MENTION)
+
+    await waitFor(() =>
+      expect(getDb().notifications.find((n) => n.id === 91)?.deliveredAt).toBeTruthy(),
+    )
   })
 })
 

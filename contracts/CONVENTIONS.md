@@ -141,8 +141,15 @@ product already enforces:
 | `/projects/{id}/sla-policies` | Task types × 4 levels |
 | `/clients/{id}/contacts` | A short list per client |
 | `/tickets/{id}/attachments` | Capped at 20 per ticket |
+| `/notifications/pending` | Capped, and drained by acknowledging rather than paged |
 
 These return `data` with no `meta`. That is the signal that the list is complete.
+
+`/notifications/pending` (D-046) is the one exemption that is not a size bound.
+It is a **queue**: the client acknowledges what it showed, and the next call
+returns whatever is still unacknowledged. A cursor would point past rows that
+have since left the result set entirely, which is a worse answer than no cursor.
+It carries `hasMore` instead, so a capped page still says so.
 
 ---
 

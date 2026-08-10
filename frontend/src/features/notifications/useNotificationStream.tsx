@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   getListNotificationsQueryKey,
+  listPendingNotifications,
+  markNotificationsDelivered,
   useMarkNotificationRead,
 } from '@/api/generated/notifications/notifications'
 import { ToastAction } from '@/components/ui/toast'
@@ -99,9 +101,94 @@ export function useNotificationStream(): void {
 
     if (event.event === 'notification.created') {
       raise(event)
+      // D-046. A live toast is a delivery like any other. Without this, every
+      // notification the user watched arrive would pop again at next login.
+      void acknowledge([event.id])
     }
     // Every one of the three moves the badge: a new notification adds to it,
     // and a read in another tab takes from it.
     refreshBadge()
   })
+
+  // ------------------------------------------------------------- D-046
+
+  /**
+   * Pop whatever was raised while nobody was watching.
+   *
+   * <p>Runs on mount — which is login, and what blueprint §11 asks for — and
+   * again whenever the tab becomes visible. The second is not belt and braces:
+   * a laptop that sleeps for two hours drops its socket, and Redis pub/sub has
+   * no replay, so everything raised in between is missed by a session that is
+   * never reloaded and would otherwise surface only on the next cold start.
+   *
+   * <p>Re-running is safe **because the server tracks delivery**. Anything
+   * already acknowledged is no longer pending, so a second call returns
+   * nothing rather than toasting twice — the idempotence is in the data, not
+   * in a guard here that could drift.
+   */
+  useEffect(() => {
+    let cancelled = false
+
+    const drain = async () => {
+      try {
+        const pending = await listPendingNotifications()
+        if (cancelled || !pending.data?.length) return
+
+        pending.data.forEach((notification) => {
+          if (notification.id == null) return
+          raise({
+            event: 'notification.created',
+            id: notification.id,
+            eventCode: notification.eventKey ?? 'UNKNOWN',
+            title: notification.title ?? '',
+            body: notification.body ?? '',
+            link: notification.deepLink ?? null,
+          })
+        })
+
+        if (pending.hasMore) {
+          // Saying so rather than silently dropping the rest: the cap exists
+          // so a week's leave does not bury the screen, but a user who cannot
+          // tell the difference between "five things happened" and "five of
+          // many" has been misled by the quieter design.
+          toast({
+            title: 'More while you were away',
+            description: 'Open the bell to see everything you missed.',
+          })
+        }
+
+        await acknowledge(pending.data.map((n) => n.id).filter((id): id is number => id != null))
+        refreshBadge()
+      } catch {
+        // A failed drain leaves everything pending, so the next visibility
+        // change or reload tries again. Nothing is lost by staying quiet, and
+        // an error toast about the notification system is noise on top of
+        // whatever is already wrong.
+      }
+    }
+
+    void drain()
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void drain()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [raise, refreshBadge])
+}
+
+/**
+ * Report what was shown. Failures are swallowed deliberately: an unacknowledged
+ * notification pops again, which is the direction to be wrong in.
+ */
+async function acknowledge(ids: number[]): Promise<void> {
+  if (!ids.length) return
+  try {
+    await markNotificationsDelivered({ ids })
+  } catch {
+    // Left pending on purpose — see above.
+  }
 }

@@ -67,8 +67,11 @@ import type {
 
 import type {
   ListNotificationsParams,
+  ListPendingNotificationsParams,
   NotFoundResponse,
   NotificationListResponse,
+  NotificationsDeliveredRequest,
+  PendingNotificationsResponse,
   Problem,
   UnauthorizedResponse
 } from '.././model';
@@ -172,6 +175,169 @@ export function useListNotifications<TData = Awaited<ReturnType<typeof listNotif
 
 
 /**
+ * Blueprint §11: a notification raised while the user was offline is queued and pops the moment they log in. Oldest first — this is a queue being drained, not a list being browsed — and capped, because somebody back from leave has a hundred queued and popping all of them is indistinguishable from popping none. `hasMore` says the cap hid some.
+Independent of `isRead`: a notification can be read without ever having been popped, and popped without being read.
+
+ * @summary Queued popups not yet shown to this user (D-046)
+ */
+export const listPendingNotifications = (
+    params?: ListPendingNotificationsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PendingNotificationsResponse>(
+      {url: `/notifications/pending`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListPendingNotificationsQueryKey = (params?: ListPendingNotificationsParams,) => {
+    return [
+    `/notifications/pending`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListPendingNotificationsQueryOptions = <TData = Awaited<ReturnType<typeof listPendingNotifications>>, TError = UnauthorizedResponse>(params?: ListPendingNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPendingNotifications>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPendingNotificationsQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPendingNotifications>>> = ({ signal }) => listPendingNotifications(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPendingNotifications>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPendingNotificationsQueryResult = NonNullable<Awaited<ReturnType<typeof listPendingNotifications>>>
+export type ListPendingNotificationsQueryError = UnauthorizedResponse
+
+
+export function useListPendingNotifications<TData = Awaited<ReturnType<typeof listPendingNotifications>>, TError = UnauthorizedResponse>(
+ params: undefined |  ListPendingNotificationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPendingNotifications>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPendingNotifications>>,
+          TError,
+          Awaited<ReturnType<typeof listPendingNotifications>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPendingNotifications<TData = Awaited<ReturnType<typeof listPendingNotifications>>, TError = UnauthorizedResponse>(
+ params?: ListPendingNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPendingNotifications>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPendingNotifications>>,
+          TError,
+          Awaited<ReturnType<typeof listPendingNotifications>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPendingNotifications<TData = Awaited<ReturnType<typeof listPendingNotifications>>, TError = UnauthorizedResponse>(
+ params?: ListPendingNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPendingNotifications>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Queued popups not yet shown to this user (D-046)
+ */
+
+export function useListPendingNotifications<TData = Awaited<ReturnType<typeof listPendingNotifications>>, TError = UnauthorizedResponse>(
+ params?: ListPendingNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPendingNotifications>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPendingNotificationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * The client reports what it actually put on screen. Deliberately client-driven: realtime delivery is fire-and-forget, so a server that stamped on publish would be recording that it *sent* a toast — the claim §17 says must not be taken on trust. Delivery is therefore at-least-once; a browser that dies between receiving and rendering re-pops on next login.
+Ids that are already delivered, or not the caller's, are ignored rather than rejected — two tabs racing to drain one queue is normal, and a 404 here would let the ack probe which ids exist.
+
+ * @summary Acknowledge notifications shown to the user (D-046)
+ */
+export const markNotificationsDelivered = (
+    notificationsDeliveredRequest: NotificationsDeliveredRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<void>(
+      {url: `/notifications/delivered`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: notificationsDeliveredRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getMarkNotificationsDeliveredMutationOptions = <TError = UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markNotificationsDelivered>>, TError,{data: NotificationsDeliveredRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof markNotificationsDelivered>>, TError,{data: NotificationsDeliveredRequest}, TContext> => {
+
+const mutationKey = ['markNotificationsDelivered'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markNotificationsDelivered>>, {data: NotificationsDeliveredRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  markNotificationsDelivered(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkNotificationsDeliveredMutationResult = NonNullable<Awaited<ReturnType<typeof markNotificationsDelivered>>>
+    export type MarkNotificationsDeliveredMutationBody = NotificationsDeliveredRequest
+    export type MarkNotificationsDeliveredMutationError = UnauthorizedResponse
+
+    /**
+ * @summary Acknowledge notifications shown to the user (D-046)
+ */
+export const useMarkNotificationsDelivered = <TError = UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markNotificationsDelivered>>, TError,{data: NotificationsDeliveredRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof markNotificationsDelivered>>,
+        TError,
+        {data: NotificationsDeliveredRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getMarkNotificationsDeliveredMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * @summary Mark one as read
  */
 export const markNotificationRead = (

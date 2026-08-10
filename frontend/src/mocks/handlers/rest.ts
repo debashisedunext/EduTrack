@@ -623,6 +623,25 @@ export const restHandlers = [
     db.notifications.filter((n) => n.userId === db.currentUserId).forEach((n) => { n.isRead = true; });
     return noContent();
   }),
+  // D-046. Oldest first and independent of isRead — mirroring the server, where
+  // "shown" and "read" are separate facts.
+  http.get(url('/notifications/pending'), ({ request }) => {
+    const db = getDb();
+    const limit = Number(new URL(request.url).searchParams.get('limit') ?? 5);
+    const queued = db.notifications
+      .filter((n) => n.userId === db.currentUserId && !n.deliveredAt)
+      .sort((a, b) => a.id - b.id);
+    return HttpResponse.json({ data: queued.slice(0, limit), hasMore: queued.length > limit });
+  }),
+  http.post(url('/notifications/delivered'), async ({ request }) => {
+    const db = getDb();
+    const { ids } = (await request.json()) as { ids: number[] };
+    db.notifications
+      // Somebody else's ids are ignored rather than rejected, as on the server.
+      .filter((n) => n.userId === db.currentUserId && ids.includes(n.id) && !n.deliveredAt)
+      .forEach((n) => { n.deliveredAt = new Date().toISOString(); });
+    return noContent();
+  }),
 
   // ── chat ──────────────────────────────────────────────────────────────────
   http.get(url('/chat/threads'), ({ request }) => {
