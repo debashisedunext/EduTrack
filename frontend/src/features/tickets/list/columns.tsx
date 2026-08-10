@@ -167,6 +167,18 @@ export const COLUMNS: ColumnDef[] = [
   },
 ]
 
+/**
+ * C-016 — row colour cue. Critical wins over delayed when both are true (in
+ * practice the SLA scanner auto-promotes a delayed ticket to Critical
+ * anyway, so this only matters for the gap before that scan runs, or a
+ * ticket someone set Critical manually before it was ever late).
+ */
+export function rowCueClassName(ticket: Ticket): string | undefined {
+  if (ticket.level === 'CRITICAL') return 'border-l-4 border-l-level-critical'
+  if (ticket.isDelayed) return 'border-l-4 border-l-level-high'
+  return undefined
+}
+
 export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = [
   'ticketId',
   'title',

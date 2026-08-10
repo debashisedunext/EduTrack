@@ -275,6 +275,41 @@ async function pickSavedView(name: RegExp | string) {
   )
 }
 
+describe('S-17 Row colour cues — C-016', () => {
+  it('gives every Critical row a soft red left border', async () => {
+    renderPage()
+    await rowsReady()
+    await pickFilterOption('Level', 'Critical')
+    await waitFor(
+      () => {
+        const rows = screen.getAllByRole('row').slice(1)
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) {
+          expect(within(row).getByText('CRITICAL')).toBeInTheDocument()
+          expect(row.className).toMatch(/border-l-level-critical/)
+        }
+      },
+      { timeout: 4000 },
+    )
+  })
+
+  it('gives a Low row no colour cue — Low is never auto-escalated', async () => {
+    renderPage()
+    await rowsReady()
+    await pickFilterOption('Level', 'Low')
+    await waitFor(
+      () => {
+        const rows = screen.getAllByRole('row').slice(1)
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) {
+          expect(row.className).not.toMatch(/border-l-level/)
+        }
+      },
+      { timeout: 4000 },
+    )
+  })
+})
+
 describe('S-17 Saved views — C-015', () => {
   it('Overdue sends isDelayed=true and replaces whatever else was set', async () => {
     // Not `rowsReady()` — Level=High alone may legitimately scope to zero of
