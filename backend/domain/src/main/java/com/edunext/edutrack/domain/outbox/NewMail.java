@@ -10,7 +10,9 @@ package com.edunext.edutrack.domain.outbox;
  * @param templateId the notification template (S-15), or null to resolve at render
  * @param toUserId   the recipient user, or null when the recipient is a client contact
  * @param toEmail    the recipient address
- * @param subject    may be null until D-031 builds the subject pattern
+ * @param subject    what happened, <em>without</em> the ticket code — D-031's
+ *                   {@code [CRM-26-00347]} prefix is added by
+ *                   {@link OutboxEnqueuer}, so no event can ship without it
  */
 public record NewMail(
         Long ticketId,
