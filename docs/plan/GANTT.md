@@ -34,15 +34,10 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `A-021` failed_attempts counter, 15-minute lockout at 5, | Shivendra | Wed 12 Aug | Sat 08 Aug | +85d |
 | `B-008` Seed manifest with fixed load order | Ayush | Wed 12 Aug | Sat 08 Aug | +85d |
 | `A-022` JWT access token, 15 min, claims sub, role, perm | Shivendra | Thu 13 Aug | Sat 08 Aug | +84d |
-| `A-023` Opaque refresh token, 7 days, HttpOnly + Secure  | Shivendra | Fri 14 Aug | Sat 08 Aug | +83d |
 | `A-024` Refresh rotation with family revocation | Shivendra | Mon 17 Aug | Sat 08 Aug | +82d |
 | `B-005` JPA entities + repositories for the full model,  | Ayush | Mon 17 Aug | Sat 08 Aug | +82d |
-| `A-025` Logout | Shivendra | Tue 18 Aug | Sat 08 Aug | +81d |
 | `C-006` Command palette on Ctrl+K for jump-to-ticket | Divyansh | Wed 19 Aug | Sat 08 Aug | +80d |
 | `D-005` CI staleness check | Debashis | Wed 19 Aug | Sat 08 Aug | +80d |
-| `C-011` Ticket ID generation | Divyansh | Thu 20 Aug | Sat 08 Aug | +79d |
-| `B-006` MapStruct base configuration | Ayush | Fri 21 Aug | Sat 08 Aug | +78d |
-| `C-010` Create ticket — all field groups from blueprint  | Divyansh | Tue 25 Aug | Sat 08 Aug | +76d |
 | `D-015` Frontend STOMP client | Debashis | Thu 03 Sep | Sat 08 Aug | +69d |
 | `D-050` Chat engine, three surfaces one engine | Debashis | Tue 08 Sep | Sat 08 Aug | +66d |
 | `D-057` Chat immutable after a 5-minute edit window; del | Debashis | Wed 09 Sep | Sat 08 Aug | +65d |
@@ -50,8 +45,13 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `D-052` @mentions firing notifications | Debashis | Tue 15 Sep | Sat 08 Aug | +61d |
 | `D-053` File and image share, emoji, message search | Debashis | Thu 17 Sep | Sat 08 Aug | +59d |
 | `B-034` Step 4 — dry-run validation preview | Ayush | Wed 02 Sep | Tue 13 Oct | +29d |
+| `B-035` Step 5 — commit as a background job with progres | Ayush | Fri 04 Sep | Thu 15 Oct | +29d |
+| `B-036` Error report generation | Ayush | Mon 07 Sep | Fri 16 Oct | +29d |
+| `B-037` import_batches traceability | Ayush | Tue 08 Sep | Mon 19 Oct | +29d |
+| `B-038` Resource bulk import — the second registration,  | Ayush | Wed 09 Sep | Tue 20 Oct | +29d |
+| `B-031` Step 1 — template download | Ayush | Tue 25 Aug | Fri 02 Oct | +28d |
 
-*…and 25 more — see the interactive chart.*
+*…and 20 more — see the interactive chart.*
 
 ---
 
@@ -206,9 +206,9 @@ gantt
 |  | `A-020` | Login endpoint — Argon2id | 1.5 | `A-003` `A-012` ᶦ | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
 |  | `A-021` | failed_attempts counter, 15-minute lockout at 5, email to Admin on… | 0.5 | `A-020` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `A-022` | JWT access token, 15 min, claims sub, role, permissions[]… | 1 | `A-020` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
-|  | `A-023` | Opaque refresh token, 7 days, HttpOnly + Secure + SameSite=Strict… | 1 | `A-022` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
+|  | `A-023` | Opaque refresh token, 7 days, HttpOnly + Secure + SameSite=Strict… | 1 | `A-022` ᶦ | Sat 08 Aug | Mon 10 Aug | 85 | ✅ done |
 | 🔴 | `A-024` | Refresh rotation with family revocation | 1.5 | `A-023` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
-|  | `A-025` | Logout | 1 | `A-023` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
+|  | `A-025` | Logout | 1 | `A-023` ᶦ | Sat 08 Aug | Mon 10 Aug | 86 | ✅ done |
 |  | `A-026` | Forced password change on first login — must_change_password | 0.5 | `A-020` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ▫️ to do |
 |  | `A-027` | Forgot/reset password — single-use, 30-min TTL, hashed at rest | 1 | `A-020` ᶦ | Mon 10 Aug | Tue 11 Aug | 0 | ▫️ to do |
 |  | `A-028` | Password policy | 1 | `A-020` ᶦ | Tue 11 Aug | Wed 12 Aug | 0 | ▫️ to do |
@@ -266,7 +266,7 @@ gantt
 |  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 39 | ✅ done |
 |  | `B-004` | Seed: 3 workflow templates with their stages — Standard Dev Flow | 1 | `A-005` | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
 |  | `B-005` | JPA entities + repositories for the full model, built on A's schema | 3 | `A-006` `A-007` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
-|  | `B-006` | MapStruct base configuration | 0.5 | `B-005` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
+|  | `B-006` | MapStruct base configuration | 0.5 | `B-005` ᶦ | Sat 08 Aug | Mon 10 Aug | 86 | ✅ done |
 | ▲🔴 | `B-007` | Ticket fixture corpus | 2 | `B-004` `B-005` | Mon 10 Aug | Tue 11 Aug | 0 | ▫️ to do |
 |  | `B-008` | Seed manifest with fixed load order | 0.5 | `B-001` `B-002` `B-003` `B-004` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 | ▲ | `B-010` | Resource list | 2 | `B-005` `C-003` `A-012` | Fri 14 Aug | Mon 17 Aug | 0 | ▫️ to do |
@@ -325,8 +325,8 @@ gantt
 |  | `C-004` | Storybook, with every shared component documented | 1.5 | `C-003` | Fri 07 Aug | Fri 07 Aug | 87 | ✅ done |
 |  | `C-005` | App shell | 2 | `C-003` | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
 |  | `C-006` | Command palette on Ctrl+K for jump-to-ticket | 1 | `C-005` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
-|  | `C-010` | Create ticket — all field groups from blueprint §7.5 | 2.5 | `C-005` `D-004` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
-| 🔴 | `C-011` | Ticket ID generation | 1 | `A-003` `A-012` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
+|  | `C-010` | Create ticket — all field groups from blueprint §7.5 | 2.5 | `C-005` `D-004` | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
+| 🔴 | `C-011` | Ticket ID generation | 1 | `A-003` `A-012` | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `C-012` | SLA policy resolution → auto-computed Planned Close Date, previewed… | 1.5 | `C-011` `B-024` | Tue 13 Oct | Wed 14 Oct | 0 | ▫️ to do |
 |  | `C-013` | Actions: Save & Assign · Save as Draft · Save & Create Another | 1.5 | `C-010` `C-011` ᶦ | Mon 10 Aug | Tue 11 Aug | 0 | ▫️ to do |
 |  | `C-014` | Ticket list — filters | 3 | `C-005` `D-004` | Tue 11 Aug | Fri 14 Aug | 0 | ▫️ to do |
