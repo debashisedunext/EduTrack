@@ -28,7 +28,8 @@ class SlaRepository {
      * is escalated once, not every fifteen minutes until somebody closes it.
      */
     private static final String BREACHED = """
-            SELECT t.id, t.ticket_code, t.title, t.level, t.pcd_open AS plannedCloseDate,
+            SELECT t.id, t.ticket_code, t.title, t.level, t.task_type_id AS taskTypeId,
+                   t.pcd_open AS plannedCloseDate,
                    t.project_id AS projectId, p.name AS projectName,
                    t.assigned_to AS assignedTo, p.manager_id AS projectManagerId,
                    u.reporting_manager_id AS reportingManagerId
@@ -124,6 +125,7 @@ class SlaRepository {
             String ticketCode,
             String title,
             String level,
+            Integer taskTypeId,
             Timestamp plannedCloseDate,
             long projectId,
             String projectName,
