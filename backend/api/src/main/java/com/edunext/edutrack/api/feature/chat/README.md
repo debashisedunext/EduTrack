@@ -189,6 +189,8 @@ cannot read. `ChatSearch` keeps word characters and adds the operators itself.
   picker; there is no reactions table in the baseline and no shape for one in
   the contract, so it is frontend work under S-25.
 - **D-055** Ask Status. `MessageKind.STATUS_REQUEST` exists for it.
-- **Subscriptions are not authorised** — D-013. Chat's *REST* side is scoped by
-  membership, but anyone can currently subscribe to any topic and see messages
-  broadcast to it. This must not reach real data before D-013.
+- ~~**Subscriptions are not authorised**~~ — **closed by D-013.**
+  `ChatSubscriptionScope` answers the socket guard with the same rule the REST
+  side uses: you may watch a room you have a thread in. It needs no
+  `ScopeResolver`, for the same reason D-050 did not — membership is explicit in
+  `chat_participants`.

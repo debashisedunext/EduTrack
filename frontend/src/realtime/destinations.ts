@@ -25,9 +25,23 @@ function positive(id: number, field: string): number {
   return id;
 }
 
-/** `user:{id}` — resolved to that user's own session queue by Spring. */
-export function userQueue(userId: number): string {
-  return `/user/${positive(userId, 'userId')}/queue/events`;
+/**
+ * `user:{id}` — your own events, and the one destination that takes no id.
+ *
+ * **Subscribe to this, never to `/user/{id}/queue/events`.** That id-bearing
+ * form is what the *server* publishes to; Spring resolves it to the session
+ * queue of the user it names. A client that subscribes to it instead gets a
+ * literal destination nothing ever publishes to — accepted, silent, and
+ * receiving nothing forever, which is the exact failure this whole file exists
+ * to prevent. D-013's interceptor now refuses it outright so the mistake is
+ * loud rather than invisible.
+ *
+ * There is no id to pass because there is nothing to choose: Spring scopes the
+ * subscription to whoever the socket is authenticated as. That is also why it
+ * cannot be used to read somebody else's queue.
+ */
+export function ownQueue(): string {
+  return '/user/queue/events';
 }
 
 /** `ticket:{id}` — ribbon advances, comments, typing. */

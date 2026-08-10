@@ -30,10 +30,27 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public static final String STOMP_ENDPOINT = "/ws";
 
     private final String[] allowedOrigins;
+    private final SubscriptionAuthorisation subscriptionAuthorisation;
 
     public WebSocketConfig(
-            @Value("${edutrack.realtime.allowed-origins:http://localhost:5173}") String[] allowedOrigins) {
+            @Value("${edutrack.realtime.allowed-origins:http://localhost:5173}") String[] allowedOrigins,
+            SubscriptionAuthorisation subscriptionAuthorisation) {
         this.allowedOrigins = allowedOrigins;
+        this.subscriptionAuthorisation = subscriptionAuthorisation;
+    }
+
+    /**
+     * D-013 · every SUBSCRIBE passes the scope guard before the broker sees it.
+     *
+     * <p>On the <em>inbound</em> channel deliberately. Filtering what the broker
+     * sends out instead would mean the subscription still exists and the check
+     * runs on every delivered message — the wrong cost, and it leaves a
+     * subscription the client believes in.
+     */
+    @Override
+    public void configureClientInboundChannel(
+            org.springframework.messaging.simp.config.ChannelRegistration registration) {
+        registration.interceptors(subscriptionAuthorisation);
     }
 
     @Override

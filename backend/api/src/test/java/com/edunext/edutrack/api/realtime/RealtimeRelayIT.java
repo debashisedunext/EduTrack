@@ -29,6 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.lang.reflect.Type;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -66,6 +67,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.test.context.ActiveProfiles({"local", "dev-noauth"})
 @EnableAutoConfiguration(exclude = {
         HibernateJpaAutoConfiguration.class,
         JpaRepositoriesAutoConfiguration.class,
@@ -74,6 +76,40 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RealtimeRelayIT {
 
     private static final String TICKET_TOPIC = "/topic/ticket.4471";
+
+    /**
+     * D-013 · this test now has to get past the subscription guard to do its
+     * own job, which makes it a second, independent proof of two things: that
+     * the {@code dev-noauth} principal survives the WebSocket handshake, and
+     * that the interceptor is genuinely wired onto the inbound channel.
+     *
+     * <p>Granting exactly one ticket rather than everything, so the allow path
+     * is a real decision and not a bypass.
+     *
+     * <p><b>Ordered first, and that is load-bearing.</b> The interceptor unions
+     * the scopes with a short-circuiting {@code anyMatch}, and the other
+     * implementation in the context — {@code ChatSubscriptionScope} — answers
+     * from {@code chat_participants}. This test deliberately starts no MySQL
+     * (see the class comment), so letting chat's scope be consulted would put a
+     * doomed {@code getConnection()} on the SUBSCRIBE path: it turned CI red
+     * while passing on any machine with a database on 3306. Answering here
+     * first keeps the guarantee this class is built on — realtime is provable
+     * without a database.
+     */
+    @org.springframework.boot.test.context.TestConfiguration
+    static class GrantTheTestRoom {
+
+        @org.springframework.context.annotation.Bean
+        @org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
+        SubscriptionScope grantTicket4471() {
+            return new SubscriptionScope() {
+                @Override
+                public boolean mayObserveTicket(long userId, long ticketId) {
+                    return ticketId == 4471L;
+                }
+            };
+        }
+    }
 
     @Container
     static final GenericContainer<?> REDIS =
@@ -176,9 +212,48 @@ class RealtimeRelayIT {
         assertThat(frame).containsEntry("event", "still.working");
     }
 
+    /** Marks the readiness probes below so no assertion ever sees one. */
+    private static final String PROBE = "subscription.probe";
+
+    /**
+     * Subscribe, and do not return until this subscription has been proven to
+     * deliver.
+     *
+     * <p>This used to be {@code session.subscribe(...)} followed by
+     * {@code Thread.sleep(300)}, with a comment conceding the race it covered:
+     * SUBSCRIBE is asynchronous, and a publish issued before the broker has
+     * registered the subscription is simply dropped — pub/sub has no replay, so
+     * the test then waits its whole poll timeout for a frame that was discarded
+     * before it was ever routed. Three hundred milliseconds was enough on a
+     * developer laptop and not on a loaded CI runner, which is the worst kind
+     * of test: green where it is written, red where it is trusted. D-013 made
+     * that visible by putting an authorisation check in front of every
+     * SUBSCRIBE, but the race predates it and would have surfaced eventually
+     * on its own.
+     *
+     * <p>A STOMP RECEIPT would be the obvious answer and does not work here:
+     * the simple in-memory broker does not send them, so every subscription
+     * would wait for an acknowledgement that is never coming. Instead the probe
+     * below settles the question the only way this stack can — by delivering
+     * something. Once a frame published to this destination has come back, the
+     * subscription is registered <em>by demonstration</em>, and any later
+     * publish has somewhere to land however slow the inbound channel was.
+     *
+     * <p>Probes are filtered out in the handler rather than drained afterwards,
+     * because more than one is usually in flight by the time the first arrives
+     * and a straggler landing mid-assertion would be read as the event under
+     * test.
+     *
+     * <p>This also repairs {@code aSubscriberOnlyReceivesItsOwnDestination},
+     * which asserts that nothing arrives: it passed in CI for the wrong reason,
+     * since a subscription that was never registered receives nothing either.
+     * It now has to be live before it can claim to be quiet.
+     */
     @SuppressWarnings("unchecked")
     private BlockingQueue<Map<String, Object>> subscribe(String destination) throws Exception {
         BlockingQueue<Map<String, Object>> frames = new LinkedBlockingQueue<>();
+        CountDownLatch delivering = new CountDownLatch(1);
+
         session.subscribe(destination, new StompFrameHandler() {
             @Override
             @NonNull
@@ -188,12 +263,22 @@ class RealtimeRelayIT {
 
             @Override
             public void handleFrame(@NonNull StompHeaders headers, Object payload) {
-                frames.add((Map<String, Object>) payload);
+                Map<String, Object> frame = (Map<String, Object>) payload;
+                if (PROBE.equals(frame.get("event"))) {
+                    delivering.countDown();
+                    return;
+                }
+                frames.add(frame);
             }
         });
-        // The SUBSCRIBE frame is asynchronous; without this the first publish
-        // can race ahead of the broker registering the subscription.
-        Thread.sleep(300);
+
+        for (int attempt = 0; attempt < 100 && delivering.getCount() > 0; attempt++) {
+            publisher.publish(destination, Map.of("event", PROBE));
+            delivering.await(100, TimeUnit.MILLISECONDS);
+        }
+        assertThat(delivering.getCount())
+                .as("the subscription to %s is live and delivering", destination)
+                .isZero();
         return frames;
     }
 }
