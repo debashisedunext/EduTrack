@@ -25,13 +25,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * D-023 · the stage-SLA scanner, against a real schema.
+ *
+ * <p>Every assertion is scoped to the ticket the test created, never to
+ * {@code scanOnce()}'s return value. Transitions cannot be deleted between
+ * tests — A-008 rejects it — so segments accumulate across the class and a
+ * global count is shared state: a pass that returns 1 may be announcing
+ * somebody else's ticket, which makes a green test mean nothing and a red one
+ * point at the wrong place.
  */
 @Testcontainers
 @SpringBootTest(classes = com.edunext.edutrack.worker.WorkerApplication.class)
 class StageSlaScannerIT {
 
-    /** Monday mid-morning, so "now" sits inside a working day. */
-    private static final Instant NOW = Instant.parse("2026-08-10T10:00:00Z");
+    /**
+     * Monday 09:45 in the calendar's own zone.
+     *
+     * <p>B-023 seeds Asia/Kolkata, 09:30–18:30, so instants here are chosen in
+     * IST and written in UTC: 04:15Z is 09:45 IST, a quarter of an hour into
+     * the working week. Picking a UTC-looking "mid-morning" instead puts NOW at
+     * 15:30 IST with six working hours already spent, which silently turns the
+     * weekend case below into a breach and makes the test agree with a bug.
+     */
+    private static final Instant NOW = Instant.parse("2026-08-10T04:15:00Z");
 
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4")
@@ -83,11 +98,15 @@ class StageSlaScannerIT {
 
     @BeforeEach
     void seed() {
-        jdbc.update("DELETE FROM stage_sla_alerts");
+        // Transitions and tickets are NOT cleaned between tests, and cannot
+        // be: A-008 rejects DELETE on ticket_stage_transitions outright — "the
+        // ribbon can never be rewritten" — which is the guarantee working, not
+        // an obstacle. Each test therefore makes its own ticket and every
+        // assertion is scoped to it. Announcements are not cleaned either, so
+        // a segment announced by one test stays claimed and cannot inflate the
+        // next one's count.
         jdbc.update("DELETE FROM notifications");
         jdbc.update("DELETE FROM email_log");
-        jdbc.update("DELETE FROM ticket_stage_transitions");
-        jdbc.update("DELETE FROM tickets");
 
         int n = SEQ.incrementAndGet();
         manager = insertUser("srm" + n, null);
@@ -106,8 +125,9 @@ class StageSlaScannerIT {
         long ticket = insertTicket("STG-1", NOW.plusSeconds(604800));
         enterStage(ticket, "QA", Instant.parse("2026-08-06T09:00:00Z"));
 
-        assertThat(scanner.scanOnce()).isEqualTo(1);
+        scanner.scanOnce();
 
+        assertThat(alertsFor(ticket)).isEqualTo(1);
         assertThat(isDelayed(ticket))
                 .as("the ticket-level SLA is untouched — this is a different alarm")
                 .isFalse();
@@ -120,8 +140,9 @@ class StageSlaScannerIT {
         long ticket = insertTicket("STG-2", NOW.plusSeconds(604800));
         enterStage(ticket, "QA", NOW.minusSeconds(1800));
 
-        assertThat(scanner.scanOnce()).isZero();
-        assertThat(countAlerts()).isZero();
+        scanner.scanOnce();
+
+        assertThat(alertsFor(ticket)).isZero();
     }
 
     @Test
@@ -132,7 +153,9 @@ class StageSlaScannerIT {
         jdbc.update("UPDATE ticket_stage_transitions SET exited_at = ?, is_current = 0 WHERE id = ?",
                 java.sql.Timestamp.from(NOW.minusSeconds(3600)), transition);
 
-        assertThat(scanner.scanOnce()).isZero();
+        scanner.scanOnce();
+
+        assertThat(alertsFor(ticket)).isZero();
     }
 
     @Test
@@ -142,7 +165,9 @@ class StageSlaScannerIT {
         long ticket = insertTicketOn(noSla, "STG-4", NOW.plusSeconds(604800));
         enterStage(ticket, "QA", Instant.parse("2026-08-03T09:00:00Z"));
 
-        assertThat(scanner.scanOnce()).isZero();
+        scanner.scanOnce();
+
+        assertThat(alertsFor(ticket)).isZero();
     }
 
     // --------------------------------------------------------- D-027 again
@@ -150,17 +175,19 @@ class StageSlaScannerIT {
     @Test
     @DisplayName("the stage budget is working hours, so a weekend does not spend it")
     void aWeekendDoesNotConsumeTheStageSla() {
-        // Handed to QA at 17:00 on Friday with a 4-working-hour SLA. By Monday
-        // 10:00 the wall clock says 65 hours; the working calendar does not.
+        // Handed to QA on Friday evening with a 4-working-hour SLA. By Monday
+        // morning the wall clock says ~63 hours; the working calendar says a
+        // quarter of one.
         // Comparing wall-clock elapsed against a working-hours budget is the
         // Friday-evening bug from §5, one level down.
         long ticket = insertTicket("STG-5", NOW.plusSeconds(604800));
-        enterStage(ticket, "QA", Instant.parse("2026-08-07T17:00:00Z"));
+        // 19:00 IST on Friday — after the working day closed at 18:30.
+        enterStage(ticket, "QA", Instant.parse("2026-08-07T13:30:00Z"));
 
-        int announced = scanner.scanOnce();
+        scanner.scanOnce();
 
-        assertThat(announced)
-                .as("only about an hour of working time has passed, against a 4-hour SLA")
+        assertThat(alertsFor(ticket))
+                .as("a quarter of a working hour has passed, against a 4-hour SLA")
                 .isZero();
     }
 
@@ -187,7 +214,9 @@ class StageSlaScannerIT {
         scanner.scanOnce();
         int after = countNotifications();
 
-        assertThat(scanner.scanOnce()).isZero();
+        scanner.scanOnce();
+
+        assertThat(alertsFor(ticket)).isEqualTo(1);
         assertThat(countNotifications()).isEqualTo(after);
     }
 
@@ -204,10 +233,11 @@ class StageSlaScannerIT {
                 java.sql.Timestamp.from(Instant.parse("2026-08-05T12:00:00Z")), first);
         enterStage(ticket, "QA", Instant.parse("2026-08-06T09:00:00Z"));
 
-        assertThat(scanner.scanOnce())
-                .as("the second visit is its own segment with its own budget")
-                .isEqualTo(1);
-        assertThat(countAlerts()).isEqualTo(2);
+        scanner.scanOnce();
+
+        assertThat(alertsFor(ticket))
+                .as("one announcement per segment, not per ticket")
+                .isEqualTo(2);
     }
 
     // ------------------------------------------------------------- who hears
@@ -244,10 +274,13 @@ class StageSlaScannerIT {
     @DisplayName("an unowned stage still records the breach")
     void aQueuedStageWithNoOwnerIsStillAnnounced() {
         long ticket = insertTicket("STG-11", NOW.plusSeconds(604800));
-        long transition = enterStage(ticket, "QA", Instant.parse("2026-08-06T09:00:00Z"));
-        jdbc.update("UPDATE ticket_stage_transitions SET to_user_id = NULL WHERE id = ?", transition);
+        // Inserted unowned rather than updated to unowned: A-008 permits
+        // exactly one mutation on this table — sealing — and rejects the rest.
+        enterStageUnowned(ticket, "QA", Instant.parse("2026-08-06T09:00:00Z"));
 
-        assertThat(scanner.scanOnce()).isEqualTo(1);
+        scanner.scanOnce();
+
+        assertThat(alertsFor(ticket)).isEqualTo(1);
         assertThat(notifiedUserIds(ticket)).containsExactly(projectManager);
     }
 
@@ -271,8 +304,17 @@ class StageSlaScannerIT {
         return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     }
 
+    /** A segment queued to a stage with nobody holding it. */
+    private long enterStageUnowned(long ticketId, String stage, Instant enteredAt) {
+        return insertSegment(ticketId, stage, enteredAt, null);
+    }
+
     /** One open segment: entered, never exited. */
     private long enterStage(long ticketId, String stage, Instant enteredAt) {
+        return insertSegment(ticketId, stage, enteredAt, stageOwner);
+    }
+
+    private long insertSegment(long ticketId, String stage, Instant enteredAt, Long owner) {
         Integer seq = jdbc.queryForObject(
                 "SELECT COALESCE(MAX(seq_no), 0) + 1 FROM ticket_stage_transitions WHERE ticket_id = ?",
                 Integer.class, ticketId);
@@ -281,7 +323,7 @@ class StageSlaScannerIT {
                        (ticket_id, cycle_no, seq_no, from_stage, to_stage, to_user_id,
                         action_code, entered_at, is_current)
                 VALUES (?, 1, ?, 'DEVELOPMENT', ?, ?, 'FORWARD', ?, 1)
-                """, ticketId, seq, stage, stageOwner, java.sql.Timestamp.from(enteredAt));
+                """, ticketId, seq, stage, owner, java.sql.Timestamp.from(enteredAt));
         return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     }
 
@@ -326,8 +368,12 @@ class StageSlaScannerIT {
                 """, Long.class, ticketId);
     }
 
-    private int countAlerts() {
-        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM stage_sla_alerts", Integer.class);
+    private int alertsFor(long ticketId) {
+        Integer n = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM stage_sla_alerts a
+                  JOIN ticket_stage_transitions tr ON tr.id = a.transition_id
+                 WHERE tr.ticket_id = ?
+                """, Integer.class, ticketId);
         return n == null ? 0 : n;
     }
 
