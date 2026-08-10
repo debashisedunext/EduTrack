@@ -3,6 +3,7 @@ package com.edunext.edutrack.domain.outbox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -63,6 +64,11 @@ public class OutboxEnqueuer {
      * <p>Served by {@code ix_email_log_rate (to_email, ticket_id, queued_at)},
      * which A-006 added for exactly this check.
      */
+    /** D-031. Primary-key lookup for the subject prefix. */
+    private static final String TICKET_CODE = """
+            SELECT ticket_code FROM tickets WHERE id = :ticketId
+            """;
+
     private static final String RECENT_TO_SAME_RECIPIENT = """
             SELECT COUNT(*) FROM email_log
              WHERE to_email = :toEmail
@@ -128,13 +134,40 @@ public class OutboxEnqueuer {
                         .addValue("templateId", mail.templateId())
                         .addValue("toUserId", mail.toUserId())
                         .addValue("toEmail", mail.toEmail())
-                        .addValue("subject", mail.subject()),
+                        // D-031. Composed here rather than trusted from the
+                        // caller, so no §4B.6 event can ship without its code.
+                        .addValue("subject", TicketMailSubject.compose(
+                                ticketCodeOf(mail.ticketId()), mail.subject())),
                 keys);
         Number id = keys.getKey();
         if (id == null) {
             throw new IllegalStateException("email_log insert returned no generated key");
         }
         return OptionalLong.of(id.longValue());
+    }
+
+    /**
+     * D-031 · the code that goes at the front of the subject.
+     *
+     * <p>One extra read per enqueue, on the primary key. Enqueue is not a hot
+     * path — it happens once per recipient per event — and the alternative is
+     * threading the code through every caller, where the one that forgets is
+     * invisible until somebody cannot find a mail.
+     */
+    private String ticketCodeOf(Long ticketId) {
+        if (ticketId == null) {
+            return null;
+        }
+        try {
+            return jdbc.queryForObject(TICKET_CODE,
+                    new MapSqlParameterSource("ticketId", ticketId), String.class);
+        } catch (EmptyResultDataAccessException e) {
+            // A foreign key makes this unreachable, and it degrades rather than
+            // throws anyway: an unprefixed subject is a worse mail, while an
+            // exception here would roll back the handoff that raised it.
+            log.warn("outbox: no ticket {} for subject prefix — sending unprefixed", ticketId);
+            return null;
+        }
     }
 
     private boolean isRateLimited(NewMail mail) {

@@ -58,6 +58,21 @@ edutrack:
   mail:
     rate-limit-window: ${MAIL_RATE_LIMIT_WINDOW:PT1M}
 
+    # D-032 · the right-hand side of every Message-ID we mint.
+    #
+    # MUST be stable for the life of a deployment and MUST be a domain we
+    # own. Changing it re-roots every future mail, so an existing ticket's
+    # thread silently splits in two at the moment of the change — the old
+    # mails reference the old root and the new ones reference a root nothing
+    # has ever seen. Some providers also reject or spam-score a Message-ID
+    # whose domain does not match the sender.
+    message-id-domain: ${MAIL_MESSAGE_ID_DOMAIN:edutrack.local}
+
+    # SMTP refuses a message with no sender, and an unset From would make
+    # every send a permanent failure the outbox retries three times before
+    # giving up. Override per environment alongside MAIL_HOST.
+    from: ${MAIL_FROM:no-reply@edutrack.local}
+
   outbox:
     enabled: true
     poll-interval: PT5S
