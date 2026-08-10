@@ -1,4 +1,4 @@
-# S-17 Ticket List (All Tickets) — C-014
+# S-17 Ticket List (All Tickets) — C-014, saved views C-015
 
 Filters, sticky header, density toggle, column chooser — the base grid
 `STREAM-C-TICKETS.md` scopes to this task. Row-scoped server-side by
@@ -8,9 +8,10 @@ on top of what the API already narrowed.
 | File | What it is |
 |---|---|
 | `TicketListPage.tsx` | The screen. Route `/tickets`. |
-| `useTicketListFilters.ts` | Filter state, read from and written to the URL. |
+| `useTicketListFilters.ts` | Filter state, read from and written to the URL; `applyFilters` (C-015) sets several keys atomically. |
 | `FilterDropdown.tsx` | Feature-local, nullable, clearable dropdown — the eight filter chips in the wireframe's second row. |
 | `DateRangeFilter.tsx` | The "Dates▾" filter — `dueFrom`/`dueTo` against the planned close date. |
+| `SavedViewsMenu.tsx` | C-015 — the six fixed S-17 saved views, replacing the old disabled stub. |
 | `columns.tsx` | Column definitions, cell renderers, the level/status chip variant maps. |
 | `useListPreferences.ts` | Density and column visibility, persisted to `localStorage`. |
 | `ColumnChooserMenu.tsx` · `DensityToggle.tsx` | The "⚙ Columns" popover and the comfortable/compact toggle. |
@@ -116,6 +117,87 @@ screen's behaviour.
 |---|---|
 | Compact ribbon column | See above — no owner yet, needs a contract answer first |
 | Row colour cues — amber/red left border | C-016 |
-| Saved views — the header's "Saved views ▾" is a disabled stub | C-015 |
 | Bulk select → reassign / change level / close | C-017 |
 | Export CSV / PDF | A-064 (Stream A's export engine) — not S-17's job at all, confirmed against the backlog before assuming it belonged here |
+
+## C-015 — Saved views are fixed presets, not persisted searches
+
+Blueprint §7.5/S-17 names exactly six views — My Open, Due Today, Overdue,
+Unassigned, Reopened, Closed This Month — with no elaboration on filter
+criteria and no `SavedView` schema anywhere in the contract. Rather than
+inventing backend persistence nobody asked for, these ship as six **fixed,
+built-in presets** over the same URL-based filter state C-014 already built —
+`SavedViewsMenu` picks one, `useTicketListFilters.applyFilters` replaces the
+filter row with its recipe in one URL update, same as `resetFilters` does for
+Reset. There is nothing to save, rename or delete, and nothing server-side to
+build for this task.
+
+| View | Recipe (all other filters cleared) |
+|---|---|
+| My Open | `assigneeId = <me, via useGetMe()>`, `excludeClosed = true` |
+| Due Today | `dueFrom = dueTo = today` (local date) |
+| Overdue | `isDelayed = true` |
+| Unassigned | `unassigned = true` |
+| Reopened | `reopenedOnly = true` |
+| Closed This Month | `status = CLOSED`, `closedFrom = 1st of this month`, `closedTo = today` |
+
+`isDelayed` and `reopenedOnly` were already full round-trips through the
+contract and the mock — C-014 just never put a UI control in front of them.
+The other three needed small additive contract changes (see below) because
+the contract had no way to express "no assignee", "not closed", or a date
+range on `actualCloseDate` rather than `plannedCloseDate`.
+
+**Active-view highlighting is computed, not stored.** `SavedViewsMenu`
+compares the current `filters` (from the URL) against each recipe's full
+`TicketListFilters` object, key by key, ignoring `q`; a match highlights that
+item and shows its name on the trigger. There is no separate "which view is
+selected" state to fall out of sync with the URL — picking a view, editing a
+filter chip afterwards, pasting a `/tickets?...` link, or hitting Reset are
+all just different ways of landing on a `filters` object, and the menu reacts
+to whichever one is current.
+
+**My Open needs `useGetMe()` to resolve first.** `TicketListPage` reads the
+signed-in user's id and passes it down; until it resolves, the "My Open" item
+renders present-but-disabled rather than applying `assigneeId=undefined`
+(which the contract would happily accept as "no filter" and silently show
+everyone's tickets under a view named "My Open").
+
+### Contract additions — ⚠ needs Stream D sign-off
+
+`contracts/openapi.yaml`'s `GET /tickets` gained four optional, additive
+boolean/date params, same style as the existing `isDelayed`/`isClientRaised`/
+`reopenedOnly`/`dueFrom`/`dueTo`:
+
+- `unassigned` (boolean) — true to return only tickets with `assigneeId IS NULL`. `assigneeId` only does equality-to-a-specific-user; there was no way to ask for "nobody".
+- `excludeClosed` (boolean) — true to exclude `status = CLOSED`. `status` is single-value equality, so "assigned to me AND not closed" (My Open) had no way to express the second half.
+- `closedFrom` / `closedTo` (date) — mirrors `dueFrom`/`dueTo` exactly, but filters `actualCloseDate` instead of `plannedCloseDate`. Closed This Month needs the date it actually closed, not its planned close date.
+
+The client was regenerated (`npm run api:generate`) — only
+`listTicketsParams.ts` and `tickets.zod.ts` changed, pattern-only diffs, `tsc
+-b` and the full test suite clean. Nothing under `api/generated/` was
+hand-edited.
+
+### The `dueFrom`/`dueTo` mock gap C-015 also had to fix
+
+C-014 declared `dueFrom`/`dueTo` in the contract and even built the "Dates▾"
+filter around them, but `frontend/src/mocks/handlers/tickets.ts`'s `GET
+/tickets` handler never actually read them — they matched the OpenAPI shape
+and did nothing. Invisible until something depended on the filter actually
+working, which "Due Today" does. Fixed alongside the three new params, same
+inclusive, date-only range style; the mock db.ts fixture ticket
+`CRM-26-00347` (`plannedCloseDate` 2026-08-13, `actualCloseDate`
+2026-08-14T16:30) is what `mocks.test.ts`'s new filter tests pin against, and
+is deliberately why the `dueFrom`/`dueTo` and `closedFrom`/`closedTo` tests
+use different days — a handler that swapped the two date fields would still
+pass a test that used the same day for both.
+
+### No Storybook entry for `SavedViewsMenu`
+
+It is ticket-list-specific — six hardcoded view names and a recipe shape
+(`TicketListFilters`) that only exists in this folder — not a generic,
+reusable control the way `FilterDropdown`'s search-list-with-clear pattern
+arguably is. CLAUDE.md's Storybook rule is for the shared library other
+streams consume (`components/ui/`, `components/ribbon/`); this stays a
+feature-local component next to `TicketListPage.tsx`, same tier as
+`ColumnChooserMenu.tsx` and `DensityToggle.tsx`, neither of which has a story
+either.

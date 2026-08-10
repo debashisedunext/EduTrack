@@ -8,6 +8,7 @@ import { useListProjects } from '@/api/generated/projects/projects'
 import { useListClients } from '@/api/generated/clients/clients'
 import { useListUsers } from '@/api/generated/users/users'
 import { useListTaskTypes, useListPriorities, useListWorkflowTemplates } from '@/api/generated/masters/masters'
+import { useGetMe } from '@/api/generated/auth/auth'
 import type { Level } from '@/api/generated/model/level'
 import type { StatusCode } from '@/api/generated/model/statusCode'
 
@@ -30,7 +31,8 @@ import { FilterDropdown } from './FilterDropdown'
 import { DateRangeFilter } from './DateRangeFilter'
 import { ColumnChooserMenu } from './ColumnChooserMenu'
 import { DensityToggle } from './DensityToggle'
-import { useTicketListFilters } from './useTicketListFilters'
+import { SavedViewsMenu } from './SavedViewsMenu'
+import { useTicketListFilters, type TicketListFilters } from './useTicketListFilters'
 import { useListPreferences } from './useListPreferences'
 import { COLUMNS, STATUS_LABEL, type ColumnRenderContext } from './columns'
 
@@ -47,15 +49,17 @@ const STATUS_OPTIONS = (Object.keys(STATUS_LABEL) as StatusCode[]).map((value) =
 const DENSITY_ROW_CLASS = { comfortable: 'py-3', compact: 'py-1.5' } as const
 
 /**
- * S-17 Ticket List (All Tickets) — C-014.
+ * S-17 Ticket List (All Tickets) — C-014, saved views C-015.
  *
  * The compact ribbon column the wireframe draws is deliberately not here: see
- * the folder README. Row colour cues (C-016), saved views (C-015) and bulk
- * select (C-017) are separate backlog items and stay out of this screen too.
+ * the folder README. Row colour cues (C-016) and bulk select (C-017) are
+ * separate backlog items and stay out of this screen too.
  */
 export function TicketListPage() {
-  const { filters, setFilter, resetFilters, activeCount } = useTicketListFilters()
+  const { filters, setFilter, applyFilters, resetFilters, activeCount } = useTicketListFilters()
   const { density, setDensity, visibleColumns, toggleColumn } = useListPreferences()
+  const { data: meData } = useGetMe()
+  const myUserId = meData?.data.id ?? null
 
   // Cursor pagination has no page numbers to jump to — CONVENTIONS.md is
   // explicit that offset paging over a table under write traffic skips and
@@ -75,6 +79,13 @@ export function TicketListPage() {
   function updateFilter<K extends keyof typeof filters>(key: K, value: (typeof filters)[K]) {
     setCursorStack([])
     setFilter(key, value)
+  }
+
+  // A saved view replaces the whole filter row in one URL update, same
+  // cursor-reset rule as every other filter-changing action on this screen.
+  function applySavedView(recipe: Partial<TicketListFilters>) {
+    setCursorStack([])
+    applyFilters(recipe)
   }
 
   // ── search box — debounced so every keystroke does not refetch ───────────
@@ -166,6 +177,12 @@ export function TicketListPage() {
       assigneeId: filters.assigneeId ?? undefined,
       dueFrom: filters.dueFrom ?? undefined,
       dueTo: filters.dueTo ?? undefined,
+      isDelayed: filters.isDelayed ?? undefined,
+      reopenedOnly: filters.reopenedOnly ?? undefined,
+      unassigned: filters.unassigned ?? undefined,
+      excludeClosed: filters.excludeClosed ?? undefined,
+      closedFrom: filters.closedFrom ?? undefined,
+      closedTo: filters.closedTo ?? undefined,
     },
     { query: { placeholderData: keepPreviousData } },
   )
@@ -204,14 +221,7 @@ export function TicketListPage() {
           />
         </div>
 
-        <button
-          type="button"
-          disabled
-          title="Saved views arrive with C-015"
-          className="flex h-9 cursor-not-allowed items-center gap-1.5 rounded-control border border-border bg-surface px-3 text-sm text-content-muted opacity-60"
-        >
-          Saved views ▾
-        </button>
+        <SavedViewsMenu filters={filters} onApply={applySavedView} myUserId={myUserId} />
 
         <div className="ml-auto flex items-center gap-2">
           <DensityToggle density={density} onChange={setDensity} />

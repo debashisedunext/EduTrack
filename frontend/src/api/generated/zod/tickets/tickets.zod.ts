@@ -75,8 +75,12 @@ export const listTicketsQueryParams = zod.object({
   "isDelayed": zod.boolean().optional(),
   "isClientRaised": zod.boolean().optional(),
   "reopenedOnly": zod.boolean().optional(),
+  "unassigned": zod.boolean().optional().describe('True to return only tickets with no assignee.'),
+  "excludeClosed": zod.boolean().optional().describe('True to exclude tickets in CLOSED status.'),
   "dueFrom": zod.string().date().optional(),
   "dueTo": zod.string().date().optional(),
+  "closedFrom": zod.string().date().optional().describe('Filters on actualCloseDate, inclusive.'),
+  "closedTo": zod.string().date().optional().describe('Filters on actualCloseDate, inclusive.'),
   "sort": zod.string().default(listTicketsQuerySortDefault)
 })
 

@@ -257,3 +257,60 @@ describe('S-17 Ticket List — C-014', () => {
     expect(screen.getByRole('button', { name: /Previous/ })).toBeDisabled()
   })
 })
+
+/**
+ * Picks a Saved-views item as one retryable "open, then click" unit, same
+ * defensive shape as `pickFilterOption` above — a popover that was open a
+ * frame ago and got dismissed by a stray focus event just gets retried from
+ * the top rather than clicking into a menu that is no longer there.
+ */
+async function pickSavedView(name: RegExp | string) {
+  await waitFor(
+    () => {
+      const trigger = screen.getByRole('button', { name: 'Saved views' })
+      if (trigger.getAttribute('data-state') !== 'open') fireEvent.click(trigger)
+      fireEvent.click(screen.getByRole('menuitemradio', { name }))
+    },
+    { timeout: 4000 },
+  )
+}
+
+describe('S-17 Saved views — C-015', () => {
+  it('Overdue sends isDelayed=true and replaces whatever else was set', async () => {
+    // Not `rowsReady()` — Level=High alone may legitimately scope to zero of
+    // Ravi's tickets (the "counts active filters" test above hits the same
+    // thing); this test is about the request Overdue sends, not the grid.
+    renderPage('/tickets?level=HIGH')
+    await waitFor(() => expect(listRequests.some((u) => u.searchParams.get('level') === 'HIGH')).toBe(true))
+    await pickSavedView('Overdue')
+    await waitFor(() => {
+      const last = listRequests.at(-1)!
+      expect(last.searchParams.get('isDelayed')).toBe('true')
+      expect(last.searchParams.has('level')).toBe(false)
+    })
+    expect(screen.getByRole('button', { name: 'Saved views' })).toHaveTextContent('Overdue')
+  })
+
+  it('Unassigned sends unassigned=true — the contract param C-015 added for "assignee is null"', async () => {
+    renderPage()
+    await rowsReady()
+    await pickSavedView('Unassigned')
+    await waitFor(() => expect(listRequests.at(-1)?.searchParams.get('unassigned')).toBe('true'))
+  })
+
+  it('My Open sends assigneeId=<the signed-in user> and excludeClosed=true, once useGetMe resolves', async () => {
+    renderPage()
+    await rowsReady()
+    fireEvent.click(screen.getByRole('button', { name: 'Saved views' }))
+    // The mock's default currentUserId is 3 (Ravi) — see db.ts. Disabled until
+    // `useGetMe` resolves, so the item existing-but-disabled is the starting
+    // state, not a race to avoid.
+    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: 'My Open' })).not.toBeDisabled())
+    await pickSavedView('My Open')
+    await waitFor(() => {
+      const last = listRequests.at(-1)!
+      expect(last.searchParams.get('assigneeId')).toBe('3')
+      expect(last.searchParams.get('excludeClosed')).toBe('true')
+    })
+  })
+})

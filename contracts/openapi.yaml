@@ -566,8 +566,12 @@ paths:
         - { name: isDelayed, in: query, schema: { type: boolean } }
         - { name: isClientRaised, in: query, schema: { type: boolean } }
         - { name: reopenedOnly, in: query, schema: { type: boolean } }
+        - { name: unassigned, in: query, schema: { type: boolean }, description: 'True to return only tickets with no assignee.' }
+        - { name: excludeClosed, in: query, schema: { type: boolean }, description: 'True to exclude tickets in CLOSED status.' }
         - { name: dueFrom, in: query, schema: { type: string, format: date } }
         - { name: dueTo, in: query, schema: { type: string, format: date } }
+        - { name: closedFrom, in: query, schema: { type: string, format: date }, description: 'Filters on actualCloseDate, inclusive.' }
+        - { name: closedTo, in: query, schema: { type: string, format: date }, description: 'Filters on actualCloseDate, inclusive.' }
         - { name: sort, in: query, schema: { type: string, default: '-createdAt' } }
       responses:
         '200':
