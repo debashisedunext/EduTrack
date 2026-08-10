@@ -42,8 +42,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @org.springframework.context.annotation.Import(PreBreachScannerIT.FixedClock.class)
 class PreBreachScannerIT {
 
-    /** Monday 2026-08-10, 14:00 IST. */
-    private static final Instant NOW = Instant.parse("2026-08-10T08:30:00Z");
+    /** Monday 2026-08-10, 09:45 IST — a quarter of an hour into the week. */
+    private static final Instant NOW = Instant.parse("2026-08-10T04:15:00Z");
 
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4")
@@ -106,12 +106,12 @@ class PreBreachScannerIT {
     @Test
     @DisplayName("a ticket most of the way through its window warns its assignee")
     void pastEightyPercentWarns() {
-        // Reported Thursday 09:30 IST, due Monday 14:30 IST: 9 + 9 working
-        // hours either side of a weekend that counts for nothing, plus 5 on
-        // Monday — 23 committed. It is now Monday 14:00, so 22.5 are spent.
+        // Reported Thursday 09:30 IST, due Monday 11:00 IST: 9 + 9 working
+        // hours either side of a weekend that counts for nothing, plus 1.5 on
+        // Monday — 19.5 committed, of which 18.25 are spent.
         long ticket = insertTicket("PB-1",
                 Instant.parse("2026-08-06T04:00:00Z"),   // Thu 09:30 IST
-                Instant.parse("2026-08-10T09:00:00Z"));  // Mon 14:30 IST
+                Instant.parse("2026-08-10T05:30:00Z"));  // Mon 11:00 IST
 
         scanner.scanOnce();
 
@@ -136,7 +136,7 @@ class PreBreachScannerIT {
     void onlyTheAssigneeIsWarned() {
         long ticket = insertTicket("PB-3",
                 Instant.parse("2026-08-06T04:00:00Z"),
-                Instant.parse("2026-08-10T09:00:00Z"));
+                Instant.parse("2026-08-10T05:30:00Z"));
 
         scanner.scanOnce();
 
@@ -165,7 +165,7 @@ class PreBreachScannerIT {
     void anUnassignedTicketIsSkipped() {
         long ticket = insertTicket("PB-5",
                 Instant.parse("2026-08-06T04:00:00Z"),
-                Instant.parse("2026-08-10T09:00:00Z"));
+                Instant.parse("2026-08-10T05:30:00Z"));
         jdbc.update("UPDATE tickets SET assigned_to = NULL WHERE id = ?", ticket);
 
         scanner.scanOnce();
@@ -178,7 +178,7 @@ class PreBreachScannerIT {
     void aClosedTicketIsInvisible() {
         long ticket = insertTicket("PB-6",
                 Instant.parse("2026-08-06T04:00:00Z"),
-                Instant.parse("2026-08-10T09:00:00Z"));
+                Instant.parse("2026-08-10T05:30:00Z"));
         jdbc.update("UPDATE tickets SET actual_close_date = ?, status = 'CLOSED' WHERE id = ?",
                 java.sql.Timestamp.from(NOW.minusSeconds(3600)), ticket);
 
@@ -194,7 +194,7 @@ class PreBreachScannerIT {
     void warningHappensOncePerCycle() {
         long ticket = insertTicket("PB-7",
                 Instant.parse("2026-08-06T04:00:00Z"),
-                Instant.parse("2026-08-10T09:00:00Z"));
+                Instant.parse("2026-08-10T05:30:00Z"));
         scanner.scanOnce();
         int after = countNotifications();
 
@@ -209,7 +209,7 @@ class PreBreachScannerIT {
     void aReopenReArmsTheWarning() {
         long ticket = insertTicket("PB-8",
                 Instant.parse("2026-08-06T04:00:00Z"),
-                Instant.parse("2026-08-10T09:00:00Z"));
+                Instant.parse("2026-08-10T05:30:00Z"));
         scanner.scanOnce();
 
         // Reopened: a new cycle with its own window. Somebody told about cycle 1
@@ -232,13 +232,19 @@ class PreBreachScannerIT {
     @Test
     @DisplayName("the proportion is of working hours, not of the calendar")
     void aWeekendDoesNotAdvanceTheWindow() {
-        // Reported Friday 17:30 IST, due Tuesday 17:30 IST. In wall-clock terms
-        // it is now ~70% through. In working terms the weekend is not part of
-        // the window at all, so barely a fifth of it has been used — and a
-        // wall-clock implementation would warn here.
+        // Reported Friday 18:00 IST, due Monday 18:00 IST, and it is now
+        // Monday 09:45. The window is three calendar days of which two are a
+        // weekend, so:
+        //
+        //   wall clock  63.75h of 72h  = 88.5%  -> a naive implementation warns
+        //   working      0.75h of  9h  =  8.3%  -> barely started
+        //
+        // Chosen so the two answers fall on opposite sides of the threshold.
+        // An earlier draft had them both under it, which made the test pass
+        // against wall-clock maths and prove nothing.
         long ticket = insertTicket("PB-9",
-                Instant.parse("2026-08-07T12:00:00Z"),   // Fri 17:30 IST
-                Instant.parse("2026-08-11T12:00:00Z"));  // Tue 17:30 IST
+                Instant.parse("2026-08-07T12:30:00Z"),   // Fri 18:00 IST
+                Instant.parse("2026-08-10T12:30:00Z"));  // Mon 18:00 IST
 
         scanner.scanOnce();
 
