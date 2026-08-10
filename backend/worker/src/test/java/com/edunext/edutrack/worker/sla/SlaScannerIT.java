@@ -175,7 +175,12 @@ class SlaScannerIT {
 
         scanner.scanOnce();
 
-        assertThat(notifiedUserIds(id)).containsExactly(assignee);
+        // Their reporting manager is legitimately told as well — what must not
+        // happen is the assignee appearing twice for filling two of the three
+        // roles.
+        assertThat(notifiedUserIds(id))
+                .containsExactlyInAnyOrder(assignee, manager)
+                .doesNotHaveDuplicates();
     }
 
     @Test
