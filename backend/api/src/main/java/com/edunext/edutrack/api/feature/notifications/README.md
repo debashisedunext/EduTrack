@@ -80,10 +80,23 @@ producers cannot disagree about it.
 - **D-042** the per-user preference matrix. Until it exists, no optional mail is
   sent for an event §4B.6 marks optional — see `feature/chat` on why mention
   email waits for it.
-- **D-043** in-app toast. `MentionNotifier` already pushes
-  `notification.created` to the recipient's queue carrying the notification id,
-  which is what Open / Snooze / Dismiss need to act on.
-- **D-044** the persistent badge. **Nothing pushes a `notification.read` event**,
-  so marking one read in a second tab leaves the first tab's badge stale until
-  it reloads. That belongs with the badge, not here.
 - **D-046** offline queueing and replay on next login.
+
+## The realtime side (D-043/D-044)
+
+`NotificationBroadcaster` publishes to the recipient's own queue:
+
+| Event | When | Carries |
+|---|---|---|
+| `notification.created` | a notification is raised (`MentionNotifier` today) | id, eventCode, title, body, link |
+| `notification.read` | one marked read | id |
+| `notification.all-read` | the user cleared everything | count |
+
+Two rules hold across all three. **No unread count is ever sent** — the client
+refetches and takes the number from the database, because a count computed after
+commit would race every other tab and leave the badge on whichever frame landed
+last rather than the true one. And **nothing is published inside the
+transaction**: a rolled-back mark-read that had already told four tabs to
+decrement leaves all four wrong until reload.
+
+The consumer is `frontend/src/features/notifications/`.
