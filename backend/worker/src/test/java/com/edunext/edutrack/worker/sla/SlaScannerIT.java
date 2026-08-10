@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * "now" means something different every time it runs.
  */
 @Testcontainers
-@SpringBootTest
+@SpringBootTest(classes = com.edunext.edutrack.worker.WorkerApplication.class)
 class SlaScannerIT {
 
     /** A Monday, mid-morning — a working hour on any sane calendar. */
@@ -56,9 +56,10 @@ class SlaScannerIT {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
-        registry.add("spring.flyway.url", MYSQL::getJdbcUrl);
-        registry.add("spring.flyway.user", MYSQL::getUsername);
-        registry.add("spring.flyway.password", MYSQL::getPassword);
+        // The worker never migrates in production — api owns that — so
+        // application.yml disables Flyway and the test has to turn it back on
+        // to get a schema at all.
+        registry.add("spring.flyway.enabled", () -> true);
         // The scheduled trigger is not under test; every case here drives
         // scanOnce() directly so nothing fires behind the assertions.
         registry.add("edutrack.sla.scan-interval", () -> "PT1H");
