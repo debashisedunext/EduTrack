@@ -254,9 +254,16 @@ class SlaScannerIT {
             // hold is that a weekend was not counted as working time. Wall
             // clock here is ~64h, so anything near it means the calendar was
             // bypassed and D-027 was not honoured.
+            // Bounded on both sides deliberately. Only asserting "< 24" would
+            // pass if the service returned 0.00 — which is what a misconfigured
+            // calendar with no working days would give, and the test would then
+            // certify D-027 while proving nothing.
             assertThat(reported)
-                    .as("a weekend must not be billed as working hours")
+                    .as("a weekend must not be billed as working hours (wall clock is ~64h)")
                     .isLessThan(24.0);
+            assertThat(reported)
+                    .as("Monday morning is working time, so this cannot be zero")
+                    .isGreaterThan(0.0);
         }
     }
 
