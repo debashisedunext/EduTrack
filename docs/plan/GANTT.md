@@ -173,7 +173,7 @@ gantt
     title Stream D — Debashis
     excludes weekends
     section Milestones
-    Sprint 0 — weeks 1–2 :done, d0, 2026-08-06, 90d
+    Sprint 0 — weeks 1–2 :done, d0, 2026-08-06, 3d
     Infrastructure — weeks 3–5 :active, d1, 2026-08-07, 13d
     M5 — SLA  escalation & mail — weeks 6–11 :active, d2, 2026-08-07, 63d
     M7 — Chat & realtime — weeks 12–16 :active, d3, 2026-08-08, -14d
@@ -391,7 +391,7 @@ gantt
 | 🔴 | `D-001` | OpenAPI contract for every endpoint in blueprint §13 | 3 | — | Thu 06 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `D-002` | Conventions baked into the spec | 1 | `D-001` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
 |  | `D-003` | springdoc config + codegen pipeline | 2 | `D-002` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
-| 🔴 | `D-004` | MSW mock server returning realistic fixtures for every endpoint | 2.5 | `D-002` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
+| 🔴 | `D-004` | MSW mock server returning realistic fixtures for every endpoint | 2.5 | `D-002` | Thu 06 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-005` | CI staleness check | 1 | `D-003` | Thu 06 Aug | Sat 08 Aug | 0 | ✅ done |
 | 🔴 | `D-010` | Outbox worker pattern | 2.5 | `A-006` `A-012` | Fri 07 Aug | Fri 07 Aug | 44 | ✅ done |
 |  | `D-011` | @Scheduled + ShedLock | 1 | `D-010` ᶦ | Fri 07 Aug | Fri 07 Aug | 63 | ✅ done |
