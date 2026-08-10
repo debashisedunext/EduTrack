@@ -4,6 +4,7 @@ import {
   CLIENT_REQUIRING_TASK_TYPES,
   clientRequiringTaskTypeIds,
   emptyTicketForm,
+  retainedForNextTicket,
   ticketFormSchema,
   toCreateRequest,
   type TicketFormValues,
@@ -27,6 +28,15 @@ const valid: TicketFormValues = {
   taskTypeId: 5,
   level: 'HIGH',
   estimatedHrs: '4.5',
+}
+
+/** What is left of a ticket someone parked half-written — C-013's Save as Draft. */
+const draftable: TicketFormValues = {
+  ...emptyTicketForm,
+  projectId: 1,
+  title: 'Half-written — finish tomorrow',
+  taskTypeId: 5,
+  level: 'HIGH',
 }
 
 /** The field a given parse complained about, so assertions name the field not the index. */
@@ -131,11 +141,97 @@ describe('toCreateRequest', () => {
     expect(body.description).toBe('Body')
   })
 
-  it('never sends saveAsDraft true — the draft action is C-013', () => {
+  it('marks the body as a draft only on the draft action', () => {
+    expect(toCreateRequest(valid, 'assign').saveAsDraft).toBe(false)
+    expect(toCreateRequest(valid, 'another').saveAsDraft).toBe(false)
+    expect(toCreateRequest(valid, 'draft').saveAsDraft).toBe(true)
+    // The default is the primary action, so an unmigrated caller cannot
+    // accidentally start saving live tickets as drafts.
     expect(toCreateRequest(valid).saveAsDraft).toBe(false)
+  })
+
+  it('omits description and effort a draft left blank rather than sending empties', () => {
+    // `estimatedHrs: 0` is a genuine zero-hour estimate and `description: ''`
+    // is a genuine empty description; both are different claims from "not
+    // filled in yet", and both would survive into the finished ticket.
+    const body = toCreateRequest({ ...draftable, description: '  ', estimatedHrs: '' }, 'draft')
+    expect('description' in body).toBe(false)
+    expect('estimatedHrs' in body).toBe(false)
+    expect(createTicketBody.safeParse(body)).toMatchObject({ success: true })
   })
 
   it('throws rather than sending a null id if it is ever called unvalidated', () => {
     expect(() => toCreateRequest(emptyTicketForm)).toThrow(/never passed validation/)
+  })
+})
+
+describe('ticketFormSchema — the draft action (C-013)', () => {
+  const draftSchema = ticketFormSchema(clientRequired, 'draft')
+
+  it('accepts a ticket that has only what the contract requires', () => {
+    // `TicketCreateRequest.required` is [projectId, title, taskTypeId, level],
+    // and level pre-fills from the task type — so a draft costs project, task
+    // type and title. Relaxing further would just earn a 400.
+    expect(draftSchema.safeParse(draftable).success).toBe(true)
+    expect(schema.safeParse(draftable).success).toBe(false)
+  })
+
+  it('still insists on the four fields the contract makes required', () => {
+    const result = draftSchema.safeParse(emptyTicketForm)
+    expect(result.success).toBe(false)
+    const fields = result.success ? [] : result.error.issues.map((i) => i.path.join('.'))
+    expect(fields.sort()).toEqual(['level', 'projectId', 'taskTypeId', 'title'].sort())
+  })
+
+  it('waives the §4B.2 client rule, which is the blueprint’s and not the contract’s', () => {
+    const clientBug = TASK_TYPES.find((t) => t.name === 'Client Bug')!.id
+    // Chasing down which client a half-written ticket belongs to is a common
+    // reason to park it as a draft in the first place.
+    expect(draftSchema.safeParse({ ...draftable, taskTypeId: clientBug }).success).toBe(true)
+    expect(schema.safeParse({ ...valid, taskTypeId: clientBug }).success).toBe(false)
+  })
+
+  it('still rejects effort the user actually typed but typed wrongly', () => {
+    // A draft is permission to leave a field empty, not permission to store
+    // "4h" and discover it when the ticket is finished.
+    expect(draftSchema.safeParse({ ...draftable, estimatedHrs: '4h' }).success).toBe(false)
+    expect(draftSchema.safeParse({ ...draftable, estimatedHrs: '' }).success).toBe(true)
+    expect(draftSchema.safeParse({ ...draftable, estimatedHrs: '4.5' }).success).toBe(true)
+  })
+})
+
+describe('retainedForNextTicket', () => {
+  const submitted: TicketFormValues = {
+    ...valid,
+    clientId: 3,
+    clientContactId: 7,
+    isClientRaised: true,
+    assigneeId: 9,
+    watcherIds: [4, 5],
+    plannedCloseDate: '2026-08-20T17:30',
+  }
+
+  it('keeps what a batch shares and clears what describes one ticket', () => {
+    const next = { ...emptyTicketForm, ...retainedForNextTicket(submitted) }
+
+    expect(next).toMatchObject({
+      projectId: 1,
+      clientId: 3,
+      clientContactId: 7,
+      taskTypeId: 5,
+      level: 'HIGH',
+      isClientRaised: true,
+      assigneeId: 9,
+      watcherIds: [4, 5],
+    })
+    // A title or an estimate surviving is how a batch ends up as five copies
+    // of the same ticket.
+    expect(next).toMatchObject({ title: '', description: '', estimatedHrs: '', plannedCloseDate: '' })
+  })
+
+  it('copies the watcher list rather than aliasing the one just sent', () => {
+    const next = retainedForNextTicket(submitted)
+    expect(next.watcherIds).not.toBe(submitted.watcherIds)
+    expect(next.watcherIds).toEqual(submitted.watcherIds)
   })
 })
