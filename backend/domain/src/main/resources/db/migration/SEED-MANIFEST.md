@@ -48,11 +48,12 @@ environment, always.
 | 17 | `V20260808_1630__working_calendar.sql` | B | B-023 | schema + **seed** | `working_calendar` — the weekly-off pattern and working-day bounds, plus the one row it is constrained to hold |
 | 18 | `V20260810_0930__holidays_unique_org_wide.sql` | B | B-023 | correction | `holidays`: `uq_holidays` rebuilt over a NULL-free `project_scope`, so two org-wide holidays cannot share a date |
 | 19 | `V20260810_1015__notification_delivery_log.sql` | D | D-046 | schema | `notifications.delivered_at` + `ix_notifications_undelivered` — what was shown, as distinct from what was read |
-| 20 | `V20260810_1420__notification_preferences.sql` | D | D-042 | schema | `notification_preferences` — sparse overrides only; the default lives in code |
-| 21 | `V20260810_1620__stage_sla_alerts.sql` | D | D-023 | schema | `stage_sla_alerts` — the once-per-segment claim, kept outside the append-only chain |
-| 22 | `V20260810_1810__sla_prebreach_alerts.sql` | D | D-021 | schema | `sla_prebreach_alerts` — once per ticket **per cycle**, so a reopen re-arms the warning |
-| 23 | `V20260810_1930__stale_ticket_nudges.sql` | D | D-022 | schema | `stale_ticket_nudges` — one row per ticket, updated in place; a nudge repeats where a warning does not |
-| 24 | `V20260810_2040__l2_escalations.sql` | D | D-024 | schema | `l2_escalations` — the second-level claim; L1 needs none, `tickets.is_delayed` already records it |
+| 20 | `V20260810_1120__password_reset_tokens.sql` | A | A-027 | schema | `password_reset_tokens` — hashed at rest, 30-minute TTL, single use via `used_at` |
+| 21 | `V20260810_1420__notification_preferences.sql` | D | D-042 | schema | `notification_preferences` — sparse overrides only; the default lives in code |
+| 22 | `V20260810_1620__stage_sla_alerts.sql` | D | D-023 | schema | `stage_sla_alerts` — the once-per-segment claim, kept outside the append-only chain |
+| 23 | `V20260810_1810__sla_prebreach_alerts.sql` | D | D-021 | schema | `sla_prebreach_alerts` — once per ticket **per cycle**, so a reopen re-arms the warning |
+| 24 | `V20260810_1930__stale_ticket_nudges.sql` | D | D-022 | schema | `stale_ticket_nudges` — one row per ticket, updated in place; a nudge repeats where a warning does not |
+| 25 | `V20260810_2040__l2_escalations.sql` | D | D-024 | schema | `l2_escalations` — the second-level claim; L1 needs none, `tickets.is_delayed` already records it |
 
 <!-- load-order:end -->
 

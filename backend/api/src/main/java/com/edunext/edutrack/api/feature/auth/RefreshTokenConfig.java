@@ -23,7 +23,14 @@ import org.springframework.core.env.Environment;
  * setting that only {@code local} is allowed to hold.
  */
 @Configuration
-@EnableConfigurationProperties({RefreshTokenProperties.class, SessionProperties.class})
+@EnableConfigurationProperties({
+        RefreshTokenProperties.class,
+        SessionProperties.class,
+        // A-027. Registered here rather than in a config class of its own —
+        // there is nothing to validate at startup for the reset properties, and
+        // a second @Configuration whose only job is one @EnableConfigurationProperties
+        // is a file to maintain for no behaviour.
+        PasswordResetProperties.class})
 class RefreshTokenConfig {
 
     RefreshTokenConfig(RefreshTokenProperties properties, Environment environment) {

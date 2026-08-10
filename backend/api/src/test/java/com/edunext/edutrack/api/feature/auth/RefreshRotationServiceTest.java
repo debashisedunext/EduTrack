@@ -447,6 +447,102 @@ class RefreshRotationServiceTest {
         verify(authentication, never()).authenticate(anyString(), anyString());
     }
 
+    // ── A-027 · a password reset ends every session that predates it ────────
+
+    /**
+     * The check {@code ResetPasswordService} exists to make effective. A cutoff
+     * anywhere after the token was issued means the session this token belongs
+     * to no longer counts as trusted.
+     */
+    @Test
+    @DisplayName("a token issued before a password-reset cutoff is refused")
+    void aTokenPredatingASessionRevocationIsRefused() {
+        StoredRefreshToken token = live();
+        when(store.find(TOKEN)).thenReturn(Optional.of(token));
+        when(store.isFamilyRevoked(FAMILY)).thenReturn(false);
+        when(store.sessionsRevokedBefore(42L))
+                .thenReturn(Optional.of(token.issuedAt().plus(Duration.ofSeconds(1))));
+
+        assertThatExceptionOfType(InvalidRefreshTokenException.class)
+                .isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+
+        verify(store, never()).claim(anyString());
+        verify(issuer, never()).rotate(any());
+    }
+
+    /**
+     * The user reset their own password. That is not theft, and revoking the
+     * family here would raise a SECURITY log line for the one event on this
+     * endpoint that is completely ordinary — burying the alert that matters.
+     */
+    @Test
+    @DisplayName("a session-revocation refusal does NOT revoke the family")
+    void aSessionRevocationRefusalDoesNotRevokeTheFamily() {
+        StoredRefreshToken token = live();
+        when(store.find(TOKEN)).thenReturn(Optional.of(token));
+        when(store.isFamilyRevoked(FAMILY)).thenReturn(false);
+        when(store.sessionsRevokedBefore(42L))
+                .thenReturn(Optional.of(token.issuedAt().plus(Duration.ofSeconds(1))));
+
+        assertThatExceptionOfType(InvalidRefreshTokenException.class)
+                .isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+
+        verify(store, never()).revokeFamily(anyString(), any());
+    }
+
+    /**
+     * The refused token is discarded — the same tidy-up every other bound in this
+     * sequence performs — so a browser holding it does not keep replaying a
+     * credential that can never succeed again.
+     */
+    @Test
+    @DisplayName("the refused token is discarded")
+    void aSessionRevocationRefusalDiscardsTheToken() {
+        StoredRefreshToken token = live();
+        when(store.find(TOKEN)).thenReturn(Optional.of(token));
+        when(store.isFamilyRevoked(FAMILY)).thenReturn(false);
+        when(store.sessionsRevokedBefore(42L))
+                .thenReturn(Optional.of(token.issuedAt().plus(Duration.ofSeconds(1))));
+
+        assertThatExceptionOfType(InvalidRefreshTokenException.class)
+                .isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+
+        verify(store).discard(TOKEN);
+    }
+
+    /**
+     * The other direction matters just as much: a cutoff that predates the token
+     * must not touch it, or every user would be signed out by their own oldest
+     * reset forever. This is the case that keeps a fresh post-reset login usable.
+     */
+    @Test
+    @DisplayName("a token issued after the cutoff is unaffected")
+    void aTokenIssuedAfterTheCutoffIsUnaffected() {
+        StoredRefreshToken token = live();
+        givenAWorkingRotation(token);
+        when(store.sessionsRevokedBefore(42L))
+                .thenReturn(Optional.of(token.issuedAt().minus(Duration.ofMinutes(5))));
+
+        assertThatNoException().isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+
+        verify(issuer).rotate(token);
+    }
+
+    /**
+     * Almost every user, almost always. A store that has never recorded a bulk
+     * revocation for this user must not block them — the whole reason absence
+     * reads as "not revoked" rather than the reverse.
+     */
+    @Test
+    @DisplayName("a user with no recorded revocation is unaffected")
+    void noRecordedRevocationIsUnaffected() {
+        StoredRefreshToken token = live();
+        givenAWorkingRotation(token);
+        when(store.sessionsRevokedBefore(42L)).thenReturn(Optional.empty());
+
+        assertThatNoException().isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
+    }
+
     // ── failure direction ───────────────────────────────────────────────────
 
     /**

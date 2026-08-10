@@ -80,6 +80,12 @@ class RefreshTokenStore {
     /** A-024 · "this family was revoked". Value is a marker; only presence matters. */
     static final String FAMILY_REVOKED_PREFIX = "edutrack:refresh-family-revoked:";
 
+    /**
+     * A-027 · "every session this user had before instant T is over". Value is
+     * the cutoff, as epoch milliseconds.
+     */
+    static final String SESSIONS_REVOKED_PREFIX = "edutrack:sessions-revoked-before:";
+
     private static final String TOMBSTONE = "revoked";
 
     private final StringRedisTemplate redis;
@@ -215,6 +221,72 @@ class RefreshTokenStore {
      */
     void discard(String tokenValue) {
         redis.delete(keyFor(tokenValue));
+    }
+
+    // ── A-027 · revoking every session a user has ───────────────────────────
+
+    /**
+     * Ends <b>all</b> of one user's sessions at once — every device, every
+     * family — by recording an instant before which nothing of theirs is
+     * honoured. The contract's promise on {@code POST /auth/reset-password}:
+     * "Password changed; all sessions revoked."
+     *
+     * <h2>Why a cutoff and not a user→families index</h2>
+     *
+     * <p>The obvious implementation keeps a set of family ids per user, then
+     * revokes each. {@link #revokeFamily} already rejects that shape for
+     * families, and every word of its reasoning applies here with more force:
+     * such an index has to be written at login and kept in step with every
+     * rotation and expiry, and <b>the day it drifts, a session that was supposed
+     * to be revoked keeps working</b> — silently, and precisely for the user who
+     * just reset their password because they believed they were compromised.
+     *
+     * <p>A cutoff inverts it exactly as the family tombstone does: nothing has
+     * to be enumerated, nothing has to be maintained, and the check is positive
+     * — a token is honoured only while nothing says otherwise. One key per user,
+     * written once, and it cannot fall out of step with a set it does not have.
+     *
+     * <h2>Why the comparison is against {@code issuedAt}</h2>
+     *
+     * <p>Every live token at the moment of the reset was issued before it, and
+     * the only way to obtain one issued after is to log in again with the new
+     * password. A rotation cannot manufacture one: rotating requires presenting
+     * a predecessor, and the predecessor is itself refused by this check before
+     * any successor is minted. So "issued before the cutoff" is exactly "belongs
+     * to a session that existed when the password was reset".
+     *
+     * <p>The TTL is the maximum refresh lifetime — the longest any token this
+     * could need to refuse can survive. Beyond that every affected token is
+     * expired on its own terms and the marker has no decision left to inform.
+     * Over-long is harmless; short would resurrect the very sessions this ended.
+     */
+    void revokeSessionsFor(long userId, Instant cutoff, Duration ttl) {
+        redis.opsForValue().set(
+                SESSIONS_REVOKED_PREFIX + userId, String.valueOf(cutoff.toEpochMilli()), ttl);
+    }
+
+    /**
+     * The cutoff for this user, or empty if they have never had a bulk
+     * revocation — which is almost everyone, almost always.
+     *
+     * <p>A malformed value is treated as <b>revoked at the epoch's end of time
+     * rather than not revoked at all</b>: this is consulted on the refresh path,
+     * and the only safe reading of "there is a revocation here but I cannot
+     * parse it" is to refuse. Falling through to "not revoked" would un-revoke
+     * every session the entry was written to end.
+     */
+    Optional<Instant> sessionsRevokedBefore(long userId) {
+        String stored = redis.opsForValue().get(SESSIONS_REVOKED_PREFIX + userId);
+        if (stored == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Instant.ofEpochMilli(Long.parseLong(stored)));
+        } catch (NumberFormatException e) {
+            log.warn("auth: unreadable session-revocation cutoff for user {} — "
+                    + "refusing every refresh for them until it expires", userId);
+            return Optional.of(Instant.MAX);
+        }
     }
 
     /**

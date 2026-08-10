@@ -20,6 +20,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -59,6 +60,15 @@ class AuthControllerTest {
 
     @MockitoBean
     LogoutService logout;
+
+    @MockitoBean
+    ForgotPasswordService forgotPassword;
+
+    @MockitoBean
+    ResetPasswordService resetPassword;
+
+    @MockitoBean
+    PasswordResetRateLimiter resetRateLimiter;
 
     private static final String VALID_BODY = """
             {"username":"asha.rao","password":"Correct-Horse-1!"}
@@ -500,5 +510,198 @@ class AuthControllerTest {
                 .doesNotContainIgnoringCase("signature")
                 .doesNotContainIgnoringCase("expired")
                 .doesNotContainIgnoringCase("issuer");
+    }
+
+    // ── A-027 · POST /auth/forgot-password ───────────────────────────────────
+
+    private static final String FORGOT_BODY = """
+            {"email":"asha.rao@edunext.test"}
+            """;
+
+    @Test
+    @DisplayName("a forgot-password request is accepted with 202 and no body")
+    void forgotPasswordReturnsAccepted() throws Exception {
+        when(resetRateLimiter.checkAndSpend(anyString(), anyString())).thenReturn(Optional.empty());
+
+        mvc.perform(post("/api/v1/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(FORGOT_BODY))
+                .andExpect(status().isAccepted())
+                .andExpect(content().string(""));
+    }
+
+    /**
+     * The address reaches the service lower-cased and trimmed, because the same
+     * string is both a database lookup and a rate-limit key — and
+     * {@code Digests.sha256Hex} is case-sensitive where MySQL's collation is
+     * not. Without normalising, alternating capitalisation buys a fresh budget
+     * each time and the per-address cap is trivially bypassed.
+     */
+    @Test
+    @DisplayName("the address is normalised before it reaches the service or the limiter")
+    void normalisesTheAddress() throws Exception {
+        when(resetRateLimiter.checkAndSpend(anyString(), anyString())).thenReturn(Optional.empty());
+
+        mvc.perform(post("/api/v1/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"  ASHA.RAO@edunext.test  "}
+                                """))
+                .andExpect(status().isAccepted());
+
+        verify(forgotPassword).requestReset("asha.rao@edunext.test");
+        verify(resetRateLimiter).checkAndSpend(eq("asha.rao@edunext.test"), anyString());
+    }
+
+    /**
+     * The single most important test on this endpoint. An unknown address must
+     * be indistinguishable from a known one — the service is what stays silent,
+     * and the controller must not turn that silence into a different status.
+     */
+    @Test
+    @DisplayName("an unknown address still answers 202, byte-identical to a known one")
+    void unknownAddressIsIndistinguishable() throws Exception {
+        when(resetRateLimiter.checkAndSpend(anyString(), anyString())).thenReturn(Optional.empty());
+
+        String known = mvc.perform(post("/api/v1/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(FORGOT_BODY))
+                .andExpect(status().isAccepted())
+                .andReturn().getResponse().getContentAsString();
+
+        String unknown = mvc.perform(post("/api/v1/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"nobody@edunext.test"}
+                                """))
+                .andExpect(status().isAccepted())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(unknown)
+                .as("a response that differs for an unknown address is a staff directory")
+                .isEqualTo(known);
+    }
+
+    /**
+     * The budget is spent before the lookup, so throttling reveals nothing about
+     * whether the account exists — but the limiter must actually be consulted,
+     * or the endpoint is an open mail cannon.
+     */
+    @Test
+    @DisplayName("exceeding the limit is 429 with a Retry-After header, and issues nothing")
+    void rateLimitedRequestIs429() throws Exception {
+        when(resetRateLimiter.checkAndSpend(anyString(), anyString()))
+                .thenReturn(Optional.of(Duration.ofSeconds(420)));
+
+        mvc.perform(post("/api/v1/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(FORGOT_BODY))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("https://edutrack/errors/too-many-reset-requests"))
+                .andExpect(jsonPath("$.status").value(429))
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "420"));
+
+        verify(forgotPassword, org.mockito.Mockito.never()).requestReset(anyString());
+    }
+
+    @Test
+    @DisplayName("a malformed address is rejected before any work")
+    void rejectsAMalformedAddress() throws Exception {
+        mvc.perform(post("/api/v1/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"not-an-address"}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verify(forgotPassword, org.mockito.Mockito.never()).requestReset(anyString());
+    }
+
+    // ── A-027 · POST /auth/reset-password ────────────────────────────────────
+
+    private static final String RESET_BODY = """
+            {"token":"a-token-value-of-at-least-32-characters","newPassword":"Chosen-By-Me-9!"}
+            """;
+
+    @Test
+    @DisplayName("a successful reset returns 204 with no body")
+    void resetPasswordReturnsNoContent() throws Exception {
+        mvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(RESET_BODY))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        verify(resetPassword).reset("a-token-value-of-at-least-32-characters", "Chosen-By-Me-9!");
+    }
+
+    /**
+     * 410, per the contract — the token was a real resource with a fixed
+     * lifetime and that lifetime is over. A 401 would send the frontend's
+     * interceptor to the login screen, which is wrong for a flow whose entire
+     * premise is that the user cannot log in.
+     */
+    @Test
+    @DisplayName("an expired, spent or unknown token is 410 with a stable type URI")
+    void invalidResetTokenIs410() throws Exception {
+        org.mockito.Mockito.doThrow(new InvalidResetTokenException())
+                .when(resetPassword).reset(anyString(), anyString());
+
+        mvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(RESET_BODY))
+                .andExpect(status().isGone())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("https://edutrack/errors/invalid-reset-token"))
+                .andExpect(jsonPath("$.status").value(410));
+    }
+
+    @Test
+    @DisplayName("a new password under 8 characters is rejected before any work")
+    void rejectsAShortNewPassword() throws Exception {
+        mvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"a-token-value-of-at-least-32-characters","newPassword":"short1!"}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verify(resetPassword, org.mockito.Mockito.never()).reset(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("an obviously-too-short token is rejected without a database round trip")
+    void rejectsAShortToken() throws Exception {
+        mvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"tiny","newPassword":"Chosen-By-Me-9!"}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verify(resetPassword, org.mockito.Mockito.never()).reset(anyString(), anyString());
+    }
+
+    /**
+     * Both values on this endpoint are credentials — the token grants the
+     * account, and the password becomes it. A refusal that echoes either writes
+     * it into every log and error tracker the response passes through.
+     */
+    @Test
+    @DisplayName("no reset response echoes the token or the password")
+    void resetNeverEchoesCredentials() throws Exception {
+        org.mockito.Mockito.doThrow(new InvalidResetTokenException())
+                .when(resetPassword).reset(anyString(), anyString());
+
+        String body = mvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(RESET_BODY))
+                .andExpect(status().isGone())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body)
+                .doesNotContain("a-token-value-of-at-least-32-characters")
+                .doesNotContain("Chosen-By-Me-9!");
     }
 }
