@@ -54,7 +54,12 @@ class LogoutServiceTest {
         jwtDecoder = mock(JwtDecoder.class);
         blacklist = mock(AccessTokenBlacklist.class);
         refreshTokens = mock(RefreshTokenStore.class);
-        logout = new LogoutService(jwtDecoder, blacklist, refreshTokens);
+        // A-026 moved the bearer verification into AccessTokenVerifier. The real
+        // one is used here rather than a mock: it is the thing that decides
+        // whether a header is acceptable, and stubbing it out would leave these
+        // tests asserting that logout calls a collaborator instead of that a
+        // forged header is refused.
+        logout = new LogoutService(new AccessTokenVerifier(jwtDecoder), blacklist, refreshTokens);
     }
 
     private void givenAValidAccessToken() {

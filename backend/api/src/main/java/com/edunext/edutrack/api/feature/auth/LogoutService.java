@@ -3,8 +3,6 @@ package com.edunext.edutrack.api.feature.auth;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -26,15 +24,20 @@ import java.time.Instant;
  * <p>{@code /auth/logout} is the first route in the system the contract does not
  * mark {@code security: []}, and A-032's filter chain — the thing that would
  * normally have authenticated the caller long before a service saw them — does
- * not exist yet. So the token is decoded here, through the shared
- * {@code JwtDecoder} bean rather than by hand: signature, algorithm, issuer and
- * expiry are all the decoder's business (see {@code JwtDecoderConfig}), and this
- * class only reads claims out of a token already proven good.
+ * not exist yet. So the token is verified here, through
+ * {@link AccessTokenVerifier}: signature, algorithm, issuer and expiry are all
+ * the shared {@code JwtDecoder}'s business (see {@code JwtDecoderConfig}), and
+ * this class only reads claims out of a token already proven good.
  *
  * <p><b>It has to be a real verification, not a decode.</b> Accepting an
  * unverified token here would let anyone forge a {@code jti} and blacklist an
  * arbitrary stranger's access token — a logout endpoint that logs other people
  * out. That is why nothing in this class parses a JWT itself.
+ *
+ * <p>A-026 moved that verification out to {@link AccessTokenVerifier} when
+ * {@code PATCH /me/password} needed the identical check; the behaviour is
+ * unchanged, and there is now one implementation for A-032's chain to replace
+ * instead of two.
  *
  * <h2>What logout deliberately does not do</h2>
  *
@@ -63,16 +66,14 @@ class LogoutService {
 
     private static final Logger log = LoggerFactory.getLogger(LogoutService.class);
 
-    private static final String BEARER = "Bearer ";
-
-    private final JwtDecoder jwtDecoder;
+    private final AccessTokenVerifier accessTokens;
     private final AccessTokenBlacklist blacklist;
     private final RefreshTokenStore refreshTokens;
 
-    LogoutService(JwtDecoder jwtDecoder,
+    LogoutService(AccessTokenVerifier accessTokens,
                   AccessTokenBlacklist blacklist,
                   RefreshTokenStore refreshTokens) {
-        this.jwtDecoder = jwtDecoder;
+        this.accessTokens = accessTokens;
         this.blacklist = blacklist;
         this.refreshTokens = refreshTokens;
     }
@@ -102,7 +103,7 @@ class LogoutService {
      *                                     unsigned by us, or expired
      */
     void logout(String authorizationHeader, String refreshTokenValue) {
-        Jwt accessToken = verify(authorizationHeader);
+        Jwt accessToken = accessTokens.verify(authorizationHeader);
 
         // Order matters, slightly: revoke the credential that is currently
         // usable before removing the one that could mint another. Reversed, a
@@ -117,21 +118,6 @@ class LogoutService {
 
         log.info("auth: user {} signed out; access token {} revoked until its natural expiry",
                 accessToken.getSubject(), accessToken.getId());
-    }
-
-    private Jwt verify(String authorizationHeader) {
-        if (authorizationHeader == null || !authorizationHeader.startsWith(BEARER)) {
-            throw new InvalidAccessTokenException();
-        }
-        try {
-            return jwtDecoder.decode(authorizationHeader.substring(BEARER.length()).trim());
-        } catch (JwtException e) {
-            // Deliberately flattened: a bad signature, a wrong issuer and an
-            // expired token all leave here as the same refusal. Reporting which
-            // one tells a caller probing with forged tokens exactly how close
-            // they are.
-            throw new InvalidAccessTokenException();
-        }
     }
 
     /**

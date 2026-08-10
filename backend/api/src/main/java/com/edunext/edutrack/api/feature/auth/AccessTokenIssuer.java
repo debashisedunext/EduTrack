@@ -31,6 +31,19 @@ import java.util.UUID;
 @Component
 class AccessTokenIssuer {
 
+    /**
+     * A-026 · marks a token belonging to an account that has not yet replaced its
+     * temporary password. Read by {@link PasswordChangeGate}.
+     *
+     * <p><b>Emitted only when true.</b> A claim present on every token to say
+     * "false" would be 26 bytes on every request to describe the ordinary case;
+     * more importantly, absence is the reading that keeps every token minted
+     * before this task — and every token for the majority of users — working.
+     * The gate documents why fail-open is the correct direction for a claim that
+     * lives inside a signature we control.
+     */
+    static final String MUST_CHANGE_PASSWORD_CLAIM = "mustChangePassword";
+
     private final JwtEncoder encoder;
     private final JwtProperties properties;
 
@@ -43,7 +56,7 @@ class AccessTokenIssuer {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(properties.accessTokenTtl());
 
-        JwtClaimsSet claims = JwtClaimsSet.builder()
+        JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
                 .issuer(properties.issuer())
                 .subject(String.valueOf(user.id()))
                 .issuedAt(issuedAt)
@@ -54,11 +67,17 @@ class AccessTokenIssuer {
                 .claim("role", user.roleCode())
                 .claim("permissions", user.permissions())
                 .claim("projects", user.projectIds())
-                .claim("reportees", user.reporteeIds())
-                .build();
+                .claim("reportees", user.reporteeIds());
+
+        // A-026. The flag has to travel in the token, not only in the response
+        // body: the body is a suggestion the client may ignore, and this is the
+        // copy the server itself will refuse requests on.
+        if (user.mustChangePassword()) {
+            claims.claim(MUST_CHANGE_PASSWORD_CLAIM, true);
+        }
 
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-        String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+        String token = encoder.encode(JwtEncoderParameters.from(header, claims.build())).getTokenValue();
 
         return new AccessToken(token, (int) properties.accessTokenTtl().toSeconds());
     }

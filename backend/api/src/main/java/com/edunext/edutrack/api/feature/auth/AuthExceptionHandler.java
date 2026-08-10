@@ -13,19 +13,26 @@ import java.net.URI;
  * A-020 · turns a refused login into the RFC 9457 problem document the contract
  * promises ({@code CONVENTIONS.md} §3).
  *
- * <p><b>Scoped to {@link AuthController}</b> rather than declared globally.
- * A repository-wide {@code @RestControllerAdvice} is shared surface: four
- * streams would edit one file, and it is not Stream A's to introduce
+ * <p><b>Scoped to the auth feature's controllers</b> rather than declared
+ * globally. A repository-wide {@code @RestControllerAdvice} is shared surface:
+ * four streams would edit one file, and it is not Stream A's to introduce
  * unilaterally. Framework-level failures (a malformed body, an unreadable
  * request) are already RFC 9457 through {@code spring.mvc.problemdetails.enabled},
  * so nothing here needs to duplicate them.
+ *
+ * <p>A-026 added {@link MeController} to the list. It is a second controller
+ * rather than a second mapping on {@link AuthController} because the contract
+ * puts {@code changeOwnPassword} under {@code /me}, and it shares this advice
+ * because it raises the same exceptions and must produce byte-identical problem
+ * bodies — an endpoint that reports {@code invalid-access-token} with a
+ * different shape is a second contract the frontend has to learn.
  *
  * <p>{@code type} is the stable part. {@code CONVENTIONS.md} §3 is explicit that
  * clients branch on {@code type} and never on {@code title} or {@code detail},
  * which are prose and may be reworded — so the URI below must not change once
  * the frontend switches on it.
  */
-@RestControllerAdvice(assignableTypes = AuthController.class)
+@RestControllerAdvice(assignableTypes = {AuthController.class, MeController.class})
 class AuthExceptionHandler {
 
     private static final URI INVALID_CREDENTIALS = URI.create("https://edutrack/errors/invalid-credentials");
@@ -33,6 +40,8 @@ class AuthExceptionHandler {
     private static final URI INVALID_REFRESH_TOKEN = URI.create("https://edutrack/errors/invalid-refresh-token");
     private static final URI REFRESH_TOKEN_REUSE = URI.create("https://edutrack/errors/refresh-token-reuse");
     private static final URI INVALID_ACCESS_TOKEN = URI.create("https://edutrack/errors/invalid-access-token");
+    private static final URI PASSWORD_UNCHANGED = URI.create("https://edutrack/errors/password-unchanged");
+    private static final URI PASSWORD_CHANGE_REQUIRED = URI.create("https://edutrack/errors/password-change-required");
 
     private final RefreshTokenIssuer refreshTokens;
 
@@ -138,6 +147,70 @@ class AuthExceptionHandler {
         problem.setTitle("Not signed in");
         problem.setDetail("A valid access token is required for this request.");
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem);
+    }
+
+    // ── A-026 · the password lifecycle ──────────────────────────────────────
+
+    /**
+     * A-026 · {@code currentPassword} was wrong on {@code PATCH /me/password}.
+     *
+     * <p><b>The same {@code type} as a refused login, with an accurate
+     * {@code detail}.</b> {@code CONVENTIONS.md} §3 makes {@code type} the stable
+     * part clients branch on, and "these credentials are not right" is genuinely
+     * the same class of failure — a second URI meaning the same thing would be
+     * one more branch for S-03 to get wrong. The prose differs because a form
+     * with one password field on it must not tell the user their <i>username</i>
+     * might be at fault.
+     *
+     * <p>Specific where login is deliberately vague, for the reason
+     * {@link InvalidCurrentPasswordException} gives: this caller is already
+     * authenticated, so there is no account to enumerate.
+     */
+    @ExceptionHandler(InvalidCurrentPasswordException.class)
+    ResponseEntity<ProblemDetail> handleInvalidCurrentPassword(InvalidCurrentPasswordException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNAUTHORIZED);
+        problem.setType(INVALID_CREDENTIALS);
+        problem.setTitle("Invalid credentials");
+        problem.setDetail("The current password is incorrect.");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem);
+    }
+
+    /**
+     * A-026 · the replacement is the password being replaced.
+     *
+     * <p>400 rather than 401: the caller authenticated correctly and knew their
+     * own password, so nothing about their credentials failed — the request is
+     * what does not make sense. Its own {@code type} so S-03 can attach the
+     * message to the new-password field instead of parsing {@code detail}.
+     */
+    @ExceptionHandler(PasswordUnchangedException.class)
+    ResponseEntity<ProblemDetail> handlePasswordUnchanged(PasswordUnchangedException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+        problem.setType(PASSWORD_UNCHANGED);
+        problem.setTitle("Password unchanged");
+        problem.setDetail("The new password must be different from your current one.");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    /**
+     * A-026 · an authenticated caller whose account still demands a password
+     * change asked for something else.
+     *
+     * <p>403, and {@link PasswordChangeRequiredException} explains why a 401 here
+     * would be an infinite redirect loop rather than a stricter answer.
+     *
+     * <p><b>Unreachable today</b>, because {@link PasswordChangeGate} is not
+     * consulted until A-032's filter chain lands. Registered now so that when it
+     * is, the refusal already has an agreed shape and a documented {@code type}
+     * rather than arriving as a bare Spring Security 403 with an empty body.
+     */
+    @ExceptionHandler(PasswordChangeRequiredException.class)
+    ResponseEntity<ProblemDetail> handlePasswordChangeRequired(PasswordChangeRequiredException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.FORBIDDEN);
+        problem.setType(PASSWORD_CHANGE_REQUIRED);
+        problem.setTitle("Password change required");
+        problem.setDetail("Set a new password before continuing.");
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
     }
 
     /**
