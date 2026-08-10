@@ -22,6 +22,44 @@ const me = () => {
   };
 };
 
+/**
+ * D-042. The server builds this from `NotificationEvent`; the mock keeps a
+ * short representative slice rather than all 25 — enough to cover a locked
+ * category, an unlocked one, and each tab — because a full copy of the enum
+ * here would be a second vocabulary to keep in step, which is the drift the
+ * server's "send the whole catalogue" rule exists to avoid.
+ */
+const NOTIFICATION_EVENTS = [
+  { eventKey: 'TICKET_ASSIGNED', category: 'ASSIGNMENT' },
+  { eventKey: 'HANDOFF_RECEIVED', category: 'ASSIGNMENT' },
+  { eventKey: 'SLA_BREACHED', category: 'ESCALATION' },
+  { eventKey: 'MENTIONED', category: 'MENTION' },
+  { eventKey: 'STATUS_REQUESTED', category: 'STATUS_REQUEST' },
+  { eventKey: 'COMMENT_ADDED', category: 'OTHER' },
+  { eventKey: 'DAILY_DIGEST', category: 'OTHER' },
+] as const;
+
+/** D-036 — the same rule as `NotificationEvent.isMandatoryMail()`. */
+const isMandatoryMail = (category: string) =>
+  category === 'ASSIGNMENT' || category === 'ESCALATION';
+
+function preferenceMatrix(db: ReturnType<typeof getDb>) {
+  const stored = db.notificationPreferences ?? [];
+  return NOTIFICATION_EVENTS.map((event) => {
+    const row = stored.find(
+      (p) => p.userId === db.currentUserId && p.eventKey === event.eventKey,
+    );
+    const locked = isMandatoryMail(event.category);
+    return {
+      eventKey: event.eventKey,
+      category: event.category,
+      inApp: row?.inApp ?? true,
+      email: locked || (row?.email ?? true),
+      emailLocked: locked,
+    };
+  });
+}
+
 const PERMISSIONS: Record<string, string[]> = {
   ADMIN: ['ticket.read', 'ticket.write', 'ticket.assign', 'master.write', 'report.read', 'audit.read'],
   PM: ['ticket.read', 'ticket.write', 'ticket.assign', 'master.write', 'report.read'],
@@ -622,6 +660,42 @@ export const restHandlers = [
     const db = getDb();
     db.notifications.filter((n) => n.userId === db.currentUserId).forEach((n) => { n.isRead = true; });
     return noContent();
+  }),
+  // D-042/D-036. The catalogue with overrides applied, mirroring the server:
+  // built from the event list so a new event appears without a stored row, and
+  // a locked mail always reads as on whatever the override says.
+  http.get(url('/me/notification-preferences'), () => {
+    const db = getDb();
+    return HttpResponse.json({ data: preferenceMatrix(db) });
+  }),
+  http.put(url('/me/notification-preferences'), async ({ request }) => {
+    const db = getDb();
+    const { preferences } = (await request.json()) as {
+      preferences: { eventKey: string; inApp?: boolean; email?: boolean }[];
+    };
+    for (const update of preferences) {
+      const event = NOTIFICATION_EVENTS.find((e) => e.eventKey === update.eventKey);
+      if (!event) {
+        return HttpResponse.json(
+          {
+            type: 'https://edutrack/errors/invalid-body',
+            title: 'Unknown notification event',
+            status: 400,
+            detail: 'One or more eventKey values are not notification events',
+          },
+          { status: 400, headers: { 'Content-Type': 'application/problem+json' } },
+        );
+      }
+      const stored = (db.notificationPreferences ??= []);
+      const row = stored.find(
+        (p) => p.userId === db.currentUserId && p.eventKey === update.eventKey,
+      ) ?? { userId: db.currentUserId, eventKey: update.eventKey, inApp: true, email: true };
+      if (update.inApp !== undefined) row.inApp = update.inApp;
+      // Discarded rather than rejected when locked — as on the server.
+      if (update.email !== undefined && !isMandatoryMail(event.category)) row.email = update.email;
+      if (!stored.includes(row)) stored.push(row);
+    }
+    return HttpResponse.json({ data: preferenceMatrix(db) });
   }),
   // D-046. Oldest first and independent of isRead — mirroring the server, where
   // "shown" and "read" are separate facts.

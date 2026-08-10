@@ -142,6 +142,7 @@ product already enforces:
 | `/clients/{id}/contacts` | A short list per client |
 | `/tickets/{id}/attachments` | Capped at 20 per ticket |
 | `/notifications/pending` | Capped, and drained by acknowledging rather than paged |
+| `/me/notification-preferences` | One row per `NotificationEvent` — 25, bounded by the enum |
 
 These return `data` with no `meta`. That is the signal that the list is complete.
 

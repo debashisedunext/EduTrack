@@ -120,6 +120,10 @@ export interface Notification {
   /** D-046. Null means still queued to pop — distinct from unread. */
   deliveredAt?: string | null;
 }
+/** D-042. Sparse overrides, as on the server — absence means enabled. */
+export interface NotificationPreference {
+  userId: number; eventKey: string; inApp: boolean; email: boolean;
+}
 export interface EmailLogEntry {
   id: number; ticketId: string; toAddress: string; subject: string; eventKey: string;
   status: 'QUEUED' | 'SENT' | 'BOUNCED' | 'FAILED'; retryCount: number;
@@ -142,6 +146,7 @@ export interface Db {
   tickets: Ticket[]; cycles: Cycle[]; transitions: Transition[];
   effortLogs: EffortLog[]; history: HistoryEntry[]; comments: Comment[];
   attachments: Attachment[]; notifications: Notification[];
+  notificationPreferences: NotificationPreference[];
   emailLog: EmailLogEntry[]; chatThreads: ChatThread[]; chatMessages: ChatMessage[];
   currentUserId: number;
   seq: Record<string, number>;
@@ -263,7 +268,7 @@ export function createDb(): Db {
     taskTypes: structuredClone(TASK_TYPES),
     stages: structuredClone(STAGES),
     tickets: [], cycles: [], transitions: [], effortLogs: [], history: [],
-    comments: [], attachments: [], notifications: [], emailLog: [],
+    comments: [], attachments: [], notifications: [], notificationPreferences: [], emailLog: [],
     chatThreads: [], chatMessages: [],
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
     seq: {},

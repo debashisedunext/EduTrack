@@ -35,6 +35,7 @@ NO_IF_MATCH = {
     "/tickets/{ticketId}/priority":        "reason mandatory and every change logged, so concurrent changes are visible not lost",
     "/tickets/{ticketId}/comments/{commentId}": "author-only inside a 5-minute window",
     "/chat/threads/{threadId}/messages/{messageId}": "author-only inside a 5-minute window",
+    "/me/notification-preferences":        "your own settings only, and partial by field so two tabs cannot overwrite each other's untouched switches",
 }
 
 # §6 — bounded by a constraint the product already enforces.
@@ -46,6 +47,7 @@ NO_PAGINATION = {
     "/clients/{clientId}/contacts":      "a short list per client",
     "/tickets/{ticketId}/attachments":   "capped at 20 per ticket",
     "/notifications/pending":            "a queue drained by acknowledging, not paged; a cursor would outlive the rows it points past",
+    "/me/notification-preferences":      "one row per NotificationEvent — 25, and bounded by the enum",
 }
 
 # §8 — GET only. No mutation verb, ever.

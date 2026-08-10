@@ -85,6 +85,47 @@ export const listNotificationsResponse = zod.object({
 })
 
 /**
+ * The whole event catalogue with your answers applied, not just your overrides — a client that had to know every event code to render the grid would be a second copy of the server's vocabulary, and a newly added event would silently fail to appear.
+`emailLocked` is D-036: assignment, handoff, escalation and breach mails ignore preferences and always send (§4B.6). A locked row always reports `email: true`, whatever is stored, so the screen cannot show a switch as off that the send path ignores.
+
+ * @summary The per-user notification matrix (S-26)
+ */
+export const getNotificationPreferencesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "eventKey": zod.string(),
+  "category": zod.enum(['MENTION', 'ASSIGNMENT', 'ESCALATION', 'STATUS_REQUEST', 'OTHER']).describe('S-26\'s grouping, so the grid can be sectioned without a second mapping.'),
+  "inApp": zod.boolean().describe('Whether the D-043 toast fires. Turning it off never suppresses the bell entry — S-26 is where you go to find what you missed.\n'),
+  "email": zod.boolean(),
+  "emailLocked": zod.boolean().describe('D-036. This mail cannot be switched off. Sent rather than inferred from the category so the rule has one home.\n')
+}))
+})
+
+/**
+ * Partial by field: an omitted `inApp` or `email` leaves that channel alone, so saving one row does not require restating the grid.
+An attempt to disable a locked mail is **discarded, not rejected** — the client is usually posting back the row it was showing, and failing the whole save over a switch the user could not move would punish the caller for our own UI. The response is the resulting matrix, so what actually took effect is visible.
+An unknown `eventKey` **is** rejected: there is nothing to honour, and accepting it silently would leave someone believing they had switched something off.
+
+ * @summary Change which events reach you, on which channel
+ */
+export const updateNotificationPreferencesBody = zod.object({
+  "preferences": zod.array(zod.object({
+  "eventKey": zod.string(),
+  "inApp": zod.boolean().optional().describe('Omit to leave this channel unchanged.'),
+  "email": zod.boolean().optional().describe('Omit to leave this channel unchanged.')
+}))
+})
+
+export const updateNotificationPreferencesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "eventKey": zod.string(),
+  "category": zod.enum(['MENTION', 'ASSIGNMENT', 'ESCALATION', 'STATUS_REQUEST', 'OTHER']).describe('S-26\'s grouping, so the grid can be sectioned without a second mapping.'),
+  "inApp": zod.boolean().describe('Whether the D-043 toast fires. Turning it off never suppresses the bell entry — S-26 is where you go to find what you missed.\n'),
+  "email": zod.boolean(),
+  "emailLocked": zod.boolean().describe('D-036. This mail cannot be switched off. Sent rather than inferred from the category so the rule has one home.\n')
+}))
+})
+
+/**
  * Blueprint §11: a notification raised while the user was offline is queued and pops the moment they log in. Oldest first — this is a queue being drained, not a list being browsed — and capped, because somebody back from leave has a hundred queued and popping all of them is indistinguishable from popping none. `hasMore` says the cap hid some.
 Independent of `isRead`: a notification can be read without ever having been popped, and popped without being read.
 

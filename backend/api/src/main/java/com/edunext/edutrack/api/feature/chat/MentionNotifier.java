@@ -4,6 +4,8 @@ import com.edunext.edutrack.api.realtime.RealtimeDestinations;
 import com.edunext.edutrack.api.realtime.RealtimePublisher;
 import com.edunext.edutrack.domain.notifications.NewNotification;
 import com.edunext.edutrack.domain.notifications.NotificationEvent;
+import com.edunext.edutrack.domain.notifications.NotificationChannel;
+import com.edunext.edutrack.domain.notifications.NotificationPreferences;
 import com.edunext.edutrack.domain.notifications.NotificationWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,10 +42,14 @@ class MentionNotifier {
 
     private final NotificationWriter notifications;
     private final RealtimePublisher realtime;
+    private final NotificationPreferences preferences;
 
-    MentionNotifier(NotificationWriter notifications, RealtimePublisher realtime) {
+    MentionNotifier(NotificationWriter notifications,
+                    RealtimePublisher realtime,
+                    NotificationPreferences preferences) {
         this.notifications = notifications;
         this.realtime = realtime;
+        this.preferences = preferences;
     }
 
     /**
@@ -104,7 +110,13 @@ class MentionNotifier {
         // message and a project channel, and Map.of rejects a null value.
         event.put("ticketId", anchor.ticketId());
 
-        realtime.publish(RealtimeDestinations.user(mentioned.id()), event);
+        // D-042. The preference silences the popup, never the record: the bell
+        // entry above is already written, and S-26 is where somebody goes to
+        // find what they missed. Turning off toasts must not make a mention
+        // disappear.
+        if (preferences.allows(mentioned.id(), EVENT_CODE.name(), NotificationChannel.IN_APP)) {
+            realtime.publish(RealtimeDestinations.user(mentioned.id()), event);
+        }
     }
 
     /**

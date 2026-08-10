@@ -1,5 +1,8 @@
 package com.edunext.edutrack.domain.outbox;
 
+import com.edunext.edutrack.domain.notifications.NotificationChannel;
+import com.edunext.edutrack.domain.notifications.NotificationEvent;
+import com.edunext.edutrack.domain.notifications.NotificationPreferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -56,6 +59,11 @@ public class OutboxEnqueuer {
                     :toEmail, :subject, 'QUEUED', 0, CURRENT_TIMESTAMP(6))
             """;
 
+    /** D-031. Primary-key lookup for the subject prefix. */
+    private static final String TICKET_CODE = """
+            SELECT ticket_code FROM tickets WHERE id = :ticketId
+            """;
+
     /**
      * D-035. {@code <=>} is MySQL's NULL-safe equality: a non-ticket mail has
      * {@code ticket_id IS NULL}, and plain {@code =} would never match NULL to
@@ -64,11 +72,6 @@ public class OutboxEnqueuer {
      * <p>Served by {@code ix_email_log_rate (to_email, ticket_id, queued_at)},
      * which A-006 added for exactly this check.
      */
-    /** D-031. Primary-key lookup for the subject prefix. */
-    private static final String TICKET_CODE = """
-            SELECT ticket_code FROM tickets WHERE id = :ticketId
-            """;
-
     private static final String RECENT_TO_SAME_RECIPIENT = """
             SELECT COUNT(*) FROM email_log
              WHERE to_email = :toEmail
@@ -77,11 +80,14 @@ public class OutboxEnqueuer {
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final NotificationPreferences preferences;
     private final Duration rateLimitWindow;
 
     public OutboxEnqueuer(NamedParameterJdbcTemplate jdbc,
+                          NotificationPreferences preferences,
                           @Value("${edutrack.mail.rate-limit-window:PT1M}") Duration rateLimitWindow) {
         this.jdbc = jdbc;
+        this.preferences = preferences;
         this.rateLimitWindow = rateLimitWindow;
     }
 
@@ -103,12 +109,20 @@ public class OutboxEnqueuer {
      * (D-040) is not rate limited, and the ticket itself holds the authoritative
      * state. Only the redundant <em>email</em> goes away.
      *
-     * <p>Note this is <em>not</em> the "critical mails cannot be disabled" rule.
-     * Blueprint §4B.6 scopes that exemption to user <em>preferences</em>
-     * (D-036/D-042), and states this limit unconditionally, so assignment and
-     * escalation mails are throttled like any other. If that turns out to be
-     * wrong in practice — a breach suppressed because an assignment went out
-     * 30 seconds earlier — D-036 is where the exemption belongs.
+     * <p>Note this is <em>not</em> the "critical mails cannot be disabled" rule,
+     * which now exists alongside it (D-036). §4B.6 scopes that exemption to user
+     * <em>preferences</em> and states this limit unconditionally, so a mandatory
+     * mail is still throttled: {@link NotificationEvent#isMandatoryMail()}
+     * defeats a preference, never the rate limit. The two answer different
+     * questions — "did you ask not to receive this" and "have we just sent you
+     * one" — and collapsing them would let a burst of assignments become a burst
+     * of mail again.
+     *
+     * <p>The residual risk is real and accepted: a breach mail suppressed
+     * because an assignment for the same ticket went out 30 seconds earlier. The
+     * in-app path is not rate limited, so the alert still lands; if that proves
+     * too weak in practice, the fix is a per-event window here rather than an
+     * exemption in D-036.
      *
      * <p>The check and the insert share the caller's transaction, but this is a
      * read-then-write without a lock: two concurrent enqueues can both see an
@@ -116,10 +130,15 @@ public class OutboxEnqueuer {
      * unique constraint on a minute bucket, which turns a spam-prevention
      * heuristic into something that can fail a business transaction.
      *
-     * @return the {@code email_log} id, or empty if the mail was throttled
+     * @return the {@code email_log} id, or empty if the mail was throttled or
+     *         suppressed by a preference (D-042)
      */
     @Transactional(propagation = Propagation.REQUIRED)
     public OptionalLong enqueue(NewMail mail) {
+        if (isSuppressedByPreference(mail)) {
+            log.debug("outbox: {} to {} suppressed by preference", mail.eventCode(), mail.toEmail());
+            return OptionalLong.empty();
+        }
         if (isRateLimited(mail)) {
             log.debug("outbox: throttled {} to {} for ticket {} — one already queued this window",
                     mail.eventCode(), mail.toEmail(), mail.ticketId());
@@ -144,6 +163,25 @@ public class OutboxEnqueuer {
             throw new IllegalStateException("email_log insert returned no generated key");
         }
         return OptionalLong.of(id.longValue());
+    }
+
+    /**
+     * D-042 · the user turned this mail off · D-036 · unless they may not.
+     *
+     * <p>Checked at enqueue rather than at send, so a suppressed mail never
+     * enters {@code email_log} at all. Queueing it and dropping it later would
+     * put a row in the delivery log that D-033 reads as "we tried", and §17
+     * wants that log to answer "did they get it" without a second story about
+     * which QUEUED rows were never really going anywhere.
+     *
+     * <p>A mail with no {@code toUserId} — a client contact, who is not a user
+     * — has no preferences to consult and is always enqueued.
+     */
+    private boolean isSuppressedByPreference(NewMail mail) {
+        if (mail.toUserId() == null) {
+            return false;
+        }
+        return !preferences.allows(mail.toUserId(), mail.eventCode(), NotificationChannel.EMAIL);
     }
 
     /**
