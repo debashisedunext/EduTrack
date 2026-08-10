@@ -3,8 +3,10 @@ package com.edunext.edutrack.worker;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.time.Clock;
@@ -21,11 +23,25 @@ import java.time.Clock;
  * running migrations. Two processes racing to migrate the same schema on
  * deploy is a real failure mode, and Flyway's lock turns it into a slow
  * startup rather than a clean one.
+ *
+ * <h2>{@code @EnableJpaRepositories} / {@code @EntityScan} are not redundant here</h2>
+ *
+ * {@code scanBasePackages} widens {@code @ComponentScan} to the root package,
+ * which is how a plain {@code domain} bean — {@code OutboxEnqueuer}, now
+ * {@code WorkingHoursService} (B-024) — gets found. Spring Data JPA does not
+ * follow it: repository and entity scanning key off Spring Boot's
+ * {@code AutoConfigurationPackages}, which is registered from the package of
+ * <em>this</em> class — {@code com.edunext.edutrack.worker} — regardless of
+ * {@code scanBasePackages}. {@code EduTrackApplication} never needed the
+ * explicit annotations because it sits in the root package itself; this class
+ * does not, so it has to say so. Without it, no {@code domain} {@code
+ * JpaRepository} — {@code WorkingCalendarRepository} among them — is ever
+ * registered as a bean here, which stayed invisible only because nothing in
+ * {@code worker} had asked Spring Data for one before.
  */
-// Scans from the root rather than from `…worker`, so shared domain services —
-// OutboxEnqueuer among them — are picked up. This matches EduTrackApplication,
-// which scans the same root; api is not on this module's classpath.
 @SpringBootApplication(scanBasePackages = "com.edunext.edutrack")
+@EnableJpaRepositories(basePackages = "com.edunext.edutrack")
+@EntityScan(basePackages = "com.edunext.edutrack")
 @ConfigurationPropertiesScan
 @EnableScheduling
 public class WorkerApplication {
