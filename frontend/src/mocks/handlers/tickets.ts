@@ -37,6 +37,27 @@ export const ticketHandlers = [
     eq('isDelayed', (t) => t.isDelayed);
     eq('isClientRaised', (t) => t.isClientRaised);
     if (q.get('reopenedOnly') === 'true') rows = rows.filter((t) => t.reopenCount > 0);
+    if (q.get('unassigned') === 'true') rows = rows.filter((t) => t.assigneeId == null);
+    if (q.get('excludeClosed') === 'true') rows = rows.filter((t) => t.status !== 'CLOSED');
+
+    // Date-only, inclusive range filters. C-015's "Due Today" and "Closed This
+    // Month" saved views are the reason `dueFrom`/`dueTo` actually filter here
+    // now — the contract already declared them but no handler read them.
+    const dateRange = (fromKey: string, toKey: string, get: (t: Ticket) => string | null) => {
+      const from = q.get(fromKey);
+      const to = q.get(toKey);
+      if (!from && !to) return;
+      rows = rows.filter((t) => {
+        const raw = get(t);
+        if (!raw) return false;
+        const date = raw.slice(0, 10);
+        if (from && date < from) return false;
+        if (to && date > to) return false;
+        return true;
+      });
+    };
+    dateRange('dueFrom', 'dueTo', (t) => t.plannedCloseDate);
+    dateRange('closedFrom', 'closedTo', (t) => t.actualCloseDate);
 
     const sort = q.get('sort') ?? '-createdAt';
     const desc = sort.startsWith('-');

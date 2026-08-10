@@ -75,7 +75,23 @@ assigneeId?: number;
 isDelayed?: boolean;
 isClientRaised?: boolean;
 reopenedOnly?: boolean;
+/**
+ * True to return only tickets with no assignee.
+ */
+unassigned?: boolean;
+/**
+ * True to exclude tickets in CLOSED status.
+ */
+excludeClosed?: boolean;
 dueFrom?: string;
 dueTo?: string;
+/**
+ * Filters on actualCloseDate, inclusive.
+ */
+closedFrom?: string;
+/**
+ * Filters on actualCloseDate, inclusive.
+ */
+closedTo?: string;
 sort?: string;
 };

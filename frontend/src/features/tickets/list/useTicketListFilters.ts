@@ -14,6 +14,14 @@ export interface TicketListFilters {
   assigneeId: number | null
   dueFrom: string | null
   dueTo: string | null
+  // C-015 — saved views. Booleans mirror the contract's isDelayed / isClientRaised
+  // style: present-and-true or absent, never a literal 'false' in the URL.
+  isDelayed: boolean | null
+  reopenedOnly: boolean | null
+  unassigned: boolean | null
+  excludeClosed: boolean | null
+  closedFrom: string | null
+  closedTo: string | null
 }
 
 export const EMPTY_FILTERS: TicketListFilters = {
@@ -27,10 +35,17 @@ export const EMPTY_FILTERS: TicketListFilters = {
   assigneeId: null,
   dueFrom: null,
   dueTo: null,
+  isDelayed: null,
+  reopenedOnly: null,
+  unassigned: null,
+  excludeClosed: null,
+  closedFrom: null,
+  closedTo: null,
 }
 
 const NUMERIC_KEYS = ['projectId', 'clientId', 'taskTypeId', 'assigneeId'] as const
-const STRING_KEYS = ['level', 'stage', 'status', 'dueFrom', 'dueTo'] as const
+const STRING_KEYS = ['level', 'stage', 'status', 'dueFrom', 'dueTo', 'closedFrom', 'closedTo'] as const
+const BOOLEAN_KEYS = ['isDelayed', 'reopenedOnly', 'unassigned', 'excludeClosed'] as const
 
 function parse(params: URLSearchParams): TicketListFilters {
   const filters = { ...EMPTY_FILTERS, q: params.get('q') ?? '' }
@@ -41,7 +56,20 @@ function parse(params: URLSearchParams): TicketListFilters {
   for (const key of STRING_KEYS) {
     filters[key] = (params.get(key) as never) ?? null
   }
+  for (const key of BOOLEAN_KEYS) {
+    filters[key] = params.get(key) === 'true' ? true : null
+  }
   return filters
+}
+
+/** Writes one key into a `URLSearchParams`, dropping it rather than ever writing `'false'`. */
+function writeKey<K extends keyof TicketListFilters>(
+  params: URLSearchParams,
+  key: K,
+  value: TicketListFilters[K],
+) {
+  if (value == null || value === '' || value === false) params.delete(key)
+  else params.set(key, String(value))
 }
 
 /**
@@ -49,7 +77,7 @@ function parse(params: URLSearchParams): TicketListFilters {
  * search (C-005) already navigates here as `/tickets?q=…`, so this list has
  * to read `q` out of the URL on mount rather than owning it privately. Every
  * other filter follows the same rule for the same reason a saved view (C-015)
- * will want: a filtered list is a link a manager can paste into chat.
+ * wants it: a filtered list is a link a manager can paste into chat.
  */
 export function useTicketListFilters() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -60,9 +88,42 @@ export function useTicketListFilters() {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev)
-          if (value == null || value === '') next.delete(key)
-          else next.set(key, String(value))
+          writeKey(next, key, value)
           return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  /**
+   * Applies several filter keys atomically in one URL update — a saved view
+   * sets multiple keys at once, and going through `setFilter` N times would
+   * have each call read the *pre-update* URL and clobber the previous call's
+   * write (`setSearchParams` updaters don't compose across separate calls in
+   * the same tick the way a single functional update does).
+   *
+   * Defaults to replacing the whole filter row (`opts.replace !== false`),
+   * the same semantics as `resetFilters`: every key not named in `next` is
+   * cleared. `q` is the one exception — it survives a replace unless `next`
+   * names it explicitly, because the search box is a header control the
+   * filter row's Reset already leaves alone for the same reason.
+   */
+  const applyFilters = React.useCallback(
+    (next: Partial<TicketListFilters>, opts?: { replace?: boolean }) => {
+      const replace = opts?.replace !== false
+      setSearchParams(
+        (prev) => {
+          const params = replace ? new URLSearchParams() : new URLSearchParams(prev)
+          if (replace && !('q' in next)) {
+            const q = prev.get('q')
+            if (q) params.set('q', q)
+          }
+          for (const key of Object.keys(next) as (keyof TicketListFilters)[]) {
+            writeKey(params, key, next[key] as TicketListFilters[typeof key])
+          }
+          return params
         },
         { replace: true },
       )
@@ -89,5 +150,5 @@ export function useTicketListFilters() {
     (key) => key !== 'q' && filters[key] != null && filters[key] !== '',
   ).length
 
-  return { filters, setFilter, resetFilters, activeCount }
+  return { filters, setFilter, applyFilters, resetFilters, activeCount }
 }

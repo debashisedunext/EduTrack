@@ -282,3 +282,58 @@ describe('conventions hold at runtime, not just in the document', () => {
     expect(again.status).toBe(304);
   });
 });
+
+describe('GET /tickets filters — C-015 saved views', () => {
+  interface TicketRow {
+    ticketId: string;
+    status: string;
+    plannedCloseDate: string;
+    actualCloseDate: string | null;
+    assignee: { id: number } | null;
+  }
+
+  it('dueFrom/dueTo actually filter plannedCloseDate — declared in the contract since C-014 but never read by the handler until now', async () => {
+    getDb().currentUserId = 1;
+    // The walkthrough ticket's plannedCloseDate is 2026-08-13.
+    const day = '2026-08-13';
+    const unfiltered = await get<Envelope<TicketRow[]>>('/tickets?limit=200');
+    const list = await get<Envelope<TicketRow[]>>(`/tickets?dueFrom=${day}&dueTo=${day}&limit=200`);
+    expect(list.data.length).toBeGreaterThan(0);
+    expect(list.data.length).toBeLessThan(unfiltered.data.length);
+    for (const t of list.data) {
+      expect(t.plannedCloseDate.slice(0, 10)).toBe(day);
+    }
+    expect(list.data.map((t) => t.ticketId)).toContain('CRM-26-00347');
+  });
+
+  it('unassigned=true returns only tickets with no assignee', async () => {
+    const db = getDb();
+    db.currentUserId = 1;
+    const someTicket = db.tickets.find((t) => t.ticketId !== 'CRM-26-00347')!;
+    someTicket.assigneeId = null;
+
+    const list = await get<Envelope<TicketRow[]>>('/tickets?unassigned=true&limit=200');
+    expect(list.data.length).toBeGreaterThan(0);
+    expect(list.data.every((t) => t.assignee == null)).toBe(true);
+    expect(list.data.map((t) => t.ticketId)).toContain(someTicket.ticketId);
+  });
+
+  it('excludeClosed=true drops every CLOSED ticket', async () => {
+    getDb().currentUserId = 1;
+    const list = await get<Envelope<TicketRow[]>>('/tickets?excludeClosed=true&limit=200');
+    expect(list.data.length).toBeGreaterThan(0);
+    expect(list.data.some((t) => t.status === 'CLOSED')).toBe(false);
+  });
+
+  it('closedFrom/closedTo filter actualCloseDate, not plannedCloseDate', async () => {
+    getDb().currentUserId = 1;
+    // The walkthrough ticket closed 2026-08-14; its plannedCloseDate is the
+    // 13th, so a range that only matches the 14th proves the handler is
+    // reading actualCloseDate and not accidentally reusing dueFrom/dueTo.
+    const inRange = await get<Envelope<TicketRow[]>>('/tickets?closedFrom=2026-08-14&closedTo=2026-08-14&limit=200');
+    expect(inRange.data.map((t) => t.ticketId)).toContain('CRM-26-00347');
+
+    const outOfRange = await get<Envelope<TicketRow[]>>('/tickets?closedFrom=2026-08-01&closedTo=2026-08-01&limit=200');
+    expect(outOfRange.data.map((t) => t.ticketId)).not.toContain('CRM-26-00347');
+  });
+});
