@@ -98,6 +98,11 @@ edutrack:
     # each pass costs a working-hours computation per open ticket.
     stale-scan-interval: ${STALE_SCAN_INTERVAL:PT1H}
 
+    # D-024 · the second escalation level. Half-hourly: the trigger is 48
+    # working hours past the close date, so the exact minute it fires does not
+    # matter, but a manager hearing about it the same morning does.
+    l2-scan-interval: ${L2_SCAN_INTERVAL:PT30M}
+
   outbox:
     enabled: true
     poll-interval: PT5S

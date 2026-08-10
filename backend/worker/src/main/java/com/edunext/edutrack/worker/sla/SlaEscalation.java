@@ -38,15 +38,18 @@ class SlaEscalation {
 
     private final SlaRepository tickets;
     private final WorkingHoursService workingHours;
+    private final EscalationPolicies policies;
     private final NotificationWriter notifications;
     private final OutboxEnqueuer outbox;
 
     SlaEscalation(SlaRepository tickets,
                   WorkingHoursService workingHours,
+                  EscalationPolicies policies,
                   NotificationWriter notifications,
                   OutboxEnqueuer outbox) {
         this.tickets = tickets;
         this.workingHours = workingHours;
+        this.policies = policies;
         this.notifications = notifications;
         this.outbox = outbox;
     }
@@ -73,7 +76,13 @@ class SlaEscalation {
                 + " working hours — raised to Critical.";
         String link = "/tickets/" + ticket.ticketCode();
 
-        Set<Long> recipients = recipientsOf(ticket);
+        // D-024. The matrix decides whether this breach reaches the reporting
+        // manager at all — that is what L1 means. The assignee and the project
+        // manager are told regardless: they own the work and the project, and
+        // switching off an escalation should not switch off the alert.
+        EscalationPolicies.Escalation policy = policies.forTicket(
+                ticket.projectId(), ticket.taskTypeId(), ticket.level());
+        Set<Long> recipients = recipientsOf(ticket, policy.l1());
         Map<Long, String> emails = tickets.emailsOf(recipients);
 
         if (recipients.isEmpty()) {
@@ -115,13 +124,16 @@ class SlaEscalation {
      *
      * <p>Nulls are skipped rather than substituted. An unassigned ticket past
      * its date is D-026's problem, not a reason to invent a recipient.
+     *
+     * @param l1 D-024: false when the project's matrix says a breach of this
+     *           kind does not go up the reporting line
      */
-    private static Set<Long> recipientsOf(SlaRepository.BreachedTicket ticket) {
+    private static Set<Long> recipientsOf(SlaRepository.BreachedTicket ticket, boolean l1) {
         Set<Long> recipients = new LinkedHashSet<>();
         if (ticket.assignedTo() != null) {
             recipients.add(ticket.assignedTo());
         }
-        if (ticket.reportingManagerId() != null) {
+        if (l1 && ticket.reportingManagerId() != null) {
             recipients.add(ticket.reportingManagerId());
         }
         if (ticket.projectManagerId() != null) {

@@ -52,6 +52,7 @@ environment, always.
 | 21 | `V20260810_1620__stage_sla_alerts.sql` | D | D-023 | schema | `stage_sla_alerts` — the once-per-segment claim, kept outside the append-only chain |
 | 22 | `V20260810_1810__sla_prebreach_alerts.sql` | D | D-021 | schema | `sla_prebreach_alerts` — once per ticket **per cycle**, so a reopen re-arms the warning |
 | 23 | `V20260810_1930__stale_ticket_nudges.sql` | D | D-022 | schema | `stale_ticket_nudges` — one row per ticket, updated in place; a nudge repeats where a warning does not |
+| 24 | `V20260810_2040__l2_escalations.sql` | D | D-024 | schema | `l2_escalations` — the second-level claim; L1 needs none, `tickets.is_delayed` already records it |
 
 <!-- load-order:end -->
 
