@@ -143,6 +143,32 @@ export interface Db {
   emailLog: EmailLogEntry[]; chatThreads: ChatThread[]; chatMessages: ChatMessage[];
   currentUserId: number;
   seq: Record<string, number>;
+  /**
+   * B-023 · the working calendar (S-14).
+   *
+   * Held here rather than in the handler module so `resetDb()` covers it. State
+   * that lives outside this object does not get reset between tests, and the
+   * failure that produces is a test which passes alone and fails in a full run.
+   *
+   * `weeklyOff` is **ISO-8601**: Mon=1 … Sun=7, so `[6, 7]` is Sat + Sun — not
+   * the `[0, 6]` a JS `Date.getDay()` would give. Times carry seconds, matching
+   * what a Java `LocalTime` serialises to.
+   */
+  calendar: {
+    week: { weeklyOff: number[]; workDayStart: string; workDayEnd: string; timezone: string };
+    holidays: Holiday[];
+    leaves: ResourceLeave[];
+  };
+}
+
+export interface Holiday {
+  id: number; date: string; name: string;
+  projectId: number | null; isRecurring: boolean; isActive: boolean;
+}
+
+export interface ResourceLeave {
+  id: number; userId: number; startDate: string; endDate: string;
+  leaveType: string; isHalfDay: boolean; status: string; reason: string | null;
 }
 
 export const nextId = (db: Db, key: string): number => (db.seq[key] = (db.seq[key] ?? 0) + 1);
@@ -239,6 +265,23 @@ export function createDb(): Db {
     chatThreads: [], chatMessages: [],
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
     seq: {},
+    calendar: {
+      week: {
+        weeklyOff: [6, 7],
+        workDayStart: '09:30:00',
+        workDayEnd: '18:30:00',
+        timezone: 'Asia/Kolkata',
+      },
+      holidays: [
+        { id: 1, date: '2026-08-15', name: 'Independence Day', projectId: null, isRecurring: true, isActive: true },
+        { id: 2, date: '2026-10-02', name: 'Gandhi Jayanti', projectId: null, isRecurring: true, isActive: true },
+        { id: 3, date: '2026-11-08', name: 'Diwali', projectId: null, isRecurring: false, isActive: true },
+      ],
+      leaves: [
+        { id: 1, userId: 4, startDate: '2026-08-24', endDate: '2026-08-28', leaveType: 'PLANNED', isHalfDay: false, status: 'APPROVED', reason: null },
+        { id: 2, userId: 5, startDate: '2026-09-03', endDate: '2026-09-03', leaveType: 'SICK', isHalfDay: true, status: 'APPROVED', reason: null },
+      ],
+    },
   };
   seedWalkthrough(db);
   seedFiller(db);

@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
+import type { Holiday } from '../db';
 import { round } from './tickets';
 import {
   clientRef, currentUser, noContent, notFound, ok, paginate, problem,
@@ -34,6 +35,37 @@ const LANDING: Record<string, string> = {
   ADMIN: '/dashboard', PM: '/dashboard', DEVELOPER: '/my-tasks',
   SUPPORT: '/tickets', QA: '/stages/queue', DEPLOYMENT: '/stages/queue',
 };
+
+// ── working calendar · S-14 (B-023) ─────────────────────────────────────────
+/**
+ * State lives in `db.ts` so `resetDb()` clears it between tests. A module-level
+ * `let` here would survive the reset, and one test's saved working week would
+ * silently become the next test's starting point.
+ */
+const calendarState = () => getDb().calendar;
+
+const nextCalendarId = (key: string) => nextId(getDb(), key);
+
+/** `09:30` → `09:30:00`, the shape a Java LocalTime serialises to. */
+const withSeconds = (time: string) => (time.length === 5 ? `${time}:00` : time);
+
+/** The three fields the SLA read model carries alongside the holiday list. */
+const workingWeek = () => {
+  const { weeklyOff, workDayStart, workDayEnd } = calendarState().week;
+  return { weeklyOff, workDayStart, workDayEnd };
+};
+
+/** The settings resource, which also carries the zone those bounds are read in. */
+const workingWeekFull = () => ({ ...calendarState().week });
+
+/**
+ * Content-derived, like the real controller's. A timestamp would change on a
+ * save that rewrote identical values and fail an `If-Match` for an edit that
+ * conflicts with nothing.
+ */
+const calendarEtag = () =>
+  `"${Math.abs([...JSON.stringify(calendarState().week)]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
 
 export const restHandlers = [
   // ── auth ──────────────────────────────────────────────────────────────────
@@ -346,16 +378,124 @@ export const restHandlers = [
       { id: 4, level: 'CRITICAL', colour: '#BE185D', defaultSlaHrs: 4, autoEscalates: true },
     ]),
   ),
+  // ── working calendar · S-14 (B-023) ───────────────────────────────────────
   http.get(url('/masters/holidays'), () =>
     ok({
-      holidays: [
-        { date: '2026-08-15', name: 'Independence Day' },
-        { date: '2026-10-02', name: 'Gandhi Jayanti' },
-        { date: '2026-11-08', name: 'Diwali' },
-      ],
-      weeklyOff: [0, 6], workDayStart: '09:30', workDayEnd: '18:30',
+      holidays: calendarState().holidays.filter((h) => h.isActive),
+      ...workingWeek(),
     }),
   ),
+  http.post(url('/masters/holidays'), async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    const date = String(body.date);
+    const projectId = (body.projectId ?? null) as number | null;
+    // uq_holidays (holiday_date, project_id). A project holiday does not clash
+    // with the org one for the same date — either makes the day non-working.
+    if (calendarState().holidays.some((h) => h.date === date && h.projectId === projectId)) {
+      return problem(409, 'duplicate', projectId === null
+        ? `An org-wide holiday already exists on ${date}`
+        : `Project ${projectId} already has a holiday on ${date}`);
+    }
+    const created = {
+      id: nextCalendarId('holiday'), date, name: String(body.name), projectId,
+      isRecurring: Boolean(body.isRecurring ?? false),
+      isActive: Boolean(body.isActive ?? true),
+    };
+    calendarState().holidays.push(created);
+    return ok(created, undefined, { status: 201 });
+  }),
+  http.patch(url('/masters/holidays/:holidayId'), async ({ params, request }) => {
+    const holiday = calendarState().holidays.find((h) => h.id === Number(params.holidayId));
+    if (!holiday) return notFound('Holiday');
+    const body = (await request.json()) as Partial<Holiday>;
+    // Only what was sent — omitting a field must not blank it. Mirrors the real
+    // service's nullValuePropertyMappingStrategy = IGNORE.
+    const sent = Object.fromEntries(
+      Object.entries(body).filter(([, v]) => v !== undefined && v !== null),
+    ) as Partial<Holiday>;
+    Object.assign(holiday, sent);
+    return ok(holiday);
+  }),
+  http.delete(url('/masters/holidays/:holidayId'), ({ params }) => {
+    const i = calendarState().holidays.findIndex((h) => h.id === Number(params.holidayId));
+    if (i < 0) return notFound('Holiday');
+    calendarState().holidays.splice(i, 1);
+    return noContent();
+  }),
+
+  http.get(url('/masters/working-calendar'), () =>
+    HttpResponse.json({ data: workingWeekFull() }, { headers: { ETag: calendarEtag() } }),
+  ),
+  http.put(url('/masters/working-calendar'), async ({ request }) => {
+    // The mock enforces If-Match too. A guard the real backend has and the mock
+    // waves through is a guard the frontend never gets to exercise.
+    const ifMatch = request.headers.get('If-Match');
+    if (!ifMatch) {
+      return problem(428, 'precondition-required',
+        'If-Match is required. GET the working week first and send back its ETag.');
+    }
+    if (ifMatch !== '*' && ifMatch.replace(/W\//, '') !== calendarEtag()) {
+      return problem(412, 'precondition-failed',
+        'The working week changed since you read it. Reload and reapply your edit.');
+    }
+    const body = (await request.json()) as Record<string, unknown>;
+    calendarState().week = {
+      weeklyOff: [...(body.weeklyOff as number[])].sort((a, b) => a - b),
+      // Echoed back with seconds, as a LocalTime serialises. A client that
+      // sends `09:30` must be able to read `09:30:00` back without surprise.
+      workDayStart: withSeconds(String(body.workDayStart)),
+      workDayEnd: withSeconds(String(body.workDayEnd)),
+      timezone: String(body.timezone),
+    };
+    return HttpResponse.json({ data: workingWeekFull() }, { headers: { ETag: calendarEtag() } });
+  }),
+
+  http.get(url('/masters/leaves'), ({ request }) => {
+    const q = new URL(request.url).searchParams;
+    let rows = calendarState().leaves;
+    if (q.get('userId')) rows = rows.filter((l) => l.userId === Number(q.get('userId')));
+    if (q.get('status')) rows = rows.filter((l) => l.status === q.get('status'));
+    // Overlap, not containment: leave that brackets the window entirely has
+    // neither endpoint inside it.
+    const from = q.get('from');
+    const to = q.get('to');
+    if (from) rows = rows.filter((l) => l.endDate >= from);
+    if (to) rows = rows.filter((l) => l.startDate <= to);
+    const { page, meta } = paginate(rows, new URL(request.url));
+    return ok(page, meta);
+  }),
+  http.post(url('/masters/leaves'), async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (String(body.endDate) < String(body.startDate)) {
+      return validationFailed({ endDate: ['Leave cannot end before it starts'] });
+    }
+    const created = {
+      id: nextCalendarId('leave'), userId: Number(body.userId),
+      startDate: String(body.startDate), endDate: String(body.endDate),
+      leaveType: (body.leaveType ?? 'PLANNED') as string,
+      isHalfDay: Boolean(body.isHalfDay ?? false),
+      status: (body.status ?? 'APPROVED') as string,
+      reason: (body.reason ?? null) as string | null,
+    };
+    calendarState().leaves.push(created);
+    return ok(created, undefined, { status: 201 });
+  }),
+  http.patch(url('/masters/leaves/:leaveId'), async ({ params, request }) => {
+    const leave = calendarState().leaves.find((l) => l.id === Number(params.leaveId));
+    if (!leave) return notFound('Leave');
+    const body = (await request.json()) as Record<string, unknown>;
+    const start = String(body.startDate ?? leave.startDate);
+    const end = String(body.endDate ?? leave.endDate);
+    if (end < start) return validationFailed({ endDate: ['Leave cannot end before it starts'] });
+    Object.assign(leave, body);
+    return ok(leave);
+  }),
+  http.delete(url('/masters/leaves/:leaveId'), ({ params }) => {
+    const i = calendarState().leaves.findIndex((l) => l.id === Number(params.leaveId));
+    if (i < 0) return notFound('Leave');
+    calendarState().leaves.splice(i, 1);
+    return noContent();
+  }),
   http.get(url('/masters/workflow-templates'), () =>
     ok([{
       id: 1, name: 'Standard Dev Flow', version: 1, projectId: null, taskTypeId: null,

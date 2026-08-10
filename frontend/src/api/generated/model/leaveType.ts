@@ -47,7 +47,13 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type HolidayListResponseDataHolidaysItem = {
-  date?: string;
-  name?: string;
-};
+export type LeaveType = typeof LeaveType[keyof typeof LeaveType];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const LeaveType = {
+  PLANNED: 'PLANNED',
+  SICK: 'SICK',
+  COMP_OFF: 'COMP_OFF',
+  OTHER: 'OTHER',
+} as const;

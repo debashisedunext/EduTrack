@@ -3,9 +3,7 @@ package com.edunext.edutrack.api.realtime;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
@@ -37,13 +35,22 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.data.redis.host=127.0.0.1",
         "spring.data.redis.port=1",
         "spring.data.redis.timeout=250ms",
-        "management.health.redis.enabled=false"
+        "management.health.redis.enabled=false",
+        // B-023, Stream B edit — flagged for Debashis's sign-off rather than
+        // made quietly (CLAUDE.md, code ownership).
+        //
+        // JPA is no longer excluded: `CalendarService` is the first bean here to
+        // read through a Spring Data repository, so without it the context
+        // cannot build `CalendarController`. This test's own point — that the
+        // app boots when infrastructure is missing — is unaffected: naming the
+        // dialect and refusing the JDBC metadata lookup lets Hibernate build an
+        // EntityManagerFactory without connecting, so MySQL is as absent here as
+        // Redis is.
+        "spring.jpa.hibernate.ddl-auto=none",
+        "spring.jpa.database-platform=org.hibernate.dialect.MySQLDialect",
+        "spring.jpa.properties.hibernate.boot.allow_jdbc_metadata_access=false",
 })
-@EnableAutoConfiguration(exclude = {
-        HibernateJpaAutoConfiguration.class,
-        JpaRepositoriesAutoConfiguration.class,
-        FlywayAutoConfiguration.class
-})
+@EnableAutoConfiguration(exclude = FlywayAutoConfiguration.class)
 class RelayBootsWithoutRedisTest {
 
     @Autowired

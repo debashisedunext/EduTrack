@@ -52,7 +52,11 @@
 - [ ] **B-022** Notification template master — event, channel, subject, HTML body, merge tags, per-event on/off, per-role recipients. Drives D's mail engine. **S-15**
 
 ### Working calendar
-- [ ] **B-023** Working calendar & holiday master — org holidays, weekly off pattern, per-resource leave. **S-14**
+- [x] **B-023** Working calendar & holiday master — org holidays, weekly off pattern, per-resource leave. **S-14** — *`V20260808_1630__working_calendar.sql` + `WorkingCalendar`; `api/feature/masters/Calendar*`; `features/masters/calendar/`. 9 new contract operations. **B-024 now has everything it needs.***
+
+  > **Days are ISO-8601 — Mon=1 … Sun=7 — everywhere.** The contract described `weeklyOff` as "ISO day numbers" while constraining it to `0–6`, and the mock sent `[0, 6]`: JavaScript's `Date.getDay()` convention wearing an ISO label. Read literally by a backend using `DayOfWeek`, `0` is not a day and **Sunday becomes a working day** — every SLA spanning a weekend short by a day, in the one calculation CLAUDE.md says must have a single implementation. A third numbering was also live in `docs/plan/calendar.json` (`[0,1,2,3,4]`, Python's `date.weekday()`), unread but documented as the shared source B-024 should use. All three are now ISO, and `ck_working_calendar_weekly_off` makes the database refuse a `0`.
+  >
+  > **Two defects the tests caught before merge.** The working day was first stored as `TIME`/`LocalTime`; both `api` and `worker` set `hibernate.jdbc.time_zone: UTC`, so it round-tripped shifted by the JVM offset — 09:30 written, 15:00 read. Now `SMALLINT` minutes from midnight, which nothing can convert. And MapStruct's default collection strategy mutates what the getter returns, but `getWeeklyOff()` derives a fresh `EnumSet` each call — so `PUT` answered 200, echoed the new week back, and saved nothing. Both have named regression tests.
 - [ ] **B-024** 🔴 **Working-hours calculation service** — `workingHoursBetween(start, end)` and `addWorkingHours(start, n)`, honouring weekends, holidays and resource leave. **Every SLA, duration and utilisation figure in the system routes through this.** D is blocked on it. Blueprint §5 calls it the most commonly missed requirement.
 
 ### Client master

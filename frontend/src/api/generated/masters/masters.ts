@@ -69,14 +69,26 @@ import type {
   ConflictResponse,
   GetWorkingCalendarParams,
   HolidayListResponse,
+  HolidayPatchRequest,
+  HolidayResponse,
+  HolidayWriteRequest,
+  ListResourceLeavesParams,
   ListWorkflowTemplatesParams,
+  NotFoundResponse,
+  PreconditionFailedResponse,
   PriorityListResponse,
+  ResourceLeaveListResponse,
+  ResourceLeavePatchRequest,
+  ResourceLeaveResponse,
+  ResourceLeaveWriteRequest,
   TaskTypeListResponse,
   UnauthorizedResponse,
   ValidationFailedResponse,
   WorkflowTemplateListResponse,
   WorkflowTemplateResponse,
-  WorkflowTemplateWriteRequest
+  WorkflowTemplateWriteRequest,
+  WorkingWeekResponse,
+  WorkingWeekUpdateRequest
 } from '.././model';
 
 import { http } from '../../http';
@@ -367,6 +379,678 @@ export function useGetWorkingCalendar<TData = Awaited<ReturnType<typeof getWorki
 
 
 /**
+ * A recurring holiday is stored **once**, not once per year — the
+working-hours service expands it. That is why `date` on a recurring row
+is a template rather than the only occurrence, and why re-adding "the
+same" holiday next year is a duplicate, answered `409`.
+
+`projectId` omitted means org-wide. A project holiday does not replace
+the org one for the same date: either makes the day non-working, so the
+two union rather than override.
+
+ * @summary Add an org or project holiday (S-14)
+ */
+export const createHoliday = (
+    holidayWriteRequest: HolidayWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<HolidayResponse>(
+      {url: `/masters/holidays`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: holidayWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateHolidayMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHoliday>>, TError,{data: HolidayWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createHoliday>>, TError,{data: HolidayWriteRequest}, TContext> => {
+
+const mutationKey = ['createHoliday'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHoliday>>, {data: HolidayWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createHoliday(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateHolidayMutationResult = NonNullable<Awaited<ReturnType<typeof createHoliday>>>
+    export type CreateHolidayMutationBody = HolidayWriteRequest
+    export type CreateHolidayMutationError = ValidationFailedResponse | UnauthorizedResponse | ConflictResponse
+
+    /**
+ * @summary Add an org or project holiday (S-14)
+ */
+export const useCreateHoliday = <TError = ValidationFailedResponse | UnauthorizedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHoliday>>, TError,{data: HolidayWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createHoliday>>,
+        TError,
+        {data: HolidayWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateHolidayMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * A partial update — send only the fields that change. Every field is
+optional here, unlike on create: an omitted field keeps its stored
+value rather than being cleared.
+
+ * @summary Edit a holiday
+ */
+export const updateHoliday = (
+    holidayId: number,
+    holidayPatchRequest: HolidayPatchRequest,
+ ) => {
+      
+      
+      return http<HolidayResponse>(
+      {url: `/masters/holidays/${holidayId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: holidayPatchRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateHolidayMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHoliday>>, TError,{holidayId: number;data: HolidayPatchRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateHoliday>>, TError,{holidayId: number;data: HolidayPatchRequest}, TContext> => {
+
+const mutationKey = ['updateHoliday'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateHoliday>>, {holidayId: number;data: HolidayPatchRequest}> = (props) => {
+          const {holidayId,data} = props ?? {};
+
+          return  updateHoliday(holidayId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateHolidayMutationResult = NonNullable<Awaited<ReturnType<typeof updateHoliday>>>
+    export type UpdateHolidayMutationBody = HolidayPatchRequest
+    export type UpdateHolidayMutationError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Edit a holiday
+ */
+export const useUpdateHoliday = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHoliday>>, TError,{holidayId: number;data: HolidayPatchRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateHoliday>>,
+        TError,
+        {holidayId: number;data: HolidayPatchRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateHolidayMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * A hard delete, unlike a workflow stage. Nothing references a holiday by
+id — the working-hours service reads the set of dates for a window, so a
+removed row simply makes that day workable again from the next
+calculation. Historic SLA figures already recorded are unaffected;
+they are stored, not recomputed.
+
+ * @summary Remove a holiday
+ */
+export const deleteHoliday = (
+    holidayId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/masters/holidays/${holidayId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteHolidayMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHoliday>>, TError,{holidayId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteHoliday>>, TError,{holidayId: number}, TContext> => {
+
+const mutationKey = ['deleteHoliday'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteHoliday>>, {holidayId: number}> = (props) => {
+          const {holidayId} = props ?? {};
+
+          return  deleteHoliday(holidayId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteHolidayMutationResult = NonNullable<Awaited<ReturnType<typeof deleteHoliday>>>
+    
+    export type DeleteHolidayMutationError = UnauthorizedResponse | NotFoundResponse
+
+    /**
+ * @summary Remove a holiday
+ */
+export const useDeleteHoliday = <TError = UnauthorizedResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHoliday>>, TError,{holidayId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteHoliday>>,
+        TError,
+        {holidayId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteHolidayMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The settings half of S-14, separate from the holiday list because they
+change on entirely different cadences: holidays are edited every year,
+the working week almost never.
+
+Returns an `ETag`. `PUT` requires it back as `If-Match` — two admins
+editing the working week from different tabs is exactly the lost update
+that would otherwise silently reset somebody's change.
+
+ * @summary The org working week — weekly-off pattern and working-day bounds
+ */
+export const getWorkingWeek = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<WorkingWeekResponse>(
+      {url: `/masters/working-calendar`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetWorkingWeekQueryKey = () => {
+    return [
+    `/masters/working-calendar`
+    ] as const;
+    }
+
+    
+export const getGetWorkingWeekQueryOptions = <TData = Awaited<ReturnType<typeof getWorkingWeek>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWorkingWeek>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetWorkingWeekQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWorkingWeek>>> = ({ signal }) => getWorkingWeek(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getWorkingWeek>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetWorkingWeekQueryResult = NonNullable<Awaited<ReturnType<typeof getWorkingWeek>>>
+export type GetWorkingWeekQueryError = UnauthorizedResponse
+
+
+export function useGetWorkingWeek<TData = Awaited<ReturnType<typeof getWorkingWeek>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWorkingWeek>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWorkingWeek>>,
+          TError,
+          Awaited<ReturnType<typeof getWorkingWeek>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetWorkingWeek<TData = Awaited<ReturnType<typeof getWorkingWeek>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWorkingWeek>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWorkingWeek>>,
+          TError,
+          Awaited<ReturnType<typeof getWorkingWeek>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetWorkingWeek<TData = Awaited<ReturnType<typeof getWorkingWeek>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWorkingWeek>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The org working week — weekly-off pattern and working-day bounds
+ */
+
+export function useGetWorkingWeek<TData = Awaited<ReturnType<typeof getWorkingWeek>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWorkingWeek>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetWorkingWeekQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * A whole-resource replace, not a patch: a partial weekend is meaningless,
+and the working day's two bounds are only valid relative to each other.
+
+**Every SLA, duration and utilisation figure in the system is computed
+against this.** Changing it does not rewrite figures already recorded —
+stored values stay as they were — but every calculation from here on
+uses the new week.
+
+ * @summary Replace the org working week
+ */
+export const updateWorkingWeek = (
+    workingWeekUpdateRequest: WorkingWeekUpdateRequest,
+ ) => {
+      
+      
+      return http<WorkingWeekResponse>(
+      {url: `/masters/working-calendar`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: workingWeekUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateWorkingWeekMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWorkingWeek>>, TError,{data: WorkingWeekUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateWorkingWeek>>, TError,{data: WorkingWeekUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateWorkingWeek'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateWorkingWeek>>, {data: WorkingWeekUpdateRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateWorkingWeek(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateWorkingWeekMutationResult = NonNullable<Awaited<ReturnType<typeof updateWorkingWeek>>>
+    export type UpdateWorkingWeekMutationBody = WorkingWeekUpdateRequest
+    export type UpdateWorkingWeekMutationError = ValidationFailedResponse | UnauthorizedResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Replace the org working week
+ */
+export const useUpdateWorkingWeek = <TError = ValidationFailedResponse | UnauthorizedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWorkingWeek>>, TError,{data: WorkingWeekUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateWorkingWeek>>,
+        TError,
+        {data: WorkingWeekUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateWorkingWeekMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Overlap, not containment: a fortnight's leave that brackets the window
+entirely has neither endpoint inside it, and a containment filter would
+report the resource at their desk all week.
+
+ * @summary Resource leave, the per-person half of the working calendar
+ */
+export const listResourceLeaves = (
+    params?: ListResourceLeavesParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ResourceLeaveListResponse>(
+      {url: `/masters/leaves`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListResourceLeavesQueryKey = (params?: ListResourceLeavesParams,) => {
+    return [
+    `/masters/leaves`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListResourceLeavesQueryOptions = <TData = Awaited<ReturnType<typeof listResourceLeaves>>, TError = UnauthorizedResponse>(params?: ListResourceLeavesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listResourceLeaves>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListResourceLeavesQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listResourceLeaves>>> = ({ signal }) => listResourceLeaves(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listResourceLeaves>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListResourceLeavesQueryResult = NonNullable<Awaited<ReturnType<typeof listResourceLeaves>>>
+export type ListResourceLeavesQueryError = UnauthorizedResponse
+
+
+export function useListResourceLeaves<TData = Awaited<ReturnType<typeof listResourceLeaves>>, TError = UnauthorizedResponse>(
+ params: undefined |  ListResourceLeavesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listResourceLeaves>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listResourceLeaves>>,
+          TError,
+          Awaited<ReturnType<typeof listResourceLeaves>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListResourceLeaves<TData = Awaited<ReturnType<typeof listResourceLeaves>>, TError = UnauthorizedResponse>(
+ params?: ListResourceLeavesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listResourceLeaves>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listResourceLeaves>>,
+          TError,
+          Awaited<ReturnType<typeof listResourceLeaves>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListResourceLeaves<TData = Awaited<ReturnType<typeof listResourceLeaves>>, TError = UnauthorizedResponse>(
+ params?: ListResourceLeavesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listResourceLeaves>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Resource leave, the per-person half of the working calendar
+ */
+
+export function useListResourceLeaves<TData = Awaited<ReturnType<typeof listResourceLeaves>>, TError = UnauthorizedResponse>(
+ params?: ListResourceLeavesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listResourceLeaves>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListResourceLeavesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * @summary Record leave for a resource
+ */
+export const createResourceLeave = (
+    resourceLeaveWriteRequest: ResourceLeaveWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ResourceLeaveResponse>(
+      {url: `/masters/leaves`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: resourceLeaveWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateResourceLeaveMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createResourceLeave>>, TError,{data: ResourceLeaveWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createResourceLeave>>, TError,{data: ResourceLeaveWriteRequest}, TContext> => {
+
+const mutationKey = ['createResourceLeave'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createResourceLeave>>, {data: ResourceLeaveWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createResourceLeave(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateResourceLeaveMutationResult = NonNullable<Awaited<ReturnType<typeof createResourceLeave>>>
+    export type CreateResourceLeaveMutationBody = ResourceLeaveWriteRequest
+    export type CreateResourceLeaveMutationError = ValidationFailedResponse | UnauthorizedResponse | ConflictResponse
+
+    /**
+ * @summary Record leave for a resource
+ */
+export const useCreateResourceLeave = <TError = ValidationFailedResponse | UnauthorizedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createResourceLeave>>, TError,{data: ResourceLeaveWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createResourceLeave>>,
+        TError,
+        {data: ResourceLeaveWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateResourceLeaveMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Only `APPROVED` leave stops the SLA clock. A pending or rejected request
+must not, or the target a manager sees depends on paperwork nobody has
+signed yet.
+
+A partial update — approving is `{"status": "APPROVED"}` and nothing
+else. Omitted fields keep their stored value.
+
+ * @summary Edit or approve a leave record
+ */
+export const updateResourceLeave = (
+    leaveId: number,
+    resourceLeavePatchRequest: ResourceLeavePatchRequest,
+ ) => {
+      
+      
+      return http<ResourceLeaveResponse>(
+      {url: `/masters/leaves/${leaveId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: resourceLeavePatchRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateResourceLeaveMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateResourceLeave>>, TError,{leaveId: number;data: ResourceLeavePatchRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateResourceLeave>>, TError,{leaveId: number;data: ResourceLeavePatchRequest}, TContext> => {
+
+const mutationKey = ['updateResourceLeave'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateResourceLeave>>, {leaveId: number;data: ResourceLeavePatchRequest}> = (props) => {
+          const {leaveId,data} = props ?? {};
+
+          return  updateResourceLeave(leaveId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateResourceLeaveMutationResult = NonNullable<Awaited<ReturnType<typeof updateResourceLeave>>>
+    export type UpdateResourceLeaveMutationBody = ResourceLeavePatchRequest
+    export type UpdateResourceLeaveMutationError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Edit or approve a leave record
+ */
+export const useUpdateResourceLeave = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateResourceLeave>>, TError,{leaveId: number;data: ResourceLeavePatchRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateResourceLeave>>,
+        TError,
+        {leaveId: number;data: ResourceLeavePatchRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateResourceLeaveMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * @summary Remove a leave record
+ */
+export const deleteResourceLeave = (
+    leaveId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/masters/leaves/${leaveId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteResourceLeaveMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteResourceLeave>>, TError,{leaveId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteResourceLeave>>, TError,{leaveId: number}, TContext> => {
+
+const mutationKey = ['deleteResourceLeave'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteResourceLeave>>, {leaveId: number}> = (props) => {
+          const {leaveId} = props ?? {};
+
+          return  deleteResourceLeave(leaveId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteResourceLeaveMutationResult = NonNullable<Awaited<ReturnType<typeof deleteResourceLeave>>>
+    
+    export type DeleteResourceLeaveMutationError = UnauthorizedResponse | NotFoundResponse
+
+    /**
+ * @summary Remove a leave record
+ */
+export const useDeleteResourceLeave = <TError = UnauthorizedResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteResourceLeave>>, TError,{leaveId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteResourceLeave>>,
+        TError,
+        {leaveId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteResourceLeaveMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * @summary Workflow templates with their stages
  */
 export const listWorkflowTemplates = (
