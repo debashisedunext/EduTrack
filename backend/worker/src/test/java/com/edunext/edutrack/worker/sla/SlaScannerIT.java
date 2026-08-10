@@ -42,7 +42,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @SpringBootTest(classes = com.edunext.edutrack.worker.WorkerApplication.class)
 @org.springframework.context.annotation.Import(SlaScannerIT.FixedClock.class)
-@org.springframework.context.annotation.Import(SlaScannerIT.FixedClock.class)
 class SlaScannerIT {
 
     /** A Monday, mid-morning — a working hour on any sane calendar. */
