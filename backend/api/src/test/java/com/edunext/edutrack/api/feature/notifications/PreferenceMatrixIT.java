@@ -270,11 +270,13 @@ class PreferenceMatrixIT {
         return count == null ? 0 : count;
     }
 
+    /** The same shape {@code NotificationCentreIT} uses — emp_code is required. */
     private long insertUser(String username) {
+        Long roleId = jdbc.queryForObject("SELECT id FROM roles ORDER BY id LIMIT 1", Long.class);
         jdbc.update("""
-                INSERT INTO users (username, email, full_name, password_hash, role_id, is_active)
-                SELECT ?, ?, ?, 'x', MIN(id), 1 FROM roles
-                """, username, username + "@edunext.test", username);
+                INSERT INTO users (emp_code, username, email, password_hash, full_name, role_id)
+                VALUES (?, ?, ?, 'not-a-real-hash', ?, ?)
+                """, username, username, username + "@example.com", username, roleId);
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         return id == null ? 0L : id;
     }
