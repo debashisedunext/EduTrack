@@ -70,6 +70,8 @@ import type {
   ListPendingNotificationsParams,
   NotFoundResponse,
   NotificationListResponse,
+  NotificationPreferenceMatrix,
+  NotificationPreferenceUpdateRequest,
   NotificationsDeliveredRequest,
   PendingNotificationsResponse,
   Problem,
@@ -175,6 +177,168 @@ export function useListNotifications<TData = Awaited<ReturnType<typeof listNotif
 
 
 /**
+ * The whole event catalogue with your answers applied, not just your overrides — a client that had to know every event code to render the grid would be a second copy of the server's vocabulary, and a newly added event would silently fail to appear.
+`emailLocked` is D-036: assignment, handoff, escalation and breach mails ignore preferences and always send (§4B.6). A locked row always reports `email: true`, whatever is stored, so the screen cannot show a switch as off that the send path ignores.
+
+ * @summary The per-user notification matrix (S-26)
+ */
+export const getNotificationPreferences = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<NotificationPreferenceMatrix>(
+      {url: `/me/notification-preferences`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetNotificationPreferencesQueryKey = () => {
+    return [
+    `/me/notification-preferences`
+    ] as const;
+    }
+
+    
+export const getGetNotificationPreferencesQueryOptions = <TData = Awaited<ReturnType<typeof getNotificationPreferences>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationPreferences>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNotificationPreferencesQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNotificationPreferences>>> = ({ signal }) => getNotificationPreferences(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNotificationPreferences>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetNotificationPreferencesQueryResult = NonNullable<Awaited<ReturnType<typeof getNotificationPreferences>>>
+export type GetNotificationPreferencesQueryError = UnauthorizedResponse
+
+
+export function useGetNotificationPreferences<TData = Awaited<ReturnType<typeof getNotificationPreferences>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationPreferences>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNotificationPreferences>>,
+          TError,
+          Awaited<ReturnType<typeof getNotificationPreferences>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNotificationPreferences<TData = Awaited<ReturnType<typeof getNotificationPreferences>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationPreferences>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNotificationPreferences>>,
+          TError,
+          Awaited<ReturnType<typeof getNotificationPreferences>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNotificationPreferences<TData = Awaited<ReturnType<typeof getNotificationPreferences>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationPreferences>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The per-user notification matrix (S-26)
+ */
+
+export function useGetNotificationPreferences<TData = Awaited<ReturnType<typeof getNotificationPreferences>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationPreferences>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetNotificationPreferencesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Partial by field: an omitted `inApp` or `email` leaves that channel alone, so saving one row does not require restating the grid.
+An attempt to disable a locked mail is **discarded, not rejected** — the client is usually posting back the row it was showing, and failing the whole save over a switch the user could not move would punish the caller for our own UI. The response is the resulting matrix, so what actually took effect is visible.
+An unknown `eventKey` **is** rejected: there is nothing to honour, and accepting it silently would leave someone believing they had switched something off.
+
+ * @summary Change which events reach you, on which channel
+ */
+export const updateNotificationPreferences = (
+    notificationPreferenceUpdateRequest: NotificationPreferenceUpdateRequest,
+ ) => {
+      
+      
+      return http<NotificationPreferenceMatrix>(
+      {url: `/me/notification-preferences`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: notificationPreferenceUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateNotificationPreferencesMutationOptions = <TError = Problem | UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNotificationPreferences>>, TError,{data: NotificationPreferenceUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateNotificationPreferences>>, TError,{data: NotificationPreferenceUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateNotificationPreferences'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateNotificationPreferences>>, {data: NotificationPreferenceUpdateRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateNotificationPreferences(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateNotificationPreferencesMutationResult = NonNullable<Awaited<ReturnType<typeof updateNotificationPreferences>>>
+    export type UpdateNotificationPreferencesMutationBody = NotificationPreferenceUpdateRequest
+    export type UpdateNotificationPreferencesMutationError = Problem | UnauthorizedResponse
+
+    /**
+ * @summary Change which events reach you, on which channel
+ */
+export const useUpdateNotificationPreferences = <TError = Problem | UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNotificationPreferences>>, TError,{data: NotificationPreferenceUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateNotificationPreferences>>,
+        TError,
+        {data: NotificationPreferenceUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateNotificationPreferencesMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * Blueprint §11: a notification raised while the user was offline is queued and pops the moment they log in. Oldest first — this is a queue being drained, not a list being browsed — and capped, because somebody back from leave has a hundred queued and popping all of them is indistinguishable from popping none. `hasMore` says the cap hid some.
 Independent of `isRead`: a notification can be read without ever having been popped, and popped without being read.
 

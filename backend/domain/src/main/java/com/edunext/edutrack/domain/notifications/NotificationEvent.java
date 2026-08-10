@@ -90,6 +90,30 @@ public enum NotificationEvent {
     }
 
     /**
+     * D-036 · the mail this user cannot switch off.
+     *
+     * <p>Blueprint §4B.6: <em>"assignment, handoff, escalation and breach mails
+     * ignore user preferences. Everything else respects them."</em> Those four
+     * are not a list of event codes to keep in step by hand — they are exactly
+     * {@link Category#ASSIGNMENT} and {@link Category#ESCALATION}, which is why
+     * the rule is stated over the category. A new escalation event added to
+     * this enum is mandatory the moment it is declared, with nothing else to
+     * remember.
+     *
+     * <p><strong>Mail only, deliberately.</strong> §7.7 calls mail "the
+     * guaranteed channel" and gives the guarantee to it: an in-app toast only
+     * reaches somebody who is logged in, so it was never the thing making an
+     * assignment impossible to miss. Locking the in-app channel too would take
+     * away a real preference — quieting toasts while keeping the mail — to
+     * protect a channel that was never the guarantee. The bell entry is still
+     * written either way; what a preference silences is the popup, never the
+     * record.
+     */
+    public boolean isMandatoryMail() {
+        return category == Category.ASSIGNMENT || category == Category.ESCALATION;
+    }
+
+    /**
      * @return empty for a code this build does not know — never an exception.
      *         The bell must render a row written by an older deploy.
      */

@@ -2027,6 +2027,63 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /me/notification-preferences:
+    get:
+      tags: [notifications]
+      operationId: getNotificationPreferences
+      summary: The per-user notification matrix (S-26)
+      description: >
+        The whole event catalogue with your answers applied, not just your
+        overrides — a client that had to know every event code to render the
+        grid would be a second copy of the server's vocabulary, and a newly
+        added event would silently fail to appear.
+
+        `emailLocked` is D-036: assignment, handoff, escalation and breach mails
+        ignore preferences and always send (§4B.6). A locked row always reports
+        `email: true`, whatever is stored, so the screen cannot show a switch as
+        off that the send path ignores.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferenceMatrix' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [notifications]
+      operationId: updateNotificationPreferences
+      summary: Change which events reach you, on which channel
+      description: >
+        Partial by field: an omitted `inApp` or `email` leaves that channel
+        alone, so saving one row does not require restating the grid.
+
+        An attempt to disable a locked mail is **discarded, not rejected** — the
+        client is usually posting back the row it was showing, and failing the
+        whole save over a switch the user could not move would punish the caller
+        for our own UI. The response is the resulting matrix, so what actually
+        took effect is visible.
+
+        An unknown `eventKey` **is** rejected: there is nothing to honour, and
+        accepting it silently would leave someone believing they had switched
+        something off.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationPreferenceUpdateRequest' }
+      responses:
+        '200':
+          description: Saved. Returns the matrix as it now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferenceMatrix' }
+        '400':
+          description: An `eventKey` that is not a notification event.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /notifications/pending:
     get:
       tags: [notifications]
@@ -3627,6 +3684,47 @@ components:
             - type: object
               properties:
                 unreadCount: { type: integer }
+    NotificationPreferenceMatrix:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationPreferenceRow' }
+    NotificationPreferenceRow:
+      type: object
+      required: [eventKey, category, inApp, email, emailLocked]
+      properties:
+        eventKey: { type: string, example: SLA_BREACHED }
+        category:
+          type: string
+          enum: [MENTION, ASSIGNMENT, ESCALATION, STATUS_REQUEST, OTHER]
+          description: S-26's grouping, so the grid can be sectioned without a second mapping.
+        inApp:
+          type: boolean
+          description: >
+            Whether the D-043 toast fires. Turning it off never suppresses the
+            bell entry — S-26 is where you go to find what you missed.
+        email: { type: boolean }
+        emailLocked:
+          type: boolean
+          description: >
+            D-036. This mail cannot be switched off. Sent rather than inferred
+            from the category so the rule has one home.
+    NotificationPreferenceUpdateRequest:
+      type: object
+      required: [preferences]
+      properties:
+        preferences:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationPreferenceUpdate' }
+    NotificationPreferenceUpdate:
+      type: object
+      required: [eventKey]
+      properties:
+        eventKey: { type: string }
+        inApp: { type: boolean, description: Omit to leave this channel unchanged. }
+        email: { type: boolean, description: Omit to leave this channel unchanged. }
     PendingNotificationsResponse:
       type: object
       required: [data, hasMore]
