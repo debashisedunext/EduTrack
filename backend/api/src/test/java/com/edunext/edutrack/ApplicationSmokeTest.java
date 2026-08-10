@@ -68,8 +68,18 @@ class ApplicationSmokeTest {
         assertThat(context.getBeanDefinitionCount()).isPositive();
     }
 
+    /**
+     * B-023 edit. Not an ID-string comparison — {@code TimeZone.getTimeZone("UTC")}
+     * is not portable across JDK builds. CI (Ubuntu, Temurin 25) returns an
+     * instance whose {@code getID()} is {@code "Etc/UTC"} for the identical call
+     * that returns {@code "UTC"} elsewhere; both are the same zero-offset,
+     * no-DST zone. {@link UtcIsSetBeforeAnyDateIsReadTest} carries the full
+     * explanation of what this codebase actually needs from the default zone.
+     */
     @Test
     void defaultTimeZoneIsUtc() {
-        assertThat(TimeZone.getDefault().getID()).isEqualTo("UTC");
+        TimeZone zone = TimeZone.getDefault();
+        assertThat(zone.getRawOffset()).isZero();
+        assertThat(zone.observesDaylightTime()).isFalse();
     }
 }

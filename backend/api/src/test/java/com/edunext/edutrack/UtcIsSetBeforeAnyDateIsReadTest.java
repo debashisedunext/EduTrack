@@ -44,10 +44,22 @@ class UtcIsSetBeforeAnyDateIsReadTest {
         // Referencing the class guarantees its static initialiser has run.
         assertThat(EduTrackApplication.class).isNotNull();
 
-        assertThat(TimeZone.getDefault().getID())
+        // Not an ID-string comparison. TimeZone.getTimeZone("UTC").getID() is not
+        // portable across JDK builds: CI (Ubuntu, Temurin 25) returns "Etc/UTC"
+        // for the identical call that returns "UTC" on this codebase's other
+        // dev machines. Both are the same zero-offset, no-DST zone — the alias
+        // name is a JDK/tzdata implementation detail this test has no business
+        // asserting on. What the comment above and PLAN.md §3.1 actually require
+        // is the offset, not the label, so that is what gets checked.
+        TimeZone zone = TimeZone.getDefault();
+        assertThat(zone.getRawOffset())
                 .as("storage is UTC everywhere (PLAN.md §3.1); a JVM on another zone "
                         + "silently shifts every DATE and DATETIME the app reads")
-                .isEqualTo("UTC");
+                .isZero();
+        assertThat(zone.observesDaylightTime())
+                .as("a DST-observing zone would still shift dates twice a year even at "
+                        + "nominal zero offset")
+                .isFalse();
     }
 
     /**
