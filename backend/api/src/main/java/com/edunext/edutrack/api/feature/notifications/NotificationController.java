@@ -22,7 +22,7 @@ import java.util.Optional;
  * {@code limit}, not a second route.
  */
 @RestController
-@RequestMapping("/notifications")
+@RequestMapping("/api/v1/notifications")
 @Tag(name = "notifications")
 class NotificationController {
 
