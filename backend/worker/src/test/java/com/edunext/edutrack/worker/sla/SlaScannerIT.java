@@ -233,6 +233,41 @@ class SlaScannerIT {
                 Integer.class, id, assignee)).isZero();
     }
 
+    // ------------------------------------------------------------- D-024
+
+    @Test
+    @DisplayName("a project can keep a breach off the reporting line")
+    void theMatrixCanSwitchOffTheFirstEscalationLevel() {
+        // escalate_to_l1 = 0 for this project and level: L1 means "the
+        // reporting manager", so switching it off removes them and nobody else.
+        jdbc.update("""
+                INSERT INTO sla_policies (project_id, task_type_id, level, resolution_hrs,
+                                          escalate_to_l1, escalate_to_l2, is_active)
+                VALUES (?, NULL, 'HIGH', 8.00, 0, 0, 1)
+                """, projectId);
+        long id = insertTicket("quiet", NOW.minusSeconds(3600), "HIGH");
+
+        scanner.scanOnce();
+
+        assertThat(notifiedUserIds(id))
+                .as("the assignee owns the work and the PM owns the project — "
+                        + "switching off an escalation must not switch off the alert")
+                .containsExactlyInAnyOrder(assignee, projectManager)
+                .doesNotContain(manager);
+    }
+
+    @Test
+    @DisplayName("with no policy configured the reporting manager is still told")
+    void theDefaultKeepsTheFirstLevelOn() {
+        long id = insertTicket("default", NOW.minusSeconds(3600), "HIGH");
+
+        scanner.scanOnce();
+
+        // A-007's column default is escalate_to_l1 = 1, and an absent row uses
+        // it — an org that has never opened the matrix still gets escalations.
+        assertThat(notifiedUserIds(id)).contains(manager);
+    }
+
     // ------------------------------------------------------------ D-027
 
     @Test
