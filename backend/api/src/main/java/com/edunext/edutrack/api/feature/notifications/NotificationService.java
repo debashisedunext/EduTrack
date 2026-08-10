@@ -19,9 +19,11 @@ public class NotificationService {
     static final int BELL_LIMIT = 10;
 
     private final NotificationReadRepository repository;
+    private final NotificationBroadcaster broadcaster;
 
-    NotificationService(NotificationReadRepository repository) {
+    NotificationService(NotificationReadRepository repository, NotificationBroadcaster broadcaster) {
         this.repository = repository;
+        this.broadcaster = broadcaster;
     }
 
     @Transactional(readOnly = true)
@@ -55,6 +57,10 @@ public class NotificationService {
     @Transactional
     public ReadOutcome markRead(long id, long userId) {
         if (repository.markRead(id, userId)) {
+            // D-044. Only on MARKED: an already-read row changed nothing, and
+            // announcing it would make every other tab refetch to be told the
+            // badge is where it already was.
+            broadcaster.read(userId, id);
             return ReadOutcome.MARKED;
         }
         // Nothing was updated. Either it was already read, or it is not the
@@ -66,7 +72,9 @@ public class NotificationService {
 
     @Transactional
     public int markAllRead(long userId) {
-        return repository.markAllRead(userId);
+        int marked = repository.markAllRead(userId);
+        broadcaster.allRead(userId, marked);
+        return marked;
     }
 
     private static NotificationDtos.Notification toDto(NotificationReadRepository.NotificationRow row) {
