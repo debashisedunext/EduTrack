@@ -92,6 +92,12 @@ edutrack:
     # slower sweep spends the remaining fifth of the window before speaking.
     pre-breach-scan-interval: ${PRE_BREACH_SCAN_INTERVAL:PT15M}
 
+    # D-022 · the stale-task sweep. Hourly, not quarter-hourly: the threshold
+    # is three working DAYS, so a fifteen-minute sweep asks a question whose
+    # answer cannot have changed on ninety-five passes out of ninety-six, and
+    # each pass costs a working-hours computation per open ticket.
+    stale-scan-interval: ${STALE_SCAN_INTERVAL:PT1H}
+
   outbox:
     enabled: true
     poll-interval: PT5S

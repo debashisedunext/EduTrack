@@ -52,6 +52,21 @@ public enum NotificationEvent {
     COMMENT_MARKED_CLIENT_VISIBLE(Category.OTHER),
     ATTACHMENT_ADDED(Category.OTHER),
     PRIORITY_CHANGED(Category.OTHER),
+    /**
+     * D-022. Not in blueprint §11's list of 24, and added rather than
+     * borrowed: nothing there means "nobody has touched this in a while".
+     * {@code SLA_80_PERCENT_ELAPSED} was the near miss and is wrong — that
+     * one is about a deadline approaching, while a ticket can go quiet for a
+     * fortnight with its deadline still months away.
+     *
+     * <p><b>{@code OTHER}, so it is opt-out.</b> An escalation category would
+     * make the mail unsuppressable under D-036, and a reminder nobody can
+     * switch off is how a mailbox rule gets written that hides the alerts that
+     * do matter. Nothing has gone wrong when this fires — that is the point of
+     * sending it.
+     */
+    STALE_TICKET_NUDGE(Category.OTHER),
+
     DAILY_DIGEST(Category.OTHER),
     WEEKLY_MANAGER_SUMMARY(Category.OTHER),
 

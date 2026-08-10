@@ -137,14 +137,15 @@ class SchemaIntegrationIT {
                 // 36 domain tables (A-003..A-007) + flyway_schema_history itself,
                 // + email_suppressions (D-034), + working_calendar (B-023),
                 // + notification_preferences (D-042),
-                // + stage_sla_alerts (D-023), + sla_prebreach_alerts (D-021).
+                // + stage_sla_alerts (D-023), + sla_prebreach_alerts (D-021),
+                // + stale_ticket_nudges (D-022).
                 // Stream A: this exact count is a tripwire on every new table,
                 // which is why Stream D's migration had to come here to update
                 // it, and B-023's after it. That is working as intended — but if
                 // you would rather it did not need touching cross-stream,
                 // asserting the presence of named tables would give the same
                 // protection without the coupling.
-                assertThat(rs.getInt(1)).isEqualTo(42);
+                assertThat(rs.getInt(1)).isEqualTo(43);
             }
             try (ResultSet rs = s.executeQuery(
                     "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()")) {
