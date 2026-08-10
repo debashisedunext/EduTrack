@@ -49,6 +49,7 @@ environment, always.
 | 18 | `V20260810_0930__holidays_unique_org_wide.sql` | B | B-023 | correction | `holidays`: `uq_holidays` rebuilt over a NULL-free `project_scope`, so two org-wide holidays cannot share a date |
 | 19 | `V20260810_1015__notification_delivery_log.sql` | D | D-046 | schema | `notifications.delivered_at` + `ix_notifications_undelivered` — what was shown, as distinct from what was read |
 | 20 | `V20260810_1420__notification_preferences.sql` | D | D-042 | schema | `notification_preferences` — sparse overrides only; the default lives in code |
+| 21 | `V20260810_1620__stage_sla_alerts.sql` | D | D-023 | schema | `stage_sla_alerts` — the once-per-segment claim, kept outside the append-only chain |
 
 <!-- load-order:end -->
 

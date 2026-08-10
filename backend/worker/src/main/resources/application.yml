@@ -81,6 +81,12 @@ edutrack:
   sla:
     scan-interval: ${SLA_SCAN_INTERVAL:PT15M}
 
+    # D-023 · the stage-SLA scan (§16 item 3b). A separate scanner and a
+    # separate interval from the ticket scan above: a ticket can sit well
+    # inside its Planned Close Date while rotting four days in one queue, and
+    # the two questions have no reason to be asked on the same schedule.
+    stage-scan-interval: ${STAGE_SLA_SCAN_INTERVAL:PT15M}
+
   outbox:
     enabled: true
     poll-interval: PT5S

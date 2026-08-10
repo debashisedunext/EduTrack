@@ -29,9 +29,19 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>The clock is fixed rather than {@code systemUTC}, because every assertion
  * here is about a moment relative to a Planned Close Date and a test that says
  * "now" means something different every time it runs.
+
+/**
+ * <b>{@code @Import(FixedClock.class)} is not decoration.</b> A nested
+ * {@code @TestConfiguration} is auto-detected only when {@code @SpringBootTest}
+ * declares no {@code classes}; this one does, so without the explicit import
+ * the fixed clock is silently ignored and every assertion runs against the real
+ * one. That is exactly how it was written first — the suite passed, and it
+ * passed because the tickets were old enough to breach under any clock, not
+ * because the clock was fixed.
  */
 @Testcontainers
 @SpringBootTest(classes = com.edunext.edutrack.worker.WorkerApplication.class)
+@org.springframework.context.annotation.Import(SlaScannerIT.FixedClock.class)
 class SlaScannerIT {
 
     /** A Monday, mid-morning — a working hour on any sane calendar. */
@@ -67,7 +77,7 @@ class SlaScannerIT {
     }
 
     @TestConfiguration
-    static class FixedClock {
+    public static class FixedClock {
         @Bean
         @Primary
         Clock fixedClock() {
