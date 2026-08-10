@@ -12,17 +12,17 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 65 of 222 (29%) | 92.0 of 342.0 (27%) |
-| In flight | 1 | 3.0 |
-| On the driving chain | 50 | 84.5 |
-| Zero float (no slack at all) | 102 | 157.5 |
+| Complete | 66 of 222 (30%) | 95.0 of 342.0 (28%) |
+| In flight | 0 | 0.0 |
+| On the driving chain | 49 | 81.5 |
+| Zero float (no slack at all) | 101 | 154.5 |
 
 ### By developer
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
 | **A** | Shivendra | 63 | 20 | 92.0 | 87 | 106% ⚠️ | Tue 24 Nov |
-| **B** | Ayush | 50 | 8 | 84.5 | 87 | 97% | Wed 18 Nov |
+| **B** | Ayush | 50 | 9 | 84.5 | 87 | 97% | Wed 18 Nov |
 | **C** | Divyansh | 61 | 10 | 94.5 | 87 | 109% ⚠️ | Wed 02 Dec |
 | **D** | Debashis | 48 | 27 | 71.0 | 87 | 82% | Thu 12 Nov |
 
@@ -40,18 +40,18 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `C-013` Actions: Save & Assign · Save as Draft · Save &  | Divyansh | Wed 26 Aug | Mon 10 Aug | +71d |
 | `D-013` Channel interceptor authorising subscriptions wi | Debashis | Tue 22 Sep | Mon 10 Aug | +52d |
 | `D-036` "Critical mails cannot be disabled" | Debashis | Tue 13 Oct | Mon 10 Aug | +37d |
+| `B-024` Working-hours calculation service | Ayush | Thu 15 Oct | Mon 10 Aug | +35d |
 | `D-031` Subject pattern with the ticket ID first so it t | Debashis | Thu 15 Oct | Mon 10 Aug | +35d |
 | `D-032` Threading | Debashis | Fri 16 Oct | Mon 10 Aug | +34d |
-| `B-031` Step 1 — template download | Ayush | Tue 25 Aug | Tue 29 Sep | +25d |
-| `B-032` Step 2 — upload, max 5 MB / 5,000 rows, event-dr | Ayush | Thu 27 Aug | Thu 01 Oct | +25d |
 | `B-034` Step 4 — dry-run validation preview | Ayush | Wed 02 Sep | Wed 07 Oct | +25d |
 | `B-035` Step 5 — commit as a background job with progres | Ayush | Fri 04 Sep | Fri 09 Oct | +25d |
 | `B-037` import_batches traceability | Ayush | Tue 08 Sep | Tue 13 Oct | +25d |
 | `B-038` Resource bulk import — the second registration,  | Ayush | Wed 09 Sep | Wed 14 Oct | +25d |
+| `B-031` Step 1 — template download | Ayush | Tue 25 Aug | Sat 26 Sep | +24d |
+| `B-032` Step 2 — upload, max 5 MB / 5,000 rows, event-dr | Ayush | Thu 27 Aug | Wed 30 Sep | +24d |
 | `D-042` Per-user preference matrix — which events, which | Debashis | Tue 03 Nov | Mon 10 Aug | +22d |
-| `D-043` In-app toast via WebSocket, appearing within ~1  | Debashis | Wed 04 Nov | Mon 10 Aug | +21d |
 
-*…and 17 more — see the interactive chart.*
+*…and 18 more — see the interactive chart.*
 
 ---
 
@@ -61,38 +61,38 @@ Each of these is held up either by the one before it or by the fact that the sam
 
 | # | Task | Owner | Title | Est | Start | End | Held up by |
 |---:|---|---|---|---:|---|---|---|
-| 1 | `B-023` | Ayush | Working calendar & holiday master | 2 | Mon 10 Aug | Mon 10 Aug | — |
-| 2 | `B-024` | Ayush | Working-hours calculation service | 3 | Tue 11 Aug | Tue 11 Aug | `B-023` finished |
-| 3 | `B-007` | Ayush | Ticket fixture corpus | 2 | Tue 11 Aug | Thu 13 Aug | Ayush was busy on `B-024` |
-| 4 | `B-030` | Ayush | Import engine as a schema registry — built once, reg | 2 | Thu 13 Aug | Sat 15 Aug | Ayush was busy on `B-007` |
-| 5 | `B-010` | Ayush | Resource list | 2 | Sat 15 Aug | Wed 19 Aug | Ayush was busy on `B-030` |
+| 1 | `A-007` | Shivendra | Flyway baseline 5/5 — masters & ops | 1.5 | Tue 11 Aug | Tue 11 Aug | — |
+| 2 | `B-005` | Ayush | JPA entities + repositories for the full model, buil | 3 | Sat 08 Aug | Sat 08 Aug | `A-007` finished |
+| 3 | `B-007` | Ayush | Ticket fixture corpus | 2 | Tue 11 Aug | Wed 12 Aug | `B-005` finished |
+| 4 | `B-030` | Ayush | Import engine as a schema registry — built once, reg | 2 | Thu 13 Aug | Fri 14 Aug | Ayush was busy on `B-007` |
+| 5 | `B-010` | Ayush | Resource list | 2 | Sat 15 Aug | Tue 18 Aug | Ayush was busy on `B-030` |
 | 6 | `B-011` | Ayush | Resource create/edit | 2.5 | Wed 19 Aug | Fri 21 Aug | `B-010` finished |
-| 7 | `B-012` | Ayush | Reporting-manager cycle detection | 1 | Sat 22 Aug | Sat 22 Aug | `B-011` finished |
-| 8 | `B-013` | Ayush | Validations | 1 | Tue 25 Aug | Tue 25 Aug | Ayush was busy on `B-012` |
-| 9 | `B-014` | Ayush | Deactivating a resource with open tickets forces the | 1 | Wed 26 Aug | Wed 26 Aug | Ayush was busy on `B-013` |
-| 10 | `B-015` | Ayush | Role & permission master — module × CRUD/approve che | 2 | Thu 27 Aug | Fri 28 Aug | Ayush was busy on `B-014` |
-| 11 | `B-016` | Ayush | Project master list/create/edit — code | 2 | Sat 29 Aug | Tue 01 Sep | Ayush was busy on `B-015` |
-| 12 | `B-017` | Ayush | Team tab — resources + per-project role | 1.5 | Wed 02 Sep | Thu 03 Sep | `B-016` finished |
+| 7 | `B-012` | Ayush | Reporting-manager cycle detection | 1 | Fri 21 Aug | Sat 22 Aug | `B-011` finished |
+| 8 | `B-013` | Ayush | Validations | 1 | Sat 22 Aug | Tue 25 Aug | Ayush was busy on `B-012` |
+| 9 | `B-014` | Ayush | Deactivating a resource with open tickets forces the | 1 | Tue 25 Aug | Wed 26 Aug | Ayush was busy on `B-013` |
+| 10 | `B-015` | Ayush | Role & permission master — module × CRUD/approve che | 2 | Wed 26 Aug | Fri 28 Aug | Ayush was busy on `B-014` |
+| 11 | `B-016` | Ayush | Project master list/create/edit — code | 2 | Fri 28 Aug | Tue 01 Sep | Ayush was busy on `B-015` |
+| 12 | `B-017` | Ayush | Team tab — resources + per-project role | 1.5 | Tue 01 Sep | Wed 02 Sep | `B-016` finished |
 | 13 | `B-018` | Ayush | SLA tab | 1.5 | Thu 03 Sep | Fri 04 Sep | Ayush was busy on `B-017` |
-| 14 | `B-019` | Ayush | Settings tab | 1.5 | Sat 05 Sep | Tue 08 Sep | Ayush was busy on `B-018` |
+| 14 | `B-019` | Ayush | Settings tab | 1.5 | Fri 04 Sep | Sat 05 Sep | Ayush was busy on `B-018` |
 | 15 | `B-020` | Ayush | Task type master — the 11 seeded types, Admin-extens | 1.5 | Tue 08 Sep | Wed 09 Sep | Ayush was busy on `B-019` |
-| 16 | `B-021` | Ayush | Priority master | 1.5 | Thu 10 Sep | Fri 11 Sep | Ayush was busy on `B-020` |
-| 17 | `B-022` | Ayush | Notification template master | 2 | Fri 11 Sep | Tue 15 Sep | Ayush was busy on `B-021` |
-| 18 | `B-025` | Ayush | Client list | 2 | Tue 15 Sep | Thu 17 Sep | Ayush was busy on `B-022` |
-| 19 | `B-026` | Ayush | Client create/edit across four tabs | 3 | Thu 17 Sep | Tue 22 Sep | `B-025` finished |
+| 16 | `B-021` | Ayush | Priority master | 1.5 | Wed 09 Sep | Thu 10 Sep | Ayush was busy on `B-020` |
+| 17 | `B-022` | Ayush | Notification template master | 2 | Fri 11 Sep | Sat 12 Sep | Ayush was busy on `B-021` |
+| 18 | `B-025` | Ayush | Client list | 2 | Tue 15 Sep | Wed 16 Sep | Ayush was busy on `B-022` |
+| 19 | `B-026` | Ayush | Client create/edit across four tabs | 3 | Thu 17 Sep | Sat 19 Sep | `B-025` finished |
 | 20 | `B-027` | Ayush | client_contacts child grid | 1.5 | Tue 22 Sep | Wed 23 Sep | `B-026` finished |
-| 21 | `B-028` | Ayush | Validation | 1 | Thu 24 Sep | Thu 24 Sep | `B-027` finished |
-| 22 | `B-029` | Ayush | Deactivating a client with open tickets warns and bl | 1 | Fri 25 Sep | Fri 25 Sep | Ayush was busy on `B-028` |
-| 23 | `B-031` | Ayush | Step 1 — template download | 1.5 | Sat 26 Sep | Tue 29 Sep | Ayush was busy on `B-029` |
-| 24 | `B-032` | Ayush | Step 2 — upload, max 5 MB / 5,000 rows, event-driven | 2 | Tue 29 Sep | Thu 01 Oct | Ayush was busy on `B-031` |
-| 25 | `B-033` | Ayush | Step 3 | 2 | Thu 01 Oct | Sat 03 Oct | `B-032` finished |
+| 21 | `B-028` | Ayush | Validation | 1 | Wed 23 Sep | Thu 24 Sep | `B-027` finished |
+| 22 | `B-029` | Ayush | Deactivating a client with open tickets warns and bl | 1 | Thu 24 Sep | Fri 25 Sep | Ayush was busy on `B-028` |
+| 23 | `B-031` | Ayush | Step 1 — template download | 1.5 | Fri 25 Sep | Sat 26 Sep | Ayush was busy on `B-029` |
+| 24 | `B-032` | Ayush | Step 2 — upload, max 5 MB / 5,000 rows, event-driven | 2 | Tue 29 Sep | Wed 30 Sep | Ayush was busy on `B-031` |
+| 25 | `B-033` | Ayush | Step 3 | 2 | Thu 01 Oct | Fri 02 Oct | `B-032` finished |
 | 26 | `B-034` | Ayush | Step 4 — dry-run validation preview | 2.5 | Sat 03 Oct | Wed 07 Oct | `B-033` finished |
-| 27 | `B-035` | Ayush | Step 5 — commit as a background job with progress ba | 2 | Thu 08 Oct | Fri 09 Oct | `B-034` finished |
-| 28 | `B-036` | Ayush | Error report generation | 1 | Sat 10 Oct | Sat 10 Oct | Ayush was busy on `B-035` |
-| 29 | `B-037` | Ayush | import_batches traceability | 1 | Tue 13 Oct | Tue 13 Oct | Ayush was busy on `B-036` |
-| 30 | `B-038` | Ayush | Resource bulk import — the second registration, not  | 1 | Wed 14 Oct | Wed 14 Oct | Ayush was busy on `B-037` |
-| 31 | `B-039` | Ayush | Status/stage/workflow master tab 1 | 2 | Thu 15 Oct | Fri 16 Oct | Ayush was busy on `B-038` |
-| 32 | `B-040` | Ayush | Tab 2 — stages | 2 | Sat 17 Oct | Tue 20 Oct | `B-039` finished |
+| 27 | `B-035` | Ayush | Step 5 — commit as a background job with progress ba | 2 | Wed 07 Oct | Fri 09 Oct | `B-034` finished |
+| 28 | `B-036` | Ayush | Error report generation | 1 | Fri 09 Oct | Sat 10 Oct | Ayush was busy on `B-035` |
+| 29 | `B-037` | Ayush | import_batches traceability | 1 | Sat 10 Oct | Tue 13 Oct | Ayush was busy on `B-036` |
+| 30 | `B-038` | Ayush | Resource bulk import — the second registration, not  | 1 | Tue 13 Oct | Wed 14 Oct | Ayush was busy on `B-037` |
+| 31 | `B-039` | Ayush | Status/stage/workflow master tab 1 | 2 | Wed 14 Oct | Fri 16 Oct | Ayush was busy on `B-038` |
+| 32 | `B-040` | Ayush | Tab 2 — stages | 2 | Fri 16 Oct | Tue 20 Oct | `B-039` finished |
 | 33 | `C-042` | Divyansh | Transition service | 2.5 | Wed 21 Oct | Fri 23 Oct | `B-040` finished |
 | 34 | `C-032` | Divyansh | Stamping | 1 | Fri 23 Oct | Sat 24 Oct | `C-042` finished |
 | 35 | `C-044` | Divyansh | Handoff dialog — next stage | 2.5 | Sat 24 Oct | Wed 28 Oct | Divyansh was busy on `C-032` |
@@ -144,9 +144,9 @@ gantt
     title Stream B — Ayush
     excludes weekends
     section Milestones
-    Sprint 0 — weeks 1–2 :active, b0, 2026-08-06, 6d
-    M3 — Master data — weeks 3–9 :active, b1, 2026-08-10, -14d
-    Weeks 12–14 — M6 reports :b2, 2026-10-22, 8d
+    Sprint 0 — weeks 1–2 :active, b0, 2026-08-06, 5d
+    M3 — Master data — weeks 3–9 :active, b1, 2026-08-10, -15d
+    Weeks 12–14 — M6 reports :b2, 2026-10-21, 8d
     Weeks 10–11 — join Stream C on the ribbon :b3, 2026-10-31, 13d
 ```
 
@@ -261,55 +261,55 @@ gantt
 | | Task | Title | Est | Predecessors | Start | End | Float | Status |
 |---|---|---|---:|---|---|---|---:|---|
 |  | `B-001` | Seed: 6 roles + the full permission matrix from blueprint §2 | 1 | `A-003` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
-|  | `B-002` | Seed: 11 task types | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 5 | ✅ done |
-|  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 39 | ✅ done |
+|  | `B-002` | Seed: 11 task types | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 2 | ✅ done |
+|  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 37 | ✅ done |
 |  | `B-004` | Seed: 3 workflow templates with their stages — Standard Dev Flow | 1 | `A-005` | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
 |  | `B-005` | JPA entities + repositories for the full model, built on A's schema | 3 | `A-006` `A-007` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `B-006` | MapStruct base configuration | 0.5 | `B-005` ᶦ | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
-| ▲🔴 | `B-007` | Ticket fixture corpus | 2 | `B-004` `B-005` | Tue 11 Aug | Thu 13 Aug | 0 | ▫️ to do |
+| ▲🔴 | `B-007` | Ticket fixture corpus | 2 | `B-004` `B-005` | Tue 11 Aug | Wed 12 Aug | 0 | ▫️ to do |
 |  | `B-008` | Seed manifest with fixed load order | 0.5 | `B-001` `B-002` `B-003` `B-004` ᶦ | Sat 08 Aug | Sat 08 Aug | 82 | ✅ done |
-| ▲ | `B-010` | Resource list | 2 | `B-005` `C-003` `A-012` | Sat 15 Aug | Wed 19 Aug | 0 | ▫️ to do |
+| ▲ | `B-010` | Resource list | 2 | `B-005` `C-003` `A-012` | Sat 15 Aug | Tue 18 Aug | 0 | ▫️ to do |
 | ▲ | `B-011` | Resource create/edit | 2.5 | `B-010` ᶦ | Wed 19 Aug | Fri 21 Aug | 0 | ▫️ to do |
-| ▲🔴 | `B-012` | Reporting-manager cycle detection | 1 | `B-011` ᶦ | Sat 22 Aug | Sat 22 Aug | 0 | ▫️ to do |
-| ▲ | `B-013` | Validations | 1 | `B-011` ᶦ | Tue 25 Aug | Tue 25 Aug | 0 | ▫️ to do |
-| ▲ | `B-014` | Deactivating a resource with open tickets forces the bulk… | 1 | `B-011` ᶦ | Wed 26 Aug | Wed 26 Aug | 0 | ▫️ to do |
-| ▲ | `B-015` | Role & permission master — module × CRUD/approve checkbox matrix | 2 | `B-001` `C-003` ᶦ | Thu 27 Aug | Fri 28 Aug | 0 | ▫️ to do |
-| ▲ | `B-016` | Project master list/create/edit — code | 2 | `B-005` `C-003` ᶦ | Sat 29 Aug | Tue 01 Sep | 0 | ▫️ to do |
-| ▲ | `B-017` | Team tab — resources + per-project role | 1.5 | `B-016` ᶦ | Wed 02 Sep | Thu 03 Sep | 0 | ▫️ to do |
+| ▲🔴 | `B-012` | Reporting-manager cycle detection | 1 | `B-011` ᶦ | Fri 21 Aug | Sat 22 Aug | 0 | ▫️ to do |
+| ▲ | `B-013` | Validations | 1 | `B-011` ᶦ | Sat 22 Aug | Tue 25 Aug | 0 | ▫️ to do |
+| ▲ | `B-014` | Deactivating a resource with open tickets forces the bulk… | 1 | `B-011` ᶦ | Tue 25 Aug | Wed 26 Aug | 0 | ▫️ to do |
+| ▲ | `B-015` | Role & permission master — module × CRUD/approve checkbox matrix | 2 | `B-001` `C-003` ᶦ | Wed 26 Aug | Fri 28 Aug | 0 | ▫️ to do |
+| ▲ | `B-016` | Project master list/create/edit — code | 2 | `B-005` `C-003` ᶦ | Fri 28 Aug | Tue 01 Sep | 0 | ▫️ to do |
+| ▲ | `B-017` | Team tab — resources + per-project role | 1.5 | `B-016` ᶦ | Tue 01 Sep | Wed 02 Sep | 0 | ▫️ to do |
 | ▲ | `B-018` | SLA tab | 1.5 | `B-016` ᶦ | Thu 03 Sep | Fri 04 Sep | 0 | ▫️ to do |
-| ▲ | `B-019` | Settings tab | 1.5 | `B-016` ᶦ | Sat 05 Sep | Tue 08 Sep | 0 | ▫️ to do |
+| ▲ | `B-019` | Settings tab | 1.5 | `B-016` ᶦ | Fri 04 Sep | Sat 05 Sep | 0 | ▫️ to do |
 | ▲ | `B-020` | Task type master — the 11 seeded types, Admin-extensible | 1.5 | `B-002` `C-003` ᶦ | Tue 08 Sep | Wed 09 Sep | 0 | ▫️ to do |
-| ▲ | `B-021` | Priority master | 1.5 | `B-002` `C-003` | Thu 10 Sep | Fri 11 Sep | 0 | ▫️ to do |
-| ▲ | `B-022` | Notification template master | 2 | `B-005` `C-003` | Fri 11 Sep | Tue 15 Sep | 0 | ▫️ to do |
+| ▲ | `B-021` | Priority master | 1.5 | `B-002` `C-003` | Wed 09 Sep | Thu 10 Sep | 0 | ▫️ to do |
+| ▲ | `B-022` | Notification template master | 2 | `B-005` `C-003` | Fri 11 Sep | Sat 12 Sep | 0 | ▫️ to do |
 |  | `B-023` | Working calendar & holiday master | 2 | `B-005` `C-003` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-| ▲🔴 | `B-024` | Working-hours calculation service | 3 | `B-023` | Tue 11 Aug | Tue 11 Aug | 0 | 🔵 in review |
-| ▲ | `B-025` | Client list | 2 | `B-005` `C-003` ᶦ | Tue 15 Sep | Thu 17 Sep | 0 | ▫️ to do |
-| ▲ | `B-026` | Client create/edit across four tabs | 3 | `B-025` ᶦ | Thu 17 Sep | Tue 22 Sep | 0 | ▫️ to do |
+| 🔴 | `B-024` | Working-hours calculation service | 3 | `B-023` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
+| ▲ | `B-025` | Client list | 2 | `B-005` `C-003` ᶦ | Tue 15 Sep | Wed 16 Sep | 0 | ▫️ to do |
+| ▲ | `B-026` | Client create/edit across four tabs | 3 | `B-025` ᶦ | Thu 17 Sep | Sat 19 Sep | 0 | ▫️ to do |
 | ▲ | `B-027` | client_contacts child grid | 1.5 | `B-026` ᶦ | Tue 22 Sep | Wed 23 Sep | 0 | ▫️ to do |
-| ▲ | `B-028` | Validation | 1 | `B-027` | Thu 24 Sep | Thu 24 Sep | 0 | ▫️ to do |
-| ▲ | `B-029` | Deactivating a client with open tickets warns and blocks new… | 1 | `B-026` ᶦ | Fri 25 Sep | Fri 25 Sep | 0 | ▫️ to do |
-| ▲🔴 | `B-030` | Import engine as a schema registry — built once, registered twice | 2 | `B-005` | Thu 13 Aug | Sat 15 Aug | 0 | ▫️ to do |
-| ▲ | `B-031` | Step 1 — template download | 1.5 | `B-030` ᶦ | Sat 26 Sep | Tue 29 Sep | 0 | ▫️ to do |
-| ▲ | `B-032` | Step 2 — upload, max 5 MB / 5,000 rows, event-driven SAX parse | 2 | `B-030` ᶦ | Tue 29 Sep | Thu 01 Oct | 0 | ▫️ to do |
-| ▲ | `B-033` | Step 3 | 2 | `B-032` ᶦ | Thu 01 Oct | Sat 03 Oct | 0 | ▫️ to do |
+| ▲ | `B-028` | Validation | 1 | `B-027` | Wed 23 Sep | Thu 24 Sep | 0 | ▫️ to do |
+| ▲ | `B-029` | Deactivating a client with open tickets warns and blocks new… | 1 | `B-026` ᶦ | Thu 24 Sep | Fri 25 Sep | 0 | ▫️ to do |
+| ▲🔴 | `B-030` | Import engine as a schema registry — built once, registered twice | 2 | `B-005` | Thu 13 Aug | Fri 14 Aug | 0 | ▫️ to do |
+| ▲ | `B-031` | Step 1 — template download | 1.5 | `B-030` ᶦ | Fri 25 Sep | Sat 26 Sep | 0 | ▫️ to do |
+| ▲ | `B-032` | Step 2 — upload, max 5 MB / 5,000 rows, event-driven SAX parse | 2 | `B-030` ᶦ | Tue 29 Sep | Wed 30 Sep | 0 | ▫️ to do |
+| ▲ | `B-033` | Step 3 | 2 | `B-032` ᶦ | Thu 01 Oct | Fri 02 Oct | 0 | ▫️ to do |
 | ▲🔴 | `B-034` | Step 4 — dry-run validation preview | 2.5 | `B-033` | Sat 03 Oct | Wed 07 Oct | 0 | ▫️ to do |
-| ▲ | `B-035` | Step 5 — commit as a background job with progress bar | 2 | `B-034` | Thu 08 Oct | Fri 09 Oct | 0 | ▫️ to do |
-| ▲ | `B-036` | Error report generation | 1 | `B-034` ᶦ | Sat 10 Oct | Sat 10 Oct | 0 | ▫️ to do |
-| ▲ | `B-037` | import_batches traceability | 1 | `B-035` ᶦ | Tue 13 Oct | Tue 13 Oct | 0 | ▫️ to do |
-| ▲ | `B-038` | Resource bulk import — the second registration, not a second build | 1 | `B-035` | Wed 14 Oct | Wed 14 Oct | 0 | ▫️ to do |
-| ▲ | `B-039` | Status/stage/workflow master tab 1 | 2 | `B-003` `C-003` ᶦ | Thu 15 Oct | Fri 16 Oct | 0 | ▫️ to do |
-| ▲ | `B-040` | Tab 2 — stages | 2 | `B-039` | Sat 17 Oct | Tue 20 Oct | 0 | ▫️ to do |
-|  | `B-041` | Tab 3 | 2.5 | `B-040` `B-050` | Thu 05 Nov | Sat 07 Nov | 7 | ▫️ to do |
-| 🔴 | `B-042` | Stages in use may be deprecated, never deleted | 1 | `B-040` | Wed 21 Oct | Wed 21 Oct | 5 | ▫️ to do |
-|  | `B-043` | Workflow template designer | 3 | `B-041` `B-042` | Sat 07 Nov | Thu 12 Nov | 8 | ▫️ to do |
-|  | `B-050` | Ribbon segment component — 6 states | 2.5 | `C-003` `C-042` | Sat 31 Oct | Wed 04 Nov | 7 | ▫️ to do |
-|  | `B-051` | Compact dot variant for the ticket list | 1 | `B-050` ᶦ | Thu 12 Nov | Fri 13 Nov | 9 | ▫️ to do |
-|  | `B-052` | Ribbon accessibility | 1.5 | `B-050` ᶦ | Fri 13 Nov | Sat 14 Nov | 10 | ▫️ to do |
-|  | `B-053` | Readability at 8 stages on a laptop | 2 | `B-050` ᶦ | Tue 17 Nov | Wed 18 Nov | 10 | ▫️ to do |
-|  | `B-060` | Client report | 2 | `A-064` `B-029` | Thu 22 Oct | Fri 23 Oct | 5 | ▫️ to do |
-|  | `B-061` | Resource performance scorecard and workload/capacity report | 2 | `A-064` `B-010` | Sat 24 Oct | Tue 27 Oct | 5 | ▫️ to do |
-|  | `B-062` | Export engine integration for all report types | 1.5 | `A-064` | Wed 28 Oct | Thu 29 Oct | 5 | ▫️ to do |
-|  | `B-063` | Timesheet view — stage-aware, a resource's week across all tickets | 2 | `A-064` `C-061` | Thu 29 Oct | Sat 31 Oct | 6 | ▫️ to do |
+| ▲ | `B-035` | Step 5 — commit as a background job with progress bar | 2 | `B-034` | Wed 07 Oct | Fri 09 Oct | 0 | ▫️ to do |
+| ▲ | `B-036` | Error report generation | 1 | `B-034` ᶦ | Fri 09 Oct | Sat 10 Oct | 0 | ▫️ to do |
+| ▲ | `B-037` | import_batches traceability | 1 | `B-035` ᶦ | Sat 10 Oct | Tue 13 Oct | 0 | ▫️ to do |
+| ▲ | `B-038` | Resource bulk import — the second registration, not a second build | 1 | `B-035` | Tue 13 Oct | Wed 14 Oct | 0 | ▫️ to do |
+| ▲ | `B-039` | Status/stage/workflow master tab 1 | 2 | `B-003` `C-003` ᶦ | Wed 14 Oct | Fri 16 Oct | 0 | ▫️ to do |
+| ▲ | `B-040` | Tab 2 — stages | 2 | `B-039` | Fri 16 Oct | Tue 20 Oct | 0 | ▫️ to do |
+|  | `B-041` | Tab 3 | 2.5 | `B-040` `B-050` | Wed 04 Nov | Fri 06 Nov | 9 | ▫️ to do |
+| 🔴 | `B-042` | Stages in use may be deprecated, never deleted | 1 | `B-040` | Tue 20 Oct | Wed 21 Oct | 5 | ▫️ to do |
+|  | `B-043` | Workflow template designer | 3 | `B-041` `B-042` | Sat 07 Nov | Wed 11 Nov | 9 | ▫️ to do |
+|  | `B-050` | Ribbon segment component — 6 states | 2.5 | `C-003` `C-042` | Sat 31 Oct | Wed 04 Nov | 8 | ▫️ to do |
+|  | `B-051` | Compact dot variant for the ticket list | 1 | `B-050` ᶦ | Thu 12 Nov | Thu 12 Nov | 9 | ▫️ to do |
+|  | `B-052` | Ribbon accessibility | 1.5 | `B-050` ᶦ | Fri 13 Nov | Sat 14 Nov | 9 | ▫️ to do |
+|  | `B-053` | Readability at 8 stages on a laptop | 2 | `B-050` ᶦ | Sat 14 Nov | Wed 18 Nov | 10 | ▫️ to do |
+|  | `B-060` | Client report | 2 | `A-064` `B-029` | Wed 21 Oct | Fri 23 Oct | 6 | ▫️ to do |
+|  | `B-061` | Resource performance scorecard and workload/capacity report | 2 | `A-064` `B-010` | Fri 23 Oct | Tue 27 Oct | 7 | ▫️ to do |
+|  | `B-062` | Export engine integration for all report types | 1.5 | `A-064` | Tue 27 Oct | Wed 28 Oct | 8 | ▫️ to do |
+|  | `B-063` | Timesheet view — stage-aware, a resource's week across all tickets | 2 | `A-064` `C-061` | Thu 29 Oct | Fri 30 Oct | 8 | ▫️ to do |
 
 </details>
 
@@ -407,18 +407,18 @@ gantt
 |  | `D-026` | Unassigned ticket > 2 h → triage alert to PM and Support Desk | 1 | `D-020` ᶦ | Sat 22 Aug | Tue 25 Aug | 47 | ▫️ to do |
 | 🔴 | `D-027` | Every calculation routes through Stream B's working-hours service | 1 | `D-020` | Wed 19 Aug | Thu 20 Aug | 44 | ▫️ to do |
 |  | `D-028` | original_level preserved so "born critical vs became critical"… | 1 | `D-020` ᶦ | Tue 25 Aug | Wed 26 Aug | 48 | ▫️ to do |
-|  | `D-029` | Thymeleaf templates driven by Stream B's notification template… | 1.5 | `D-010` `B-022` | Wed 16 Sep | Thu 17 Sep | 36 | ▫️ to do |
-|  | `D-030` | Mail body | 1.5 | `D-029` ᶦ | Thu 17 Sep | Fri 18 Sep | 37 | ▫️ to do |
+|  | `D-029` | Thymeleaf templates driven by Stream B's notification template… | 1.5 | `D-010` `B-022` | Tue 15 Sep | Wed 16 Sep | 37 | ▫️ to do |
+|  | `D-030` | Mail body | 1.5 | `D-029` ᶦ | Wed 16 Sep | Thu 17 Sep | 38 | ▫️ to do |
 |  | `D-031` | Subject pattern with the ticket ID first so it threads and searches… | 0.5 | `D-029` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 | 🔴 | `D-032` | Threading | 1.5 | `D-031` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-033` | Every send logged in email_log with status, provider message ID and… | 1 | `D-010` | Fri 07 Aug | Fri 07 Aug | 82 | ✅ done |
 |  | `D-034` | Bounce and complaint webhooks | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 83 | ✅ done |
 |  | `D-035` | Rate limit | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 83 | ✅ done |
 | 🔴 | `D-036` | "Critical mails cannot be disabled" | 1 | `D-029` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Sat 19 Sep | Tue 22 Sep | 37 | ▫️ to do |
-|  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Wed 23 Sep | Thu 24 Sep | 37 | ▫️ to do |
+|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Fri 18 Sep | Sat 19 Sep | 38 | ▫️ to do |
+|  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Tue 22 Sep | Wed 23 Sep | 38 | ▫️ to do |
 |  | `D-039` | Inbound webhook — reply-to-comment parsing with quoted text stripped | 2 | `D-032` ᶦ | Tue 11 Aug | Wed 12 Aug | 41 | ▫️ to do |
-|  | `D-040` | All 24 events from blueprint §11 across in-app / bell / email… | 2 | `D-012` `B-022` | Thu 24 Sep | Sat 26 Sep | 38 | ▫️ to do |
+|  | `D-040` | All 24 events from blueprint §11 across in-app / bell / email… | 2 | `D-012` `B-022` | Wed 23 Sep | Fri 25 Sep | 39 | ▫️ to do |
 |  | `D-041` | Notification centre — bell dropdown (last 10) + full page with tabs | 2.5 | `D-040` `C-005` | Sat 08 Aug | Sat 08 Aug | 42 | ✅ done |
 |  | `D-042` | Per-user preference matrix — which events, which channel | 1.5 | `D-041` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-043` | In-app toast via WebSocket, appearing within ~1 second, with Open /… | 1 | `D-041` `D-014` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
