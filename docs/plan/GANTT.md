@@ -12,8 +12,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 68 of 222 (31%) | 98.0 of 342.0 (29%) |
-| In flight | 2 | 3.0 |
+| Complete | 69 of 222 (31%) | 100.0 of 342.0 (29%) |
+| In flight | 1 | 1.0 |
 | On the driving chain | 49 | 81.5 |
 | Zero float (no slack at all) | 104 | 159.5 |
 
@@ -24,7 +24,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | **A** | Shivendra | 63 | 20 | 92.0 | 87 | 106% ⚠️ | Tue 24 Nov |
 | **B** | Ayush | 50 | 9 | 84.5 | 87 | 97% | Wed 18 Nov |
 | **C** | Divyansh | 61 | 10 | 94.5 | 87 | 109% ⚠️ | Wed 02 Dec |
-| **D** | Debashis | 48 | 29 | 71.0 | 87 | 82% | Thu 12 Nov |
+| **D** | Debashis | 48 | 30 | 71.0 | 87 | 82% | Thu 12 Nov |
 
 ### Slipping
 
@@ -51,7 +51,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `B-032` Step 2 — upload, max 5 MB / 5,000 rows, event-dr | Ayush | Thu 27 Aug | Wed 30 Sep | +24d |
 | `D-042` Per-user preference matrix — which events, which | Debashis | Tue 03 Nov | Mon 10 Aug | +22d |
 
-*…and 19 more — see the interactive chart.*
+*…and 20 more — see the interactive chart.*
 
 ---
 
@@ -174,7 +174,7 @@ gantt
     section Milestones
     Sprint 0 — weeks 1–2 :done, d0, 2026-08-06, 86d
     Infrastructure — weeks 3–5 :done, d1, 2026-08-07, 85d
-    M5 — SLA  escalation & mail — weeks 6–11 :active, d2, 2026-08-07, 57d
+    M5 — SLA  escalation & mail — weeks 6–11 :active, d2, 2026-08-07, 36d
     M7 — Chat & realtime — weeks 12–16 :active, d3, 2026-08-08, 69d
 ```
 
@@ -392,46 +392,46 @@ gantt
 |  | `D-003` | springdoc config + codegen pipeline | 2 | `D-002` | Thu 06 Aug | Thu 06 Aug | 81 | ✅ done |
 | 🔴 | `D-004` | MSW mock server returning realistic fixtures for every endpoint | 2.5 | `D-002` | Thu 06 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-005` | CI staleness check | 1 | `D-003` | Thu 06 Aug | Sat 08 Aug | 82 | ✅ done |
-| 🔴 | `D-010` | Outbox worker pattern | 2.5 | `A-006` `A-012` | Fri 07 Aug | Fri 07 Aug | 50 | ✅ done |
-|  | `D-011` | @Scheduled + ShedLock | 1 | `D-010` ᶦ | Fri 07 Aug | Fri 07 Aug | 51 | ✅ done |
+| 🔴 | `D-010` | Outbox worker pattern | 2.5 | `A-006` `A-012` | Fri 07 Aug | Fri 07 Aug | 49 | ✅ done |
+|  | `D-011` | @Scheduled + ShedLock | 1 | `D-010` ᶦ | Fri 07 Aug | Fri 07 Aug | 50 | ✅ done |
 |  | `D-012` | Spring WebSocket + STOMP config, Redis pub/sub relay for… | 2 | `A-012` ᶦ | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
 | 🔴 | `D-013` | Channel interceptor authorising subscriptions with the same scope… | 2 | `D-012` `A-034` | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-014` | Destination map per blueprint §9.3 | 1 | `D-012` | Fri 07 Aug | Fri 07 Aug | 51 | ✅ done |
 |  | `D-015` | Frontend STOMP client | 1.5 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 82 | ✅ done |
 | 🔴 | `D-020` | SLA scanner, every 15 minutes | 2 | `D-011` `B-024` `A-009` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-021` | 80%-of-SLA pre-breach warning to the assignee | 1 | `D-020` ᶦ | Tue 11 Aug | Tue 11 Aug | 51 | ▫️ to do |
-|  | `D-022` | Stale-task nudge — no update for 3 working days, to assignee cc RM | 1 | `D-020` ᶦ | Wed 12 Aug | Wed 12 Aug | 51 | ▫️ to do |
-| 🔴 | `D-023` | Stage-SLA scanner, separate from ticket SLA | 2 | `D-020` `C-042` | Sat 24 Oct | Sat 24 Oct | 24 | 🔵 in review |
-|  | `D-024` | Escalation matrix per project | 1.5 | `D-020` `B-018` | Sat 05 Sep | Tue 08 Sep | 42 | ▫️ to do |
-|  | `D-025` | Ping-pong flag at iteration_no ≥ 3 → PM dashboard | 0.5 | `D-023` ᶦ | Sat 24 Oct | Sat 24 Oct | 25 | ▫️ to do |
-|  | `D-026` | Unassigned ticket > 2 h → triage alert to PM and Support Desk | 1 | `D-020` ᶦ | Thu 13 Aug | Thu 13 Aug | 51 | ▫️ to do |
+|  | `D-021` | 80%-of-SLA pre-breach warning to the assignee | 1 | `D-020` ᶦ | Tue 11 Aug | Tue 11 Aug | 50 | ▫️ to do |
+|  | `D-022` | Stale-task nudge — no update for 3 working days, to assignee cc RM | 1 | `D-020` ᶦ | Wed 12 Aug | Wed 12 Aug | 50 | ▫️ to do |
+| 🔴 | `D-023` | Stage-SLA scanner, separate from ticket SLA | 2 | `D-020` `C-042` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
+|  | `D-024` | Escalation matrix per project | 1.5 | `D-020` `B-018` | Sat 05 Sep | Tue 08 Sep | 44 | ▫️ to do |
+|  | `D-025` | Ping-pong flag at iteration_no ≥ 3 → PM dashboard | 0.5 | `D-023` ᶦ | Thu 13 Aug | Thu 13 Aug | 50 | ▫️ to do |
+|  | `D-026` | Unassigned ticket > 2 h → triage alert to PM and Support Desk | 1 | `D-020` ᶦ | Thu 13 Aug | Fri 14 Aug | 51 | ▫️ to do |
 | 🔴 | `D-027` | Every calculation routes through Stream B's working-hours service | 1 | `D-020` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-028` | original_level preserved so "born critical vs became critical"… | 1 | `D-020` ᶦ | Fri 14 Aug | Fri 14 Aug | 51 | ▫️ to do |
-|  | `D-029` | Thymeleaf templates driven by Stream B's notification template… | 1.5 | `D-010` `B-022` | Tue 15 Sep | Wed 16 Sep | 38 | ▫️ to do |
-|  | `D-030` | Mail body | 1.5 | `D-029` ᶦ | Wed 16 Sep | Thu 17 Sep | 39 | ▫️ to do |
+|  | `D-028` | original_level preserved so "born critical vs became critical"… | 1 | `D-020` ᶦ | Fri 14 Aug | Sat 15 Aug | 52 | ▫️ to do |
+|  | `D-029` | Thymeleaf templates driven by Stream B's notification template… | 1.5 | `D-010` `B-022` | Tue 15 Sep | Wed 16 Sep | 40 | ▫️ to do |
+|  | `D-030` | Mail body | 1.5 | `D-029` ᶦ | Wed 16 Sep | Thu 17 Sep | 41 | ▫️ to do |
 |  | `D-031` | Subject pattern with the ticket ID first so it threads and searches… | 0.5 | `D-029` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 | 🔴 | `D-032` | Threading | 1.5 | `D-031` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-033` | Every send logged in email_log with status, provider message ID and… | 1 | `D-010` | Fri 07 Aug | Fri 07 Aug | 82 | ✅ done |
 |  | `D-034` | Bounce and complaint webhooks | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 83 | ✅ done |
 |  | `D-035` | Rate limit | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 83 | ✅ done |
 | 🔴 | `D-036` | "Critical mails cannot be disabled" | 1 | `D-029` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Fri 18 Sep | Sat 19 Sep | 39 | ▫️ to do |
-|  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Tue 22 Sep | Wed 23 Sep | 39 | ▫️ to do |
-|  | `D-039` | Inbound webhook — reply-to-comment parsing with quoted text stripped | 2 | `D-032` ᶦ | Sat 15 Aug | Tue 18 Aug | 51 | ▫️ to do |
-|  | `D-040` | All 24 events from blueprint §11 across in-app / bell / email… | 2 | `D-012` `B-022` | Wed 23 Sep | Fri 25 Sep | 40 | ▫️ to do |
-|  | `D-041` | Notification centre — bell dropdown (last 10) + full page with tabs | 2.5 | `D-040` `C-005` | Sat 08 Aug | Sat 08 Aug | 56 | ✅ done |
+|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Fri 18 Sep | Sat 19 Sep | 41 | ▫️ to do |
+|  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Tue 22 Sep | Wed 23 Sep | 41 | ▫️ to do |
+|  | `D-039` | Inbound webhook — reply-to-comment parsing with quoted text stripped | 2 | `D-032` ᶦ | Sat 15 Aug | Wed 19 Aug | 53 | ▫️ to do |
+|  | `D-040` | All 24 events from blueprint §11 across in-app / bell / email… | 2 | `D-012` `B-022` | Wed 23 Sep | Fri 25 Sep | 42 | ▫️ to do |
+|  | `D-041` | Notification centre — bell dropdown (last 10) + full page with tabs | 2.5 | `D-040` `C-005` | Sat 08 Aug | Sat 08 Aug | 59 | ✅ done |
 |  | `D-042` | Per-user preference matrix — which events, which channel | 1.5 | `D-041` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-043` | In-app toast via WebSocket, appearing within ~1 second, with Open /… | 1 | `D-041` `D-014` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-044` | Persistent bell badge with unread count | 0.5 | `D-041` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-045` | Browser push via the Web Push API for users who opt in | 1.5 | `D-043` ᶦ | Wed 19 Aug | Thu 20 Aug | 51 | ▫️ to do |
+|  | `D-045` | Browser push via the Web Push API for users who opt in | 1.5 | `D-043` ᶦ | Wed 19 Aug | Thu 20 Aug | 54 | ▫️ to do |
 | 🔴 | `D-046` | Offline queueing | 1.5 | `D-043` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 59 | ✅ done |
+|  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 62 | ✅ done |
 |  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 82 | ✅ done |
 |  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 82 | ✅ done |
 |  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 82 | ✅ done |
-|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Thu 20 Aug | Fri 21 Aug | 52 | ▫️ to do |
-| 🔴 | `D-055` | Ask Status | 1.5 | `D-050` `C-036` | Wed 30 Sep | Thu 01 Oct | 38 | ▫️ to do |
-|  | `D-056` | Manager response time recorded as a reportable metric; status… | 1 | `D-055` ᶦ | Thu 01 Oct | Fri 02 Oct | 39 | ▫️ to do |
+|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Fri 21 Aug | Fri 21 Aug | 54 | ▫️ to do |
+| 🔴 | `D-055` | Ask Status | 1.5 | `D-050` `C-036` | Wed 30 Sep | Thu 01 Oct | 40 | ▫️ to do |
+|  | `D-056` | Manager response time recorded as a reportable metric; status… | 1 | `D-055` ᶦ | Thu 01 Oct | Fri 02 Oct | 41 | ▫️ to do |
 | 🔴 | `D-057` | Chat immutable after a 5-minute edit window; deletions leave… | 1.5 | `D-050` | Sat 08 Aug | Sat 08 Aug | 82 | ✅ done |
 |  | `D-058` | Live ribbon advance | 1 | `D-014` `C-045` | Sat 31 Oct | Sat 31 Oct | 21 | ▫️ to do |
 |  | `D-059` | Team inbox live updates | 1 | `D-058` `C-062` | Thu 12 Nov | Thu 12 Nov | 14 | ▫️ to do |
