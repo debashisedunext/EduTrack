@@ -9,6 +9,7 @@ Resource, role, project, task type, priority, calendar, notification templates. 
 | Task | Files | Screen |
 |---|---|---|
 | **B-023** Working calendar | `Calendar*` | S-14 |
+| **B-024** Working-hours service | `domain.masters.WorkingHoursService` | — |
 
 ### B-023 · the working calendar
 
@@ -29,10 +30,13 @@ time?
 `CalendarMapper` converts through `DayOfWeek.of(int)` and that is the only
 crossing point.
 
-**Nothing here computes durations.** That is B-024, deliberately: CLAUDE.md's
-rule is that every SLA, duration and utilisation figure routes through one
-implementation, and a second one growing here because it was convenient is how
-four answers to the same question appear.
+**Nothing here computes durations.** That is `domain.masters.WorkingHoursService`
+(B-024), deliberately: CLAUDE.md's rule is that every SLA, duration and
+utilisation figure routes through one implementation, and a second one growing
+here because it was convenient is how four answers to the same question appear.
+It lives in `domain`, not here, because Stream D's SLA scanner (`worker`) and
+Stream C's transition service both need to call it and only `domain` is on
+every stream's classpath.
 
 `CalendarMapper` is the first mapper on B-006's shared `BaseMapperConfig`. Its
 javadoc records why it overrides `collectionMappingStrategy` and why that

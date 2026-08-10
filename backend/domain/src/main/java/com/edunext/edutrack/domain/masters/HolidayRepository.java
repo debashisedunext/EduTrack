@@ -36,4 +36,22 @@ public interface HolidayRepository extends JpaRepository<Holiday, Long> {
     List<Holiday> findOrgWideOrForProject(@Param("projectId") Long projectId,
                                           @Param("from") LocalDate from,
                                           @Param("to") LocalDate to);
+
+    /**
+     * Every org-wide or project holiday, unfiltered by date — what B-024 needs
+     * and {@link #findOrgWideOrForProject} cannot give it.
+     *
+     * <p>A recurring holiday is stored once, in whatever year it was entered.
+     * Filtering on {@code holidayDate between :from and :to} — as the read-model
+     * query above does, deliberately, for a UI window — would make a 2020-dated
+     * recurring holiday invisible to a 2026 SLA calculation. Expanding it into
+     * every year the walk touches is the working-hours service's job, and it
+     * cannot do that over rows it was never given.
+     */
+    @Query("""
+            select h from Holiday h
+             where h.isActive = true
+               and (h.projectId is null or h.projectId = :projectId)
+            """)
+    List<Holiday> findAllOrgWideOrForProject(@Param("projectId") Long projectId);
 }
