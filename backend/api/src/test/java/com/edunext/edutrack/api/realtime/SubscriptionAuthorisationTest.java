@@ -159,6 +159,53 @@ class SubscriptionAuthorisationTest {
         }
     }
 
+    // --------------------------------------------- one scope failing alone
+
+    /**
+     * The bug that turned {@code RealtimeRelayIT} red in CI and stayed green
+     * locally: {@code ChatSubscriptionScope} queries the database on every
+     * SUBSCRIBE, and where no database was reachable the exception came out of
+     * {@code preSend} and refused the subscription outright — including a room
+     * a second, healthy scope was granting. Nothing logged it as a fault, so it
+     * read as "realtime is broken" rather than "chat's scope cannot answer".
+     */
+    @Test
+    @DisplayName("a scope that throws does not veto a scope that grants")
+    void aBrokenScopeDoesNotRefuseWhatAHealthyOneAllows() {
+        SubscriptionAuthorisation withABrokenScope = new SubscriptionAuthorisation(
+                List.of(exploding(), chat));
+
+        assertThatCode(() -> withABrokenScope.preSend(
+                subscribeMessage(authenticated(RAVI), "/topic/ticket." + TICKET_HE_IS_IN), null))
+                .doesNotThrowAnyException();
+    }
+
+    /** Swallowing the failure must not become an accidental allow-all. */
+    @Test
+    @DisplayName("a scope that throws still grants nothing of its own")
+    void aBrokenScopeGrantsNothing() {
+        SubscriptionAuthorisation onlyBroken = new SubscriptionAuthorisation(List.of(exploding()));
+
+        assertThatThrownBy(() -> onlyBroken.preSend(
+                subscribeMessage(authenticated(RAVI), "/topic/ticket." + TICKET_HE_IS_IN), null))
+                .isInstanceOf(MessageDeliveryException.class);
+    }
+
+    /** Stands in for a scope whose database has gone away mid-flight. */
+    private static SubscriptionScope exploding() {
+        return new SubscriptionScope() {
+            @Override
+            public boolean mayObserveTicket(long userId, long ticketId) {
+                throw new IllegalStateException("no connection available");
+            }
+
+            @Override
+            public boolean mayObserveProject(long userId, long projectId) {
+                throw new IllegalStateException("no connection available");
+            }
+        };
+    }
+
     // ------------------------------------------------------------- helpers
 
     private void subscribe(long userId, String destination) {

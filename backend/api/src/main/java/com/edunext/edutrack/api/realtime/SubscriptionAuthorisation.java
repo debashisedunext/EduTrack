@@ -116,8 +116,36 @@ class SubscriptionAuthorisation implements ChannelInterceptor {
                 .orElse(false);
     }
 
+    /**
+     * The union, with one scope's outage isolated from the rest.
+     *
+     * <p>Each implementation answers from its own tables, so any of them can
+     * fail on its own — a dropped connection, a slow query, a table this
+     * deployment has not migrated yet. Letting that propagate would refuse
+     * <em>every</em> subscription, including the rooms a healthy scope was
+     * about to grant: chat's database being unreachable would silently close
+     * the ribbon's rooms too, and the STOMP ERROR frame would name the
+     * destination rather than the cause.
+     *
+     * <p><strong>A scope that cannot answer grants nothing, but vetoes
+     * nothing either.</strong> Since the union only ever grants, swallowing a
+     * failure can only make the decision more restrictive, never less — a
+     * broken scope can never open a door, and the overall default is still
+     * deny. It is logged at error because a scope throwing here is a fault,
+     * not an access decision, and the two must not look alike in a log.
+     */
     private boolean any(java.util.function.Predicate<SubscriptionScope> granted) {
-        return scopes.stream().anyMatch(granted);
+        for (SubscriptionScope scope : scopes) {
+            try {
+                if (granted.test(scope)) {
+                    return true;
+                }
+            } catch (RuntimeException failure) {
+                log.error("realtime: {} could not answer and granted nothing",
+                        scope.getClass().getSimpleName(), failure);
+            }
+        }
+        return false;
     }
 
     private static MessageDeliveryException refuse(String destination, String reason) {
