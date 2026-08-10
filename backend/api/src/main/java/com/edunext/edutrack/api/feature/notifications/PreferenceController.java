@@ -24,7 +24,7 @@ import java.util.Map;
  * what is worth interrupting them for.
  */
 @RestController
-@RequestMapping("/me/notification-preferences")
+@RequestMapping("/api/v1/me/notification-preferences")
 @Tag(name = "notifications")
 class PreferenceController {
 

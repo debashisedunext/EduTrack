@@ -33,7 +33,7 @@ import java.util.Map;
  * two named people are talking, which is the private part.
  */
 @RestController
-@RequestMapping("/chat")
+@RequestMapping("/api/v1/chat")
 @Tag(name = "chat")
 class ChatController {
 
