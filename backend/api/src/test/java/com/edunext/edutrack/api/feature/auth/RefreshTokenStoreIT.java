@@ -21,6 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * A-023 · the refresh store against a real Redis.
@@ -332,5 +333,63 @@ class RefreshTokenStoreIT {
         assertThat(store.findConsumedFamily(value))
                 .as("a browser-update mismatch must not arm a theft detection")
                 .isEmpty();
+    }
+
+    // ── A-027 · revoking every session a user has ────────────────────────────
+
+    @Test
+    @DisplayName("a user with no recorded revocation has none")
+    void noRevocationByDefault() {
+        assertThat(store.sessionsRevokedBefore(999_999L)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a recorded cutoff reads back as the same instant")
+    void revocationReadsBackTheCutoff() {
+        long userId = 100L + UUID.randomUUID().hashCode() % 100000;
+        Instant cutoff = Instant.now();
+
+        store.revokeSessionsFor(userId, cutoff, Duration.ofDays(7));
+
+        assertThat(store.sessionsRevokedBefore(userId))
+                .isPresent()
+                .get(org.assertj.core.api.InstanceOfAssertFactories.INSTANT)
+                // Millisecond-precision epoch storage; sub-millisecond noise from
+                // Instant.now() is not part of what this primitive promises.
+                .isCloseTo(cutoff, within(1, ChronoUnit.MILLIS));
+    }
+
+    /**
+     * Revoking one user's sessions must not touch another's — the blast radius
+     * of a password reset is exactly one account.
+     */
+    @Test
+    @DisplayName("revoking one user's sessions leaves another user's alone")
+    void revocationIsScopedToOneUser() {
+        long revoked = 200L + UUID.randomUUID().hashCode() % 100000;
+        long other = 300L + UUID.randomUUID().hashCode() % 100000;
+
+        store.revokeSessionsFor(revoked, Instant.now(), Duration.ofDays(7));
+
+        assertThat(store.sessionsRevokedBefore(revoked)).isPresent();
+        assertThat(store.sessionsRevokedBefore(other))
+                .as("resetting one account's password must not end a different account's sessions")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("recording a cutoff twice leaves the more recent one in force")
+    void aSecondResetMovesTheCutoffForward() {
+        long userId = 400L + UUID.randomUUID().hashCode() % 100000;
+        Instant first = Instant.now();
+        Instant second = first.plus(Duration.ofMinutes(10));
+
+        store.revokeSessionsFor(userId, first, Duration.ofDays(7));
+        store.revokeSessionsFor(userId, second, Duration.ofDays(7));
+
+        assertThat(store.sessionsRevokedBefore(userId))
+                .isPresent()
+                .get(org.assertj.core.api.InstanceOfAssertFactories.INSTANT)
+                .isCloseTo(second, within(1, ChronoUnit.MILLIS));
     }
 }

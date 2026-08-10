@@ -191,6 +191,31 @@ class RefreshRotationService {
             throw new InvalidRefreshTokenException();
         }
 
+        // 4c ── A-027 · did a password reset end every session this user had?
+        //       Checked here, alongside the other session bounds and before the
+        //       claim, so a revoked session leaves no trace beyond its own
+        //       removal.
+        //
+        //       Refuses without revoking the family, like every bound above it.
+        //       The user reset their own password; that is not theft, and
+        //       raising a SECURITY line for it would bury the one event that
+        //       genuinely warrants one.
+        //
+        //       Note this is the ONLY place the bulk revocation is enforced, and
+        //       it is enough: a refresh token is worthless without the ability
+        //       to rotate, so refusing here ends the session at its next
+        //       fifteen-minute tick. What it cannot do is cut short an access
+        //       token already in flight — same fifteen-minute window A-025's
+        //       blacklist has, closing when A-032's chain reads both.
+        if (store.sessionsRevokedBefore(token.userId())
+                .filter(cutoff -> token.issuedAt().isBefore(cutoff))
+                .isPresent()) {
+            store.discard(tokenValue);
+            log.info("auth: refresh refused for user {} — every session predating their "
+                    + "password reset is revoked", token.userId());
+            throw new InvalidRefreshTokenException();
+        }
+
         // 5 ── The identity, re-read rather than taken from the stored record.
         //      A deactivation, a role change or a project reassignment lands
         //      here, at most one access-token lifetime stale. Runs before the
@@ -218,6 +243,7 @@ class RefreshRotationService {
         ResponseCookie cookie = issuer.rotate(token);
         return new Rotation(Session.issue(user, accessTokens.issue(user)), cookie);
     }
+
 
     /**
      * Revoking is the response, not the reporting of it. Done here so that no

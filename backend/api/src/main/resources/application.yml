@@ -150,6 +150,21 @@ edutrack:
       idle-timeout: PT30M         # measured from the last successful refresh
       absolute-timeout: PT12H     # measured from login; never extended by use
 
+    # A-027 · the forgot/reset-password flow.
+    password-reset:
+      # Blueprint §10.3. Short because this token grants an account without a
+      # password and lives in a mailbox — the one place a credential is most
+      # likely to be read by someone other than its owner.
+      ttl: PT30M
+      # Where the emailed link points, before `?token=…`. Genuinely
+      # environment-specific, hence a property.
+      #
+      # DELIBERATELY NOT derived from the request's Host header, which is the
+      # convenient choice and a well-known hole: an attacker who can set that
+      # header makes the mail *we* send point at *their* server, and the victim
+      # clicks a link we authored and hands over the token.
+      base-url: ${PASSWORD_RESET_BASE_URL:http://localhost:5173/reset-password}
+
   storage:
     endpoint: ${S3_ENDPOINT:http://localhost:9000}
     bucket: ${S3_BUCKET:edutrack}

@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -48,17 +49,26 @@ class AuthController {
     private final RefreshTokenIssuer refreshTokens;
     private final RefreshRotationService rotation;
     private final LogoutService logout;
+    private final ForgotPasswordService forgotPassword;
+    private final ResetPasswordService resetPassword;
+    private final PasswordResetRateLimiter resetRateLimiter;
 
     AuthController(AuthenticationService authentication,
                    AccessTokenIssuer tokens,
                    RefreshTokenIssuer refreshTokens,
                    RefreshRotationService rotation,
-                   LogoutService logout) {
+                   LogoutService logout,
+                   ForgotPasswordService forgotPassword,
+                   ResetPasswordService resetPassword,
+                   PasswordResetRateLimiter resetRateLimiter) {
         this.authentication = authentication;
         this.tokens = tokens;
         this.refreshTokens = refreshTokens;
         this.rotation = rotation;
         this.logout = logout;
+        this.forgotPassword = forgotPassword;
+        this.resetPassword = resetPassword;
+        this.resetRateLimiter = resetRateLimiter;
     }
 
     @PostMapping(path = "/login", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -341,5 +351,165 @@ class AuthController {
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, refreshTokens.clearing().toString())
                 .build();
+    }
+
+    /**
+     * A-027 · {@code POST /api/v1/auth/forgot-password}. Blueprint §10.3, screen S-02.
+     *
+     * <p>Public, like login and refresh — a user who has forgotten their password
+     * has nothing to authenticate with, which is the entire premise.
+     *
+     * <p><b>The rate limit is spent here, in the controller, before the service
+     * is called.</b> That placement is deliberate rather than convenient: the
+     * budget must be charged for every request regardless of whether the address
+     * resolves to an account, and doing it inside
+     * {@link ForgotPasswordService#requestReset} would invite a future refactor
+     * to move it after the lookup — at which point an address that never
+     * throttles is an address that does not exist, and the endpoint becomes the
+     * enumeration oracle its 202 exists to prevent.
+     */
+    @PostMapping(path = "/forgot-password", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @SecurityRequirements
+    @Operation(
+            operationId = "forgotPassword",
+            summary = "Request a password-reset link",
+            description = """
+                    **Always returns 202**, whether or not the address belongs to an \
+                    account. A different response for unknown addresses — a 404, or \
+                    merely a different message — turns this endpoint into a staff \
+                    directory anyone on the internet can read.
+
+                    A deactivated account is treated the same way: accepted, and \
+                    silently ignored. Being able to recover an account that was \
+                    deliberately switched off would defeat switching it off.
+
+                    The token is single-use, expires in 30 minutes, and is stored as \
+                    a SHA-256 digest — the raw value exists only in the mail.""")
+    @ApiResponse(responseCode = "202",
+            description = "Accepted. If the address belongs to an active account, a reset mail is queued.")
+    @ApiResponse(responseCode = "400", description = "The body is missing or the address is malformed.",
+            content = @Content)
+    @ApiResponse(
+            responseCode = "429",
+            description = """
+                    Rate limited — three per address per 15 minutes, forty per client \
+                    per 30 minutes. Both budgets are spent before the address is looked \
+                    up, so a 429 says nothing about whether the account exists.""",
+            headers = @Header(
+                    name = "Retry-After",
+                    description = "Seconds until the binding budget frees up.",
+                    schema = @Schema(type = "integer")),
+            content = @Content(
+                    mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class),
+                    examples = @ExampleObject(
+                            name = "too-many-reset-requests",
+                            value = """
+                                    {
+                                      "type": "https://edutrack/errors/too-many-reset-requests",
+                                      "title": "Too many requests",
+                                      "status": 429,
+                                      "detail": "Too many password reset requests. Try again shortly."
+                                    }""")))
+    ResponseEntity<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request,
+                                        HttpServletRequest httpRequest) {
+
+        String email = request.normalisedEmail();
+
+        resetRateLimiter.checkAndSpend(email, clientKeyOf(httpRequest))
+                .ifPresent(retryAfter -> {
+                    throw new TooManyResetRequestsException(retryAfter);
+                });
+
+        forgotPassword.requestReset(email);
+
+        // 202, not 200: the mail is queued through the outbox and sent by the
+        // worker, so nothing here can honestly claim it was delivered.
+        return ResponseEntity.accepted().build();
+    }
+
+    /**
+     * A-027 · {@code POST /api/v1/auth/reset-password}. Blueprint §10.3, screen S-02.
+     *
+     * <p>Public for the same reason: the caller cannot log in. The token in the
+     * body <i>is</i> the credential, which is why it is single-use, short-lived
+     * and stored only as a digest.
+     */
+    @PostMapping(path = "/reset-password", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @SecurityRequirements
+    @Operation(
+            operationId = "resetPassword",
+            summary = "Complete a password reset",
+            description = """
+                    Redeems a token from the reset mail and sets a new password. The \
+                    token is spent by the first request that presents it; a second \
+                    presentation is refused even seconds later.
+
+                    **Every session the account had is revoked**, on every device. \
+                    Someone resetting a forgotten password is often doing it because \
+                    they believe somebody else is in the account, and leaving that \
+                    somebody's seven-day refresh token alive would make the reset \
+                    cosmetic. A refresh token issued before the reset can no longer be \
+                    rotated; an access token already minted keeps working for the \
+                    remainder of its fifteen minutes, until A-032's filter chain lands.
+
+                    Any outstanding reset links for the same account are retired at the \
+                    same moment — a link that still works after the password has changed \
+                    is a second way in, sitting in a mailbox.
+
+                    Composition rules (upper, lower, digit, symbol) and the \
+                    no-reuse-of-the-last-three rule described on the `Password` schema \
+                    are not enforced yet — only its 8–128 length bounds are. That is \
+                    A-028.""")
+    @ApiResponse(responseCode = "204", description = "Password changed; all sessions revoked.")
+    @ApiResponse(responseCode = "400", description = "Malformed body, or the new password fails the length bounds.",
+            content = @Content)
+    @ApiResponse(
+            responseCode = "410",
+            description = """
+                    The token is expired, already used, or was never issued — deliberately \
+                    one response for all three. Distinguishing them would let anyone \
+                    holding a token learn whether it was ever real, and whether the \
+                    account has already recovered, from an endpoint that requires no \
+                    authentication.""",
+            content = @Content(
+                    mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class),
+                    examples = @ExampleObject(
+                            name = "invalid-reset-token",
+                            value = """
+                                    {
+                                      "type": "https://edutrack/errors/invalid-reset-token",
+                                      "title": "Reset link is no longer valid",
+                                      "status": 410,
+                                      "detail": "This password reset link has expired or has already been used. Request a new one."
+                                    }""")))
+    ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        resetPassword.reset(request.token(), request.newPassword());
+        return ResponseEntity.noContent().build();
+        
+    }
+
+    /**
+     * The per-source half of the rate limit.
+     *
+     * <p>{@code X-Forwarded-For}'s <b>first</b> entry is the original client; the
+     * rest are proxies that appended themselves. Read only because this
+     * application is deployed behind one — and treated as a hint, not as
+     * identity: the header is caller-supplied and trivially spoofed, so someone
+     * determined can rotate it and escape the per-source budget entirely. That is
+     * accepted, because the per-<i>address</i> budget is the one that protects a
+     * specific person from being mail-bombed, and it cannot be escaped this way.
+     * The per-source cap is here to make casual enumeration slow, not to be
+     * unforgeable.
+     */
+    private static String clientKeyOf(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            int firstComma = forwarded.indexOf(',');
+            return (firstComma < 0 ? forwarded : forwarded.substring(0, firstComma)).trim();
+        }
+        String remote = request.getRemoteAddr();
+        return remote == null ? "unknown" : remote;
     }
 }

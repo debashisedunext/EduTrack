@@ -42,6 +42,9 @@ class AuthExceptionHandler {
     private static final URI INVALID_ACCESS_TOKEN = URI.create("https://edutrack/errors/invalid-access-token");
     private static final URI PASSWORD_UNCHANGED = URI.create("https://edutrack/errors/password-unchanged");
     private static final URI PASSWORD_CHANGE_REQUIRED = URI.create("https://edutrack/errors/password-change-required");
+    private static final URI INVALID_RESET_TOKEN = URI.create("https://edutrack/errors/invalid-reset-token");
+    private static final URI TOO_MANY_RESET_REQUESTS =
+            URI.create("https://edutrack/errors/too-many-reset-requests");
 
     private final RefreshTokenIssuer refreshTokens;
 
@@ -211,6 +214,55 @@ class AuthExceptionHandler {
         problem.setTitle("Password change required");
         problem.setDetail("Set a new password before continuing.");
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
+    // ── A-027 · the password reset flow ─────────────────────────────────────
+
+    /**
+     * A-027 · {@code 410 Gone} — the reset token is expired, already redeemed, or
+     * was never issued.
+     *
+     * <p>One body for all three, per the contract and for
+     * {@link InvalidResetTokenException}'s reason: this endpoint is
+     * unauthenticated, so distinguishing them would let anyone holding a token
+     * discover whether it was ever real and whether the account has already
+     * recovered.
+     *
+     * <p><b>No cookie is cleared here.</b> The caller of a reset has no session
+     * to end — that is why they are resetting — and a {@code Set-Cookie} on this
+     * response would be an unauthenticated request mutating a browser's cookie
+     * jar for no reason.
+     */
+    @ExceptionHandler(InvalidResetTokenException.class)
+    ResponseEntity<ProblemDetail> handleInvalidResetToken(InvalidResetTokenException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.GONE);
+        problem.setType(INVALID_RESET_TOKEN);
+        problem.setTitle("Reset link is no longer valid");
+        problem.setDetail("This password reset link has expired or has already been used. "
+                + "Request a new one.");
+        return ResponseEntity.status(HttpStatus.GONE).body(problem);
+    }
+
+    /**
+     * A-027 · {@code 429} with {@code Retry-After}, as the contract's
+     * {@code TooManyRequests} response declares.
+     *
+     * <p>The header is the point. A 429 without one tells a client to back off
+     * without saying how far, and the honest ones then retry immediately and stay
+     * refused while the dishonest ones were never going to read it anyway.
+     * {@code Retry-After} is seconds here rather than an HTTP-date — both are
+     * legal per RFC 9110, and a duration cannot be misread by a client whose
+     * clock disagrees with ours.
+     */
+    @ExceptionHandler(TooManyResetRequestsException.class)
+    ResponseEntity<ProblemDetail> handleTooManyResetRequests(TooManyResetRequestsException exception) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.TOO_MANY_REQUESTS);
+        problem.setType(TOO_MANY_RESET_REQUESTS);
+        problem.setTitle("Too many requests");
+        problem.setDetail("Too many password reset requests. Try again shortly.");
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.retryAfter().toSeconds()))
+                .body(problem);
     }
 
     /**
