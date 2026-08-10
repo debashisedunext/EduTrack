@@ -12,7 +12,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 71 of 222 (32%) | 102.0 of 342.0 (30%) |
+| Complete | 72 of 222 (32%) | 103.0 of 342.0 (30%) |
 | In flight | 1 | 2.0 |
 | On the driving chain | 49 | 81.5 |
 | Zero float (no slack at all) | 109 | 169.5 |
@@ -24,7 +24,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | **A** | Shivendra | 63 | 20 | 92.0 | 85 | 108% ⚠️ | Fri 20 Nov |
 | **B** | Ayush | 50 | 9 | 84.5 | 85 | 99% | Sat 14 Nov |
 | **C** | Divyansh | 61 | 11 | 94.5 | 85 | 111% ⚠️ | Sat 28 Nov |
-| **D** | Debashis | 48 | 31 | 71.0 | 85 | 84% | Tue 10 Nov |
+| **D** | Debashis | 48 | 32 | 71.0 | 85 | 84% | Tue 10 Nov |
 
 ### Slipping
 
@@ -51,7 +51,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `B-037` import_batches traceability | Ayush | Tue 08 Sep | Fri 09 Oct | +23d |
 | `B-038` Resource bulk import — the second registration,  | Ayush | Wed 09 Sep | Sat 10 Oct | +23d |
 
-*…and 22 more — see the interactive chart.*
+*…and 23 more — see the interactive chart.*
 
 ---
 
@@ -400,13 +400,13 @@ gantt
 |  | `D-015` | Frontend STOMP client | 1.5 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 80 | ✅ done |
 | 🔴 | `D-020` | SLA scanner, every 15 minutes | 2 | `D-011` `B-024` `A-009` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-021` | 80%-of-SLA pre-breach warning to the assignee | 1 | `D-020` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-022` | Stale-task nudge — no update for 3 working days, to assignee cc RM | 1 | `D-020` ᶦ | Tue 11 Aug | Tue 11 Aug | 49 | ▫️ to do |
+|  | `D-022` | Stale-task nudge — no update for 3 working days, to assignee cc RM | 1 | `D-020` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 | 🔴 | `D-023` | Stage-SLA scanner, separate from ticket SLA | 2 | `D-020` `C-042` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-024` | Escalation matrix per project | 1.5 | `D-020` `B-018` | Thu 03 Sep | Fri 04 Sep | 44 | ▫️ to do |
-|  | `D-025` | Ping-pong flag at iteration_no ≥ 3 → PM dashboard | 0.5 | `D-023` ᶦ | Wed 12 Aug | Wed 12 Aug | 49 | ▫️ to do |
-|  | `D-026` | Unassigned ticket > 2 h → triage alert to PM and Support Desk | 1 | `D-020` ᶦ | Wed 12 Aug | Thu 13 Aug | 50 | ▫️ to do |
+|  | `D-025` | Ping-pong flag at iteration_no ≥ 3 → PM dashboard | 0.5 | `D-023` ᶦ | Tue 11 Aug | Tue 11 Aug | 50 | ▫️ to do |
+|  | `D-026` | Unassigned ticket > 2 h → triage alert to PM and Support Desk | 1 | `D-020` ᶦ | Tue 11 Aug | Wed 12 Aug | 51 | ▫️ to do |
 | 🔴 | `D-027` | Every calculation routes through Stream B's working-hours service | 1 | `D-020` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-028` | original_level preserved so "born critical vs became critical"… | 1 | `D-020` ᶦ | Thu 13 Aug | Fri 14 Aug | 51 | ▫️ to do |
+|  | `D-028` | original_level preserved so "born critical vs became critical"… | 1 | `D-020` ᶦ | Wed 12 Aug | Thu 13 Aug | 52 | ▫️ to do |
 |  | `D-029` | Thymeleaf templates driven by Stream B's notification template… | 1.5 | `D-010` `B-022` | Sat 12 Sep | Tue 15 Sep | 39 | ▫️ to do |
 |  | `D-030` | Mail body | 1.5 | `D-029` ᶦ | Tue 15 Sep | Wed 16 Sep | 40 | ▫️ to do |
 |  | `D-031` | Subject pattern with the ticket ID first so it threads and searches… | 0.5 | `D-029` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
@@ -417,19 +417,19 @@ gantt
 | 🔴 | `D-036` | "Critical mails cannot be disabled" | 1 | `D-029` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Thu 17 Sep | Fri 18 Sep | 40 | ▫️ to do |
 |  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Sat 19 Sep | Tue 22 Sep | 40 | ▫️ to do |
-|  | `D-039` | Inbound webhook — reply-to-comment parsing with quoted text stripped | 2 | `D-032` ᶦ | Fri 14 Aug | Tue 18 Aug | 52 | ▫️ to do |
+|  | `D-039` | Inbound webhook — reply-to-comment parsing with quoted text stripped | 2 | `D-032` ᶦ | Thu 13 Aug | Sat 15 Aug | 53 | ▫️ to do |
 |  | `D-040` | All 24 events from blueprint §11 across in-app / bell / email… | 2 | `D-012` `B-022` | Tue 22 Sep | Thu 24 Sep | 41 | ▫️ to do |
 |  | `D-041` | Notification centre — bell dropdown (last 10) + full page with tabs | 2.5 | `D-040` `C-005` | Sat 08 Aug | Sat 08 Aug | 57 | ✅ done |
 |  | `D-042` | Per-user preference matrix — which events, which channel | 1.5 | `D-041` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-043` | In-app toast via WebSocket, appearing within ~1 second, with Open /… | 1 | `D-041` `D-014` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-044` | Persistent bell badge with unread count | 0.5 | `D-041` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-045` | Browser push via the Web Push API for users who opt in | 1.5 | `D-043` ᶦ | Tue 18 Aug | Wed 19 Aug | 53 | ▫️ to do |
+|  | `D-045` | Browser push via the Web Push API for users who opt in | 1.5 | `D-043` ᶦ | Sat 15 Aug | Tue 18 Aug | 54 | ▫️ to do |
 | 🔴 | `D-046` | Offline queueing | 1.5 | `D-043` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 60 | ✅ done |
 |  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 80 | ✅ done |
 |  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 80 | ✅ done |
 |  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 80 | ✅ done |
-|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Thu 20 Aug | Thu 20 Aug | 53 | ▫️ to do |
+|  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Wed 19 Aug | Wed 19 Aug | 54 | ▫️ to do |
 | 🔴 | `D-055` | Ask Status | 1.5 | `D-050` `C-036` | Tue 29 Sep | Wed 30 Sep | 39 | ▫️ to do |
 |  | `D-056` | Manager response time recorded as a reportable metric; status… | 1 | `D-055` ᶦ | Wed 30 Sep | Thu 01 Oct | 40 | ▫️ to do |
 | 🔴 | `D-057` | Chat immutable after a 5-minute edit window; deletions leave… | 1.5 | `D-050` | Sat 08 Aug | Sat 08 Aug | 80 | ✅ done |
