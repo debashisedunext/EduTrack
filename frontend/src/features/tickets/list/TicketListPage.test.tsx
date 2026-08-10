@@ -1,0 +1,259 @@
+import { beforeAll, afterEach, describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom'
+import { server } from '@/mocks/server'
+import { TicketListPage } from './TicketListPage'
+
+/** Radix's popover primitives need measurement and pointer-capture APIs jsdom does not implement. */
+beforeAll(() => {
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  const element = Element.prototype as unknown as Record<string, unknown>
+  element.hasPointerCapture ??= () => false
+  element.setPointerCapture ??= () => {}
+  element.releasePointerCapture ??= () => {}
+  element.scrollIntoView ??= () => {}
+})
+
+function TicketDetailStub() {
+  const { ticketId } = useParams()
+  return <p>Landed on {ticketId}</p>
+}
+
+function renderPage(initialEntry = '/tickets') {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/tickets" element={<TicketListPage />} />
+          <Route path="/tickets/new" element={<p>New ticket form</p>} />
+          <Route path="/tickets/:ticketId" element={<TicketDetailStub />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
+const TICKET_LINK_HREF = /^\/tickets\/\S+-26-\d+$/
+
+/**
+ * Waits for the first page of *real* rows — skeleton rows are also `<tr>`s, so
+ * counting rows alone would pass while the loading state is still showing.
+ */
+async function rowsReady() {
+  await waitFor(() => {
+    const ticketLinks = screen.getAllByRole('link').filter((el) => TICKET_LINK_HREF.test(el.getAttribute('href') ?? ''))
+    expect(ticketLinks.length).toBeGreaterThan(0)
+  })
+  return screen.getAllByRole('row')
+}
+
+/**
+ * Opens a filter's popover, retrying — Radix restores focus to the trigger a
+ * frame after close. `timeout: 4000` matches the create-form suite's own
+ * popover helper: this suite runs alongside nine others under one CPU-bound
+ * `vitest run`, and the default 1000ms is tight enough to flake there even
+ * when every step is individually correct.
+ */
+async function openFilter(name: RegExp | string) {
+  return waitFor(
+    () => {
+      const trigger = screen.getByRole('button', { name })
+      if (trigger.getAttribute('data-state') !== 'open') fireEvent.click(trigger)
+      return trigger
+    },
+    { timeout: 4000 },
+  )
+}
+
+/**
+ * Open-and-pick as one retryable unit, not two.
+ *
+ * A popover that just closed restores focus to its own trigger a frame
+ * later — the same race `CreateTicketPage.test.tsx` documents. If this pick
+ * follows straight on from another filter's pick, that stray focus event can
+ * land *after* this popover has already opened and read as focus leaving it,
+ * dismissing it before the option click lands. Retrying "reopen, then pick"
+ * together recovers; retrying only the click, against a popover that is no
+ * longer there to click into, does not.
+ */
+async function pickFilterOption(triggerName: RegExp | string, optionName: RegExp | string) {
+  await waitFor(
+    () => {
+      const trigger = screen.getByRole('button', { name: triggerName })
+      if (trigger.getAttribute('data-state') !== 'open') fireEvent.click(trigger)
+      fireEvent.click(screen.getByRole('option', { name: optionName }))
+    },
+    { timeout: 4000 },
+  )
+}
+
+let listRequests: URL[] = []
+const captureRequest = ({ request }: { request: Request }) => {
+  if (request.method === 'GET' && new URL(request.url).pathname.endsWith('/tickets')) {
+    listRequests.push(new URL(request.url))
+  }
+}
+
+beforeAll(() => server.events.on('request:start', captureRequest))
+afterEach(() => {
+  listRequests = []
+})
+
+describe('S-17 Ticket List — C-014', () => {
+  it('lists the current user’s scoped tickets and offers New ticket', async () => {
+    renderPage()
+    const rows = await rowsReady()
+    expect(screen.getByRole('link', { name: /New ticket/ })).toHaveAttribute('href', '/tickets/new')
+    // Every row's ID cell is a real ticket link, not filler text.
+    const firstDataRow = rows[1]
+    expect(within(firstDataRow).getByRole('link')).toHaveAttribute('href', expect.stringMatching(/^\/tickets\/\S+-26-\d+$/))
+  })
+
+  it('reads the search box from the URL — TopBar’s global search lands here', async () => {
+    // "payment" matches nothing in Ravi's own scope — the walkthrough ticket
+    // that mentions it belongs to Meera — so this deliberately does not wait
+    // for rows, only that the box and the request both carry the term.
+    renderPage('/tickets?q=payment')
+    expect(await screen.findByRole('textbox', { name: /Search tickets/ })).toHaveValue('payment')
+    await waitFor(() => expect(listRequests.some((u) => u.searchParams.get('q') === 'payment')).toBe(true))
+  })
+
+  it('narrows to a project and sends projectId to the API, then All projects clears it', async () => {
+    renderPage()
+    await rowsReady()
+
+    await pickFilterOption('Project', /^CRM/)
+    await waitFor(
+      () => {
+        const rows = screen.getAllByRole('row').slice(1)
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) {
+          expect(within(row).getByRole('link').textContent).toMatch(/^CRM-/)
+        }
+      },
+      { timeout: 4000 },
+    )
+    expect(listRequests.at(-1)?.searchParams.get('projectId')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Project: CRM/ })).toBeInTheDocument()
+
+    await pickFilterOption(/^Project: CRM/, /All project/)
+    await waitFor(() => expect(listRequests.at(-1)?.searchParams.has('projectId')).toBe(false), { timeout: 4000 })
+    expect(screen.getByRole('button', { name: 'Project' })).toBeInTheDocument()
+  })
+
+  it('offers Level options in priority-master order and narrows the grid to the chosen one', async () => {
+    renderPage()
+    await rowsReady()
+
+    await openFilter('Level')
+    await waitFor(
+      () => {
+        const options = screen.getAllByRole('option').map((o) => o.textContent)
+        expect(options).toEqual(['All level', 'Low', 'Medium', 'High', 'Critical'])
+      },
+      { timeout: 4000 },
+    )
+    fireEvent.click(screen.getByRole('option', { name: 'Critical' }))
+    await waitFor(() => expect(listRequests.at(-1)?.searchParams.get('level')).toBe('CRITICAL'), { timeout: 4000 })
+
+    // `keepPreviousData` deliberately keeps the prior page on screen while the
+    // filtered one loads, so the row check has to retry as one assertion —
+    // reading the rows once and checking their text after is a stale snapshot.
+    await waitFor(
+      () => {
+        const rows = screen.getAllByRole('row').slice(1)
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) {
+          expect(within(row).getByText('CRITICAL')).toBeInTheDocument()
+        }
+      },
+      { timeout: 4000 },
+    )
+  })
+
+  it('counts active filters, and Reset clears the filter row without touching the search box', async () => {
+    // Both filters arrive via the URL rather than two chained popover picks.
+    // Radix restores focus to a just-closed popover's trigger a frame later
+    // (the race `CreateTicketPage.test.tsx` documents), and opening a second,
+    // unrelated popover immediately after the first can race that restoration
+    // and get dismissed by it — a real flake under a CPU-contended full run.
+    // The popover mechanics are already covered by the Project and Level
+    // tests above; this one is about `activeCount` and Reset, so it drives
+    // the same state the picks would have produced without their timing.
+    // Not `rowsReady()` — Level=High and Status=New together may legitimately
+    // scope to zero of Ravi's tickets, and this test is about the filter row
+    // and Reset, not about what the grid underneath happens to show.
+    //
+    // `q` arrives via the URL too, rather than typed through `fireEvent.change`
+    // — typing schedules the search box's own 300ms debounce timer, and on a
+    // slower CI runner the rest of this test (find, click Reset, wait, assert)
+    // can easily take longer than that, so the timer fires mid-test and its
+    // `setSearchParams` call races Reset's. Driving `q` through the same URL
+    // as the other two filters sidesteps that entirely; the debounce itself is
+    // already covered by "reads the search box from the URL" above.
+    renderPage('/tickets?level=HIGH&status=NEW&q=payment')
+    expect(await screen.findByRole('textbox', { name: /Search tickets/ })).toHaveValue('payment')
+
+    expect(await screen.findByRole('button', { name: /^Level: High/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Status: New/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reset (2)' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset (2)' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Reset/ })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Level' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Status' })).toBeInTheDocument()
+    // The search box is a header control, not part of the filter row Reset clears.
+    expect(screen.getByRole('textbox', { name: /Search tickets/ })).toHaveValue('payment')
+  })
+
+  it('hides a column from the chooser and remembers the choice across a remount', async () => {
+    const { unmount } = renderPage()
+    await rowsReady()
+    expect(screen.getByRole('columnheader', { name: 'Eff' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Columns/ }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Eff' }))
+    await waitFor(() => expect(screen.queryByRole('columnheader', { name: 'Eff' })).not.toBeInTheDocument())
+
+    unmount()
+    renderPage()
+    await rowsReady()
+    expect(screen.queryByRole('columnheader', { name: 'Eff' })).not.toBeInTheDocument()
+  })
+
+  it('switches row density from comfortable to compact', async () => {
+    renderPage()
+    const rows = await rowsReady()
+    const firstCell = within(rows[1]).getAllByRole('cell')[0]
+    expect(firstCell.className).toMatch(/py-3/)
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Compact' }))
+    await waitFor(() => expect(within(rows[1]).getAllByRole('cell')[0].className).toMatch(/py-1\.5/))
+  })
+
+  it('shows the no-match empty state for a search with no results, offering New ticket', async () => {
+    renderPage()
+    await rowsReady()
+    fireEvent.change(screen.getByRole('textbox', { name: /Search tickets/ }), {
+      target: { value: 'no ticket matches this string zzz' },
+    })
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /Search tickets/ }), { key: 'Enter' })
+
+    expect(await screen.findByText('No tickets match these filters')).toBeInTheDocument()
+    // No other filter is active, so the CTA points at creating rather than at
+    // Reset — the header's own [+ New Ticket] is the second "New ticket" link.
+    expect(screen.getAllByRole('link', { name: 'New ticket' })).toHaveLength(2)
+  })
+
+  it('starts on the first page with Previous disabled', async () => {
+    renderPage()
+    await rowsReady()
+    expect(screen.getByRole('button', { name: /Previous/ })).toBeDisabled()
+  })
+})
