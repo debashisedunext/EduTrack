@@ -189,8 +189,16 @@ describe('S-17 Ticket List — C-014', () => {
     // Not `rowsReady()` — Level=High and Status=New together may legitimately
     // scope to zero of Ravi's tickets, and this test is about the filter row
     // and Reset, not about what the grid underneath happens to show.
-    renderPage('/tickets?level=HIGH&status=NEW')
-    fireEvent.change(await screen.findByRole('textbox', { name: /Search tickets/ }), { target: { value: 'payment' } })
+    //
+    // `q` arrives via the URL too, rather than typed through `fireEvent.change`
+    // — typing schedules the search box's own 300ms debounce timer, and on a
+    // slower CI runner the rest of this test (find, click Reset, wait, assert)
+    // can easily take longer than that, so the timer fires mid-test and its
+    // `setSearchParams` call races Reset's. Driving `q` through the same URL
+    // as the other two filters sidesteps that entirely; the debounce itself is
+    // already covered by "reads the search box from the URL" above.
+    renderPage('/tickets?level=HIGH&status=NEW&q=payment')
+    expect(await screen.findByRole('textbox', { name: /Search tickets/ })).toHaveValue('payment')
 
     expect(await screen.findByRole('button', { name: /^Level: High/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Status: New/ })).toBeInTheDocument()
