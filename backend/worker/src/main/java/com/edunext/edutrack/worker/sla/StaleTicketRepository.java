@@ -43,7 +43,7 @@ class StaleTicketRepository {
                      t.date_reported,
                      COALESCE((SELECT MAX(c.created_at) FROM ticket_comments c
                                 WHERE c.ticket_id = t.id), t.date_reported),
-                     COALESCE((SELECT MAX(e.created_at) FROM ticket_effort_logs e
+                     COALESCE((SELECT MAX(e.logged_at) FROM ticket_effort_logs e
                                 WHERE e.ticket_id = t.id), t.date_reported),
                      COALESCE((SELECT MAX(s.entered_at) FROM ticket_stage_transitions s
                                 WHERE s.ticket_id = t.id), t.date_reported)
@@ -58,22 +58,32 @@ class StaleTicketRepository {
             """;
 
     /**
-     * Claim the nudge.
+     * Claim the nudge — first time.
      *
-     * <p>{@code ON DUPLICATE KEY UPDATE} with the freshness test inside the
-     * {@code IF} rather than a read-then-write: two instances evaluating the
-     * same ticket in the same pass would otherwise both decide to nudge. MySQL
-     * reports 1 for an insert and 2 for an update that changed something, so a
-     * non-zero count is "this call won"; a stale-nudge attempt that loses the
-     * race changes nothing and returns 0.
+     * <p>Two statements rather than one {@code ON DUPLICATE KEY UPDATE}, and
+     * the reason is a driver detail worth knowing: <strong>Connector/J reports
+     * <em>matched</em> rows, not changed rows</strong> ({@code
+     * useAffectedRows=false} is the default). An upsert whose freshness test
+     * lives in an {@code IF()} inside the {@code SET} therefore returns 1 even
+     * when it decided to change nothing, so the row count cannot be used to
+     * answer "did I win the claim". The first version of this did exactly that
+     * and nudged on every pass.
+     *
+     * <p>Splitting it puts the condition in a {@code WHERE}, where a row that
+     * must not be touched is not matched in the first place and the count is
+     * unambiguous under either setting.
      */
-    private static final String CLAIM = """
-            INSERT INTO stale_ticket_nudges (ticket_id, nudged_at, last_activity_at)
+    private static final String CLAIM_FIRST = """
+            INSERT IGNORE INTO stale_ticket_nudges (ticket_id, nudged_at, last_activity_at)
             VALUES (:ticketId, :now, :lastActivityAt)
-            ON DUPLICATE KEY UPDATE
-                nudged_at = IF(nudged_at <= :nudgeableIfBefore, :now, nudged_at),
-                last_activity_at = IF(nudged_at <= :nudgeableIfBefore,
-                                      :lastActivityAt, last_activity_at)
+            """;
+
+    /** Claim a repeat, only if the previous nudge is itself old enough. */
+    private static final String CLAIM_AGAIN = """
+            UPDATE stale_ticket_nudges
+               SET nudged_at = :now, last_activity_at = :lastActivityAt
+             WHERE ticket_id = :ticketId
+               AND nudged_at <= :nudgeableIfBefore
             """;
 
     private static final String EMAILS = """
@@ -97,12 +107,20 @@ class StaleTicketRepository {
      * @return true if this call is the one that nudges
      */
     boolean claim(long ticketId, Instant now, Instant lastActivity, Instant nudgeableIfBefore) {
-        return jdbc.sql(CLAIM)
+        int inserted = jdbc.sql(CLAIM_FIRST)
+                .param("ticketId", ticketId)
+                .param("now", Timestamp.from(now))
+                .param("lastActivityAt", Timestamp.from(lastActivity))
+                .update();
+        if (inserted == 1) {
+            return true;
+        }
+        return jdbc.sql(CLAIM_AGAIN)
                 .param("ticketId", ticketId)
                 .param("now", Timestamp.from(now))
                 .param("lastActivityAt", Timestamp.from(lastActivity))
                 .param("nudgeableIfBefore", Timestamp.from(nudgeableIfBefore))
-                .update() > 0;
+                .update() == 1;
     }
 
     java.util.Map<Long, String> emailsOf(java.util.Collection<Long> ids) {
