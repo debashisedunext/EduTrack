@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm, Controller, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
 
@@ -33,18 +33,19 @@ import { useCreateTicket } from './createTicketMutation'
 import {
   clientRequiringTaskTypeIds,
   emptyTicketForm,
+  retainedForNextTicket,
   ticketFormSchema,
   toCreateRequest,
   type TicketFormValues,
+  type TicketSaveAction,
 } from './ticketForm'
 
 /**
- * S-19 Create Ticket — C-010.
+ * S-19 Create Ticket — C-010, plus the four §7.5 actions from C-013.
  *
- * All five blueprint §7.5 field groups. What is deliberately *not* here, and
- * why, is in this folder's README: the inline planned-close-date preview is
- * C-012, the three save actions are C-013, attachments are C-023/C-024 and the
- * opening comment is C-029.
+ * What is deliberately *not* here, and why, is in this folder's README: the
+ * inline planned-close-date preview is C-012, attachments are C-023/C-024 and
+ * the opening comment is C-029.
  */
 export function CreateTicketPage() {
   const navigate = useNavigate()
@@ -67,7 +68,23 @@ export function CreateTicketPage() {
   )
 
   const clientRequiredIds = React.useMemo(() => clientRequiringTaskTypeIds(taskTypes), [taskTypes])
-  const resolver = React.useMemo(() => zodResolver(ticketFormSchema(clientRequiredIds)), [clientRequiredIds])
+
+  /**
+   * Which button is being validated for. Held in a ref because the resolver has
+   * to read it at validation time, and a state update would not have landed by
+   * then — `handleSubmit` validates in the same tick as the click.
+   *
+   * It falls back to `assign` after every attempt so that blur validation, and
+   * the revalidate-on-change that follows a failed submit, keep measuring the
+   * form against the primary action rather than the last button pressed. A
+   * draft attempt must not leave the form permanently lenient.
+   */
+  const submitAction = React.useRef<TicketSaveAction>('assign')
+  const resolver = React.useMemo<Resolver<TicketFormValues>>(
+    () => (values, context, options) =>
+      zodResolver(ticketFormSchema(clientRequiredIds, submitAction.current))(values, context, options),
+    [clientRequiredIds],
+  )
 
   const {
     control,
@@ -76,7 +93,9 @@ export function CreateTicketPage() {
     watch,
     setValue,
     setError,
-    formState: { errors, isSubmitting },
+    setFocus,
+    reset,
+    formState: { errors },
   } = useForm<TicketFormValues>({
     resolver,
     defaultValues: { ...emptyTicketForm, projectId: currentProject?.id ?? null },
@@ -120,6 +139,41 @@ export function CreateTicketPage() {
   const idempotencyKey = React.useRef(newIdempotencyKey())
   const createTicket = useCreateTicket()
 
+  // Which action is in flight, rather than a single `isSubmitting`: with four
+  // buttons the user needs to see which one they pressed, and all four have to
+  // lock so a second save cannot start on the same idempotency key.
+  const [saving, setSaving] = React.useState<TicketSaveAction | null>(null)
+  const isSaving = saving != null
+
+  /**
+   * Bumped by Save & Create Another so focus can move on the *next* commit.
+   *
+   * `reset` drops the field-ref registry and lets the inputs re-register as
+   * they render, so a `setFocus` in the same tick looks up a field that is
+   * momentarily not there and silently does nothing. An effect runs after that
+   * commit, by which time the ref is back.
+   */
+  const [ticketsInBatch, setTicketsInBatch] = React.useState(0)
+  React.useEffect(() => {
+    if (ticketsInBatch > 0) setFocus('title')
+  }, [ticketsInBatch, setFocus])
+
+  /**
+   * The last ticket a batch produced, confirmed in the action bar rather than
+   * with a toast.
+   *
+   * The shared toast viewport is `fixed bottom-0 right-0 z-[100]`, which is
+   * exactly where this screen's primary action sits — so a success toast
+   * physically covers Save & Assign. Every other path navigates away before
+   * that matters; Save & Create Another is the one that leaves the user here
+   * and expects them to press a button again, so on that path a toast blocks
+   * the very action it is congratulating them for. Moving the viewport would
+   * change every screen in all four streams, so the confirmation moves instead
+   * — into the bar's existing live region, which is where the user is looking
+   * anyway.
+   */
+  const [lastCreated, setLastCreated] = React.useState<string | null>(null)
+
   // Level is pre-filled from the task type's default and stays pre-filled until
   // the user picks one themselves; after that, changing the task type must not
   // silently overwrite their choice.
@@ -139,15 +193,41 @@ export function CreateTicketPage() {
     }
   }, [clientId, setValue])
 
-  async function onSubmit(values: TicketFormValues) {
+  async function onSubmit(values: TicketFormValues, action: TicketSaveAction) {
+    setSaving(action)
     try {
       const response = await createTicket.mutateAsync({
-        data: toCreateRequest(values),
+        data: toCreateRequest(values, action),
         idempotencyKey: idempotencyKey.current,
       })
       const ticketId = response.data.ticketId
+
+      // Rotated the moment a ticket exists, and before anything can submit
+      // again. Save & Create Another is the one path that reaches the form a
+      // second time without a remount, so it is the one path where a stale key
+      // would make the second ticket replay the first response — the server
+      // returns the original for 24 hours — and the user would watch the same
+      // ID appear twice with the second ticket never created.
       idempotencyKey.current = newIdempotencyKey()
-      toast({ variant: 'success', title: `${ticketId} created`, description: values.title.trim() })
+
+      if (action === 'another') {
+        // `levelTouched` is deliberately left as it stands: if the user chose a
+        // level it stays chosen, and if it was pre-filled it re-derives when
+        // they pick a different task type for the next ticket.
+        reset({ ...emptyTicketForm, ...retainedForNextTicket(values) })
+        // Confirmed in the action bar, not with a toast — see `lastCreated`.
+        setLastCreated(ticketId)
+        // Without this the user is left at the bottom of a form that looks
+        // unchanged, with no cue that it is now blank.
+        setTicketsInBatch((count) => count + 1)
+        return
+      }
+
+      toast({
+        variant: 'success',
+        title: action === 'draft' ? `${ticketId} saved as a draft` : `${ticketId} created`,
+        description: values.title.trim(),
+      })
       navigate(`/tickets/${ticketId}`)
     } catch (error) {
       if (error instanceof ApiError && error.status === 400) {
@@ -161,10 +241,26 @@ export function CreateTicketPage() {
       }
       toast({
         variant: 'danger',
-        title: 'The ticket was not created',
+        title: action === 'draft' ? 'The draft was not saved' : 'The ticket was not created',
         description: error instanceof ApiError ? error.problem.detail ?? error.message : 'Try again in a moment.',
       })
+    } finally {
+      setSaving(null)
     }
+  }
+
+  /**
+   * Validate against `action`'s rules, then save under it.
+   *
+   * The ref is set before `handleSubmit` runs so the resolver sees it, and the
+   * action is also passed down the closure so `onSubmit` never has to read a
+   * ref that has since been reset.
+   */
+  function save(action: TicketSaveAction) {
+    submitAction.current = action
+    return handleSubmit((values) => onSubmit(values, action))().finally(() => {
+      submitAction.current = 'assign'
+    })
   }
 
   if (projectsPending || taskTypesPending) {
@@ -183,7 +279,16 @@ export function CreateTicketPage() {
   const selectedAssignee = members.find((u) => u.id === watch('assigneeId')) ?? null
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate className="mx-auto max-w-4xl p-8 pb-28">
+    <form
+      // Save & Assign is the primary, so it is also what Enter in a text field
+      // does. The other two are `type="button"` and route through `save`.
+      onSubmit={(event) => {
+        event.preventDefault()
+        void save('assign')
+      }}
+      noValidate
+      className="mx-auto max-w-4xl p-8 pb-28"
+    >
       <header className="mb-6">
         <h1 className="text-h1 text-content">New ticket</h1>
         <p className="mt-1 text-sm text-content-muted">
@@ -532,17 +637,45 @@ export function CreateTicketPage() {
         </FieldGroup>
       </div>
 
+      {/* ── Actions — §7.5 ───────────────────────────────────────────────── */}
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-surface px-8 py-4 shadow-modal">
-        <div className="mx-auto flex max-w-4xl items-center justify-end gap-2">
-          <span className="mr-auto text-caption text-content-muted">
-            Save as Draft, Save &amp; Assign and Save &amp; Create Another arrive with C-013.
-          </span>
-          <Button type="button" variant="secondary" onClick={() => navigate(-1)}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Creating…' : 'Create ticket'}
-          </Button>
+        <div className="mx-auto flex max-w-4xl items-center gap-4">
+          {/* What the save will actually do with the assignee. §7.5 does not
+              mark Assigned To required and C-015 ships an Unassigned saved
+              view, so saving without one is a supported outcome — but it is
+              worth stating, because "Save & Assign" implies otherwise.
+
+              `min-w-0 flex-1` is load-bearing: without it the hint holds its
+              full width and pushes the primary action onto a second row, off
+              the bar. The hint is what wraps when the bar runs out of room. */}
+          <p className="min-w-0 flex-1 text-caption text-content-muted" role="status">
+            {lastCreated && (
+              <span className="mr-2 font-medium text-success-text">
+                {lastCreated} created — {ticketsInBatch} in this batch.
+              </span>
+            )}
+            {selectedAssignee ? (
+              <>
+                Will be assigned to <span className="font-medium text-content">{selectedAssignee.displayName}</span>.
+              </>
+            ) : (
+              'Saves unassigned — it will show in the Unassigned view.'
+            )}
+          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" variant="ghost" onClick={() => navigate(-1)} disabled={isSaving}>
+              Cancel
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void save('draft')} disabled={isSaving}>
+              {saving === 'draft' ? 'Saving draft…' : 'Save as Draft'}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void save('another')} disabled={isSaving}>
+              {saving === 'another' ? 'Saving…' : 'Save & Create Another'}
+            </Button>
+            <Button type="submit" disabled={isSaving}>
+              {saving === 'assign' ? 'Saving…' : 'Save & Assign'}
+            </Button>
+          </div>
         </div>
       </div>
     </form>

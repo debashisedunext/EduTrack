@@ -1,13 +1,92 @@
-# S-19 Create Ticket — C-010
+# S-19 Create Ticket — C-010 · C-013
 
-All five blueprint §7.5 field groups: **Identity · Core · People · Effort · Extra**.
+All five blueprint §7.5 field groups — **Identity · Core · People · Effort ·
+Extra** — and its four actions.
 
 | File | What it is |
 |---|---|
 | `CreateTicketPage.tsx` | The screen. Route `/tickets/new`. |
-| `ticketForm.ts` | Form state, validation, and the mapping onto `TicketCreateRequest`. |
+| `ticketForm.ts` | Form state, per-action validation, and the mapping onto `TicketCreateRequest`. |
 | `createTicketMutation.ts` | `POST /tickets` carrying an `Idempotency-Key`. |
 | `FormField.tsx` · `LevelPicker.tsx` · `WatcherPicker.tsx` | Feature-local controls. Not shared — see below. |
+
+## The four actions — C-013
+
+**Cancel · Save as Draft · Save & Create Another · Save & Assign**, in that
+order, with Save & Assign as the primary and as what Enter does.
+
+**A draft relaxes exactly three rules, and which three is a contract fact
+rather than a preference.** `TicketCreateRequest.required` is
+`[projectId, title, taskTypeId, level]`, so a draft missing any of those earns a
+400 whatever the form allows. What it *can* waive is the three rules that are
+the blueprint's rather than the contract's: the mandatory **description**
+(§7.5), the mandatory **estimated effort** (§7.5), and **§4B.2's client rule for
+client-facing task types** — you often park a ticket precisely because you are
+still chasing which client it belongs to. Level pre-fills from the task type, so
+a draft costs project + task type + title.
+
+A draft still rejects a *malformed* entry: `4h` in the effort field fails on
+every path. A draft is permission to leave a field empty, not permission to
+store something that will have to be fixed later.
+
+**Validation is chosen per attempt, not per mount.** The resolver reads a ref
+that the clicked button sets, and the ref falls back to `assign` once the
+attempt settles — so blur validation, and the revalidate-on-change that follows
+a failed submit, keep measuring against the primary action. A draft attempt must
+not leave the form permanently lenient, and `applies the draft rules per attempt
+rather than latching them on` is the test that says so.
+
+**Blank optional fields are omitted, never sent empty.** Already true of
+`plannedCloseDate`; the draft path makes it matter for two more.
+`estimatedHrs: 0` is a genuine zero-hour estimate and `description: ''` a
+genuine empty description — both are different claims from "not filled in yet",
+and both would survive into the finished ticket.
+
+**Save & Create Another rotates the idempotency key, and that is the sharpest
+bug in this task.** It is the only path that reaches the form a second time
+without a remount. Carrying the key over would make the second save replay the
+first response — the server returns the original for 24 hours — so the user
+would be shown the first ticket's ID again and the second ticket would never
+exist. The MSW mock does not implement replay, so nothing but an assertion that
+the two keys *differ* catches it; `mints a fresh idempotency key for the second
+ticket of a batch` is that assertion.
+
+It keeps what a batch shares — project, client, contact, task type, level,
+client-raised, assignee, watchers — and clears what describes one ticket. Then
+it moves focus back to the title, which has to happen in an effect rather than
+inline: `reset` drops React Hook Form's field-ref registry and lets the inputs
+re-register as they render, so a `setFocus` in the same tick looks up a field
+that is momentarily absent and silently does nothing.
+
+**It confirms in the action bar, not with a toast — and that is not a style
+preference.** The shared toast viewport is `fixed bottom-0 right-0 z-[100]`,
+which is exactly where this screen's primary action sits, so a success toast
+physically covers Save & Assign. Every other path navigates away before that
+matters. Save & Create Another is the one that leaves the user here and expects
+them to press a button again, so a toast there blocks the very action it is
+congratulating them for — clicks land on the toast and nothing happens. Caught
+by driving real Chrome, not by the test suite: jsdom has no layout, so no
+amount of unit testing would have found it.
+
+> **Worth knowing for the other streams.** This is not specific to this screen.
+> Any screen that pairs a fixed bottom action bar with right-aligned buttons
+> will collide with the toast viewport. Confirming inline is the local fix;
+> moving the viewport would change every screen in all four streams, so it is
+> not something to do from one feature branch. If a second screen hits it, that
+> is the point to raise moving the viewport as a shared change.
+
+**The action bar's hint is `min-w-0 flex-1`, and that is load-bearing.** Two
+buttons fitted the bar; four plus a hint do not. Without the shrink the hint
+holds its full width and pushes the primary action onto a second row, off the
+bar entirely — also caught only in a real browser. The hint is what wraps when
+the bar runs out of room; the button group is `shrink-0` and never does.
+
+**Save & Assign does not require an assignee.** §7.5 does not mark Assigned To
+with an asterisk and C-015 ships an *Unassigned* saved view, so an unassigned
+ticket is a supported outcome, not an oversight — making it mandatory here would
+contradict a screen we are about to build. The label still implies otherwise, so
+the action bar states which way it will go: the assignee's name, or that it
+saves unassigned and shows in the Unassigned view.
 
 ## Decisions worth knowing about
 
@@ -60,7 +139,6 @@ three streams depend on. Promote it when a second caller appears.
 | Not built | Owner |
 |---|---|
 | Inline planned-close-date preview | C-012 |
-| Save as Draft · Save & Assign · Save & Create Another | C-013 |
 | Inline "+ Add contact", client auto-fills (SLA, account manager as watcher, timezone) | C-021 |
 | Attachments, clipboard paste | C-023 · C-024 |
 | Opening comment, and the rich-text editor the description will share with it | C-029 |
@@ -68,6 +146,41 @@ three streams depend on. Promote it when a second caller appears.
 The description is a plain textarea for now. §7.5 wants rich text, and C-029
 wants a rich-text comment box — one editor should serve both, and that choice is
 worth making once rather than smuggling into this form.
+
+## 🔴 Open for Stream D — a draft is not yet distinguishable from a ticket
+
+`saveAsDraft` is on `TicketCreateRequest`, but **`StatusCode` has no `DRAFT`**
+and `TicketResponse` carries no draft flag — so the field is write-only with no
+observable effect. Once saved, a draft is indistinguishable from a live ticket:
+it appears in every list and saved view, is handed a planned close date and an
+SLA clock it will breach, and notifies whoever is in Assigned To. D-004's mock
+encodes the gap exactly, at `mocks/handlers/tickets.ts`:
+
+```ts
+status: body.saveAsDraft ? 'NEW' : 'NEW',
+```
+
+The form sends the right request today and will need no change. What is missing
+is server-side, and it is three things: somewhere to record draft-ness
+(a `DRAFT` status or an `isDraft` on `TicketResponse`); suppression of the
+assignee notification, the email and the SLA clock while it is one; and
+exclusion from the default list views. Until then, "Save as Draft" is honest
+about the request and optimistic about what the server does with it.
+
+Second, smaller: `taskTypeId` and `level` are in `TicketCreateRequest.required`,
+so a draft cannot be saved from a title alone. That is a reasonable floor and
+the form is built to it — but if §7.5's Save as Draft is meant to accept less,
+those two need to become optional when `saveAsDraft` is true.
+
+## The rest of C-013's save chain is server-side
+
+§7.5's "on save → ID generated → 🔔 to assignee → history entry `CREATED` →
+email" is one line of spec across three owners. ID generation is C-011 and
+landed. The `CREATED` history row belongs to the ticket-create service, which
+does not exist yet — `backend/api/…/feature/tickets/` holds only the code
+generator — and the notification and the email are Stream D's engines. The MSW
+mock already inserts the `CREATED` row, so the frontend is exercised against the
+intended behaviour; none of the three is implementable from this folder.
 
 ## Open for Stream D — `contracts/openapi.yaml`
 
