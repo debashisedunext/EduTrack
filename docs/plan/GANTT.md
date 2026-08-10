@@ -13,7 +13,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 72 of 222 (32%) | 103.0 of 342.0 (30%) |
-| In flight | 1 | 2.0 |
+| In flight | 2 | 2.5 |
 | On the driving chain | 49 | 81.5 |
 | Zero float (no slack at all) | 109 | 169.5 |
 
@@ -330,7 +330,7 @@ gantt
 |  | `C-013` | Actions: Save & Assign · Save as Draft · Save & Create Another | 1.5 | `C-010` `C-011` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `C-014` | Ticket list — filters | 3 | `C-005` `D-004` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `C-015` | Saved views | 1 | `C-014` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `C-016` | Row colour cues | 0.5 | `C-014` ᶦ | Tue 11 Aug | Tue 11 Aug | 0 | ▫️ to do |
+|  | `C-016` | Row colour cues | 0.5 | `C-014` ᶦ | Tue 11 Aug | Tue 11 Aug | 0 | 🟡 50% |
 |  | `C-017` | Bulk select → reassign / change level / close (PM & Admin only) | 1.5 | `C-014` `A-034` | Thu 10 Sep | Fri 11 Sep | 0 | ▫️ to do |
 |  | `C-018` | My Tasks | 2.5 | `C-014` ᶦ | Tue 11 Aug | Thu 13 Aug | 0 | ▫️ to do |
 |  | `C-019` | Detail shell + summary panel — every entity a link | 2 | `C-005` `D-004` | Sat 15 Aug | Wed 19 Aug | 0 | ▫️ to do |
