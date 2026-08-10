@@ -34,7 +34,7 @@ import { DensityToggle } from './DensityToggle'
 import { SavedViewsMenu } from './SavedViewsMenu'
 import { useTicketListFilters, type TicketListFilters } from './useTicketListFilters'
 import { useListPreferences } from './useListPreferences'
-import { COLUMNS, STATUS_LABEL, type ColumnRenderContext } from './columns'
+import { COLUMNS, STATUS_LABEL, rowCueClassName, type ColumnRenderContext } from './columns'
 
 const PAGE_SIZE = 25
 const SEARCH_DEBOUNCE_MS = 300
@@ -52,8 +52,8 @@ const DENSITY_ROW_CLASS = { comfortable: 'py-3', compact: 'py-1.5' } as const
  * S-17 Ticket List (All Tickets) — C-014, saved views C-015.
  *
  * The compact ribbon column the wireframe draws is deliberately not here: see
- * the folder README. Row colour cues (C-016) and bulk select (C-017) are
- * separate backlog items and stay out of this screen too.
+ * the folder README. Bulk select (C-017) is a separate backlog item and
+ * stays out of this screen too.
  */
 export function TicketListPage() {
   const { filters, setFilter, applyFilters, resetFilters, activeCount } = useTicketListFilters()
@@ -383,7 +383,11 @@ export function TicketListPage() {
               </TableRow>
             ) : (
               tickets.map((ticket) => (
-                <TableRow key={ticket.ticketId} aria-busy={isFetching || undefined}>
+                <TableRow
+                  key={ticket.ticketId}
+                  aria-busy={isFetching || undefined}
+                  className={rowCueClassName(ticket)}
+                >
                   {orderedVisibleColumns.map((column) => (
                     <TableCell
                       key={column.key}

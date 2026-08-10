@@ -116,9 +116,25 @@ screen's behaviour.
 | Not built | Owner |
 |---|---|
 | Compact ribbon column | See above — no owner yet, needs a contract answer first |
-| Row colour cues — amber/red left border | C-016 |
 | Bulk select → reassign / change level / close | C-017 |
 | Export CSV / PDF | A-064 (Stream A's export engine) — not S-17's job at all, confirmed against the backlog before assuming it belonged here |
+
+## C-016 — Row colour cue is a left border, not a background tint
+
+PLAN.md's own line is literal: "delayed rows get a soft amber left border;
+critical get soft red" — nothing about shading the row itself. `columns.tsx`
+exports `rowCueClassName(ticket)`, a pure function `TicketListPage` passes
+straight to each `TableRow`'s `className`, using the same `level-high` /
+`level-critical` tokens the Level chip and the ribbon already draw from
+(`tokens.css` calls the un-tinted `DEFAULT` shade "3:1 UI threshold... for
+icons, borders and chip backgrounds", which is exactly this use). Critical
+wins when a row is both delayed and Critical — in practice the SLA scanner
+promotes a delayed ticket to Critical itself (blueprint §7.2/§7.4), so the
+mock's own ticket generator sets `level: delayed ? 'CRITICAL' : pick(LEVELS)`
+and a delayed-but-not-Critical row essentially only exists in the gap before
+that scan runs. The colour is additive, not the only signal — the Level chip
+column and the PCD column's ⚠ icon already say the same thing in text/icon
+form, so this reads fine for colour-blind users and on a printed screenshot.
 
 ## C-015 — Saved views are fixed presets, not persisted searches
 
