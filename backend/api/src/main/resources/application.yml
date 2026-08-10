@@ -229,3 +229,30 @@ edutrack:
     role: ADMIN
     project-ids: []
     reportee-ids: []
+
+---
+# ---------------------------------------------------------------------------
+# B-007 · fixtures. Opt-in on top of `local`, exactly like dev-noauth above —
+# activate BOTH together:
+#
+#     ./mvnw -pl api spring-boot:run -Dspring-boot.run.profiles=local,fixtures
+#
+# Never alone: FixtureGuard refuses to start the application if `local` is
+# not also active, so the 200-ticket corpus can never be loaded into a real
+# environment. CI activates neither profile, so none of this code runs there.
+#
+# Deliberately NOT a Flyway migration — SEED-MANIFEST.md §5 flags exactly
+# this: the corpus is dev/test data, not the reference data every environment
+# boots with, and `spring.flyway.locations` is shared between `api` and
+# `worker` with nothing separating a fixture migration from a real one. A
+# profile-gated ApplicationRunner (feature/fixtures) is the isolation instead
+# — it never runs unless both profiles are explicitly requested.
+#
+# Idempotent by inspection, not by a flag here: FixtureLoader checks for the
+# CRM/PAY/WEB projects before writing anything and skips if they exist, so
+# restarting the app under this profile is a safe no-op after the first run.
+# ---------------------------------------------------------------------------
+spring:
+  config:
+    activate:
+      on-profile: fixtures
