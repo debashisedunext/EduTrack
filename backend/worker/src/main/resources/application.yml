@@ -73,6 +73,14 @@ edutrack:
     # giving up. Override per environment alongside MAIL_HOST.
     from: ${MAIL_FROM:no-reply@edutrack.local}
 
+  # D-020 · the SLA scan (blueprint §16 item 3). Fifteen minutes is the
+  # blueprint's figure: short enough that a breach is announced while somebody
+  # can still act on the day, long enough that the scan is not the reason the
+  # database is busy. Shortening it does not detect breaches sooner in any
+  # useful sense — the Planned Close Date is a date, not a second.
+  sla:
+    scan-interval: ${SLA_SCAN_INTERVAL:PT15M}
+
   outbox:
     enabled: true
     poll-interval: PT5S
