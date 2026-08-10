@@ -2027,6 +2027,57 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /notifications/pending:
+    get:
+      tags: [notifications]
+      operationId: listPendingNotifications
+      summary: Queued popups not yet shown to this user (D-046)
+      description: >
+        Blueprint §11: a notification raised while the user was offline is
+        queued and pops the moment they log in. Oldest first — this is a queue
+        being drained, not a list being browsed — and capped, because somebody
+        back from leave has a hundred queued and popping all of them is
+        indistinguishable from popping none. `hasMore` says the cap hid some.
+
+        Independent of `isRead`: a notification can be read without ever having
+        been popped, and popped without being read.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 20, default: 5 }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingNotificationsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/delivered:
+    post:
+      tags: [notifications]
+      operationId: markNotificationsDelivered
+      summary: Acknowledge notifications shown to the user (D-046)
+      description: >
+        The client reports what it actually put on screen. Deliberately
+        client-driven: realtime delivery is fire-and-forget, so a server that
+        stamped on publish would be recording that it *sent* a toast — the
+        claim §17 says must not be taken on trust. Delivery is therefore
+        at-least-once; a browser that dies between receiving and rendering
+        re-pops on next login.
+
+        Ids that are already delivered, or not the caller's, are ignored rather
+        than rejected — two tabs racing to drain one queue is normal, and a 404
+        here would let the ack probe which ids exist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationsDeliveredRequest' }
+      responses:
+        '204': { description: Recorded. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /notifications/{notificationId}/read:
     parameters:
       - { name: notificationId, in: path, required: true, schema: { type: integer, format: int64 } }
@@ -3576,6 +3627,26 @@ components:
             - type: object
               properties:
                 unreadCount: { type: integer }
+    PendingNotificationsResponse:
+      type: object
+      required: [data, hasMore]
+      description: >
+        D-046. No cursor: this is drained by acknowledging, not by paging, so
+        the next call returns whatever is still unacknowledged.
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+        hasMore:
+          type: boolean
+          description: More were queued than the cap returned.
+    NotificationsDeliveredRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          minItems: 0
+          items: { type: integer, format: int64 }
+          description: Notification ids the client has shown to the user.
     ChatThread:
       type: object
       properties:

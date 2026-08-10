@@ -47,6 +47,7 @@ environment, always.
 | 16 | `V20260808_1400__fix_workflow_transitions_support_role_code.sql` | B | B-003 | correction | `workflow_transitions`: 13 rows, `SUPPORT_DESK` → `SUPPORT` |
 | 17 | `V20260808_1630__working_calendar.sql` | B | B-023 | schema + **seed** | `working_calendar` — the weekly-off pattern and working-day bounds, plus the one row it is constrained to hold |
 | 18 | `V20260810_0930__holidays_unique_org_wide.sql` | B | B-023 | correction | `holidays`: `uq_holidays` rebuilt over a NULL-free `project_scope`, so two org-wide holidays cannot share a date |
+| 19 | `V20260810_1015__notification_delivery_log.sql` | D | D-046 | schema | `notifications.delivered_at` + `ix_notifications_undelivered` — what was shown, as distinct from what was read |
 
 <!-- load-order:end -->
 

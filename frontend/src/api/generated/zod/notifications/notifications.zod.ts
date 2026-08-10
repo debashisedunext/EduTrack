@@ -85,6 +85,49 @@ export const listNotificationsResponse = zod.object({
 })
 
 /**
+ * Blueprint §11: a notification raised while the user was offline is queued and pops the moment they log in. Oldest first — this is a queue being drained, not a list being browsed — and capped, because somebody back from leave has a hundred queued and popping all of them is indistinguishable from popping none. `hasMore` says the cap hid some.
+Independent of `isRead`: a notification can be read without ever having been popped, and popped without being read.
+
+ * @summary Queued popups not yet shown to this user (D-046)
+ */
+export const listPendingNotificationsQueryLimitDefault = 5;
+export const listPendingNotificationsQueryLimitMax = 20;
+
+
+
+export const listPendingNotificationsQueryParams = zod.object({
+  "limit": zod.number().min(1).max(listPendingNotificationsQueryLimitMax).default(listPendingNotificationsQueryLimitDefault)
+})
+
+export const listPendingNotificationsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "eventKey": zod.string().optional(),
+  "title": zod.string().optional(),
+  "body": zod.string().optional(),
+  "ticketId": zod.string().nullish(),
+  "isRead": zod.boolean().optional(),
+  "createdAt": zod.string().datetime({}).optional(),
+  "deepLink": zod.string().optional()
+})),
+  "hasMore": zod.boolean().describe('More were queued than the cap returned.')
+}).describe('D-046. No cursor: this is drained by acknowledging, not by paging, so the next call returns whatever is still unacknowledged.\n')
+
+/**
+ * The client reports what it actually put on screen. Deliberately client-driven: realtime delivery is fire-and-forget, so a server that stamped on publish would be recording that it *sent* a toast — the claim §17 says must not be taken on trust. Delivery is therefore at-least-once; a browser that dies between receiving and rendering re-pops on next login.
+Ids that are already delivered, or not the caller's, are ignored rather than rejected — two tabs racing to drain one queue is normal, and a 404 here would let the ack probe which ids exist.
+
+ * @summary Acknowledge notifications shown to the user (D-046)
+ */
+export const markNotificationsDeliveredBodyIdsMin = 0;
+
+
+
+export const markNotificationsDeliveredBody = zod.object({
+  "ids": zod.array(zod.number()).min(markNotificationsDeliveredBodyIdsMin).describe('Notification ids the client has shown to the user.')
+})
+
+/**
  * @summary Mark one as read
  */
 export const markNotificationReadParams = zod.object({

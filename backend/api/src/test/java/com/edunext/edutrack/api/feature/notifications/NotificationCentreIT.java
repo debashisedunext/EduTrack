@@ -263,7 +263,116 @@ class NotificationCentreIT {
                 .isNull();
     }
 
+    /**
+     * D-046 · the queue that survives being offline.
+     *
+     * <p>Blueprint §17 asks for a delivery log so a missed alert is provable
+     * rather than deniable, which is a stronger claim than "we sent it".
+     */
+    @org.junit.jupiter.api.Nested
+    class OfflineQueue {
+
+        @Test
+        void everythingStartsUndelivered() {
+            raise(ravi, "TICKET_ASSIGNED", "raised while you were away");
+
+            assertThat(titles(notifications.pending(ravi, 5).data()))
+                    .containsExactly("raised while you were away");
+        }
+
+        @Test
+        void acknowledgingTakesItOutOfTheQueue() {
+            raise(ravi, "TICKET_ASSIGNED", "popped");
+            long id = latestId();
+
+            assertThat(notifications.markDelivered(ravi, java.util.List.of(id))).isEqualTo(1);
+            assertThat(notifications.pending(ravi, 5).data()).isEmpty();
+        }
+
+        @Test
+        void aSecondAcknowledgementChangesNothing() {
+            raise(ravi, "TICKET_ASSIGNED", "popped once");
+            long id = latestId();
+            notifications.markDelivered(ravi, java.util.List.of(id));
+
+            // Two tabs racing to drain one queue is normal; the loser must not
+            // move the timestamp, or the log says when the client last
+            // mentioned it rather than when the user first saw it.
+            assertThat(notifications.markDelivered(ravi, java.util.List.of(id))).isZero();
+        }
+
+        @Test
+        void youCannotAcknowledgeSomebodyElsesQueue() {
+            raise(meera, "TICKET_ASSIGNED", "meera's");
+            long hers = latestId();
+
+            assertThat(notifications.markDelivered(ravi, java.util.List.of(hers))).isZero();
+            // Still queued for her, which is the point — Ravi's client must not
+            // be able to silence somebody else's popup.
+            assertThat(notifications.pending(meera, 5).data()).hasSize(1);
+        }
+
+        @Test
+        void readingIsNotShowing() {
+            raise(ravi, "TICKET_ASSIGNED", "read from the bell, never popped");
+            long id = latestId();
+            notifications.markRead(id, ravi);
+
+            // The user opened the bell and clicked it; no toast ever appeared.
+            // Filtering the queue on is_read would drop it, and filtering the
+            // bell on delivered_at would hide it. They are separate facts.
+            assertThat(notifications.pending(ravi, 5).data()).hasSize(1);
+        }
+
+        @Test
+        void showingIsNotReading() {
+            raise(ravi, "TICKET_ASSIGNED", "popped but ignored");
+            long id = latestId();
+            notifications.markDelivered(ravi, java.util.List.of(id));
+
+            assertThat(isRead(id)).isFalse();
+            assertThat(list(ravi, NotificationTab.ALL).meta().unreadCount()).isEqualTo(1);
+        }
+
+        @Test
+        void theQueueDrainsOldestFirst() {
+            raise(ravi, "TICKET_ASSIGNED", "first");
+            raise(ravi, "TICKET_ASSIGNED", "second");
+            raise(ravi, "TICKET_ASSIGNED", "third");
+
+            // The opposite of the bell, deliberately: this is a queue being
+            // replayed in the order things happened, not a list being browsed.
+            assertThat(titles(notifications.pending(ravi, 5).data()))
+                    .containsExactly("first", "second", "third");
+        }
+
+        @Test
+        void theCapSaysWhenItHidSomething() {
+            for (int i = 0; i < 4; i++) {
+                raise(ravi, "TICKET_ASSIGNED", "missed " + i);
+            }
+
+            NotificationService.Pending pending = notifications.pending(ravi, 2);
+
+            assertThat(pending.data()).hasSize(2);
+            // Somebody back from leave has a hundred queued; popping all of
+            // them is indistinguishable from popping none.
+            assertThat(pending.hasMore()).isTrue();
+        }
+
+        @Test
+        void anEmptyAcknowledgementIsNotAnError() {
+            // IN () is a syntax error in MySQL, and a client with nothing
+            // queued sending an empty list is normal.
+            assertThat(notifications.markDelivered(ravi, java.util.List.of())).isZero();
+        }
+    }
+
     // ------------------------------------------------------------- helpers
+
+    private static java.util.List<String> titles(java.util.List<NotificationDtos.Notification> rows) {
+        return rows.stream().map(NotificationDtos.Notification::title).toList();
+    }
 
     private NotificationService.Page list(long userId, NotificationTab tab) {
         return notifications.list(userId, tab, false, null, 25);
