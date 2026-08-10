@@ -82,6 +82,47 @@ class AccessTokenIssuerTest {
         assertThat(first.getId()).isNotEqualTo(second.getId());
     }
 
+    // ── A-026 · the must-change claim ───────────────────────────────────────
+
+    /**
+     * The claim {@code PasswordChangeGate} refuses requests on. Reporting the
+     * flag only in the response body leaves it a suggestion the client may
+     * ignore, and the token issued alongside it is fully privileged.
+     */
+    @Test
+    @DisplayName("a must-change account's token carries the claim the gate reads")
+    void mintsTheMustChangePasswordClaimWhenSet() {
+        JwtProperties properties = new JwtProperties(SECRET, ISSUER, Duration.ofMinutes(15));
+        AccessTokenIssuer issuer = new AccessTokenIssuer(encoderFor(SECRET), properties);
+
+        Jwt jwt = decoderFor(SECRET).decode(issuer.issue(mustChangeVersionOf(USER)).value());
+
+        assertThat(jwt.<Boolean>getClaim(AccessTokenIssuer.MUST_CHANGE_PASSWORD_CLAIM)).isTrue();
+    }
+
+    /**
+     * Absence is the "not required" reading — {@link PasswordChangeGate} explains
+     * why fail-open is correct for a claim inside a signature we control. This
+     * asserts the ordinary token stays clean, so that reading cannot be
+     * accidentally inverted by someone emitting {@code false} here later.
+     */
+    @Test
+    @DisplayName("an ordinary account's token carries no must-change claim at all")
+    void omitsTheClaimEntirelyWhenNotSet() {
+        JwtProperties properties = new JwtProperties(SECRET, ISSUER, Duration.ofMinutes(15));
+        AccessTokenIssuer issuer = new AccessTokenIssuer(encoderFor(SECRET), properties);
+
+        Jwt jwt = decoderFor(SECRET).decode(issuer.issue(USER).value());
+
+        assertThat(jwt.hasClaim(AccessTokenIssuer.MUST_CHANGE_PASSWORD_CLAIM)).isFalse();
+    }
+
+    private static AuthenticatedUser mustChangeVersionOf(AuthenticatedUser user) {
+        return new AuthenticatedUser(user.id(), user.username(), user.email(), user.fullName(),
+                user.roleCode(), user.timezone(), true,
+                user.permissions(), user.projectIds(), user.reporteeIds());
+    }
+
     @Test
     @DisplayName("a token signed with a different secret fails verification")
     void signatureIsRejectedByTheWrongSecret() {

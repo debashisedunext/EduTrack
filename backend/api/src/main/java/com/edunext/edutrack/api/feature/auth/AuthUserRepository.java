@@ -120,6 +120,31 @@ class AuthUserRepository {
             """;
 
     /**
+     * A-026 · the new password and the cleared flag in <b>one statement</b>.
+     *
+     * <p>Two updates would leave a window in which the password has changed and
+     * the account is still flagged — the user would be sent back to the
+     * change-password screen and told their new password is wrong, because it is
+     * now the current one. Worse in the other order: the flag clears, the write
+     * of the hash fails, and the temporary password is live on an account that no
+     * longer demands rotation. One statement has neither state.
+     *
+     * <p>{@code updated_at} is not set here; the column carries
+     * {@code ON UPDATE CURRENT_TIMESTAMP(6)} from A-003 and maintains itself.
+     *
+     * <p>Lockout state is deliberately left alone. Reaching this statement
+     * requires a valid access token, which requires having logged in, which
+     * requires not being locked — so there is nothing to clear, and zeroing the
+     * counter here would let a token holder wipe the evidence of a guessing run
+     * against the account.
+     */
+    private static final String UPDATE_PASSWORD = """
+            UPDATE users
+               SET password_hash = ?, must_change_password = 0
+             WHERE id = ?
+            """;
+
+    /**
      * A-021 · who hears about a lockout. Blueprint §S-01 says "email to Admin"
      * without naming one, so every active Admin is told.
      *
@@ -223,5 +248,25 @@ class AuthUserRepository {
 
     List<AdminRecipient> findActiveAdmins() {
         return jdbc.sql(ACTIVE_ADMINS).query(ADMIN_MAPPER).list();
+    }
+
+    // ── A-026 · setting a password ──────────────────────────────────────────
+
+    /**
+     * The only write in the system that touches {@code password_hash}, and the
+     * only one that clears {@code must_change_password}.
+     *
+     * @param newPasswordHash an <b>already-hashed</b> password. This class never
+     *                        sees a plaintext and must not start to — hashing
+     *                        belongs with the {@code PasswordEncoder} in
+     *                        {@link PasswordChangeService}, and a repository that
+     *                        accepted a raw password would be one refactor away
+     *                        from logging one.
+     * @return rows updated — 1, or 0 if the row vanished between the read and
+     *         this write. The caller checks it rather than assuming, because a
+     *         silent 0 reports success for a password that was never stored.
+     */
+    int updatePassword(long userId, String newPasswordHash) {
+        return jdbc.sql(UPDATE_PASSWORD).param(newPasswordHash).param(userId).update();
     }
 }

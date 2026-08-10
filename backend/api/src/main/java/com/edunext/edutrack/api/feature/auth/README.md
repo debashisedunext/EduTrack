@@ -29,11 +29,25 @@ and not Argon2id.
 `AuthenticationService` verifies credentials (A-020) and counts failures
 (A-021). `AccessTokenIssuer` mints the JWT (A-022). `RefreshTokenIssuer` mints
 the refresh token, stamps a family and a device fingerprint on it, and returns
-the cookie (A-023).
+the cookie (A-023). `RefreshRotationService` rotates it with family revocation
+on reuse (A-024). `LogoutService` ends one session — refresh token deleted,
+access `jti` blacklisted (A-025). `PasswordChangeService` is `PATCH
+/me/password` — verify, reject a same-password resubmission, write the hash
+and clear `must_change_password` in one statement, revoke the token that did
+it (A-026).
 
-Nothing yet **reads** either token: `POST /auth/refresh` with rotation and
-family revocation is A-024, logout and the access-token blacklist are A-025,
-and the filter chain that rejects a missing or expired access token is A-032.
-`StoredRefreshToken#matchesDevice` is the hook A-024 needs for the device
-binding — the fingerprint is recorded today but not enforced, because the only
-place it can be checked is the endpoint that does not exist yet.
+Two routes now authenticate their own caller — through the shared
+`AccessTokenVerifier` — because A-032's filter chain does not exist yet:
+`LogoutService` and `PasswordChangeService`. When that chain lands it replaces
+both callers at once.
+
+**Two hooks are built and not yet read**, same shape, same reason: the only
+place either can be enforced is a filter chain that does not exist.
+`StoredRefreshToken#matchesDevice` is A-024's device fingerprint, recorded on
+every refresh token since A-023. `PasswordChangeGate` is A-026's decision —
+`AccessTokenIssuer#MUST_CHANGE_PASSWORD_CLAIM` is stamped into the token
+already, but nothing consults the gate on a route that is not `/me/password`,
+`/auth/logout` or `/auth/refresh`. A-032 wires both.
+
+Not started: A-027 (forgot/reset password), A-028 (composition policy and
+no-reuse-of-last-3 — needs a `password_history` table), A-029 (TOTP).
