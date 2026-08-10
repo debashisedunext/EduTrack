@@ -4,9 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -34,12 +32,24 @@ import static org.assertj.core.api.Assertions.assertThat;
  * touches no tables and must not need a MySQL.
  */
 @Testcontainers
-@SpringBootTest
-@EnableAutoConfiguration(exclude = {
-        HibernateJpaAutoConfiguration.class,
-        JpaRepositoriesAutoConfiguration.class,
-        FlywayAutoConfiguration.class
+@SpringBootTest(properties = {
+        // B-023, Stream B edit — flagged for its owner's sign-off rather than
+        // made quietly (CLAUDE.md, code ownership).
+        //
+        // JPA is no longer excluded: `CalendarService` is the first bean in this
+        // module to read through a Spring Data repository, so without it the
+        // context cannot build `CalendarController` and every test in this class
+        // fails on context refresh.
+        //
+        // This class still needs no MySQL. Hibernate connected during refresh
+        // only to read JDBC metadata for dialect selection; naming the dialect
+        // and refusing that lookup builds the EntityManagerFactory offline.
+        // Flyway stays excluded — it connects unconditionally.
+        "spring.jpa.hibernate.ddl-auto=none",
+        "spring.jpa.database-platform=org.hibernate.dialect.MySQLDialect",
+        "spring.jpa.properties.hibernate.boot.allow_jdbc_metadata_access=false",
 })
+@EnableAutoConfiguration(exclude = FlywayAutoConfiguration.class)
 class AccessTokenBlacklistIT {
 
     @Container

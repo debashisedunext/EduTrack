@@ -47,7 +47,17 @@ export class ApiError extends Error {
   }
 }
 
-const BASE = import.meta.env.VITE_API_BASE ?? '/api/v1';
+/**
+ * Exported so a feature that must read a *response header* can build the same
+ * URL rather than duplicating this default.
+ *
+ * `http()` returns a parsed body and drops the response, which is right for the
+ * generated client — but `ETag` is part of the contract for the working-week
+ * resource (B-023), and an optimistic-concurrency guard cannot work without it.
+ * Duplicating `'/api/v1'` in a feature would mean `VITE_API_BASE` silently
+ * applying to some calls and not others.
+ */
+export const BASE = import.meta.env.VITE_API_BASE ?? '/api/v1';
 
 let accessToken: string | null = null;
 

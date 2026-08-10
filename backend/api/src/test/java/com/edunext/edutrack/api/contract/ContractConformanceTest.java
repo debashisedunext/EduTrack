@@ -7,9 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 
@@ -42,9 +40,9 @@ import static org.assertj.core.api.Assertions.fail;
  * December, and a check that is always red is a check nobody reads. It is
  * reported as coverage instead, which turns the contract into a progress meter.
  *
- * <p>Owned by Stream D. Runs with no infrastructure — JPA and Flyway
- * autoconfiguration are excluded, the same way {@code ApplicationSmokeTest}
- * does it, so this passes on a laptop with nothing installed.
+ * <p>Owned by Stream D. Runs with no infrastructure, the same way
+ * {@code ApplicationSmokeTest} does it, so this passes on a laptop with nothing
+ * installed.
  *
  * <p><b>Stream A edit, A-020 — flagged for Debashis's sign-off rather than made
  * quietly (CLAUDE.md, code ownership).</b> The datasource exclusions were
@@ -56,19 +54,32 @@ import static org.assertj.core.api.Assertions.fail;
  *
  * <p>The no-infrastructure promise is unaffected: Spring Boot constructs the
  * {@code HikariDataSource} without starting its pool, and the pool opens on the
- * first {@code getConnection()}, which no test here triggers. JPA and Flyway
- * stay excluded because both <i>do</i> connect during context refresh.
- * {@code JpaRepositoriesAutoConfiguration} joins them: with a datasource present
- * it registers a shared {@code EntityManagerFactory} whose backing bean
- * {@code HibernateJpaAutoConfiguration} is no longer there to supply. The same
- * three-line change is in {@code ApplicationSmokeTest}.
+ * first {@code getConnection()}, which no test here triggers.
+ *
+ * <p><b>B-023 went one step further</b> and stopped excluding JPA — see the
+ * property block below. Only Flyway is excluded now. The same change is in
+ * {@code ApplicationSmokeTest}, {@code RelayBootsWithoutRedisTest} and
+ * {@code DevPrincipalReachesRequestsTest}.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@EnableAutoConfiguration(exclude = {
-        HibernateJpaAutoConfiguration.class,
-        JpaRepositoriesAutoConfiguration.class,
-        FlywayAutoConfiguration.class
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        // B-023, Stream B edit — flagged for Debashis's sign-off rather than
+        // made quietly, exactly as A-020's note above did.
+        //
+        // Same shape of problem, one layer further on. `CalendarService` is the
+        // first bean here to read through a Spring Data repository, so with JPA
+        // excluded `CalendarController` never starts — and this test cannot see
+        // an endpoint that failed to start, which is the failure A-020
+        // described.
+        //
+        // The no-infrastructure promise survives. Hibernate connected during
+        // refresh only to read JDBC metadata for dialect selection; naming the
+        // dialect and refusing that lookup builds the EntityManagerFactory
+        // offline. Flyway stays excluded — it connects unconditionally.
+        "spring.jpa.hibernate.ddl-auto=none",
+        "spring.jpa.database-platform=org.hibernate.dialect.MySQLDialect",
+        "spring.jpa.properties.hibernate.boot.allow_jdbc_metadata_access=false",
 })
+@EnableAutoConfiguration(exclude = FlywayAutoConfiguration.class)
 class ContractConformanceTest {
 
     /** Paths where a mutation verb must never appear. Blueprint §4A.5, PLAN.md §3.5. */

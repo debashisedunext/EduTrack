@@ -2,9 +2,7 @@ package com.edunext.edutrack.api.security.dev;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -39,14 +37,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>This is also the prerequisite for D-013: a subscription cannot be
  * authorised against a principal that never arrives.
  */
-@SpringBootTest
+@SpringBootTest(properties = {
+        // B-023, Stream B edit — flagged for Shivendra's sign-off rather than
+        // made quietly (CLAUDE.md, code ownership).
+        //
+        // JPA is no longer excluded: `CalendarService` is the first bean in this
+        // module to read through a Spring Data repository, so without it the
+        // context cannot build `CalendarController`. Naming the dialect and
+        // refusing the JDBC metadata lookup lets Hibernate build an
+        // EntityManagerFactory without connecting, so this still runs with
+        // nothing installed. Flyway stays excluded — it connects regardless.
+        "spring.jpa.hibernate.ddl-auto=none",
+        "spring.jpa.database-platform=org.hibernate.dialect.MySQLDialect",
+        "spring.jpa.properties.hibernate.boot.allow_jdbc_metadata_access=false",
+})
 @AutoConfigureMockMvc
 @ActiveProfiles({"local", "dev-noauth"})
-@EnableAutoConfiguration(exclude = {
-        HibernateJpaAutoConfiguration.class,
-        JpaRepositoriesAutoConfiguration.class,
-        FlywayAutoConfiguration.class
-})
+@EnableAutoConfiguration(exclude = FlywayAutoConfiguration.class)
 class DevPrincipalReachesRequestsTest {
 
     @TestConfiguration

@@ -1644,6 +1644,208 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/HolidayListResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [masters]
+      operationId: createHoliday
+      summary: Add an org or project holiday (S-14)
+      description: |
+        A recurring holiday is stored **once**, not once per year — the
+        working-hours service expands it. That is why `date` on a recurring row
+        is a template rather than the only occurrence, and why re-adding "the
+        same" holiday next year is a duplicate, answered `409`.
+
+        `projectId` omitted means org-wide. A project holiday does not replace
+        the org one for the same date: either makes the day non-working, so the
+        two union rather than override.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HolidayWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HolidayResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /masters/holidays/{holidayId}:
+    parameters: [{ $ref: '#/components/parameters/HolidayId' }]
+    patch:
+      tags: [masters]
+      operationId: updateHoliday
+      summary: Edit a holiday
+      description: |
+        A partial update — send only the fields that change. Every field is
+        optional here, unlike on create: an omitted field keeps its stored
+        value rather than being cleared.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HolidayPatchRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HolidayResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      tags: [masters]
+      operationId: deleteHoliday
+      summary: Remove a holiday
+      description: |
+        A hard delete, unlike a workflow stage. Nothing references a holiday by
+        id — the working-hours service reads the set of dates for a window, so a
+        removed row simply makes that day workable again from the next
+        calculation. Historic SLA figures already recorded are unaffected;
+        they are stored, not recomputed.
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /masters/working-calendar:
+    get:
+      tags: [masters]
+      operationId: getWorkingWeek
+      summary: The org working week — weekly-off pattern and working-day bounds
+      description: |
+        The settings half of S-14, separate from the holiday list because they
+        change on entirely different cadences: holidays are edited every year,
+        the working week almost never.
+
+        Returns an `ETag`. `PUT` requires it back as `If-Match` — two admins
+        editing the working week from different tabs is exactly the lost update
+        that would otherwise silently reset somebody's change.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkingWeekResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [masters]
+      operationId: updateWorkingWeek
+      summary: Replace the org working week
+      description: |
+        A whole-resource replace, not a patch: a partial weekend is meaningless,
+        and the working day's two bounds are only valid relative to each other.
+
+        **Every SLA, duration and utilisation figure in the system is computed
+        against this.** Changing it does not rewrite figures already recorded —
+        stored values stay as they were — but every calculation from here on
+        uses the new week.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkingWeekUpdateRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkingWeekResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  /masters/leaves:
+    get:
+      tags: [masters]
+      operationId: listResourceLeaves
+      summary: Resource leave, the per-person half of the working calendar
+      description: |
+        Overlap, not containment: a fortnight's leave that brackets the window
+        entirely has neither endpoint inside it, and a containment filter would
+        report the resource at their desk all week.
+      parameters:
+        - { name: userId, in: query, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/LeaveStatus' } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResourceLeaveListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [masters]
+      operationId: createResourceLeave
+      summary: Record leave for a resource
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResourceLeaveWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResourceLeaveResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /masters/leaves/{leaveId}:
+    parameters: [{ $ref: '#/components/parameters/LeaveId' }]
+    patch:
+      tags: [masters]
+      operationId: updateResourceLeave
+      summary: Edit or approve a leave record
+      description: |
+        Only `APPROVED` leave stops the SLA clock. A pending or rejected request
+        must not, or the target a manager sees depends on paperwork nobody has
+        signed yet.
+
+        A partial update — approving is `{"status": "APPROVED"}` and nothing
+        else. Omitted fields keep their stored value.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResourceLeavePatchRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResourceLeaveResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      tags: [masters]
+      operationId: deleteResourceLeave
+      summary: Remove a leave record
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /masters/workflow-templates:
     get:
@@ -2120,6 +2322,16 @@ components:
       schema: { type: integer, format: int64 }
     ClientId:
       name: clientId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    HolidayId:
+      name: holidayId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    LeaveId:
+      name: leaveId
       in: path
       required: true
       schema: { type: integer, format: int64 }
@@ -3055,6 +3267,166 @@ components:
       type: object
       required: [data]
       properties: { data: { type: array, items: { $ref: '#/components/schemas/Priority' } } }
+    Holiday:
+      type: object
+      required: [id, date, name, isRecurring, isActive]
+      properties:
+        id: { type: integer, format: int64 }
+        date: { type: string, format: date }
+        name: { type: string, maxLength: 120 }
+        projectId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            `null` is org-wide. A project holiday adds to the org calendar for
+            that project rather than replacing it.
+        isRecurring:
+          type: boolean
+          description: |
+            A fixed-date annual holiday, stored **once**. The working-hours
+            service expands it per year, so a plain date-range query over the
+            master does not see next year's occurrence.
+        isActive: { type: boolean }
+    HolidayResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Holiday' }
+    HolidayWriteRequest:
+      type: object
+      required: [date, name]
+      properties:
+        date: { type: string, format: date }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        projectId: { type: [integer, 'null'], format: int64 }
+        isRecurring: { type: boolean, default: false }
+        isActive: { type: boolean, default: true }
+    WeeklyOff:
+      type: array
+      items: { type: integer, minimum: 1, maximum: 7 }
+      uniqueItems: true
+      maxItems: 6
+      examples: [[6, 7]]
+      description: |
+        Non-working days of the week as **ISO-8601 day numbers**:
+        `1` Mon, `2` Tue, `3` Wed, `4` Thu, `5` Fri, `6` Sat, `7` Sun.
+        A standard weekend is `[6, 7]`.
+
+        This is exactly `java.time.DayOfWeek.getValue()`, so the backend reads
+        and writes it with no conversion. `0` is not a valid value, and the
+        database rejects it.
+
+        **JavaScript callers must convert at the boundary.** `Date.getDay()` is
+        Sunday-zero-based (Sun `0` … Sat `6`), which collides with this range
+        everywhere except Sat: use `getDay() || 7`. This field previously said
+        "ISO" while constraining `0–6`, and the mock sent `[0, 6]` — under that
+        reading a backend using `DayOfWeek` treats **Sunday as a working day**,
+        which silently mis-states every SLA spanning a weekend. Convert in one
+        place; a per-component conversion just relocates the bug.
+
+        At most six days: a seven-day weekend leaves `addWorkingHours` searching
+        for a working day that does not exist.
+    WorkingWeek:
+      type: object
+      required: [weeklyOff, workDayStart, workDayEnd, timezone]
+      properties:
+        weeklyOff: { $ref: '#/components/schemas/WeeklyOff' }
+        workDayStart: { type: string, examples: ['09:30'] }
+        workDayEnd: { type: string, examples: ['18:30'] }
+        timezone:
+          type: string
+          examples: ['Asia/Kolkata']
+          description: |
+            The zone `workDayStart` and `workDayEnd` are read in. Storage is UTC
+            everywhere, but a working day is a local fact — 09:30 in Kolkata is
+            not 09:30 in UTC — so the pair is meaningless without this.
+    WorkingWeekResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/WorkingWeek' }
+    WorkingWeekUpdateRequest:
+      type: object
+      required: [weeklyOff, workDayStart, workDayEnd, timezone]
+      properties:
+        weeklyOff: { $ref: '#/components/schemas/WeeklyOff' }
+        workDayStart: { type: string, examples: ['09:30'] }
+        workDayEnd: { type: string, examples: ['18:30'] }
+        timezone: { type: string, examples: ['Asia/Kolkata'] }
+    LeaveStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+      description: |
+        Only `APPROVED` stops the SLA clock — a pending request must not, or the
+        target depends on paperwork nobody has signed.
+    LeaveType:
+      type: string
+      enum: [PLANNED, SICK, COMP_OFF, OTHER]
+    ResourceLeave:
+      type: object
+      required: [id, userId, startDate, endDate, isHalfDay, status]
+      properties:
+        id: { type: integer, format: int64 }
+        userId: { type: integer, format: int64 }
+        startDate: { type: string, format: date }
+        endDate:
+          type: string
+          format: date
+          description: Inclusive, and never earlier than `startDate`.
+        leaveType: { $ref: '#/components/schemas/LeaveType' }
+        isHalfDay:
+          type: boolean
+          description: |
+            A flag, not a count of hours — the working-hours service resolves it
+            against that user's `dailyCapacityHrs`.
+        status: { $ref: '#/components/schemas/LeaveStatus' }
+        reason: { type: [string, 'null'], maxLength: 255 }
+    ResourceLeaveResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ResourceLeave' }
+    ResourceLeaveListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ResourceLeave' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ResourceLeaveWriteRequest:
+      type: object
+      required: [userId, startDate, endDate]
+      properties:
+        userId: { type: integer, format: int64 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        leaveType: { $ref: '#/components/schemas/LeaveType' }
+        isHalfDay: { type: boolean, default: false }
+        status: { $ref: '#/components/schemas/LeaveStatus' }
+        reason: { type: [string, 'null'], maxLength: 255 }
+    HolidayPatchRequest:
+      type: object
+      description: |
+        Every field optional. Separate from `HolidayWriteRequest` because a
+        create needs a date and a name and an edit does not — sharing one schema
+        made a name-only `PATCH` a 400.
+      properties:
+        date: { type: string, format: date }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        projectId: { type: [integer, 'null'], format: int64 }
+        isRecurring: { type: boolean }
+        isActive: { type: boolean }
+    ResourceLeavePatchRequest:
+      type: object
+      description: |
+        Every field optional — approving is `{"status": "APPROVED"}` alone.
+      properties:
+        userId: { type: integer, format: int64 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        leaveType: { $ref: '#/components/schemas/LeaveType' }
+        isHalfDay: { type: boolean }
+        status: { $ref: '#/components/schemas/LeaveStatus' }
+        reason: { type: [string, 'null'], maxLength: 255 }
     HolidayListResponse:
       type: object
       required: [data]
@@ -3064,15 +3436,8 @@ components:
           properties:
             holidays:
               type: array
-              items:
-                type: object
-                properties:
-                  date: { type: string, format: date }
-                  name: { type: string }
-            weeklyOff:
-              type: array
-              items: { type: integer, minimum: 0, maximum: 6 }
-              description: ISO day numbers that are non-working.
+              items: { $ref: '#/components/schemas/Holiday' }
+            weeklyOff: { $ref: '#/components/schemas/WeeklyOff' }
             workDayStart: { type: string, examples: ['09:30'] }
             workDayEnd: { type: string, examples: ['18:30'] }
     WorkflowStage:

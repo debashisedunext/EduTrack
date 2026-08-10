@@ -146,16 +146,27 @@ export function ticketDto(t: Ticket, db: Db = getDb()) {
   };
 }
 
-/** Working minutes between two instants — weekends excluded, 09:30–18:30. */
+/**
+ * Working minutes between two instants — weekends excluded, 09:30–18:30.
+ *
+ * Days are ISO-8601 numbers (Mon=1 … Sun=7), the same convention as
+ * `weeklyOff` on `GET /masters/holidays` and as `DayOfWeek.getValue()` in the
+ * real service. `Date.getUTCDay()` is Sunday-zero-based, so it is normalised
+ * once, here — this stays hardcoded to Sat/Sun rather than reading `weeklyOff`,
+ * and feeding ISO values into an un-normalised 0–6 test is precisely how Sunday
+ * becomes a working day.
+ */
 export function workingMinutes(fromIso: string, toIso: string): number {
+  const SATURDAY = 6;
+  const SUNDAY = 7;
   const DAY_START = 9.5 * 60;
   const DAY_END = 18.5 * 60;
   let total = 0;
   const cursor = new Date(fromIso);
   const end = new Date(toIso);
   while (cursor < end) {
-    const day = cursor.getUTCDay();
-    if (day !== 0 && day !== 6) {
+    const day = cursor.getUTCDay() || SUNDAY;
+    if (day !== SATURDAY && day !== SUNDAY) {
       const minsIntoDay = cursor.getUTCHours() * 60 + cursor.getUTCMinutes();
       const dayEnd = new Date(cursor);
       dayEnd.setUTCHours(0, DAY_END, 0, 0);

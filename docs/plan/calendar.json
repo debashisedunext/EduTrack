@@ -7,11 +7,19 @@
     "",
     "The same holiday list is the input Ayush needs for B-023/B-024 — the",
     "working-hours service every SLA calculation routes through. Keep one",
-    "list, not two, or the Gantt and the SLA engine will disagree."
+    "list, not two, or the Gantt and the SLA engine will disagree.",
+    "",
+    "`working_weekdays` is ISO-8601: 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat",
+    "7=Sun, matching `weeklyOff` in the API contract and DayOfWeek.getValue()",
+    "in the service. It previously read [0,1,2,3,4] — Python's date.weekday(),",
+    "a third numbering next to the API's and JavaScript's. Nothing read it, so",
+    "the value was inert; the trap was that B-024 is told to treat this file as",
+    "the shared source and would have inherited an off-by-one straight into the",
+    "SLA engine."
   ],
 
   "project_start": "2026-08-03",
-  "working_weekdays": [0, 1, 2, 3, 4],
+  "working_weekdays": [1, 2, 3, 4, 5],
   "hours_per_day": 8,
 
   "holidays": [],

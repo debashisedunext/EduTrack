@@ -96,21 +96,300 @@ export const getWorkingCalendarQueryParams = zod.object({
   "to": zod.string().date().optional()
 })
 
-export const getWorkingCalendarResponseDataWeeklyOffItemMin = 0;
-export const getWorkingCalendarResponseDataWeeklyOffItemMax = 6;
+export const getWorkingCalendarResponseDataHolidaysItemNameMax = 120;
+
+export const getWorkingCalendarResponseDataWeeklyOffItemMax = 7;
+
+export const getWorkingCalendarResponseDataWeeklyOffMax = 6;
 
 
 
 export const getWorkingCalendarResponse = zod.object({
   "data": zod.object({
   "holidays": zod.array(zod.object({
-  "date": zod.string().date().optional(),
-  "name": zod.string().optional()
+  "id": zod.number(),
+  "date": zod.string().date(),
+  "name": zod.string().max(getWorkingCalendarResponseDataHolidaysItemNameMax),
+  "projectId": zod.number().nullish().describe('`null` is org-wide. A project holiday adds to the org calendar for\nthat project rather than replacing it.\n'),
+  "isRecurring": zod.boolean().describe('A fixed-date annual holiday, stored \*\*once\*\*. The working-hours\nservice expands it per year, so a plain date-range query over the\nmaster does not see next year\'s occurrence.\n'),
+  "isActive": zod.boolean()
 })).optional(),
-  "weeklyOff": zod.array(zod.number().min(getWorkingCalendarResponseDataWeeklyOffItemMin).max(getWorkingCalendarResponseDataWeeklyOffItemMax)).optional().describe('ISO day numbers that are non-working.'),
+  "weeklyOff": zod.array(zod.number().min(1).max(getWorkingCalendarResponseDataWeeklyOffItemMax)).max(getWorkingCalendarResponseDataWeeklyOffMax).optional().describe('Non-working days of the week as \*\*ISO-8601 day numbers\*\*:\n`1` Mon, `2` Tue, `3` Wed, `4` Thu, `5` Fri, `6` Sat, `7` Sun.\nA standard weekend is `[6, 7]`.\n\nThis is exactly `java.time.DayOfWeek.getValue()`, so the backend reads\nand writes it with no conversion. `0` is not a valid value, and the\ndatabase rejects it.\n\n\*\*JavaScript callers must convert at the boundary.\*\* `Date.getDay()` is\nSunday-zero-based (Sun `0` … Sat `6`), which collides with this range\neverywhere except Sat: use `getDay() || 7`. This field previously said\n\"ISO\" while constraining `0–6`, and the mock sent `[0, 6]` — under that\nreading a backend using `DayOfWeek` treats \*\*Sunday as a working day\*\*,\nwhich silently mis-states every SLA spanning a weekend. Convert in one\nplace; a per-component conversion just relocates the bug.\n\nAt most six days: a seven-day weekend leaves `addWorkingHours` searching\nfor a working day that does not exist.\n'),
   "workDayStart": zod.string().optional(),
   "workDayEnd": zod.string().optional()
 })
+})
+
+/**
+ * A recurring holiday is stored **once**, not once per year — the
+working-hours service expands it. That is why `date` on a recurring row
+is a template rather than the only occurrence, and why re-adding "the
+same" holiday next year is a duplicate, answered `409`.
+
+`projectId` omitted means org-wide. A project holiday does not replace
+the org one for the same date: either makes the day non-working, so the
+two union rather than override.
+
+ * @summary Add an org or project holiday (S-14)
+ */
+export const createHolidayHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createHolidayBodyNameMax = 120;
+
+export const createHolidayBodyIsRecurringDefault = false;export const createHolidayBodyIsActiveDefault = true;
+
+export const createHolidayBody = zod.object({
+  "date": zod.string().date(),
+  "name": zod.string().min(1).max(createHolidayBodyNameMax),
+  "projectId": zod.number().nullish(),
+  "isRecurring": zod.boolean().optional(),
+  "isActive": zod.boolean().default(createHolidayBodyIsActiveDefault)
+})
+
+/**
+ * A partial update — send only the fields that change. Every field is
+optional here, unlike on create: an omitted field keeps its stored
+value rather than being cleared.
+
+ * @summary Edit a holiday
+ */
+export const updateHolidayParams = zod.object({
+  "holidayId": zod.number()
+})
+
+export const updateHolidayHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateHolidayBodyNameMax = 120;
+
+
+
+export const updateHolidayBody = zod.object({
+  "date": zod.string().date().optional(),
+  "name": zod.string().min(1).max(updateHolidayBodyNameMax).optional(),
+  "projectId": zod.number().nullish(),
+  "isRecurring": zod.boolean().optional(),
+  "isActive": zod.boolean().optional()
+}).describe('Every field optional. Separate from `HolidayWriteRequest` because a\ncreate needs a date and a name and an edit does not — sharing one schema\nmade a name-only `PATCH` a 400.\n')
+
+export const updateHolidayResponseDataNameMax = 120;
+
+
+
+export const updateHolidayResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "date": zod.string().date(),
+  "name": zod.string().max(updateHolidayResponseDataNameMax),
+  "projectId": zod.number().nullish().describe('`null` is org-wide. A project holiday adds to the org calendar for\nthat project rather than replacing it.\n'),
+  "isRecurring": zod.boolean().describe('A fixed-date annual holiday, stored \*\*once\*\*. The working-hours\nservice expands it per year, so a plain date-range query over the\nmaster does not see next year\'s occurrence.\n'),
+  "isActive": zod.boolean()
+})
+})
+
+/**
+ * A hard delete, unlike a workflow stage. Nothing references a holiday by
+id — the working-hours service reads the set of dates for a window, so a
+removed row simply makes that day workable again from the next
+calculation. Historic SLA figures already recorded are unaffected;
+they are stored, not recomputed.
+
+ * @summary Remove a holiday
+ */
+export const deleteHolidayParams = zod.object({
+  "holidayId": zod.number()
+})
+
+/**
+ * The settings half of S-14, separate from the holiday list because they
+change on entirely different cadences: holidays are edited every year,
+the working week almost never.
+
+Returns an `ETag`. `PUT` requires it back as `If-Match` — two admins
+editing the working week from different tabs is exactly the lost update
+that would otherwise silently reset somebody's change.
+
+ * @summary The org working week — weekly-off pattern and working-day bounds
+ */
+export const getWorkingWeekResponseDataWeeklyOffItemMax = 7;
+
+export const getWorkingWeekResponseDataWeeklyOffMax = 6;
+
+
+
+export const getWorkingWeekResponse = zod.object({
+  "data": zod.object({
+  "weeklyOff": zod.array(zod.number().min(1).max(getWorkingWeekResponseDataWeeklyOffItemMax)).max(getWorkingWeekResponseDataWeeklyOffMax).describe('Non-working days of the week as \*\*ISO-8601 day numbers\*\*:\n`1` Mon, `2` Tue, `3` Wed, `4` Thu, `5` Fri, `6` Sat, `7` Sun.\nA standard weekend is `[6, 7]`.\n\nThis is exactly `java.time.DayOfWeek.getValue()`, so the backend reads\nand writes it with no conversion. `0` is not a valid value, and the\ndatabase rejects it.\n\n\*\*JavaScript callers must convert at the boundary.\*\* `Date.getDay()` is\nSunday-zero-based (Sun `0` … Sat `6`), which collides with this range\neverywhere except Sat: use `getDay() || 7`. This field previously said\n\"ISO\" while constraining `0–6`, and the mock sent `[0, 6]` — under that\nreading a backend using `DayOfWeek` treats \*\*Sunday as a working day\*\*,\nwhich silently mis-states every SLA spanning a weekend. Convert in one\nplace; a per-component conversion just relocates the bug.\n\nAt most six days: a seven-day weekend leaves `addWorkingHours` searching\nfor a working day that does not exist.\n'),
+  "workDayStart": zod.string(),
+  "workDayEnd": zod.string(),
+  "timezone": zod.string().describe('The zone `workDayStart` and `workDayEnd` are read in. Storage is UTC\neverywhere, but a working day is a local fact — 09:30 in Kolkata is\nnot 09:30 in UTC — so the pair is meaningless without this.\n')
+})
+})
+
+/**
+ * A whole-resource replace, not a patch: a partial weekend is meaningless,
+and the working day's two bounds are only valid relative to each other.
+
+**Every SLA, duration and utilisation figure in the system is computed
+against this.** Changing it does not rewrite figures already recorded —
+stored values stay as they were — but every calculation from here on
+uses the new week.
+
+ * @summary Replace the org working week
+ */
+export const updateWorkingWeekHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateWorkingWeekBodyWeeklyOffItemMax = 7;
+
+export const updateWorkingWeekBodyWeeklyOffMax = 6;
+
+
+
+export const updateWorkingWeekBody = zod.object({
+  "weeklyOff": zod.array(zod.number().min(1).max(updateWorkingWeekBodyWeeklyOffItemMax)).max(updateWorkingWeekBodyWeeklyOffMax).describe('Non-working days of the week as \*\*ISO-8601 day numbers\*\*:\n`1` Mon, `2` Tue, `3` Wed, `4` Thu, `5` Fri, `6` Sat, `7` Sun.\nA standard weekend is `[6, 7]`.\n\nThis is exactly `java.time.DayOfWeek.getValue()`, so the backend reads\nand writes it with no conversion. `0` is not a valid value, and the\ndatabase rejects it.\n\n\*\*JavaScript callers must convert at the boundary.\*\* `Date.getDay()` is\nSunday-zero-based (Sun `0` … Sat `6`), which collides with this range\neverywhere except Sat: use `getDay() || 7`. This field previously said\n\"ISO\" while constraining `0–6`, and the mock sent `[0, 6]` — under that\nreading a backend using `DayOfWeek` treats \*\*Sunday as a working day\*\*,\nwhich silently mis-states every SLA spanning a weekend. Convert in one\nplace; a per-component conversion just relocates the bug.\n\nAt most six days: a seven-day weekend leaves `addWorkingHours` searching\nfor a working day that does not exist.\n'),
+  "workDayStart": zod.string(),
+  "workDayEnd": zod.string(),
+  "timezone": zod.string()
+})
+
+export const updateWorkingWeekResponseDataWeeklyOffItemMax = 7;
+
+export const updateWorkingWeekResponseDataWeeklyOffMax = 6;
+
+
+
+export const updateWorkingWeekResponse = zod.object({
+  "data": zod.object({
+  "weeklyOff": zod.array(zod.number().min(1).max(updateWorkingWeekResponseDataWeeklyOffItemMax)).max(updateWorkingWeekResponseDataWeeklyOffMax).describe('Non-working days of the week as \*\*ISO-8601 day numbers\*\*:\n`1` Mon, `2` Tue, `3` Wed, `4` Thu, `5` Fri, `6` Sat, `7` Sun.\nA standard weekend is `[6, 7]`.\n\nThis is exactly `java.time.DayOfWeek.getValue()`, so the backend reads\nand writes it with no conversion. `0` is not a valid value, and the\ndatabase rejects it.\n\n\*\*JavaScript callers must convert at the boundary.\*\* `Date.getDay()` is\nSunday-zero-based (Sun `0` … Sat `6`), which collides with this range\neverywhere except Sat: use `getDay() || 7`. This field previously said\n\"ISO\" while constraining `0–6`, and the mock sent `[0, 6]` — under that\nreading a backend using `DayOfWeek` treats \*\*Sunday as a working day\*\*,\nwhich silently mis-states every SLA spanning a weekend. Convert in one\nplace; a per-component conversion just relocates the bug.\n\nAt most six days: a seven-day weekend leaves `addWorkingHours` searching\nfor a working day that does not exist.\n'),
+  "workDayStart": zod.string(),
+  "workDayEnd": zod.string(),
+  "timezone": zod.string().describe('The zone `workDayStart` and `workDayEnd` are read in. Storage is UTC\neverywhere, but a working day is a local fact — 09:30 in Kolkata is\nnot 09:30 in UTC — so the pair is meaningless without this.\n')
+})
+})
+
+/**
+ * Overlap, not containment: a fortnight's leave that brackets the window
+entirely has neither endpoint inside it, and a containment filter would
+report the resource at their desk all week.
+
+ * @summary Resource leave, the per-person half of the working calendar
+ */
+export const listResourceLeavesQueryLimitDefault = 50;
+export const listResourceLeavesQueryLimitMax = 200;
+
+
+
+export const listResourceLeavesQueryParams = zod.object({
+  "userId": zod.number().optional(),
+  "from": zod.string().date().optional(),
+  "to": zod.string().date().optional(),
+  "status": zod.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listResourceLeavesQueryLimitMax).default(listResourceLeavesQueryLimitDefault)
+})
+
+export const listResourceLeavesResponseDataItemReasonMax = 255;
+
+
+
+export const listResourceLeavesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "userId": zod.number(),
+  "startDate": zod.string().date(),
+  "endDate": zod.string().date().describe('Inclusive, and never earlier than `startDate`.'),
+  "leaveType": zod.enum(['PLANNED', 'SICK', 'COMP_OFF', 'OTHER']).optional(),
+  "isHalfDay": zod.boolean().describe('A flag, not a count of hours — the working-hours service resolves it\nagainst that user\'s `dailyCapacityHrs`.\n'),
+  "status": zod.enum(['PENDING', 'APPROVED', 'REJECTED']).describe('Only `APPROVED` stops the SLA clock — a pending request must not, or the\ntarget depends on paperwork nobody has signed.\n'),
+  "reason": zod.string().max(listResourceLeavesResponseDataItemReasonMax).nullish()
+})),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+}).optional()
+})
+
+/**
+ * @summary Record leave for a resource
+ */
+export const createResourceLeaveHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createResourceLeaveBodyIsHalfDayDefault = false;export const createResourceLeaveBodyReasonMax = 255;
+
+
+
+export const createResourceLeaveBody = zod.object({
+  "userId": zod.number(),
+  "startDate": zod.string().date(),
+  "endDate": zod.string().date(),
+  "leaveType": zod.enum(['PLANNED', 'SICK', 'COMP_OFF', 'OTHER']).optional(),
+  "isHalfDay": zod.boolean().optional(),
+  "status": zod.enum(['PENDING', 'APPROVED', 'REJECTED']).optional().describe('Only `APPROVED` stops the SLA clock — a pending request must not, or the\ntarget depends on paperwork nobody has signed.\n'),
+  "reason": zod.string().max(createResourceLeaveBodyReasonMax).nullish()
+})
+
+/**
+ * Only `APPROVED` leave stops the SLA clock. A pending or rejected request
+must not, or the target a manager sees depends on paperwork nobody has
+signed yet.
+
+A partial update — approving is `{"status": "APPROVED"}` and nothing
+else. Omitted fields keep their stored value.
+
+ * @summary Edit or approve a leave record
+ */
+export const updateResourceLeaveParams = zod.object({
+  "leaveId": zod.number()
+})
+
+export const updateResourceLeaveHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateResourceLeaveBodyReasonMax = 255;
+
+
+
+export const updateResourceLeaveBody = zod.object({
+  "userId": zod.number().optional(),
+  "startDate": zod.string().date().optional(),
+  "endDate": zod.string().date().optional(),
+  "leaveType": zod.enum(['PLANNED', 'SICK', 'COMP_OFF', 'OTHER']).optional(),
+  "isHalfDay": zod.boolean().optional(),
+  "status": zod.enum(['PENDING', 'APPROVED', 'REJECTED']).optional().describe('Only `APPROVED` stops the SLA clock — a pending request must not, or the\ntarget depends on paperwork nobody has signed.\n'),
+  "reason": zod.string().max(updateResourceLeaveBodyReasonMax).nullish()
+}).describe('Every field optional — approving is `{\"status\": \"APPROVED\"}` alone.\n')
+
+export const updateResourceLeaveResponseDataReasonMax = 255;
+
+
+
+export const updateResourceLeaveResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "userId": zod.number(),
+  "startDate": zod.string().date(),
+  "endDate": zod.string().date().describe('Inclusive, and never earlier than `startDate`.'),
+  "leaveType": zod.enum(['PLANNED', 'SICK', 'COMP_OFF', 'OTHER']).optional(),
+  "isHalfDay": zod.boolean().describe('A flag, not a count of hours — the working-hours service resolves it\nagainst that user\'s `dailyCapacityHrs`.\n'),
+  "status": zod.enum(['PENDING', 'APPROVED', 'REJECTED']).describe('Only `APPROVED` stops the SLA clock — a pending request must not, or the\ntarget depends on paperwork nobody has signed.\n'),
+  "reason": zod.string().max(updateResourceLeaveResponseDataReasonMax).nullish()
+})
+})
+
+/**
+ * @summary Remove a leave record
+ */
+export const deleteResourceLeaveParams = zod.object({
+  "leaveId": zod.number()
 })
 
 /**

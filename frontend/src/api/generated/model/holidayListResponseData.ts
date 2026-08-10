@@ -46,12 +46,12 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { HolidayListResponseDataHolidaysItem } from './holidayListResponseDataHolidaysItem';
+import type { Holiday } from './holiday';
+import type { WeeklyOff } from './weeklyOff';
 
 export type HolidayListResponseData = {
-  holidays?: HolidayListResponseDataHolidaysItem[];
-  /** ISO day numbers that are non-working. */
-  weeklyOff?: number[];
+  holidays?: Holiday[];
+  weeklyOff?: WeeklyOff;
   workDayStart?: string;
   workDayEnd?: string;
 };

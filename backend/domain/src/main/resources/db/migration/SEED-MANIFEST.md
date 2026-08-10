@@ -44,7 +44,9 @@ environment, always.
 | 13 | `V20260807_1700__seed_workflow_templates_stages.sql` | B | B-004 | **seed** | 3 templates · 18 stages |
 | 14 | `V20260808_1000__chat_project_channels_and_message_lifecycle.sql` | D | D-050 | schema | Project channels; the message edit window and tombstones |
 | 15 | `V20260808_1200__chat_message_search.sql` | D | D-053 | schema | `FULLTEXT` on `chat_messages.body` |
-| 15 | `V20260808_1400__fix_workflow_transitions_support_role_code.sql` | B | B-003 | correction | `workflow_transitions`: 13 rows, `SUPPORT_DESK` → `SUPPORT` |
+| 16 | `V20260808_1400__fix_workflow_transitions_support_role_code.sql` | B | B-003 | correction | `workflow_transitions`: 13 rows, `SUPPORT_DESK` → `SUPPORT` |
+| 17 | `V20260808_1630__working_calendar.sql` | B | B-023 | schema + **seed** | `working_calendar` — the weekly-off pattern and working-day bounds, plus the one row it is constrained to hold |
+| 18 | `V20260810_0930__holidays_unique_org_wide.sql` | B | B-023 | correction | `holidays`: `uq_holidays` rebuilt over a NULL-free `project_scope`, so two org-wide holidays cannot share a date |
 
 <!-- load-order:end -->
 
@@ -61,7 +63,9 @@ Flyway will happily run a seed file before the data it depends on exists. These
 are the edges that hold today — break one and the failure is a silently empty
 table, not an error.
 
-- **Schema before seed.** Rows 1–7 create every table rows 8–15 write into.
+- **Schema before seed.** Rows 1–7 create every table rows 8–17 write into,
+  except row 17, which creates and seeds its own in one file — a singleton
+  config row is the table's initial state, not a separate load step.
   Row 7 carries a later timestamp than rows 5–6 on purpose: `clients` and
   `email_log` have FKs into `sla_policies` and `notification_templates`, both
   created by row 4.
@@ -96,7 +100,16 @@ The trap this register exists to expose:
 
 | Correction | Undone by | Repaired by |
 |---|---|---|
-| Row 10 — `roles.code` → `SUPPORT` | Row 11, which hardcoded `'SUPPORT_DESK'` into 13 `workflow_transitions` rows | Row 15 |
+| Row 10 — `roles.code` → `SUPPORT` | Row 11, which hardcoded `'SUPPORT_DESK'` into 13 `workflow_transitions` rows | Row 16 |
+
+Row 18 is a different kind of correction — not a value written back by a later
+file, but a constraint that never held what it appeared to. `uq_holidays
+(holiday_date, project_id)` reads as "one holiday per date per scope", and for
+project-scoped rows it is. For **org-wide** rows, where `project_id IS NULL`,
+MySQL compares NULLs as distinct and the index permits unlimited duplicates.
+Nothing failed; the second insert simply succeeded. Found by calling the
+endpoint against a real database rather than by reading the DDL, which is the
+only way this class of defect surfaces.
 
 Row 13, written later and aware of the rename, seeded `owner_role` correctly —
 which is why the defect sat in exactly one table.

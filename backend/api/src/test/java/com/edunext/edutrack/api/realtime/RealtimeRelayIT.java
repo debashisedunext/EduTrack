@@ -6,9 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -59,20 +57,38 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Nothing dials MySQL as a result: Spring Boot builds the
  * {@code HikariDataSource} without starting its pool, and the pool opens on the
- * first {@code getConnection()}, which no test here triggers. JPA and Flyway
- * stay excluded because both <i>do</i> connect during context refresh, and
- * {@code JpaRepositoriesAutoConfiguration} joins them — with a datasource
- * present it registers a shared {@code EntityManagerFactory} whose backing bean
- * {@code HibernateJpaAutoConfiguration} is no longer there to supply.
+ * first {@code getConnection()}, which no test here triggers.
+ *
+ * <p><b>B-023 went one step further</b> and stopped excluding JPA — see the
+ * property block below. {@code CalendarService} is the first bean in this
+ * module to read through a Spring Data repository, so without JPA the context
+ * cannot build {@code CalendarController} and this class fails on refresh
+ * along with everything else. Only Flyway is excluded now; it connects
+ * unconditionally during refresh and there is no equivalent switch. The same
+ * change is in {@code ApplicationSmokeTest}, {@code ContractConformanceTest},
+ * {@code AccessTokenBlacklistIT}, {@code RefreshTokenStoreIT} and
+ * {@code DevPrincipalReachesRequestsTest}.
  */
 @Testcontainers
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@org.springframework.test.context.ActiveProfiles({"local", "dev-noauth"})
-@EnableAutoConfiguration(exclude = {
-        HibernateJpaAutoConfiguration.class,
-        JpaRepositoriesAutoConfiguration.class,
-        FlywayAutoConfiguration.class
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        // B-023, Stream B edit — flagged for its owner's sign-off rather than
+        // made quietly (CLAUDE.md, code ownership).
+        //
+        // JPA is no longer excluded: `CalendarService` is the first bean in this
+        // module to read through a Spring Data repository, so without it the
+        // context cannot build `CalendarController` and every test in this class
+        // fails on context refresh.
+        //
+        // This class still needs no MySQL. Hibernate connected during refresh
+        // only to read JDBC metadata for dialect selection; naming the dialect
+        // and refusing that lookup builds the EntityManagerFactory offline.
+        // Flyway stays excluded — it connects unconditionally.
+        "spring.jpa.hibernate.ddl-auto=none",
+        "spring.jpa.database-platform=org.hibernate.dialect.MySQLDialect",
+        "spring.jpa.properties.hibernate.boot.allow_jdbc_metadata_access=false",
 })
+@org.springframework.test.context.ActiveProfiles({"local", "dev-noauth"})
+@EnableAutoConfiguration(exclude = FlywayAutoConfiguration.class)
 class RealtimeRelayIT {
 
     private static final String TICKET_TOPIC = "/topic/ticket.4471";

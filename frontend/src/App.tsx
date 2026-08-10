@@ -3,6 +3,7 @@ import { AppShell } from './app/AppShell'
 import { ScreenPlaceholder } from './app/ScreenPlaceholder'
 import { TicketDetailPlaceholder } from './app/TicketDetailPlaceholder'
 import { CreateTicketPage } from './features/tickets/create/CreateTicketPage'
+import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { Button } from './components/ui/button'
 
 export default function App() {
@@ -34,7 +35,22 @@ export default function App() {
           <Route path="/projects" element={<ScreenPlaceholder title="Projects" />} />
           <Route path="/chat" element={<ScreenPlaceholder title="Chat" />} />
           <Route path="/reports" element={<ScreenPlaceholder title="Reports" />} />
-          <Route path="/masters" element={<ScreenPlaceholder title="Masters" />} />
+          <Route
+            path="/masters"
+            element={
+              <ScreenPlaceholder
+                title="Masters"
+                action={
+                  <Button asChild>
+                    {/* The masters index arrives with the rest of M3; until
+                        then the calendar is reachable from here. */}
+                    <Link to="/masters/calendar">Working calendar</Link>
+                  </Button>
+                }
+              />
+            }
+          />
+          <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
           <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
           <Route path="*" element={<ScreenPlaceholder title="Not found" />} />
         </Route>
