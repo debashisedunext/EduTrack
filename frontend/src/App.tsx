@@ -3,6 +3,7 @@ import { AppShell } from './app/AppShell'
 import { ScreenPlaceholder } from './app/ScreenPlaceholder'
 import { TicketDetailPlaceholder } from './app/TicketDetailPlaceholder'
 import { CreateTicketPage } from './features/tickets/create/CreateTicketPage'
+import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { Button } from './components/ui/button'
 
@@ -14,20 +15,7 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<ScreenPlaceholder title="Dashboard" />} />
           <Route path="/my-tasks" element={<ScreenPlaceholder title="My Tasks" />} />
-          <Route
-            path="/tickets"
-            element={
-              <ScreenPlaceholder
-                title="Tickets"
-                action={
-                  <Button asChild>
-                    {/* The grid's own [+ New Ticket] arrives with the list, C-014. */}
-                    <Link to="/tickets/new">New ticket</Link>
-                  </Button>
-                }
-              />
-            }
-          />
+          <Route path="/tickets" element={<TicketListPage />} />
           {/* Ahead of `/tickets/:ticketId` for readability; React Router ranks
               the static segment higher regardless of order. */}
           <Route path="/tickets/new" element={<CreateTicketPage />} />
