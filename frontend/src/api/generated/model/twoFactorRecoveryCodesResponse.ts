@@ -46,8 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { TwoFactorRecoveryCodes } from './twoFactorRecoveryCodes';
 
-export type ConfirmTwoFactorEnrolment200Data = {
-  /** Single-use. Each substitutes for the 6-digit code at login. */
-  recoveryCodes: string[];
-};
+export interface TwoFactorRecoveryCodesResponse {
+  data: TwoFactorRecoveryCodes;
+}
