@@ -22,6 +22,11 @@ import java.time.Instant;
  *                       rejected, and is rejected with the same generic failure
  *                       as a wrong password so that deactivation is not
  *                       observable to an outsider.
+ * @param passwordChangedAt A-028. When the current password was set. UTC, and
+ *                       {@code NOT NULL} in the schema — read by
+ *                       {@link PasswordPolicy#isExpired} for §10.3's optional
+ *                       90-day rule, and ignored entirely while that rule is
+ *                       switched off, which is the default.
  * @param failedAttempts A-021. Consecutive failures since the last success or
  *                       lock. Reset to zero both on a successful login and at
  *                       the moment a lock is applied, so the counter always
@@ -41,6 +46,7 @@ record AuthUserRow(
         String timezone,
         boolean active,
         boolean mustChangePassword,
+        Instant passwordChangedAt,
         int failedAttempts,
         Instant lockedUntil
 ) {

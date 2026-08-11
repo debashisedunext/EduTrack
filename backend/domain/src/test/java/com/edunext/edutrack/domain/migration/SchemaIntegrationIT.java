@@ -138,14 +138,25 @@ class SchemaIntegrationIT {
                 // + email_suppressions (D-034), + working_calendar (B-023),
                 // + notification_preferences (D-042),
                 // + stage_sla_alerts (D-023), + sla_prebreach_alerts (D-021),
-                // + stale_ticket_nudges (D-022), + l2_escalations (D-024).
+                // + stale_ticket_nudges (D-022), + l2_escalations (D-024),
+                // + password_reset_tokens (A-027), + password_history (A-028).
+                //
                 // Stream A: this exact count is a tripwire on every new table,
                 // which is why Stream D's migration had to come here to update
                 // it, and B-023's after it. That is working as intended — but if
                 // you would rather it did not need touching cross-stream,
                 // asserting the presence of named tables would give the same
                 // protection without the coupling.
-                assertThat(rs.getInt(1)).isEqualTo(44);
+                //
+                // A-028 note: this went red between A-027 and A-028, because
+                // A-027 added password_reset_tokens and did not update the
+                // count — its author ran SeedManifestTest and SeedDataIT but not
+                // this class, so the tripwire fired on the next branch rather
+                // than on the one that tripped it. Both tables are accounted for
+                // here. The suggestion above is worth taking: a count is a
+                // tripwire nobody can read, and the failure it produced named
+                // neither table.
+                assertThat(rs.getInt(1)).isEqualTo(46);
             }
             try (ResultSet rs = s.executeQuery(
                     "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()")) {

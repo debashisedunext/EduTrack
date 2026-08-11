@@ -83,15 +83,18 @@ class PasswordChangeService {
     private final AuthUserRepository users;
     private final PasswordEncoder passwordEncoder;
     private final AccessTokenBlacklist blacklist;
+    private final PasswordPolicy passwordPolicy;
 
     PasswordChangeService(AccessTokenVerifier accessTokens,
                           AuthUserRepository users,
                           PasswordEncoder passwordEncoder,
-                          AccessTokenBlacklist blacklist) {
+                          AccessTokenBlacklist blacklist,
+                          PasswordPolicy passwordPolicy) {
         this.accessTokens = accessTokens;
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.blacklist = blacklist;
+        this.passwordPolicy = passwordPolicy;
     }
 
     /**
@@ -100,6 +103,8 @@ class PasswordChangeService {
      *                                        gone or deactivated
      * @throws InvalidCurrentPasswordException {@code currentPassword} is wrong
      * @throws PasswordUnchangedException     the replacement is the current one
+     * @throws PasswordReusedException        A-028 · the replacement is one of
+     *                                        the last few this account used
      */
     @Transactional
     void change(String authorizationHeader, ChangePasswordRequest request) {
@@ -129,6 +134,19 @@ class PasswordChangeService {
         if (request.newPassword().equals(request.currentPassword())) {
             throw new PasswordUnchangedException();
         }
+
+        // A-028 · blueprint §10.3's no-reuse rule. Runs after the two cheap
+        // checks above and after `currentPassword` has verified, so a caller who
+        // cannot prove who they are never triggers three Argon2id verifications
+        // at 64 MB each — the composition rules are already enforced by
+        // @ValidPassword before this method is entered.
+        passwordPolicy.enforceNotReused(userId, request.newPassword());
+
+        // A-028 · the outgoing hash joins history BEFORE the row is overwritten.
+        // Read from `user`, which still holds the pre-change value; taking it
+        // from the database after the UPDATE would file the new password as
+        // though it were retired, and the window would be permanently off by one.
+        passwordPolicy.recordRetired(userId, user.passwordHash());
 
         int updated = users.updatePassword(userId, passwordEncoder.encode(request.newPassword()));
         if (updated != 1) {

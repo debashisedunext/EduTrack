@@ -62,6 +62,7 @@ class AuthenticationService {
     private final AuthUserRepository users;
     private final PasswordEncoder passwordEncoder;
     private final LoginAttemptRecorder attempts;
+    private final PasswordPolicy passwordPolicy;
 
     /**
      * A real Argon2id hash of a value nobody knows, verified against whenever
@@ -80,10 +81,12 @@ class AuthenticationService {
 
     AuthenticationService(AuthUserRepository users,
                           PasswordEncoder passwordEncoder,
-                          LoginAttemptRecorder attempts) {
+                          LoginAttemptRecorder attempts,
+                          PasswordPolicy passwordPolicy) {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.attempts = attempts;
+        this.passwordPolicy = passwordPolicy;
         this.decoyHash = passwordEncoder.encode(randomSecret());
     }
 
@@ -195,7 +198,18 @@ class AuthenticationService {
                 user.fullName(),
                 user.roleCode(),
                 user.timezone(),
-                user.mustChangePassword(),
+                // A-028 · §10.3's optional 90-day expiry rides on A-026's flag
+                // rather than inventing a second forced-change pathway. The
+                // effect is identical from here on: the session body reports it,
+                // AccessTokenIssuer stamps the claim, PasswordChangeGate refuses
+                // everything but /me/password, and PATCH /me/password clears it.
+                //
+                // No write happens — expiry is derived from a column already in
+                // this row, so a stale password costs nothing on the login path
+                // and nothing has to be reset when the flag is switched off
+                // again. Returns false unmodified while expiry is disabled,
+                // which is the default.
+                user.mustChangePassword() || passwordPolicy.isExpired(user.passwordChangedAt()),
                 permissions,
                 projectIds,
                 reporteeIds);
