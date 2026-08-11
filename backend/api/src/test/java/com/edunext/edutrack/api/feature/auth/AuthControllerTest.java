@@ -92,7 +92,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("a valid login returns the session inside the { data } envelope")
     void returnsSessionEnvelope() throws Exception {
-        when(authentication.authenticate("asha.rao", "Correct-Horse-1!"))
+        when(authentication.authenticate("asha.rao", "Correct-Horse-1!", null))
                 .thenReturn(new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                         "DEVELOPER", "Asia/Kolkata", false,
                         List.of("ticket.read"), List.of(11L), List.of()));
@@ -118,7 +118,7 @@ class AuthControllerTest {
     void carriesExactlyTheMintedToken() throws Exception {
         AuthenticatedUser user = new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                 "DEVELOPER", "Asia/Kolkata", false, List.of(), List.of(), List.of());
-        when(authentication.authenticate(anyString(), anyString())).thenReturn(user);
+        when(authentication.authenticate(anyString(), anyString(), any())).thenReturn(user);
         when(tokens.issue(user)).thenReturn(new AccessToken("this-users-token", 900));
 
         mvc.perform(post("/api/v1/auth/login")
@@ -131,7 +131,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("a refused login is a problem+json with a stable type URI")
     void refusalIsRfc9457() throws Exception {
-        when(authentication.authenticate(anyString(), anyString()))
+        when(authentication.authenticate(anyString(), anyString(), any()))
                 .thenThrow(new InvalidCredentialsException());
 
         mvc.perform(post("/api/v1/auth/login")
@@ -149,7 +149,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("the refusal body names neither the field that failed nor the user")
     void refusalLeaksNothing() throws Exception {
-        when(authentication.authenticate(anyString(), anyString()))
+        when(authentication.authenticate(anyString(), anyString(), any()))
                 .thenThrow(new InvalidCredentialsException());
 
         String body = mvc.perform(post("/api/v1/auth/login")
@@ -173,7 +173,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("a valid login sets the refresh cookie, and never puts it in the body")
     void setsTheRefreshCookie() throws Exception {
-        when(authentication.authenticate(anyString(), anyString()))
+        when(authentication.authenticate(anyString(), anyString(), any()))
                 .thenReturn(new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                         "DEVELOPER", "Asia/Kolkata", false, List.of(), List.of(), List.of()));
         when(tokens.issue(any(AuthenticatedUser.class)))
@@ -205,7 +205,7 @@ class AuthControllerTest {
     void forwardsTheUserAgentToTheIssuer() throws Exception {
         AuthenticatedUser user = new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                 "DEVELOPER", "Asia/Kolkata", false, List.of(), List.of(), List.of());
-        when(authentication.authenticate(anyString(), anyString())).thenReturn(user);
+        when(authentication.authenticate(anyString(), anyString(), any())).thenReturn(user);
         when(tokens.issue(any(AuthenticatedUser.class))).thenReturn(new AccessToken("t", 900));
 
         mvc.perform(post("/api/v1/auth/login")
@@ -223,7 +223,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("an unreachable token store shortens the session; the login still returns 200")
     void loginSucceedsWithoutARefreshCookie() throws Exception {
-        when(authentication.authenticate(anyString(), anyString()))
+        when(authentication.authenticate(anyString(), anyString(), any()))
                 .thenReturn(new AuthenticatedUser(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                         "DEVELOPER", "Asia/Kolkata", false, List.of(), List.of(), List.of()));
         when(tokens.issue(any(AuthenticatedUser.class))).thenReturn(new AccessToken("t", 900));
@@ -243,7 +243,7 @@ class AuthControllerTest {
     @DisplayName("a locked account gets 423 with the lockedUntil timestamp")
     void lockedAccountGets423() throws Exception {
         Instant lockedUntil = Instant.parse("2026-08-07T16:05:00Z");
-        when(authentication.authenticate(anyString(), anyString()))
+        when(authentication.authenticate(anyString(), anyString(), any()))
                 .thenThrow(new AccountLockedException(lockedUntil));
 
         mvc.perform(post("/api/v1/auth/login")

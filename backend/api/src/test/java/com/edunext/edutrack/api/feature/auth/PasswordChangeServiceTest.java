@@ -88,7 +88,7 @@ class PasswordChangeServiceTest {
     private static AuthUserRow row(boolean active, boolean mustChangePassword) {
         return new AuthUserRow(USER_ID, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                 CURRENT_HASH, "DEVELOPER", 3, "Asia/Kolkata",
-                active, mustChangePassword, Instant.now(), 0, null);
+                active, mustChangePassword, Instant.now(), null, false, 0, null);
     }
 
     private static ChangePasswordRequest request(String current, String replacement) {

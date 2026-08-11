@@ -264,6 +264,115 @@ paths:
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  # ── A-029 · two-factor enrolment ────────────────────────────────────────────
+  #
+  # STREAM A ADDITION — flagged for Debashis's review rather than made silently
+  # (CLAUDE.md, code ownership: Stream D owns this file).
+  #
+  # The contract described 2FA only as LoginRequest.totpCode, with no endpoints
+  # for enrolling, confirming, disabling, or for recovery codes. A-029 needs all
+  # of them, and ContractConformanceTest fails the build on any served endpoint
+  # that is not here — its own message says "add it to the contract and get it
+  # reviewed, or remove it". These are added so the build is green and the
+  # generated client can be regenerated; the review is still owed.
+  #
+  # Recovery codes are an addition beyond the blueprint too: §10.3 and S-04
+  # describe TOTP and stop, but a second factor living on one device makes a lost
+  # phone a permanently locked account.
+  /me/2fa/setup:
+    post:
+      tags: [auth]
+      operationId: beginTwoFactorEnrolment
+      summary: Start two-factor enrolment
+      description: |
+        Generates a shared secret and returns it with an `otpauth://` URI to
+        render as a QR code. **Does not enable 2FA** — the account is unchanged
+        until `/me/2fa/confirm` succeeds, so a QR that fails to scan cannot lock
+        the user out of the account they were protecting.
+
+        Calling it again replaces an unconfirmed secret. Refused once 2FA is on:
+        re-enrolling requires disabling first, and disabling requires the
+        password, so a stolen access token cannot swap the second factor.
+      responses:
+        '200':
+          description: Secret and otpauth URI. 2FA is not yet enabled.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, otpauthUri]
+                properties:
+                  secret: { type: string, description: 'Base32, for typing in when a QR cannot be scanned.' }
+                  otpauthUri: { type: string, description: 'Render client-side as a QR code.' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /me/2fa/confirm:
+    post:
+      tags: [auth]
+      operationId: confirmTwoFactorEnrolment
+      summary: Confirm two-factor enrolment and switch it on
+      description: |
+        Verifies a code from the authenticator — proving the secret was added —
+        and only then enables 2FA.
+
+        **Returns the recovery codes, once.** They are stored hashed and cannot
+        be shown again. Issued here rather than at setup, because codes handed
+        out for an enrolment that was never completed would be live credentials
+        for an account with no second factor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '200':
+          description: Two-factor enabled. Recovery codes returned once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recoveryCodes]
+                properties:
+                  recoveryCodes:
+                    type: array
+                    items: { type: string }
+                    description: Single-use. Each substitutes for the 6-digit code at login.
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /me/2fa/disable:
+    post:
+      tags: [auth]
+      operationId: disableTwoFactor
+      summary: Turn two-factor authentication off
+      description: |
+        **Requires the account password**, not just a valid access token.
+        Removing the second factor is the first thing a stolen fifteen-minute
+        token would be used for, and a token must not be enough to strip the
+        protection it was layered under.
+
+        Clears the secret and every recovery code, so re-enabling means scanning
+        a new QR.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        '204': { description: 'Two-factor off. Secret and recovery codes cleared.' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   # ──────────────────────────────────────────────────────────── users ────────
   /users:
     get:
@@ -2756,6 +2865,17 @@ components:
         username: { type: string, minLength: 1, maxLength: 100 }
         password: { type: string, minLength: 1 }
         totpCode: { type: string, pattern: '^\d{6}$', description: Required when 2FA is enabled. }
+        # A-029, Stream A addition — flagged for Debashis with the /me/2fa paths.
+        # A separate field rather than relaxing totpCode's pattern: a recovery
+        # code is not six digits, and widening a reviewed constraint to carry a
+        # different kind of credential is the worse of the two changes.
+        recoveryCode:
+          type: string
+          maxLength: 32
+          description: >-
+            A single-use recovery code, in place of totpCode when the
+            authenticator is unavailable. Hyphens, spaces and lower case are
+            all accepted.
     Session:
       type: object
       required: [accessToken, expiresIn, user]

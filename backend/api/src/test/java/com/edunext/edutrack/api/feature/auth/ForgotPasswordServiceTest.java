@@ -55,7 +55,7 @@ class ForgotPasswordServiceTest {
     private static AuthUserRow row(boolean active) {
         return new AuthUserRow(USER_ID, "asha.rao", EMAIL, "Asha Rao",
                 PASSWORD_HASH, "DEVELOPER", 3, "Asia/Kolkata",
-                active, false, Instant.now(), 0, null);
+                active, false, Instant.now(), null, false, 0, null);
     }
 
     // ── the happy path ──────────────────────────────────────────────────────

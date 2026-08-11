@@ -27,6 +27,17 @@ import java.time.Instant;
  *                       {@link PasswordPolicy#isExpired} for §10.3's optional
  *                       90-day rule, and ignored entirely while that rule is
  *                       switched off, which is the default.
+ * @param totpSecret  A-029. The shared secret, <b>still encrypted</b> — this
+ *                    record carries it as stored, and only
+ *                    {@code TotpSecretCipher} turns it back into something an
+ *                    authenticator would recognise. Null until enrolment starts.
+ *                    Note it is populated whether or not 2FA is enabled: a
+ *                    secret exists from setup and means nothing until
+ *                    {@code totpEnabled} says so.
+ * @param totpEnabled A-029. <b>The only field the login path consults.</b> True
+ *                    only once the user has echoed a valid code back, so a QR
+ *                    that never scanned cannot lock anyone out of the account
+ *                    they were trying to protect.
  * @param failedAttempts A-021. Consecutive failures since the last success or
  *                       lock. Reset to zero both on a successful login and at
  *                       the moment a lock is applied, so the counter always
@@ -47,6 +58,8 @@ record AuthUserRow(
         boolean active,
         boolean mustChangePassword,
         Instant passwordChangedAt,
+        String totpSecret,
+        boolean totpEnabled,
         int failedAttempts,
         Instant lockedUntil
 ) {

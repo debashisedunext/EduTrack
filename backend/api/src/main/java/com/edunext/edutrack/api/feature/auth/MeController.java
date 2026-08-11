@@ -8,11 +8,13 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -46,9 +48,12 @@ import org.springframework.web.bind.annotation.RestController;
 class MeController {
 
     private final PasswordChangeService passwordChange;
+    private final TwoFactorEnrolmentService twoFactorEnrolment;
 
-    MeController(PasswordChangeService passwordChange) {
+    MeController(PasswordChangeService passwordChange,
+                 TwoFactorEnrolmentService twoFactorEnrolment) {
         this.passwordChange = passwordChange;
+        this.twoFactorEnrolment = twoFactorEnrolment;
     }
 
     @PatchMapping(path = "/password", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -135,6 +140,144 @@ class MeController {
             @Valid @RequestBody ChangePasswordRequest request) {
 
         passwordChange.change(authorization, request);
+
+        return ResponseEntity.noContent().build();
+    }
+
+    // ── A-029 · two-factor enrolment ────────────────────────────────────────
+    //
+    // CONTRACT DEVIATION, flagged for Debashis rather than made quietly (Stream
+    // D owns contracts/openapi.yaml). The contract describes 2FA only as
+    // LoginRequest.totpCode — there are no endpoints for enrolling, confirming
+    // or disabling, and none for recovery codes. The three below are therefore
+    // additions rather than implementations of a reviewed shape, and
+    // ContractConformanceTest will report them as served-but-undocumented until
+    // the contract catches up. Paths and bodies are documented springdoc-side so
+    // the generated client can be regenerated the moment it does.
+
+    @PostMapping(path = "/2fa/setup")
+    @Operation(
+            operationId = "beginTwoFactorEnrolment",
+            summary = "Start two-factor enrolment",
+            description = """
+                    Generates a shared secret and returns it, along with the `otpauth://` \
+                    URI to render as a QR code. **This does not turn 2FA on** — the account \
+                    is unchanged until `/2fa/confirm` succeeds.
+
+                    That two-step shape is the whole design. Enabling at the moment the \
+                    secret is created locks out anyone whose QR did not scan, whose phone \
+                    clock is wrong, or who simply closed the tab — and locks them out of \
+                    the account they were in the middle of protecting.
+
+                    Calling this again replaces an unconfirmed secret, which is what makes \
+                    "let me scan that again" work. It is refused outright once 2FA is \
+                    enabled: re-enrolling requires disabling first, and disabling requires \
+                    the password, so a stolen access token cannot swap the second factor \
+                    for one of its own.""")
+    @ApiResponse(responseCode = "200", description = "Secret and otpauth:// URI. 2FA is not yet enabled.")
+    @ApiResponse(responseCode = "401", description = "Missing, forged or expired access token.",
+            content = @Content)
+    @ApiResponse(
+            responseCode = "409",
+            description = "Two-factor is already enabled — disable it first.",
+            content = @Content(
+                    mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class),
+                    examples = @ExampleObject(
+                            name = "two-factor-already-enabled",
+                            value = """
+                                    {
+                                      "type": "https://edutrack/errors/two-factor-already-enabled",
+                                      "title": "Two-factor is already enabled",
+                                      "status": 409,
+                                      "detail": "Disable two-factor authentication before enrolling a new authenticator."
+                                    }""")))
+    ResponseEntity<TwoFactorRequests.SetupResponse> beginTwoFactorEnrolment(
+            @Parameter(hidden = true)
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+
+        TotpService.Enrolment enrolment = twoFactorEnrolment.begin(authorization);
+
+        return ResponseEntity.ok(
+                new TwoFactorRequests.SetupResponse(enrolment.secret(), enrolment.otpauthUri()));
+    }
+
+    @PostMapping(path = "/2fa/confirm", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(
+            operationId = "confirmTwoFactorEnrolment",
+            summary = "Confirm two-factor enrolment and switch it on",
+            description = """
+                    Verifies a code from the authenticator, which proves the secret was \
+                    added successfully, and only then enables 2FA.
+
+                    **Returns the recovery codes, once.** They are stored hashed and cannot \
+                    be shown again — the user has to keep them now or regenerate the set \
+                    later. They are issued here rather than at setup because codes handed \
+                    out for an enrolment that was never completed would be live credentials \
+                    for an account with no second factor.
+
+                    Each recovery code works exactly once and substitutes for the 6-digit \
+                    code at login, which is what stops a lost phone becoming a permanently \
+                    locked account.""")
+    @ApiResponse(responseCode = "200", description = "Two-factor is now enabled. Recovery codes returned once.")
+    @ApiResponse(responseCode = "400", description = "The code is not six digits.", content = @Content)
+    @ApiResponse(
+            responseCode = "401",
+            description = "Bad access token, or the code did not verify.",
+            content = @Content(
+                    mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class),
+                    examples = @ExampleObject(
+                            name = "invalid-totp-code",
+                            value = """
+                                    {
+                                      "type": "https://edutrack/errors/invalid-totp-code",
+                                      "title": "Two-factor code is not valid",
+                                      "status": 401,
+                                      "detail": "That code was not accepted. Codes change every 30 seconds — check your authenticator and try the current one."
+                                    }""")))
+    @ApiResponse(responseCode = "409", description = "No enrolment in progress, or 2FA is already on.",
+            content = @Content)
+    ResponseEntity<TwoFactorRequests.RecoveryCodesResponse> confirmTwoFactorEnrolment(
+            @Parameter(hidden = true)
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+            @Valid @RequestBody TwoFactorRequests.ConfirmRequest request) {
+
+        List<String> codes = twoFactorEnrolment.confirm(authorization, request.code());
+
+        return ResponseEntity.ok(new TwoFactorRequests.RecoveryCodesResponse(codes));
+    }
+
+    @PostMapping(path = "/2fa/disable", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(
+            operationId = "disableTwoFactor",
+            summary = "Turn two-factor authentication off",
+            description = """
+                    **Requires the account password**, not just a valid access token, and \
+                    that is the security of this endpoint rather than a formality. Removing \
+                    the second factor is the first thing somebody holding a stolen \
+                    fifteen-minute token would do, and a token must not be enough to strip \
+                    the protection it was layered under.
+
+                    Clears the secret and every recovery code, so re-enabling means scanning \
+                    a new QR. Leaving them behind would mean a user who disabled 2FA because \
+                    their authenticator was compromised silently resurrects that same secret \
+                    on re-enrolling.""")
+    @ApiResponse(responseCode = "204", description = "Two-factor is off. Secret and recovery codes cleared.")
+    @ApiResponse(
+            responseCode = "401",
+            description = """
+                    `invalid-access-token` — bad or missing bearer token. \
+                    `invalid-credentials` — the token was fine but the password was wrong.""",
+            content = @Content(
+                    mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class)))
+    ResponseEntity<Void> disableTwoFactor(
+            @Parameter(hidden = true)
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+            @Valid @RequestBody TwoFactorRequests.DisableRequest request) {
+
+        twoFactorEnrolment.disable(authorization, request.password());
 
         return ResponseEntity.noContent().build();
     }

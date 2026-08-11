@@ -76,7 +76,7 @@ class ResetPasswordServiceTest {
     private static AuthUserRow userRow(boolean active) {
         return new AuthUserRow(USER_ID, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                 "{argon2id}$old", "DEVELOPER", 3, "Asia/Kolkata",
-                active, true, Instant.now(), 4, null);
+                active, true, Instant.now(), null, false, 4, null);
     }
 
     // ── the happy path ──────────────────────────────────────────────────────

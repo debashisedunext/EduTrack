@@ -32,8 +32,15 @@ import java.util.List;
  * </ol>
  *
  * <p><b>Not in this task, deliberately.</b> A-022 owns the access token; A-023
- * the refresh cookie; A-026 the forced-change redirect; A-029 the TOTP
- * challenge.
+ * the refresh cookie; A-026 the forced-change redirect.
+ *
+ * <p><b>A-029 added the TOTP challenge</b>, and its placement is part of the
+ * design above rather than an addition to it: {@link TotpService#verifyForLogin}
+ * is called after the password verification and the lockout check, so a
+ * "this account needs a code" answer is only ever given to somebody who has
+ * already proved the password. Reaching it earlier would confirm both that an
+ * account exists and that it is protected — a list of exactly whom to phish —
+ * and would answer in a measurably different time from an account without 2FA.
  *
  * <p><b>Two gaps remain after A-021, both belonging to A-074.</b>
  *
@@ -63,6 +70,7 @@ class AuthenticationService {
     private final PasswordEncoder passwordEncoder;
     private final LoginAttemptRecorder attempts;
     private final PasswordPolicy passwordPolicy;
+    private final TotpService twoFactor;
 
     /**
      * A real Argon2id hash of a value nobody knows, verified against whenever
@@ -82,11 +90,13 @@ class AuthenticationService {
     AuthenticationService(AuthUserRepository users,
                           PasswordEncoder passwordEncoder,
                           LoginAttemptRecorder attempts,
-                          PasswordPolicy passwordPolicy) {
+                          PasswordPolicy passwordPolicy,
+                          TotpService twoFactor) {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.attempts = attempts;
         this.passwordPolicy = passwordPolicy;
+        this.twoFactor = twoFactor;
         this.decoyHash = passwordEncoder.encode(randomSecret());
     }
 
@@ -101,7 +111,7 @@ class AuthenticationService {
      * @throws InvalidCredentialsException on every failure, without saying which
      */
     @Transactional(readOnly = true)
-    AuthenticatedUser authenticate(String username, String rawPassword) {
+    AuthenticatedUser authenticate(String username, String rawPassword, String totpCode) {
         AuthUserRow user = users.findByUsername(username).orElse(null);
 
         // Both branches run the full KDF. Do not "optimise" this into an early
@@ -136,6 +146,22 @@ class AuthenticationService {
         if (user.isLockedAt(Instant.now())) {
             throw new AccountLockedException(user.lockedUntil());
         }
+
+        // A-029 · blueprint §10.1's `2FA enabled? → TOTP challenge`.
+        //
+        // Placed HERE — after the password and the lock, before the session is
+        // resolved — for the same reason A-021's lockout sits where it does. A
+        // "this account needs a code" answer handed to someone who has not
+        // proved the password would confirm both that the account exists and
+        // that it is protected, which is a list of exactly whom to phish. And
+        // because it runs after the KDF, a 2FA-enabled account does not answer
+        // faster or slower than one without.
+        //
+        // Note this runs BEFORE recordSuccess: a correct password with a wrong
+        // code must not clear the failure counter, or an attacker holding the
+        // password could hold the lockout open indefinitely while grinding the
+        // six digits.
+        twoFactor.verifyForLogin(user, totpCode);
 
         attempts.recordSuccess(user);
         return resolveScope(user);

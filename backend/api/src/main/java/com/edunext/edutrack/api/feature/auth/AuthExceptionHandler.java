@@ -43,6 +43,12 @@ class AuthExceptionHandler {
     private static final URI PASSWORD_UNCHANGED = URI.create("https://edutrack/errors/password-unchanged");
     private static final URI PASSWORD_CHANGE_REQUIRED = URI.create("https://edutrack/errors/password-change-required");
     private static final URI PASSWORD_REUSED = URI.create("https://edutrack/errors/password-reused");
+    private static final URI TWO_FACTOR_REQUIRED = URI.create("https://edutrack/errors/two-factor-required");
+    private static final URI INVALID_TOTP_CODE = URI.create("https://edutrack/errors/invalid-totp-code");
+    private static final URI TWO_FACTOR_ALREADY_ENABLED =
+            URI.create("https://edutrack/errors/two-factor-already-enabled");
+    private static final URI TWO_FACTOR_NOT_ENROLLED =
+            URI.create("https://edutrack/errors/two-factor-not-enrolled");
     private static final URI INVALID_RESET_TOKEN = URI.create("https://edutrack/errors/invalid-reset-token");
     private static final URI TOO_MANY_RESET_REQUESTS =
             URI.create("https://edutrack/errors/too-many-reset-requests");
@@ -216,6 +222,83 @@ class AuthExceptionHandler {
         problem.setTitle("Password recently used");
         problem.setDetail("This password has been used recently. Choose one you have not used before.");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    // ── A-029 · two-factor authentication ───────────────────────────────────
+
+    /**
+     * A-029 · the password was right and this account needs a code.
+     *
+     * <p><b>401 with its own {@code type}, and the distinction is the point.</b>
+     * S-04 has to tell "your password was wrong" from "your password was fine,
+     * now open your authenticator" — the first means re-enter the password, the
+     * second means do not. A shared {@code invalid-credentials} would leave the
+     * frontend guessing, and guessing wrong means clearing a password field the
+     * user typed correctly.
+     *
+     * <p>Reachable only after the password verifies (see
+     * {@link AuthenticationService}), so answering specifically here reveals
+     * nothing to anyone who has not already proved they hold the first factor.
+     */
+    @ExceptionHandler(TwoFactorRequiredException.class)
+    ResponseEntity<ProblemDetail> handleTwoFactorRequired(TwoFactorRequiredException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNAUTHORIZED);
+        problem.setType(TWO_FACTOR_REQUIRED);
+        problem.setTitle("Two-factor code required");
+        problem.setDetail("Enter the 6-digit code from your authenticator app.");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem);
+    }
+
+    /**
+     * A-029 · the code was wrong, expired, replayed, or an unrecognised recovery
+     * code.
+     *
+     * <p>One body for all of them, per {@link InvalidTotpCodeException}. Naming
+     * the failed check would hand a caller a clock-synchronisation oracle —
+     * "that was the right code but already used" tells them their clock is
+     * correct and their code was real, which turns brute-forcing six digits into
+     * a search rather than a guess.
+     */
+    @ExceptionHandler(InvalidTotpCodeException.class)
+    ResponseEntity<ProblemDetail> handleInvalidTotpCode(InvalidTotpCodeException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNAUTHORIZED);
+        problem.setType(INVALID_TOTP_CODE);
+        problem.setTitle("Two-factor code is not valid");
+        problem.setDetail("That code was not accepted. Codes change every 30 seconds — "
+                + "check your authenticator and try the current one.");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem);
+    }
+
+    /**
+     * A-029 · 409 — enrolling on an account that already has 2FA on.
+     *
+     * <p>{@link TwoFactorAlreadyEnabledException} explains why this is refused
+     * rather than treated as a re-enrolment: silently reissuing would let a
+     * stolen fifteen-minute access token replace the second factor and become a
+     * permanent foothold.
+     */
+    @ExceptionHandler(TwoFactorAlreadyEnabledException.class)
+    ResponseEntity<ProblemDetail> handleTwoFactorAlreadyEnabled(TwoFactorAlreadyEnabledException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(TWO_FACTOR_ALREADY_ENABLED);
+        problem.setTitle("Two-factor is already enabled");
+        problem.setDetail("Disable two-factor authentication before enrolling a new authenticator.");
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /**
+     * A-029 · 409 — confirm or disable with no enrolment in progress.
+     *
+     * <p>409 rather than 404: the account exists and the caller is authenticated
+     * as it. What is missing is the state the request assumes.
+     */
+    @ExceptionHandler(TwoFactorNotEnrolledException.class)
+    ResponseEntity<ProblemDetail> handleTwoFactorNotEnrolled(TwoFactorNotEnrolledException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(TWO_FACTOR_NOT_ENROLLED);
+        problem.setTitle("No enrolment in progress");
+        problem.setDetail("Start two-factor setup before confirming a code.");
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 
     /**

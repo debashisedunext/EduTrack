@@ -195,6 +195,35 @@ edutrack:
       expiry-enabled: ${PASSWORD_EXPIRY_ENABLED:false}
       max-age: ${PASSWORD_MAX_AGE:P90D}
 
+    # A-029 · two-factor authentication. Blueprint §10.1, screen S-04.
+    totp:
+      # The name an authenticator app shows above the code. The organisation's,
+      # not ours — and it is how a user with accounts on two EduTrack
+      # installations tells the entries apart.
+      issuer: ${TOTP_ISSUER:EduTrack}
+
+      # 30-second steps accepted either side of now. One tolerates ±30s of
+      # phone-clock drift plus the seconds between reading a code and pressing
+      # submit. Each extra step multiplies how many codes are valid at once, so
+      # this buys tolerance at a directly proportional cost in strength.
+      window-steps: ${TOTP_WINDOW_STEPS:1}
+
+      # Single-use codes issued at enrolment. Ten is the industry norm: few
+      # enough to print, many enough that losing a phone twice does not
+      # exhaust them.
+      recovery-codes: ${TOTP_RECOVERY_CODES:10}
+
+      # Encrypts the shared secret at rest. Unlike a password the secret must
+      # be recoverable — verifying a code recomputes HMAC over it — so this is
+      # encryption rather than hashing, and the key living outside the database
+      # is what makes a stolen dump useless on its own.
+      #
+      # TotpConfig REFUSES TO START outside `local` while this is still the
+      # committed default. A default key is in the repository, so it is the
+      # same as no encryption at all: source plus a database dump would yield
+      # every enrolled user's second factor.
+      encryption-key: ${TOTP_ENCRYPTION_KEY:local-dev-only-totp-encryption-key-change-me-in-every-other-environment}
+
   storage:
     endpoint: ${S3_ENDPOINT:http://localhost:9000}
     bucket: ${S3_BUCKET:edutrack}
