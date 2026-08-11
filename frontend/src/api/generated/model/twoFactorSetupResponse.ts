@@ -46,8 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { BeginTwoFactorEnrolment200Data } from './beginTwoFactorEnrolment200Data';
+import type { TwoFactorSetup } from './twoFactorSetup';
 
-export type BeginTwoFactorEnrolment200 = {
-  data: BeginTwoFactorEnrolment200Data;
-};
+export interface TwoFactorSetupResponse {
+  data: TwoFactorSetup;
+}

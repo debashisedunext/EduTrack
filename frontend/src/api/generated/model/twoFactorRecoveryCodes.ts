@@ -47,9 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type BeginTwoFactorEnrolment200Data = {
-  /** Base32, for typing in when a QR cannot be scanned. */
-  secret: string;
-  /** Render client-side as a QR code. */
-  otpauthUri: string;
-};
+export interface TwoFactorRecoveryCodes {
+  /** Single-use. Each substitutes for the 6-digit code at login, and is the only way back in if the authenticator is lost. Shown once. */
+  recoveryCodes: string[];
+}

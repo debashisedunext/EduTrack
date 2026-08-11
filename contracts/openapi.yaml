@@ -298,16 +298,7 @@ paths:
           description: Secret and otpauth URI. 2FA is not yet enabled.
           content:
             application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data:
-                    type: object
-                    required: [secret, otpauthUri]
-                    properties:
-                      secret: { type: string, description: 'Base32, for typing in when a QR cannot be scanned.' }
-                      otpauthUri: { type: string, description: 'Render client-side as a QR code.' }
+              schema: { $ref: '#/components/schemas/TwoFactorSetupResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
 
@@ -338,18 +329,7 @@ paths:
           description: Two-factor enabled. Recovery codes returned once.
           content:
             application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data:
-                    type: object
-                    required: [recoveryCodes]
-                    properties:
-                      recoveryCodes:
-                        type: array
-                        items: { type: string }
-                        description: Single-use. Each substitutes for the 6-digit code at login.
+              schema: { $ref: '#/components/schemas/TwoFactorRecoveryCodesResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -2903,6 +2883,50 @@ components:
       required: [data]
       properties:
         data: { $ref: '#/components/schemas/Session' }
+
+    # ── A-029 · two-factor enrolment ──────────────────────────────────────
+    #
+    # A 2xx body must be a $ref to a named schema, never an inline object.
+    # check-conventions.py resolves response schemas with
+    #
+    #     schemas.get(ref.get("$ref", "").split("/")[-1], {})
+    #
+    # which yields an empty dict for anything inline — so an inline body fails
+    # the "wrapped in { data }" rule no matter how it is written, because the
+    # checker never sees its properties. Every 2xx in this file is a $ref.
+    TwoFactorSetup:
+      type: object
+      required: [secret, otpauthUri]
+      properties:
+        secret:
+          type: string
+          description: Base32 shared secret, for typing in when a QR cannot be scanned.
+        otpauthUri:
+          type: string
+          description: >-
+            The otpauth:// URI to render client-side as a QR code. Carries the
+            same secret, so it is never turned into a cacheable image.
+    TwoFactorSetupResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/TwoFactorSetup' }
+
+    TwoFactorRecoveryCodes:
+      type: object
+      required: [recoveryCodes]
+      properties:
+        recoveryCodes:
+          type: array
+          items: { type: string }
+          description: >-
+            Single-use. Each substitutes for the 6-digit code at login, and is
+            the only way back in if the authenticator is lost. Shown once.
+    TwoFactorRecoveryCodesResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/TwoFactorRecoveryCodes' }
     Me:
       allOf:
         - { $ref: '#/components/schemas/UserRef' }

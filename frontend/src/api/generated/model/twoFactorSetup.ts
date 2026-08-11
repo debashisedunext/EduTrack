@@ -46,8 +46,10 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ConfirmTwoFactorEnrolment200Data } from './confirmTwoFactorEnrolment200Data';
 
-export type ConfirmTwoFactorEnrolment200 = {
-  data: ConfirmTwoFactorEnrolment200Data;
-};
+export interface TwoFactorSetup {
+  /** Base32 shared secret, for typing in when a QR cannot be scanned. */
+  secret: string;
+  /** The otpauth:// URI to render client-side as a QR code. Carries the same secret, so it is never turned into a cacheable image. */
+  otpauthUri: string;
+}
