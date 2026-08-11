@@ -101,6 +101,17 @@ export const userRef = (id: number | null, db: Db = getDb()) => {
   return u ? { id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl, role: u.role } : null;
 };
 
+/**
+ * `ProjectRef` — the label half of a project (B-010).
+ *
+ * Resolved server-side so the S-07 grid can print project names without a
+ * second request per row.
+ */
+export const projectRef = (id: number, db: Db = getDb()) => {
+  const p = db.projects.find((x) => x.id === id);
+  return p ? { id: p.id, projectCode: p.projectCode, name: p.name, colourTag: p.colourTag } : null;
+};
+
 export const clientRef = (id: number | null, db: Db = getDb()) => {
   if (id == null) return null;
   const c = db.clients.find((x) => x.id === id);

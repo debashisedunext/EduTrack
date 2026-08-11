@@ -269,7 +269,16 @@ paths:
     get:
       tags: [users]
       operationId: listUsers
-      summary: List resources
+      summary: List resources (S-07)
+      description: |
+        The Resource Master grid, and the directory every assignee picker reads.
+
+        Every role may call this — the resource directory is not confidential,
+        and the ticket-assignee picker (S-18) and `@mention` resolution are the
+        same data. Only Admin sees the write actions, which are separate routes.
+
+        The file download is `GET /users/export`, deliberately a separate
+        operation — see the note there.
       parameters:
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Limit' }
@@ -363,6 +372,95 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/OpenTicketsProblem' }
+
+  /users/export:
+    get:
+      tags: [users]
+      operationId: exportUsers
+      summary: Download the filtered resource list (S-07)
+      description: |
+        The same query as `listUsers`, streamed as a file. Takes the same
+        filters and applies them the same way — one code path builds both, so
+        "download what I'm looking at" cannot quietly mean something else.
+
+        **Cursor and limit are absent by design.** The export is every matching
+        row. One that stopped at the current page would produce a file that
+        looks complete and is not, which is the failure nobody checks for
+        because the file opens.
+
+        > **Why a separate operation rather than `?export=` on `listUsers`,
+        > which is what `/reports/{key}` and `/audit-logs` do.** An operation
+        > that declares both `application/json` and
+        > `application/octet-stream` generates a client returning
+        > `Blob | UserListResponse`. Every existing caller of `useListUsers` —
+        > the ticket list's assignee filter and the create form's assignee
+        > picker among them — then fails to compile until it narrows a union it
+        > has no interest in, and every future caller pays the same tax. Tried
+        > it that way in B-010 and reverted; **the same latent break sits in
+        > `/reports/{key}` and `/audit-logs`, which have no consumer yet.**
+        > Raised with Streams A and D rather than changed here.
+      parameters:
+        - { name: format, in: query, required: true, schema: { type: string, enum: [xlsx, csv] } }
+        - { name: q, in: query, schema: { type: string }, description: 'Name, username, email or employee code.' }
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/RoleCode' } }
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: managerId, in: query, schema: { type: integer, format: int64 } }
+        - { name: isActive, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: The file, named by `Content-Disposition`.
+          headers:
+            Content-Disposition:
+              schema: { type: string, examples: ['attachment; filename="resources-2026-08-11.xlsx"'] }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users/bulk-status:
+    post:
+      tags: [users]
+      operationId: setUserStatusBulk
+      summary: Activate or deactivate a selection (S-07)
+      description: |
+        The bulk half of `PATCH /users/{userId}/status`, for the resource
+        grid's selection bar.
+
+        **Answers `200` with a per-resource outcome, not a single verdict.** A
+        selection of forty in which two hold open tickets is the normal case,
+        and both alternatives are wrong: failing the batch punishes the
+        thirty-eight, and succeeding quietly hides the two. Each row comes back
+        as `CHANGED`, `UNCHANGED`, `BLOCKED_OPEN_TICKETS` or `NOT_FOUND`, and
+        the caller renders exactly what happened.
+
+        `BLOCKED_OPEN_TICKETS` carries the count, matching the singular route's
+        `409`. Those resources are reassigned through
+        `POST /tickets/bulk-reassign` first — deactivating them regardless is
+        how live work disappears.
+
+        No `Idempotency-Key` and no `If-Match`: setting a flag to a stated value
+        is idempotent, so a replay converges rather than double-acting, and last
+        write wins is the correct semantic. CONVENTIONS.md §5 records the same
+        exemption for the singular route.
+
+        **Admin only**, like every master write. Refused before any id in the
+        body is read, so the refusal says nothing about which resources exist —
+        which is why this documents no `403` of its own, exactly as
+        `PATCH /users/{userId}/status` and `POST /users` do not.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkUserStatusRequest' }
+      responses:
+        '200':
+          description: Per-resource outcomes. Partial success is expected, not exceptional.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkUserStatusResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /users/{userId}/profile-360:
     parameters: [{ $ref: '#/components/parameters/UserId' }]
@@ -2679,10 +2777,27 @@ components:
             username: { type: string }
             email: { type: string, format: email }
             employeeCode: { type: string }
+            department: { type: [string, 'null'] }
+            designation: { type: [string, 'null'] }
             reportingManager: { $ref: '#/components/schemas/UserRef' }
-            projectIds: { type: array, items: { type: integer, format: int64 } }
+            projectIds:
+              type: array
+              items: { type: integer, format: int64 }
+              description: |
+                Retained for callers that only need membership. Prefer
+                `projects` — an id cannot be rendered without a second lookup.
+            projects:
+              type: array
+              items: { $ref: '#/components/schemas/ProjectRef' }
+              description: |
+                Resolved server-side so the S-07 grid can print project names
+                without a second request per row.
             isActive: { type: boolean }
             openTicketCount: { type: integer }
+            lastLoginAt:
+              type: [string, 'null']
+              format: date-time
+              description: UTC, like every stored instant. Null until the first login.
             createdAt: { type: string, format: date-time }
     UserWriteRequest:
       type: object
@@ -2709,6 +2824,50 @@ components:
       properties:
         data: { type: array, items: { $ref: '#/components/schemas/User' } }
         meta: { $ref: '#/components/schemas/Meta' }
+    BulkUserStatusRequest:
+      type: object
+      required: [userIds, isActive]
+      properties:
+        userIds:
+          type: array
+          items: { type: integer, format: int64 }
+          minItems: 1
+          maxItems: 200
+          description: |
+            Capped at the pagination maximum: a selection is made on a page, so
+            a larger one did not come from the grid.
+        isActive: { type: boolean }
+        reason: { type: string, maxLength: 500 }
+    BulkUserStatusOutcome:
+      type: object
+      required: [userId, outcome]
+      properties:
+        userId: { type: integer, format: int64 }
+        displayName: { type: [string, 'null'] }
+        outcome:
+          type: string
+          enum: [CHANGED, UNCHANGED, BLOCKED_OPEN_TICKETS, NOT_FOUND]
+          description: |
+            `UNCHANGED` means the resource was already in the requested state —
+            reported rather than counted as a change, so the summary line does
+            not overstate what happened.
+        openTicketCount:
+          type: [integer, 'null']
+          description: Present only on `BLOCKED_OPEN_TICKETS`.
+    BulkUserStatusResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [results, changed, unchanged, blocked, notFound]
+          properties:
+            results: { type: array, items: { $ref: '#/components/schemas/BulkUserStatusOutcome' } }
+            changed: { type: integer }
+            unchanged: { type: integer }
+            blocked: { type: integer }
+            notFound: { type: integer }
+            reassignUrl: { type: string, examples: ['/api/v1/tickets/bulk-reassign'] }
     Profile360Response:
       type: object
       required: [data]
@@ -2725,6 +2884,18 @@ components:
             currentStages: { type: array, items: { type: string } }
 
     # ── projects ──────────────────────────────────────────────────────────
+    ProjectRef:
+      type: object
+      required: [id, projectCode, name]
+      description: |
+        The label half of `Project`, for embedding. Kept to four fields for the
+        reason `UserRef` gives — it is inlined wherever a project is named, so
+        anything more becomes weight in every schema that references it.
+      properties:
+        id: { type: integer, format: int64 }
+        projectCode: { type: string }
+        name: { type: string }
+        colourTag: { type: [string, 'null'], pattern: '^#[0-9A-Fa-f]{6}$' }
     Project:
       type: object
       required: [id, projectCode, name]
