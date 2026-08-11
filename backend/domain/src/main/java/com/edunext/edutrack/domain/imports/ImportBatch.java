@@ -2,6 +2,8 @@ package com.edunext.edutrack.domain.imports;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -52,9 +54,18 @@ public class ImportBatch {
     @Column(name = "rejected_rows", nullable = false)
     private int rejectedRows;
 
-    /** PENDING | VALIDATING | COMMITTING | DONE | FAILED. */
+    /**
+     * The contract's vocabulary, and since
+     * {@code V20260810_2010__import_batch_status_vocabulary} the only one
+     * {@code ck_import_batches_status} permits — see {@link ImportBatchStatus}.
+     *
+     * <p>{@code STRING}, not {@code ORDINAL}: the column is a {@code VARCHAR}
+     * the CHECK constraint reads by name, and an ordinal would make reordering
+     * this enum silently rewrite the meaning of every stored row.
+     */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
-    private String status = "PENDING";
+    private ImportBatchStatus status = ImportBatchStatus.QUEUED;
 
     /**
      * Object-storage key of the B-036 error report: the rejected rows as
@@ -132,11 +143,11 @@ public class ImportBatch {
         this.rejectedRows = rejectedRows;
     }
 
-    public String getStatus() {
+    public ImportBatchStatus getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(ImportBatchStatus status) {
         this.status = status;
     }
 

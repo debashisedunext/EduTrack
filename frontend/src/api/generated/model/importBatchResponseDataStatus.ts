@@ -47,6 +47,13 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * The commit job's lifecycle, and the only vocabulary
+`import_batches.status` uses. There is no state for the step-4
+dry run because the dry run writes nothing — no batch row
+exists until commit, and it is born `QUEUED`.
+
+ */
 export type ImportBatchResponseDataStatus = typeof ImportBatchResponseDataStatus[keyof typeof ImportBatchResponseDataStatus];
 
 

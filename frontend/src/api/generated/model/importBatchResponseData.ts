@@ -50,7 +50,12 @@ import type { ImportBatchResponseDataStatus } from './importBatchResponseDataSta
 import type { ImportBatchResponseDataErrorReportUrl } from './importBatchResponseDataErrorReportUrl';
 
 export type ImportBatchResponseData = {
-  batchId?: string;
+  batchId?: number;
+  /** The commit job's lifecycle, and the only vocabulary
+`import_batches.status` uses. There is no state for the step-4
+dry run because the dry run writes nothing — no batch row
+exists until commit, and it is born `QUEUED`.
+ */
   status?: ImportBatchResponseDataStatus;
   processed?: number;
   total?: number;

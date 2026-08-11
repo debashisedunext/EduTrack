@@ -13,6 +13,10 @@ public interface ImportBatchRepository extends JpaRepository<ImportBatch, Long> 
      */
     List<ImportBatch> findByEntityOrderByCreatedAtDesc(String entity);
 
-    /** Finds runs stuck mid-flight (VALIDATING, COMMITTING) after a restart. */
-    List<ImportBatch> findByStatus(String status);
+    /**
+     * Finds runs stuck mid-flight after a restart — {@code RUNNING} batches
+     * whose job died with the JVM. There is no dry-run state to sweep up: step 4
+     * writes nothing, so a crash during validation leaves no row behind.
+     */
+    List<ImportBatch> findByStatus(ImportBatchStatus status);
 }
