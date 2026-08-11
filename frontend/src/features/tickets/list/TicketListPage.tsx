@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
+import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import {
   TableContainer,
   Table,
@@ -27,7 +28,6 @@ import {
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 
-import { FilterDropdown } from './FilterDropdown'
 import { DateRangeFilter } from './DateRangeFilter'
 import { ColumnChooserMenu } from './ColumnChooserMenu'
 import { DensityToggle } from './DensityToggle'
