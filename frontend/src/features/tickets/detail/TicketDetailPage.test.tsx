@@ -234,6 +234,55 @@ describe('S-20 Ticket detail shell — C-019', () => {
     expect(within(ribbon).getByText(/C-051/)).toBeInTheDocument()
   })
 
+  describe('description — rich text since C-066', () => {
+    const setDescription = (description: string) => {
+      const ticket = getDb().tickets.find((t) => t.ticketId === TICKET)!
+      ticket.description = description
+    }
+
+    it('renders stored markup as markup, not as visible tags', async () => {
+      signInAsAdmin()
+      setDescription('<p>Card payments <strong>hang</strong>.</p><ol><li>Open Fees</li></ol>')
+      renderPage()
+      await waitForTicket()
+
+      // Scoped: the ribbon and the tab strip have lists of their own.
+      const section = screen.getByRole('region', { name: 'Description' })
+      expect(within(section).getByText('hang').tagName).toBe('STRONG')
+      expect(within(section).getByRole('listitem')).toHaveTextContent('Open Fees')
+    })
+
+    it('sanitises on render, so tightening the allow-list reaches rows already stored', async () => {
+      // §3.9's retroactivity rule, and the reason this goes through
+      // `RichTextView` rather than a bare `dangerouslySetInnerHTML`. A row
+      // written by an older, looser sanitiser is still in the table.
+      signInAsAdmin()
+      setDescription('<p>legit</p><script>alert(1)</script><img src="x" onerror="alert(2)">')
+      renderPage()
+      await waitForTicket()
+
+      const section = screen.getByRole('region', { name: 'Description' })
+      expect(within(section).getByText('legit')).toBeInTheDocument()
+      expect(section.querySelector('script')).toBeNull()
+      expect(section.querySelector('img')).toBeNull()
+      expect(section.innerHTML).not.toContain('onerror')
+    })
+
+    it('keeps the line breaks of a description written before the field was rich text', async () => {
+      // Every row in the database is plain text until C-067 backfills. Handed
+      // straight to the view, HTML would collapse these two paragraphs into
+      // one — which is a silent edit to somebody's bug report.
+      signInAsAdmin()
+      setDescription('Reproduced on production.\n\nGuest checkout is fine.')
+      renderPage()
+      await waitForTicket()
+
+      const section = screen.getByRole('region', { name: 'Description' })
+      expect(within(section).getByText('Reproduced on production.').tagName).toBe('P')
+      expect(within(section).getByText('Guest checkout is fine.').tagName).toBe('P')
+    })
+  })
+
   it('answers an out-of-scope ticket with "not found" and never hints that it exists', async () => {
     // No signInAsAdmin: Ravi is a Developer and this ticket is assigned to
     // Meera, so the mock's scope guard answers 404 — the same response a

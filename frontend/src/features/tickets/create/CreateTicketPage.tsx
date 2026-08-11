@@ -22,9 +22,10 @@ import { Chip } from '@/components/ui/chip'
 import { SearchableDropdown } from '@/components/ui/searchable-dropdown'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { toast } from '@/components/ui/use-toast'
+import { createTicketBodyDescriptionMax } from '@/api/generated/zod/tickets/tickets.zod'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
-import { cn } from '@/lib/utils'
 
 import { FieldGroup, FormField, ReadOnlyField } from './FormField'
 import { LevelPicker } from './LevelPicker'
@@ -454,20 +455,26 @@ export function CreateTicketPage() {
             label="Task description"
             required
             error={errors.description?.message}
-            hint="Rich text — bold, lists, code blocks and inline images — arrives with the shared editor built for the comment box (C-029)."
+            hint="Bold, headings, lists, code blocks and links. Paste from a client's email — the formatting is kept and the styling is stripped."
             className="sm:col-span-2"
           >
             {(aria) => (
-              <textarea
-                {...aria}
-                {...register('description')}
-                rows={6}
-                placeholder="What happened, what was expected, and how to reproduce it."
-                className={cn(
-                  'w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-content',
-                  'placeholder:text-content-muted',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
-                  'aria-[invalid=true]:border-danger aria-[invalid=true]:focus-visible:ring-danger',
+              // `Controller`, not `register`: a contentEditable emits no
+              // `input` event carrying a `value`, so there is nothing for
+              // react-hook-form's uncontrolled path to read.
+              <Controller
+                name="description"
+                control={control}
+                render={({ field }) => (
+                  <RichTextEditor
+                    {...aria}
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    showCount
+                    maxLength={createTicketBodyDescriptionMax}
+                    placeholder="What happened, what was expected, and how to reproduce it."
+                  />
                 )}
               />
             )}

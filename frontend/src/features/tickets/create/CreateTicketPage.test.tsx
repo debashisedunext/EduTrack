@@ -94,12 +94,23 @@ const captureRequest = ({ request }: { request: Request }) => {
 const idempotencyKeys = () => creates.map((request) => request.headers.get('Idempotency-Key'))
 const bodyOf = (index: number) => creates[index].json() as Promise<Record<string, unknown>>
 
+const descriptionEditor = () => screen.getByRole('textbox', { name: /Task description/ })
+
+/**
+ * The description is a contentEditable since C-066, so there is no `value` to
+ * set — `fireEvent.change` throws "the given element does not have a value
+ * setter". Writing the markup and firing `input` is what the browser does.
+ */
+function typeDescription(html: string) {
+  const editor = descriptionEditor()
+  editor.innerHTML = html
+  fireEvent.input(editor)
+}
+
 /** The three fields Save & Assign insists on beyond project and task type. */
 function fillTicketBody(title: string) {
   fireEvent.change(screen.getByLabelText(/Title \/ summary/), { target: { value: title } })
-  fireEvent.change(screen.getByLabelText(/Task description/), {
-    target: { value: 'Card payments hang at the confirmation step, then fail.' },
-  })
+  typeDescription('<p>Card payments hang at the confirmation step, then fail.</p>')
   fireEvent.change(screen.getByLabelText(/Estimated effort/), { target: { value: '4.5' } })
 }
 
@@ -244,6 +255,59 @@ describe('S-19 Create Ticket', () => {
     // and the sequence never gives the first one back.
     expect(idempotencyKeys()[0]).toMatch(/^[0-9a-f-]{36}$/i)
   })
+
+  it('sends the description as sanitised rich text — C-066', async () => {
+    // The round trip the shared editor exists for: a support agent's structure
+    // survives to the wire, and what came in with it does not. Anything the
+    // §3.9 allow-list rejects is stripped here, on the client, *as well as* on
+    // the write path — the server's copy is the guarantee, this one is what
+    // stops the user believing they saved something they did not.
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    fireEvent.change(screen.getByLabelText(/Title \/ summary/), {
+      target: { value: 'Payment gateway times out on checkout' },
+    })
+    fireEvent.change(screen.getByLabelText(/Estimated effort/), { target: { value: '4.5' } })
+    typeDescription(
+      '<p style="color:red">Card payments <b>hang</b>.</p>' +
+        '<ol><li>Open Fees</li><li>Submit</li></ol>' +
+        '<script>alert(1)</script>',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+    await screen.findByText(/^Landed on CRM-26-\d{5,}$/)
+
+    const body = await bodyOf(0)
+    // `<b>` folded to `<strong>`, the inline style dropped, the list kept, the
+    // script gone tag and contents both.
+    expect(body.description).toBe(
+      '<p>Card payments <strong>hang</strong>.</p><ol><li>Open Fees</li><li>Submit</li></ol>',
+    )
+  })
+
+  it('refuses an editor the user focused and left empty', async () => {
+    // `<p><br></p>` is what the browser leaves behind, and it is 13 characters
+    // of nothing — a `.min(1)` check on the raw value would let it through and
+    // store a description that reads as blank.
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    fireEvent.change(screen.getByLabelText(/Title \/ summary/), {
+      target: { value: 'Payment gateway times out on checkout' },
+    })
+    fireEvent.change(screen.getByLabelText(/Estimated effort/), { target: { value: '4.5' } })
+    typeDescription('<p><br></p>')
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+
+    expect(
+      await screen.findByText('Describe the task — this is what the assignee reads first'),
+    ).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+  })
 })
 
 describe('S-19 actions — C-013', () => {
@@ -357,7 +421,12 @@ describe('S-19 actions — C-013', () => {
 
     const title = screen.getByLabelText(/Title \/ summary/)
     await waitFor(() => expect(title).toHaveValue(''))
-    expect(screen.getByLabelText(/Task description/)).toHaveValue('')
+    // A contentEditable has no `value`; an emptied one is the placeholder
+    // coming back, which is also what the user actually sees.
+    expect(descriptionEditor().innerHTML).toBe('')
+    expect(
+      screen.getByText('What happened, what was expected, and how to reproduce it.'),
+    ).toBeInTheDocument()
     expect(screen.getByLabelText(/Estimated effort/)).toHaveValue('')
 
     // What a batch shares survives, or the action saves nobody any work.

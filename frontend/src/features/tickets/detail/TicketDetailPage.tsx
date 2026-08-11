@@ -9,6 +9,8 @@ import { ApiError } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
+import { RichTextView } from '@/components/ui/rich-text-view'
+import { ensureRichText } from '@/components/ui/rich-text'
 
 import { PendingSection } from './PendingSection'
 import { TicketDetailHeader } from './TicketDetailHeader'
@@ -186,11 +188,17 @@ export function TicketDetailPage() {
             <h2 id="ticket-description-heading" className="mb-2 text-h3 text-content">
               Description
             </h2>
-            {ticket.description ? (
-              <p className="whitespace-pre-wrap text-sm text-content">{ticket.description}</p>
-            ) : (
-              <p className="text-sm text-content-muted">No description was given.</p>
-            )}
+            {/*
+              Rendered through the §3.9 sanitiser, not printed as text — the
+              description is rich text since C-066. `ensureRichText` is the
+              migration shim: every row already in the database is plain text
+              until C-067 backfills, and handing that straight to the view
+              would collapse its line breaks. It goes when the backfill lands.
+            */}
+            <RichTextView
+              html={ensureRichText(ticket.description ?? '')}
+              emptyText="No description was given."
+            />
           </section>
 
           <TicketDetailTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} />
