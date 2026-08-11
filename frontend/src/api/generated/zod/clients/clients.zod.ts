@@ -302,6 +302,12 @@ export const getClient360QueryParams = zod.object({
 
 export const getClient360ResponseDataTicketsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const getClient360ResponseDataTicketsItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const getClient360ResponseDataTicketsItemScreenNameMax = 120;
+
+export const getClient360ResponseDataTicketsItemFeatureMax = 120;
+
+export const getClient360ResponseDataTicketsItemStepsToGenerateMax = 20000;
+
 
 
 export const getClient360ResponseDataTicketsItemPctCompleteMin = 0;
@@ -368,6 +374,10 @@ export const getClient360Response = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(getClient360ResponseDataTicketsItemScreenNameMax).nullish(),
+  "feature": zod.string().max(getClient360ResponseDataTicketsItemFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(getClient360ResponseDataTicketsItemStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),

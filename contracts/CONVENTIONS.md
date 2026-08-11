@@ -137,6 +137,7 @@ product already enforces:
 | Endpoint | Bound |
 |---|---|
 | `/masters/task-types`, `/masters/priorities` | 11 and 4 rows |
+| `/masters/modules` | 8 seeded rows; a ninth is a row somebody adds |
 | `/masters/workflow-templates` | A handful per project |
 | `/projects/{id}/sla-policies` | Task types × 4 levels |
 | `/clients/{id}/contacts` | A short list per client |

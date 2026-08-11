@@ -408,6 +408,11 @@ export const restHandlers = [
 
   // ── masters ───────────────────────────────────────────────────────────────
   http.get(url('/masters/task-types'), () => ok(getDb().taskTypes)),
+  // Inactive rows included, in `seq` order — a picker filters them out, a grid
+  // still has to name the module an old ticket was raised against.
+  http.get(url('/masters/modules'), () =>
+    ok([...getDb().modules].sort((a, b) => a.seq - b.seq)),
+  ),
   http.get(url('/masters/priorities'), () =>
     ok([
       { id: 1, level: 'LOW', colour: '#84CC16', defaultSlaHrs: 120, autoEscalates: false },

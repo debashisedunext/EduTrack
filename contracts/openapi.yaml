@@ -559,6 +559,7 @@ paths:
         - { name: projectId, in: query, schema: { type: integer, format: int64 } }
         - { name: clientId, in: query, schema: { type: integer, format: int64 } }
         - { name: taskTypeId, in: query, schema: { type: integer, format: int64 } }
+        - { name: moduleId, in: query, schema: { type: integer, format: int64 }, description: 'Product module the concern was raised against (§7.5).' }
         - { name: level, in: query, schema: { $ref: '#/components/schemas/Level' } }
         - { name: status, in: query, schema: { $ref: '#/components/schemas/StatusCode' } }
         - { name: stage, in: query, schema: { type: string, examples: [QA] } }
@@ -1613,6 +1614,29 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TaskTypeListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /masters/modules:
+    get:
+      tags: [masters]
+      operationId: listModules
+      summary: Product modules a concern can be raised against (§7.5)
+      description: |
+        The Module field on the ticket. Eight seeded rows — Student, Admission,
+        Fees, Examination, Attendance, Library, Inventory, Parent App — held as a
+        master rather than an enum so that the ninth is a row somebody adds, not
+        a migration and a deployment.
+
+        **Deactivated rows are returned too**, carrying `isActive: false`, the
+        same way task types are. A ticket raised last year against a module since
+        retired still has to render its name; filtering them out here would leave
+        that cell blank. Offer only the active ones in a picker.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleListResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /masters/priorities:
@@ -2783,6 +2807,24 @@ components:
         clientContactId: { type: [integer, 'null'], format: int64 }
         isClientRaised: { type: boolean }
         taskTypeId: { type: integer, format: int64 }
+        moduleId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            The product module the concern was raised against (§7.5). Resolve the
+            name through `GET /masters/modules` rather than expecting it inline —
+            the master is small, cached, and includes deactivated rows precisely
+            so an old ticket's module still has a name.
+        screenName: { type: [string, 'null'], maxLength: 120 }
+        feature: { type: [string, 'null'], maxLength: 120 }
+        stepsToGenerate:
+          type: [string, 'null']
+          maxLength: 20000
+          description: |
+            **Sanitised HTML**, per PLAN.md §3.9 — render it through a sanitiser
+            client-side as well. The server sanitises on write, but a row written
+            before the allow-list was last tightened is only protected if the
+            renderer applies today's list too.
         level: { $ref: '#/components/schemas/Level' }
         originalLevel:
           $ref: '#/components/schemas/Level'
@@ -2817,6 +2859,17 @@ components:
         title: { type: string, minLength: 3, maxLength: 300 }
         description: { type: string, maxLength: 20000 }
         taskTypeId: { type: integer, format: int64 }
+        moduleId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            Optional here, and **mandatory on the form for bug-type task types**
+            (§7.5). The rule lives in the form rather than the contract because a
+            change request may genuinely span three modules, and a draft is saved
+            precisely because the answer is not known yet.
+        screenName: { type: [string, 'null'], maxLength: 120 }
+        feature: { type: [string, 'null'], maxLength: 120 }
+        stepsToGenerate: { type: [string, 'null'], maxLength: 20000, description: 'Sanitised HTML — PLAN.md §3.9.' }
         level: { $ref: '#/components/schemas/Level' }
         clientId: { type: [integer, 'null'], format: int64 }
         clientContactId: { type: [integer, 'null'], format: int64 }
@@ -2836,6 +2889,10 @@ components:
       properties:
         title: { type: string, minLength: 3, maxLength: 300 }
         description: { type: string, maxLength: 20000 }
+        moduleId: { type: [integer, 'null'], format: int64 }
+        screenName: { type: [string, 'null'], maxLength: 120 }
+        feature: { type: [string, 'null'], maxLength: 120 }
+        stepsToGenerate: { type: [string, 'null'], maxLength: 20000, description: 'Sanitised HTML — PLAN.md §3.9.' }
         estimatedHrs: { type: [number, 'null'], format: double }
         pctComplete: { type: integer, minimum: 0, maximum: 100 }
         watcherIds: { type: array, items: { type: integer, format: int64 } }
@@ -3367,6 +3424,19 @@ components:
       type: object
       required: [data]
       properties: { data: { type: array, items: { $ref: '#/components/schemas/TaskType' } } }
+    Module:
+      type: object
+      required: [id, code, name, isActive]
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string, maxLength: 40, examples: [FEES] }
+        name: { type: string, maxLength: 80, examples: [Fees] }
+        seq: { type: integer, description: Display order in the picker. }
+        isActive: { type: boolean }
+    ModuleListResponse:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/Module' } } }
     Priority:
       type: object
       properties:

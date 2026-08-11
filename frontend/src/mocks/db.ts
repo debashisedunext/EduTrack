@@ -62,6 +62,10 @@ export interface TaskType {
   id: number; name: string; icon: string; colour: string;
   defaultLevel: Level; defaultSlaHrs: number; isActive: boolean;
 }
+/** §7.5 — the product area a concern was raised against. */
+export interface Module {
+  id: number; code: string; name: string; seq: number; isActive: boolean;
+}
 export interface Stage {
   stageCode: string; displayName: string; sequence: number; ownerRole: RoleCode;
   icon: string; stageSlaHrs: number | null; isOptional: boolean; canReturnTo: string[];
@@ -70,6 +74,10 @@ export interface Ticket {
   ticketId: string; title: string; description: string;
   projectId: number; clientId: number | null; clientContactId: number | null;
   isClientRaised: boolean; taskTypeId: number;
+  /** §7.5 "where it happened". Null on tickets raised before the fields existed. */
+  moduleId: number | null; screenName: string | null; feature: string | null;
+  /** Sanitised HTML — PLAN.md §3.9. */
+  stepsToGenerate: string | null;
   level: Level; originalLevel: Level; status: StatusCode;
   currentStageCode: string | null; assigneeId: number | null; reportedById: number;
   cycleNo: number; iterationNo: number; reopenCount: number;
@@ -142,7 +150,7 @@ export interface ChatMessage {
 // ── the store ───────────────────────────────────────────────────────────────
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
-  taskTypes: TaskType[]; stages: Stage[];
+  taskTypes: TaskType[]; modules: Module[]; stages: Stage[];
   tickets: Ticket[]; cycles: Cycle[]; transitions: Transition[];
   effortLogs: EffortLog[]; history: HistoryEntry[]; comments: Comment[];
   attachments: Attachment[]; notifications: Notification[];
@@ -247,6 +255,27 @@ const TASK_TYPES: TaskType[] = [
   isActive: true,
 }));
 
+/**
+ * §7.5's eight modules, plus one that has been retired.
+ *
+ * `Transport` is deactivated and is referenced by exactly one seeded ticket. It
+ * is here because the endpoint deliberately returns inactive rows: a picker
+ * offers only the active ones, while a grid still has to render the name of a
+ * module some old ticket was raised against. A fixture with only active rows
+ * cannot tell those two behaviours apart, so the bug ships.
+ */
+const MODULES: Module[] = [
+  'Student', 'Admission', 'Fees', 'Examination',
+  'Attendance', 'Library', 'Inventory', 'Parent App',
+].map((name, i) => ({
+  id: i + 1,
+  code: name.toUpperCase().replace(/ /g, '_'),
+  name,
+  seq: (i + 1) * 10,
+  isActive: true,
+}));
+MODULES.push({ id: 9, code: 'TRANSPORT', name: 'Transport', seq: 90, isActive: false });
+
 /** Standard Dev Flow — the 8 stages of blueprint §4A.9. */
 const STAGES: Stage[] = [
   { stageCode: 'INTAKE', displayName: 'Intake', sequence: 1, ownerRole: 'SUPPORT', icon: 'inbox', stageSlaHrs: 2, isOptional: false, canReturnTo: [] },
@@ -266,6 +295,7 @@ export function createDb(): Db {
     clients: structuredClone(CLIENTS),
     contacts: structuredClone(CONTACTS),
     taskTypes: structuredClone(TASK_TYPES),
+    modules: structuredClone(MODULES),
     stages: structuredClone(STAGES),
     tickets: [], cycles: [], transitions: [], effortLogs: [], history: [],
     comments: [], attachments: [], notifications: [], notificationPreferences: [], emailLog: [],
@@ -316,7 +346,16 @@ function seedWalkthrough(db: Db) {
       'Acme report that returning customers paying with a saved card get a 500 at the ' +
       'final step. Reproduced on production with two accounts. Guest checkout is fine.',
     projectId: 1, clientId: 1, clientContactId: 1, isClientRaised: true,
-    taskTypeId: 2, level: 'CRITICAL', originalLevel: 'HIGH', status: 'CLOSED',
+    taskTypeId: 2,
+    moduleId: 3, // Fees
+    screenName: 'Checkout — payment',
+    feature: 'Saved-card payment',
+    stepsToGenerate:
+      '<ol><li>Sign in as a returning customer with a saved card.</li>' +
+      '<li>Add any item to the basket and go to checkout.</li>' +
+      '<li>Choose the saved card and press <strong>Pay</strong>.</li></ol>' +
+      '<p>Expected: order confirmation. Actual: HTTP 500.</p>',
+    level: 'CRITICAL', originalLevel: 'HIGH', status: 'CLOSED',
     currentStageCode: 'CLOSED', assigneeId: MEERA, reportedById: PRIYA,
     cycleNo: 2, iterationNo: 1, reopenCount: 1,
     plannedCloseDate: iso('2026-08-13T12:00:00'), actualCloseDate: iso('2026-08-14T16:30:00'),
@@ -467,6 +506,14 @@ function seedFiller(db: Db) {
     'Round-robin assignment skips inactive users', 'Holiday calendar ignores regional holidays',
     'Ticket ID sequence reset after year change',
   ];
+  const SCREENS = [
+    'Student Profile', 'Admission Form', 'Fee Receipt Print', 'Marks Entry',
+    'Daily Register', 'Issue & Return', 'Stock Adjustment', 'Parent Timeline',
+  ];
+  const FEATURES = [
+    'Bulk edit', 'Duplicate check', 'Reprint with watermark', 'Grade calculation',
+    'Backdated entry', 'Overdue reminder', 'Low-stock alert', 'Push notification',
+  ];
   const LEVELS: Level[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
   const ACTIVE: StatusCode[] = ['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK'];
   const OPEN_STAGES = ['TRIAGE', 'DEVELOPMENT', 'QA', 'DEPLOYMENT', 'VERIFICATION', 'SIGNOFF'];
@@ -484,6 +531,15 @@ function seedFiller(db: Db) {
     const pcd = new Date(now + int(-4, 12) * 86_400_000).toISOString();
     const delayed = !closed && Date.parse(pcd) < now;
 
+    // §7.5's fields, spread deliberately rather than uniformly:
+    //   · every 11th ticket has no module at all — the state of every ticket
+    //     raised before the fields existed, and what the grid must render
+    //   · one references the retired module, which only resolves because the
+    //     endpoint returns inactive rows
+    //   · steps are present on roughly a third, because they are optional and a
+    //     detail page that has only ever seen them populated hides the empty case
+    const moduleId = i === 7 ? 9 : i % 11 === 0 ? null : (i % 8) + 1;
+
     db.tickets.push({
       ticketId, title,
       description: `${title}. Reported by the desk; reproduced on the current release.`,
@@ -492,6 +548,15 @@ function seedFiller(db: Db) {
       clientContactId: null,
       isClientRaised: i % 3 !== 0,
       taskTypeId: int(1, 11),
+      moduleId,
+      screenName: moduleId == null ? null : SCREENS[i % SCREENS.length],
+      feature: moduleId == null ? null : FEATURES[i % FEATURES.length],
+      stepsToGenerate:
+        moduleId != null && i % 3 === 0
+          ? `<ol><li>Open ${SCREENS[i % SCREENS.length]}.</li>` +
+            `<li>Use ${FEATURES[i % FEATURES.length]} with a typical record.</li>` +
+            `<li>Observe: ${title.toLowerCase()}.</li></ol>`
+          : null,
       level: delayed ? 'CRITICAL' : pick(LEVELS),
       originalLevel: pick(LEVELS),
       status: closed ? 'CLOSED' : pick(ACTIVE),
