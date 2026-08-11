@@ -30,8 +30,18 @@ describe('App shell', () => {
   it('shows the mock user in the avatar menu once /me resolves', async () => {
     renderApp()
     // Ravi Kumar → initials "RK", once the mock /me request resolves.
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Account menu/i })).toHaveTextContent('RK'),
+    //
+    // The explicit timeout is not decoration. `waitFor` defaults to 1000 ms,
+    // and this is the only assertion in the file that waits on a real round
+    // trip through MSW — which carries a deliberate 120 ms latency so loading
+    // states are visible while developing. Alone it settles in well under a
+    // second; in a full run, competing with nineteen other suites for the CPU,
+    // it intermittently does not, and the failure looks like "/me returned
+    // nothing" rather than "the clock ran out". Every other network-waiting
+    // assertion in this codebase already passes 4000.
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /Account menu/i })).toHaveTextContent('RK'),
+      { timeout: 4000 },
     )
   })
 })

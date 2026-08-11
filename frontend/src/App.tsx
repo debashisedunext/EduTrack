@@ -1,8 +1,14 @@
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './app/AppShell'
 import { ScreenPlaceholder } from './app/ScreenPlaceholder'
-import { TicketDetailPlaceholder } from './app/TicketDetailPlaceholder'
 import { CreateTicketPage } from './features/tickets/create/CreateTicketPage'
+import { TicketDetailPage } from './features/tickets/detail/TicketDetailPage'
+import {
+  CLIENT_ROUTE,
+  PROJECT_ROUTE,
+  RESOURCE_ROUTE,
+  TICKET_ROUTE,
+} from './features/tickets/detail/entityLinks'
 import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
@@ -20,8 +26,21 @@ export default function App() {
           {/* Ahead of `/tickets/:ticketId` for readability; React Router ranks
               the static segment higher regardless of order. */}
           <Route path="/tickets/new" element={<CreateTicketPage />} />
-          <Route path="/tickets/:ticketId" element={<TicketDetailPlaceholder />} />
+          <Route path={TICKET_ROUTE} element={<TicketDetailPage />} />
           <Route path="/projects" element={<ScreenPlaceholder title="Projects" />} />
+          {/*
+            S-20's traceability rule is that every entity in the summary panel
+            is a link, and three of those destinations belong to other streams:
+            the project dashboard and the resource 360 (A-069 / S-28) to Stream
+            A, the client 360 to Stream B. Their routes are declared here, from
+            the same constants the links are built from, so a link lands on a
+            named "not built yet" screen instead of the catch-all Not found —
+            which reads as a broken link rather than an unbuilt screen. Each
+            owner replaces one element.
+          */}
+          <Route path={PROJECT_ROUTE} element={<ScreenPlaceholder title="Project dashboard" />} />
+          <Route path={CLIENT_ROUTE} element={<ScreenPlaceholder title="Client 360" />} />
+          <Route path={RESOURCE_ROUTE} element={<ScreenPlaceholder title="Resource profile" />} />
           <Route path="/chat" element={<ScreenPlaceholder title="Chat" />} />
           <Route path="/reports" element={<ScreenPlaceholder title="Reports" />} />
           <Route

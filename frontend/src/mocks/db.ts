@@ -76,6 +76,16 @@ export interface Ticket {
   plannedCloseDate: string | null; actualCloseDate: string | null;
   isDelayed: boolean; delayedSince: string | null;
   estimatedHrs: number | null; pctComplete: number;
+  /**
+   * ⚠ For Stream D. `TicketCreateRequest.watcherIds` and
+   * `TicketPatchRequest.watcherIds` have existed since D-001 and
+   * `TicketDetailResponse.data.watchers` returns them, but nothing stored
+   * them: `POST /tickets` dropped the field and `/full` answered `watchers: []`
+   * unconditionally, so C-010's watcher picker looked wired end to end and
+   * silently was not. Held on the ticket rather than in a join table because
+   * that is all the mock needs to round-trip the contract.
+   */
+  watcherIds: number[];
   createdAt: string; updatedAt: string; version: number;
 }
 export interface Cycle {
@@ -322,6 +332,8 @@ function seedWalkthrough(db: Db) {
     plannedCloseDate: iso('2026-08-13T12:00:00'), actualCloseDate: iso('2026-08-14T16:30:00'),
     isDelayed: true, delayedSince: iso('2026-08-13T00:15:00'),
     estimatedHrs: 16, pctComplete: 100,
+    // Meera and Anil, per the S-20 wireframe's "Watchers  Meera, Anil".
+    watcherIds: [MEERA, ANIL],
     createdAt: iso('2026-08-03T09:12:00'), updatedAt: iso('2026-08-14T16:30:00'), version: 14,
   });
 
@@ -507,6 +519,7 @@ function seedFiller(db: Db) {
       delayedSince: delayed ? pcd : null,
       estimatedHrs: int(2, 24),
       pctComplete: closed ? 100 : int(0, 90),
+      watcherIds: i % 4 === 0 ? [2] : [],
       createdAt, updatedAt: createdAt, version: 1,
     });
     db.cycles.push({ ticketId, cycleNo: 1, isSealed: closed, startedAt: createdAt, closedAt: null, reason: null });
