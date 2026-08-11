@@ -20,14 +20,19 @@ export interface FilterDropdownProps<T> {
 }
 
 /**
- * The filter bar's own dropdown, not `searchable-dropdown.tsx`.
+ * A filter-bar dropdown, distinct from `searchable-dropdown.tsx`.
  *
- * The shared one models a required field — pick exactly one option, no way
- * back to "nothing". Every filter in S-17 needs the opposite: unset is the
- * default and every row has an explicit way to return to it, both from the
- * open list (an "All …" row) and closed (an inline clear button on the
- * trigger itself, so clearing a set filter never costs opening the popup).
- * A second caller earns this its own promotion to `components/ui/`.
+ * That one models a required field — pick exactly one option, no way back to
+ * "nothing". A filter needs the opposite: unset is the default and every row
+ * has an explicit way to return to it, both from the open list (an "All …"
+ * row) and closed (an inline clear button on the trigger itself, so clearing a
+ * set filter never costs opening the popup).
+ *
+ * <p>Lived in `features/tickets/list/` until B-010, whose resource grid (S-07)
+ * is the second caller its own comment named as the trigger for promotion.
+ * Moved unchanged — the diff is an import line in `TicketListPage` and this
+ * paragraph. **Stream C owns `components/ui/`; this move needs their sign-off
+ * before merge.**
  */
 export function FilterDropdown<T>({
   label,

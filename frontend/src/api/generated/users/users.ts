@@ -66,7 +66,10 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  BulkUserStatusRequest,
+  BulkUserStatusResponse,
   ConflictResponse,
+  ExportUsersParams,
   ListReporteesParams,
   ListUsersParams,
   NotFoundResponse,
@@ -87,7 +90,16 @@ import { http } from '../../http';
 
 
 /**
- * @summary List resources
+ * The Resource Master grid, and the directory every assignee picker reads.
+
+Every role may call this — the resource directory is not confidential,
+and the ticket-assignee picker (S-18) and `@mention` resolution are the
+same data. Only Admin sees the write actions, which are separate routes.
+
+The file download is `GET /users/export`, deliberately a separate
+operation — see the note there.
+
+ * @summary List resources (S-07)
  */
 export const listUsers = (
     params?: ListUsersParams,
@@ -159,7 +171,7 @@ export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TErr
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List resources
+ * @summary List resources (S-07)
  */
 
 export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TError = UnauthorizedResponse>(
@@ -380,6 +392,210 @@ export const useSetUserStatus = <TError = NotFoundResponse | OpenTicketsProblem,
       > => {
 
       const mutationOptions = getSetUserStatusMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The same query as `listUsers`, streamed as a file. Takes the same
+filters and applies them the same way — one code path builds both, so
+"download what I'm looking at" cannot quietly mean something else.
+
+**Cursor and limit are absent by design.** The export is every matching
+row. One that stopped at the current page would produce a file that
+looks complete and is not, which is the failure nobody checks for
+because the file opens.
+
+> **Why a separate operation rather than `?export=` on `listUsers`,
+> which is what `/reports/{key}` and `/audit-logs` do.** An operation
+> that declares both `application/json` and
+> `application/octet-stream` generates a client returning
+> `Blob | UserListResponse`. Every existing caller of `useListUsers` —
+> the ticket list's assignee filter and the create form's assignee
+> picker among them — then fails to compile until it narrows a union it
+> has no interest in, and every future caller pays the same tax. Tried
+> it that way in B-010 and reverted; **the same latent break sits in
+> `/reports/{key}` and `/audit-logs`, which have no consumer yet.**
+> Raised with Streams A and D rather than changed here.
+
+ * @summary Download the filtered resource list (S-07)
+ */
+export const exportUsers = (
+    params: ExportUsersParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<Blob>(
+      {url: `/users/export`, method: 'GET',
+        params,
+        responseType: 'blob', signal
+    },
+      );
+    }
+  
+
+
+
+export const getExportUsersQueryKey = (params?: ExportUsersParams,) => {
+    return [
+    `/users/export`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getExportUsersQueryOptions = <TData = Awaited<ReturnType<typeof exportUsers>>, TError = ValidationFailedResponse | UnauthorizedResponse>(params: ExportUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsers>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportUsersQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportUsers>>> = ({ signal }) => exportUsers(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportUsers>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportUsersQueryResult = NonNullable<Awaited<ReturnType<typeof exportUsers>>>
+export type ExportUsersQueryError = ValidationFailedResponse | UnauthorizedResponse
+
+
+export function useExportUsers<TData = Awaited<ReturnType<typeof exportUsers>>, TError = ValidationFailedResponse | UnauthorizedResponse>(
+ params: ExportUsersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsers>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportUsers>>,
+          TError,
+          Awaited<ReturnType<typeof exportUsers>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportUsers<TData = Awaited<ReturnType<typeof exportUsers>>, TError = ValidationFailedResponse | UnauthorizedResponse>(
+ params: ExportUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsers>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportUsers>>,
+          TError,
+          Awaited<ReturnType<typeof exportUsers>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportUsers<TData = Awaited<ReturnType<typeof exportUsers>>, TError = ValidationFailedResponse | UnauthorizedResponse>(
+ params: ExportUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsers>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Download the filtered resource list (S-07)
+ */
+
+export function useExportUsers<TData = Awaited<ReturnType<typeof exportUsers>>, TError = ValidationFailedResponse | UnauthorizedResponse>(
+ params: ExportUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsers>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportUsersQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * The bulk half of `PATCH /users/{userId}/status`, for the resource
+grid's selection bar.
+
+**Answers `200` with a per-resource outcome, not a single verdict.** A
+selection of forty in which two hold open tickets is the normal case,
+and both alternatives are wrong: failing the batch punishes the
+thirty-eight, and succeeding quietly hides the two. Each row comes back
+as `CHANGED`, `UNCHANGED`, `BLOCKED_OPEN_TICKETS` or `NOT_FOUND`, and
+the caller renders exactly what happened.
+
+`BLOCKED_OPEN_TICKETS` carries the count, matching the singular route's
+`409`. Those resources are reassigned through
+`POST /tickets/bulk-reassign` first — deactivating them regardless is
+how live work disappears.
+
+No `Idempotency-Key` and no `If-Match`: setting a flag to a stated value
+is idempotent, so a replay converges rather than double-acting, and last
+write wins is the correct semantic. CONVENTIONS.md §5 records the same
+exemption for the singular route.
+
+**Admin only**, like every master write. Refused before any id in the
+body is read, so the refusal says nothing about which resources exist —
+which is why this documents no `403` of its own, exactly as
+`PATCH /users/{userId}/status` and `POST /users` do not.
+
+ * @summary Activate or deactivate a selection (S-07)
+ */
+export const setUserStatusBulk = (
+    bulkUserStatusRequest: BulkUserStatusRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<BulkUserStatusResponse>(
+      {url: `/users/bulk-status`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: bulkUserStatusRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getSetUserStatusBulkMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setUserStatusBulk>>, TError,{data: BulkUserStatusRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof setUserStatusBulk>>, TError,{data: BulkUserStatusRequest}, TContext> => {
+
+const mutationKey = ['setUserStatusBulk'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setUserStatusBulk>>, {data: BulkUserStatusRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setUserStatusBulk(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetUserStatusBulkMutationResult = NonNullable<Awaited<ReturnType<typeof setUserStatusBulk>>>
+    export type SetUserStatusBulkMutationBody = BulkUserStatusRequest
+    export type SetUserStatusBulkMutationError = ValidationFailedResponse | UnauthorizedResponse
+
+    /**
+ * @summary Activate or deactivate a selection (S-07)
+ */
+export const useSetUserStatusBulk = <TError = ValidationFailedResponse | UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setUserStatusBulk>>, TError,{data: BulkUserStatusRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setUserStatusBulk>>,
+        TError,
+        {data: BulkUserStatusRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSetUserStatusBulkMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

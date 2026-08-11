@@ -46,30 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { UserAllOfDepartment } from './userAllOfDepartment';
-import type { UserAllOfDesignation } from './userAllOfDesignation';
-import type { UserRef } from './userRef';
-import type { ProjectRef } from './projectRef';
-import type { UserAllOfLastLoginAt } from './userAllOfLastLoginAt';
 
-export type UserAllOf = {
-  username?: string;
-  email?: string;
-  employeeCode?: string;
-  department?: UserAllOfDepartment;
-  designation?: UserAllOfDesignation;
-  reportingManager?: UserRef;
-  /** Retained for callers that only need membership. Prefer
-`projects` — an id cannot be rendered without a second lookup.
+/**
+ * Present only on `BLOCKED_OPEN_TICKETS`.
  */
-  projectIds?: number[];
-  /** Resolved server-side so the S-07 grid can print project names
-without a second request per row.
- */
-  projects?: ProjectRef[];
-  isActive?: boolean;
-  openTicketCount?: number;
-  /** UTC, like every stored instant. Null until the first login. */
-  lastLoginAt?: UserAllOfLastLoginAt;
-  createdAt?: string;
-};
+export type BulkUserStatusOutcomeOpenTicketCount = number | null;

@@ -50,7 +50,16 @@ import * as zod from 'zod';
 
 
 /**
- * @summary List resources
+ * The Resource Master grid, and the directory every assignee picker reads.
+
+Every role may call this — the resource directory is not confidential,
+and the ticket-assignee picker (S-18) and `@mention` resolution are the
+same data. Only Admin sees the write actions, which are separate routes.
+
+The file download is `GET /users/export`, deliberately a separate
+operation — see the note there.
+
+ * @summary List resources (S-07)
  */
 export const listUsersQueryLimitDefault = 50;
 export const listUsersQueryLimitMax = 200;
@@ -67,6 +76,9 @@ export const listUsersQueryParams = zod.object({
   "isActive": zod.boolean().optional()
 })
 
+export const listUsersResponseDataItemProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
 export const listUsersResponse = zod.object({
   "data": zod.array(zod.object({
   "id": zod.number(),
@@ -78,6 +90,8 @@ export const listUsersResponse = zod.object({
   "username": zod.string().optional(),
   "email": zod.string().email().optional(),
   "employeeCode": zod.string().optional(),
+  "department": zod.string().nullish(),
+  "designation": zod.string().nullish(),
   "reportingManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -85,9 +99,16 @@ export const listUsersResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "projectIds": zod.array(zod.number()).optional(),
+  "projectIds": zod.array(zod.number()).optional().describe('Retained for callers that only need membership. Prefer\n`projects` — an id cannot be rendered without a second lookup.\n'),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(listUsersResponseDataItemProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('Resolved server-side so the S-07 grid can print project names\nwithout a second request per row.\n'),
   "isActive": zod.boolean().optional(),
   "openTicketCount": zod.number().optional(),
+  "lastLoginAt": zod.string().datetime({}).nullish().describe('UTC, like every stored instant. Null until the first login.'),
   "createdAt": zod.string().datetime({}).optional()
 }))),
   "meta": zod.object({
@@ -162,6 +183,9 @@ export const updateUserBody = zod.object({
   "timezone": zod.string().optional()
 })
 
+export const updateUserResponseDataProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
 export const updateUserResponse = zod.object({
   "data": zod.object({
   "id": zod.number(),
@@ -173,6 +197,8 @@ export const updateUserResponse = zod.object({
   "username": zod.string().optional(),
   "email": zod.string().email().optional(),
   "employeeCode": zod.string().optional(),
+  "department": zod.string().nullish(),
+  "designation": zod.string().nullish(),
   "reportingManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -180,9 +206,16 @@ export const updateUserResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "projectIds": zod.array(zod.number()).optional(),
+  "projectIds": zod.array(zod.number()).optional().describe('Retained for callers that only need membership. Prefer\n`projects` — an id cannot be rendered without a second lookup.\n'),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(updateUserResponseDataProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('Resolved server-side so the S-07 grid can print project names\nwithout a second request per row.\n'),
   "isActive": zod.boolean().optional(),
   "openTicketCount": zod.number().optional(),
+  "lastLoginAt": zod.string().datetime({}).nullish().describe('UTC, like every stored instant. Null until the first login.'),
   "createdAt": zod.string().datetime({}).optional()
 }))
 })
@@ -209,11 +242,103 @@ export const setUserStatusBody = zod.object({
 })
 
 /**
+ * The same query as `listUsers`, streamed as a file. Takes the same
+filters and applies them the same way — one code path builds both, so
+"download what I'm looking at" cannot quietly mean something else.
+
+**Cursor and limit are absent by design.** The export is every matching
+row. One that stopped at the current page would produce a file that
+looks complete and is not, which is the failure nobody checks for
+because the file opens.
+
+> **Why a separate operation rather than `?export=` on `listUsers`,
+> which is what `/reports/{key}` and `/audit-logs` do.** An operation
+> that declares both `application/json` and
+> `application/octet-stream` generates a client returning
+> `Blob | UserListResponse`. Every existing caller of `useListUsers` —
+> the ticket list's assignee filter and the create form's assignee
+> picker among them — then fails to compile until it narrows a union it
+> has no interest in, and every future caller pays the same tax. Tried
+> it that way in B-010 and reverted; **the same latent break sits in
+> `/reports/{key}` and `/audit-logs`, which have no consumer yet.**
+> Raised with Streams A and D rather than changed here.
+
+ * @summary Download the filtered resource list (S-07)
+ */
+export const exportUsersQueryParams = zod.object({
+  "format": zod.enum(['xlsx', 'csv']),
+  "q": zod.string().optional().describe('Name, username, email or employee code.'),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "projectId": zod.number().optional(),
+  "managerId": zod.number().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+/**
+ * The bulk half of `PATCH /users/{userId}/status`, for the resource
+grid's selection bar.
+
+**Answers `200` with a per-resource outcome, not a single verdict.** A
+selection of forty in which two hold open tickets is the normal case,
+and both alternatives are wrong: failing the batch punishes the
+thirty-eight, and succeeding quietly hides the two. Each row comes back
+as `CHANGED`, `UNCHANGED`, `BLOCKED_OPEN_TICKETS` or `NOT_FOUND`, and
+the caller renders exactly what happened.
+
+`BLOCKED_OPEN_TICKETS` carries the count, matching the singular route's
+`409`. Those resources are reassigned through
+`POST /tickets/bulk-reassign` first — deactivating them regardless is
+how live work disappears.
+
+No `Idempotency-Key` and no `If-Match`: setting a flag to a stated value
+is idempotent, so a replay converges rather than double-acting, and last
+write wins is the correct semantic. CONVENTIONS.md §5 records the same
+exemption for the singular route.
+
+**Admin only**, like every master write. Refused before any id in the
+body is read, so the refusal says nothing about which resources exist —
+which is why this documents no `403` of its own, exactly as
+`PATCH /users/{userId}/status` and `POST /users` do not.
+
+ * @summary Activate or deactivate a selection (S-07)
+ */
+export const setUserStatusBulkBodyUserIdsMax = 200;
+
+export const setUserStatusBulkBodyReasonMax = 500;
+
+
+
+export const setUserStatusBulkBody = zod.object({
+  "userIds": zod.array(zod.number()).min(1).max(setUserStatusBulkBodyUserIdsMax).describe('Capped at the pagination maximum: a selection is made on a page, so\na larger one did not come from the grid.\n'),
+  "isActive": zod.boolean(),
+  "reason": zod.string().max(setUserStatusBulkBodyReasonMax).optional()
+})
+
+export const setUserStatusBulkResponse = zod.object({
+  "data": zod.object({
+  "results": zod.array(zod.object({
+  "userId": zod.number(),
+  "displayName": zod.string().nullish(),
+  "outcome": zod.enum(['CHANGED', 'UNCHANGED', 'BLOCKED_OPEN_TICKETS', 'NOT_FOUND']).describe('`UNCHANGED` means the resource was already in the requested state —\nreported rather than counted as a change, so the summary line does\nnot overstate what happened.\n'),
+  "openTicketCount": zod.number().nullish().describe('Present only on `BLOCKED_OPEN_TICKETS`.')
+})),
+  "changed": zod.number(),
+  "unchanged": zod.number(),
+  "blocked": zod.number(),
+  "notFound": zod.number(),
+  "reassignUrl": zod.string().optional()
+})
+})
+
+/**
  * @summary Resource 360° profile (S-28)
  */
 export const getUserProfile360Params = zod.object({
   "userId": zod.number()
 })
+
+export const getUserProfile360ResponseDataUserProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
 
 export const getUserProfile360Response = zod.object({
   "data": zod.object({
@@ -227,6 +352,8 @@ export const getUserProfile360Response = zod.object({
   "username": zod.string().optional(),
   "email": zod.string().email().optional(),
   "employeeCode": zod.string().optional(),
+  "department": zod.string().nullish(),
+  "designation": zod.string().nullish(),
   "reportingManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -234,9 +361,16 @@ export const getUserProfile360Response = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "projectIds": zod.array(zod.number()).optional(),
+  "projectIds": zod.array(zod.number()).optional().describe('Retained for callers that only need membership. Prefer\n`projects` — an id cannot be rendered without a second lookup.\n'),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(getUserProfile360ResponseDataUserProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('Resolved server-side so the S-07 grid can print project names\nwithout a second request per row.\n'),
   "isActive": zod.boolean().optional(),
   "openTicketCount": zod.number().optional(),
+  "lastLoginAt": zod.string().datetime({}).nullish().describe('UTC, like every stored instant. Null until the first login.'),
   "createdAt": zod.string().datetime({}).optional()
 })).optional(),
   "openTickets": zod.number().optional(),
@@ -269,6 +403,9 @@ export const listReporteesQueryParams = zod.object({
   "limit": zod.number().min(1).max(listReporteesQueryLimitMax).default(listReporteesQueryLimitDefault)
 })
 
+export const listReporteesResponseDataItemProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
 export const listReporteesResponse = zod.object({
   "data": zod.array(zod.object({
   "id": zod.number(),
@@ -280,6 +417,8 @@ export const listReporteesResponse = zod.object({
   "username": zod.string().optional(),
   "email": zod.string().email().optional(),
   "employeeCode": zod.string().optional(),
+  "department": zod.string().nullish(),
+  "designation": zod.string().nullish(),
   "reportingManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -287,9 +426,16 @@ export const listReporteesResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "projectIds": zod.array(zod.number()).optional(),
+  "projectIds": zod.array(zod.number()).optional().describe('Retained for callers that only need membership. Prefer\n`projects` — an id cannot be rendered without a second lookup.\n'),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(listReporteesResponseDataItemProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('Resolved server-side so the S-07 grid can print project names\nwithout a second request per row.\n'),
   "isActive": zod.boolean().optional(),
   "openTicketCount": zod.number().optional(),
+  "lastLoginAt": zod.string().datetime({}).nullish().describe('UTC, like every stored instant. Null until the first login.'),
   "createdAt": zod.string().datetime({}).optional()
 }))),
   "meta": zod.object({

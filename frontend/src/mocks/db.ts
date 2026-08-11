@@ -45,6 +45,8 @@ export interface User {
   role: RoleCode; employeeCode: string; avatarUrl: string | null;
   reportingManagerId: number | null; projectIds: number[]; isActive: boolean;
   timezone: string;
+  /** S-07 grid columns (B-010). `lastLoginAt` is null until the first login. */
+  department: string | null; designation: string | null; lastLoginAt: string | null;
 }
 export interface Project {
   id: number; projectCode: string; name: string; projectManagerId: number;
@@ -201,15 +203,21 @@ export const nextId = (db: Db, key: string): number => (db.seq[key] = (db.seq[ke
 const iso = (d: string) => new Date(`${d}Z`).toISOString();
 
 // ── seed ────────────────────────────────────────────────────────────────────
+/**
+ * Deliberately varied for B-010's grid: two departments, one resource on a
+ * single project rather than all three, one deactivated, and one who has never
+ * logged in. A directory where every row is identical proves nothing about the
+ * screen that renders it.
+ */
 const USERS: User[] = [
-  ['Anita Rao', 'anita', 'ADMIN', 'EMP-001', null],
-  ['Meera Iyer', 'meera', 'PM', 'EMP-002', 1],
-  ['Ravi Kumar', 'ravi', 'DEVELOPER', 'EMP-003', 2],
-  ['Anil Shah', 'anil', 'QA', 'EMP-004', 2],
-  ['Karan Bose', 'karan', 'DEPLOYMENT', 'EMP-005', 2],
-  ['Priya Nair', 'priya', 'SUPPORT', 'EMP-006', 2],
-  ['Sunil Menon', 'sunil', 'DEVELOPER', 'EMP-007', 2],
-].map(([displayName, username, role, employeeCode, mgr], i) => ({
+  ['Anita Rao', 'anita', 'ADMIN', 'EMP-001', null, 'Leadership', 'Head of Delivery', [1, 2, 3], true, '2026-08-11T04:15:00.000Z'],
+  ['Meera Iyer', 'meera', 'PM', 'EMP-002', 1, 'Delivery', 'Project Manager', [1, 2, 3], true, '2026-08-10T11:02:00.000Z'],
+  ['Ravi Kumar', 'ravi', 'DEVELOPER', 'EMP-003', 2, 'Engineering', 'Senior Engineer', [1, 2], true, '2026-08-10T06:30:00.000Z'],
+  ['Anil Shah', 'anil', 'QA', 'EMP-004', 2, 'Quality', 'QA Engineer', [1, 2, 3], true, '2026-08-09T13:45:00.000Z'],
+  ['Karan Bose', 'karan', 'DEPLOYMENT', 'EMP-005', 2, 'Platform', 'Release Engineer', [3], true, null],
+  ['Priya Nair', 'priya', 'SUPPORT', 'EMP-006', 2, 'Support', 'Support Lead', [1, 2, 3], true, '2026-08-11T03:20:00.000Z'],
+  ['Sunil Menon', 'sunil', 'DEVELOPER', 'EMP-007', 2, 'Engineering', 'Engineer', [2], false, '2026-05-02T09:10:00.000Z'],
+].map(([displayName, username, role, employeeCode, mgr, department, designation, projectIds, isActive, lastLoginAt], i) => ({
   id: i + 1,
   displayName: displayName as string,
   username: username as string,
@@ -218,9 +226,12 @@ const USERS: User[] = [
   employeeCode: employeeCode as string,
   avatarUrl: null,
   reportingManagerId: mgr as number | null,
-  projectIds: [1, 2, 3],
-  isActive: true,
+  projectIds: projectIds as number[],
+  isActive: isActive as boolean,
   timezone: 'Asia/Kolkata',
+  department: department as string,
+  designation: designation as string,
+  lastLoginAt: lastLoginAt as string | null,
 }));
 
 const PROJECTS: Project[] = [

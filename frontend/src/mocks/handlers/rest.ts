@@ -3,7 +3,7 @@ import { getDb, nextId } from '../db';
 import type { Holiday } from '../db';
 import { round } from './tickets';
 import {
-  clientRef, currentUser, noContent, notFound, ok, paginate, problem,
+  clientRef, currentUser, noContent, notFound, ok, paginate, problem, projectRef,
   scopedTickets, ticketDto, url, userRef, validationFailed,
 } from './util';
 
@@ -144,20 +144,66 @@ export const restHandlers = [
 
   // ── users ─────────────────────────────────────────────────────────────────
   http.get(url('/users'), ({ request }) => {
-    const db = getDb();
-    const q = new URL(request.url).searchParams;
-    let rows = db.users;
-    const text = q.get('q')?.toLowerCase();
-    if (text) {
-      rows = rows.filter((u) =>
-        [u.displayName, u.username, u.email, u.employeeCode].some((f) => f.toLowerCase().includes(text)),
-      );
-    }
-    if (q.get('role')) rows = rows.filter((u) => u.role === q.get('role'));
-    if (q.get('isActive')) rows = rows.filter((u) => String(u.isActive) === q.get('isActive'));
-    if (q.get('projectId')) rows = rows.filter((u) => u.projectIds.includes(Number(q.get('projectId'))));
-    const { page, meta } = paginate(rows, new URL(request.url));
+    const requestUrl = new URL(request.url);
+    const { page, meta } = paginate(filteredUsers(requestUrl.searchParams), requestUrl);
     return ok(page.map(userDto), meta);
+  }),
+  /**
+   * B-010 · the whole filtered set as a file, ignoring cursor and limit.
+   *
+   * Its own route rather than `?export=` on the list: one operation declaring
+   * both JSON and a binary body generates `Blob | UserListResponse`, and every
+   * caller of `useListUsers` then has to narrow a union it has no interest in.
+   */
+  http.get(url('/users/export'), ({ request }) => {
+    const q = new URL(request.url).searchParams;
+    const format = q.get('format');
+    if (format !== 'xlsx' && format !== 'csv') {
+      return validationFailed({ format: ["must be 'xlsx' or 'csv'"] });
+    }
+    return usersExport(filteredUsers(q), format);
+  }),
+  /**
+   * B-010 · the bulk half of `PATCH /users/{userId}/status`.
+   *
+   * Answers 200 with a per-resource outcome. A selection of forty in which two
+   * hold open tickets is the normal case: failing the batch punishes the
+   * thirty-eight, and succeeding quietly hides the two.
+   */
+  http.post(url('/users/bulk-status'), async ({ request }) => {
+    const db = getDb();
+    const { userIds, isActive } = (await request.json()) as {
+      userIds: number[];
+      isActive: boolean;
+    };
+
+    const results = [...new Set(userIds)].map((id) => {
+      const u = db.users.find((x) => x.id === id);
+      if (!u) return { userId: id, displayName: null, outcome: 'NOT_FOUND' as const };
+      if (u.isActive === isActive) {
+        return { userId: id, displayName: u.displayName, outcome: 'UNCHANGED' as const };
+      }
+      const open = db.tickets.filter((t) => t.assigneeId === id && t.status !== 'CLOSED').length;
+      if (!isActive && open > 0) {
+        return {
+          userId: id, displayName: u.displayName,
+          outcome: 'BLOCKED_OPEN_TICKETS' as const, openTicketCount: open,
+        };
+      }
+      u.isActive = isActive;
+      return { userId: id, displayName: u.displayName, outcome: 'CHANGED' as const };
+    });
+
+    const count = (outcome: string) => results.filter((r) => r.outcome === outcome).length;
+    const blocked = count('BLOCKED_OPEN_TICKETS');
+    return ok({
+      results,
+      changed: count('CHANGED'),
+      unchanged: count('UNCHANGED'),
+      blocked,
+      notFound: count('NOT_FOUND'),
+      ...(blocked > 0 ? { reassignUrl: '/api/v1/tickets/bulk-reassign' } : {}),
+    });
   }),
   http.post(url('/users'), async ({ request }) => {
     const db = getDb();
@@ -170,6 +216,9 @@ export const restHandlers = [
       email: body.email, role: body.role as never, employeeCode: body.employeeCode ?? '',
       avatarUrl: null, reportingManagerId: null, projectIds: [], isActive: true,
       timezone: body.timezone ?? 'Asia/Kolkata',
+      // B-010 columns. `lastLoginAt` is null because a resource created a
+      // moment ago has not logged in — the grid renders that as "Never".
+      department: null, designation: null, lastLoginAt: null,
     };
     db.users.push(u);
     return ok(userDto(u), undefined, { status: 201 });
@@ -869,15 +918,87 @@ export const restHandlers = [
   }),
 ];
 
+// ── users: filtering and export ─────────────────────────────────────────────
+
+/**
+ * B-010 · the S-07 filters, in one place.
+ *
+ * The grid and the export share it deliberately. An export that built its
+ * filter separately is an export that eventually disagrees with the screen
+ * above it, and nobody notices until the numbers are in a board pack.
+ */
+function filteredUsers(q: URLSearchParams) {
+  let rows = getDb().users;
+
+  const text = q.get('q')?.toLowerCase();
+  if (text) {
+    rows = rows.filter((u) =>
+      [u.displayName, u.username, u.email, u.employeeCode].some((f) => f.toLowerCase().includes(text)),
+    );
+  }
+  if (q.get('role')) rows = rows.filter((u) => u.role === q.get('role'));
+  if (q.get('isActive')) rows = rows.filter((u) => String(u.isActive) === q.get('isActive'));
+  if (q.get('projectId')) rows = rows.filter((u) => u.projectIds.includes(Number(q.get('projectId'))));
+  if (q.get('managerId')) {
+    rows = rows.filter((u) => u.reportingManagerId === Number(q.get('managerId')));
+  }
+  return [...rows].sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+/**
+ * A downloadable file, close enough to prove the button works.
+ *
+ * CSV in both cases — the mock cannot produce a real xlsx, and pretending to
+ * would give the browser a corrupt file, which is a worse lie than a `.csv`
+ * whose `Content-Disposition` says what it is. The real engine is SXSSF
+ * (`ResourceExportWriter`).
+ */
+function usersExport(rows: import('../db').User[], format: 'xlsx' | 'csv') {
+  const db = getDb();
+  const header = [
+    'Emp Code', 'Name', 'Username', 'Email', 'Role', 'Department', 'Designation',
+    'Reporting Manager', 'Projects', 'Status', 'Open Tickets', 'Last Login (UTC)',
+  ];
+  const cells = (u: import('../db').User) => [
+    u.employeeCode, u.displayName, u.username, u.email, u.role,
+    u.department ?? '', u.designation ?? '',
+    userRef(u.reportingManagerId, db)?.displayName ?? '',
+    u.projectIds.map((id) => projectRef(id, db)?.name).filter(Boolean).join(', '),
+    u.isActive ? 'Active' : 'Inactive',
+    String(db.tickets.filter((t) => t.assigneeId === u.id && t.status !== 'CLOSED').length),
+    u.lastLoginAt ?? '',
+  ];
+
+  const body = [header, ...rows.map(cells)]
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .join('\r\n');
+
+  // Leading BOM, built from its code point rather than pasted in as an
+  // invisible literal: Excel reads a BOM-less UTF-8 CSV in the system codepage
+  // and mangles every non-ASCII name.
+  return new HttpResponse(String.fromCharCode(0xfeff) + body, {
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename="resources-2026-08-11.${format}"`,
+    },
+  });
+}
+
 // ── mappers ─────────────────────────────────────────────────────────────────
 function userDto(u: import('../db').User) {
   const db = getDb();
   return {
     id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl, role: u.role,
     username: u.username, email: u.email, employeeCode: u.employeeCode,
+    department: u.department, designation: u.designation,
     reportingManager: userRef(u.reportingManagerId, db),
-    projectIds: u.projectIds, isActive: u.isActive,
+    projectIds: u.projectIds,
+    // B-010: names as well as ids, so the S-07 grid renders a Projects column
+    // without a lookup per row.
+    projects: u.projectIds.map((id) => projectRef(id, db)).filter(Boolean),
+    isActive: u.isActive,
     openTicketCount: db.tickets.filter((t) => t.assigneeId === u.id && t.status !== 'CLOSED').length,
+    lastLoginAt: u.lastLoginAt,
     createdAt: '2026-08-03T09:00:00.000Z',
   };
 }

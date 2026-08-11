@@ -32,9 +32,19 @@ import java.util.List;
  * {@code If-Match} back on the write: two admins editing the working week from
  * different tabs is exactly the lost update CONVENTIONS.md §5 exists for, and
  * here a silently discarded change alters every SLA figure computed afterwards.
+ *
+ * <p><b>The {@code /api/v1} prefix was missing until B-010.</b> Nothing declares
+ * it globally — there is no context path and no {@code configurePathMatch}
+ * prefix — so every other controller spells it out and this one did not, leaving
+ * all nine calendar operations served at {@code /masters/…} while the generated
+ * client, the MSW handlers and the contract all call {@code /api/v1/masters/…}.
+ * Every one of them would have 404'd. It survived review because
+ * {@code CalendarControllerTest} invokes the controller as a plain object, which
+ * never consults the request mapping; {@code MasterRoutesTest} now pins the
+ * prefix for both controllers in this feature.
  */
 @RestController
-@RequestMapping("/masters")
+@RequestMapping("/api/v1/masters")
 @Tag(name = "masters")
 class CalendarController {
 

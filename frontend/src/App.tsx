@@ -12,6 +12,7 @@ import {
 import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
+import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { Button } from './components/ui/button'
 
 export default function App() {
@@ -49,15 +50,21 @@ export default function App() {
               <ScreenPlaceholder
                 title="Masters"
                 action={
-                  <Button asChild>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
                     {/* The masters index arrives with the rest of M3; until
-                        then the calendar is reachable from here. */}
-                    <Link to="/masters/calendar">Working calendar</Link>
-                  </Button>
+                        then the screens that exist are reachable from here. */}
+                    <Button asChild>
+                      <Link to="/masters/resources">Resources</Link>
+                    </Button>
+                    <Button asChild variant="secondary">
+                      <Link to="/masters/calendar">Working calendar</Link>
+                    </Button>
+                  </div>
                 }
               />
             }
           />
+          <Route path="/masters/resources" element={<ResourceListPage />} />
           <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
           <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
           <Route path="*" element={<ScreenPlaceholder title="Not found" />} />
