@@ -4,6 +4,7 @@ import { ScreenPlaceholder } from './app/ScreenPlaceholder'
 import { TicketDetailPlaceholder } from './app/TicketDetailPlaceholder'
 import { CreateTicketPage } from './features/tickets/create/CreateTicketPage'
 import { TicketListPage } from './features/tickets/list/TicketListPage'
+import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { Button } from './components/ui/button'
 
@@ -14,7 +15,7 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<ScreenPlaceholder title="Dashboard" />} />
-          <Route path="/my-tasks" element={<ScreenPlaceholder title="My Tasks" />} />
+          <Route path="/my-tasks" element={<MyTasksPage />} />
           <Route path="/tickets" element={<TicketListPage />} />
           {/* Ahead of `/tickets/:ticketId` for readability; React Router ranks
               the static segment higher regardless of order. */}
