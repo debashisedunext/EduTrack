@@ -42,6 +42,7 @@ class AuthExceptionHandler {
     private static final URI INVALID_ACCESS_TOKEN = URI.create("https://edutrack/errors/invalid-access-token");
     private static final URI PASSWORD_UNCHANGED = URI.create("https://edutrack/errors/password-unchanged");
     private static final URI PASSWORD_CHANGE_REQUIRED = URI.create("https://edutrack/errors/password-change-required");
+    private static final URI PASSWORD_REUSED = URI.create("https://edutrack/errors/password-reused");
     private static final URI INVALID_RESET_TOKEN = URI.create("https://edutrack/errors/invalid-reset-token");
     private static final URI TOO_MANY_RESET_REQUESTS =
             URI.create("https://edutrack/errors/too-many-reset-requests");
@@ -192,6 +193,28 @@ class AuthExceptionHandler {
         problem.setType(PASSWORD_UNCHANGED);
         problem.setTitle("Password unchanged");
         problem.setDetail("The new password must be different from your current one.");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    /**
+     * A-028 · the replacement is one this account used within the no-reuse
+     * window. Blueprint §10.3.
+     *
+     * <p>Its own {@code type}, distinct from {@code password-unchanged} above,
+     * because the two are genuinely different situations and S-03 should be able
+     * to word them differently — see {@link PasswordReusedException}. 400 for the
+     * same reason: the credentials were fine, the content is not.
+     *
+     * <p>{@code detail} names the rule but never the match. Saying which previous
+     * password it was, or when it was used, hands real information to a caller
+     * who — on the reset path — need not be the account's owner.
+     */
+    @ExceptionHandler(PasswordReusedException.class)
+    ResponseEntity<ProblemDetail> handlePasswordReused(PasswordReusedException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+        problem.setType(PASSWORD_REUSED);
+        problem.setTitle("Password recently used");
+        problem.setDetail("This password has been used recently. Choose one you have not used before.");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
     }
 

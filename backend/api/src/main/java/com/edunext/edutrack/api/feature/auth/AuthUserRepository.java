@@ -39,7 +39,7 @@ class AuthUserRepository {
     private static final String FIND_BY_USERNAME = """
             SELECT u.id, u.username, u.email, u.full_name, u.password_hash,
                    u.role_id, r.code AS role_code, u.timezone,
-                   u.is_active, u.must_change_password,
+                   u.is_active, u.must_change_password, u.password_changed_at,
                    u.failed_attempts, u.locked_until
               FROM users u
               JOIN roles r ON r.id = u.role_id
@@ -62,7 +62,7 @@ class AuthUserRepository {
     private static final String FIND_BY_ID = """
             SELECT u.id, u.username, u.email, u.full_name, u.password_hash,
                    u.role_id, r.code AS role_code, u.timezone,
-                   u.is_active, u.must_change_password,
+                   u.is_active, u.must_change_password, u.password_changed_at,
                    u.failed_attempts, u.locked_until
               FROM users u
               JOIN roles r ON r.id = u.role_id
@@ -86,7 +86,7 @@ class AuthUserRepository {
     private static final String FIND_BY_EMAIL = """
             SELECT u.id, u.username, u.email, u.full_name, u.password_hash,
                    u.role_id, r.code AS role_code, u.timezone,
-                   u.is_active, u.must_change_password,
+                   u.is_active, u.must_change_password, u.password_changed_at,
                    u.failed_attempts, u.locked_until
               FROM users u
               JOIN roles r ON r.id = u.role_id
@@ -164,7 +164,9 @@ class AuthUserRepository {
      */
     private static final String UPDATE_PASSWORD = """
             UPDATE users
-               SET password_hash = ?, must_change_password = 0
+               SET password_hash = ?,
+                   must_change_password = 0,
+                   password_changed_at = CURRENT_TIMESTAMP(6)
              WHERE id = ?
             """;
 
@@ -188,6 +190,7 @@ class AuthUserRepository {
             UPDATE users
                SET password_hash = ?,
                    must_change_password = 0,
+                   password_changed_at = CURRENT_TIMESTAMP(6),
                    failed_attempts = 0,
                    locked_until = NULL
              WHERE id = ?
@@ -221,6 +224,12 @@ class AuthUserRepository {
             rs.getString("timezone"),
             rs.getBoolean("is_active"),
             rs.getBoolean("must_change_password"),
+            // A-028 · NOT NULL and backfilled by V20260811_1030, so this is
+            // never null in practice; toInstant tolerates it rather than
+            // assuming, because a projection that gained the column and a
+            // database that has not yet run the migration is a startup-order
+            // problem, not a reason to NPE on every login.
+            toInstant(rs.getObject("password_changed_at", LocalDateTime.class)),
             rs.getInt("failed_attempts"),
             toInstant(rs.getObject("locked_until", LocalDateTime.class)));
 

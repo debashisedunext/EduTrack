@@ -46,6 +46,7 @@ class ResetPasswordServiceTest {
     private AuthUserRepository users;
     private PasswordEncoder passwordEncoder;
     private RefreshTokenStore refreshTokens;
+    private PasswordPolicy passwordPolicy;
     private ResetPasswordService service;
 
     @BeforeEach
@@ -54,8 +55,9 @@ class ResetPasswordServiceTest {
         users = mock(AuthUserRepository.class);
         passwordEncoder = mock(PasswordEncoder.class);
         refreshTokens = mock(RefreshTokenStore.class);
+        passwordPolicy = mock(PasswordPolicy.class);
         service = new ResetPasswordService(tokens, users, passwordEncoder, refreshTokens,
-                new RefreshTokenProperties(Duration.ofDays(7), null, null, null));
+                new RefreshTokenProperties(Duration.ofDays(7), null, null, null), passwordPolicy);
     }
 
     private void givenARedeemableToken() {
@@ -74,7 +76,7 @@ class ResetPasswordServiceTest {
     private static AuthUserRow userRow(boolean active) {
         return new AuthUserRow(USER_ID, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                 "{argon2id}$old", "DEVELOPER", 3, "Asia/Kolkata",
-                active, true, 4, null);
+                active, true, Instant.now(), 4, null);
     }
 
     // ── the happy path ──────────────────────────────────────────────────────
@@ -270,5 +272,82 @@ class ResetPasswordServiceTest {
         assertThatNoException().isThrownBy(() -> service.reset(RAW_TOKEN, NEW_PASSWORD));
 
         verify(users).updatePasswordAndClearLockout(USER_ID, NEW_HASH);
+    }
+
+    // ── A-028 · the password policy ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("the no-reuse rule is enforced on the reset path too")
+    void enforcesTheNoReuseRule() {
+        givenARedeemableToken();
+
+        service.reset(RAW_TOKEN, NEW_PASSWORD);
+
+        verify(passwordPolicy).enforceNotReused(USER_ID, NEW_PASSWORD);
+    }
+
+    /**
+     * <b>The token survives a policy refusal.</b> Checking after the claim would
+     * be simpler to reason about and would burn the reset link every time someone
+     * reached for an old favourite — leaving them refused, out of a valid link,
+     * and needing a fresh mail to try again.
+     */
+    @Test
+    @DisplayName("a reused password is refused WITHOUT spending the reset token")
+    void aReusedPasswordDoesNotBurnTheToken() {
+        givenARedeemableToken();
+        doThrow(new PasswordReusedException())
+                .when(passwordPolicy).enforceNotReused(anyLong(), anyString());
+
+        assertThatExceptionOfType(PasswordReusedException.class)
+                .isThrownBy(() -> service.reset(RAW_TOKEN, NEW_PASSWORD));
+
+        verify(tokens, never()).markUsed(anyLong(), any());
+        verify(users, never()).updatePasswordAndClearLockout(anyLong(), anyString());
+        verify(refreshTokens, never()).revokeSessionsFor(anyLong(), any(), any());
+    }
+
+    /**
+     * Recovering an account and changing a password from inside a session must
+     * not differ in what they accept, or the weaker path becomes the way in.
+     * This is the same assertion {@code PasswordChangeServiceTest} makes.
+     */
+    @Test
+    @DisplayName("the hash being replaced is the one recorded as retired")
+    void recordsTheOutgoingHashNotTheIncomingOne() {
+        givenARedeemableToken();
+
+        service.reset(RAW_TOKEN, NEW_PASSWORD);
+
+        verify(passwordPolicy).recordRetired(USER_ID, "{argon2id}$old");
+        verify(passwordPolicy, never()).recordRetired(USER_ID, NEW_HASH);
+    }
+
+    @Test
+    @DisplayName("the retired hash is recorded before the row is overwritten")
+    void recordsHistoryBeforeTheUpdate() {
+        givenARedeemableToken();
+
+        service.reset(RAW_TOKEN, NEW_PASSWORD);
+
+        InOrder order = inOrder(passwordPolicy, users);
+        order.verify(passwordPolicy).recordRetired(anyLong(), anyString());
+        order.verify(users).updatePasswordAndClearLockout(anyLong(), anyString());
+    }
+
+    /**
+     * An expired or already-spent token must be refused before the policy costs
+     * three Argon2id verifications — this endpoint is unauthenticated, so an
+     * attacker with a junk token must not be able to buy 192 MB of work with it.
+     */
+    @Test
+    @DisplayName("an invalid token never reaches the expensive reuse check")
+    void anInvalidTokenSkipsTheReuseCheck() {
+        when(tokens.findByHash(anyString())).thenReturn(Optional.empty());
+
+        assertThatExceptionOfType(InvalidResetTokenException.class)
+                .isThrownBy(() -> service.reset(RAW_TOKEN, NEW_PASSWORD));
+
+        verify(passwordPolicy, never()).enforceNotReused(anyLong(), anyString());
     }
 }

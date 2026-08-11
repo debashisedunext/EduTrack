@@ -20,14 +20,13 @@ import jakarta.validation.constraints.Size;
  * invalid. {@code newPassword} carries the contract's {@code Password} bounds,
  * because policy applies when a password is <i>set</i>.
  *
- * <p><b>Only the bounds, not the whole policy.</b> The contract's {@code Password}
- * schema (openapi.yaml) says "upper, lower, digit and symbol required; the last
- * three are not reusable" in its <i>description</i> and carries no {@code pattern}
- * — the composition rules and the reuse history are A-028, which also has to
- * create the history table that does not exist yet. Min 8 / max 128 is what the
- * contract actually constrains today and is what this enforces. Until A-028
- * lands, a forced change can set a weak-but-long password; that gap is named
- * here rather than left to be discovered.
+ * <p><b>A-028 completed the policy.</b> This previously carried only the
+ * contract's 8–128 bounds, and the gap was named here rather than hidden:
+ * composition and the no-reuse rule were deferred because the latter needed a
+ * history table that did not exist. {@link ValidPassword} now adds the four
+ * character classes, and {@link PasswordPolicy} adds the reuse check — which
+ * cannot live on this record, because it needs the account's identity and three
+ * database rows that a constraint validator has no way to reach.
  *
  * <p>The 128 ceiling is not decoration. Argon2id hashes whatever it is given, so
  * an unbounded field is a CPU-and-memory amplifier: one request with a megabyte
@@ -41,7 +40,10 @@ record ChangePasswordRequest(
 
         @NotBlank
         @Size(min = 8, max = 128)
-        @Schema(description = "The replacement. Must differ from the current password.")
+        @ValidPassword
+        @Schema(description = "The replacement. Must differ from the current password, must not "
+                + "match one of the last few used, and must contain an upper-case letter, a "
+                + "lower-case letter, a digit and a symbol.")
         String newPassword
 ) {
 }

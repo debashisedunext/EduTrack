@@ -88,17 +88,20 @@ class ResetPasswordService {
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenStore refreshTokens;
     private final RefreshTokenProperties refreshProperties;
+    private final PasswordPolicy passwordPolicy;
 
     ResetPasswordService(PasswordResetTokenRepository tokens,
                          AuthUserRepository users,
                          PasswordEncoder passwordEncoder,
                          RefreshTokenStore refreshTokens,
-                         RefreshTokenProperties refreshProperties) {
+                         RefreshTokenProperties refreshProperties,
+                         PasswordPolicy passwordPolicy) {
         this.tokens = tokens;
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokens = refreshTokens;
         this.refreshProperties = refreshProperties;
+        this.passwordPolicy = passwordPolicy;
     }
 
     /**
@@ -143,6 +146,19 @@ class ResetPasswordService {
             throw new InvalidResetTokenException();
         }
 
+        // A-028 · blueprint §10.3's no-reuse rule, and it runs BEFORE the token
+        // is spent. That ordering is a deliberate kindness with a real cost
+        // attached: checking after the claim would be cheaper to reason about,
+        // but it would burn the reset link every time someone reached for an old
+        // favourite password — leaving them refused, out of a valid link, and
+        // needing a fresh mail to try again. The token survives a policy refusal
+        // precisely so the second attempt can succeed.
+        //
+        // The composition rules are already enforced by @ValidPassword before the
+        // controller was entered, so what reaches here is a well-formed password
+        // that merely might be an old one.
+        passwordPolicy.enforceNotReused(row.userId(), newPassword);
+
         // The race arbiter. A concurrent click that already won this returns
         // false here and is refused, having written nothing.
         if (!tokens.markUsed(row.id(), now)) {
@@ -150,6 +166,12 @@ class ResetPasswordService {
                     + "two requests presented the same token at once", row.userId());
             throw new InvalidResetTokenException();
         }
+
+        // A-028 · the outgoing hash joins history before the row is overwritten.
+        // `user` still holds the pre-reset value; reading it back after the
+        // UPDATE would file the new password as retired and shift the whole
+        // window by one.
+        passwordPolicy.recordRetired(row.userId(), user.passwordHash());
 
         int updated = users.updatePasswordAndClearLockout(row.userId(), passwordEncoder.encode(newPassword));
         if (updated != 1) {

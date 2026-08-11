@@ -30,7 +30,11 @@ import org.springframework.core.env.Environment;
         // there is nothing to validate at startup for the reset properties, and
         // a second @Configuration whose only job is one @EnableConfigurationProperties
         // is a file to maintain for no behaviour.
-        PasswordResetProperties.class})
+        PasswordResetProperties.class,
+        // A-028. Same reasoning; its own invariants are enforced in its compact
+        // constructor, which runs at binding time and so still fails startup
+        // rather than the first password change.
+        PasswordPolicyProperties.class})
 class RefreshTokenConfig {
 
     RefreshTokenConfig(RefreshTokenProperties properties, Environment environment) {

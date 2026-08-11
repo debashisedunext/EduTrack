@@ -51,6 +51,7 @@ class PasswordChangeServiceTest {
     private AuthUserRepository users;
     private PasswordEncoder passwordEncoder;
     private AccessTokenBlacklist blacklist;
+    private PasswordPolicy passwordPolicy;
     private PasswordChangeService service;
 
     @BeforeEach
@@ -59,8 +60,9 @@ class PasswordChangeServiceTest {
         users = mock(AuthUserRepository.class);
         passwordEncoder = mock(PasswordEncoder.class);
         blacklist = mock(AccessTokenBlacklist.class);
+        passwordPolicy = mock(PasswordPolicy.class);
         service = new PasswordChangeService(
-                new AccessTokenVerifier(jwtDecoder), users, passwordEncoder, blacklist);
+                new AccessTokenVerifier(jwtDecoder), users, passwordEncoder, blacklist, passwordPolicy);
     }
 
     private void givenAValidSession() {
@@ -86,7 +88,7 @@ class PasswordChangeServiceTest {
     private static AuthUserRow row(boolean active, boolean mustChangePassword) {
         return new AuthUserRow(USER_ID, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                 CURRENT_HASH, "DEVELOPER", 3, "Asia/Kolkata",
-                active, mustChangePassword, 0, null);
+                active, mustChangePassword, Instant.now(), 0, null);
     }
 
     private static ChangePasswordRequest request(String current, String replacement) {
@@ -317,5 +319,87 @@ class PasswordChangeServiceTest {
         assertThatNoException().isThrownBy(() -> service.change(HEADER, request(CURRENT, NEW)));
 
         verify(users).updatePassword(USER_ID, NEW_HASH);
+    }
+
+    // ── A-028 · the password policy ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("the no-reuse rule is consulted before the password is written")
+    void enforcesTheNoReuseRule() {
+        givenAValidSession();
+
+        service.change(HEADER, request(CURRENT, NEW));
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(passwordPolicy, users);
+        order.verify(passwordPolicy).enforceNotReused(USER_ID, NEW);
+        order.verify(users).updatePassword(anyLong(), anyString());
+    }
+
+    /**
+     * A refusal must leave the account exactly as it was — no write, and no
+     * history row claiming a password was retired when it was not.
+     */
+    @Test
+    @DisplayName("a reused password is refused and writes nothing")
+    void aReusedPasswordIsRefused() {
+        givenAValidSession();
+        doThrow(new PasswordReusedException())
+                .when(passwordPolicy).enforceNotReused(anyLong(), anyString());
+
+        assertThatExceptionOfType(PasswordReusedException.class)
+                .isThrownBy(() -> service.change(HEADER, request(CURRENT, NEW)));
+
+        verify(users, never()).updatePassword(anyLong(), anyString());
+        verify(passwordPolicy, never()).recordRetired(anyLong(), anyString());
+    }
+
+    /**
+     * <b>The OLD hash goes into history, not the new one.</b> Filing the incoming
+     * hash would put the live password in the window and quietly reduce the
+     * effective depth by one — a bug that looks like nothing until someone tries
+     * to reuse a password three changes back and is allowed to.
+     */
+    @Test
+    @DisplayName("the hash being replaced is the one recorded as retired")
+    void recordsTheOutgoingHashNotTheIncomingOne() {
+        givenAValidSession();
+
+        service.change(HEADER, request(CURRENT, NEW));
+
+        verify(passwordPolicy).recordRetired(USER_ID, CURRENT_HASH);
+        verify(passwordPolicy, never()).recordRetired(USER_ID, NEW_HASH);
+    }
+
+    /**
+     * History is filed before the row is overwritten — reading the hash back
+     * afterwards would retire the password that was just set.
+     */
+    @Test
+    @DisplayName("the retired hash is recorded before the row is overwritten")
+    void recordsHistoryBeforeTheUpdate() {
+        givenAValidSession();
+
+        service.change(HEADER, request(CURRENT, NEW));
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(passwordPolicy, users);
+        order.verify(passwordPolicy).recordRetired(USER_ID, CURRENT_HASH);
+        order.verify(users).updatePassword(anyLong(), anyString());
+    }
+
+    /**
+     * The reuse check costs three Argon2id verifications at 64 MB. A caller who
+     * cannot prove who they are must not be able to trigger that.
+     */
+    @Test
+    @DisplayName("a wrong current password never reaches the expensive reuse check")
+    void aWrongCurrentPasswordSkipsTheReuseCheck() {
+        when(jwtDecoder.decode(anyString())).thenReturn(jwt());
+        when(users.findById(USER_ID)).thenReturn(Optional.of(row(true, true)));
+        when(passwordEncoder.matches(anyString(), eq(CURRENT_HASH))).thenReturn(false);
+
+        assertThatExceptionOfType(InvalidCurrentPasswordException.class)
+                .isThrownBy(() -> service.change(HEADER, request("wrong", NEW)));
+
+        verify(passwordPolicy, never()).enforceNotReused(anyLong(), anyString());
     }
 }

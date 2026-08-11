@@ -165,6 +165,36 @@ edutrack:
       # clicks a link we authored and hands over the token.
       base-url: ${PASSWORD_RESET_BASE_URL:http://localhost:5173/reset-password}
 
+    # A-028 · password policy. Blueprint §10.3.
+    #
+    # The composition rules — upper, lower, digit, symbol — are NOT here.
+    # They live in @ValidPassword so springdoc emits them into the schema and
+    # orval generates the matching Zod, per PLAN.md §2.2 (D-4). A knob that
+    # switched off "requires a symbol" would also be a knob somebody turns off
+    # during an incident caused by it being on.
+    password-policy:
+      # §10.3's "no reuse of last 3". Each one costs an Argon2id verification
+      # at 64 MB on a password change, so the number is a real cost as well as
+      # a policy. 0 disables the rule outright — the honest way to say "we do
+      # not want this", rather than leaving it configured and unenforced.
+      history-depth: ${PASSWORD_HISTORY_DEPTH:3}
+
+      # §10.3 calls the 90-day expiry "optional", and it ships OFF.
+      #
+      # NIST SP 800-63B §5.1.1.2 advises against scheduled rotation: people
+      # answer a forced change by incrementing a digit, so an organisation
+      # trades real entropy for the appearance of hygiene, plus a quarterly
+      # support spike. Rotation is worth it on evidence of compromise, and
+      # A-026's must_change_password already covers that case deliberately
+      # rather than by calendar.
+      #
+      # Built because the blueprint asks for it and some compliance regimes
+      # require it; defaulted off so nothing acquires the behaviour by
+      # accident. Switching it on needs no migration — password_changed_at is
+      # already maintained on every password write.
+      expiry-enabled: ${PASSWORD_EXPIRY_ENABLED:false}
+      max-age: ${PASSWORD_MAX_AGE:P90D}
+
   storage:
     endpoint: ${S3_ENDPOINT:http://localhost:9000}
     bucket: ${S3_BUCKET:edutrack}

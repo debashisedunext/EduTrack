@@ -46,6 +46,7 @@ class AuthenticationServiceTest {
     private AuthUserRepository users;
     private PasswordEncoder encoder;
     private LoginAttemptRecorder attempts;
+    private PasswordPolicy passwordPolicy;
     private AuthenticationService service;
 
     @BeforeEach
@@ -54,7 +55,12 @@ class AuthenticationServiceTest {
         encoder = mock(PasswordEncoder.class);
         attempts = mock(LoginAttemptRecorder.class);
         when(encoder.encode(anyString())).thenReturn(DECOY_HASH);
-        service = new AuthenticationService(users, encoder, attempts);
+        // A-028 · mocked, so isExpired answers false — the same thing the real
+        // policy does while §10.3's optional expiry is switched off, which is
+        // the default and therefore what this suite should see. The expiry
+        // behaviour itself is PasswordPolicyTest's subject.
+        passwordPolicy = mock(PasswordPolicy.class);
+        service = new AuthenticationService(users, encoder, attempts, passwordPolicy);
     }
 
     private static AuthUserRow row(boolean active) {
@@ -64,7 +70,7 @@ class AuthenticationServiceTest {
     private static AuthUserRow row(boolean active, int failedAttempts, Instant lockedUntil) {
         return new AuthUserRow(7L, "asha.rao", "asha.rao@edunext.test", "Asha Rao",
                 STORED_HASH, "DEVELOPER", 3, "Asia/Kolkata", active, false,
-                failedAttempts, lockedUntil);
+                Instant.now(), failedAttempts, lockedUntil);
     }
 
     // ── the enumeration oracle this task exists to close ────────────────────

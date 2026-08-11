@@ -17,12 +17,13 @@ import jakarta.validation.constraints.Size;
  * row that exists, is unexpired and is unredeemed — see
  * {@link ResetPasswordService}.
  *
- * <p><b>Only the contract's length bounds on {@code newPassword}, not the whole
- * policy.</b> The {@code Password} schema's description names upper, lower,
- * digit and symbol, and no-reuse-of-the-last-three — but it carries no
- * {@code pattern}, and the password history table does not exist. Those are
- * A-028. Until then a reset can set a weak-but-long password; the gap is named
- * here rather than left to be found.
+ * <p><b>A-028 completed the policy.</b> This previously carried only the
+ * contract's length bounds, with the gap named rather than hidden.
+ * {@link ValidPassword} now enforces the four character classes, and
+ * {@link PasswordPolicy} the no-reuse rule — the same two rules, through the
+ * same two mechanisms, as {@link ChangePasswordRequest}. Setting a password by
+ * recovering an account and setting one from inside a session must not be able
+ * to differ in what they accept, or the weaker path becomes the way in.
  */
 record ResetPasswordRequest(
 
@@ -33,7 +34,9 @@ record ResetPasswordRequest(
 
         @NotBlank
         @Size(min = 8, max = 128)
-        @Schema(description = "The new password.")
+        @ValidPassword
+        @Schema(description = "The new password. Must not match one of the last few used, and must "
+                + "contain an upper-case letter, a lower-case letter, a digit and a symbol.")
         String newPassword
 ) {
 }
