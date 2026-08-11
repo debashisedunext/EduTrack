@@ -444,7 +444,7 @@ class RefreshRotationServiceTest {
         assertThatNoException().isThrownBy(() -> rotation.rotate(TOKEN, CHROME));
 
         verify(authentication).resolveActiveUser(42L);
-        verify(authentication, never()).authenticate(anyString(), anyString());
+        verify(authentication, never()).authenticate(anyString(), anyString(), any());
     }
 
     // ── A-027 · a password reset ends every session that predates it ────────

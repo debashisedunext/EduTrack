@@ -131,39 +131,61 @@ class SchemaIntegrationIT {
     @Test
     void schemaHasExpectedShape() throws SQLException {
         try (Connection c = connect(); Statement s = c.createStatement()) {
+            // A-029 · this was `COUNT(*) == 46`, and A-029 has taken the
+            // suggestion the previous two authors of this block left behind.
+            //
+            // The count was a genuine tripwire — it caught every new table — but
+            // it caught them uselessly. Its failure read `expected: 46 but was:
+            // 47` and named neither the table that was added nor the one that
+            // was missing, so every stream that tripped it had to go and diff
+            // the schema by hand to find out what it was telling them. It also
+            // coupled four streams to one integer: D's migrations edited this
+            // line, then B's, then A-027's did not and left the assertion red
+            // for a whole branch before A-028 found it.
+            //
+            // Naming the tables gives strictly more protection. A missing table
+            // now says which one, an unexpected table says which one, and adding
+            // a migration means adding a name here — which is the same
+            // discipline SEED-MANIFEST.md already imposes, and for the same
+            // reason.
+            //
+            // Debashis asked for exactly this in D-025, independently and in
+            // the same breath as bumping the count to 47: "the suggestion three
+            // paragraphs up is now overdue — asserting a set of named tables
+            // would fail with 'missing: ping_pong_flags' instead of 'expected
+            // 47 but was 46', and no stream would need to touch another's file
+            // to add a table." Two streams reaching the same conclusion from
+            // opposite ends is a reasonable signal it was the right one.
             try (ResultSet rs = s.executeQuery(
-                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()")) {
-                rs.next();
-                // 36 domain tables (A-003..A-007) + flyway_schema_history itself,
-                // + email_suppressions (D-034), + working_calendar (B-023),
-                // + notification_preferences (D-042),
-                // + stage_sla_alerts (D-023), + sla_prebreach_alerts (D-021),
-                // + stale_ticket_nudges (D-022), + l2_escalations (D-024),
-                // + password_reset_tokens (A-027), + password_history (A-028).
-                //
-                // Stream A: this exact count is a tripwire on every new table,
-                // which is why Stream D's migration had to come here to update
-                // it, and B-023's after it. That is working as intended — but if
-                // you would rather it did not need touching cross-stream,
-                // asserting the presence of named tables would give the same
-                // protection without the coupling.
-                //
-                // A-028 note: this went red between A-027 and A-028, because
-                // A-027 added password_reset_tokens and did not update the
-                // count — its author ran SeedManifestTest and SeedDataIT but not
-                // this class, so the tripwire fired on the next branch rather
-                // than on the one that tripped it. Both tables are accounted for
-                // here. The suggestion above is worth taking: a count is a
-                // tripwire nobody can read, and the failure it produced named
-                // neither table.
-                //
-                // D-025 note: +1 for ping_pong_flags, and this is the fourth
-                // time a Stream D migration has had to edit a Stream A test to
-                // add one. The suggestion three paragraphs up is now overdue —
-                // asserting a set of named tables would fail with "missing:
-                // ping_pong_flags" instead of "expected 48 but was 46", and no
-                // stream would need to touch another's file to add a table.
-                assertThat(rs.getInt(1)).isEqualTo(48);
+                    "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()")) {
+                java.util.Set<String> present = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+                while (rs.next()) {
+                    present.add(rs.getString(1));
+                }
+
+                assertThat(present)
+                        .as("every table the migrations are supposed to create")
+                        .contains(
+                                // A-003..A-007 · the baseline domain model
+                                "users", "roles", "permissions", "role_permissions", "user_roles",
+                                "projects", "project_members",
+                                "tickets", "ticket_cycles", "ticket_history", "ticket_effort_logs",
+                                "ticket_watchers", "ticket_links",
+                                "workflow_templates", "workflow_stages", "ticket_stage_transitions",
+                                "task_types", "priorities", "statuses", "workflow_transitions",
+                                "sla_policies", "holidays", "resource_leaves",
+                                "notification_templates", "notifications",
+                                "chat_threads", "chat_participants", "chat_messages", "audit_logs",
+                                "clients", "client_contacts", "client_projects",
+                                "ticket_comments", "ticket_attachments", "email_log", "import_batches",
+                                // Flyway's own bookkeeping
+                                "flyway_schema_history",
+                                // D-034, B-023, D-042, D-023, D-021, D-022, D-024, D-025, D-026
+                                "email_suppressions", "working_calendar", "notification_preferences",
+                                "stage_sla_alerts", "sla_prebreach_alerts", "stale_ticket_nudges",
+                                "l2_escalations", "ping_pong_flags", "unassigned_ticket_alerts",
+                                // A-027, A-028, A-029
+                                "password_reset_tokens", "password_history", "totp_recovery_codes");
             }
             try (ResultSet rs = s.executeQuery(
                     "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()")) {

@@ -53,6 +53,11 @@ class MeControllerTest {
     @MockitoBean
     RefreshTokenIssuer refreshTokens;
 
+    // A-029 · MeController gained the 2FA enrolment routes, so the slice needs
+    // this bean even for the tests that only exercise password change.
+    @MockitoBean
+    TwoFactorEnrolmentService twoFactorEnrolment;
+
     // ── the happy path ──────────────────────────────────────────────────────
 
     @Test

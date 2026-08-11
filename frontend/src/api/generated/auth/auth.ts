@@ -66,7 +66,12 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  BeginTwoFactorEnrolment200,
   ChangeOwnPasswordBody,
+  ConfirmTwoFactorEnrolment200,
+  ConfirmTwoFactorEnrolmentBody,
+  ConflictResponse,
+  DisableTwoFactorBody,
   ForgotPasswordBody,
   LoginRequest,
   MeResponse,
@@ -577,6 +582,221 @@ export const useChangeOwnPassword = <TError = ValidationFailedResponse | Unautho
       > => {
 
       const mutationOptions = getChangeOwnPasswordMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Generates a shared secret and returns it with an `otpauth://` URI to
+render as a QR code. **Does not enable 2FA** — the account is unchanged
+until `/me/2fa/confirm` succeeds, so a QR that fails to scan cannot lock
+the user out of the account they were protecting.
+
+Calling it again replaces an unconfirmed secret. Refused once 2FA is on:
+re-enrolling requires disabling first, and disabling requires the
+password, so a stolen access token cannot swap the second factor.
+
+ * @summary Start two-factor enrolment
+ */
+export const beginTwoFactorEnrolment = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<BeginTwoFactorEnrolment200>(
+      {url: `/me/2fa/setup`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getBeginTwoFactorEnrolmentMutationOptions = <TError = UnauthorizedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof beginTwoFactorEnrolment>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof beginTwoFactorEnrolment>>, TError,void, TContext> => {
+
+const mutationKey = ['beginTwoFactorEnrolment'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof beginTwoFactorEnrolment>>, void> = () => {
+          
+
+          return  beginTwoFactorEnrolment()
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BeginTwoFactorEnrolmentMutationResult = NonNullable<Awaited<ReturnType<typeof beginTwoFactorEnrolment>>>
+    
+    export type BeginTwoFactorEnrolmentMutationError = UnauthorizedResponse | ConflictResponse
+
+    /**
+ * @summary Start two-factor enrolment
+ */
+export const useBeginTwoFactorEnrolment = <TError = UnauthorizedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof beginTwoFactorEnrolment>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof beginTwoFactorEnrolment>>,
+        TError,
+        void,
+        TContext
+      > => {
+
+      const mutationOptions = getBeginTwoFactorEnrolmentMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Verifies a code from the authenticator — proving the secret was added —
+and only then enables 2FA.
+
+**Returns the recovery codes, once.** They are stored hashed and cannot
+be shown again. Issued here rather than at setup, because codes handed
+out for an enrolment that was never completed would be live credentials
+for an account with no second factor.
+
+ * @summary Confirm two-factor enrolment and switch it on
+ */
+export const confirmTwoFactorEnrolment = (
+    confirmTwoFactorEnrolmentBody: ConfirmTwoFactorEnrolmentBody,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ConfirmTwoFactorEnrolment200>(
+      {url: `/me/2fa/confirm`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: confirmTwoFactorEnrolmentBody, signal
+    },
+      );
+    }
+  
+
+
+export const getConfirmTwoFactorEnrolmentMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmTwoFactorEnrolment>>, TError,{data: ConfirmTwoFactorEnrolmentBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof confirmTwoFactorEnrolment>>, TError,{data: ConfirmTwoFactorEnrolmentBody}, TContext> => {
+
+const mutationKey = ['confirmTwoFactorEnrolment'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmTwoFactorEnrolment>>, {data: ConfirmTwoFactorEnrolmentBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  confirmTwoFactorEnrolment(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmTwoFactorEnrolmentMutationResult = NonNullable<Awaited<ReturnType<typeof confirmTwoFactorEnrolment>>>
+    export type ConfirmTwoFactorEnrolmentMutationBody = ConfirmTwoFactorEnrolmentBody
+    export type ConfirmTwoFactorEnrolmentMutationError = ValidationFailedResponse | UnauthorizedResponse | ConflictResponse
+
+    /**
+ * @summary Confirm two-factor enrolment and switch it on
+ */
+export const useConfirmTwoFactorEnrolment = <TError = ValidationFailedResponse | UnauthorizedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmTwoFactorEnrolment>>, TError,{data: ConfirmTwoFactorEnrolmentBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof confirmTwoFactorEnrolment>>,
+        TError,
+        {data: ConfirmTwoFactorEnrolmentBody},
+        TContext
+      > => {
+
+      const mutationOptions = getConfirmTwoFactorEnrolmentMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **Requires the account password**, not just a valid access token.
+Removing the second factor is the first thing a stolen fifteen-minute
+token would be used for, and a token must not be enough to strip the
+protection it was layered under.
+
+Clears the secret and every recovery code, so re-enabling means scanning
+a new QR.
+
+ * @summary Turn two-factor authentication off
+ */
+export const disableTwoFactor = (
+    disableTwoFactorBody: DisableTwoFactorBody,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<void>(
+      {url: `/me/2fa/disable`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: disableTwoFactorBody, signal
+    },
+      );
+    }
+  
+
+
+export const getDisableTwoFactorMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableTwoFactor>>, TError,{data: DisableTwoFactorBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof disableTwoFactor>>, TError,{data: DisableTwoFactorBody}, TContext> => {
+
+const mutationKey = ['disableTwoFactor'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disableTwoFactor>>, {data: DisableTwoFactorBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  disableTwoFactor(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DisableTwoFactorMutationResult = NonNullable<Awaited<ReturnType<typeof disableTwoFactor>>>
+    export type DisableTwoFactorMutationBody = DisableTwoFactorBody
+    export type DisableTwoFactorMutationError = ValidationFailedResponse | UnauthorizedResponse
+
+    /**
+ * @summary Turn two-factor authentication off
+ */
+export const useDisableTwoFactor = <TError = ValidationFailedResponse | UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableTwoFactor>>, TError,{data: DisableTwoFactorBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof disableTwoFactor>>,
+        TError,
+        {data: DisableTwoFactorBody},
+        TContext
+      > => {
+
+      const mutationOptions = getDisableTwoFactorMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

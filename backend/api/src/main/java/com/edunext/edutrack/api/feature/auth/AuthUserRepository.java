@@ -40,6 +40,7 @@ class AuthUserRepository {
             SELECT u.id, u.username, u.email, u.full_name, u.password_hash,
                    u.role_id, r.code AS role_code, u.timezone,
                    u.is_active, u.must_change_password, u.password_changed_at,
+                   u.totp_secret, u.totp_enabled,
                    u.failed_attempts, u.locked_until
               FROM users u
               JOIN roles r ON r.id = u.role_id
@@ -63,6 +64,7 @@ class AuthUserRepository {
             SELECT u.id, u.username, u.email, u.full_name, u.password_hash,
                    u.role_id, r.code AS role_code, u.timezone,
                    u.is_active, u.must_change_password, u.password_changed_at,
+                   u.totp_secret, u.totp_enabled,
                    u.failed_attempts, u.locked_until
               FROM users u
               JOIN roles r ON r.id = u.role_id
@@ -87,6 +89,7 @@ class AuthUserRepository {
             SELECT u.id, u.username, u.email, u.full_name, u.password_hash,
                    u.role_id, r.code AS role_code, u.timezone,
                    u.is_active, u.must_change_password, u.password_changed_at,
+                   u.totp_secret, u.totp_enabled,
                    u.failed_attempts, u.locked_until
               FROM users u
               JOIN roles r ON r.id = u.role_id
@@ -197,6 +200,45 @@ class AuthUserRepository {
             """;
 
     /**
+     * A-029 · enrolment step one. Stores the encrypted secret and <b>changes
+     * nothing else</b>.
+     *
+     * <p>{@code totp_enabled} is deliberately untouched: a secret that has been
+     * generated but not yet proved readable must not gate a login. Overwrites
+     * any previous unconfirmed secret, which is what makes "scan it again"
+     * work without a separate cancel step.
+     */
+    private static final String START_TOTP_ENROLMENT = """
+            UPDATE users SET totp_secret = ? WHERE id = ?
+            """;
+
+    /**
+     * A-029 · enrolment step two — the user echoed a valid code back.
+     *
+     * <p>{@code AND totp_secret IS NOT NULL} is not belt-and-braces: without it
+     * a confirm racing a disable could enable 2FA against a secret that has just
+     * been cleared, leaving an account requiring codes nobody can generate.
+     */
+    private static final String CONFIRM_TOTP = """
+            UPDATE users
+               SET totp_enabled = 1, totp_confirmed_at = CURRENT_TIMESTAMP(6)
+             WHERE id = ? AND totp_secret IS NOT NULL
+            """;
+
+    /**
+     * A-029 · disable, and it clears the secret rather than only the flag.
+     *
+     * <p>Leaving the secret behind would mean re-enabling silently resurrects a
+     * secret the user may have disabled precisely because their authenticator was
+     * compromised. Turning 2FA back on must mean scanning a new QR.
+     */
+    private static final String DISABLE_TOTP = """
+            UPDATE users
+               SET totp_enabled = 0, totp_secret = NULL, totp_confirmed_at = NULL
+             WHERE id = ?
+            """;
+
+    /**
      * A-021 · who hears about a lockout. Blueprint §S-01 says "email to Admin"
      * without naming one, so every active Admin is told.
      *
@@ -230,6 +272,12 @@ class AuthUserRepository {
             // database that has not yet run the migration is a startup-order
             // problem, not a reason to NPE on every login.
             toInstant(rs.getObject("password_changed_at", LocalDateTime.class)),
+            // A-029 · still ciphertext here. TotpSecretCipher is the only thing
+            // that turns it into a usable secret, and it does so as late as
+            // possible so a plaintext shared secret never sits in a row object
+            // that gets logged or serialised.
+            rs.getString("totp_secret"),
+            rs.getBoolean("totp_enabled"),
             rs.getInt("failed_attempts"),
             toInstant(rs.getObject("locked_until", LocalDateTime.class)));
 
@@ -366,5 +414,21 @@ class AuthUserRepository {
                 .param(newPasswordHash)
                 .param(userId)
                 .update();
+    }
+
+    // ── A-029 · two-factor enrolment ────────────────────────────────────────
+
+    /** @param encryptedSecret ciphertext from {@link TotpSecretCipher}, never the raw secret */
+    void startTotpEnrolment(long userId, String encryptedSecret) {
+        jdbc.sql(START_TOTP_ENROLMENT).param(encryptedSecret).param(userId).update();
+    }
+
+    /** @return true if 2FA is now on; false if the secret vanished under a racing disable */
+    boolean confirmTotp(long userId) {
+        return jdbc.sql(CONFIRM_TOTP).param(userId).update() == 1;
+    }
+
+    void disableTotp(long userId) {
+        jdbc.sql(DISABLE_TOTP).param(userId).update();
     }
 }

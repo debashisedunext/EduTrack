@@ -21,8 +21,24 @@ import jakarta.validation.constraints.Size;
  * which candidates are not worth trying, and would lock out every user whose
  * existing password predates a later policy change.
  *
- * @param totpCode carried because the contract defines it; the 2FA challenge
- *                 itself is A-029 and this field is not yet consulted.
+ * @param totpCode     the six-digit code from an authenticator. Consulted from
+ *                     A-029; the contract has defined the field since A-020.
+ * @param recoveryCode a single-use recovery code, for the user whose
+ *                     authenticator is lost.
+ *                     <p><b>A separate field rather than reusing
+ *                     {@code totpCode}, and that is a deliberate choice.</b> The
+ *                     contract constrains {@code totpCode} to
+ *                     {@code ^\d{6}$}, so a recovery code sent through it is
+ *                     refused by validation before any service sees it — which
+ *                     is exactly what {@code TwoFactorIT} caught. Relaxing that
+ *                     pattern would have worked and would have weakened a
+ *                     constraint four streams reviewed; adding a field leaves
+ *                     the reviewed one untouched.
+ *                     <p><b>Contract deviation, flagged for Debashis</b> (Stream
+ *                     D owns {@code contracts/openapi.yaml}): recovery codes are
+ *                     not in the contract at all, so this field is an addition
+ *                     rather than an implementation. Documented springdoc-side
+ *                     meanwhile.
  */
 record LoginRequest(
 
@@ -37,6 +53,23 @@ record LoginRequest(
 
         @Pattern(regexp = "^\\d{6}$")
         @Schema(description = "Six-digit TOTP. Required once the account has 2FA enabled (A-029).")
-        String totpCode
+        String totpCode,
+
+        @Size(max = 32)
+        @Schema(description = "A single-use recovery code, used in place of totpCode when the "
+                + "authenticator is unavailable. Formatted XXXXX-XXXXX; hyphens, spaces and "
+                + "lower case are all accepted.", example = "A1B2C-D3E4F")
+        String recoveryCode
 ) {
+
+    /**
+     * Whichever second factor the caller supplied.
+     *
+     * <p>{@code totpCode} wins when both are present — it is the ordinary path,
+     * and a recovery code is precious enough that it should not be silently
+     * spent because a form posted both fields.
+     */
+    String secondFactor() {
+        return totpCode != null && !totpCode.isBlank() ? totpCode : recoveryCode;
+    }
 }

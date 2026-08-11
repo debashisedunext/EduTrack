@@ -65,12 +65,15 @@ export const loginBodyUsernameMax = 100;
 
 
 export const loginBodyTotpCodeRegExp = new RegExp('^\\d{6}$');
+export const loginBodyRecoveryCodeMax = 32;
+
 
 
 export const loginBody = zod.object({
   "username": zod.string().min(1).max(loginBodyUsernameMax),
   "password": zod.string().min(1),
-  "totpCode": zod.string().regex(loginBodyTotpCodeRegExp).optional().describe('Required when 2FA is enabled.')
+  "totpCode": zod.string().regex(loginBodyTotpCodeRegExp).optional().describe('Required when 2FA is enabled.'),
+  "recoveryCode": zod.string().max(loginBodyRecoveryCodeMax).optional().describe('A single-use recovery code, in place of totpCode when the authenticator is unavailable. Hyphens, spaces and lower case are all accepted.')
 })
 
 export const loginResponse = zod.object({
@@ -188,5 +191,63 @@ export const changeOwnPasswordBodyNewPasswordMax = 128;
 export const changeOwnPasswordBody = zod.object({
   "currentPassword": zod.string(),
   "newPassword": zod.string().min(changeOwnPasswordBodyNewPasswordMin).max(changeOwnPasswordBodyNewPasswordMax).describe('Upper, lower, digit and symbol required; the last three are not reusable.')
+})
+
+/**
+ * Generates a shared secret and returns it with an `otpauth://` URI to
+render as a QR code. **Does not enable 2FA** — the account is unchanged
+until `/me/2fa/confirm` succeeds, so a QR that fails to scan cannot lock
+the user out of the account they were protecting.
+
+Calling it again replaces an unconfirmed secret. Refused once 2FA is on:
+re-enrolling requires disabling first, and disabling requires the
+password, so a stolen access token cannot swap the second factor.
+
+ * @summary Start two-factor enrolment
+ */
+export const beginTwoFactorEnrolmentResponse = zod.object({
+  "data": zod.object({
+  "secret": zod.string().describe('Base32, for typing in when a QR cannot be scanned.'),
+  "otpauthUri": zod.string().describe('Render client-side as a QR code.')
+})
+})
+
+/**
+ * Verifies a code from the authenticator — proving the secret was added —
+and only then enables 2FA.
+
+**Returns the recovery codes, once.** They are stored hashed and cannot
+be shown again. Issued here rather than at setup, because codes handed
+out for an enrolment that was never completed would be live credentials
+for an account with no second factor.
+
+ * @summary Confirm two-factor enrolment and switch it on
+ */
+export const confirmTwoFactorEnrolmentBodyCodeRegExp = new RegExp('^\\d{6}$');
+
+
+export const confirmTwoFactorEnrolmentBody = zod.object({
+  "code": zod.string().regex(confirmTwoFactorEnrolmentBodyCodeRegExp)
+})
+
+export const confirmTwoFactorEnrolmentResponse = zod.object({
+  "data": zod.object({
+  "recoveryCodes": zod.array(zod.string()).describe('Single-use. Each substitutes for the 6-digit code at login.')
+})
+})
+
+/**
+ * **Requires the account password**, not just a valid access token.
+Removing the second factor is the first thing a stolen fifteen-minute
+token would be used for, and a token must not be enough to strip the
+protection it was layered under.
+
+Clears the secret and every recovery code, so re-enabling means scanning
+a new QR.
+
+ * @summary Turn two-factor authentication off
+ */
+export const disableTwoFactorBody = zod.object({
+  "password": zod.string()
 })
 

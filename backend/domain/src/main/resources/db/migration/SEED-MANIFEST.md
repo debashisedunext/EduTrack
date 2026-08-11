@@ -58,6 +58,7 @@ environment, always.
 | 27 | `V20260811_1030__password_policy.sql` | A | A-028 | schema | `password_history` + `users.password_changed_at` — the no-reuse rule and the optional expiry clock |
 | 28 | `V20260811_1100__ping_pong_flags.sql` | D | D-025 | schema | `ping_pong_flags` — one row **per cycle**, holding the highest iteration already announced, so a further bounce is new information and a reopen re-arms |
 | 29 | `V20260811_1400__unassigned_ticket_alerts.sql` | D | D-026 | schema | `unassigned_ticket_alerts` — one row per ticket, cleared the moment somebody picks it up, so a later reassignment away alerts immediately |
+| 30 | `V20260811_1420__two_factor_totp.sql` | A | A-029 | schema | `users.totp_secret`/`totp_enabled`/`totp_confirmed_at` + `totp_recovery_codes` — the enrol-then-confirm states and the way back in |
 
 <!-- load-order:end -->
 

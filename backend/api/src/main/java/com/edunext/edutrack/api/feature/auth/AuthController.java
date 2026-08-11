@@ -143,7 +143,11 @@ class AuthController {
             @Parameter(hidden = true)
             @RequestHeader(value = HttpHeaders.USER_AGENT, required = false) String userAgent) {
 
-        AuthenticatedUser user = authentication.authenticate(request.username(), request.password());
+        // A-029 · totpCode was declared by the contract from the start and
+        // ignored until now; the challenge itself lives in AuthenticationService,
+        // which is what keeps its ordering relative to the password check.
+        AuthenticatedUser user = authentication.authenticate(
+                request.username(), request.password(), request.secondFactor());
         AccessToken token = tokens.issue(user);
         SessionResponse body = new SessionResponse(Session.issue(user, token));
 
