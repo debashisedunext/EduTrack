@@ -132,7 +132,17 @@ class StaleTicketNudge {
                                     StaleTicketRepository.OpenTicket ticket,
                                     BigDecimal threshold) {
         if (ticket.lastNudgedAt() == null) {
-            return now;
+            // Never nudged as far as this pass could see, so the INSERT is the
+            // only path that may claim it. If that insert loses — a row exists
+            // that was not there when the candidates were read — another worker
+            // nudged in between, and this pass must not nudge again.
+            //
+            // This returned `now` until D-025, which made the guard vacuously
+            // true: `nudged_at <= now` matches a row written a millisecond ago,
+            // so a lost race told the assignee and their manager twice. Only
+            // reachable with two passes in flight at once, which is one worker
+            // pod restarting or simply the normal deployment.
+            return Instant.EPOCH;
         }
         Instant lastNudged = ticket.lastNudgedAt().toInstant();
         BigDecimal sinceLastNudge = workingHours.workingHoursBetween(

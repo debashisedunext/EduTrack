@@ -84,6 +84,9 @@ class StaleTicketScannerIT {
     @Autowired
     StaleTicketScanner scanner;
 
+    @Autowired
+    StaleTicketNudge nudge;
+
     private static final AtomicInteger SEQ = new AtomicInteger();
 
     private long assignee;
@@ -237,6 +240,35 @@ class StaleTicketScannerIT {
         assertThat(notifiedUserIds(ticket))
                 .as("two recipients, twice")
                 .hasSize(4);
+    }
+
+    @Test
+    @DisplayName("losing the insert race does not nudge the same ticket twice")
+    void aLostInsertRaceDoesNotNudgeAgain() {
+        long ticket = insertTicket(Instant.parse("2026-08-04T04:00:00Z"));
+        scanner.scanOnce();
+        assertThat(notifiedUserIds(ticket)).as("pass one nudges").hasSize(2);
+
+        // What a second worker sees when it read the candidate list a moment
+        // before the first one committed: its row says "never nudged" while the
+        // table already says otherwise. Its INSERT IGNORE then loses, and the
+        // fallback UPDATE decides whether anybody is told twice.
+        //
+        // Found because D-025 added a scanner to the same context, which shifted
+        // when the scheduled startup sweep lands relative to this class's first
+        // test — enough to make a latent race fire. It was always reachable in
+        // production, where two workers is the normal deployment.
+        StaleTicketRepository.OpenTicket asSeenByALaterWorker =
+                new StaleTicketRepository.OpenTicket(
+                        ticket, "ST-race", "race", projectId, assignee, manager,
+                        null, java.sql.Timestamp.from(Instant.parse("2026-08-04T04:00:00Z")));
+
+        boolean nudgedAgain = nudge.nudgeIfStale(asSeenByALaterWorker, NOW);
+
+        assertThat(nudgedAgain).isFalse();
+        assertThat(notifiedUserIds(ticket))
+                .as("still two — the worker that inserted the row did the nudging")
+                .hasSize(2);
     }
 
     // ------------------------------------------------------------- helpers
