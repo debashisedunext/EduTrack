@@ -539,6 +539,50 @@ export const restHandlers = [
     }, undefined, { headers: { ETag: 'W/"batch-complete"' } }),
   ),
 
+  // ── browser push · D-045 ──────────────────────────────────────────────────
+  // A real, well-formed VAPID public key shape — 65 base64url bytes — so a
+  // client that passes it to `pushManager.subscribe()` fails on the browser's
+  // permission prompt rather than on a key the API would never have accepted.
+  http.get(url('/push/public-key'), () =>
+    ok({ publicKey: 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U' }),
+  ),
+  http.post(url('/me/push-subscriptions'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as {
+      endpoint?: string
+      keys?: { p256dh?: string; auth?: string }
+      userAgent?: string | null
+    };
+    if (!body.endpoint || !body.keys?.p256dh || !body.keys?.auth) {
+      return validationFailed({ endpoint: ['is missing or malformed'] });
+    }
+    // Keyed on the endpoint, and the user is reassigned on conflict — the same
+    // rule the real table's unique key enforces, so a client cannot be built
+    // against a mock that quietly allows two owners for one browser.
+    const existing = db.pushSubscriptions.find((s) => s.endpoint === body.endpoint);
+    const row = {
+      endpoint: body.endpoint,
+      userId: db.currentUserId,
+      p256dh: body.keys.p256dh,
+      auth: body.keys.auth,
+      userAgent: body.userAgent ?? null,
+    };
+    if (existing) Object.assign(existing, row);
+    else db.pushSubscriptions.push(row);
+    return noContent();
+  }),
+  http.delete(url('/me/push-subscriptions'), ({ request }) => {
+    const db = getDb();
+    const endpoint = new URL(request.url).searchParams.get('endpoint');
+    // Scoped to the caller, and 204 either way: unsubscribing states a desired
+    // state, and a browser the push service already expired has nothing to
+    // report as an error.
+    db.pushSubscriptions = db.pushSubscriptions.filter(
+      (s) => !(s.endpoint === endpoint && s.userId === db.currentUserId),
+    );
+    return noContent();
+  }),
+
   // ── masters ───────────────────────────────────────────────────────────────
   http.get(url('/masters/task-types'), () => ok(getDb().taskTypes)),
   // Inactive rows included, in `seq` order — a picker filters them out, a grid

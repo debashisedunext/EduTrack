@@ -126,6 +126,60 @@ export const updateNotificationPreferencesResponse = zod.object({
 })
 
 /**
+ * The browser needs this *before* it can subscribe — it is the `applicationServerKey` passed to `pushManager.subscribe()`, and it binds the subscription to this deployment so no other server can push to it.
+
+Public by design: it is the public half of the VAPID pair, and shipping it to every browser is what it is for. The private half never leaves the server.
+
+Served rather than baked into the frontend build, so rotating the pair is a config change and a redeploy of one service rather than a rebuild — and so a browser that subscribed under the old key can be told the key changed.
+
+ * @summary The VAPID application server key (D-045)
+ */
+export const getPushPublicKeyResponse = zod.object({
+  "data": zod.object({
+  "publicKey": zod.string().describe('base64url, unpadded — the uncompressed P-256 point the Web Push API expects as `applicationServerKey`.\n')
+})
+})
+
+/**
+ * Idempotent by design, which is why it answers 204 rather than 201 and takes no idempotency key: the endpoint identifies the browser, so posting the same one twice is the same subscription, not a second.
+
+**Re-posting an endpoint that belongs to somebody else moves it.** The endpoint is a property of the browser, not of the account — on a shared machine, leaving the previous user's row in place would push their ticket alerts onto this user's screen.
+
+ * @summary Register this browser for push (D-045)
+ */
+export const subscribeToPushBodyEndpointMax = 500;
+
+export const subscribeToPushBodyKeysP256dhMax = 128;
+
+export const subscribeToPushBodyKeysAuthMax = 32;
+
+export const subscribeToPushBodyUserAgentMax = 255;
+
+
+
+export const subscribeToPushBody = zod.object({
+  "endpoint": zod.string().max(subscribeToPushBodyEndpointMax),
+  "keys": zod.object({
+  "p256dh": zod.string().max(subscribeToPushBodyKeysP256dhMax).describe('base64url of the browser\'s public key (RFC 8291).'),
+  "auth": zod.string().max(subscribeToPushBodyKeysAuthMax).describe('base64url of the 16-byte auth secret.')
+}),
+  "userAgent": zod.string().max(subscribeToPushBodyUserAgentMax).nullish().describe('So somebody can tell which of their devices a subscription is. Sent by the client rather than read from the request header, because the header describes whatever made the HTTP call and the subscription belongs to the browser that granted permission.\n')
+})
+
+/**
+ * Answers 204 whether or not the endpoint was registered. Unsubscribing is a statement about the desired state, and a browser that has already been forgotten — because the push service expired it and the server dropped it — has nothing to report as an error.
+
+ * @summary Forget this browser
+ */
+export const unsubscribeFromPushQueryEndpointMax = 500;
+
+
+
+export const unsubscribeFromPushQueryParams = zod.object({
+  "endpoint": zod.string().max(unsubscribeFromPushQueryEndpointMax).describe('The endpoint returned by `pushManager.subscribe()`.')
+})
+
+/**
  * Blueprint §11: a notification raised while the user was offline is queued and pops the moment they log in. Oldest first — this is a queue being drained, not a list being browsed — and capped, because somebody back from leave has a hundred queued and popping all of them is indistinguishable from popping none. `hasMore` says the cap hid some.
 Independent of `isRead`: a notification can be read without ever having been popped, and popped without being read.
 

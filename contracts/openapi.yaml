@@ -2306,6 +2306,81 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /push/public-key:
+    get:
+      tags: [notifications]
+      operationId: getPushPublicKey
+      summary: The VAPID application server key (D-045)
+      description: >
+        The browser needs this *before* it can subscribe — it is the
+        `applicationServerKey` passed to `pushManager.subscribe()`, and it binds
+        the subscription to this deployment so no other server can push to it.
+
+
+        Public by design: it is the public half of the VAPID pair, and shipping
+        it to every browser is what it is for. The private half never leaves the
+        server.
+
+
+        Served rather than baked into the frontend build, so rotating the pair
+        is a config change and a redeploy of one service rather than a
+        rebuild — and so a browser that subscribed under the old key can be told
+        the key changed.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PushPublicKeyResponse' }
+        '404':
+          description: Push is not configured on this deployment.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /me/push-subscriptions:
+    post:
+      tags: [notifications]
+      operationId: subscribeToPush
+      summary: Register this browser for push (D-045)
+      description: >
+        Idempotent by design, which is why it answers 204 rather than 201 and
+        takes no idempotency key: the endpoint identifies the browser, so
+        posting the same one twice is the same subscription, not a second.
+
+
+        **Re-posting an endpoint that belongs to somebody else moves it.** The
+        endpoint is a property of the browser, not of the account — on a shared
+        machine, leaving the previous user's row in place would push their
+        ticket alerts onto this user's screen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PushSubscriptionRequest' }
+      responses:
+        '204': { description: Subscribed. }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [notifications]
+      operationId: unsubscribeFromPush
+      summary: Forget this browser
+      description: >
+        Answers 204 whether or not the endpoint was registered. Unsubscribing is
+        a statement about the desired state, and a browser that has already been
+        forgotten — because the push service expired it and the server dropped
+        it — has nothing to report as an error.
+      parameters:
+        - name: endpoint
+          in: query
+          required: true
+          schema: { type: string, maxLength: 500 }
+          description: The endpoint returned by `pushManager.subscribe()`.
+      responses:
+        '204': { description: 'Gone, or never here.' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /notifications/pending:
     get:
       tags: [notifications]
@@ -4096,6 +4171,45 @@ components:
             - type: object
               properties:
                 unreadCount: { type: integer }
+    PushPublicKeyResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [publicKey]
+          properties:
+            publicKey:
+              type: string
+              description: >
+                base64url, unpadded — the uncompressed P-256 point the Web Push
+                API expects as `applicationServerKey`.
+              examples: ['BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U']
+    PushSubscriptionRequest:
+      type: object
+      required: [endpoint, keys]
+      properties:
+        endpoint: { type: string, maxLength: 500 }
+        keys:
+          type: object
+          required: [p256dh, auth]
+          properties:
+            p256dh:
+              type: string
+              maxLength: 128
+              description: base64url of the browser's public key (RFC 8291).
+            auth:
+              type: string
+              maxLength: 32
+              description: base64url of the 16-byte auth secret.
+        userAgent:
+          type: [string, 'null']
+          maxLength: 255
+          description: >
+            So somebody can tell which of their devices a subscription is. Sent
+            by the client rather than read from the request header, because the
+            header describes whatever made the HTTP call and the subscription
+            belongs to the browser that granted permission.
     NotificationPreferenceMatrix:
       type: object
       required: [data]

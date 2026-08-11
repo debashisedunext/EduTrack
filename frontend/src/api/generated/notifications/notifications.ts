@@ -75,7 +75,11 @@ import type {
   NotificationsDeliveredRequest,
   PendingNotificationsResponse,
   Problem,
-  UnauthorizedResponse
+  PushPublicKeyResponse,
+  PushSubscriptionRequest,
+  UnauthorizedResponse,
+  UnsubscribeFromPushParams,
+  ValidationFailedResponse
 } from '.././model';
 
 import { http } from '../../http';
@@ -335,6 +339,236 @@ export const useUpdateNotificationPreferences = <TError = Problem | Unauthorized
       > => {
 
       const mutationOptions = getUpdateNotificationPreferencesMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The browser needs this *before* it can subscribe — it is the `applicationServerKey` passed to `pushManager.subscribe()`, and it binds the subscription to this deployment so no other server can push to it.
+
+Public by design: it is the public half of the VAPID pair, and shipping it to every browser is what it is for. The private half never leaves the server.
+
+Served rather than baked into the frontend build, so rotating the pair is a config change and a redeploy of one service rather than a rebuild — and so a browser that subscribed under the old key can be told the key changed.
+
+ * @summary The VAPID application server key (D-045)
+ */
+export const getPushPublicKey = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PushPublicKeyResponse>(
+      {url: `/push/public-key`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetPushPublicKeyQueryKey = () => {
+    return [
+    `/push/public-key`
+    ] as const;
+    }
+
+    
+export const getGetPushPublicKeyQueryOptions = <TData = Awaited<ReturnType<typeof getPushPublicKey>>, TError = Problem>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPushPublicKey>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPushPublicKeyQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPushPublicKey>>> = ({ signal }) => getPushPublicKey(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPushPublicKey>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPushPublicKeyQueryResult = NonNullable<Awaited<ReturnType<typeof getPushPublicKey>>>
+export type GetPushPublicKeyQueryError = Problem
+
+
+export function useGetPushPublicKey<TData = Awaited<ReturnType<typeof getPushPublicKey>>, TError = Problem>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPushPublicKey>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPushPublicKey>>,
+          TError,
+          Awaited<ReturnType<typeof getPushPublicKey>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPushPublicKey<TData = Awaited<ReturnType<typeof getPushPublicKey>>, TError = Problem>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPushPublicKey>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPushPublicKey>>,
+          TError,
+          Awaited<ReturnType<typeof getPushPublicKey>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPushPublicKey<TData = Awaited<ReturnType<typeof getPushPublicKey>>, TError = Problem>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPushPublicKey>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The VAPID application server key (D-045)
+ */
+
+export function useGetPushPublicKey<TData = Awaited<ReturnType<typeof getPushPublicKey>>, TError = Problem>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPushPublicKey>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPushPublicKeyQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Idempotent by design, which is why it answers 204 rather than 201 and takes no idempotency key: the endpoint identifies the browser, so posting the same one twice is the same subscription, not a second.
+
+**Re-posting an endpoint that belongs to somebody else moves it.** The endpoint is a property of the browser, not of the account — on a shared machine, leaving the previous user's row in place would push their ticket alerts onto this user's screen.
+
+ * @summary Register this browser for push (D-045)
+ */
+export const subscribeToPush = (
+    pushSubscriptionRequest: PushSubscriptionRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<void>(
+      {url: `/me/push-subscriptions`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: pushSubscriptionRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getSubscribeToPushMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof subscribeToPush>>, TError,{data: PushSubscriptionRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof subscribeToPush>>, TError,{data: PushSubscriptionRequest}, TContext> => {
+
+const mutationKey = ['subscribeToPush'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof subscribeToPush>>, {data: PushSubscriptionRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  subscribeToPush(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubscribeToPushMutationResult = NonNullable<Awaited<ReturnType<typeof subscribeToPush>>>
+    export type SubscribeToPushMutationBody = PushSubscriptionRequest
+    export type SubscribeToPushMutationError = ValidationFailedResponse | UnauthorizedResponse
+
+    /**
+ * @summary Register this browser for push (D-045)
+ */
+export const useSubscribeToPush = <TError = ValidationFailedResponse | UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof subscribeToPush>>, TError,{data: PushSubscriptionRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof subscribeToPush>>,
+        TError,
+        {data: PushSubscriptionRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSubscribeToPushMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Answers 204 whether or not the endpoint was registered. Unsubscribing is a statement about the desired state, and a browser that has already been forgotten — because the push service expired it and the server dropped it — has nothing to report as an error.
+
+ * @summary Forget this browser
+ */
+export const unsubscribeFromPush = (
+    params: UnsubscribeFromPushParams,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/me/push-subscriptions`, method: 'DELETE',
+        params
+    },
+      );
+    }
+  
+
+
+export const getUnsubscribeFromPushMutationOptions = <TError = UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unsubscribeFromPush>>, TError,{params: UnsubscribeFromPushParams}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof unsubscribeFromPush>>, TError,{params: UnsubscribeFromPushParams}, TContext> => {
+
+const mutationKey = ['unsubscribeFromPush'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof unsubscribeFromPush>>, {params: UnsubscribeFromPushParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  unsubscribeFromPush(params,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UnsubscribeFromPushMutationResult = NonNullable<Awaited<ReturnType<typeof unsubscribeFromPush>>>
+    
+    export type UnsubscribeFromPushMutationError = UnauthorizedResponse
+
+    /**
+ * @summary Forget this browser
+ */
+export const useUnsubscribeFromPush = <TError = UnauthorizedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unsubscribeFromPush>>, TError,{params: UnsubscribeFromPushParams}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof unsubscribeFromPush>>,
+        TError,
+        {params: UnsubscribeFromPushParams},
+        TContext
+      > => {
+
+      const mutationOptions = getUnsubscribeFromPushMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

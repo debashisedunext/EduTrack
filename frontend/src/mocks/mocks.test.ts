@@ -397,6 +397,50 @@ describe('GET /tickets filters — C-015 saved views', () => {
   });
 });
 
+/** D-045 — the opt-in half of browser push. */
+describe('push subscriptions', () => {
+  interface Key { publicKey: string }
+  const del = (url: string) => http<void>({ url, method: 'DELETE' });
+
+  it('serves a VAPID key the browser could actually use', async () => {
+    const key = await get<Envelope<Key>>('/push/public-key');
+    // 65 base64url bytes — an uncompressed P-256 point. A shorter placeholder
+    // would be rejected by pushManager.subscribe() rather than by us.
+    expect(atob(key.data.publicKey.replace(/-/g, '+').replace(/_/g, '/'))).toHaveLength(65);
+  });
+
+  it('subscribes, and subscribing twice is one subscription', async () => {
+    const body = { endpoint: 'https://push.example/abc', keys: { p256dh: 'x', auth: 'y' } };
+    await post('/me/push-subscriptions', body);
+    await post('/me/push-subscriptions', body);
+
+    expect(getDb().pushSubscriptions).toHaveLength(1);
+  });
+
+  it('moves the subscription when a second user takes over the browser', async () => {
+    const db = getDb();
+    const body = { endpoint: 'https://push.example/shared', keys: { p256dh: 'x', auth: 'y' } };
+    await post('/me/push-subscriptions', body);
+
+    db.currentUserId = 4;
+    await post('/me/push-subscriptions', body);
+
+    expect(db.pushSubscriptions).toHaveLength(1);
+    expect(db.pushSubscriptions[0].userId).toBe(4);
+  });
+
+  it('unsubscribes by endpoint, and says nothing about one that was never here', async () => {
+    await post('/me/push-subscriptions', {
+      endpoint: 'https://push.example/gone', keys: { p256dh: 'x', auth: 'y' },
+    });
+
+    await del('/me/push-subscriptions?endpoint=' + encodeURIComponent('https://push.example/gone'));
+    await del('/me/push-subscriptions?endpoint=' + encodeURIComponent('https://push.example/never'));
+
+    expect(getDb().pushSubscriptions).toHaveLength(0);
+  });
+})
+
 /**
  * D-060 — the four §7.5 fields, in the contract and the mock before C-065…C-070
  * are built against them.
