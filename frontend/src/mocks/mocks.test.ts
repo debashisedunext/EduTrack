@@ -16,6 +16,65 @@ interface Envelope<T> { data: T; meta?: Record<string, unknown> }
 
 beforeEach(() => resetDb());
 
+/**
+ * A-029's endpoints, mocked in D-004's file. Not Stream A's tests — these pin
+ * the *mock's* behaviour, so a screen built against it cannot assume something
+ * the real server will not do.
+ */
+describe('two-factor enrolment', () => {
+  interface Setup { secret: string; otpauthUri: string }
+  interface Confirm { recoveryCodes: string[] }
+
+  it('setup hands back a secret and an otpauth URI, and leaves 2FA off', async () => {
+    const setup = await post<Envelope<Setup>>('/me/2fa/setup');
+
+    expect(setup.data.otpauthUri).toContain(`secret=${setup.data.secret}`);
+    // The whole point of the two-step design: a QR that never scans must not
+    // have locked the user out of the account they were protecting.
+    expect(getDb().twoFactor[getDb().currentUserId].enabled).toBe(false);
+  });
+
+  it('confirm turns it on and returns recovery codes', async () => {
+    await post('/me/2fa/setup');
+    const confirmed = await post<Envelope<Confirm>>('/me/2fa/confirm', { code: '123456' });
+
+    expect(confirmed.data.recoveryCodes).toHaveLength(10);
+    expect(getDb().twoFactor[getDb().currentUserId].enabled).toBe(true);
+  });
+
+  it('refuses to confirm something that was never started', async () => {
+    await expect(post('/me/2fa/confirm', { code: '123456' })).rejects.toSatisfy(
+      (e: unknown) => e instanceof ApiError && e.status === 409,
+    );
+  });
+
+  it('refuses to disable without the password', async () => {
+    await post('/me/2fa/setup');
+    await post('/me/2fa/confirm', { code: '123456' });
+
+    // The password is what this endpoint is for — a stolen access token must
+    // not be enough to remove the second factor.
+    //
+    // 401 rather than 400, which is the handler's call and the right one: the
+    // mock holds no passwords, so it cannot tell an absent one from a wrong
+    // one, and collapsing both to "re-authentication failed" is the answer a
+    // screen has to handle anyway. The contract declares both codes.
+    await expect(post('/me/2fa/disable', {})).rejects.toSatisfy(
+      (e: unknown) => e instanceof ApiError && e.status === 401,
+    );
+    expect(getDb().twoFactor[getDb().currentUserId].enabled).toBe(true);
+  });
+
+  it('disabling with the password clears the enrolment', async () => {
+    await post('/me/2fa/setup');
+    await post('/me/2fa/confirm', { code: '123456' });
+
+    await post('/me/2fa/disable', { password: 'correct horse' });
+
+    expect(getDb().twoFactor[getDb().currentUserId]).toBeUndefined();
+  });
+})
+
 describe('walkthrough A — the fixture Stream C is judged against', () => {
   const T = 'CRM-26-00347';
 

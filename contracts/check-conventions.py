@@ -77,8 +77,24 @@ def main():
         c = o.get("responses", {}).get(code, {}).get("content", {})
         return c.get("application/json", {}).get("schema", {})
 
-    def resolved(ref):
-        return schemas.get(ref.get("$ref", "").split("/")[-1], {})
+    def resolved(schema):
+        """
+        Follow a `$ref`, or hand back an inline schema unchanged.
+
+        The second half was missing until A-029, and its absence was a **false
+        positive that failed somebody else's build**. Every operation until then
+        answered with a named component, so this was only ever handed a `$ref`;
+        the first inline 2xx body resolved to `{}`, reported no `data` property,
+        and the §2 envelope rule fired on a response that was correctly wrapped.
+        Its author then went looking for a defect that was never there.
+
+        A checker that is wrong in the strict direction is worse than no
+        checker: it spends other people's time and teaches them to distrust it.
+        """
+        ref = schema.get("$ref") if isinstance(schema, dict) else None
+        if not ref:
+            return schema if isinstance(schema, dict) else {}
+        return schemas.get(ref.split("/")[-1], {})
 
     if "--list" in sys.argv:
         print("If-Match exemptions:")
