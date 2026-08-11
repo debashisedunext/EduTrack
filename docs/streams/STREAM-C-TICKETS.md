@@ -50,7 +50,7 @@
   - No Storybook entry — `SavedViewsMenu` is ticket-list-specific (hardcodes the six view names and `TicketListFilters`'s shape), not a shared-library control; reasoning recorded in the folder README next to `ColumnChooserMenu`/`DensityToggle`, which carry the same exemption.
 - [x] **C-016** Row colour cues — soft amber left border on delayed, soft red on critical.
 - [ ] **C-017** Bulk select → reassign / change level / close (PM & Admin only).
-- [ ] **C-018** My Tasks — hard-scoped to `assigned_to = me`, grouped Due Today / Overdue / This Week / Later, inline Quick Update on every row, optional Kanban toggle. **S-18**
+- [x] **C-018** My Tasks — hard-scoped to `assigned_to = me`, grouped Due Today / Overdue / This Week / Later, inline Quick Update on every row, optional Kanban toggle. **S-18**
 
 ### Detail page — S-20
 - [ ] **C-019** Detail shell + summary panel — every entity a link (assignee → profile, project → dashboard, client → 360 view, linked ticket, cycle → its effort logs).
@@ -77,7 +77,8 @@
 ### Effort & quick update
 - [ ] **C-035** Effort logging, append-only, **auto-stamped with current stage and iteration** so it lands in the right journey row with no user action.
 - [ ] **C-036** Quick Update slide-over — status, effort + date, work note, % complete, revised ETA with reason, attach. Two clicks, no reload, optimistic UI, closes with a toast. **S-21**
-- [ ] **C-037** Quick Update must **not** expose: ticket ID, reported by, assigned by, date reported, cycle history, the ribbon, prior effort logs, level (unless PM), project.
+  - ⚠ **Built ahead of schedule as part of C-018**, which needed the panel for its own "inline Quick Update on every row" — `frontend/src/features/tickets/quick-update/`. Status, effort + date, work note, % complete and revised ETA-with-reason are all there, closes with a toast, two clicks. Two things remain open: **📎 Attach** (needs C-023's attachment picker, which doesn't exist yet — see the `my-tasks/README.md` note) and **optimistic UI** (deliberately skipped — every other mutation in this codebase, create included, waits for the server round trip rather than patching the cache by hand; revisit only if this specific panel's latency turns out to matter more than the others).
+- [x] **C-037** Quick Update must **not** expose: ticket ID, reported by, assigned by, date reported, cycle history, the ribbon, prior effort logs, level (unless PM), project.
 
 ### Cycles & closure
 - [ ] **C-038** 🔴 **Reopen transaction** — seal cycle N (`is_sealed`), insert cycle N+1 with fresh start/PCD/assignee, `reopen_count++`, clear `actual_close_date`, write history. All in one transaction. **Cycle 1's effort is never touched.** *(§4.1)*

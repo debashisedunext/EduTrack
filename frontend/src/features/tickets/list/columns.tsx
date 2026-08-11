@@ -38,14 +38,14 @@ export interface ColumnDef {
   render: (ticket: Ticket, ctx: ColumnRenderContext) => ReactNode
 }
 
-const LEVEL_VARIANT: Record<Level, ChipProps['variant']> = {
+export const LEVEL_VARIANT: Record<Level, ChipProps['variant']> = {
   LOW: 'low',
   MEDIUM: 'medium',
   HIGH: 'high',
   CRITICAL: 'critical',
 }
 
-const STATUS_VARIANT: Record<StatusCode, ChipProps['variant']> = {
+export const STATUS_VARIANT: Record<StatusCode, ChipProps['variant']> = {
   NEW: 'neutral',
   IN_PROGRESS: 'info',
   ON_HOLD: 'warning',
