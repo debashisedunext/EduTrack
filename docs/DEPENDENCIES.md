@@ -19,9 +19,9 @@ The single reference for sequencing. Task detail lives in `streams/STREAM-*.md`;
 | Stream | Owner | GitHub | Task IDs | Branch prefix |
 |---|---|---|---|---|
 | **A** Platform & Security | Shivendra | `@shivendraedunext-18` | `A-001` … `A-075` | `feat/platform/…` |
-| **B** Masters & Clients | Ayush | `@Ayushedunext` | `B-001` … `B-063` | `feat/masters/…` |
-| **C** Tickets & Ribbon | Divyansh | `@Divyanshedunext` | `C-001` … `C-064` | `feat/tickets/…` |
-| **D** Engines & Realtime | Debashis | `@debashisedunext` | `D-001` … `D-059` | `feat/engines/…` |
+| **B** Masters & Clients | Ayush | `@Ayushedunext` | `B-001` … `B-064` | `feat/masters/…` |
+| **C** Tickets & Ribbon | Divyansh | `@Divyanshedunext` | `C-001` … `C-070` | `feat/tickets/…` |
+| **D** Engines & Realtime | Debashis | `@debashisedunext` | `D-001` … `D-060` | `feat/engines/…` |
 
 ---
 
@@ -48,6 +48,9 @@ Every edge where one developer waits on another. **These are the only dependenci
 | 15 | **D-001** OpenAPI contract | Debashis | All API work in all streams | **All three** | Week 1 |
 | 16 | **D-004** MSW mock server | Debashis | C's entire frontend before APIs exist | Divyansh | **Day 5** |
 | 17 | **D-012…D-014** STOMP infrastructure | Debashis | C-045 live ribbon advance | Divyansh | Week 10 |
+| 18 | **D-060** triage fields in the contract & mocks | Debashis | C-065…C-070 all build against it | Divyansh | **Before C-065** |
+| 19 | **B-064** module master endpoint | Ayush | C-068's dropdown **against the real backend** — the screen itself builds on D-060's mock (§6) | Divyansh | Before M4 demo |
+| 20 | **C-065** `tickets` ALTER for the triage fields | Divyansh | Needs **A's review**, not A's work (TEAM-PLAN §7.1) | Shivendra reviews | Week 3 |
 
 ### The four that decide whether this works
 

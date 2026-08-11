@@ -1,5 +1,5 @@
 # EduTrack — Organisation Task & Client Ticketing System
-### Complete Product, Architecture & UI Blueprint (v1.2)
+### Complete Product, Architecture & UI Blueprint (v1.3)
 
 ---
 
@@ -572,7 +572,7 @@ The same wizard pattern is reused for the resource master bulk import — build 
 |---|---|
 | Where you can attach | Create form · ticket detail · **comment box** · handoff dialog (test evidence, deployment log) · quick update panel · inbound email |
 | Input methods | Drag-and-drop zone, file picker, and **paste from clipboard** — the last one matters most, because a support agent pasting a screenshot straight from Snipping Tool is the single most common attachment action |
-| Allowed types | Images (png, jpg, gif, webp), documents (pdf, docx, xlsx, csv, txt, log), archives (zip), video (mp4, up to 50 MB) |
+| Allowed types | Images (png, jpg, gif, webp), documents (pdf, **doc**, docx, xls, xlsx, csv, txt, log), archives (zip), video (mp4, up to 50 MB). The legacy binary Office formats are on the list because clients still send them; they are also the reason MIME sniffing is not optional — a `.doc` is an OLE container and its extension proves nothing |
 | Limits | 10 MB per file by default, 50 MB per ticket, 20 files per ticket — all configurable in system settings |
 | Image handling | Thumbnail generated on upload, gallery strip on the ticket page, click to open a lightbox with zoom and next/previous. EXIF stripped on upload (client screenshots can carry location data) |
 | Security | Extension allow-list **and** MIME sniffing (not extension alone), anti-virus scan before the file becomes visible, stored in S3/MinIO under `tickets/{ticket_id}/{uuid}`, served only through short-lived signed URLs, never a public bucket |
@@ -970,7 +970,7 @@ Columns: Client Code, Name, Account Manager, Support Plan, Projects, Open Ticket
 ┌───────────────────────────────────────────────────────────────────────────────┐
 │ Tickets   [+ New Ticket]        🔍 Search…   [Saved views ▾]  [⚙ Columns] ⬇   │
 ├───────────────────────────────────────────────────────────────────────────────┤
-│ Project▾ Client▾ Type▾ Level▾ Stage▾ Status▾ Assignee▾ Dates▾  ↺Reset       │
+│ Project▾ Client▾ Module▾ Type▾ Level▾ Stage▾ Status▾ Assignee▾ Dates▾ ↺Reset  │
 ├──────────┬─────────────────────┬───────┬──────┬────────┬────────┬─────┬───────┤
 │ ID       │ Description         │ Type  │Level │Assignee│ PCD    │ Eff │Status │
 ├──────────┼─────────────────────┼───────┼──────┼────────┼────────┼─────┼───────┤
@@ -983,6 +983,7 @@ Columns: Client Code, Name, Account Manager, Support Plan, Projects, Open Ticket
 
 - **Compact ribbon column** — eight small dots per row (filled = done, ringed = current, hollow = pending, amber = reworked) so a manager can scan a whole grid and see exactly where every ticket sits without opening any of them. Hovering a dot names the stage and its owner.
 - Row colour cue: delayed rows get a soft amber left border; critical get soft red.
+- **Module filter and an optional Module column** — off by default in the column chooser, because the grid is already at its width budget, but filterable always. "Every open Fees ticket" is the question this list gets asked most once the field exists.
 - **Saved views:** My Open, Due Today, Overdue, Unassigned, Reopened, Closed This Month.
 - Bulk select → reassign / change level / close (PM & Admin only).
 - Density toggle, column chooser, sticky header, infinite or paged scroll.
@@ -1002,6 +1003,10 @@ Columns: Client Code, Name, Account Manager, Support Plan, Projects, Open Ticket
 | | **Task Type*** | 11-type dropdown with colour chips |
 | | Sub-type / Category | Optional 2nd level |
 | | **Level (Priority)*** | Colour-chip dropdown from the priority master. Pre-filled from the task type default; changing it recomputes and previews the planned close date before save |
+| Where it happened | **Module*** | The product area the concern was raised against — Student, Admission, Fees, Examination, Attendance, Library, Inventory, Parent App. Sourced from the **module master**, not an enum, so a ninth module is a row somebody adds rather than a release. **Mandatory for bug-type task types**, optional for change requests and internal work — see the note below |
+| | **Screen Name** | Free text, the screen it happened on: "Fee Receipt Print" |
+| | **Feature** | Free text, the feature within that screen: "Reprint with duplicate watermark" |
+| | **Steps to Generate** | Rich text — numbered steps and inline screenshots. What a developer needs in order to reproduce it without going back to ask |
 | People | **Date Reported*** | Defaults to now, backdating allowed for Admin/PM only |
 | | **Reported By*** | Defaults to logged-in user; Support Desk can pick client contact |
 | | **Assigned To** | Filtered to project members; shows current open-load count next to each name so the assigner sees who is free |
@@ -1019,6 +1024,12 @@ Columns: Client Code, Name, Account Manager, Support Plan, Projects, Open Ticket
 
 Actions: **Save & Assign** · Save as Draft · Save & Create Another · Cancel.
 On save → ID generated → 🔔 popup to assignee → history entry `CREATED` → email.
+
+**On the four "where it happened" fields.** They exist so that "which module generates the most concerns" is a query rather than a reading exercise, and so that a developer opening a bug is not starting from a one-line title. Three rules follow from that:
+
+- **Module is a master table, never an enum.** The eight values ship as seed data; an enum would make the ninth one a schema migration and a deployment.
+- **Every column is nullable.** Tickets raised before these fields existed have no honest value, and back-filling one is worse than leaving it empty. Mandatoriness is a rule of the *form*, not of the column — exactly as Task Description already is.
+- **Mandatory only where the answer is real.** A Production Bug without a module is a bug nobody can route. A change request may genuinely span three modules, and forcing a choice there just teaches people to pick the first item in the list, which poisons the very reporting the field exists for. Save as Draft waives it either way.
 
 **S-20 Ticket Detail — the most important screen**
 
@@ -1069,6 +1080,7 @@ On save → ID generated → 🔔 popup to assignee → history entry `CREATED` 
 - **Chat tab** — threaded ticket conversation (§7.6).
 - **Activity tab** — full audit stream including attachments and watcher changes.
 - **Priority is inline-editable** from the summary panel by Admin, PM and Support Desk — one click on the chip opens the dropdown, a reason is required once the ticket is assigned, and the change writes a history row and recomputes the planned close date.
+- **Where it happened** — Module, Screen Name and Feature sit in the summary panel directly under Type; **Steps to Generate** renders below the description in the Details pane, where the person about to reproduce the bug is already looking. All four are inline-editable by the roles that may edit the description, and every change writes a `FIELD_CHANGED` history row with the old and new value like any other field.
 - **Traceability:** every entity in the panel is a link — assignee → resource profile, project → project dashboard, **client → client 360 view**, linked ticket → that ticket, cycle → that cycle's effort logs. Breadcrumbs everywhere.
 
 **S-21 Quick Update Panel** (slide-over, opens from any list row — this is the resource's daily driver)
@@ -1231,6 +1243,20 @@ CREATE TABLE projects (
   ticket_seq    BIGINT DEFAULT 0                  -- per-project counter
 );
 
+-- The product areas a concern can be raised against (§7.5). A master table
+-- rather than an enum: the ninth module must be a row somebody adds, not a
+-- migration and a deployment. Named product_modules because "module" already
+-- means an area of the application in §7 and in the role-permission matrix,
+-- and one word with two meanings in one schema is a defect in waiting.
+CREATE TABLE product_modules (
+  id          INT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  code        VARCHAR(40) UNIQUE NOT NULL,   -- STUDENT, ADMISSION, FEES, …
+  name        VARCHAR(80) NOT NULL,
+  seq         SMALLINT DEFAULT 0,
+  is_active   BOOLEAN DEFAULT TRUE,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE tickets (
   id                    BIGSERIAL PRIMARY KEY,
   ticket_code           VARCHAR(30) UNIQUE NOT NULL,   -- CRM-26-00347
@@ -1238,6 +1264,13 @@ CREATE TABLE tickets (
   title                 VARCHAR(200) NOT NULL,
   description           TEXT,
   task_type_id          INT  REFERENCES task_types(id),
+  -- Where it happened (§7.5). All four nullable: tickets raised before these
+  -- fields existed have no honest value, and Module is mandatory on the form
+  -- for bug-type task types, which is a rule of the form and not of the column.
+  module_id             INT  REFERENCES product_modules(id),
+  screen_name           VARCHAR(120),
+  feature               VARCHAR(120),
+  steps_to_generate     TEXT,                          -- sanitised rich text
   level                 VARCHAR(10) NOT NULL,          -- LOW|MEDIUM|HIGH|CRITICAL
   original_level        VARCHAR(10) NOT NULL,
   status                VARCHAR(20) NOT NULL DEFAULT 'NEW',
@@ -1260,6 +1293,7 @@ CREATE TABLE tickets (
 );
 CREATE INDEX ix_tickets_assignee_status ON tickets(assigned_to, status);
 CREATE INDEX ix_tickets_project_status  ON tickets(project_id, status);
+CREATE INDEX ix_tickets_module          ON tickets(module_id);
 CREATE INDEX ix_tickets_pcd_open        ON tickets(planned_close_date)
        WHERE actual_close_date IS NULL;
 
@@ -1746,3 +1780,5 @@ These are the things that will be requested in month two if they aren't built in
 *Revision 1.1 — added the Workflow Ribbon (§4A), the QA and Deployment roles, stage-aware effort attribution, iteration vs cycle counters, screens S-29 to S-31, and the stage-based reports.*
 
 *Revision 1.2 — added §4B: the priority dropdown, the client dropdown and client master with Excel bulk import (screens S-32 to S-34), attachments with clipboard paste, the comment box with history interleaving, and the mail alert engine with templates, threading, delivery logging and bounce handling.*
+
+*Revision 1.3 — 11 Aug 2026, at the client's request: the four "where it happened" fields on the ticket (Module, Screen Name, Feature, Steps to Generate), the `product_modules` master behind the first of them, the module filter and optional column on S-17, and the legacy binary Office formats on the §4B.4 attachment allow-list. Attachments themselves were already specified in §4B.4 and needed nothing.*
