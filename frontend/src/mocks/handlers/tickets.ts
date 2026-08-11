@@ -141,6 +141,10 @@ export const ticketHandlers = [
       delayedSince: null,
       estimatedHrs: (body.estimatedHrs as number) ?? null,
       pctComplete: 0,
+      // Kept, not dropped. `watcherIds` has been on the request since D-001 and
+      // C-010's watcher picker sends it; until now `/full` answered
+      // `watchers: []` regardless, so the whole path looked wired and was not.
+      watcherIds: Array.isArray(body.watcherIds) ? (body.watcherIds as number[]) : [],
       createdAt: now,
       updatedAt: now,
       version: 1,
@@ -247,7 +251,7 @@ export const ticketHandlers = [
         attachments: db.attachments
           .filter((a) => a.ticketId === t.ticketId && a.cycleNo === cycle)
           .map(attachmentDto),
-        watchers: [],
+        watchers: t.watcherIds.map((id) => userRef(id, db)).filter(Boolean),
         // Resolved server-side so the client renders buttons from this rather
         // than re-deriving permissions. Two implementations of the same rule
         // always diverge, and the client's copy is the one that gets it wrong.

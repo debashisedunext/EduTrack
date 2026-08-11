@@ -100,6 +100,25 @@ function clearToasts() {
 
 beforeEach(() => {
   clearToasts()
+  // Drain D-046's offline queue for the whole file, not just for the block
+  // that is about it.
+  //
+  // `resetDb()` re-seeds three `TICKET_HANDED_OFF` rows for the mock user with
+  // no `deliveredAt`, so every `renderStream()` fetches them from
+  // `/notifications/pending` and pops them — in *every* describe block, not
+  // only D-046's. The blocks above are about a single live frame, and a
+  // replayed toast landing mid-test is noise they never asked for.
+  //
+  // This is what made `Dismiss › closes the toast without marking it read`
+  // flaky: it dismisses the pushed toast and then asserts that *nothing* is
+  // showing, which held only while the replay had not arrived yet. Under a
+  // full run's CPU contention it arrives inside the window, and the leftover
+  // toast is "CRM-26-00347 handed to you at Development" — a seeded row, not
+  // the one under test. The failure therefore read as "dismiss did not close
+  // the toast", pointing at the dismiss handler, which is entirely innocent.
+  // Raising the timeout does not help; it just waits longer for a toast that
+  // is correctly there.
+  getDb().notifications.forEach((n) => { n.deliveredAt = new Date().toISOString() })
   navigate.mockReset()
   subscribedTo = []
   push = () => {
@@ -254,12 +273,9 @@ describe('D-046 · what was raised while nobody was watching', () => {
     })
   }
 
-  beforeEach(() => {
-    // The seeded rows have no deliveredAt, so they would all pop and drown the
-    // assertions. Start from a drained queue and add exactly what each test
-    // is about.
-    getDb().notifications.forEach((n) => { n.deliveredAt = new Date().toISOString() })
-  })
+  // The drain that used to live here is now file-level — every block needed
+  // it, not just this one. Each test below still adds exactly what it is about
+  // via `queue()`, which runs after that drain.
 
   it('pops a notification raised while the user was offline', async () => {
     queue(9001, 'Queued while you were offline')
