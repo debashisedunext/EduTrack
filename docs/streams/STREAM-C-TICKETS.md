@@ -52,6 +52,17 @@
 - [ ] **C-017** Bulk select → reassign / change level / close (PM & Admin only).
 - [x] **C-018** My Tasks — hard-scoped to `assigned_to = me`, grouped Due Today / Overdue / This Week / Later, inline Quick Update on every row, optional Kanban toggle. **S-18**
 
+### Where it happened — module, screen, feature, steps
+
+Added 11 Aug 2026 at the client's request; blueprint revision 1.3 (§7.5, §8.2) and PLAN.md §3.9 carry the specification. Four fields that turn "which module generates the most concerns" into a query, and give a developer opening a bug something to reproduce from. **Attachments were part of the same request and need nothing new — §4B.4 already specifies them and C-023 – C-028 already build them.**
+
+- [ ] **C-065** `product_modules` master + the four columns on `tickets` — table (`code`, `name`, `seq`, `is_active`) seeded with Student, Admission, Fees, Examination, Attendance, Library, Inventory, Parent App in a Stream C seed file (TEAM-PLAN §7.3); `module_id` FK, `screen_name VARCHAR(120)`, `feature VARCHAR(120)`, `steps_to_generate MEDIUMTEXT`, all nullable, plus `ix_tickets_module`. **Needs Stream A's review before merge** — it ALTERs `tickets` (TEAM-PLAN §7.1). Timestamp-versioned; the eight rows are seed data, never a Java enum.
+- [ ] **C-066** Shared rich-text editor in `components/ui/` + Storybook — the first one in the codebase; description is a plain textarea today and C-029's comment box needs the same control, so it is built once here. Client-side sanitisation over PLAN.md §3.9's allow-list, `dangerouslySetInnerHTML` only ever over sanitiser output, keyboard-accessible toolbar with ARIA labels.
+- [ ] **C-067** Backend wiring for all four fields — create, PATCH, read, validation, sanitisation, history; Bean Validation bounds so springdoc emits them into the contract; **server-side HTML sanitisation on the write path** (§3.9 — the client's copy is advice, this one is the guarantee); one `FIELD_CHANGED` history row per changed field, same as any other. Module resolved against the master, inactive modules rejected on write but still readable on old tickets.
+- [ ] **C-068** Create form S-19 — the new "Where it happened" group: module dropdown from `GET /masters/modules`, screen name, feature, steps in C-066's editor. **Built against D-060's mock, not against B-064** — DEPENDENCIES §6's first rule, and the reason the mock server exists at all; B-064 is what it integrates with later, not what it waits for. **Module required on Save & Assign for bug-type task types only**, waived on Save as Draft — same shape as the existing description rule, and the reasoning is in §7.5: forcing a module on a change request teaches people to pick the first item in the list.
+- [ ] **C-069** Detail page S-20 shows all four, inline-editable — Module, Screen and Feature in the summary panel under Type; Steps to Generate below the description where the person about to reproduce it is already looking. Editable by the roles that may edit the description, each change writing its own `FIELD_CHANGED` row.
+- [ ] **C-070** List S-17 gains a Module filter — and a Module column **off by default** in the column chooser (the grid is at its width budget). Filter state in the URL like every other C-014 filter, so a filtered grid stays a pasteable link.
+
 ### Detail page — S-20
 - [ ] **C-019** Detail shell + summary panel — every entity a link (assignee → profile, project → dashboard, client → 360 view, linked ticket, cycle → its effort logs).
 - [ ] **C-020** Priority dropdown — colour chips, pre-filled from task type default, recomputes and previews PCD on change. **Mandatory reason once assigned.** Inline-editable from the summary panel. Writes `LEVEL_CHANGED`; **`original_level` never overwritten**. *(§4B.1)*
@@ -61,7 +72,7 @@
 ### Attachments — §4B.4
 - [ ] **C-023** Upload surfaces: create form, detail, comment box, handoff dialog, quick update.
 - [ ] **C-024** 🔴 **Clipboard paste** alongside drag-drop and file picker. The blueprint is right that paste decides whether support agents actually use it.
-- [ ] **C-025** Security — extension allow-list **and** MIME sniffing, AV scan before the file becomes visible, EXIF stripped, S3/MinIO keys `tickets/{id}/{uuid}`, short-lived signed URLs, never a public bucket.
+- [ ] **C-025** Security — extension allow-list **and** MIME sniffing, AV scan before the file becomes visible, EXIF stripped, S3/MinIO keys `tickets/{id}/{uuid}`, short-lived signed URLs, never a public bucket. The allow-list is §4B.4's, which as of revision 1.3 includes the legacy binary Office formats (`.doc`, `.xls`) because clients still send them — and which is precisely why the extension alone is never the test.
 - [ ] **C-026** Thumbnails, gallery strip, lightbox with zoom and next/previous.
 - [ ] **C-027** Limits — 10 MB/file, 50 MB/ticket, 20 files/ticket, all configurable.
 - [ ] **C-028** Delete within 15 minutes by the uploader; after that a soft delete leaving a tombstone. `is_client_visible` flag per attachment.

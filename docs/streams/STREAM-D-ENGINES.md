@@ -90,6 +90,10 @@
 - [ ] **D-058** Live ribbon advance — push `stage.changed` to `/topic/ticket.{id}` so anyone viewing sees the handoff land. *Coordinate with C-045.*
 - [ ] **D-059** Team inbox live updates — `stage.arrived` / `stage.left` on the stage topic, so QA and Deployment queues update without refresh.
 
+## Contract changes
+
+- [ ] **D-060** Ticket "where it happened" fields in the contract and the mock server — `moduleId`, `screenName`, `feature`, `stepsToGenerate` on `TicketCreateRequest`, the PATCH body and every ticket response; `GET /masters/modules` and its `Module` schema (B-064 implements it); the four fields seeded in `mocks/db.ts` and served by the ticket handlers. **This lands before C-065**, for the reason D-001 and D-004 existed at all: Divyansh builds S-19 against the mock, and a shape that changes after he has built against it costs more than getting it right first. Regenerate the client; `coverage.test.ts` will fail until the new operation has a handler, which is the point of it.
+
 ---
 
 ## Decisions you own

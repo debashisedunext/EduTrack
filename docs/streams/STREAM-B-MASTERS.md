@@ -50,6 +50,7 @@
 - [ ] **B-020** Task type master — the 11 seeded types, Admin-extensible. **S-11**
 - [ ] **B-021** Priority master — Low/Medium/High/Critical + colour + default SLA hours + escalation flag. Drives C's priority dropdown. **S-12**
 - [ ] **B-022** Notification template master — event, channel, subject, HTML body, merge tags, per-event on/off, per-role recipients. Drives D's mail engine. **S-15**
+- [ ] **B-064** 🔴 **Module master read endpoint** — `GET /api/v1/masters/modules` over the `product_modules` table C-065 creates and seeds (Student, Admission, Fees, Examination, Attendance, Library, Inventory, Parent App). Read-only, active rows in `seq` order; the contract shape is D-060's. **Blocks C-068.** Added 11 Aug 2026 with blueprint revision 1.3 — the eight rows are reference data, and a master served out of the tickets feature is how the masters pattern stops meaning anything. No admin CRUD screen: the client asked for a fixed list, and the table exists so that changing it later is a row rather than a release. If a Module Master screen is wanted, it is a new task on the S-11/S-12 pattern, not a change to this one.
 
 ### Working calendar
 - [x] **B-023** Working calendar & holiday master — org holidays, weekly off pattern, per-resource leave. **S-14** — *`V20260808_1630__working_calendar.sql` + `WorkingCalendar`; `api/feature/masters/Calendar*`; `features/masters/calendar/`. 9 new contract operations. **B-024 now has everything it needs.***
