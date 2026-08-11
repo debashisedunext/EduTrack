@@ -407,7 +407,8 @@ describe('S-19 actions — C-013', () => {
     await waitFor(() => expect(document.getElementById('assigneeId')).toHaveFocus())
 
     fireEvent.click(screen.getByRole('button', { name: 'Save & Create Another' }))
-    await waitFor(() => expect(creates).toHaveLength(1))
+    // 4000, not the 1000 ms default — this waits on a real MSW round trip.
+    await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
 
     // It stays on the form — navigating away is what the other two do.
     expect(screen.queryByText(/^Landed on /)).not.toBeInTheDocument()
@@ -420,7 +421,7 @@ describe('S-19 actions — C-013', () => {
     expect(await screen.findByText(/CRM-26-\d{5,} created — 1 in this batch/)).toBeInTheDocument()
 
     const title = screen.getByLabelText(/Title \/ summary/)
-    await waitFor(() => expect(title).toHaveValue(''))
+    await waitFor(() => expect(title).toHaveValue(''), { timeout: 4000 })
     // A contentEditable has no `value`; an emptied one is the placeholder
     // coming back, which is also what the user actually sees.
     expect(descriptionEditor().innerHTML).toBe('')
@@ -447,11 +448,20 @@ describe('S-19 actions — C-013', () => {
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
     fillTicketBody('First of a batch')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Create Another' }))
-    await waitFor(() => expect(screen.getByLabelText(/Title \/ summary/)).toHaveValue(''))
+    // Both waits are on a real round trip through MSW, which carries a
+    // deliberate 120 ms latency, and this is the only test in the file that
+    // makes two of them in sequence. `waitFor` defaults to 1000 ms; alone that
+    // is ample, but competing with twenty-two other suites for the CPU it
+    // intermittently is not, and the failure reads as "the second ticket was
+    // never created" rather than "the clock ran out". Every other
+    // network-waiting assertion in this codebase already passes 4000.
+    await waitFor(() => expect(screen.getByLabelText(/Title \/ summary/)).toHaveValue(''), {
+      timeout: 4000,
+    })
 
     fillTicketBody('Second of a batch')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
-    await waitFor(() => expect(creates).toHaveLength(2))
+    await waitFor(() => expect(creates).toHaveLength(2), { timeout: 4000 })
 
     const [first, second] = idempotencyKeys()
     expect(first).toMatch(/^[0-9a-f-]{36}$/i)
