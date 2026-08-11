@@ -64,6 +64,17 @@ export interface TaskType {
   id: number; name: string; icon: string; colour: string;
   defaultLevel: Level; defaultSlaHrs: number; isActive: boolean;
 }
+/**
+ * D-045 — one browser that has granted push permission.
+ *
+ * Keyed by `endpoint`, like the real table, because the endpoint identifies the
+ * browser rather than the account: a second user subscribing from the same
+ * machine must take the row over, not add one.
+ */
+export interface PushSubscription {
+  endpoint: string; userId: number; p256dh: string; auth: string; userAgent: string | null;
+}
+
 /** §7.5 — the product area a concern was raised against. */
 export interface Module {
   id: number; code: string; name: string; seq: number; isActive: boolean;
@@ -163,6 +174,7 @@ export interface ChatMessage {
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
   taskTypes: TaskType[]; modules: Module[]; stages: Stage[];
+  pushSubscriptions: PushSubscription[];
   tickets: Ticket[]; cycles: Cycle[]; transitions: Transition[];
   effortLogs: EffortLog[]; history: HistoryEntry[]; comments: Comment[];
   attachments: Attachment[]; notifications: Notification[];
@@ -332,6 +344,7 @@ export function createDb(): Db {
     taskTypes: structuredClone(TASK_TYPES),
     modules: structuredClone(MODULES),
     stages: structuredClone(STAGES),
+    pushSubscriptions: [],
     tickets: [], cycles: [], transitions: [], effortLogs: [], history: [],
     comments: [], attachments: [], notifications: [], notificationPreferences: [], emailLog: [],
     chatThreads: [], chatMessages: [],

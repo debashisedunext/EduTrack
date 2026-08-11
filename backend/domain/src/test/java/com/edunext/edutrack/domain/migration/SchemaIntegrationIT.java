@@ -185,7 +185,9 @@ class SchemaIntegrationIT {
                                 "stage_sla_alerts", "sla_prebreach_alerts", "stale_ticket_nudges",
                                 "l2_escalations", "ping_pong_flags", "unassigned_ticket_alerts",
                                 // A-027, A-028, A-029
-                                "password_reset_tokens", "password_history", "totp_recovery_codes");
+                                "password_reset_tokens", "password_history", "totp_recovery_codes",
+                                // D-045
+                                "push_subscriptions");
             }
             try (ResultSet rs = s.executeQuery(
                     "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()")) {
