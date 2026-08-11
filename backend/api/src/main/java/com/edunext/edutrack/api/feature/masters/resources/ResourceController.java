@@ -7,9 +7,13 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,10 +34,15 @@ import java.util.Set;
  * owns the code; the path says what the resource is, and they are allowed to
  * differ.
  *
- * <p>Creating and editing a resource (B-011), reporting-manager cycle detection
- * (B-012) and the bulk reassignment wizard (B-014) are separate tasks and are
- * deliberately absent. What is here is the grid, its filters, its bulk status
- * action and its export.
+ * <p>B-010 built the grid, its filters, its bulk status action and its export.
+ * B-011 added the S-08 form: {@code GET}, {@code POST} and {@code PATCH} of one
+ * resource.
+ *
+ * <p><b>Reporting-manager cycle detection (B-012) and the bulk reassignment
+ * wizard (B-014) are still absent.</b> The former means {@code PATCH} will
+ * currently accept A→B→C→A; only self-reference is refused. The latter means
+ * deactivating somebody who holds open tickets stops with a count and a URL
+ * rather than offering to fix it.
  *
  * <h2>Permissions</h2>
  *
@@ -41,13 +50,18 @@ import java.util.Set;
  * and enforced when it lands:
  *
  * <ul>
- *   <li><b>{@code GET /users}</b> — all six roles. Admin, PM, Support,
+ *   <li><b>{@code GET /users}, {@code GET /users/{id}},
+ *       {@code GET /users/export}</b> — all six roles. Admin, PM, Support,
  *       Developer, QA and Deployment all read the directory: the assignee
  *       picker, {@code @mention} resolution and the reportee tree are the same
  *       data, and hiding it would break three features to protect a list of
  *       colleagues' names. No row scoping — a directory scoped to your own row
- *       is not a directory.</li>
- *   <li><b>{@code POST /users/bulk-status}</b> — Admin only, like every master
+ *       is not a directory. The detail read carries no credential: the
+ *       projection names its columns and {@code password_hash},
+ *       {@code failed_attempts}, {@code locked_until} and
+ *       {@code password_changed_at} are not among them.</li>
+ *   <li><b>{@code POST /users}, {@code PATCH /users/{id}},
+ *       {@code POST /users/bulk-status}</b> — Admin only, like every master
  *       write. The other five roles are refused before any id in the body is
  *       read.</li>
  * </ul>
@@ -79,10 +93,13 @@ class ResourceController {
 
     private final ResourceService resources;
     private final ResourceExportWriter exporter;
+    private final ResourceWriteService writes;
 
-    ResourceController(ResourceService resources, ResourceExportWriter exporter) {
+    ResourceController(ResourceService resources, ResourceExportWriter exporter,
+                       ResourceWriteService writes) {
         this.resources = resources;
         this.exporter = exporter;
+        this.writes = writes;
     }
 
     /** A page of the grid. */
@@ -141,6 +158,110 @@ class ResourceController {
     @Operation(operationId = "setUserStatusBulk", summary = "Activate or deactivate a selection (S-07)")
     ResourceDtos.BulkStatusResponse setStatusBulk(@Valid @RequestBody ResourceDtos.BulkStatusRequest request) {
         return new ResourceDtos.BulkStatusResponse(resources.setStatus(request));
+    }
+
+    // ------------------------------------------------------------------
+    // B-011 · S-08, the form
+    // ------------------------------------------------------------------
+
+    /**
+     * One resource in full, with the {@code ETag} the {@code PATCH} requires.
+     *
+     * <p><b>This route did not exist before B-011, and its absence was a
+     * defect.</b> CONVENTIONS.md §5 pairs every {@code If-Match} write with a
+     * detail read that emits the tag; {@code PATCH /users/{userId}} declared the
+     * precondition and there was nowhere to obtain it, so the operation could
+     * not be called correctly by anybody. {@code /projects/{id}} and
+     * {@code /clients/{id}} both have theirs.
+     */
+    @GetMapping(path = "/{userId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "getUser", summary = "One resource, in full (S-08)")
+    ResponseEntity<ResourceDtos.ResourceDetailResponse> get(@PathVariable long userId) {
+        ResourceDtos.ResourceDetail resource = writes.detail(userId);
+        return ResponseEntity.ok()
+                .eTag(resource.etag())
+                .body(new ResourceDtos.ResourceDetailResponse(resource));
+    }
+
+    /**
+     * Creates a resource, answering {@code 201} with the one-time password.
+     *
+     * <p>No {@code If-Match} — there is nothing yet to have changed underneath
+     * you. {@code Idempotency-Key} is accepted per CONVENTIONS.md §4 and is
+     * <b>not yet honoured</b>: the 24-hour replay store is A-035 and does not
+     * exist. Until it does, a retried create is refused by
+     * {@code uq_users_username} with a 409 rather than silently creating a
+     * second account — which is the failure mode that matters, and is why this
+     * ships rather than waiting.
+     */
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "createUser", summary = "Create a resource (S-08)")
+    ResponseEntity<ResourceDtos.ResourceCreatedResponse> create(
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ResourceDtos.ResourceWriteRequest request) {
+
+        ResourceWriteService.Created created = writes.create(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .eTag(created.resource().etag())
+                .body(new ResourceDtos.ResourceCreatedResponse(
+                        created.resource(),
+                        new ResourceDtos.CreatedMeta(created.temporaryPassword())));
+    }
+
+    /**
+     * Applies a partial edit.
+     *
+     * <p><b>{@code If-Match} is required, not optional</b>, and a write without
+     * one is refused with 428 rather than allowed through. {@code CalendarController}
+     * states the reason: treating a missing precondition as "no conflict" means
+     * the guard protects only the clients that already opted in, which is the
+     * set that needed it least.
+     *
+     * <p>The row is read once and both the precondition and the write reason
+     * about that same snapshot, so the deactivation guard cannot be checked
+     * against a different version of the resource than the tag was.
+     */
+    @PatchMapping(path = "/{userId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "updateUser", summary = "Update a resource (S-08)")
+    ResponseEntity<ResourceDtos.ResourceDetailResponse> update(
+            @PathVariable long userId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody ResourceDtos.ResourceWriteRequest request) {
+
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+                    "If-Match is required. GET the resource first and send back its ETag.");
+        }
+
+        ResourceDtos.ResourceDetail current = writes.detail(userId);
+        if (!etagMatches(ifMatch, current.etag())) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
+                    "This resource changed since you read it. Reload and reapply your edit.");
+        }
+
+        ResourceDtos.ResourceDetail saved = writes.update(current, request);
+        return ResponseEntity.ok()
+                .eTag(saved.etag())
+                .body(new ResourceDtos.ResourceDetailResponse(saved));
+    }
+
+    /**
+     * {@code *} matches anything, per RFC 9110.
+     *
+     * <p>Same comparison {@code CalendarController} makes, and the weak-validator
+     * prefix is stripped for the same reason: some proxies add {@code W/} on the
+     * way through, and refusing the edit because of it would be a 412 the caller
+     * cannot act on.
+     */
+    private static boolean etagMatches(String ifMatch, String current) {
+        String candidate = ifMatch.trim();
+        if ("*".equals(candidate)) {
+            return true;
+        }
+        return candidate.replace("W/", "").replace("\"", "").equals(current);
     }
 
     private static ResourceFilter filterFrom(String q, String role, Long projectId,

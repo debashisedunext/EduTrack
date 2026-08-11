@@ -13,6 +13,7 @@ import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
+import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage'
 import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage'
 import { LoginPage } from './features/auth/LoginPage'
@@ -88,6 +89,13 @@ export default function App() {
               }
             />
             <Route path="/masters/resources" element={<ResourceListPage />} />
+            {/* `/new` before `/:userId/edit` so the literal wins — otherwise
+                "new" is matched as a userId and the form loads resource NaN.
+                Inside `RequireAuth` and inside the shell, like every other
+                master screen: the S-08 form is an Admin screen, not one of
+                A-030's four shell-less auth routes. */}
+            <Route path="/masters/resources/new" element={<ResourceFormPage />} />
+            <Route path="/masters/resources/:userId/edit" element={<ResourceFormPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />

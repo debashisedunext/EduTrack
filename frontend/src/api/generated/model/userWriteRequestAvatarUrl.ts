@@ -48,8 +48,7 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
-
+ * Profile photo. A URL into attachment storage, not a blob.
+ * @maxLength 500
  */
-export type UserWriteRequestReportingManagerId = number | null;
+export type UserWriteRequestAvatarUrl = string | null;

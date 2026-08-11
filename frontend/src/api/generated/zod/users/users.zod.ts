@@ -122,36 +122,180 @@ export const listUsersResponse = zod.object({
  * Generates a temporary password and sets `mustChangePassword`. Username,
 email and employee code are each unique.
 
+**The generated password is in `meta.temporaryPassword` of the `201`,
+and that is the only time it is ever readable.** It is stored as an
+Argon2id hash like any other, so no later request can recover it — an
+admin who loses it issues a reset rather than looking it up. This is
+why the create response has its own schema instead of reusing
+`UserResponse`: a password field on `User` could be returned by
+`listUsers`, and a field that *cannot* leak is worth more than a field
+that is merely not populated today.
+
  * @summary Create a resource
  */
 export const createUserHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
 })
 
-export const createUserBodyDisplayNameMax = 150;
+export const createUserBodyDisplayNameMax = 120;
+
+export const createUserBodyEmployeeCodeMax = 20;
+
+export const createUserBodyEmailMax = 150;
+
+export const createUserBodyMobileMax = 20;
+
+
+export const createUserBodyMobileRegExp = new RegExp('^[0-9+][0-9 ()-]{5,19}$');
+export const createUserBodyAvatarUrlMax = 500;
 
 export const createUserBodyUsernameMin = 3;
-export const createUserBodyUsernameMax = 100;
+export const createUserBodyUsernameMax = 50;
 
-export const createUserBodyEmployeeCodeMax = 50;
+export const createUserBodyDepartmentMax = 80;
+
+export const createUserBodyDesignationMax = 80;
+
+export const createUserBodyLocationMax = 120;
+
+export const createUserBodyTimezoneMax = 50;
+
+export const createUserBodyDailyCapacityHrsDefault = 8;
+export const createUserBodyDailyCapacityHrsMin = 0.5;
+export const createUserBodyDailyCapacityHrsMax = 24;
+
+export const createUserBodyWeeklyOffItemMax = 7;
+
+export const createUserBodyWeeklyOffMax = 6;
+
+export const createUserBodySkillsItemMax = 60;
+
+export const createUserBodySkillsMax = 30;
+
+export const createUserBodyProjectsMax = 100;
 
 
 
 export const createUserBody = zod.object({
   "displayName": zod.string().min(1).max(createUserBodyDisplayNameMax),
+  "employeeCode": zod.string().min(1).max(createUserBodyEmployeeCodeMax),
+  "email": zod.string().email().max(createUserBodyEmailMax),
+  "mobile": zod.string().max(createUserBodyMobileMax).regex(createUserBodyMobileRegExp).nullish(),
+  "avatarUrl": zod.string().max(createUserBodyAvatarUrlMax).nullish().describe('Profile photo. A URL into attachment storage, not a blob.'),
+  "dateOfJoining": zod.string().date().nullish().describe('A calendar date with no instant attached — never a `date-time`.'),
   "username": zod.string().min(createUserBodyUsernameMin).max(createUserBodyUsernameMax),
-  "email": zod.string().email(),
-  "employeeCode": zod.string().max(createUserBodyEmployeeCodeMax).optional(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']),
-  "reportingManagerId": zod.number().nullish().describe('Rejected with `409` if it would create a cycle at any depth.'),
-  "projectIds": zod.array(zod.number()).optional(),
-  "timezone": zod.string().optional()
+  "isActive": zod.boolean().optional().describe('Defaults to `true` on create. On update, \*\*setting this `false` for\nsomebody holding open tickets is refused with `409`\*\*, exactly as\n`PATCH \/users\/{userId}\/status` is — the form must not be a way around\nthe guard the status route enforces.\n'),
+  "department": zod.string().max(createUserBodyDepartmentMax).nullish(),
+  "designation": zod.string().max(createUserBodyDesignationMax).nullish(),
+  "reportingManagerId": zod.number().nullish().describe('Rejected with `409` if it would create a cycle at any depth. \*\*Only\nself-reference is enforced today — the depth-`n` walk is B-012.\*\*\n'),
+  "location": zod.string().max(createUserBodyLocationMax).nullish(),
+  "timezone": zod.string().max(createUserBodyTimezoneMax).optional().describe('Display only. Storage is UTC everywhere (PLAN.md §3.1).'),
+  "dailyCapacityHrs": zod.number().min(createUserBodyDailyCapacityHrsMin).max(createUserBodyDailyCapacityHrsMax).default(createUserBodyDailyCapacityHrsDefault).describe('Feeds every utilisation figure, through B-024.'),
+  "weeklyOff": zod.array(zod.number().min(1).max(createUserBodyWeeklyOffItemMax)).max(createUserBodyWeeklyOffMax).nullish().describe('ISO-8601 day numbers, \*\*1=Mon … 7=Sun\*\*. `0` is not a day — see the\nnote on `GET \/masters\/working-calendar` for what a second numbering\ncost once already.\n\n`null` means \"inherit the org working week\", which is the default for\neverybody. `[]` is a different answer — this person has no weekly off,\nwhich a support rota is a real reason to want.\n'),
+  "skills": zod.array(zod.string().min(1).max(createUserBodySkillsItemMax)).max(createUserBodySkillsMax).nullish(),
+  "projects": zod.array(zod.object({
+  "projectId": zod.number(),
+  "roleInProject": zod.enum(['PM', 'DEVELOPER', 'SUPPORT', 'QA', 'DEPLOYMENT', 'VIEWER']).optional().describe('A resource\'s role \*\*on one project\*\*, which may differ from their global\n`RoleCode`: a Developer globally can be mapped as QA on one project.\n\n\*\*Deliberately not `RoleCode`\*\*, and it differs in both directions.\n`VIEWER` exists here and not there — read-only access to one project is a\nper-project grant, and a global viewer role would mean read-only access to\neverything, which is the opposite thing. `ADMIN` exists there and not here\n— an Admin already sees every project through `ScopeResolver`, so an\n`ADMIN` membership would be a grant that changes nothing, and a grant that\nchanges nothing is one somebody later assumes does something.\n\nBlueprint §7.4 S-10 names these six as \"PM \/ Dev \/ Support \/ QA \/ Deploy \/\nViewer\". `ck_project_members_role` holds the same set in the database.\n')
+}).describe('One `project_members` row, as the S-08 Projects section reads and writes\nit. Ids only — the names are already in `User.projects`, and repeating\nthem here would make the two disagree the moment a project is renamed.\n')).max(createUserBodyProjectsMax).optional().describe('The complete membership set — \*\*sent whole, not as a delta.\*\* An\nabsent key leaves memberships untouched; a present one replaces them,\nand a project dropped from the list is deactivated rather than\ndeleted, so the historical assignment survives.\n\nReplaced `projectIds: int64[]` in B-011. That shape could not carry\nthe per-project role S-08 requires and `project_members.role_in_project`\nhas always had a column for. Breaking, and safe to break: no shipped\nclient sent it.\n')
+}).describe('The S-08 form, as one body. Used by both `POST \/users` and\n`PATCH \/users\/{userId}`.\n\n\*\*The five required fields are required on the `PATCH` too\*\*, and are the\nfive S-08 marks with an asterisk that map to `NOT NULL` columns. They have\nno \"absent\" state to model: the form always holds a value for each, and a\n`PATCH` that could omit `username` would need a rule for what an empty\nusername means, which is a rule with no correct answer.\n\n\*\*Every other key is absent-means-leave-alone\*\*, and where the column is\nnullable an explicit `null` means \"clear it\". The distinction is\nload-bearing for `reportingManagerId`: \"I am not editing their manager\"\nand \"detach them from their manager, who has left\" are different\nintentions, and one sentinel cannot carry both.\n\n\*\*No password field, on either verb.\*\* S-08 specifies the temporary\npassword as auto-generated, and there is no route by which an admin sets\nsomebody else\'s password directly — a password only its holder has ever\ntyped is the property that makes `mustChangePassword` mean anything.\n')
+
+/**
+ * The S-08 form's read. Returns `UserDetail` — every field `listUsers`
+returns, plus the ones only the form needs: mobile, joining date,
+location, capacity, weekly-off override, skills, and the per-project
+role assignments.
+
+**This carries the `ETag` that `PATCH /users/{userId}` requires as
+`If-Match`.** Added in B-011 because it was missing: CONVENTIONS.md §5
+pairs every `If-Match` write with a detail read that emits the tag, and
+`PATCH /users/{userId}` had no such read — so the precondition it
+documents was unobtainable and the operation could not be called
+correctly by anybody. `/projects/{projectId}` and `/clients/{clientId}`
+have their detail reads; this was the gap.
+
+The tag is derived from the response content, not from `updated_at`, so
+a save that rewrites identical values does not invalidate a concurrent
+edit that conflicts with nothing.
+
+ * @summary One resource, in full (S-08)
+ */
+export const getUserParams = zod.object({
+  "userId": zod.number()
+})
+
+export const getUserResponseDataProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const getUserResponseDataWeeklyOffItemMax = 7;
+
+
+
+export const getUserResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).and(zod.object({
+  "username": zod.string().optional(),
+  "email": zod.string().email().optional(),
+  "employeeCode": zod.string().optional(),
+  "department": zod.string().nullish(),
+  "designation": zod.string().nullish(),
+  "reportingManager": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "projectIds": zod.array(zod.number()).optional().describe('Retained for callers that only need membership. Prefer\n`projects` — an id cannot be rendered without a second lookup.\n'),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(getUserResponseDataProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('Resolved server-side so the S-07 grid can print project names\nwithout a second request per row.\n'),
+  "isActive": zod.boolean().optional(),
+  "openTicketCount": zod.number().optional(),
+  "lastLoginAt": zod.string().datetime({}).nullish().describe('UTC, like every stored instant. Null until the first login.'),
+  "createdAt": zod.string().datetime({}).optional()
+})).and(zod.object({
+  "mobile": zod.string().nullish(),
+  "avatarUrl": zod.string().nullish(),
+  "dateOfJoining": zod.string().date().nullish(),
+  "location": zod.string().nullish(),
+  "timezone": zod.string().optional(),
+  "dailyCapacityHrs": zod.number().optional(),
+  "weeklyOff": zod.array(zod.number().min(1).max(getUserResponseDataWeeklyOffItemMax)).nullish().describe('`null` means the org working week applies.'),
+  "skills": zod.array(zod.string()).optional(),
+  "projectAssignments": zod.array(zod.object({
+  "projectId": zod.number(),
+  "roleInProject": zod.enum(['PM', 'DEVELOPER', 'SUPPORT', 'QA', 'DEPLOYMENT', 'VIEWER']).optional().describe('A resource\'s role \*\*on one project\*\*, which may differ from their global\n`RoleCode`: a Developer globally can be mapped as QA on one project.\n\n\*\*Deliberately not `RoleCode`\*\*, and it differs in both directions.\n`VIEWER` exists here and not there — read-only access to one project is a\nper-project grant, and a global viewer role would mean read-only access to\neverything, which is the opposite thing. `ADMIN` exists there and not here\n— an Admin already sees every project through `ScopeResolver`, so an\n`ADMIN` membership would be a grant that changes nothing, and a grant that\nchanges nothing is one somebody later assumes does something.\n\nBlueprint §7.4 S-10 names these six as \"PM \/ Dev \/ Support \/ QA \/ Deploy \/\nViewer\". `ck_project_members_role` holds the same set in the database.\n')
+}).describe('One `project_members` row, as the S-08 Projects section reads and writes\nit. Ids only — the names are already in `User.projects`, and repeating\nthem here would make the two disagree the moment a project is renamed.\n')).optional().describe('The per-project roles behind `projects`. Same rows, carrying the\none field `ProjectRef` deliberately does not.\n'),
+  "mustChangePassword": zod.boolean().optional().describe('Still holding the temporary password. Shown on the form so an\nadmin can tell \"never logged in\" from \"logged in and has not been\nactive\", which `lastLoginAt` alone cannot distinguish from a\nreactivated account.\n')
+}).describe('Everything `User` has, plus the S-08 fields only the form reads.\n\nKept off `User` rather than added to it with a note that the list\nleaves them null. `listUsers` returns up to 200 of these; carrying a\nskills array and a membership list on every grid row would be paid on\nevery page of a screen that shows none of it — and a field that is\n\"usually absent\" is one every consumer has to defend against.\n'))
 })
 
 /**
  * **A reporting-manager change is rejected if it creates a cycle at any
 depth**, not merely self-reference. A→B→C→A is as broken as A→A, and the
 database `CHECK` only catches the latter.
+
+> **Not yet true as implemented. B-011 enforces self-reference only.**
+> The depth-`n` walk is **B-012**, still open. Until it lands this
+> operation will accept A→B→C→A, and the reportee tree that results has
+> no root. Documented here rather than quietly deferred, because a
+> contract describing a guarantee the server does not make is worse than
+> no guarantee at all.
+
+`If-Match` is required, not optional — a write without one is refused
+with `428`. Treating a missing precondition as "no conflict" would mean
+the guard protects only the clients that already opted in, which is the
+set that needed it least. Read the current tag from `GET /users/{userId}`.
+
+See `UserWriteRequest` for which keys are required here and what an
+absent one versus an explicit `null` one does.
 
  * @summary Update a resource
  */
@@ -163,27 +307,72 @@ export const updateUserHeader = zod.object({
   "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
 })
 
-export const updateUserBodyDisplayNameMax = 150;
+export const updateUserBodyDisplayNameMax = 120;
+
+export const updateUserBodyEmployeeCodeMax = 20;
+
+export const updateUserBodyEmailMax = 150;
+
+export const updateUserBodyMobileMax = 20;
+
+
+export const updateUserBodyMobileRegExp = new RegExp('^[0-9+][0-9 ()-]{5,19}$');
+export const updateUserBodyAvatarUrlMax = 500;
 
 export const updateUserBodyUsernameMin = 3;
-export const updateUserBodyUsernameMax = 100;
+export const updateUserBodyUsernameMax = 50;
 
-export const updateUserBodyEmployeeCodeMax = 50;
+export const updateUserBodyDepartmentMax = 80;
+
+export const updateUserBodyDesignationMax = 80;
+
+export const updateUserBodyLocationMax = 120;
+
+export const updateUserBodyTimezoneMax = 50;
+
+export const updateUserBodyDailyCapacityHrsDefault = 8;
+export const updateUserBodyDailyCapacityHrsMin = 0.5;
+export const updateUserBodyDailyCapacityHrsMax = 24;
+
+export const updateUserBodyWeeklyOffItemMax = 7;
+
+export const updateUserBodyWeeklyOffMax = 6;
+
+export const updateUserBodySkillsItemMax = 60;
+
+export const updateUserBodySkillsMax = 30;
+
+export const updateUserBodyProjectsMax = 100;
 
 
 
 export const updateUserBody = zod.object({
   "displayName": zod.string().min(1).max(updateUserBodyDisplayNameMax),
+  "employeeCode": zod.string().min(1).max(updateUserBodyEmployeeCodeMax),
+  "email": zod.string().email().max(updateUserBodyEmailMax),
+  "mobile": zod.string().max(updateUserBodyMobileMax).regex(updateUserBodyMobileRegExp).nullish(),
+  "avatarUrl": zod.string().max(updateUserBodyAvatarUrlMax).nullish().describe('Profile photo. A URL into attachment storage, not a blob.'),
+  "dateOfJoining": zod.string().date().nullish().describe('A calendar date with no instant attached — never a `date-time`.'),
   "username": zod.string().min(updateUserBodyUsernameMin).max(updateUserBodyUsernameMax),
-  "email": zod.string().email(),
-  "employeeCode": zod.string().max(updateUserBodyEmployeeCodeMax).optional(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']),
-  "reportingManagerId": zod.number().nullish().describe('Rejected with `409` if it would create a cycle at any depth.'),
-  "projectIds": zod.array(zod.number()).optional(),
-  "timezone": zod.string().optional()
-})
+  "isActive": zod.boolean().optional().describe('Defaults to `true` on create. On update, \*\*setting this `false` for\nsomebody holding open tickets is refused with `409`\*\*, exactly as\n`PATCH \/users\/{userId}\/status` is — the form must not be a way around\nthe guard the status route enforces.\n'),
+  "department": zod.string().max(updateUserBodyDepartmentMax).nullish(),
+  "designation": zod.string().max(updateUserBodyDesignationMax).nullish(),
+  "reportingManagerId": zod.number().nullish().describe('Rejected with `409` if it would create a cycle at any depth. \*\*Only\nself-reference is enforced today — the depth-`n` walk is B-012.\*\*\n'),
+  "location": zod.string().max(updateUserBodyLocationMax).nullish(),
+  "timezone": zod.string().max(updateUserBodyTimezoneMax).optional().describe('Display only. Storage is UTC everywhere (PLAN.md §3.1).'),
+  "dailyCapacityHrs": zod.number().min(updateUserBodyDailyCapacityHrsMin).max(updateUserBodyDailyCapacityHrsMax).default(updateUserBodyDailyCapacityHrsDefault).describe('Feeds every utilisation figure, through B-024.'),
+  "weeklyOff": zod.array(zod.number().min(1).max(updateUserBodyWeeklyOffItemMax)).max(updateUserBodyWeeklyOffMax).nullish().describe('ISO-8601 day numbers, \*\*1=Mon … 7=Sun\*\*. `0` is not a day — see the\nnote on `GET \/masters\/working-calendar` for what a second numbering\ncost once already.\n\n`null` means \"inherit the org working week\", which is the default for\neverybody. `[]` is a different answer — this person has no weekly off,\nwhich a support rota is a real reason to want.\n'),
+  "skills": zod.array(zod.string().min(1).max(updateUserBodySkillsItemMax)).max(updateUserBodySkillsMax).nullish(),
+  "projects": zod.array(zod.object({
+  "projectId": zod.number(),
+  "roleInProject": zod.enum(['PM', 'DEVELOPER', 'SUPPORT', 'QA', 'DEPLOYMENT', 'VIEWER']).optional().describe('A resource\'s role \*\*on one project\*\*, which may differ from their global\n`RoleCode`: a Developer globally can be mapped as QA on one project.\n\n\*\*Deliberately not `RoleCode`\*\*, and it differs in both directions.\n`VIEWER` exists here and not there — read-only access to one project is a\nper-project grant, and a global viewer role would mean read-only access to\neverything, which is the opposite thing. `ADMIN` exists there and not here\n— an Admin already sees every project through `ScopeResolver`, so an\n`ADMIN` membership would be a grant that changes nothing, and a grant that\nchanges nothing is one somebody later assumes does something.\n\nBlueprint §7.4 S-10 names these six as \"PM \/ Dev \/ Support \/ QA \/ Deploy \/\nViewer\". `ck_project_members_role` holds the same set in the database.\n')
+}).describe('One `project_members` row, as the S-08 Projects section reads and writes\nit. Ids only — the names are already in `User.projects`, and repeating\nthem here would make the two disagree the moment a project is renamed.\n')).max(updateUserBodyProjectsMax).optional().describe('The complete membership set — \*\*sent whole, not as a delta.\*\* An\nabsent key leaves memberships untouched; a present one replaces them,\nand a project dropped from the list is deactivated rather than\ndeleted, so the historical assignment survives.\n\nReplaced `projectIds: int64[]` in B-011. That shape could not carry\nthe per-project role S-08 requires and `project_members.role_in_project`\nhas always had a column for. Breaking, and safe to break: no shipped\nclient sent it.\n')
+}).describe('The S-08 form, as one body. Used by both `POST \/users` and\n`PATCH \/users\/{userId}`.\n\n\*\*The five required fields are required on the `PATCH` too\*\*, and are the\nfive S-08 marks with an asterisk that map to `NOT NULL` columns. They have\nno \"absent\" state to model: the form always holds a value for each, and a\n`PATCH` that could omit `username` would need a rule for what an empty\nusername means, which is a rule with no correct answer.\n\n\*\*Every other key is absent-means-leave-alone\*\*, and where the column is\nnullable an explicit `null` means \"clear it\". The distinction is\nload-bearing for `reportingManagerId`: \"I am not editing their manager\"\nand \"detach them from their manager, who has left\" are different\nintentions, and one sentinel cannot carry both.\n\n\*\*No password field, on either verb.\*\* S-08 specifies the temporary\npassword as auto-generated, and there is no route by which an admin sets\nsomebody else\'s password directly — a password only its holder has ever\ntyped is the property that makes `mustChangePassword` mean anything.\n')
 
 export const updateUserResponseDataProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const updateUserResponseDataWeeklyOffItemMax = 7;
+
 
 
 export const updateUserResponse = zod.object({
@@ -217,7 +406,21 @@ export const updateUserResponse = zod.object({
   "openTicketCount": zod.number().optional(),
   "lastLoginAt": zod.string().datetime({}).nullish().describe('UTC, like every stored instant. Null until the first login.'),
   "createdAt": zod.string().datetime({}).optional()
-}))
+})).and(zod.object({
+  "mobile": zod.string().nullish(),
+  "avatarUrl": zod.string().nullish(),
+  "dateOfJoining": zod.string().date().nullish(),
+  "location": zod.string().nullish(),
+  "timezone": zod.string().optional(),
+  "dailyCapacityHrs": zod.number().optional(),
+  "weeklyOff": zod.array(zod.number().min(1).max(updateUserResponseDataWeeklyOffItemMax)).nullish().describe('`null` means the org working week applies.'),
+  "skills": zod.array(zod.string()).optional(),
+  "projectAssignments": zod.array(zod.object({
+  "projectId": zod.number(),
+  "roleInProject": zod.enum(['PM', 'DEVELOPER', 'SUPPORT', 'QA', 'DEPLOYMENT', 'VIEWER']).optional().describe('A resource\'s role \*\*on one project\*\*, which may differ from their global\n`RoleCode`: a Developer globally can be mapped as QA on one project.\n\n\*\*Deliberately not `RoleCode`\*\*, and it differs in both directions.\n`VIEWER` exists here and not there — read-only access to one project is a\nper-project grant, and a global viewer role would mean read-only access to\neverything, which is the opposite thing. `ADMIN` exists there and not here\n— an Admin already sees every project through `ScopeResolver`, so an\n`ADMIN` membership would be a grant that changes nothing, and a grant that\nchanges nothing is one somebody later assumes does something.\n\nBlueprint §7.4 S-10 names these six as \"PM \/ Dev \/ Support \/ QA \/ Deploy \/\nViewer\". `ck_project_members_role` holds the same set in the database.\n')
+}).describe('One `project_members` row, as the S-08 Projects section reads and writes\nit. Ids only — the names are already in `User.projects`, and repeating\nthem here would make the two disagree the moment a project is renamed.\n')).optional().describe('The per-project roles behind `projects`. Same rows, carrying the\none field `ProjectRef` deliberately does not.\n'),
+  "mustChangePassword": zod.boolean().optional().describe('Still holding the temporary password. Shown on the form so an\nadmin can tell \"never logged in\" from \"logged in and has not been\nactive\", which `lastLoginAt` alone cannot distinguish from a\nreactivated account.\n')
+}).describe('Everything `User` has, plus the S-08 fields only the form reads.\n\nKept off `User` rather than added to it with a note that the list\nleaves them null. `listUsers` returns up to 200 of these; carrying a\nskills array and a membership list on every grid row would be paid on\nevery page of a screen that shows none of it — and a field that is\n\"usually absent\" is one every consumer has to defend against.\n'))
 })
 
 /**

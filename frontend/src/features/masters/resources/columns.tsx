@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import { Chip } from '@/components/ui/chip'
 import type { User } from '@/api/generated/model/user'
 import type { RoleCode } from '@/api/generated/model/roleCode'
@@ -133,6 +135,25 @@ export const RESOURCE_COLUMNS: ResourceColumn[] = [
       <span className={r.lastLoginAt ? 'text-content' : 'text-content-muted'}>
         {formatLastLogin(r.lastLoginAt)}
       </span>
+    ),
+  },
+  {
+    // B-011. Declared in §7.4's column list and empty until now, because B-010
+    // had no screen to send anybody to.
+    key: 'actions',
+    header: 'Actions',
+    widthClassName: 'w-20',
+    render: (r) => (
+      // A real link, not a button with an onClick. Middle-click, Cmd-click and
+      // "copy link address" all work, and an admin working through a list of
+      // people to correct opens them in tabs.
+      <Link
+        to={`/masters/resources/${r.id}/edit`}
+        className="rounded-control px-2 py-1 text-sm text-primary hover:bg-subtle hover:underline focus-visible:outline-none focus-visible:ring-2"
+        aria-label={`Edit ${r.displayName}`}
+      >
+        Edit
+      </Link>
     ),
   },
 ]

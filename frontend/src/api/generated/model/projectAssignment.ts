@@ -46,10 +46,15 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ProjectRoleCode } from './projectRoleCode';
 
 /**
- * Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
+ * One `project_members` row, as the S-08 Projects section reads and writes
+it. Ids only — the names are already in `User.projects`, and repeating
+them here would make the two disagree the moment a project is renamed.
 
  */
-export type UserWriteRequestReportingManagerId = number | null;
+export interface ProjectAssignment {
+  projectId: number;
+  roleInProject?: ProjectRoleCode;
+}

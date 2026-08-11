@@ -48,8 +48,30 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
+ * A resource's role **on one project**, which may differ from their global
+`RoleCode`: a Developer globally can be mapped as QA on one project.
+
+**Deliberately not `RoleCode`**, and it differs in both directions.
+`VIEWER` exists here and not there — read-only access to one project is a
+per-project grant, and a global viewer role would mean read-only access to
+everything, which is the opposite thing. `ADMIN` exists there and not here
+— an Admin already sees every project through `ScopeResolver`, so an
+`ADMIN` membership would be a grant that changes nothing, and a grant that
+changes nothing is one somebody later assumes does something.
+
+Blueprint §7.4 S-10 names these six as "PM / Dev / Support / QA / Deploy /
+Viewer". `ck_project_members_role` holds the same set in the database.
 
  */
-export type UserWriteRequestReportingManagerId = number | null;
+export type ProjectRoleCode = typeof ProjectRoleCode[keyof typeof ProjectRoleCode];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ProjectRoleCode = {
+  PM: 'PM',
+  DEVELOPER: 'DEVELOPER',
+  SUPPORT: 'SUPPORT',
+  QA: 'QA',
+  DEPLOYMENT: 'DEPLOYMENT',
+  VIEWER: 'VIEWER',
+} as const;

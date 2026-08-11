@@ -1,0 +1,453 @@
+package com.edunext.edutrack.api.feature.masters.resources;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/**
+ * B-011 · the S-08 form against a real MySQL.
+ *
+ * <p>{@code ResourceWriteServiceTest} proves the decisions against mocks. This
+ * proves the half a mock cannot: that the SQL is valid, that a partial update
+ * really leaves the untouched columns alone, that the new {@code CHECK}
+ * constraints reject what they are supposed to, that the {@code JSON} columns
+ * round-trip, and that {@code DATE} and {@code DECIMAL(4,2)} survive the driver.
+ *
+ * <p>Fixture rows are prefixed {@code ITFRM} — employee codes, usernames and
+ * emails alike — so nothing collides with B-001's seed or {@code ResourceListIT},
+ * and the cleanup can be exact.
+ */
+@SpringBootTest
+@Testcontainers
+class ResourceFormIT {
+
+    @Container
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4")
+            .withDatabaseName("edutrack_resource_form_it")
+            .withCommand(
+                    "--character-set-server=utf8mb4",
+                    "--collation-server=utf8mb4_0900_ai_ci",
+                    "--default-time-zone=+00:00",
+                    "--sql-mode=ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,"
+                            + "ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION",
+                    "--log-bin-trust-function-creators=1")
+            .withUrlParam("allowPublicKeyRetrieval", "true")
+            .withUrlParam("useSSL", "false")
+            .withUrlParam("connectionTimeZone", "UTC");
+
+    @DynamicPropertySource
+    static void datasource(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.flyway.url", MYSQL::getJdbcUrl);
+        registry.add("spring.flyway.user", MYSQL::getUsername);
+        registry.add("spring.flyway.password", MYSQL::getPassword);
+    }
+
+    @Autowired
+    ResourceWriteService service;
+
+    @Autowired
+    PasswordEncoder passwordEncoder;
+
+    @Autowired
+    JdbcTemplate jdbc;
+
+    private long projectOneId;
+    private long projectTwoId;
+    private long managerId;
+
+    @BeforeEach
+    void seedFixtures() {
+        clearFixtureRows();
+
+        jdbc.update("INSERT INTO projects (project_code, name, status) VALUES ('ITFRM1', 'Form Project One', 'ACTIVE')");
+        jdbc.update("INSERT INTO projects (project_code, name, status) VALUES ('ITFRM2', 'Form Project Two', 'ACTIVE')");
+        projectOneId = idOfProject("ITFRM1");
+        projectTwoId = idOfProject("ITFRM2");
+
+        managerId = service.create(request("ITFRM000", "itfrm.manager", "PM")).resource().id();
+    }
+
+    private void clearFixtureRows() {
+        jdbc.update("DELETE FROM tickets WHERE ticket_code LIKE 'ITFRM%'");
+        jdbc.update("DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE emp_code LIKE 'ITFRM%')");
+        jdbc.update("UPDATE users SET reporting_manager_id = NULL WHERE emp_code LIKE 'ITFRM%'");
+        jdbc.update("DELETE FROM password_history WHERE user_id IN (SELECT id FROM users WHERE emp_code LIKE 'ITFRM%')");
+        jdbc.update("DELETE FROM users WHERE emp_code LIKE 'ITFRM%'");
+        jdbc.update("DELETE FROM projects WHERE project_code LIKE 'ITFRM%'");
+    }
+
+    // ------------------------------------------------------------------
+    // create
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("create")
+    class Create {
+
+        @Test
+        @DisplayName("every S-08 section round-trips through the database unchanged")
+        void everySectionRoundTrips() {
+            ResourceDtos.ResourceWriteRequest request = request("ITFRM001", "itfrm.full", "DEVELOPER");
+            request.setMobile(Optional.of("+91 98765 43210"));
+            request.setDateOfJoining(Optional.of(LocalDate.of(2026, 3, 17)));
+            request.setAvatarUrl(Optional.of("https://files.edunext.test/avatars/itfrm001.png"));
+            request.setDepartment(Optional.of("Engineering"));
+            request.setDesignation(Optional.of("Senior Developer"));
+            request.setLocation(Optional.of("Pune"));
+            request.setTimezone(Optional.of("Asia/Kolkata"));
+            request.setReportingManagerId(Optional.of(managerId));
+            request.setDailyCapacityHrs(Optional.of(new BigDecimal("6.50")));
+            request.setWeeklyOff(Optional.of(List.of(7, 6)));
+            request.setSkills(Optional.of(List.of("Java", "React")));
+            request.setProjects(Optional.of(List.of(
+                    new ResourceDtos.ProjectAssignment(projectOneId, "DEVELOPER"),
+                    new ResourceDtos.ProjectAssignment(projectTwoId, "QA"))));
+
+            ResourceDtos.ResourceDetail saved = service.detail(service.create(request).resource().id());
+
+            assertThat(saved.mobile()).isEqualTo("+91 98765 43210");
+            // A DATE, not a DATETIME — 17 March must not become 16 March
+            // because a timezone got involved on the way through the driver.
+            assertThat(saved.dateOfJoining()).isEqualTo(LocalDate.of(2026, 3, 17));
+            assertThat(saved.avatarUrl()).endsWith("itfrm001.png");
+            assertThat(saved.department()).isEqualTo("Engineering");
+            assertThat(saved.designation()).isEqualTo("Senior Developer");
+            assertThat(saved.location()).isEqualTo("Pune");
+            assertThat(saved.timezone()).isEqualTo("Asia/Kolkata");
+            assertThat(saved.reportingManager()).isNotNull();
+            assertThat(saved.reportingManager().id()).isEqualTo(managerId);
+            assertThat(saved.dailyCapacityHrs()).isEqualByComparingTo("6.50");
+            assertThat(saved.weeklyOff()).containsExactly(6, 7);
+            assertThat(saved.skills()).containsExactly("Java", "React");
+            assertThat(saved.projectAssignments()).containsExactlyInAnyOrder(
+                    new ResourceDtos.ProjectAssignment(projectOneId, "DEVELOPER"),
+                    new ResourceDtos.ProjectAssignment(projectTwoId, "QA"));
+            assertThat(saved.mustChangePassword()).isTrue();
+        }
+
+        @Test
+        @DisplayName("the stored hash verifies against the returned password, and is not the password")
+        void passwordIsHashedNotStored() {
+            ResourceWriteService.Created created = service.create(request("ITFRM002", "itfrm.pass", "QA"));
+
+            String storedHash = jdbc.queryForObject(
+                    "SELECT password_hash FROM users WHERE id = ?", String.class, created.resource().id());
+
+            assertThat(storedHash).isNotEqualTo(created.temporaryPassword());
+            assertThat(passwordEncoder.matches(created.temporaryPassword(), storedHash)).isTrue();
+            // A-020's encoder, not Spring Security's bcrypt default —
+            // PasswordEncoderConfig names Stream B's Resource Master as one of
+            // the callers that would silently get the wrong algorithm.
+            assertThat(storedHash).startsWith("$argon2id$");
+        }
+
+        @Test
+        @DisplayName("a resource created with no weekly-off override stores NULL, meaning 'inherit the org week'")
+        void weeklyOffDefaultsToNullNotEmpty() {
+            long id = service.create(request("ITFRM003", "itfrm.inherit", "SUPPORT")).resource().id();
+
+            assertThat(jdbc.queryForObject(
+                    "SELECT weekly_off FROM users WHERE id = ?", String.class, id)).isNull();
+            assertThat(service.detail(id).weeklyOff()).isNull();
+        }
+
+        @Test
+        @DisplayName("a duplicate username is a DuplicateResourceException naming the field")
+        void duplicateUsernameIsNamed() {
+            service.create(request("ITFRM004", "itfrm.taken", "DEVELOPER"));
+
+            // A different employee code AND a different email, so the only
+            // thing that collides is the username. `request` derives the email
+            // from the username, which would otherwise make this assert two
+            // conflicts while claiming to test one.
+            ResourceDtos.ResourceWriteRequest clash = request("ITFRM005", "itfrm.taken", "DEVELOPER");
+            clash.setEmail("itfrm.different@edunext.test");
+
+            assertThatThrownBy(() -> service.create(clash))
+                    .isInstanceOf(ResourceWriteService.DuplicateResourceException.class)
+                    .satisfies(e -> assertThat(
+                            ((ResourceWriteService.DuplicateResourceException) e).fieldErrors())
+                            .containsOnlyKeys("username"));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // update
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("update")
+    class Update {
+
+        private long userId;
+
+        @BeforeEach
+        void createSubject() {
+            ResourceDtos.ResourceWriteRequest request = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            request.setDepartment(Optional.of("Engineering"));
+            request.setLocation(Optional.of("Pune"));
+            request.setSkills(Optional.of(List.of("Java")));
+            userId = service.create(request).resource().id();
+        }
+
+        /**
+         * The one a mock cannot prove. {@code ResourceWriteServiceTest} shows
+         * the column is absent from the change map; this shows the value is
+         * still in the row afterwards.
+         */
+        @Test
+        @DisplayName("a field the PATCH did not mention still holds its value afterwards")
+        void absentFieldsSurviveTheUpdate() {
+            ResourceDtos.ResourceWriteRequest patch = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            patch.setDepartment(Optional.of("Platform"));
+
+            service.update(service.detail(userId), patch);
+
+            ResourceDtos.ResourceDetail after = service.detail(userId);
+            assertThat(after.department()).isEqualTo("Platform");
+            assertThat(after.location()).isEqualTo("Pune");
+            assertThat(after.skills()).containsExactly("Java");
+        }
+
+        @Test
+        @DisplayName("an explicit null clears the column in the row, not just in the change map")
+        void explicitNullClearsInTheDatabase() {
+            ResourceDtos.ResourceWriteRequest patch = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            patch.setLocation(Optional.empty());
+
+            service.update(service.detail(userId), patch);
+
+            assertThat(service.detail(userId).location()).isNull();
+        }
+
+        @Test
+        @DisplayName("the role change lands as a role_id, resolved from the code")
+        void roleChangeResolvesToAnId() {
+            ResourceDtos.ResourceWriteRequest patch = request("ITFRM010", "itfrm.subject", "QA");
+
+            service.update(service.detail(userId), patch);
+
+            assertThat(service.detail(userId).role()).isEqualTo("QA");
+        }
+
+        @Test
+        @DisplayName("a project dropped from the list is deactivated, not deleted — the history survives")
+        void droppedMembershipIsDeactivated() {
+            ResourceDtos.ResourceWriteRequest join = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            join.setProjects(Optional.of(List.of(
+                    new ResourceDtos.ProjectAssignment(projectOneId, "DEVELOPER"),
+                    new ResourceDtos.ProjectAssignment(projectTwoId, "QA"))));
+            service.update(service.detail(userId), join);
+
+            ResourceDtos.ResourceWriteRequest leave = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            leave.setProjects(Optional.of(List.of(
+                    new ResourceDtos.ProjectAssignment(projectOneId, "DEVELOPER"))));
+            service.update(service.detail(userId), leave);
+
+            assertThat(service.detail(userId).projectAssignments())
+                    .containsExactly(new ResourceDtos.ProjectAssignment(projectOneId, "DEVELOPER"));
+
+            // The row is still there, holding the record that they were on it.
+            Integer stillThere = jdbc.queryForObject(
+                    "SELECT is_active FROM project_members WHERE user_id = ? AND project_id = ?",
+                    Integer.class, userId, projectTwoId);
+            assertThat(stillThere).isZero();
+        }
+
+        @Test
+        @DisplayName("rejoining a project they left reactivates the row rather than colliding with it")
+        void rejoiningReactivates() {
+            ResourceDtos.ResourceWriteRequest join = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            join.setProjects(Optional.of(List.of(
+                    new ResourceDtos.ProjectAssignment(projectOneId, "DEVELOPER"))));
+            service.update(service.detail(userId), join);
+
+            ResourceDtos.ResourceWriteRequest leave = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            leave.setProjects(Optional.of(List.of()));
+            service.update(service.detail(userId), leave);
+
+            ResourceDtos.ResourceWriteRequest rejoin = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            rejoin.setProjects(Optional.of(List.of(
+                    new ResourceDtos.ProjectAssignment(projectOneId, "QA"))));
+            service.update(service.detail(userId), rejoin);
+
+            assertThat(service.detail(userId).projectAssignments())
+                    .containsExactly(new ResourceDtos.ProjectAssignment(projectOneId, "QA"));
+            assertThat(jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM project_members WHERE user_id = ? AND project_id = ?",
+                    Integer.class, userId, projectOneId)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("the ETag moves when a field changes and holds still when nothing does")
+        void etagTracksContent() {
+            String before = service.detail(userId).etag();
+
+            ResourceDtos.ResourceWriteRequest noop = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            service.update(service.detail(userId), noop);
+            assertThat(service.detail(userId).etag()).isEqualTo(before);
+
+            ResourceDtos.ResourceWriteRequest real = request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            real.setDesignation(Optional.of("Tech Lead"));
+            service.update(service.detail(userId), real);
+            assertThat(service.detail(userId).etag()).isNotEqualTo(before);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // the new constraints
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("the constraints V20260811_1520 adds")
+    class Constraints {
+
+        /**
+         * B-023's note records what the alternative day numbering cost: a `0`
+         * read as ISO makes Sunday a working day and every weekend-spanning SLA
+         * short by a day. The org calendar already refuses it; this proves the
+         * per-resource override does too, so the defect cannot come back one
+         * row at a time.
+         */
+        @Test
+        @DisplayName("a weekly_off of 0 is refused by the database, not merely by Bean Validation")
+        void weeklyOffZeroIsRefusedAtTheColumn() {
+            long id = service.create(request("ITFRM020", "itfrm.days", "DEVELOPER")).resource().id();
+
+            assertThatThrownBy(() -> jdbc.update(
+                    "UPDATE users SET weekly_off = CAST('[0, 6]' AS JSON) WHERE id = ?", id))
+                    .isInstanceOf(DataAccessException.class)
+                    .hasMessageContaining("ck_users_weekly_off");
+        }
+
+        @Test
+        @DisplayName("a seven-day weekend is refused — addWorkingHours would never find a working day")
+        void sevenDayWeekendIsRefused() {
+            long id = service.create(request("ITFRM021", "itfrm.week", "DEVELOPER")).resource().id();
+
+            assertThatThrownBy(() -> jdbc.update(
+                    "UPDATE users SET weekly_off = CAST('[1,2,3,4,5,6,7]' AS JSON) WHERE id = ?", id))
+                    .isInstanceOf(DataAccessException.class)
+                    .hasMessageContaining("ck_users_weekly_off");
+        }
+
+        @Test
+        @DisplayName("an unrecognised project role is refused by ck_project_members_role")
+        void unknownProjectRoleIsRefused() {
+            long id = service.create(request("ITFRM022", "itfrm.role", "DEVELOPER")).resource().id();
+
+            assertThatThrownBy(() -> jdbc.update(
+                    "INSERT INTO project_members (project_id, user_id, role_in_project) VALUES (?, ?, 'ARCHITECT')",
+                    projectOneId, id))
+                    .isInstanceOf(DataAccessException.class)
+                    .hasMessageContaining("ck_project_members_role");
+        }
+
+        /**
+         * VIEWER is a project role and not a global one — the whole reason
+         * {@code ProjectRoleCode} is a separate enum from {@code RoleCode}.
+         */
+        @Test
+        @DisplayName("VIEWER is a legal project role even though it is not a global one")
+        void viewerIsALegalProjectRole() {
+            ResourceDtos.ResourceWriteRequest request = request("ITFRM023", "itfrm.viewer", "DEVELOPER");
+            request.setProjects(Optional.of(List.of(
+                    new ResourceDtos.ProjectAssignment(projectOneId, "VIEWER"))));
+
+            long id = service.create(request).resource().id();
+
+            assertThat(service.detail(id).projectAssignments())
+                    .containsExactly(new ResourceDtos.ProjectAssignment(projectOneId, "VIEWER"));
+        }
+
+        @Test
+        @DisplayName("the self-reference trigger is still the backstop under the service check")
+        void selfReferenceIsRefusedAtTheDatabaseToo() {
+            long id = service.create(request("ITFRM024", "itfrm.self", "DEVELOPER")).resource().id();
+
+            assertThatThrownBy(() -> jdbc.update(
+                    "UPDATE users SET reporting_manager_id = ? WHERE id = ?", id, id))
+                    .isInstanceOf(Exception.class);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // the deactivation guard, against real tickets
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("the form cannot deactivate somebody holding a real open ticket")
+    void deactivationGuardSeesRealTickets() {
+        long id = service.create(request("ITFRM030", "itfrm.busy", "DEVELOPER")).resource().id();
+        insertOpenTicket(id);
+
+        ResourceDtos.ResourceWriteRequest patch = request("ITFRM030", "itfrm.busy", "DEVELOPER");
+        patch.setIsActive(Optional.of(false));
+
+        assertThatThrownBy(() -> service.update(service.detail(id), patch))
+                .isInstanceOf(ResourceWriteService.OpenTicketsException.class);
+
+        assertThat(service.detail(id).isActive()).isTrue();
+    }
+
+    // ------------------------------------------------------------------
+    // helpers
+    // ------------------------------------------------------------------
+
+    private static ResourceDtos.ResourceWriteRequest request(String empCode, String username, String role) {
+        ResourceDtos.ResourceWriteRequest request = new ResourceDtos.ResourceWriteRequest();
+        request.setEmployeeCode(empCode);
+        request.setUsername(username);
+        request.setEmail(username + "@edunext.test");
+        request.setDisplayName(username.replace('.', ' '));
+        request.setRole(role);
+        return request;
+    }
+
+    private long idOfProject(String code) {
+        Long id = jdbc.queryForObject("SELECT id FROM projects WHERE project_code = ?", Long.class, code);
+        return id == null ? 0L : id;
+    }
+
+    /**
+     * "Open" is {@code statuses.is_open}, read from the seed rather than
+     * hardcoded — the same rule {@code ResourceRepository} follows, for the same
+     * reason: the status vocabulary is master data an Admin extends.
+     */
+    private void insertOpenTicket(long assigneeId) {
+        Map<String, Object> status = jdbc.queryForMap(
+                "SELECT code FROM statuses WHERE is_open = 1 ORDER BY id LIMIT 1");
+        Long taskTypeId = jdbc.queryForObject("SELECT id FROM task_types ORDER BY id LIMIT 1", Long.class);
+
+        jdbc.update("""
+                INSERT INTO tickets (ticket_code, project_id, task_type_id, title,
+                                     level, original_level, status,
+                                     assigned_to, reported_by, date_reported)
+                VALUES (?, ?, ?, 'Form guard fixture', 'MEDIUM', 'MEDIUM', ?, ?, ?, UTC_TIMESTAMP(6))
+                """,
+                "ITFRM-26-00001", projectOneId, taskTypeId, status.get("code"), assigneeId, managerId);
+    }
+}

@@ -48,8 +48,14 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
+ * ISO-8601 day numbers, **1=Mon … 7=Sun**. `0` is not a day — see the
+note on `GET /masters/working-calendar` for what a second numbering
+cost once already.
 
+`null` means "inherit the org working week", which is the default for
+everybody. `[]` is a different answer — this person has no weekly off,
+which a support rota is a real reason to want.
+
+ * @maxItems 6
  */
-export type UserWriteRequestReportingManagerId = number | null;
+export type UserWriteRequestWeeklyOff = number[] | null;

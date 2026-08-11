@@ -47,7 +47,28 @@ export interface User {
   timezone: string;
   /** S-07 grid columns (B-010). `lastLoginAt` is null until the first login. */
   department: string | null; designation: string | null; lastLoginAt: string | null;
+  /**
+   * S-08 form fields (B-011), returned only by `GET /users/{id}`.
+   *
+   * `weeklyOff: null` means "inherit the org working week" and is different
+   * from `[]`, which means this person has no weekly off at all. ISO day
+   * numbers, 1=Mon … 7=Sun — never JavaScript's Sunday-zero.
+   */
+  mobile: string | null; dateOfJoining: string | null; location: string | null;
+  dailyCapacityHrs: number; weeklyOff: number[] | null; skills: string[];
+  /** Per-project role, `null` meaning "same as their global role". */
+  projectRoles: Record<number, ProjectRoleCode | null>;
+  mustChangePassword: boolean;
 }
+
+/**
+ * A resource's role **on one project** — not `RoleCode`.
+ *
+ * `VIEWER` is a project role and not a global one; `ADMIN` is a global role and
+ * not a project one. See the contract's `ProjectRoleCode` for why the two sets
+ * differ in both directions.
+ */
+export type ProjectRoleCode = 'PM' | 'DEVELOPER' | 'SUPPORT' | 'QA' | 'DEPLOYMENT' | 'VIEWER';
 export interface Project {
   id: number; projectCode: string; name: string; projectManagerId: number;
   colourTag: string; isActive: boolean; ticketSeq: number;
@@ -258,6 +279,21 @@ const USERS: User[] = [
   department: department as string,
   designation: designation as string,
   lastLoginAt: lastLoginAt as string | null,
+  // B-011's S-08 fields. Varied on purpose, the same way the row above is:
+  // one person on a non-standard week, one with no skills, one who has never
+  // changed their temporary password — a form seeded from seven identical
+  // records proves nothing about the form.
+  mobile: i % 3 === 0 ? null : `+91 90000 000${String(i).padStart(2, '0')}`,
+  dateOfJoining: i % 4 === 0 ? null : `202${4 + (i % 3)}-0${1 + (i % 9)}-15`,
+  location: i % 2 === 0 ? 'Pune' : 'Bengaluru',
+  dailyCapacityHrs: i === 4 ? 6 : 8,
+  // null = inherit the org week, which is everybody except the support lead,
+  // whose rota runs Tuesday-to-Saturday.
+  weeklyOff: (username as string) === 'priya' ? [7, 1] : null,
+  skills: i % 3 === 0 ? [] : ['Java', 'React', 'MySQL'].slice(0, 1 + (i % 3)),
+  projectRoles: {},
+  // Karan has never logged in, so he is still on the password he was issued.
+  mustChangePassword: lastLoginAt == null,
 }));
 
 const PROJECTS: Project[] = [

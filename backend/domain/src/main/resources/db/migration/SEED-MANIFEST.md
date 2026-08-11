@@ -59,7 +59,8 @@ environment, always.
 | 28 | `V20260811_1100__ping_pong_flags.sql` | D | D-025 | schema | `ping_pong_flags` — one row **per cycle**, holding the highest iteration already announced, so a further bounce is new information and a reopen re-arms |
 | 29 | `V20260811_1400__unassigned_ticket_alerts.sql` | D | D-026 | schema | `unassigned_ticket_alerts` — one row per ticket, cleared the moment somebody picks it up, so a later reassignment away alerts immediately |
 | 30 | `V20260811_1420__two_factor_totp.sql` | A | A-029 | schema | `users.totp_secret`/`totp_enabled`/`totp_confirmed_at` + `totp_recovery_codes` — the enrol-then-confirm states and the way back in |
-| 31 | `V20260811_1600__push_subscriptions.sql` | D | D-045 | schema | `push_subscriptions` — one row per browser that granted permission; unique on the **endpoint alone**, so a second user on a shared machine takes the subscription over rather than inheriting somebody else's alerts |
+| 31 | `V20260811_1520__resource_profile_fields.sql` | B | B-011 | schema | `users`: `date_of_joining`, `avatar_url`, `location`, `weekly_off`, `skills` — the five S-08 fields A-003 had no reader for. Plus `ck_project_members_role`, which fixes the vocabulary of `role_in_project` at its first writer |
+| 32 | `V20260811_1600__push_subscriptions.sql` | D | D-045 | schema | `push_subscriptions` — one row per browser that granted permission; unique on the **endpoint alone**, so a second user on a shared machine takes the subscription over rather than inheriting somebody else's alerts |
 
 <!-- load-order:end -->
 

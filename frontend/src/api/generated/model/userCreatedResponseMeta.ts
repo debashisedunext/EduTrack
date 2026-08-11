@@ -47,9 +47,11 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-/**
- * Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
-
+export type UserCreatedResponseMeta = {
+  /** Readable exactly once, here. Stored as an Argon2id hash, so no
+later request can recover it; an admin who loses it issues a
+reset. The account is created with `mustChangePassword` set, so
+this password survives precisely one login.
  */
-export type UserWriteRequestReportingManagerId = number | null;
+  temporaryPassword: string;
+};

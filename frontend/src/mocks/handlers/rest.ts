@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
-import type { Holiday } from '../db';
+import type { Holiday, User } from '../db';
 import { round } from './tickets';
 import {
   clientRef, currentUser, noContent, notFound, ok, paginate, problem, projectRef,
@@ -289,35 +289,110 @@ export const restHandlers = [
       ...(blocked > 0 ? { reassignUrl: '/api/v1/tickets/bulk-reassign' } : {}),
     });
   }),
+  /**
+   * B-011 · the S-08 form's read, with the `ETag` the `PATCH` requires.
+   *
+   * Registered **after** `/users/export` and `/users/bulk-status` above, so
+   * those literal paths win. MSW matches in registration order and
+   * `:userId` would otherwise swallow both.
+   */
+  http.get(url('/users/:userId'), ({ params }) => {
+    const u = getDb().users.find((x) => x.id === Number(params.userId));
+    if (!u) return notFound('User');
+    return ok(userDetailDto(u), undefined, { headers: { ETag: userEtag(u) } });
+  }),
   http.post(url('/users'), async ({ request }) => {
     const db = getDb();
-    const body = (await request.json()) as Record<string, string>;
-    if (db.users.some((u) => u.username === body.username)) {
-      return problem(409, 'duplicate', 'That username is already taken');
-    }
-    const u = {
-      id: db.users.length + 1, displayName: body.displayName, username: body.username,
-      email: body.email, role: body.role as never, employeeCode: body.employeeCode ?? '',
-      avatarUrl: null, reportingManagerId: null, projectIds: [], isActive: true,
-      timezone: body.timezone ?? 'Asia/Kolkata',
+    const body = (await request.json()) as Record<string, unknown>;
+
+    const conflicts = userConflicts(db.users, body, null);
+    if (conflicts) return conflicts;
+
+    const u: User = {
+      id: Math.max(0, ...db.users.map((x) => x.id)) + 1,
+      displayName: String(body.displayName),
+      username: String(body.username),
+      email: String(body.email),
+      role: body.role as never,
+      employeeCode: String(body.employeeCode ?? ''),
+      avatarUrl: (body.avatarUrl as string | null) ?? null,
+      reportingManagerId: (body.reportingManagerId as number | null) ?? null,
+      projectIds: [],
+      isActive: body.isActive == null ? true : Boolean(body.isActive),
+      timezone: String(body.timezone ?? 'Asia/Kolkata'),
       // B-010 columns. `lastLoginAt` is null because a resource created a
       // moment ago has not logged in — the grid renders that as "Never".
-      department: null, designation: null, lastLoginAt: null,
+      department: (body.department as string | null) ?? null,
+      designation: (body.designation as string | null) ?? null,
+      lastLoginAt: null,
+      // B-011 columns.
+      mobile: (body.mobile as string | null) ?? null,
+      dateOfJoining: (body.dateOfJoining as string | null) ?? null,
+      location: (body.location as string | null) ?? null,
+      dailyCapacityHrs: Number(body.dailyCapacityHrs ?? 8),
+      weeklyOff: (body.weeklyOff as number[] | null) ?? null,
+      skills: (body.skills as string[]) ?? [],
+      projectRoles: {},
+      // S-08's force-change-on-first-login, and never a request field.
+      mustChangePassword: true,
     };
+    applyProjects(u, body.projects);
     db.users.push(u);
-    return ok(userDto(u), undefined, { status: 201 });
+
+    // `meta.temporaryPassword`, matching `UserCreatedResponse`. Fixed rather
+    // than random so a test can assert on it — the real one is 16 random
+    // characters from `TemporaryPasswords`.
+    return ok(userDetailDto(u), { temporaryPassword: 'Mock7#TempPass9x' }, {
+      status: 201,
+      headers: { ETag: userEtag(u) },
+    });
   }),
   http.patch(url('/users/:userId'), async ({ params, request }) => {
     const db = getDb();
     const u = db.users.find((x) => x.id === Number(params.userId));
     if (!u) return notFound('User');
+
+    // The precondition, mirrored from `ResourceController`. Absent is 428 and
+    // not "allowed through": a guard that only applies to callers who opted in
+    // protects the set that needed it least.
+    const ifMatch = request.headers.get('If-Match');
+    if (!ifMatch) {
+      return problem(428, 'precondition-required',
+        'If-Match is required. GET the resource first and send back its ETag.');
+    }
+    if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== userEtag(u)) {
+      return problem(412, 'precondition-failed',
+        'This resource changed since you read it. Reload and reapply your edit.');
+    }
+
     const body = (await request.json()) as Record<string, unknown>;
-    // A→B→C→A is as broken as A→A, and the database CHECK only catches the latter.
+
+    const conflicts = userConflicts(db.users, body, u.id);
+    if (conflicts) return conflicts;
+
+    // A→B→C→A is as broken as A→A, and the database CHECK only catches the
+    // latter. **The mock is ahead of the server here** — B-012 is still open,
+    // so the real backend accepts the deeper cycle this refuses. Left in place
+    // rather than weakened to match: the mock describes the contract, and a
+    // frontend written against it will already handle the 409 when B-012 lands.
     if (body.reportingManagerId != null && createsCycle(u.id, Number(body.reportingManagerId))) {
       return problem(409, 'manager-cycle', 'That would create a reporting cycle');
     }
-    Object.assign(u, body);
-    return ok(userDto(u));
+
+    if (body.isActive === false && u.isActive) {
+      const open = db.tickets.filter((t) => t.assigneeId === u.id && t.status !== 'CLOSED').length;
+      if (open > 0) {
+        return problem(409, 'open-tickets', 'Reassign this resource’s open tickets first', {
+          openTicketCount: open, reassignUrl: '/api/v1/tickets/bulk-reassign',
+        });
+      }
+    }
+
+    const { projects, ...scalars } = body;
+    Object.assign(u, scalars);
+    applyProjects(u, projects);
+
+    return ok(userDetailDto(u), undefined, { headers: { ETag: userEtag(u) } });
   }),
   http.patch(url('/users/:userId/status'), async ({ params, request }) => {
     const db = getDb();
@@ -1113,7 +1188,7 @@ function usersExport(rows: import('../db').User[], format: 'xlsx' | 'csv') {
 }
 
 // ── mappers ─────────────────────────────────────────────────────────────────
-function userDto(u: import('../db').User) {
+function userDto(u: User) {
   const db = getDb();
   return {
     id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl, role: u.role,
@@ -1129,6 +1204,93 @@ function userDto(u: import('../db').User) {
     lastLoginAt: u.lastLoginAt,
     createdAt: '2026-08-03T09:00:00.000Z',
   };
+}
+
+/**
+ * B-011 · `UserDetail` — everything `userDto` returns plus the S-08-only half.
+ *
+ * Deliberately **not** merged into `userDto`. `listUsers` returns up to 200 of
+ * those, and a skills array plus a membership list on every grid row is weight
+ * paid on every page of a screen that shows neither.
+ */
+function userDetailDto(u: User) {
+  return {
+    ...userDto(u),
+    mobile: u.mobile,
+    dateOfJoining: u.dateOfJoining,
+    location: u.location,
+    timezone: u.timezone,
+    dailyCapacityHrs: u.dailyCapacityHrs,
+    weeklyOff: u.weeklyOff,
+    skills: u.skills,
+    projectAssignments: u.projectIds.map((projectId: number) => ({
+      projectId,
+      // `undefined` rather than null: the generated Zod types this
+      // `.optional()`, so an explicit null is a value the frontend's own schema
+      // rejects. Same reason `ResourceDtos` carries `@JsonInclude(NON_NULL)`.
+      ...(u.projectRoles[projectId] ? { roleInProject: u.projectRoles[projectId] } : {}),
+    })),
+    mustChangePassword: u.mustChangePassword,
+  };
+}
+
+/**
+ * The `ETag`, derived from content rather than a version counter.
+ *
+ * The same three exclusions `ResourceDetail.etag()` makes, for the same reason:
+ * `openTicketCount`, `lastLoginAt` and `mustChangePassword` all move without
+ * anybody editing this resource, and any of them inside the tag would produce a
+ * 412 naming a conflict that does not exist. The tag covers what the `PATCH` can
+ * change, and no more.
+ */
+function userEtag(u: User) {
+  const stable = JSON.stringify({
+    ...userDetailDto(u),
+    openTicketCount: undefined,
+    lastLoginAt: undefined,
+    mustChangePassword: undefined,
+  });
+  let hash = 0;
+  for (let i = 0; i < stable.length; i++) {
+    hash = (hash * 31 + stable.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(16);
+}
+
+/**
+ * The three unique fields, all reported at once.
+ *
+ * One round of correction rather than three: an admin who fixes a duplicate
+ * username should not then discover the duplicate email.
+ */
+function userConflicts(users: User[], body: Record<string, unknown>, excludeId: number | null) {
+  const errors: Record<string, string[]> = {};
+  const clash = (field: 'username' | 'email' | 'employeeCode', message: string) => {
+    const candidate = String(body[field] ?? '').toLowerCase();
+    if (candidate === '') return;
+    const taken = users.some((u) => u.id !== excludeId && String(u[field]).toLowerCase() === candidate);
+    if (taken) errors[field] = [message];
+  };
+
+  clash('username', 'That username is already taken');
+  clash('email', 'That email address is already registered');
+  clash('employeeCode', 'That employee code is already in use');
+
+  if (Object.keys(errors).length === 0) return null;
+  return problem(409, 'duplicate', Object.values(errors).flat().join('; '), { errors });
+}
+
+/**
+ * Replaces the membership set when the key is present, leaves it alone when it
+ * is absent — the contract's "sent whole, not as a delta".
+ */
+function applyProjects(u: User, projects: unknown) {
+  if (projects == null) return;
+  const rows = projects as Array<{ projectId: number; roleInProject?: string }>;
+  u.projectIds = rows.map((row) => row.projectId);
+  u.projectRoles = Object.fromEntries(
+    rows.map((row) => [row.projectId, (row.roleInProject as never) ?? null]),
+  );
 }
 
 function projectDto(p: import('../db').Project) {

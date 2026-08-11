@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { keepPreviousData } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Download, RotateCcw, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, Plus, RotateCcw, Search } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import { useListUsers, useSetUserStatusBulk } from '@/api/generated/users/users'
 import { useListProjects } from '@/api/generated/projects/projects'
@@ -43,12 +44,12 @@ const STATUS_OPTIONS = [
 ]
 
 /**
- * S-07 Resource Master — List (B-010).
+ * S-07 Resource Master — List (B-010), with B-011's entry points into the form.
  *
- * The read half of the Resource Master. Create and edit are B-011,
- * reporting-manager cycle detection B-012, and the bulk reassignment wizard
- * B-014 — which is why deactivating somebody who holds open tickets stops here
- * with a named list rather than offering to fix it.
+ * "New resource" and the per-row Edit link both go to `ResourceFormPage`.
+ * Reporting-manager cycle detection is still B-012 and the bulk reassignment
+ * wizard still B-014 — which is why deactivating somebody who holds open
+ * tickets stops here with a named list rather than offering to fix it.
  */
 export function ResourceListPage() {
   const { filters, setFilter, resetFilters, activeCount } = useResourceFilters()
@@ -218,6 +219,12 @@ export function ResourceListPage() {
               Export
             </a>
           </Button>
+          <Button asChild size="sm">
+            <Link to="/masters/resources/new">
+              <Plus className="h-4 w-4" />
+              New resource
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -355,7 +362,14 @@ export function ResourceListPage() {
                         <Button variant="secondary" size="sm" onClick={resetFilters}>
                           Reset filters
                         </Button>
-                      ) : undefined
+                      ) : (
+                        // An empty directory with no filters on is a fresh
+                        // tenant, and the only useful next action is to add
+                        // somebody — not to clear filters that are not set.
+                        <Button asChild size="sm">
+                          <Link to="/masters/resources/new">Add the first resource</Link>
+                        </Button>
+                      )
                     }
                   />
                 </TableCell>

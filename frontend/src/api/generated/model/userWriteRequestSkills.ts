@@ -48,8 +48,6 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
-
+ * @maxItems 30
  */
-export type UserWriteRequestReportingManagerId = number | null;
+export type UserWriteRequestSkills = string[] | null;
