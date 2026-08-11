@@ -207,8 +207,8 @@ password, so a stolen access token cannot swap the second factor.
  */
 export const beginTwoFactorEnrolmentResponse = zod.object({
   "data": zod.object({
-  "secret": zod.string().describe('Base32, for typing in when a QR cannot be scanned.'),
-  "otpauthUri": zod.string().describe('Render client-side as a QR code.')
+  "secret": zod.string().describe('Base32 shared secret, for typing in when a QR cannot be scanned.'),
+  "otpauthUri": zod.string().describe('The otpauth:\/\/ URI to render client-side as a QR code. Carries the same secret, so it is never turned into a cacheable image.')
 })
 })
 
@@ -232,7 +232,7 @@ export const confirmTwoFactorEnrolmentBody = zod.object({
 
 export const confirmTwoFactorEnrolmentResponse = zod.object({
   "data": zod.object({
-  "recoveryCodes": zod.array(zod.string()).describe('Single-use. Each substitutes for the 6-digit code at login.')
+  "recoveryCodes": zod.array(zod.string()).describe('Single-use. Each substitutes for the 6-digit code at login, and is the only way back in if the authenticator is lost. Shown once.')
 })
 })
 

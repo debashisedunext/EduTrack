@@ -186,6 +186,20 @@ export interface Db {
     holidays: Holiday[];
     leaves: ResourceLeave[];
   };
+  /**
+   * A-029 · two-factor enrolment, keyed by user id. No entry means never
+   * enrolled — which is the starting state for every seeded user, because 2FA
+   * is opt-in.
+   *
+   * Held here for the same reason the calendar is: `resetDb()` has to clear it,
+   * or one test's enrolment becomes the next test's starting state.
+   *
+   * `secret` and `enabled` are separate because the server's are. Setup issues
+   * a secret and enables nothing; only a correct code at confirm flips
+   * `enabled`. Collapsing the two into one flag would let S-04 be built against
+   * a flow the backend does not have — one where showing the QR is enrolment.
+   */
+  twoFactor: Record<number, { secret: string; enabled: boolean }>;
 }
 
 export interface Holiday {
@@ -323,6 +337,7 @@ export function createDb(): Db {
     chatThreads: [], chatMessages: [],
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
     seq: {},
+    twoFactor: {}, // opt-in, so nobody starts enrolled
     calendar: {
       week: {
         weeklyOff: [6, 7],

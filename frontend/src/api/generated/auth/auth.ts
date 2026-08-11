@@ -66,9 +66,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  BeginTwoFactorEnrolment200,
   ChangeOwnPasswordBody,
-  ConfirmTwoFactorEnrolment200,
   ConfirmTwoFactorEnrolmentBody,
   ConflictResponse,
   DisableTwoFactorBody,
@@ -79,6 +77,8 @@ import type {
   ResetPasswordBody,
   SessionResponse,
   TooManyRequestsResponse,
+  TwoFactorRecoveryCodesResponse,
+  TwoFactorSetupResponse,
   UnauthorizedResponse,
   ValidationFailedResponse
 } from '.././model';
@@ -603,7 +603,7 @@ export const beginTwoFactorEnrolment = (
 ) => {
       
       
-      return http<BeginTwoFactorEnrolment200>(
+      return http<TwoFactorSetupResponse>(
       {url: `/me/2fa/setup`, method: 'POST', signal
     },
       );
@@ -673,7 +673,7 @@ export const confirmTwoFactorEnrolment = (
 ) => {
       
       
-      return http<ConfirmTwoFactorEnrolment200>(
+      return http<TwoFactorRecoveryCodesResponse>(
       {url: `/me/2fa/confirm`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: confirmTwoFactorEnrolmentBody, signal
