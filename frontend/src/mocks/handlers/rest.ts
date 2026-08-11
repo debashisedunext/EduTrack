@@ -105,6 +105,42 @@ const calendarEtag = () =>
   `"${Math.abs([...JSON.stringify(calendarState().week)]
     .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
 
+// ── two-factor · S-04 (A-029) ───────────────────────────────────────────────
+/** Enrolment for whoever is signed in, or undefined if they never started. */
+const twoFactorState = () => getDb().twoFactor[currentUser().id];
+
+/**
+ * Base32, and a real one — the alphabet excludes 0, 1, 8 and 9.
+ *
+ * Fixed rather than random so the QR code in a Storybook story or a visual
+ * regression test is the same image every run. It is a mock secret for a mock
+ * server; there is nothing here to protect.
+ */
+const MOCK_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+
+/** The one code the mock accepts. Anything else exercises the error state. */
+const MOCK_TOTP_CODE = '123456';
+
+/**
+ * Ten codes, in the server's alphabet — no I, L, O or U, so nothing reads as a
+ * 1 or a 0 when a user copies one off a screen under pressure.
+ */
+const MOCK_RECOVERY_CODES = [
+  '4KDP-9TXM', '7WQR-2HJN', 'B3VZ-6MCT', 'X8ND-5RFK', 'Q2HT-7WPB',
+  'M9CX-3KDV', 'Z5RT-8NQJ', 'H6PW-4BXM', 'T7KN-9VDR', 'C4MZ-6HTP',
+];
+
+/**
+ * The `otpauth://` URI an authenticator scans.
+ *
+ * The label is `issuer:account` and the issuer is repeated as a parameter —
+ * both, because older apps read one and newer ones the other, and an entry
+ * labelled only with an email address is unidentifiable once a user has four.
+ */
+const otpauthUri = (secret: string) =>
+  `otpauth://totp/EduTrack:${encodeURIComponent(currentUser().email)}`
+  + `?secret=${secret}&issuer=EduTrack&algorithm=SHA1&digits=6&period=30`;
+
 export const restHandlers = [
   // ── auth ──────────────────────────────────────────────────────────────────
   http.post(url('/auth/login'), async ({ request }) => {
@@ -141,6 +177,54 @@ export const restHandlers = [
   http.post(url('/auth/reset-password'), () => noContent()),
   http.get(url('/me'), () => ok(me())),
   http.patch(url('/me/password'), () => noContent()),
+
+  // ── two-factor · S-04 (A-029) ─────────────────────────────────────────────
+  // Enrol, then confirm. Setup alone enables nothing, so a user who scans the
+  // QR and closes the tab is not locked out of an account with a second factor
+  // they never finished adding.
+  http.post(url('/me/2fa/setup'), () => {
+    const state = twoFactorState();
+    if (state?.enabled) {
+      return problem(409, 'already-enrolled', 'Two-factor authentication is already enabled');
+    }
+    // Re-running setup issues a *new* secret and discards the old one, matching
+    // the server. Keeping the first would mean a half-finished enrolment could
+    // still be completed from a QR code shown on some other machine.
+    const secret = MOCK_TOTP_SECRET;
+    getDb().twoFactor[currentUser().id] = { secret, enabled: false };
+    return ok({ secret, otpauthUri: otpauthUri(secret) });
+  }),
+  http.post(url('/me/2fa/confirm'), async ({ request }) => {
+    const { code } = (await request.json()) as { code?: string };
+    const state = twoFactorState();
+    if (!state) {
+      return problem(409, 'not-enrolling', 'Start enrolment before confirming it');
+    }
+    if (state.enabled) {
+      return problem(409, 'already-enrolled', 'Two-factor authentication is already enabled');
+    }
+    // The mock cannot run the clock, so it accepts one fixed code rather than
+    // any six digits. Accepting anything would let a screen ship that never
+    // renders the "that code is wrong" state — the one users actually hit.
+    if (code !== MOCK_TOTP_CODE) {
+      return problem(400, 'invalid-code', 'That code is not valid. Check your authenticator.');
+    }
+    state.enabled = true;
+    return ok({ recoveryCodes: MOCK_RECOVERY_CODES });
+  }),
+  http.post(url('/me/2fa/disable'), async ({ request }) => {
+    const { password } = (await request.json()) as { password?: string };
+    // The password is the point of this endpoint, not a formality — a stolen
+    // access token must not be enough to strip the second factor. Mocking it as
+    // optional would let the screen ship without the re-authentication step.
+    if (!password) {
+      return problem(401, 'invalid-credentials', 'Password is incorrect');
+    }
+    // Idempotent: turning off something already off is not an error, so a
+    // double-submit does not surface as one.
+    delete getDb().twoFactor[currentUser().id];
+    return noContent();
+  }),
 
   // ── users ─────────────────────────────────────────────────────────────────
   http.get(url('/users'), ({ request }) => {
