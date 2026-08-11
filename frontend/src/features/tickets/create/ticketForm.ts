@@ -7,6 +7,7 @@ import {
 import { Level } from '@/api/generated/model/level'
 import type { TaskType } from '@/api/generated/model/taskType'
 import type { TicketCreateRequest } from '@/api/generated/model/ticketCreateRequest'
+import { isRichTextEmpty, sanitizeRichText } from '@/components/ui/rich-text'
 
 /**
  * S-19 Create Ticket — form state, validation and the mapping onto the wire.
@@ -149,11 +150,25 @@ export function ticketFormSchema(
       // Optional on the wire, mandatory here: blueprint §7.5 marks Task
       // Description with an asterisk, and the blueprint wins on behaviour.
       // A draft is the one case where that asterisk is waived.
+      //
+      // Rich text since C-066, which changes both halves of this check.
+      // `.min(1)` would pass on an *empty* editor: the browser leaves
+      // `<p><br></p>` behind the moment the field is focused, and that is 13
+      // characters of nothing. And the bound is measured over the sanitised
+      // HTML rather than the raw value, because that is the string the column
+      // stores and Bean Validation rejects — a value can only shrink through
+      // the sanitiser, so checking the raw form would reject a description the
+      // server would have accepted.
       description: z
         .string()
-        .trim()
-        .min(isDraft ? 0 : 1, 'Describe the task — this is what the assignee reads first')
-        .max(createTicketBodyDescriptionMax, `Keep the description under ${createTicketBodyDescriptionMax} characters`),
+        .refine(
+          (html) => isDraft || !isRichTextEmpty(html),
+          'Describe the task — this is what the assignee reads first',
+        )
+        .refine(
+          (html) => sanitizeRichText(html).length <= createTicketBodyDescriptionMax,
+          `Keep the description under ${createTicketBodyDescriptionMax} characters`,
+        ),
       taskTypeId: requiredId('Select a task type'),
       level: z
         .nativeEnum(Level)
@@ -231,7 +246,14 @@ export function toCreateRequest(
     throw new Error('toCreateRequest received values that never passed validation')
   }
 
-  const description = values.description.trim()
+  // Sanitised on the way out as well as on the way in. The editor already
+  // emits clean HTML, but `values` can also come from a draft loaded off the
+  // wire, and §3.9's rule is that the client sanitises whatever it handles —
+  // its copy is advice, but advice that skips a path is worse than none.
+  // `isRichTextEmpty` rather than a truthiness check: an editor the user
+  // focused and left empty holds `<p><br></p>`, and sending that would store a
+  // description that reads as blank and validates as present.
+  const description = isRichTextEmpty(values.description) ? '' : sanitizeRichText(values.description).trim()
   const estimatedHrs = values.estimatedHrs.trim()
 
   return {
