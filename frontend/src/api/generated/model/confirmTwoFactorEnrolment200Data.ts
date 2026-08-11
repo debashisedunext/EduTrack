@@ -47,22 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export interface LoginRequest {
-  /**
-   * @minLength 1
-   * @maxLength 100
-   */
-  username: string;
-  /** @minLength 1 */
-  password: string;
-  /**
-   * Required when 2FA is enabled.
-   * @pattern ^\d{6}$
-   */
-  totpCode?: string;
-  /**
-   * A single-use recovery code, in place of totpCode when the authenticator is unavailable. Hyphens, spaces and lower case are all accepted.
-   * @maxLength 32
-   */
-  recoveryCode?: string;
-}
+export type ConfirmTwoFactorEnrolment200Data = {
+  /** Single-use. Each substitutes for the 6-digit code at login. */
+  recoveryCodes: string[];
+};

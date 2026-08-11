@@ -223,8 +223,11 @@ class TwoFactorIT {
                 """
                 {"code":"%s"}""".formatted(currentCodeFor(username)));
         assertThat(confirmed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(json(confirmed).has("data"))
+                .as("CONVENTIONS.md §2 — every 2xx JSON body is wrapped in { data }")
+                .isTrue();
 
-        JsonNode codes = json(confirmed).path("recoveryCodes");
+        JsonNode codes = json(confirmed).path("data").path("recoveryCodes");
         return new ObjectMapper().convertValue(codes, new com.fasterxml.jackson.core.type.TypeReference<>() {
         });
     }
@@ -239,7 +242,17 @@ class TwoFactorIT {
         ResponseEntity<String> response = post("/api/v1/me/2fa/setup", token, null);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        JsonNode body = json(response);
+
+        // CONVENTIONS.md §2 — asserted explicitly, because the first version of
+        // these endpoints returned the body bare and every test here still
+        // passed: they read the fields they cared about and nothing looked at
+        // the envelope. check-conventions.py caught it in CI instead, which is
+        // the right backstop but the wrong first line of defence.
+        assertThat(json(response).has("data"))
+                .as("every 2xx JSON body is wrapped in { data }")
+                .isTrue();
+
+        JsonNode body = json(response).path("data");
         assertThat(body.path("secret").asText()).matches("[A-Z2-7]{32}");
         assertThat(body.path("otpauthUri").asText())
                 .startsWith("otpauth://totp/EduTrack:itt.setupshape?")
@@ -416,7 +429,7 @@ class TwoFactorIT {
     void theSecretIsEncryptedAtRest() throws Exception {
         String token = accessTokenFor("itt.encrypted");
         ResponseEntity<String> setup = post("/api/v1/me/2fa/setup", token, null);
-        String plaintextSecret = json(setup).path("secret").asText();
+        String plaintextSecret = json(setup).path("data").path("secret").asText();
 
         String stored = jdbc.queryForObject(
                 "SELECT totp_secret FROM users WHERE username = 'itt.encrypted'", String.class);

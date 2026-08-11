@@ -300,10 +300,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [secret, otpauthUri]
+                required: [data]
                 properties:
-                  secret: { type: string, description: 'Base32, for typing in when a QR cannot be scanned.' }
-                  otpauthUri: { type: string, description: 'Render client-side as a QR code.' }
+                  data:
+                    type: object
+                    required: [secret, otpauthUri]
+                    properties:
+                      secret: { type: string, description: 'Base32, for typing in when a QR cannot be scanned.' }
+                      otpauthUri: { type: string, description: 'Render client-side as a QR code.' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
 
@@ -336,12 +340,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [recoveryCodes]
+                required: [data]
                 properties:
-                  recoveryCodes:
-                    type: array
-                    items: { type: string }
-                    description: Single-use. Each substitutes for the 6-digit code at login.
+                  data:
+                    type: object
+                    required: [recoveryCodes]
+                    properties:
+                      recoveryCodes:
+                        type: array
+                        items: { type: string }
+                        description: Single-use. Each substitutes for the 6-digit code at login.
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }

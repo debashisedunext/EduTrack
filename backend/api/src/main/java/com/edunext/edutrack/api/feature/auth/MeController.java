@@ -192,14 +192,15 @@ class MeController {
                                       "status": 409,
                                       "detail": "Disable two-factor authentication before enrolling a new authenticator."
                                     }""")))
-    ResponseEntity<TwoFactorRequests.SetupResponse> beginTwoFactorEnrolment(
+    ResponseEntity<TwoFactorRequests.SetupEnvelope> beginTwoFactorEnrolment(
             @Parameter(hidden = true)
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
 
         TotpService.Enrolment enrolment = twoFactorEnrolment.begin(authorization);
 
-        return ResponseEntity.ok(
-                new TwoFactorRequests.SetupResponse(enrolment.secret(), enrolment.otpauthUri()));
+        // CONVENTIONS.md §2 — every 2xx JSON body carries { data }.
+        return ResponseEntity.ok(new TwoFactorRequests.SetupEnvelope(
+                new TwoFactorRequests.SetupResponse(enrolment.secret(), enrolment.otpauthUri())));
     }
 
     @PostMapping(path = "/2fa/confirm", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -238,14 +239,16 @@ class MeController {
                                     }""")))
     @ApiResponse(responseCode = "409", description = "No enrolment in progress, or 2FA is already on.",
             content = @Content)
-    ResponseEntity<TwoFactorRequests.RecoveryCodesResponse> confirmTwoFactorEnrolment(
+    ResponseEntity<TwoFactorRequests.RecoveryCodesEnvelope> confirmTwoFactorEnrolment(
             @Parameter(hidden = true)
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
             @Valid @RequestBody TwoFactorRequests.ConfirmRequest request) {
 
         List<String> codes = twoFactorEnrolment.confirm(authorization, request.code());
 
-        return ResponseEntity.ok(new TwoFactorRequests.RecoveryCodesResponse(codes));
+        // CONVENTIONS.md §2 — every 2xx JSON body carries { data }.
+        return ResponseEntity.ok(new TwoFactorRequests.RecoveryCodesEnvelope(
+                new TwoFactorRequests.RecoveryCodesResponse(codes)));
     }
 
     @PostMapping(path = "/2fa/disable", consumes = MediaType.APPLICATION_JSON_VALUE)

@@ -18,7 +18,28 @@ final class TwoFactorRequests {
     }
 
     /**
-     * What {@code POST /me/2fa/setup} returns.
+     * A-029 · the {@code { data }} envelope CONVENTIONS.md §2 requires of every
+     * 2xx JSON body.
+     *
+     * <p><b>Caught by CI, not by review.</b> The first version of these
+     * endpoints returned {@link SetupResponse} and {@link RecoveryCodesResponse}
+     * bare — every test passed, {@code ContractConformanceTest} was green, and
+     * {@code check-conventions.py} failed the build on exactly the rule
+     * {@link SessionResponse} was written to satisfy three tasks earlier. The
+     * wrapper is not ceremony: a bare body cannot grow a sibling — {@code meta},
+     * a deprecation notice — without breaking every generated client at once.
+     */
+    @Schema(description = "Envelope for a two-factor enrolment.")
+    record SetupEnvelope(SetupResponse data) {
+    }
+
+    /** A-029 · the same envelope for the recovery codes. See {@link SetupEnvelope}. */
+    @Schema(description = "Envelope for the issued recovery codes.")
+    record RecoveryCodesEnvelope(RecoveryCodesResponse data) {
+    }
+
+    /**
+     * What {@code POST /me/2fa/setup} returns, inside {@link SetupEnvelope}.
      *
      * <p><b>The secret is in the body exactly once, and 2FA is not on yet.</b>
      * That is safe precisely because it is not on: the value is inert until
@@ -51,8 +72,9 @@ final class TwoFactorRequests {
     }
 
     /**
-     * What confirmation returns — the recovery codes, in plaintext, for the one
-     * and only time they are ever shown.
+     * What confirmation returns, inside {@link RecoveryCodesEnvelope} — the
+     * recovery codes, in plaintext, for the one and only time they are ever
+     * shown.
      */
     @Schema(description = "Single-use recovery codes. Shown once and unrecoverable afterwards.")
     record RecoveryCodesResponse(
