@@ -1575,8 +1575,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /import-batches/{batchId}:
-    parameters:
-      - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+    parameters: [{ $ref: '#/components/parameters/BatchId' }]
     get:
       tags: [imports]
       operationId: getImportBatch
@@ -2447,6 +2446,15 @@ components:
       in: path
       required: true
       schema: { type: integer, format: int64 }
+    BatchId:
+      name: batchId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        `import_batches.id` — a `BIGINT AUTO_INCREMENT`, like every other
+        identifier in this schema. Described as a UUID until B-030, which is
+        when the engine first had to resolve one against the table.
     ImportSchema:
       name: schema
       in: path
@@ -3341,8 +3349,15 @@ components:
         data:
           type: object
           properties:
-            batchId: { type: string, format: uuid }
-            status: { type: string, enum: [QUEUED, RUNNING, COMPLETED, FAILED] }
+            batchId: { type: integer, format: int64 }
+            status:
+              type: string
+              enum: [QUEUED, RUNNING, COMPLETED, FAILED]
+              description: |
+                The commit job's lifecycle, and the only vocabulary
+                `import_batches.status` uses. There is no state for the step-4
+                dry run because the dry run writes nothing — no batch row
+                exists until commit, and it is born `QUEUED`.
             processed: { type: integer }
             total: { type: integer }
             created: { type: integer }

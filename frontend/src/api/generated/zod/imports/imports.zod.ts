@@ -156,7 +156,7 @@ two seconds should transfer a body only when something actually changed.
  * @summary Batch progress and error report
  */
 export const getImportBatchParams = zod.object({
-  "batchId": zod.string().uuid()
+  "batchId": zod.number().describe('`import_batches.id` — a `BIGINT AUTO_INCREMENT`, like every other\nidentifier in this schema. Described as a UUID until B-030, which is\nwhen the engine first had to resolve one against the table.\n')
 })
 
 export const getImportBatchHeader = zod.object({
@@ -165,8 +165,8 @@ export const getImportBatchHeader = zod.object({
 
 export const getImportBatchResponse = zod.object({
   "data": zod.object({
-  "batchId": zod.string().uuid().optional(),
-  "status": zod.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED']).optional(),
+  "batchId": zod.number().optional(),
+  "status": zod.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED']).optional().describe('The commit job\'s lifecycle, and the only vocabulary\n`import_batches.status` uses. There is no state for the step-4\ndry run because the dry run writes nothing — no batch row\nexists until commit, and it is born `QUEUED`.\n'),
   "processed": zod.number().optional(),
   "total": zod.number().optional(),
   "created": zod.number().optional(),

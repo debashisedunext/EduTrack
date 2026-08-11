@@ -404,7 +404,7 @@ two seconds should transfer a body only when something actually changed.
  * @summary Batch progress and error report
  */
 export const getImportBatch = (
-    batchId: string,
+    batchId: number,
  signal?: AbortSignal
 ) => {
       
@@ -418,14 +418,14 @@ export const getImportBatch = (
 
 
 
-export const getGetImportBatchQueryKey = (batchId?: string,) => {
+export const getGetImportBatchQueryKey = (batchId?: number,) => {
     return [
     `/import-batches/${batchId}`
     ] as const;
     }
 
     
-export const getGetImportBatchQueryOptions = <TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(batchId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
+export const getGetImportBatchQueryOptions = <TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
@@ -448,7 +448,7 @@ export type GetImportBatchQueryError = void | NotFoundResponse
 
 
 export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(
- batchId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>> & Pick<
+ batchId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getImportBatch>>,
           TError,
@@ -458,7 +458,7 @@ export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBat
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(
- batchId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>> & Pick<
+ batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getImportBatch>>,
           TError,
@@ -468,7 +468,7 @@ export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBat
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(
- batchId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
+ batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -476,7 +476,7 @@ export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBat
  */
 
 export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(
- batchId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
+ batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

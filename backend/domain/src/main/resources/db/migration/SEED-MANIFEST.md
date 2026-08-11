@@ -53,8 +53,9 @@ environment, always.
 | 22 | `V20260810_1620__stage_sla_alerts.sql` | D | D-023 | schema | `stage_sla_alerts` — the once-per-segment claim, kept outside the append-only chain |
 | 23 | `V20260810_1810__sla_prebreach_alerts.sql` | D | D-021 | schema | `sla_prebreach_alerts` — once per ticket **per cycle**, so a reopen re-arms the warning |
 | 24 | `V20260810_1930__stale_ticket_nudges.sql` | D | D-022 | schema | `stale_ticket_nudges` — one row per ticket, updated in place; a nudge repeats where a warning does not |
-| 25 | `V20260810_2040__l2_escalations.sql` | D | D-024 | schema | `l2_escalations` — the second-level claim; L1 needs none, `tickets.is_delayed` already records it |
-| 26 | `V20260811_1030__password_policy.sql` | A | A-028 | schema | `password_history` + `users.password_changed_at` — the no-reuse rule and the optional expiry clock |
+| 25 | `V20260810_2010__import_batch_status_vocabulary.sql` | B | B-030 | correction | `import_batches.status`: the column's private vocabulary replaced by the contract's `QUEUED\|RUNNING\|COMPLETED\|FAILED`, with a `CHECK` so they cannot diverge again |
+| 26 | `V20260810_2040__l2_escalations.sql` | D | D-024 | schema | `l2_escalations` — the second-level claim; L1 needs none, `tickets.is_delayed` already records it |
+| 27 | `V20260811_1030__password_policy.sql` | A | A-028 | schema | `password_history` + `users.password_changed_at` — the no-reuse rule and the optional expiry clock |
 
 <!-- load-order:end -->
 
