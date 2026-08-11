@@ -68,6 +68,10 @@ q?: string;
 projectId?: number;
 clientId?: number;
 taskTypeId?: number;
+/**
+ * Product module the concern was raised against (§7.5).
+ */
+moduleId?: number;
 level?: Level;
 status?: StatusCode;
 stage?: string;

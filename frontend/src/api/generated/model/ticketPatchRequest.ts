@@ -46,6 +46,10 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { TicketPatchRequestModuleId } from './ticketPatchRequestModuleId';
+import type { TicketPatchRequestScreenName } from './ticketPatchRequestScreenName';
+import type { TicketPatchRequestFeature } from './ticketPatchRequestFeature';
+import type { TicketPatchRequestStepsToGenerate } from './ticketPatchRequestStepsToGenerate';
 import type { TicketPatchRequestEstimatedHrs } from './ticketPatchRequestEstimatedHrs';
 import type { TicketPatchRequestPlannedCloseDate } from './ticketPatchRequestPlannedCloseDate';
 
@@ -57,6 +61,16 @@ export interface TicketPatchRequest {
   title?: string;
   /** @maxLength 20000 */
   description?: string;
+  moduleId?: TicketPatchRequestModuleId;
+  /** @maxLength 120 */
+  screenName?: TicketPatchRequestScreenName;
+  /** @maxLength 120 */
+  feature?: TicketPatchRequestFeature;
+  /**
+   * Sanitised HTML — PLAN.md §3.9.
+   * @maxLength 20000
+   */
+  stepsToGenerate?: TicketPatchRequestStepsToGenerate;
   estimatedHrs?: TicketPatchRequestEstimatedHrs;
   /**
    * @minimum 0

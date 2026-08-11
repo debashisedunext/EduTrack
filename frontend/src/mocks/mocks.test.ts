@@ -337,3 +337,107 @@ describe('GET /tickets filters — C-015 saved views', () => {
     expect(outOfRange.data.map((t) => t.ticketId)).not.toContain('CRM-26-00347');
   });
 });
+
+/**
+ * D-060 — the four §7.5 fields, in the contract and the mock before C-065…C-070
+ * are built against them.
+ */
+describe('where it happened — module, screen, feature, steps', () => {
+  interface ModuleRow { id: number; code: string; name: string; seq: number; isActive: boolean }
+  interface TriageRow {
+    ticketId: string;
+    moduleId: number | null;
+    screenName: string | null;
+    feature: string | null;
+    stepsToGenerate: string | null;
+  }
+
+  it('returns the eight modules in seq order', async () => {
+    const list = await get<Envelope<ModuleRow[]>>('/masters/modules');
+    expect(list.data.filter((m) => m.isActive).map((m) => m.name)).toEqual([
+      'Student', 'Admission', 'Fees', 'Examination',
+      'Attendance', 'Library', 'Inventory', 'Parent App',
+    ]);
+    expect([...list.data].sort((a, b) => a.seq - b.seq)).toEqual(list.data);
+  });
+
+  it('includes deactivated modules, because an old ticket still has to render its name', async () => {
+    const list = await get<Envelope<ModuleRow[]>>('/masters/modules');
+    const retired = list.data.find((m) => !m.isActive);
+    expect(retired).toBeDefined();
+
+    getDb().currentUserId = 1;
+    const tickets = await get<Envelope<TriageRow[]>>('/tickets?limit=200');
+    // Filtering inactive rows out of the master would leave this ticket's module
+    // cell blank — which is the whole reason the endpoint returns them.
+    expect(tickets.data.some((t) => t.moduleId === retired!.id)).toBe(true);
+  });
+
+  it('every seeded moduleId resolves against the master', async () => {
+    getDb().currentUserId = 1;
+    const [modules, tickets] = await Promise.all([
+      get<Envelope<ModuleRow[]>>('/masters/modules'),
+      get<Envelope<TriageRow[]>>('/tickets?limit=200'),
+    ]);
+    const known = new Set(modules.data.map((m) => m.id));
+    const orphans = tickets.data.filter((t) => t.moduleId != null && !known.has(t.moduleId));
+    expect(orphans).toEqual([]);
+  });
+
+  it('leaves some tickets with no module at all — the state of everything raised before the fields existed', async () => {
+    getDb().currentUserId = 1;
+    const tickets = await get<Envelope<TriageRow[]>>('/tickets?limit=200');
+    expect(tickets.data.some((t) => t.moduleId == null)).toBe(true);
+    expect(tickets.data.some((t) => t.stepsToGenerate == null)).toBe(true);
+  });
+
+  it('moduleId filters the list, and excludes tickets with no module', async () => {
+    getDb().currentUserId = 1;
+    const all = await get<Envelope<TriageRow[]>>('/tickets?limit=200');
+    const target = all.data.find((t) => t.moduleId != null)!.moduleId!;
+
+    const filtered = await get<Envelope<TriageRow[]>>(`/tickets?moduleId=${target}&limit=200`);
+    expect(filtered.data.length).toBeGreaterThan(0);
+    expect(filtered.data.length).toBeLessThan(all.data.length);
+    expect(filtered.data.every((t) => t.moduleId === target)).toBe(true);
+  });
+
+  it('round-trips all four fields through create', async () => {
+    getDb().currentUserId = 1;
+    const created = await post<Envelope<TriageRow>>('/tickets', {
+      projectId: 1, title: 'Fee receipt prints without the duplicate watermark',
+      taskTypeId: 2, level: 'HIGH',
+      moduleId: 3, screenName: 'Fee Receipt Print', feature: 'Reprint with watermark',
+      stepsToGenerate: '<ol><li>Open a paid receipt.</li><li>Press Reprint.</li></ol>',
+    });
+    expect(created.data.moduleId).toBe(3);
+    expect(created.data.screenName).toBe('Fee Receipt Print');
+    expect(created.data.feature).toBe('Reprint with watermark');
+    expect(created.data.stepsToGenerate).toContain('<li>Press Reprint.</li>');
+
+    // Read it back through the aggregated detail call — the only GET for one
+    // ticket, and what C-069 renders from.
+    const read = await get<Envelope<{ ticket: TriageRow }>>(`/tickets/${created.data.ticketId}/full`);
+    expect(read.data.ticket.stepsToGenerate).toBe(created.data.stepsToGenerate);
+    expect(read.data.ticket.moduleId).toBe(3);
+  });
+
+  it('creates without any of them — all four are optional on the wire', async () => {
+    getDb().currentUserId = 1;
+    const created = await post<Envelope<TriageRow>>('/tickets', {
+      projectId: 1, title: 'A ticket that names no module', taskTypeId: 1, level: 'LOW',
+    });
+    expect(created.data.moduleId).toBeNull();
+    expect(created.data.screenName).toBeNull();
+    expect(created.data.stepsToGenerate).toBeNull();
+  });
+
+  it('rejects a module the master does not have', async () => {
+    getDb().currentUserId = 1;
+    await expect(
+      post('/tickets', { projectId: 1, title: 'Unknown module', taskTypeId: 1, level: 'LOW', moduleId: 999 }),
+    ).rejects.toSatisfy((e: unknown) =>
+      e instanceof ApiError && e.problem.status === 400 && 'moduleId' in (e.problem.errors ?? {}),
+    );
+  });
+});

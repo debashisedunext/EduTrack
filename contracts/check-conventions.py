@@ -42,6 +42,7 @@ NO_IF_MATCH = {
 NO_PAGINATION = {
     "/masters/task-types":               "11 rows",
     "/masters/priorities":               "4 rows",
+    "/masters/modules":                  "8 rows, seeded; a ninth is a row somebody adds",
     "/masters/workflow-templates":       "a handful per project",
     "/projects/{projectId}/sla-policies": "task types x 4 levels",
     "/clients/{clientId}/contacts":      "a short list per client",

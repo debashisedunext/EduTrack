@@ -46,52 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { TicketCreateRequestModuleId } from './ticketCreateRequestModuleId';
-import type { TicketCreateRequestScreenName } from './ticketCreateRequestScreenName';
-import type { TicketCreateRequestFeature } from './ticketCreateRequestFeature';
-import type { TicketCreateRequestStepsToGenerate } from './ticketCreateRequestStepsToGenerate';
-import type { Level } from './level';
-import type { TicketCreateRequestClientId } from './ticketCreateRequestClientId';
-import type { TicketCreateRequestClientContactId } from './ticketCreateRequestClientContactId';
-import type { TicketCreateRequestAssigneeId } from './ticketCreateRequestAssigneeId';
-import type { TicketCreateRequestEstimatedHrs } from './ticketCreateRequestEstimatedHrs';
-import type { TicketCreateRequestPlannedCloseDate } from './ticketCreateRequestPlannedCloseDate';
 
-export interface TicketCreateRequest {
-  projectId: number;
-  /**
-   * @minLength 3
-   * @maxLength 300
-   */
-  title: string;
-  /** @maxLength 20000 */
-  description?: string;
-  taskTypeId: number;
-  /** Optional here, and **mandatory on the form for bug-type task types**
-(§7.5). The rule lives in the form rather than the contract because a
-change request may genuinely span three modules, and a draft is saved
-precisely because the answer is not known yet.
+/**
+ * Sanitised HTML — PLAN.md §3.9.
+ * @maxLength 20000
  */
-  moduleId?: TicketCreateRequestModuleId;
-  /** @maxLength 120 */
-  screenName?: TicketCreateRequestScreenName;
-  /** @maxLength 120 */
-  feature?: TicketCreateRequestFeature;
-  /**
-   * Sanitised HTML — PLAN.md §3.9.
-   * @maxLength 20000
-   */
-  stepsToGenerate?: TicketCreateRequestStepsToGenerate;
-  level: Level;
-  clientId?: TicketCreateRequestClientId;
-  clientContactId?: TicketCreateRequestClientContactId;
-  isClientRaised?: boolean;
-  assigneeId?: TicketCreateRequestAssigneeId;
-  watcherIds?: number[];
-  estimatedHrs?: TicketCreateRequestEstimatedHrs;
-  /** Omit to have it computed from the SLA policy against the working
-calendar. Supplying it requires PM or Admin.
- */
-  plannedCloseDate?: TicketCreateRequestPlannedCloseDate;
-  saveAsDraft?: boolean;
-}
+export type TicketPatchRequestStepsToGenerate = string | null;

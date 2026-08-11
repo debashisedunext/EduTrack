@@ -68,6 +68,35 @@ export const listTaskTypesResponse = zod.object({
 })
 
 /**
+ * The Module field on the ticket. Eight seeded rows — Student, Admission,
+Fees, Examination, Attendance, Library, Inventory, Parent App — held as a
+master rather than an enum so that the ninth is a row somebody adds, not
+a migration and a deployment.
+
+**Deactivated rows are returned too**, carrying `isActive: false`, the
+same way task types are. A ticket raised last year against a module since
+retired still has to render its name; filtering them out here would leave
+that cell blank. Offer only the active ones in a picker.
+
+ * @summary Product modules a concern can be raised against (§7.5)
+ */
+export const listModulesResponseDataItemCodeMax = 40;
+
+export const listModulesResponseDataItemNameMax = 80;
+
+
+
+export const listModulesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "code": zod.string().max(listModulesResponseDataItemCodeMax),
+  "name": zod.string().max(listModulesResponseDataItemNameMax),
+  "seq": zod.number().optional().describe('Display order in the picker.'),
+  "isActive": zod.boolean()
+}))
+})
+
+/**
  * @summary Priority levels
  */
 export const listPrioritiesResponseDataItemColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');

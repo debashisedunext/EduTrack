@@ -30,6 +30,7 @@ export const ticketHandlers = [
     eq('projectId', (t) => t.projectId);
     eq('clientId', (t) => t.clientId);
     eq('taskTypeId', (t) => t.taskTypeId);
+    eq('moduleId', (t) => t.moduleId);
     eq('level', (t) => t.level);
     eq('status', (t) => t.status);
     eq('stage', (t) => t.currentStageCode);
@@ -82,6 +83,20 @@ export const ticketHandlers = [
     }
     if (!body.projectId) errors.projectId = ['must not be null'];
     if (!body.taskTypeId) errors.taskTypeId = ['must not be null'];
+    // §7.5's four fields. The module is checked against the master because an
+    // unknown id is a 400 on the real thing, not a ticket that quietly stores
+    // one. Deliberately NOT checked: whether it is active — a client that only
+    // ever offers active rows cannot send an inactive one, and rejecting it here
+    // would make this the second place that rule lives.
+    if (body.moduleId != null && !db.modules.some((m) => m.id === Number(body.moduleId))) {
+      errors.moduleId = ['no such module'];
+    }
+    const tooLong = (v: unknown, max: number) => typeof v === 'string' && v.length > max;
+    if (tooLong(body.screenName, 120)) errors.screenName = ['must be at most 120 characters'];
+    if (tooLong(body.feature, 120)) errors.feature = ['must be at most 120 characters'];
+    if (tooLong(body.stepsToGenerate, 20000)) {
+      errors.stepsToGenerate = ['must be at most 20000 characters'];
+    }
     if (Object.keys(errors).length) return validationFailed(errors);
 
     const project = db.projects.find((p) => p.id === Number(body.projectId));
@@ -105,6 +120,10 @@ export const ticketHandlers = [
       clientContactId: (body.clientContactId as number) ?? null,
       isClientRaised: Boolean(body.isClientRaised),
       taskTypeId: Number(body.taskTypeId),
+      moduleId: body.moduleId == null ? null : Number(body.moduleId),
+      screenName: (body.screenName as string) ?? null,
+      feature: (body.feature as string) ?? null,
+      stepsToGenerate: (body.stepsToGenerate as string) ?? null,
       level,
       originalLevel: level,
       status: body.saveAsDraft ? 'NEW' : 'NEW',

@@ -50,6 +50,10 @@ import type { TicketId } from './ticketId';
 import type { Project } from './project';
 import type { ClientRef } from './clientRef';
 import type { TicketClientContactId } from './ticketClientContactId';
+import type { TicketModuleId } from './ticketModuleId';
+import type { TicketScreenName } from './ticketScreenName';
+import type { TicketFeature } from './ticketFeature';
+import type { TicketStepsToGenerate } from './ticketStepsToGenerate';
 import type { Level } from './level';
 import type { StatusCode } from './statusCode';
 import type { TicketCurrentStageCode } from './ticketCurrentStageCode';
@@ -68,6 +72,25 @@ export interface Ticket {
   clientContactId?: TicketClientContactId;
   isClientRaised?: boolean;
   taskTypeId?: number;
+  /** The product module the concern was raised against (§7.5). Resolve the
+name through `GET /masters/modules` rather than expecting it inline —
+the master is small, cached, and includes deactivated rows precisely
+so an old ticket's module still has a name.
+ */
+  moduleId?: TicketModuleId;
+  /** @maxLength 120 */
+  screenName?: TicketScreenName;
+  /** @maxLength 120 */
+  feature?: TicketFeature;
+  /**
+   * **Sanitised HTML**, per PLAN.md §3.9 — render it through a sanitiser
+client-side as well. The server sanitises on write, but a row written
+before the allow-list was last tightened is only protected if the
+renderer applies today's list too.
+
+   * @maxLength 20000
+   */
+  stepsToGenerate?: TicketStepsToGenerate;
   level: Level;
   /** Set once at creation and never overwritten — see `PATCH .../priority`. */
   originalLevel?: Level;

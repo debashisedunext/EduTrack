@@ -68,6 +68,7 @@ export const listTicketsQueryParams = zod.object({
   "projectId": zod.number().optional(),
   "clientId": zod.number().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().optional().describe('Product module the concern was raised against (§7.5).'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']).optional(),
   "stage": zod.string().optional(),
@@ -86,6 +87,12 @@ export const listTicketsQueryParams = zod.object({
 
 export const listTicketsResponseDataItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const listTicketsResponseDataItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const listTicketsResponseDataItemScreenNameMax = 120;
+
+export const listTicketsResponseDataItemFeatureMax = 120;
+
+export const listTicketsResponseDataItemStepsToGenerateMax = 20000;
+
 
 
 export const listTicketsResponseDataItemPctCompleteMin = 0;
@@ -123,6 +130,10 @@ export const listTicketsResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(listTicketsResponseDataItemScreenNameMax).nullish(),
+  "feature": zod.string().max(listTicketsResponseDataItemFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(listTicketsResponseDataItemStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -181,6 +192,12 @@ export const createTicketBodyTitleMax = 300;
 
 export const createTicketBodyDescriptionMax = 20000;
 
+export const createTicketBodyScreenNameMax = 120;
+
+export const createTicketBodyFeatureMax = 120;
+
+export const createTicketBodyStepsToGenerateMax = 20000;
+
 export const createTicketBodyIsClientRaisedDefault = false;export const createTicketBodySaveAsDraftDefault = false;
 
 export const createTicketBody = zod.object({
@@ -188,6 +205,10 @@ export const createTicketBody = zod.object({
   "title": zod.string().min(createTicketBodyTitleMin).max(createTicketBodyTitleMax),
   "description": zod.string().max(createTicketBodyDescriptionMax).optional(),
   "taskTypeId": zod.number(),
+  "moduleId": zod.number().nullish().describe('Optional here, and \*\*mandatory on the form for bug-type task types\*\*\n(§7.5). The rule lives in the form rather than the contract because a\nchange request may genuinely span three modules, and a draft is saved\nprecisely because the answer is not known yet.\n'),
+  "screenName": zod.string().max(createTicketBodyScreenNameMax).nullish(),
+  "feature": zod.string().max(createTicketBodyFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(createTicketBodyStepsToGenerateMax).nullish().describe('Sanitised HTML — PLAN.md §3.9.'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "clientId": zod.number().nullish(),
   "clientContactId": zod.number().nullish(),
@@ -262,6 +283,12 @@ export const updateTicketBodyTitleMax = 300;
 
 export const updateTicketBodyDescriptionMax = 20000;
 
+export const updateTicketBodyScreenNameMax = 120;
+
+export const updateTicketBodyFeatureMax = 120;
+
+export const updateTicketBodyStepsToGenerateMax = 20000;
+
 export const updateTicketBodyPctCompleteMin = 0;
 export const updateTicketBodyPctCompleteMax = 100;
 
@@ -270,6 +297,10 @@ export const updateTicketBodyPctCompleteMax = 100;
 export const updateTicketBody = zod.object({
   "title": zod.string().min(updateTicketBodyTitleMin).max(updateTicketBodyTitleMax).optional(),
   "description": zod.string().max(updateTicketBodyDescriptionMax).optional(),
+  "moduleId": zod.number().nullish(),
+  "screenName": zod.string().max(updateTicketBodyScreenNameMax).nullish(),
+  "feature": zod.string().max(updateTicketBodyFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(updateTicketBodyStepsToGenerateMax).nullish().describe('Sanitised HTML — PLAN.md §3.9.'),
   "estimatedHrs": zod.number().nullish(),
   "pctComplete": zod.number().min(updateTicketBodyPctCompleteMin).max(updateTicketBodyPctCompleteMax).optional(),
   "watcherIds": zod.array(zod.number()).optional(),
@@ -279,6 +310,12 @@ export const updateTicketBody = zod.object({
 
 export const updateTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const updateTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const updateTicketResponseDataScreenNameMax = 120;
+
+export const updateTicketResponseDataFeatureMax = 120;
+
+export const updateTicketResponseDataStepsToGenerateMax = 20000;
+
 
 
 export const updateTicketResponseDataPctCompleteMin = 0;
@@ -316,6 +353,10 @@ export const updateTicketResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(updateTicketResponseDataScreenNameMax).nullish(),
+  "feature": zod.string().max(updateTicketResponseDataFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(updateTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -377,6 +418,12 @@ export const getTicketDetailHeader = zod.object({
 
 export const getTicketDetailResponseDataTicketTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const getTicketDetailResponseDataTicketProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const getTicketDetailResponseDataTicketScreenNameMax = 120;
+
+export const getTicketDetailResponseDataTicketFeatureMax = 120;
+
+export const getTicketDetailResponseDataTicketStepsToGenerateMax = 20000;
+
 
 
 export const getTicketDetailResponseDataTicketPctCompleteMin = 0;
@@ -415,6 +462,10 @@ export const getTicketDetailResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(getTicketDetailResponseDataTicketScreenNameMax).nullish(),
+  "feature": zod.string().max(getTicketDetailResponseDataTicketFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(getTicketDetailResponseDataTicketStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -633,6 +684,12 @@ export const assignTicketBody = zod.object({
 
 export const assignTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const assignTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const assignTicketResponseDataScreenNameMax = 120;
+
+export const assignTicketResponseDataFeatureMax = 120;
+
+export const assignTicketResponseDataStepsToGenerateMax = 20000;
+
 
 
 export const assignTicketResponseDataPctCompleteMin = 0;
@@ -670,6 +727,10 @@ export const assignTicketResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(assignTicketResponseDataScreenNameMax).nullish(),
+  "feature": zod.string().max(assignTicketResponseDataFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(assignTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -731,6 +792,12 @@ export const changeTicketPriorityBody = zod.object({
 
 export const changeTicketPriorityResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const changeTicketPriorityResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const changeTicketPriorityResponseDataScreenNameMax = 120;
+
+export const changeTicketPriorityResponseDataFeatureMax = 120;
+
+export const changeTicketPriorityResponseDataStepsToGenerateMax = 20000;
+
 
 
 export const changeTicketPriorityResponseDataPctCompleteMin = 0;
@@ -768,6 +835,10 @@ export const changeTicketPriorityResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(changeTicketPriorityResponseDataScreenNameMax).nullish(),
+  "feature": zod.string().max(changeTicketPriorityResponseDataFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(changeTicketPriorityResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -844,6 +915,12 @@ export const quickUpdateTicketBody = zod.object({
 
 export const quickUpdateTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const quickUpdateTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const quickUpdateTicketResponseDataScreenNameMax = 120;
+
+export const quickUpdateTicketResponseDataFeatureMax = 120;
+
+export const quickUpdateTicketResponseDataStepsToGenerateMax = 20000;
+
 
 
 export const quickUpdateTicketResponseDataPctCompleteMin = 0;
@@ -881,6 +958,10 @@ export const quickUpdateTicketResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(quickUpdateTicketResponseDataScreenNameMax).nullish(),
+  "feature": zod.string().max(quickUpdateTicketResponseDataFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(quickUpdateTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -1099,6 +1180,12 @@ export const resolveTicketBody = zod.object({
 
 export const resolveTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const resolveTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const resolveTicketResponseDataScreenNameMax = 120;
+
+export const resolveTicketResponseDataFeatureMax = 120;
+
+export const resolveTicketResponseDataStepsToGenerateMax = 20000;
+
 
 
 export const resolveTicketResponseDataPctCompleteMin = 0;
@@ -1136,6 +1223,10 @@ export const resolveTicketResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(resolveTicketResponseDataScreenNameMax).nullish(),
+  "feature": zod.string().max(resolveTicketResponseDataFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(resolveTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -1197,6 +1288,12 @@ export const closeTicketBody = zod.object({
 
 export const closeTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const closeTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const closeTicketResponseDataScreenNameMax = 120;
+
+export const closeTicketResponseDataFeatureMax = 120;
+
+export const closeTicketResponseDataStepsToGenerateMax = 20000;
+
 
 
 export const closeTicketResponseDataPctCompleteMin = 0;
@@ -1234,6 +1331,10 @@ export const closeTicketResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(closeTicketResponseDataScreenNameMax).nullish(),
+  "feature": zod.string().max(closeTicketResponseDataFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(closeTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -1305,6 +1406,12 @@ export const reopenTicketBody = zod.object({
 
 export const reopenTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const reopenTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const reopenTicketResponseDataScreenNameMax = 120;
+
+export const reopenTicketResponseDataFeatureMax = 120;
+
+export const reopenTicketResponseDataStepsToGenerateMax = 20000;
+
 
 
 export const reopenTicketResponseDataPctCompleteMin = 0;
@@ -1342,6 +1449,10 @@ export const reopenTicketResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
+  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
+  "screenName": zod.string().max(reopenTicketResponseDataScreenNameMax).nullish(),
+  "feature": zod.string().max(reopenTicketResponseDataFeatureMax).nullish(),
+  "stepsToGenerate": zod.string().max(reopenTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
