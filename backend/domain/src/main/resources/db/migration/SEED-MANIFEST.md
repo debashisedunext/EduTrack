@@ -56,6 +56,7 @@ environment, always.
 | 25 | `V20260810_2010__import_batch_status_vocabulary.sql` | B | B-030 | correction | `import_batches.status`: the column's private vocabulary replaced by the contract's `QUEUED\|RUNNING\|COMPLETED\|FAILED`, with a `CHECK` so they cannot diverge again |
 | 26 | `V20260810_2040__l2_escalations.sql` | D | D-024 | schema | `l2_escalations` — the second-level claim; L1 needs none, `tickets.is_delayed` already records it |
 | 27 | `V20260811_1030__password_policy.sql` | A | A-028 | schema | `password_history` + `users.password_changed_at` — the no-reuse rule and the optional expiry clock |
+| 28 | `V20260811_1100__ping_pong_flags.sql` | D | D-025 | schema | `ping_pong_flags` — one row **per cycle**, holding the highest iteration already announced, so a further bounce is new information and a reopen re-arms |
 
 <!-- load-order:end -->
 

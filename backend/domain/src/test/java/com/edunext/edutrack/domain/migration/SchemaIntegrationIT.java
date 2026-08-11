@@ -156,7 +156,14 @@ class SchemaIntegrationIT {
                 // here. The suggestion above is worth taking: a count is a
                 // tripwire nobody can read, and the failure it produced named
                 // neither table.
-                assertThat(rs.getInt(1)).isEqualTo(46);
+                //
+                // D-025 note: +1 for ping_pong_flags, and this is the fourth
+                // time a Stream D migration has had to edit a Stream A test to
+                // add one. The suggestion three paragraphs up is now overdue —
+                // asserting a set of named tables would fail with "missing:
+                // ping_pong_flags" instead of "expected 47 but was 46", and no
+                // stream would need to touch another's file to add a table.
+                assertThat(rs.getInt(1)).isEqualTo(47);
             }
             try (ResultSet rs = s.executeQuery(
                     "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()")) {
