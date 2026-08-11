@@ -1,7 +1,8 @@
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { KeyRound, LogOut, User } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { useGetMe } from '@/api/generated/auth/auth'
-import { setAccessToken } from '@/api/http'
+import { useSignOut } from '@/features/auth/useSignOut'
 
 function initials(name: string) {
   return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('')
@@ -11,10 +12,25 @@ function initials(name: string) {
 export function AvatarMenu() {
   const { data: me } = useGetMe()
   const user = me?.data
+  const navigate = useNavigate()
+  const signOut = useSignOut()
 
+  /*
+    A-030. The placeholder this replaces cleared the access token and reloaded
+    to /login, which looked right and was not: it never called
+    `POST /auth/logout`, so the HttpOnly refresh cookie survived, and
+    `AuthProvider`'s startup refresh signed the user straight back in on the
+    next load. `useSignOut` ends both halves.
+
+    `navigate` rather than `window.location.assign` for the same reason — a full
+    page load would re-run the startup refresh against a cookie the server has
+    just dropped, so the user would watch a redirect resolve into a 401 they did
+    not cause. `RequireAuth` sends them to /login the moment the store goes
+    anonymous, so this only has to leave the protected route.
+  */
   function logout() {
-    setAccessToken(null)
-    window.location.assign('/login')
+    signOut()
+    navigate('/login', { replace: true })
   }
 
   return (
@@ -41,7 +57,12 @@ export function AvatarMenu() {
             </div>
           )}
           <MenuItem icon={User} label="Profile" />
-          <MenuItem icon={KeyRound} label="Change password" />
+          {/* S-03's voluntary variant. The forced one is reached by redirect. */}
+          <MenuItem
+            icon={KeyRound}
+            label="Change password"
+            onClick={() => navigate('/change-password')}
+          />
           <MenuItem icon={LogOut} label="Logout" onClick={logout} />
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>

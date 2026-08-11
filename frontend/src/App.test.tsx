@@ -1,20 +1,42 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
+import { AuthProvider } from './features/auth/AuthProvider'
+import { initialAuthState, useAuthStore } from './features/auth/authStore'
 
+/**
+ * Mirrors `main.tsx`, including `AuthProvider`.
+ *
+ * Every route below `RequireAuth` since A-030, so without it the store sits at
+ * `status: 'unknown'` for ever and this file asserts against the session splash.
+ * The provider is not stubbed: the mock `POST /auth/refresh` returns the seeded
+ * session, so these tests exercise the real restore path rather than a fake
+ * that would pass even if the guard were broken.
+ */
 function renderApp() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </QueryClientProvider>,
   )
 }
 
+// The store is a module singleton, so a session restored in one test would
+// otherwise still be signed in for the next — and a guard bug would hide behind
+// the leftover state from whichever test ran first.
+//
+// Back to `unknown`, not `signOut()`: signing out means the session *ended*, so
+// `RequireAuth` would redirect to /login before the startup refresh had a chance
+// to answer, and every assertion below would run against the login screen.
+beforeEach(() => useAuthStore.setState(initialAuthState))
+
 describe('App shell', () => {
   it('renders the sidebar nav, hiding Masters for a non-admin mock user', async () => {
     renderApp()
-    const nav = screen.getByRole('navigation', { name: 'Main' })
+    const nav = await screen.findByRole('navigation', { name: 'Main' })
     for (const label of ['Dashboard', 'My Tasks', 'Tickets', 'Projects', 'Chat', 'Reports', 'Settings']) {
       expect(within(nav).getByRole('link', { name: label })).toBeInTheDocument()
     }

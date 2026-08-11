@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
+import { AuthProvider } from './features/auth/AuthProvider'
 import './styles/tokens.css'
 
 /**
@@ -32,7 +33,18 @@ startMocks().then(() => {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
-        <App />
+        {/*
+          Above the router, not inside it — A-030. `AuthProvider` restores the
+          session with one `POST /auth/refresh` on mount and needs no navigation
+          of its own: `RequireAuth` reacts to the store, so a session that ends
+          redirects without anything here calling `useNavigate`. Keeping it above
+          `App` also guarantees the startup refresh is issued once per load
+          rather than once per route match — under A-024's rotation a second
+          call would consume a second token from the family and read as reuse.
+        */}
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </QueryClientProvider>
     </React.StrictMode>,
   )
