@@ -19,4 +19,19 @@ public interface EmailLogRepository extends JpaRepository<EmailLog, Long> {
 
     /** Operational views: what is stuck in QUEUED, what BOUNCED. */
     List<EmailLog> findByStatus(String status);
+
+    /**
+     * D-039 · did we actually mail this address about this ticket?
+     *
+     * <p>The authorisation for an inbound reply. A {@code From} header is not
+     * authentication — it is a string anybody can set — so "the sender matches
+     * a user" would let one forged address post a comment as any colleague on
+     * any ticket. This asks the only question the system can answer for itself:
+     * whether the address being replied from is one we sent this ticket's mail
+     * to. Someone who was never told about a ticket cannot reply to it.
+     *
+     * <p>Served by {@code ix_email_log_rate}, which already leads with
+     * {@code (to_email, ticket_id)} for D-035's rate limit.
+     */
+    boolean existsByTicketIdAndToEmailIgnoreCase(Long ticketId, String toEmail);
 }
