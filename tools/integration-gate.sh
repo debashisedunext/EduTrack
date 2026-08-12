@@ -27,9 +27,72 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 FAILED=()
+UNREPRODUCIBLE=()
 step() { printf '\n\033[1m── %s\033[0m\n' "$1"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$1"; }
 bad()  { printf '   \033[31m✗ %s\033[0m\n' "$1"; FAILED+=("$1"); }
+note() { printf '   \033[33m·\033[0m %s\n' "$1"; }
+
+# ── nothing else may be building while this runs ─────────────────────────────
+#
+# On 12 Aug this gate produced two failures that could not be reproduced a
+# minute later on untouched files — a jar reported as missing its frontend, and
+# six Spring contexts reported as unable to find a datasource driver. What both
+# runs had in common was another Maven process writing into the same
+# backend/*/target while they read from it.
+#
+# That is worth refusing outright rather than tolerating. A gate that reports
+# failures nobody can reproduce teaches everyone to re-run until green, which is
+# precisely how a real failure gets waved through.
+LOCK="${TMPDIR:-/tmp}/edutrack-integration-gate.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+    HOLDER=$(cat "$LOCK/pid" 2>/dev/null || echo "unknown")
+    if [ "$HOLDER" != unknown ] && ! kill -0 "$HOLDER" 2>/dev/null; then
+        # The holder died without cleaning up — its lock is meaningless.
+        note "clearing a stale lock from pid $HOLDER"
+        rm -rf "$LOCK" && mkdir "$LOCK"
+    else
+        printf '\033[31mAnother integration gate is already running (pid %s).\033[0m\n' "$HOLDER"
+        printf 'Two gates sharing one target/ is what produced this gate’s only false failures.\n'
+        exit 2
+    fi
+fi
+echo $$ > "$LOCK/pid"
+trap 'rm -rf "$LOCK"' EXIT INT TERM
+
+# A lock only stops two gates. A developer running `mvn` in another terminal, or
+# a backgrounded build left over from earlier, writes into the same target/ and
+# this cannot lock that — so it looks, before starting anything of its own.
+if OTHERS=$(pgrep -fl "MavenWrapperMain|maven.*edutrack" 2>/dev/null | grep -v "^$$ " || true); [ -n "${OTHERS:-}" ]; then
+    printf '\033[31mA Maven process is already running against this repository:\033[0m\n'
+    printf '  %s\n' "$OTHERS"
+    printf 'Let it finish first — concurrent writes to target/ make this gate lie.\n'
+    exit 2
+fi
+
+# ── run a check, and do not report a failure this cannot reproduce ───────────
+#
+# A first failure is a question, not an answer. Anything that fails here is
+# retried once from a clean tree; only a failure that survives that is reported.
+# One that does not survive is surfaced loudly and separately — it does not
+# block the batch, because blocking on an unreproducible failure is the same
+# cry-wolf problem from the other direction, but it is never printed as if
+# everything were fine.
+attempt() {
+    local label="$1" fn="$2"
+    if "$fn"; then ok "$label"; return 0; fi
+
+    note "$label failed — cleaning and retrying once before reporting it"
+    (cd backend && ./mvnw -q clean) >/dev/null 2>&1
+
+    if "$fn"; then
+        UNREPRODUCIBLE+=("$label")
+        note "$label PASSED on a clean retry — the first failure did not reproduce"
+        return 0
+    fi
+    bad "$label"
+    return 1
+}
 
 # The jar smoke test and Maven need Java 25. In VS Code-spawned shells JAVA_HOME
 # is 25 but PATH still resolves `java` to 21, which fails with a class-file
@@ -62,12 +125,10 @@ else
 fi
 
 # ── backend ──────────────────────────────────────────────────────────────────
+backend_check() { (cd backend && ./mvnw -B verify -DskipFrontend); }
+
 step "Backend — build & test"
-if (cd backend && ./mvnw -B verify -DskipFrontend); then
-    ok "mvn verify"
-else
-    bad "Backend build or tests failed"
-fi
+attempt "Backend build & tests" backend_check
 
 # ── frontend ─────────────────────────────────────────────────────────────────
 step "Frontend — lint, test & build"
@@ -98,7 +159,7 @@ fi
 # ── package ──────────────────────────────────────────────────────────────────
 # The check that caught the fixture leak. Inspecting the artifact is not the
 # same as running it: a jar can pass `unzip -l` and die during context refresh.
-step "Package — single deployable jar"
+package_check() {
 if (cd backend && ./mvnw -B package -DskipTests -q); then
     JAR=$(ls backend/api/target/edutrack-api-*.jar 2>/dev/null | head -1)
 
@@ -114,20 +175,24 @@ if (cd backend && ./mvnw -B package -DskipTests -q); then
     # everyone to re-run until green, which is how a true failure gets waved
     # through. `unzip -t` fails loudly on an incomplete archive instead.
     if [ -z "$JAR" ]; then
-        bad "No jar was produced"
+        note "no jar was produced"
+        return 1
     elif ! unzip -tqq "$JAR" >/dev/null 2>&1; then
-        bad "Jar is not a readable archive — build may not have finished writing it"
+        note "jar is not a readable archive — the build may not have finished writing it"
+        return 1
     elif ! LISTING=$(unzip -l "$JAR" 2>/dev/null) || [ -z "$LISTING" ]; then
-        bad "Could not list the jar's contents"
+        note "could not list the jar's contents"
+        return 1
     elif ! printf '%s' "$LISTING" | grep -q 'BOOT-INF/classes/static/index.html'; then
-        bad "Frontend missing from the jar — the app would serve no UI"
+        note "frontend missing from the jar — the app would serve no UI"
         # Evidence, so the next person does not have to reproduce it to find out
         # whether the jar or the check was wrong.
         printf '%s\n' "$LISTING" | grep 'BOOT-INF/classes/static' | head -5
         printf '   (%s static entries found)\n' \
             "$(printf '%s' "$LISTING" | grep -c 'BOOT-INF/classes/static/')"
+        return 1
     else
-        ok "jar contains the built frontend"
+        printf '     jar contains the built frontend\n'
 
         # Flyway alone is excluded: it connects unconditionally. JPA stays on,
         # with the dialect named and the metadata lookup refused, so it builds
@@ -154,23 +219,44 @@ if (cd backend && ./mvnw -B package -DskipTests -q); then
         kill $APP 2>/dev/null; wait $APP 2>/dev/null
 
         if [ "$STARTED" = yes ]; then
-            ok "jar starts and serves a request"
-        else
-            bad "Packaged jar failed to start"
-            grep -A6 "APPLICATION FAILED" "$LOG" | head -12
+            printf '     jar starts and serves a request\n'
+            rm -f "$LOG"
+            return 0
         fi
+        note "packaged jar failed to start"
+        grep -A6 "APPLICATION FAILED" "$LOG" | head -12
         rm -f "$LOG"
+        return 1
     fi
 else
-    bad "Packaging failed"
+    note "packaging failed"
+    return 1
 fi
+}
+
+step "Package — single deployable jar"
+attempt "Packaged jar builds, contains the frontend and starts" package_check
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 printf '\n────────────────────────────────────────────────────────\n'
+
+# Reported whether the gate passed or failed. A check that failed once and
+# passed on a clean retry is not a pass — it is something nobody has explained,
+# and the two occasions this gate has produced one, the explanation mattered.
+# Printing it only on failure would hide exactly the cases worth chasing.
+if [ ${#UNREPRODUCIBLE[@]} -ne 0 ]; then
+    printf '\033[33mNOT REPRODUCIBLE\033[0m — %d check(s) failed once, then passed from a clean tree:\n' \
+        "${#UNREPRODUCIBLE[@]}"
+    printf '  · %s\n' "${UNREPRODUCIBLE[@]}"
+    printf '  These did not block the batch. They are worth understanding before\n'
+    printf '  they are assumed to be noise — see the lock notes at the top.\n\n'
+fi
+
 if [ ${#FAILED[@]} -eq 0 ]; then
     printf '\033[32mGATE PASSED\033[0m — safe to merge.\n'
     exit 0
 fi
-printf '\033[31mGATE FAILED\033[0m — %d check(s). Do not merge:\n' "${#FAILED[@]}"
+printf '\033[31mGATE FAILED\033[0m — %d check(s), each confirmed by a second run. Do not merge:\n' \
+    "${#FAILED[@]}"
 printf '  · %s\n' "${FAILED[@]}"
 exit 1

@@ -11,6 +11,7 @@ import com.edunext.edutrack.domain.tickets.TicketCommentRepository;
 import com.edunext.edutrack.domain.tickets.TicketRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,7 +58,27 @@ import java.util.Optional;
  * client cannot be recalled, while an internal note that should have been
  * shared is a click away.
  */
+/**
+ * {@code @Lazy} for the same reason {@link
+ * com.edunext.edutrack.domain.mail.EmailSuppressions} and {@code
+ * NotificationWriter} carry it, and it is not decoration.
+ *
+ * <p>An eager singleton holding repositories forces the {@code
+ * EntityManagerFactory}, which forces the {@code DataSource}, at context
+ * refresh. Several api tests build the whole application context with no
+ * database on purpose — {@code ContractConformanceTest}, {@code
+ * RelayBootsWithoutRedisTest}, {@code DevPrincipalReachesRequestsTest} — and
+ * eager wiring here failed all six with "Failed to determine a suitable driver
+ * class", a message that names the datasource and says nothing about the bean
+ * that demanded it. Deferred, the repositories resolve on the first inbound
+ * mail, by which point there is certainly a database.
+ *
+ * <p>The {@code @Lazy} at the controller's injection point is not enough on its
+ * own: that defers the <em>reference</em>, while singleton pre-instantiation
+ * still builds the target. Both are needed.
+ */
 @Service
+@Lazy
 public class InboundReplyService {
 
     private static final Logger log = LoggerFactory.getLogger(InboundReplyService.class);
