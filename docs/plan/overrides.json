@@ -44,6 +44,17 @@
     "status": "done",
     "reason": "Shivendra, commit 0518564 — SchemaIntegrationIT covers update/delete rejection on ticket_history and ticket_effort_logs, delete and non-seal update rejection on ticket_stage_transitions, and seal-succeeds-exactly-once, on Testcontainers. Supersedes the earlier hand-verification; commit subject said 'A011' without the hyphen"
   },
+  "D-045": {
+    "status": "in-progress",
+    "pct": 60,
+    "reason": "Debashis — git reads this as done because commit da414db's subject carries the ID, but that commit is the opt-in half only and STREAM-D-ENGINES.md has always split the task in three. The crypto and wire (RFC 8291 encryption, RFC 8292 VAPID, WebPushSender, 25 tests) are written but sit unmerged on feat/engines/d-045-web-push-sender. Still to do: the service worker, the permission prompt, and deleting a subscription on 404/410 — without which the table fills with browsers that no longer exist"
+  },
+  "D-053": {
+    "status": "blocked",
+    "pct": 40,
+    "reason": "Debashis — git reads this as done, and the backlog entry says otherwise in its own first line: search shipped, the other two are blocked. File/image share has nowhere to put the row (ticket_attachments.ticket_id is NOT NULL, so an attachment on a DM or project channel is unrepresentable) and no storage layer — C-024/C-025 own upload, MinIO keys, MIME sniffing and AV scan, and a second pipeline here would put two answers next to each other for 'is this file safe'. Needs Divyansh's sign-off on the table shape. Emoji has no backend at all and belongs to S-25's composer",
+    "_blocked_by": "C-024, C-025 (Divyansh)"
+  },
   "A-030": {
     "status": "done",
     "reason": "Shivendra, PR #87 merged 2026-08-11 — features/auth/ with LoginPage, ForgotPassword, ResetPassword, ChangePassword, authStore, RequireAuth and the strength meter, verified against the real stack (MySQL, Redis, packaged jar, Vite proxy with VITE_USE_MOCKS=false), and checked off in STREAM-A-PLATFORM.md. Commit subject carried no task ID and the merge subject only had the lowercase branch slug 'a-030', which the [A-D]-\\d{3} pattern does not match"
