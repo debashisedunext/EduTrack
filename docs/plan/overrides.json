@@ -43,5 +43,9 @@
   "A-013": {
     "status": "done",
     "reason": "Shivendra, commit 0518564 — SchemaIntegrationIT covers update/delete rejection on ticket_history and ticket_effort_logs, delete and non-seal update rejection on ticket_stage_transitions, and seal-succeeds-exactly-once, on Testcontainers. Supersedes the earlier hand-verification; commit subject said 'A011' without the hyphen"
+  },
+  "A-030": {
+    "status": "done",
+    "reason": "Shivendra, PR #87 merged 2026-08-11 — features/auth/ with LoginPage, ForgotPassword, ResetPassword, ChangePassword, authStore, RequireAuth and the strength meter, verified against the real stack (MySQL, Redis, packaged jar, Vite proxy with VITE_USE_MOCKS=false), and checked off in STREAM-A-PLATFORM.md. Commit subject carried no task ID and the merge subject only had the lowercase branch slug 'a-030', which the [A-D]-\\d{3} pattern does not match"
   }
 }
