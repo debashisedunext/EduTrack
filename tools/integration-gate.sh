@@ -101,10 +101,31 @@ fi
 step "Package — single deployable jar"
 if (cd backend && ./mvnw -B package -DskipTests -q); then
     JAR=$(ls backend/api/target/edutrack-api-*.jar 2>/dev/null | head -1)
+
+    # The listing is read ONCE into a variable, and the archive's integrity is
+    # checked before anything is concluded from its contents.
+    #
+    # The first version piped `unzip -l` straight into `grep -q` per check, and
+    # on its first real run reported "Frontend missing" against a jar that
+    # demonstrably contained it — the same command passed seconds later with the
+    # file untouched. A zip's central directory is written last, so listing one
+    # mid-write yields a short or empty listing rather than an error, and a
+    # gate that reports a false failure is worse than no gate: it teaches
+    # everyone to re-run until green, which is how a true failure gets waved
+    # through. `unzip -t` fails loudly on an incomplete archive instead.
     if [ -z "$JAR" ]; then
         bad "No jar was produced"
-    elif ! unzip -l "$JAR" | grep -q 'BOOT-INF/classes/static/index.html'; then
+    elif ! unzip -tqq "$JAR" >/dev/null 2>&1; then
+        bad "Jar is not a readable archive — build may not have finished writing it"
+    elif ! LISTING=$(unzip -l "$JAR" 2>/dev/null) || [ -z "$LISTING" ]; then
+        bad "Could not list the jar's contents"
+    elif ! printf '%s' "$LISTING" | grep -q 'BOOT-INF/classes/static/index.html'; then
         bad "Frontend missing from the jar — the app would serve no UI"
+        # Evidence, so the next person does not have to reproduce it to find out
+        # whether the jar or the check was wrong.
+        printf '%s\n' "$LISTING" | grep 'BOOT-INF/classes/static' | head -5
+        printf '   (%s static entries found)\n' \
+            "$(printf '%s' "$LISTING" | grep -c 'BOOT-INF/classes/static/')"
     else
         ok "jar contains the built frontend"
 
