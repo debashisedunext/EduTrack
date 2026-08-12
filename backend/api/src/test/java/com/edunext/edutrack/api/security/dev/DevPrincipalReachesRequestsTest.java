@@ -71,6 +71,15 @@ class DevPrincipalReachesRequestsTest {
                 String fromPrincipal = principal == null ? "none" : "present";
                 return fromAuthentication + "/" + fromPrincipal;
             }
+
+            /**
+             * A-032 · the same probe under {@code /api}, which the real chain
+             * requires authentication for.
+             */
+            @GetMapping("/api/v1/__test__/whoami")
+            String whoAmIBehindTheChain(Authentication authentication, Principal principal) {
+                return whoAmI(authentication, principal);
+            }
         }
     }
 
@@ -84,6 +93,25 @@ class DevPrincipalReachesRequestsTest {
                 // Both matter: `Authentication` is what CurrentUser reads, and
                 // `Principal` is what the STOMP handshake resolves the socket
                 // user from.
+                .andExpect(content().string("DevPrincipal/present"));
+    }
+
+    @Test
+    void theFakePrincipalSatisfiesTheRealFilterChain() throws Exception {
+        // A-032 · the assertion this profile's whole purpose rests on, and which
+        // the test above could not make: `/__test__/whoami` falls under the
+        // chain's permitAll for non-API paths, so it would keep passing even if
+        // the dev principal never satisfied anything. This path is inside
+        // `/api/**`, which A-032 requires authentication for.
+        //
+        // It works because DevNoAuthFilter registers at HIGHEST_PRECEDENCE + 50,
+        // ahead of Spring Security's proxy at -100, and stores the context in the
+        // same RequestAttributeSecurityContextRepository the chain reads under
+        // SessionCreationPolicy.STATELESS. Assert it rather than reason about it:
+        // that alignment is invisible from either file alone, and a future change
+        // to the session policy would break B, C and D without touching them.
+        mockMvc.perform(get("/api/v1/__test__/whoami"))
+                .andExpect(status().isOk())
                 .andExpect(content().string("DevPrincipal/present"));
     }
 }

@@ -2,6 +2,9 @@ package com.edunext.edutrack.api.security.jwt;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -34,6 +37,15 @@ import java.nio.charset.StandardCharsets;
  * comparison is how one endpoint eventually forgets — and an expired access
  * token that still logs you out is a small bug, while the same omission in
  * A-032 is a total authentication bypass. It belongs to the decoder, once.
+ *
+ * <p><b>A-032 · revocation is validated here for the same reason.</b> The
+ * injected {@link OAuth2TokenValidator} is the blacklist check, composed
+ * alongside the defaults rather than bolted onto the filter chain. Putting it on
+ * the chain alone would leave the services that call {@code AccessTokenVerifier}
+ * directly honouring a token the chain would have refused — two verification
+ * paths, differing on the one question that decides whether logout means
+ * anything. Injected by its Spring interface so this package needs no visibility
+ * into {@code feature/auth}, where the blacklist lives.
  */
 @Configuration
 public class JwtDecoderConfig {
@@ -42,7 +54,7 @@ public class JwtDecoderConfig {
     private static final int MIN_SECRET_BYTES = 32;
 
     @Bean
-    JwtDecoder jwtDecoder(JwtProperties properties) {
+    JwtDecoder jwtDecoder(JwtProperties properties, OAuth2TokenValidator<Jwt> revocationValidator) {
         byte[] secret = properties.secret() == null
                 ? new byte[0]
                 : properties.secret().getBytes(StandardCharsets.UTF_8);
@@ -61,7 +73,13 @@ public class JwtDecoderConfig {
                 .macAlgorithm(org.springframework.security.oauth2.jose.jws.MacAlgorithm.HS256)
                 .build();
 
-        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(properties.issuer()));
+        // Composed, not replaced. Calling setJwtValidator with the revocation
+        // check alone would silently drop exp, nbf and iss — an expired token
+        // would then pass, which is the kind of bypass that looks like a
+        // one-line simplification in review.
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+                JwtValidators.createDefaultWithIssuer(properties.issuer()),
+                revocationValidator));
         return decoder;
     }
 }

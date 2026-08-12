@@ -33,9 +33,20 @@ import org.springframework.core.env.Environment;
  * activates no profiles, so none of this exists there.
  *
  * <p><b>Scope, honestly stated:</b> this provides <i>identity</i> ("who am
- * I?"), not <i>access control</i> ("what may I do?"). ScaffoldSecurityConfig
- * still permits every request until A-032's real chain lands. That is the
- * intended Sprint 0 state — B, C and D need the identity half.
+ * I?"), not <i>access control</i> ("what may I do?"). B, C and D need the
+ * identity half.
+ *
+ * <p><b>A-032 landed and this still works, by design rather than by accident.</b>
+ * The real chain requires authentication on {@code /api/**}, and the {@code
+ * Authentication} written here satisfies it — this filter registers at
+ * {@code HIGHEST_PRECEDENCE + 50}, well ahead of Spring Security's proxy at
+ * {@code -100}, and stores the context in the same
+ * {@code RequestAttributeSecurityContextRepository} the chain reads from under
+ * {@code SessionCreationPolicy.STATELESS}. Requests carrying no bearer token
+ * therefore arrive already authenticated, which is exactly what the profile
+ * promises. What it does <i>not</i> grant is a way past A-033's permission
+ * checks or A-034's row scope — those read the same principal and will apply to
+ * it like any other.
  */
 @Configuration
 @Profile("dev-noauth")

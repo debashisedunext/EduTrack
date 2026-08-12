@@ -24,6 +24,25 @@ import org.springframework.stereotype.Component;
  * Nothing here reads a JWT by hand, because a token accepted without
  * verification lets a caller forge any {@code sub} they like, which on the two
  * endpoints using this class means logging out or re-passwording a stranger.
+ *
+ * <h2>A-032 landed, and this class survives it — deliberately</h2>
+ *
+ * <p>The note above anticipated "the chain replaces every caller of this class
+ * at once". It did not, and the reason is worth stating so the next reader does
+ * not mistake this for a leftover. The chain answers <i>whether</i> a caller is
+ * authenticated; these five services need the <i>token itself</i> — the
+ * {@code jti} to blacklist, the {@code exp} to size the blacklist entry, the
+ * {@code sub} to resolve. Rewriting them to pull a {@code Jwt} back out of the
+ * {@code SecurityContext} would be the same work through a longer route.
+ *
+ * <p><b>What did change is that this is no longer a second security decision.</b>
+ * It shares the one {@code JwtDecoder} bean with the chain, and A-032 put the
+ * revocation check inside that bean rather than on the chain — so a token
+ * refused at the perimeter is refused here too, by the same code, for the same
+ * reasons. Every caller of this class now sits behind the chain as well, making
+ * these calls a second, redundant verification rather than the only one. That is
+ * cheap and honest; what it must never become is a check the chain does not
+ * make, or vice versa.
  */
 @Component
 class AccessTokenVerifier {

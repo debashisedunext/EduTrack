@@ -320,16 +320,35 @@ class AuthLogoutIT {
     }
 
     @Test
-    @DisplayName("signing out twice is not an error")
-    void logoutIsIdempotent() throws Exception {
+    @DisplayName("signing out twice refuses the second attempt, because the token is now revoked")
+    void logoutIsNotIdempotentOnceTheTokenIsRevoked() throws Exception {
+        // CHANGED BY A-032, deliberately, and worth reading before changing back.
+        //
+        // This previously asserted 204 twice, on the reasoning that "a
+        // double-click must not surface an error to someone signing out". That
+        // held only while nothing read A-025's blacklist. A-032 makes the
+        // revocation check part of validating any access token, so the second
+        // call presents a token this application has already been told to stop
+        // honouring — and the alternative to refusing it is carving out an
+        // endpoint where revoked tokens still work.
+        //
+        // The user-facing concern the original test named is handled where it
+        // belongs, on the client: useSignOut issues the request WITHOUT awaiting
+        // it and clears local state regardless, precisely so a failed logout
+        // cannot surface an error. Nobody sees this 401.
+        //
+        // What is genuinely lost is idempotence for non-browser callers - a
+        // script or a future mobile client gets 401 on a retry. That is the
+        // honest cost, and it buys a rule with no exceptions in it: a revoked
+        // token acts nowhere.
         ResponseEntity<String> session = login("itl.twice");
         String access = accessToken(session);
         String refreshToken = cookieValue(session);
 
         assertThat(logout(access, refreshToken).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(logout(access, refreshToken).getStatusCode())
-                .as("a double-click must not surface an error to someone signing out")
-                .isEqualTo(HttpStatus.NO_CONTENT);
+                .as("the second attempt carries a token that is now on the blacklist")
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     // ── the endpoint really is authenticated ────────────────────────────────
