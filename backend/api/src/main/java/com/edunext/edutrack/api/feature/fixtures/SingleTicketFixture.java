@@ -14,6 +14,7 @@ import com.edunext.edutrack.domain.tickets.TicketRepository;
 import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import com.edunext.edutrack.domain.workflow.TicketStageTransitionRepository;
 import com.edunext.edutrack.domain.workflow.WorkflowStage;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +52,7 @@ import java.util.Set;
  * NULL decision that applies to every append this class makes.
  */
 @Component
+@Profile("fixtures")
 class SingleTicketFixture {
 
     private static final List<String> TITLES = List.of(
