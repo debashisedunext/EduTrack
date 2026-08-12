@@ -313,31 +313,46 @@ jobs:
           # job only ever ran `unzip -l`.
           JAR=$(ls backend/api/target/edutrack-api-*.jar | head -1)
 
-          # What is excluded here, and why the datasource is not.
+          # What is excluded here, and why almost nothing is any more.
           #
-          # Hibernate and Flyway both open a connection during context refresh,
-          # and this job runs no database — so they stay excluded.
+          # Only Flyway. It connects unconditionally during context refresh and
+          # offers no switch to stop it, and this job runs no database.
           #
-          # The DataSource does NOT. A-020 gave the app its first bean that
-          # reads the database (AuthUserRepository needs a JdbcClient, which
-          # needs a DataSource), so excluding it stopped the jar starting at all
-          # and this job asserted nothing. Keeping it costs nothing: Spring Boot
-          # builds the HikariDataSource without opening its pool, and the pool
-          # opens on the first getConnection() — which none of the routes
-          # checked below performs.
+          # The exclusion list used to grow instead of shrink, and each addition
+          # made this job assert less. A-020 removed the DataSource exclusion
+          # once AuthUserRepository needed a JdbcClient. Then JPA repositories
+          # were excluded in its place — and that is what broke on 11 Aug, three
+          # weeks after the beans that broke it were written:
           #
-          # JpaRepositoriesAutoConfiguration takes its place in the list. Once a
-          # DataSource exists, Spring Data JPA starts wiring repositories and
-          # demands an entityManagerFactory that Hibernate, excluded above, is
-          # not there to supply.
+          #   Parameter 0 of constructor in ClientImportSchema required a bean
+          #   of type 'ClientRepository' that could not be found.
+          #
+          # B-030's import schemas and B-023's CalendarService are ordinary
+          # production beans that read through Spring Data. Excluding the
+          # repositories they need does not make the jar leaner, it makes this
+          # job start a context nobody runs — which is the exact failure this
+          # step exists to catch, reintroduced by the step itself.
+          #
+          # So JPA stays ON, the way ApplicationSmokeTest has run since B-023.
+          # What made Hibernate dial MySQL during refresh was reading JDBC
+          # metadata to choose a dialect; naming the dialect and refusing that
+          # lookup lets it build an EntityManagerFactory entirely offline. The
+          # HikariDataSource is built without opening its pool, and the pool
+          # opens on the first getConnection(), which nothing below performs.
+          #
+          # Verified locally against the packaged jar: starts in 9s, /actuator
+          # /health UP, GET / serves 200 — with no MySQL and no Redis running.
           #
           # Comments cannot live inside the command: a `#` after a line
           # continuation ends it, taking the trailing backslash with it.
-          EXCLUDE=org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration,org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+          EXCLUDE=org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
 
           java -jar "$JAR" \
             --spring.profiles.active=local \
             --spring.autoconfigure.exclude="$EXCLUDE" \
+            --spring.jpa.hibernate.ddl-auto=none \
+            --spring.jpa.database-platform=org.hibernate.dialect.MySQLDialect \
+            --spring.jpa.properties.hibernate.boot.allow_jdbc_metadata_access=false \
             --server.port=8099 \
             --management.health.redis.enabled=false \
             --management.health.mail.enabled=false > /tmp/app.log 2>&1 &
