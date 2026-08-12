@@ -298,6 +298,72 @@ class AuthLoginIT {
                 .isEqualTo(HttpStatus.OK);
     }
 
+    // ── A-031 · the role-based landing route ────────────────────────────────
+
+    @Test
+    @DisplayName("the landing route reaches the wire, and differs by role")
+    void landingRouteIsResolvedPerRole() throws Exception {
+        seedOnce();
+        // Real role codes, seeded by V20260806_0900 and already in the migrated
+        // schema — not this class's synthetic IT_AUTH_DEV. The point of the test
+        // is the mapping the application actually ships.
+        String hash = PasswordHashing.argon2id().encode(PASSWORD);
+        for (String[] spec : new String[][]{
+                {"ITA020", "it.land.admin", "ADMIN", "/dashboard"},
+                {"ITA021", "it.land.pm", "PM", "/dashboard"},
+                {"ITA022", "it.land.dev", "DEVELOPER", "/my-tasks"},
+                {"ITA023", "it.land.support", "SUPPORT", "/tickets"},
+                {"ITA024", "it.land.qa", "QA", "/stages/queue"},
+                {"ITA025", "it.land.deploy", "DEPLOYMENT", "/stages/queue"}}) {
+            jdbc.update("""
+                    INSERT INTO users (emp_code, username, email, password_hash, full_name,
+                                       role_id, timezone, is_active, must_change_password)
+                    VALUES (?, ?, ?, ?, ?, (SELECT id FROM roles WHERE code = ?), 'Asia/Kolkata', 1, 0)
+                    """, spec[0], spec[1], spec[1] + "@edunext.test", hash, spec[1], spec[2]);
+
+            ResponseEntity<String> response = login(spec[1], PASSWORD);
+            assertThat(response.getStatusCode()).as("role %s", spec[2]).isEqualTo(HttpStatus.OK);
+            assertThat(json(response).path("data").path("landingRoute").asText())
+                    .as("role %s", spec[2])
+                    .isEqualTo(spec[3]);
+        }
+    }
+
+    @Test
+    @DisplayName("a role with no mapping still returns a route, rather than omitting the field")
+    void anUnmappedRoleStillLands() throws Exception {
+        // it.asha holds this class's synthetic IT_AUTH_DEV, which LandingRoutes
+        // has never heard of — the same position a role added by B-011 and never
+        // mapped would be in. Session omits null fields, so returning null here
+        // would drop landingRoute off the wire entirely and leave the frontend
+        // unable to tell "not mapped" from "server too old to send it".
+        JsonNode data = json(login("it.asha", PASSWORD)).path("data");
+
+        assertThat(data.has("landingRoute")).isTrue();
+        assertThat(data.path("landingRoute").asText()).isEqualTo("/dashboard");
+    }
+
+    @Test
+    @DisplayName("a must-change-password session still carries its landing route")
+    void landingRouteSurvivesTheForcedChangeGate() throws Exception {
+        // S-03 reads this field to know where to send the user once they have set
+        // a new password. A first sign-in is exactly the journey where the
+        // role-based destination matters most, and the one place a missing value
+        // is hardest to spot — everyone simply ends up on the dashboard.
+        seedOnce();
+        jdbc.update("""
+                INSERT INTO users (emp_code, username, email, password_hash, full_name,
+                                   role_id, timezone, is_active, must_change_password)
+                VALUES ('ITA026', 'it.land.fresh', 'it.land.fresh@edunext.test', ?, 'Fresh Starter',
+                        (SELECT id FROM roles WHERE code = 'DEVELOPER'), 'Asia/Kolkata', 1, 1)
+                """, PasswordHashing.argon2id().encode(PASSWORD));
+
+        JsonNode data = json(login("it.land.fresh", PASSWORD)).path("data");
+
+        assertThat(data.path("mustChangePassword").asBoolean()).isTrue();
+        assertThat(data.path("landingRoute").asText()).isEqualTo("/my-tasks");
+    }
+
     // ── A-076 · the login throttle ──────────────────────────────────────────
 
     /**

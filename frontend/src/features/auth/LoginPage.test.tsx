@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/mocks/server';
 
@@ -83,6 +83,35 @@ describe('signing in', () => {
 
     await waitFor(() => expect(landedOn()).toBe('/my-tasks'));
     expect(useAuthStore.getState().status).toBe('authenticated');
+  });
+
+  it('does not navigate to a landing route this build cannot render', async () => {
+    // A-031 regression. The server correctly maps QA and Deployment to
+    // /stages/queue per the blueprint; that screen is C-062 and is not in the
+    // router yet. This navigate uses the value straight off the response, so a
+    // guard applied only inside authStore missed it entirely and every QA
+    // sign-in ended on the not-found placeholder.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    server.use(
+      http.post(LOGIN_URL, () =>
+        HttpResponse.json({
+          data: {
+            accessToken: 'test.token',
+            expiresIn: 900,
+            landingRoute: '/stages/queue',
+            user: { id: 7, displayName: 'Ravi Kumar' },
+          },
+        }),
+      ),
+    );
+
+    renderLogin();
+    await signIn();
+
+    await waitFor(() => expect(landedOn()).toBe('/dashboard'));
+    // The store and the navigate must agree, or S-03 sends the user somewhere
+    // the sign-in already decided against.
+    expect(useAuthStore.getState().landingRoute).toBe('/dashboard');
   });
 
   it('returns to the page that bounced the user here, not the landing route', async () => {

@@ -95,6 +95,48 @@ interface AuthState {
 const FALLBACK_LANDING = '/dashboard';
 
 /**
+ * A-031 · routes this build can actually render.
+ *
+ * **This is not a role→route map, and must not become one.** Where a role
+ * belongs is the server's decision (`LandingRoutes`), for the reason A-030
+ * recorded: a second copy of that mapping in TypeScript is the one nobody
+ * updates when a role is added. The question asked here is a different one that
+ * the frontend alone can answer — *does this build have a screen at that path?*
+ *
+ * It exists because the server correctly maps QA and Deployment to
+ * `/stages/queue`, which is C-062 and does not exist in the router yet. Without
+ * this, those two roles sign in and land on the not-found placeholder — the
+ * server would be right and the experience broken.
+ *
+ * The list is deliberately of *landing* destinations only, not every route. It
+ * shrinks to nothing the day every blueprint destination is built, and adding
+ * C-062 to the router is the only change needed to make `/stages/queue` start
+ * working — no server change, no edit here.
+ */
+const RENDERABLE_LANDINGS: readonly string[] = ['/dashboard', '/my-tasks', '/tickets'];
+
+/**
+ * Falls back when the server names a destination this build cannot serve.
+ *
+ * Warns rather than failing silently: a landing route quietly rewritten is
+ * indistinguishable from one that was never sent, and the whole point of A-031
+ * is that the destination is decided somewhere visible.
+ *
+ * Exported because `LoginPage` navigates using the value straight off the login
+ * response rather than the copy this store keeps — guarding only the store would
+ * miss the most common path through it, an ordinary sign-in.
+ */
+export function renderableLanding(route: string | null | undefined): string {
+  if (!route) return FALLBACK_LANDING;
+  if (RENDERABLE_LANDINGS.includes(route)) return route;
+  console.warn(
+    `auth: server landing route "${route}" has no screen in this build - using ${FALLBACK_LANDING}. ` +
+      'Remove this fallback once the route exists.',
+  );
+  return FALLBACK_LANDING;
+}
+
+/**
  * The state of a page that has just loaded and not yet asked who is signed in.
  *
  * Exported because a test needs to put the store back here between cases, and
@@ -122,7 +164,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       return {
         status: 'authenticated' as const,
         user: session.user,
-        landingRoute: session.landingRoute ?? FALLBACK_LANDING,
+        landingRoute: renderableLanding(session.landingRoute),
         mustChangePassword: session.mustChangePassword ?? false,
         expiresAt: now + session.expiresIn * 1000,
         // Only a *new* session starts the absolute clock. Reaching here while
