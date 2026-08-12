@@ -46,10 +46,41 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { UserDetailAllOfMobile } from './userDetailAllOfMobile';
+import type { UserDetailAllOfAvatarUrl } from './userDetailAllOfAvatarUrl';
+import type { UserDetailAllOfDateOfJoining } from './userDetailAllOfDateOfJoining';
+import type { UserDetailAllOfLocation } from './userDetailAllOfLocation';
+import type { UserDetailAllOfWeeklyOff } from './userDetailAllOfWeeklyOff';
+import type { ProjectAssignment } from './projectAssignment';
 
 /**
- * Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
+ * Everything `User` has, plus the S-08 fields only the form reads.
+
+Kept off `User` rather than added to it with a note that the list
+leaves them null. `listUsers` returns up to 200 of these; carrying a
+skills array and a membership list on every grid row would be paid on
+every page of a screen that shows none of it — and a field that is
+"usually absent" is one every consumer has to defend against.
 
  */
-export type UserWriteRequestReportingManagerId = number | null;
+export type UserDetailAllOf = {
+  mobile?: UserDetailAllOfMobile;
+  avatarUrl?: UserDetailAllOfAvatarUrl;
+  dateOfJoining?: UserDetailAllOfDateOfJoining;
+  location?: UserDetailAllOfLocation;
+  timezone?: string;
+  dailyCapacityHrs?: number;
+  /** `null` means the org working week applies. */
+  weeklyOff?: UserDetailAllOfWeeklyOff;
+  skills?: string[];
+  /** The per-project roles behind `projects`. Same rows, carrying the
+one field `ProjectRef` deliberately does not.
+ */
+  projectAssignments?: ProjectAssignment[];
+  /** Still holding the temporary password. Shown on the form so an
+admin can tell "never logged in" from "logged in and has not been
+active", which `lastLoginAt` alone cannot distinguish from a
+reactivated account.
+ */
+  mustChangePassword?: boolean;
+};

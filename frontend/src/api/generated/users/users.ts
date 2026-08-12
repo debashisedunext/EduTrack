@@ -75,11 +75,13 @@ import type {
   NotFoundResponse,
   OpenTicketsProblem,
   PreconditionFailedResponse,
+  Problem,
   Profile360Response,
   SetUserStatusBody,
   UnauthorizedResponse,
+  UserCreatedResponse,
+  UserDetailResponse,
   UserListResponse,
-  UserResponse,
   UserWriteRequest,
   ValidationFailedResponse
 } from '.././model';
@@ -195,6 +197,15 @@ export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TErr
  * Generates a temporary password and sets `mustChangePassword`. Username,
 email and employee code are each unique.
 
+**The generated password is in `meta.temporaryPassword` of the `201`,
+and that is the only time it is ever readable.** It is stored as an
+Argon2id hash like any other, so no later request can recover it — an
+admin who loses it issues a reset rather than looking it up. This is
+why the create response has its own schema instead of reusing
+`UserResponse`: a password field on `User` could be returned by
+`listUsers`, and a field that *cannot* leak is worth more than a field
+that is merely not populated today.
+
  * @summary Create a resource
  */
 export const createUser = (
@@ -203,7 +214,7 @@ export const createUser = (
 ) => {
       
       
-      return http<UserResponse>(
+      return http<UserCreatedResponse>(
       {url: `/users`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: userWriteRequest, signal
@@ -259,9 +270,133 @@ export const useCreateUser = <TError = ValidationFailedResponse | ConflictRespon
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * The S-08 form's read. Returns `UserDetail` — every field `listUsers`
+returns, plus the ones only the form needs: mobile, joining date,
+location, capacity, weekly-off override, skills, and the per-project
+role assignments.
+
+**This carries the `ETag` that `PATCH /users/{userId}` requires as
+`If-Match`.** Added in B-011 because it was missing: CONVENTIONS.md §5
+pairs every `If-Match` write with a detail read that emits the tag, and
+`PATCH /users/{userId}` had no such read — so the precondition it
+documents was unobtainable and the operation could not be called
+correctly by anybody. `/projects/{projectId}` and `/clients/{clientId}`
+have their detail reads; this was the gap.
+
+The tag is derived from the response content, not from `updated_at`, so
+a save that rewrites identical values does not invalidate a concurrent
+edit that conflicts with nothing.
+
+ * @summary One resource, in full (S-08)
+ */
+export const getUser = (
+    userId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<UserDetailResponse>(
+      {url: `/users/${userId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetUserQueryKey = (userId?: number,) => {
+    return [
+    `/users/${userId}`
+    ] as const;
+    }
+
+    
+export const getGetUserQueryOptions = <TData = Awaited<ReturnType<typeof getUser>>, TError = NotFoundResponse>(userId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetUserQueryKey(userId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUser>>> = ({ signal }) => getUser(userId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(userId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetUserQueryResult = NonNullable<Awaited<ReturnType<typeof getUser>>>
+export type GetUserQueryError = NotFoundResponse
+
+
+export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError = NotFoundResponse>(
+ userId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getUser>>,
+          TError,
+          Awaited<ReturnType<typeof getUser>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError = NotFoundResponse>(
+ userId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getUser>>,
+          TError,
+          Awaited<ReturnType<typeof getUser>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError = NotFoundResponse>(
+ userId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One resource, in full (S-08)
+ */
+
+export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError = NotFoundResponse>(
+ userId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetUserQueryOptions(userId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
  * **A reporting-manager change is rejected if it creates a cycle at any
 depth**, not merely self-reference. A→B→C→A is as broken as A→A, and the
 database `CHECK` only catches the latter.
+
+> **Not yet true as implemented. B-011 enforces self-reference only.**
+> The depth-`n` walk is **B-012**, still open. Until it lands this
+> operation will accept A→B→C→A, and the reportee tree that results has
+> no root. Documented here rather than quietly deferred, because a
+> contract describing a guarantee the server does not make is worse than
+> no guarantee at all.
+
+`If-Match` is required, not optional — a write without one is refused
+with `428`. Treating a missing precondition as "no conflict" would mean
+the guard protects only the clients that already opted in, which is the
+set that needed it least. Read the current tag from `GET /users/{userId}`.
+
+See `UserWriteRequest` for which keys are required here and what an
+absent one versus an explicit `null` one does.
 
  * @summary Update a resource
  */
@@ -271,7 +406,7 @@ export const updateUser = (
  ) => {
       
       
-      return http<UserResponse>(
+      return http<UserDetailResponse>(
       {url: `/users/${userId}`, method: 'PATCH',
       headers: {'Content-Type': 'application/json', },
       data: userWriteRequest
@@ -281,7 +416,7 @@ export const updateUser = (
   
 
 
-export const getUpdateUserMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
+export const getUpdateUserMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateUser>>, TError,{userId: number;data: UserWriteRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof updateUser>>, TError,{userId: number;data: UserWriteRequest}, TContext> => {
 
@@ -308,12 +443,12 @@ const {mutation: mutationOptions} = options ?
 
     export type UpdateUserMutationResult = NonNullable<Awaited<ReturnType<typeof updateUser>>>
     export type UpdateUserMutationBody = UserWriteRequest
-    export type UpdateUserMutationError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse
+    export type UpdateUserMutationError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
 
     /**
  * @summary Update a resource
  */
-export const useUpdateUser = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
+export const useUpdateUser = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateUser>>, TError,{userId: number;data: UserWriteRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateUser>>,

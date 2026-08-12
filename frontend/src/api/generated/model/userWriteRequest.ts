@@ -46,26 +46,124 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { UserWriteRequestMobile } from './userWriteRequestMobile';
+import type { UserWriteRequestAvatarUrl } from './userWriteRequestAvatarUrl';
+import type { UserWriteRequestDateOfJoining } from './userWriteRequestDateOfJoining';
 import type { RoleCode } from './roleCode';
+import type { UserWriteRequestDepartment } from './userWriteRequestDepartment';
+import type { UserWriteRequestDesignation } from './userWriteRequestDesignation';
 import type { UserWriteRequestReportingManagerId } from './userWriteRequestReportingManagerId';
+import type { UserWriteRequestLocation } from './userWriteRequestLocation';
+import type { UserWriteRequestWeeklyOff } from './userWriteRequestWeeklyOff';
+import type { UserWriteRequestSkills } from './userWriteRequestSkills';
+import type { ProjectAssignment } from './projectAssignment';
 
+/**
+ * The S-08 form, as one body. Used by both `POST /users` and
+`PATCH /users/{userId}`.
+
+**The five required fields are required on the `PATCH` too**, and are the
+five S-08 marks with an asterisk that map to `NOT NULL` columns. They have
+no "absent" state to model: the form always holds a value for each, and a
+`PATCH` that could omit `username` would need a rule for what an empty
+username means, which is a rule with no correct answer.
+
+**Every other key is absent-means-leave-alone**, and where the column is
+nullable an explicit `null` means "clear it". The distinction is
+load-bearing for `reportingManagerId`: "I am not editing their manager"
+and "detach them from their manager, who has left" are different
+intentions, and one sentinel cannot carry both.
+
+**No password field, on either verb.** S-08 specifies the temporary
+password as auto-generated, and there is no route by which an admin sets
+somebody else's password directly — a password only its holder has ever
+typed is the property that makes `mustChangePassword` mean anything.
+
+ */
 export interface UserWriteRequest {
   /**
    * @minLength 1
-   * @maxLength 150
+   * @maxLength 120
    */
   displayName: string;
   /**
+   * @minLength 1
+   * @maxLength 20
+   */
+  employeeCode: string;
+  /** @maxLength 150 */
+  email: string;
+  /**
+   * @maxLength 20
+   * @pattern ^[0-9+][0-9 ()-]{5,19}$
+   */
+  mobile?: UserWriteRequestMobile;
+  /**
+   * Profile photo. A URL into attachment storage, not a blob.
+   * @maxLength 500
+   */
+  avatarUrl?: UserWriteRequestAvatarUrl;
+  /** A calendar date with no instant attached — never a `date-time`. */
+  dateOfJoining?: UserWriteRequestDateOfJoining;
+  /**
    * @minLength 3
-   * @maxLength 100
+   * @maxLength 50
    */
   username: string;
-  email: string;
-  /** @maxLength 50 */
-  employeeCode?: string;
   role: RoleCode;
-  /** Rejected with `409` if it would create a cycle at any depth. */
+  /** Defaults to `true` on create. On update, **setting this `false` for
+somebody holding open tickets is refused with `409`**, exactly as
+`PATCH /users/{userId}/status` is — the form must not be a way around
+the guard the status route enforces.
+ */
+  isActive?: boolean;
+  /** @maxLength 80 */
+  department?: UserWriteRequestDepartment;
+  /** @maxLength 80 */
+  designation?: UserWriteRequestDesignation;
+  /** Rejected with `409` if it would create a cycle at any depth. **Only
+self-reference is enforced today — the depth-`n` walk is B-012.**
+ */
   reportingManagerId?: UserWriteRequestReportingManagerId;
-  projectIds?: number[];
+  /** @maxLength 120 */
+  location?: UserWriteRequestLocation;
+  /**
+   * Display only. Storage is UTC everywhere (PLAN.md §3.1).
+   * @maxLength 50
+   */
   timezone?: string;
+  /**
+   * Feeds every utilisation figure, through B-024.
+   * @minimum 0.5
+   * @maximum 24
+   */
+  dailyCapacityHrs?: number;
+  /**
+   * ISO-8601 day numbers, **1=Mon … 7=Sun**. `0` is not a day — see the
+note on `GET /masters/working-calendar` for what a second numbering
+cost once already.
+
+`null` means "inherit the org working week", which is the default for
+everybody. `[]` is a different answer — this person has no weekly off,
+which a support rota is a real reason to want.
+
+   * @maxItems 6
+   */
+  weeklyOff?: UserWriteRequestWeeklyOff;
+  /** @maxItems 30 */
+  skills?: UserWriteRequestSkills;
+  /**
+   * The complete membership set — **sent whole, not as a delta.** An
+absent key leaves memberships untouched; a present one replaces them,
+and a project dropped from the list is deactivated rather than
+deleted, so the historical assignment survives.
+
+Replaced `projectIds: int64[]` in B-011. That shape could not carry
+the per-project role S-08 requires and `project_members.role_in_project`
+has always had a column for. Breaking, and safe to break: no shipped
+client sent it.
+
+   * @maxItems 100
+   */
+  projects?: ProjectAssignment[];
 }

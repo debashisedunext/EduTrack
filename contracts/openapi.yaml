@@ -398,6 +398,15 @@ paths:
       description: |
         Generates a temporary password and sets `mustChangePassword`. Username,
         email and employee code are each unique.
+
+        **The generated password is in `meta.temporaryPassword` of the `201`,
+        and that is the only time it is ever readable.** It is stored as an
+        Argon2id hash like any other, so no later request can recover it — an
+        admin who loses it issues a reset rather than looking it up. This is
+        why the create response has its own schema instead of reusing
+        `UserResponse`: a password field on `User` could be returned by
+        `listUsers`, and a field that *cannot* leak is worth more than a field
+        that is merely not populated today.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true
@@ -406,15 +415,47 @@ paths:
             schema: { $ref: '#/components/schemas/UserWriteRequest' }
       responses:
         '201':
-          description: Created.
+          description: Created. `meta.temporaryPassword` is readable once, here.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/UserResponse' }
+              schema: { $ref: '#/components/schemas/UserCreatedResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '409': { $ref: '#/components/responses/Conflict' }
 
   /users/{userId}:
     parameters: [{ $ref: '#/components/parameters/UserId' }]
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: One resource, in full (S-08)
+      description: |
+        The S-08 form's read. Returns `UserDetail` — every field `listUsers`
+        returns, plus the ones only the form needs: mobile, joining date,
+        location, capacity, weekly-off override, skills, and the per-project
+        role assignments.
+
+        **This carries the `ETag` that `PATCH /users/{userId}` requires as
+        `If-Match`.** Added in B-011 because it was missing: CONVENTIONS.md §5
+        pairs every `If-Match` write with a detail read that emits the tag, and
+        `PATCH /users/{userId}` had no such read — so the precondition it
+        documents was unobtainable and the operation could not be called
+        correctly by anybody. `/projects/{projectId}` and `/clients/{clientId}`
+        have their detail reads; this was the gap.
+
+        The tag is derived from the response content, not from `updated_at`, so
+        a save that rewrites identical values does not invalidate a concurrent
+        edit that conflicts with nothing.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDetailResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [users]
       operationId: updateUser
@@ -423,6 +464,21 @@ paths:
         **A reporting-manager change is rejected if it creates a cycle at any
         depth**, not merely self-reference. A→B→C→A is as broken as A→A, and the
         database `CHECK` only catches the latter.
+
+        > **Not yet true as implemented. B-011 enforces self-reference only.**
+        > The depth-`n` walk is **B-012**, still open. Until it lands this
+        > operation will accept A→B→C→A, and the reportee tree that results has
+        > no root. Documented here rather than quietly deferred, because a
+        > contract describing a guarantee the server does not make is worse than
+        > no guarantee at all.
+
+        `If-Match` is required, not optional — a write without one is refused
+        with `428`. Treating a missing precondition as "no conflict" would mean
+        the guard protects only the clients that already opted in, which is the
+        set that needed it least. Read the current tag from `GET /users/{userId}`.
+
+        See `UserWriteRequest` for which keys are required here and what an
+        absent one versus an explicit `null` one does.
       parameters: [{ $ref: '#/components/parameters/IfMatch' }]
       requestBody:
         required: true
@@ -432,13 +488,23 @@ paths:
       responses:
         '200':
           description: Updated.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: The new tag, so a second edit needs no re-read.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/UserResponse' }
+              schema: { $ref: '#/components/schemas/UserDetailResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: |
+            `If-Match` absent. GET the resource and send back its `ETag`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /users/{userId}/status:
     parameters: [{ $ref: '#/components/parameters/UserId' }]
@@ -3050,25 +3116,209 @@ components:
               format: date-time
               description: UTC, like every stored instant. Null until the first login.
             createdAt: { type: string, format: date-time }
+    ProjectRoleCode:
+      type: string
+      enum: [PM, DEVELOPER, SUPPORT, QA, DEPLOYMENT, VIEWER]
+      description: |
+        A resource's role **on one project**, which may differ from their global
+        `RoleCode`: a Developer globally can be mapped as QA on one project.
+
+        **Deliberately not `RoleCode`**, and it differs in both directions.
+        `VIEWER` exists here and not there — read-only access to one project is a
+        per-project grant, and a global viewer role would mean read-only access to
+        everything, which is the opposite thing. `ADMIN` exists there and not here
+        — an Admin already sees every project through `ScopeResolver`, so an
+        `ADMIN` membership would be a grant that changes nothing, and a grant that
+        changes nothing is one somebody later assumes does something.
+
+        Blueprint §7.4 S-10 names these six as "PM / Dev / Support / QA / Deploy /
+        Viewer". `ck_project_members_role` holds the same set in the database.
+    ProjectAssignment:
+      type: object
+      required: [projectId]
+      description: |
+        One `project_members` row, as the S-08 Projects section reads and writes
+        it. Ids only — the names are already in `User.projects`, and repeating
+        them here would make the two disagree the moment a project is renamed.
+      properties:
+        projectId: { type: integer, format: int64 }
+        roleInProject:
+          $ref: '#/components/schemas/ProjectRoleCode'
     UserWriteRequest:
       type: object
-      required: [displayName, username, email, role]
+      required: [displayName, username, email, employeeCode, role]
+      description: |
+        The S-08 form, as one body. Used by both `POST /users` and
+        `PATCH /users/{userId}`.
+
+        **The five required fields are required on the `PATCH` too**, and are the
+        five S-08 marks with an asterisk that map to `NOT NULL` columns. They have
+        no "absent" state to model: the form always holds a value for each, and a
+        `PATCH` that could omit `username` would need a rule for what an empty
+        username means, which is a rule with no correct answer.
+
+        **Every other key is absent-means-leave-alone**, and where the column is
+        nullable an explicit `null` means "clear it". The distinction is
+        load-bearing for `reportingManagerId`: "I am not editing their manager"
+        and "detach them from their manager, who has left" are different
+        intentions, and one sentinel cannot carry both.
+
+        **No password field, on either verb.** S-08 specifies the temporary
+        password as auto-generated, and there is no route by which an admin sets
+        somebody else's password directly — a password only its holder has ever
+        typed is the property that makes `mustChangePassword` mean anything.
       properties:
-        displayName: { type: string, minLength: 1, maxLength: 150 }
-        username: { type: string, minLength: 3, maxLength: 100 }
-        email: { type: string, format: email }
-        employeeCode: { type: string, maxLength: 50 }
+        # ── Personal ──────────────────────────────────────────────────────
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        employeeCode: { type: string, minLength: 1, maxLength: 20 }
+        email: { type: string, format: email, maxLength: 150 }
+        mobile:
+          type: [string, 'null']
+          maxLength: 20
+          pattern: '^[0-9+][0-9 ()-]{5,19}$'
+        avatarUrl:
+          type: [string, 'null']
+          maxLength: 500
+          description: Profile photo. A URL into attachment storage, not a blob.
+        dateOfJoining:
+          type: [string, 'null']
+          format: date
+          description: A calendar date with no instant attached — never a `date-time`.
+
+        # ── Access ────────────────────────────────────────────────────────
+        username: { type: string, minLength: 3, maxLength: 50 }
         role: { $ref: '#/components/schemas/RoleCode' }
+        isActive:
+          type: boolean
+          description: |
+            Defaults to `true` on create. On update, **setting this `false` for
+            somebody holding open tickets is refused with `409`**, exactly as
+            `PATCH /users/{userId}/status` is — the form must not be a way around
+            the guard the status route enforces.
+
+        # ── Org ───────────────────────────────────────────────────────────
+        department: { type: [string, 'null'], maxLength: 80 }
+        designation: { type: [string, 'null'], maxLength: 80 }
         reportingManagerId:
           type: [integer, 'null']
           format: int64
-          description: Rejected with `409` if it would create a cycle at any depth.
-        projectIds: { type: array, items: { type: integer, format: int64 } }
-        timezone: { type: string }
-    UserResponse:
+          description: |
+            Rejected with `409` if it would create a cycle at any depth. **Only
+            self-reference is enforced today — the depth-`n` walk is B-012.**
+        location: { type: [string, 'null'], maxLength: 120 }
+        timezone:
+          type: string
+          maxLength: 50
+          examples: ['Asia/Kolkata']
+          description: Display only. Storage is UTC everywhere (PLAN.md §3.1).
+
+        # ── Work ──────────────────────────────────────────────────────────
+        dailyCapacityHrs:
+          type: number
+          format: double
+          minimum: 0.5
+          maximum: 24
+          default: 8
+          description: Feeds every utilisation figure, through B-024.
+        weeklyOff:
+          type: [array, 'null']
+          items: { type: integer, minimum: 1, maximum: 7 }
+          maxItems: 6
+          uniqueItems: true
+          description: |
+            ISO-8601 day numbers, **1=Mon … 7=Sun**. `0` is not a day — see the
+            note on `GET /masters/working-calendar` for what a second numbering
+            cost once already.
+
+            `null` means "inherit the org working week", which is the default for
+            everybody. `[]` is a different answer — this person has no weekly off,
+            which a support rota is a real reason to want.
+          examples: [[6, 7]]
+        skills:
+          type: [array, 'null']
+          items: { type: string, minLength: 1, maxLength: 60 }
+          maxItems: 30
+          uniqueItems: true
+
+        # ── Projects ──────────────────────────────────────────────────────
+        projects:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/ProjectAssignment' }
+          description: |
+            The complete membership set — **sent whole, not as a delta.** An
+            absent key leaves memberships untouched; a present one replaces them,
+            and a project dropped from the list is deactivated rather than
+            deleted, so the historical assignment survives.
+
+            Replaced `projectIds: int64[]` in B-011. That shape could not carry
+            the per-project role S-08 requires and `project_members.role_in_project`
+            has always had a column for. Breaking, and safe to break: no shipped
+            client sent it.
+    # `UserResponse` (`{ data: User }`) was here and is gone. Both writes now
+    # answer with `UserDetail`, and it had no other reference — a schema kept
+    # "in case" is one the next reader has to work out the status of.
+    UserDetail:
+      allOf:
+        - { $ref: '#/components/schemas/User' }
+        - type: object
+          description: |
+            Everything `User` has, plus the S-08 fields only the form reads.
+
+            Kept off `User` rather than added to it with a note that the list
+            leaves them null. `listUsers` returns up to 200 of these; carrying a
+            skills array and a membership list on every grid row would be paid on
+            every page of a screen that shows none of it — and a field that is
+            "usually absent" is one every consumer has to defend against.
+          properties:
+            mobile: { type: [string, 'null'] }
+            avatarUrl: { type: [string, 'null'] }
+            dateOfJoining: { type: [string, 'null'], format: date }
+            location: { type: [string, 'null'] }
+            timezone: { type: string }
+            dailyCapacityHrs: { type: number, format: double }
+            weeklyOff:
+              type: [array, 'null']
+              items: { type: integer, minimum: 1, maximum: 7 }
+              description: '`null` means the org working week applies.'
+            skills: { type: array, items: { type: string } }
+            projectAssignments:
+              type: array
+              items: { $ref: '#/components/schemas/ProjectAssignment' }
+              description: |
+                The per-project roles behind `projects`. Same rows, carrying the
+                one field `ProjectRef` deliberately does not.
+            mustChangePassword:
+              type: boolean
+              description: |
+                Still holding the temporary password. Shown on the form so an
+                admin can tell "never logged in" from "logged in and has not been
+                active", which `lastLoginAt` alone cannot distinguish from a
+                reactivated account.
+    UserDetailResponse:
       type: object
       required: [data]
-      properties: { data: { $ref: '#/components/schemas/User' } }
+      properties: { data: { $ref: '#/components/schemas/UserDetail' } }
+    UserCreatedResponse:
+      type: object
+      required: [data, meta]
+      description: |
+        `POST /users` only. Its own schema so that `temporaryPassword` lives on a
+        type no read operation returns — the strongest available guarantee that a
+        credential cannot appear in a list.
+      properties:
+        data: { $ref: '#/components/schemas/UserDetail' }
+        meta:
+          type: object
+          required: [temporaryPassword]
+          properties:
+            temporaryPassword:
+              type: string
+              description: |
+                Readable exactly once, here. Stored as an Argon2id hash, so no
+                later request can recover it; an admin who loses it issues a
+                reset. The account is created with `mustChangePassword` set, so
+                this password survives precisely one login.
     UserListResponse:
       type: object
       required: [data]

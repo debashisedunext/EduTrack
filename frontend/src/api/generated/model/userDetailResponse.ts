@@ -46,10 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { UserDetail } from './userDetail';
 
-/**
- * Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
-
- */
-export type UserWriteRequestReportingManagerId = number | null;
+export interface UserDetailResponse {
+  data: UserDetail;
+}

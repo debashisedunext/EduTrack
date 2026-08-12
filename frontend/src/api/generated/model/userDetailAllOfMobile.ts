@@ -46,8 +46,5 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { User } from './user';
 
-export interface UserResponse {
-  data: User;
-}
+export type UserDetailAllOfMobile = string | null;

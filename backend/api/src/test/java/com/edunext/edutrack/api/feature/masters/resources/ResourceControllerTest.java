@@ -35,13 +35,15 @@ class ResourceControllerTest {
 
     private ResourceService service;
     private ResourceExportWriter exporter;
+    private ResourceWriteService writes;
     private ResourceController controller;
 
     @BeforeEach
     void setUp() {
         service = mock(ResourceService.class);
         exporter = mock(ResourceExportWriter.class);
-        controller = new ResourceController(service, exporter);
+        writes = mock(ResourceWriteService.class);
+        controller = new ResourceController(service, exporter, writes);
 
         when(service.list(any(), any(), any())).thenReturn(
                 new ResourceDtos.ResourceListResponse(List.of(),
@@ -200,5 +202,129 @@ class ResourceControllerTest {
                 new ResourceDtos.BulkStatusRequest(List.of(1L), false, null));
 
         assertThat(response.data()).isSameAs(data);
+    }
+
+    // ------------------------------------------------------------------
+    // B-011 · the form's routes, and the precondition on the PATCH
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("the S-08 form")
+    class Form {
+
+        private ResourceDtos.ResourceDetail resource;
+
+        @BeforeEach
+        void stubDetail() {
+            resource = detail();
+            when(writes.detail(7L)).thenReturn(resource);
+        }
+
+        @Test
+        @DisplayName("the detail read carries the ETag the PATCH requires")
+        void detailCarriesAnEtag() {
+            var response = controller.get(7L);
+
+            assertThat(response.getHeaders().getETag())
+                    .isNotNull()
+                    .contains(resource.etag());
+        }
+
+        @Test
+        @DisplayName("create answers 201 with the resource and the one-time password")
+        void createAnswers201WithThePassword() {
+            when(writes.create(any())).thenReturn(
+                    new ResourceWriteService.Created(resource, "Xk7#mQpz4Rn2Tv9w"));
+
+            var response = controller.create(null, writeRequest());
+
+            assertThat(response.getStatusCode().value()).isEqualTo(201);
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().meta().temporaryPassword()).isEqualTo("Xk7#mQpz4Rn2Tv9w");
+            assertThat(response.getBody().data()).isSameAs(resource);
+        }
+
+        /**
+         * The reason a missing precondition is 428 and not "allowed through":
+         * a guard that only applies to callers who opted in protects the set
+         * that needed it least.
+         */
+        @Test
+        @DisplayName("a PATCH with no If-Match is refused with 428, not allowed through")
+        void patchWithoutIfMatchIsRefused() {
+            assertThatThrownBy(() -> controller.update(7L, null, writeRequest()))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode().value())
+                            .isEqualTo(428));
+
+            verify(writes, org.mockito.Mockito.never()).update(any(), any());
+        }
+
+        @Test
+        @DisplayName("a stale If-Match is 412, and nothing is written")
+        void staleIfMatchIs412() {
+            assertThatThrownBy(() -> controller.update(7L, "\"deadbeef\"", writeRequest()))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode().value())
+                            .isEqualTo(412));
+
+            verify(writes, org.mockito.Mockito.never()).update(any(), any());
+        }
+
+        @Test
+        @DisplayName("a current If-Match is accepted, quoted or bare, and W/ prefixed")
+        void currentIfMatchIsAccepted() {
+            when(writes.update(any(), any())).thenReturn(resource);
+
+            assertThat(controller.update(7L, resource.etag(), writeRequest())
+                    .getStatusCode().value()).isEqualTo(200);
+            assertThat(controller.update(7L, "\"" + resource.etag() + "\"", writeRequest())
+                    .getStatusCode().value()).isEqualTo(200);
+            // Some proxies add the weak-validator prefix on the way through;
+            // refusing the edit because of it would be a 412 nobody can act on.
+            assertThat(controller.update(7L, "W/\"" + resource.etag() + "\"", writeRequest())
+                    .getStatusCode().value()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("If-Match: * matches anything, per RFC 9110")
+        void wildcardIfMatchIsAccepted() {
+            when(writes.update(any(), any())).thenReturn(resource);
+
+            assertThat(controller.update(7L, "*", writeRequest()).getStatusCode().value()).isEqualTo(200);
+        }
+
+        /**
+         * The precondition and the write must reason about the same snapshot,
+         * or the deactivation guard can be checked against a version of the row
+         * the tag was never compared to.
+         */
+        @Test
+        @DisplayName("the row the precondition checked is the row handed to the write")
+        void updateReasonsAboutTheCheckedSnapshot() {
+            when(writes.update(any(), any())).thenReturn(resource);
+
+            controller.update(7L, resource.etag(), writeRequest());
+
+            verify(writes).update(org.mockito.ArgumentMatchers.same(resource), any());
+        }
+
+        private ResourceDtos.ResourceWriteRequest writeRequest() {
+            ResourceDtos.ResourceWriteRequest request = new ResourceDtos.ResourceWriteRequest();
+            request.setDisplayName("Ravi Kumar");
+            request.setUsername("ravi.kumar");
+            request.setEmail("ravi.kumar@edunext.test");
+            request.setEmployeeCode("EMP-0042");
+            request.setRole("DEVELOPER");
+            return request;
+        }
+
+        private ResourceDtos.ResourceDetail detail() {
+            return new ResourceDtos.ResourceDetail(
+                    7L, "Ravi Kumar", "DEVELOPER", "ravi.kumar", "ravi.kumar@edunext.test",
+                    "EMP-0042", "Engineering", "Developer", null, List.of(), List.of(),
+                    true, 0, null, null, null, null, null, null, "Asia/Kolkata",
+                    new java.math.BigDecimal("8.00"), null, List.of(), List.of(), true);
+        }
     }
 }
