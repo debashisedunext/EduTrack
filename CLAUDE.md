@@ -73,7 +73,24 @@ Until Stream A lands the guard (week 7), use the `dev-noauth` profile. **Do not 
 - Conventional commits: `feat(tickets): add handoff dialog with mandatory effort confirmation`.
 - PRs under ~400 changed lines.
 - Push daily, even work in progress.
+- **Open every PR as a draft.** Push to it as often as you like — drafts run no CI, which is what keeps "push daily" affordable. Mark it **Ready for review** when you want it verified.
 - **Developers never merge.** Claude integrates branches into `develop` and promotes to `main`.
+
+### Verification before merge — the hard rule
+
+**Every PR is verified before it is merged. No exception, and no PR merges any other way.**
+
+Once a PR is marked ready, Claude runs `tools/integration-gate.sh` **on the merge result** — not on the branch, because a branch that is green alone can still break `develop`. If every check passes, Claude merges it. If anything fails, the PR goes back with the failing check named; it is not merged and not partially merged.
+
+The gate runs, locally, exactly what `.github/workflows/ci.yml` runs:
+
+migration guard · backend `mvn verify` · frontend lint, test and build · OpenAPI validity, conventions and client staleness · the packaged jar actually starting and serving a request.
+
+**Why it is local.** The GitHub Actions free allowance (2,000 minutes) was exhausted on 11 Aug 2026. No job runs until the calendar month resets on **1 Sep**, and free private repositories get no branch protection — so nothing on the platform prevents an unverified merge. A-030 reached `develop` unverified during a two-day outage; three weeks of that is not acceptable on a codebase whose central guarantee is append-only hash-chained history. The verification moved to the one point every change already passes through.
+
+**What this asks of you:** run `make verify` locally before marking a PR ready. It is the same backend and frontend suite, so a PR that fails the gate has usually already failed on your machine — finding it there costs minutes, finding it at integration costs a round trip.
+
+The gate is a stand-in, not a second system. When CI runs again it resumes as the authority, and `tools/integration-gate.sh` is retired — but **the rule itself does not lapse**: verified, then merged, always.
 
 ### Never commit
 
@@ -98,5 +115,6 @@ Until Stream A lands the guard (week 7), use the `dev-noauth` profile. **Do not 
 - [ ] OpenAPI spec updated; client regenerated
 - [ ] Storybook entry for any new shared component
 - [ ] No new lint or compiler warnings
-- [ ] Rebased on current `develop`, CI green
+- [ ] Rebased on current `develop`
+- [ ] `make verify` green locally before the PR is marked ready — while CI is down this is what stands between a mistake and `develop`
 - [ ] Only your stream's paths touched, or sign-off obtained
