@@ -71,6 +71,7 @@ Until Stream A lands the guard (week 7), use the `dev-noauth` profile. **Do not 
 - Branch from `develop`, never `main`. Name: `<type>/<stream>/<slug>` — `feat/tickets/ribbon-handoff-dialog`.
 - Rebase on `develop` daily. Never merge `develop` into your branch.
 - Conventional commits: `feat(tickets): add handoff dialog with mandatory effort confirmation`.
+- **A task ID in a commit subject means that commit finishes the task.** The plan reads status from git — an ID in a subject that reaches `develop` marks the task done, and there is no way for it to tell "the commit that mentions D-045" from "D-045 is finished". For partial work, name the task in the commit **body** instead, where the parser does not look. This has already gone wrong four times: D-045 and D-053 both read as done on their first commit and had to be corrected in [`overrides.json`](docs/plan/overrides.json), and A-010/A-013 landed under a subject reading `A011` without the hyphen, so git could prove nothing about either. Free to follow, tedious to retrofit.
 - PRs under ~400 changed lines.
 - Push daily, even work in progress.
 - **Open every PR as a draft.** Push to it as often as you like — drafts run no CI, which is what keeps "push daily" affordable. Mark it **Ready for review** when you want it verified.
