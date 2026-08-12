@@ -1,13 +1,13 @@
 import * as React from 'react'
 import { keepPreviousData } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Download, Plus, RotateCcw, Search } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
-import { useListUsers, useSetUserStatusBulk } from '@/api/generated/users/users'
+import { useListUsers, useSetUserStatus, useSetUserStatusBulk } from '@/api/generated/users/users'
 import { useListProjects } from '@/api/generated/projects/projects'
 import type { RoleCode } from '@/api/generated/model/roleCode'
 import type { BulkUserStatusResponseData } from '@/api/generated/model/bulkUserStatusResponseData'
-import { BASE } from '@/api/http'
+import { ApiError, BASE } from '@/api/http'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,7 +27,13 @@ import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 
 import { RESOURCE_COLUMNS, ROLE_LABEL } from './columns'
-import { BulkStatusBar, BulkStatusResultDialog } from './BulkStatusBar'
+import {
+  BulkStatusBar,
+  BulkStatusResultDialog,
+  DeactivationConfirmDialog,
+  type DeactivationCandidate,
+} from './BulkStatusBar'
+import { resumeDeactivationTarget, withoutResumeMarker } from './reassignHandoff'
 import { useResourceFilters, toQueryParams } from './useResourceFilters'
 
 const PAGE_SIZE = 25
@@ -44,15 +50,28 @@ const STATUS_OPTIONS = [
 ]
 
 /**
- * S-07 Resource Master — List (B-010), with B-011's entry points into the form.
+ * S-07 Resource Master — List (B-010), with B-011's entry points into the form
+ * and B-014's deactivation flow.
  *
  * "New resource" and the per-row Edit link both go to `ResourceFormPage`.
- * The bulk reassignment wizard is still B-014, which is why deactivating
- * somebody who holds open tickets stops here with a named list rather than
- * offering to fix it.
+ *
+ * <h2>Deactivation is a three-legged flow, and this screen owns two of them</h2>
+ *
+ * 1. **Refuse, and say what would fix it.** A selection containing somebody with
+ *    open tickets stops in `DeactivationConfirmDialog` before the request is
+ *    made, because the grid already knows the counts.
+ * 2. **Hand off.** Each blocked person links into S-24 with themselves
+ *    preselected and a `returnTo` pointing back here — Stream C's C-063 builds
+ *    that screen; `reassignHandoff.ts` is the contract between us.
+ * 3. **Resume.** Arriving with `?deactivate=<id>` finishes the interrupted job
+ *    through `PATCH /users/{userId}/status`. Without this leg the admin comes
+ *    back to a grid where the person is still active and nothing explains why,
+ *    and the flow the blueprint calls *forced* quietly ends one step short.
  */
 export function ResourceListPage() {
   const { filters, setFilter, resetFilters, activeCount } = useResourceFilters()
+  const location = useLocation()
+  const navigate = useNavigate()
 
   // Cursor pagination has no page numbers to jump to. The stack is what makes
   // "Previous" possible without an offset — CONVENTIONS.md §6.
@@ -62,6 +81,13 @@ export function ResourceListPage() {
   const [selected, setSelected] = React.useState<ReadonlySet<number>>(new Set())
   const [bulkResult, setBulkResult] = React.useState<BulkUserStatusResponseData | null>(null)
   const [lastBulkWasActivate, setLastBulkWasActivate] = React.useState(false)
+  const [pendingDeactivation, setPendingDeactivation] =
+    React.useState<readonly DeactivationCandidate[] | null>(null)
+
+  // Every link into the S-24 wizard carries this home, so the return trip lands
+  // on the filtered view the admin was working in rather than a reset grid. The
+  // resume marker is stripped: it describes the trip we are on, not the next one.
+  const returnSearch = withoutResumeMarker(location.search)
 
   const filterSignature = JSON.stringify(filters)
   const lastFilterSignature = React.useRef(filterSignature)
@@ -143,10 +169,123 @@ export function ResourceListPage() {
     },
   })
 
-  function applyBulkStatus(isActive: boolean) {
+  function runBulkStatus(userIds: number[], isActive: boolean) {
     setLastBulkWasActivate(isActive)
-    bulkStatus.mutate({ data: { userIds: [...selected], isActive } })
+    setPendingDeactivation(null)
+    bulkStatus.mutate({ data: { userIds, isActive } })
   }
+
+  /**
+   * B-014 · stop before the request when the grid already knows it will be
+   * refused.
+   *
+   * Only for deactivation, and only when somebody in the selection holds open
+   * tickets. Activation cannot orphan anything, and a clean deactivation must
+   * not grow a confirmation step it does not need — a dialog on every bulk
+   * action is a dialog nobody reads.
+   *
+   * Rows outside the current page are in `selected` but not in `resources`, so
+   * their counts are unknown here. Those go to the server unchecked and come
+   * back through `BulkStatusResultDialog`, which is the same path a stale count
+   * takes. Fetching them to complete the picture would be a round trip to
+   * pre-empt a refusal the server makes anyway.
+   */
+  function applyBulkStatus(isActive: boolean) {
+    const ids = [...selected]
+    if (isActive) {
+      runBulkStatus(ids, true)
+      return
+    }
+
+    const blocked: DeactivationCandidate[] = resources
+      .filter((r) => selected.has(r.id) && r.isActive && (r.openTicketCount ?? 0) > 0)
+      .map((r) => ({
+        id: r.id,
+        displayName: r.displayName,
+        openTicketCount: r.openTicketCount ?? 1,
+      }))
+
+    if (blocked.length > 0) {
+      setPendingDeactivation(blocked)
+      return
+    }
+    runBulkStatus(ids, false)
+  }
+
+  /**
+   * "Deactivate the other N" — the whole selection minus the named blockers.
+   *
+   * <b>Subtracted from `selected`, not rebuilt from the visible rows.</b> A
+   * selection survives paging, so somebody ticked two pages back is in
+   * `selected` and not in `resources`; deriving "the rest" from what is on
+   * screen would drop them silently, and a bulk action that quietly does less
+   * than the count on the button is worse than one that refuses.
+   */
+  function confirmDeactivation() {
+    const blockedIds = new Set(pendingDeactivation?.map((c) => c.id))
+    runBulkStatus(
+      [...selected].filter((id) => !blockedIds.has(id)),
+      false,
+    )
+  }
+
+  // ── B-014 · the return leg from the reassignment wizard ───────────────────
+  const resumeStatus = useSetUserStatus({
+    mutation: {
+      onSuccess: () => {
+        void refetch()
+        toast({ variant: 'success', title: 'Deactivated', description: 'Their tickets now have a new owner.' })
+      },
+      onError: (mutationError) => {
+        // The most likely failure by far, and the one worth a specific
+        // sentence: the wizard moved some of the tickets and not all of them.
+        // "Something went wrong" would send the admin looking for a bug in a
+        // flow that is working exactly as designed.
+        const remaining =
+          mutationError instanceof ApiError && mutationError.is('open-tickets')
+            ? Number((mutationError.problem as { openTicketCount?: number }).openTicketCount ?? 0)
+            : null
+
+        toast({
+          variant: 'danger',
+          title: remaining != null ? 'Still holding open tickets' : 'Could not deactivate',
+          description:
+            remaining != null
+              ? `${remaining} ${remaining === 1 ? 'ticket is' : 'tickets are'} still assigned to them. Reassign the rest, then deactivate again.`
+              : 'Try again from the list.',
+        })
+      },
+    },
+  })
+
+  /**
+   * Finishes the job the wizard interrupted.
+   *
+   * The marker is cleared from the URL in the same tick the mutation is fired,
+   * for two reasons: a refresh must not re-run the write, and the URL should
+   * describe where the admin is rather than what happened on the way. `replace`
+   * rather than `push`, so Back goes to the wizard's referrer and not to a URL
+   * that would immediately try again.
+   *
+   * The ref guards against a second run when React re-invokes the effect (Strict
+   * Mode does this deliberately in development) before the navigation has
+   * settled. Deactivation is idempotent so a double fire is harmless at the
+   * server, but it would raise two toasts saying the same thing.
+   */
+  const resumeTarget = resumeDeactivationTarget(location.search)
+  const resumed = React.useRef<number | null>(null)
+
+  React.useEffect(() => {
+    if (resumeTarget == null || resumed.current === resumeTarget) return
+    resumed.current = resumeTarget
+
+    resumeStatus.mutate({
+      userId: resumeTarget,
+      data: { isActive: false, reason: 'Tickets reassigned via the S-24 wizard' },
+    })
+    navigate({ pathname: location.pathname, search: withoutResumeMarker(location.search) }, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeTarget])
 
   // ── selection ─────────────────────────────────────────────────────────────
   const pageIds = resources.map((r) => r.id)
@@ -433,9 +572,19 @@ export function ResourceListPage() {
         </div>
       </div>
 
+      <DeactivationConfirmDialog
+        blocked={pendingDeactivation}
+        proceedCount={selected.size - (pendingDeactivation?.length ?? 0)}
+        returnSearch={returnSearch}
+        isPending={bulkStatus.isPending}
+        onConfirm={confirmDeactivation}
+        onCancel={() => setPendingDeactivation(null)}
+      />
+
       <BulkStatusResultDialog
         result={bulkResult}
         isActivating={lastBulkWasActivate}
+        returnSearch={returnSearch}
         onClose={() => setBulkResult(null)}
       />
     </div>

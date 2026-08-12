@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -188,6 +188,50 @@ describe('S-08 edit', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/open tickets/i)
     expect(getDb().users.find((u) => u.id === 3)?.isActive).toBe(true)
+  })
+
+  /**
+   * B-014 · and it does not stop there.
+   *
+   * This is the most discoverable of the three ways to deactivate somebody — an
+   * admin who wants a leaver gone opens their record long before they think of
+   * the grid's selection bar — so it is the path that most needs a next step
+   * rather than a paragraph explaining why the save failed.
+   */
+  it('offers the reassignment wizard from the refusal, preselected', async () => {
+    renderForm('/masters/resources/3/edit')
+
+    await screen.findByDisplayValue('Ravi Kumar')
+    fireEvent.click(screen.getByLabelText('Status'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    const alert = await screen.findByRole('alert')
+    const href = within(alert).getByRole('link').getAttribute('href')!
+    const url = new URL(href, 'http://localhost')
+
+    expect(url.pathname).toBe('/tickets/bulk-reassign')
+    expect(url.searchParams.get('fromUserId')).toBe('3')
+    expect(url.searchParams.get('returnTo')).toBe('/masters/resources?deactivate=3')
+  })
+
+  it('drops the wizard link once the refusal is a different one', async () => {
+    renderForm('/masters/resources/3/edit')
+
+    await screen.findByDisplayValue('Ravi Kumar')
+    // A duplicate username: still a 409, nothing to do with tickets. A stale
+    // "reassign their tickets" link under it would send the admin to a wizard
+    // that has nothing to fix.
+    fireEvent.click(screen.getByLabelText('Status'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('Status'))
+    fireEvent.change(screen.getByLabelText(/^Username/), { target: { value: 'meera' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() =>
+      expect(within(screen.getByRole('alert')).queryByRole('link')).not.toBeInTheDocument(),
+    )
   })
 
   /**

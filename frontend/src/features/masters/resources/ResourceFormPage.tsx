@@ -1,8 +1,8 @@
 import * as React from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Controller, useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 
 import { useListProjects } from '@/api/generated/projects/projects'
 import { useListUsers } from '@/api/generated/users/users'
@@ -25,6 +25,7 @@ import { ROLE_LABEL } from './columns'
 import { FieldGroup, FormField, ReadOnlyField } from './FormField'
 import { SkillsInput } from './SkillsInput'
 import { ProjectAssignmentsEditor } from './ProjectAssignmentsEditor'
+import { reassignWizardHref } from './reassignHandoff'
 import { TemporaryPasswordDialog } from './TemporaryPasswordDialog'
 import { useCreateResource, useResource, useUpdateResource } from './resourceQueries'
 import {
@@ -55,8 +56,10 @@ const ROLES = Object.keys(ROLE_LABEL) as RoleCode[]
  *   dropdown would mean holding the organisation's reporting graph in the
  *   browser and keeping it fresh, to pre-empt a mistake that is rare and
  *   already has a clear answer.
- * - **The bulk reassignment wizard (B-014).** Deactivating somebody who holds
- *   open tickets is refused with a count, exactly as the grid refuses it.
+ * - **The reassignment wizard itself.** Unticking Active on somebody who holds
+ *   open tickets is refused with a count, exactly as the grid refuses it, and
+ *   B-014 turned that refusal into a link into S-24 — but the wizard is Stream
+ *   C's C-063 and nothing about it is built here.
  * - **Profile photo upload.** S-08 says "Profile photo"; this takes a URL,
  *   because attachment storage is A-016 and there is nothing to upload to yet.
  *   The column and the field are ready for it.
@@ -87,6 +90,8 @@ export function ResourceFormPage() {
   const [createdPassword, setCreatedPassword] = React.useState<string | null>(null)
   const [createdName, setCreatedName] = React.useState('')
   const [bannerError, setBannerError] = React.useState<string | null>(null)
+  /** How many open tickets refused this save, or null when that is not why. */
+  const [blockedTickets, setBlockedTickets] = React.useState<number | null>(null)
 
   const form = useForm<ResourceFormValues>({
     resolver: zodResolver(resourceFormSchema) as Resolver<ResourceFormValues>,
@@ -123,6 +128,7 @@ export function ResourceFormPage() {
       setBannerError('Something went wrong. Try again.')
       return
     }
+    setBlockedTickets(null)
 
     const { fields, unmatched } = splitFieldErrors(error.fieldErrors)
     fields.forEach(({ name, message }) => form.setError(name, { type: 'server', message }))
@@ -131,6 +137,19 @@ export function ResourceFormPage() {
       // Focus the first one. A 409 on a long form otherwise scrolls nowhere and
       // the message is below the fold.
       form.setFocus(fields[0].name)
+    }
+
+    // B-014 · unticking Active on somebody holding open tickets. Not a field
+    // error — the field's value is legitimate, the organisation's state is what
+    // refuses it — so the count is lifted out here and the banner grows a link
+    // into the reassignment wizard rather than restating the problem.
+    if (error.is('open-tickets')) {
+      const count = Number((error.problem as { openTicketCount?: number }).openTicketCount ?? 0)
+      setBlockedTickets(count)
+      setBannerError(
+        `This resource still holds ${count} open ${count === 1 ? 'ticket' : 'tickets'}. Deactivating them now would leave live work with nobody accountable for it.`,
+      )
+      return
     }
 
     // A 412 has no field errors and is not the user's mistake — it needs its
@@ -153,6 +172,7 @@ export function ResourceFormPage() {
 
   const onSubmit = form.handleSubmit(async (values) => {
     setBannerError(null)
+    setBlockedTickets(null)
     const data = toWriteRequest(values)
 
     try {
@@ -245,6 +265,28 @@ export function ResourceFormPage() {
           className="rounded-card border border-danger bg-surface px-4 py-3 text-sm text-danger-text"
         >
           {bannerError}
+          {/*
+            B-014 · the same 409 the grid gets, and the same way through it.
+
+            This is the most discoverable of the three deactivation paths — an
+            admin who wants somebody gone opens their record and unticks Active
+            long before they think of the selection bar — so it is the one that
+            most needs a next step rather than a sentence. Rendered inside the
+            banner rather than as a second alert: one refusal should not produce
+            two things to read.
+          */}
+          {blockedTickets != null && userId != null && (
+            <p className="mt-2">
+              <Link
+                to={reassignWizardHref({ fromUserId: userId, returnSearch: '' })}
+                className="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Reassign their {blockedTickets} open{' '}
+                {blockedTickets === 1 ? 'ticket' : 'tickets'}
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+              </Link>
+            </p>
+          )}
         </div>
       )}
 

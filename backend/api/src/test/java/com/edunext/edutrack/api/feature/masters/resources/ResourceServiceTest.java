@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -313,6 +314,89 @@ class ResourceServiceTest {
             when(repository.openTicketCounts(List.of(1L))).thenReturn(Map.of(1L, 0));
 
             assertThat(service.setStatus(request(false, 1L)).reassignUrl()).isNull();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // B-014 · the singular status route
+    // ------------------------------------------------------------------
+
+    /**
+     * The route the deactivation flow returns through, and the one the contract
+     * declared for months while nothing served it.
+     *
+     * <p>These assert the <b>translation</b> — outcome code to exception or
+     * silence — rather than re-testing the decision. The decision is
+     * {@code apply}, which the class above already covers; the entire claim of
+     * this route is that it does not have a second one.
+     */
+    @Nested
+    @DisplayName("activate / deactivate one resource")
+    class SingularStatus {
+
+        @Test
+        @DisplayName("deactivating someone with open tickets raises the same 409 the form does")
+        void blockedCarriesTheCount() {
+            given(1L, "Ravi Kumar", true);
+            when(repository.openTicketCounts(List.of(1L))).thenReturn(Map.of(1L, 4));
+
+            assertThatExceptionOfType(ResourceWriteService.OpenTicketsException.class)
+                    .isThrownBy(() -> service.setStatus(1L, false))
+                    .satisfies(e -> {
+                        assertThat(e.userId()).isEqualTo(1L);
+                        assertThat(e.openTicketCount()).isEqualTo(4);
+                    });
+            verify(repository, never()).setActive(anyLong(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("a resource that is already inactive succeeds, even holding tickets")
+        void alreadyInThatStateIsNotAConflict() {
+            // What a half-finished reassignment leaves behind. Checking the flag
+            // before the guard is the only thing that lets this row ever settle
+            // — reversed, it would answer 409 forever and the grid would carry a
+            // permanently unresolvable person.
+            given(1L, "Ravi Kumar", false);
+            when(repository.openTicketCounts(List.of(1L))).thenReturn(Map.of(1L, 7));
+
+            service.setStatus(1L, false);
+
+            verify(repository, never()).setActive(anyLong(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("activating is never blocked — bringing somebody back orphans nothing")
+        void activationSkipsTheGuardEntirely() {
+            given(1L, "Ravi Kumar", false);
+
+            service.setStatus(1L, true);
+
+            verify(repository).setActive(1L, true);
+            // Not merely unused: not asked for. An activation that queried the
+            // ticket table would be a round trip whose answer cannot change the
+            // outcome.
+            verify(repository, never()).openTicketCounts(any());
+        }
+
+        @Test
+        @DisplayName("deactivating someone with nothing open moves the flag")
+        void theOrdinaryCase() {
+            given(1L, "Ravi Kumar", true);
+            when(repository.openTicketCounts(List.of(1L))).thenReturn(Map.of(1L, 0));
+
+            service.setStatus(1L, false);
+
+            verify(repository).setActive(1L, false);
+        }
+
+        @Test
+        @DisplayName("an unknown id is 404, not a silent no-op")
+        void unknownResource() {
+            when(repository.findStatus(99L)).thenReturn(Optional.empty());
+            when(repository.openTicketCounts(List.of(99L))).thenReturn(Map.of(99L, 0));
+
+            assertThatExceptionOfType(ResourceWriteService.ResourceNotFoundException.class)
+                    .isThrownBy(() -> service.setStatus(99L, false));
         }
     }
 

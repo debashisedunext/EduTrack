@@ -489,8 +489,37 @@ public final class ResourceDtos {
     }
 
     // ------------------------------------------------------------------
-    // Bulk activate / deactivate
+    // Activate / deactivate — one resource, and a selection
     // ------------------------------------------------------------------
+
+    /**
+     * B-014 · the body of {@code PATCH /users/{userId}/status}.
+     *
+     * <p>Same two fields as {@link BulkStatusRequest} minus the ids, and
+     * {@code isActive} is boxed for the same reason: an omitted flag must be a
+     * 400 naming the field, not a silent {@code false} that deactivates
+     * somebody.
+     *
+     * <p><b>{@code reason} is accepted, validated and not persisted yet</b>, and
+     * that is deliberate rather than overlooked. The place it belongs is
+     * {@code audit_logs} — the table and {@code domain.audit.AuditLog} both
+     * exist — but nothing in this repository writes a row to it, and
+     * {@code actor_id} wants a principal that {@code dev-noauth} does not
+     * supply. Introducing the first writer to a shared audit table from a
+     * masters branch, with a null actor, would make the audit trail's first
+     * entries the ones nobody can attribute. Dropping the field from the
+     * contract instead would mean re-adding it later as a breaking change to
+     * every client that had learned to omit it. <b>Flagged for Stream A</b>
+     * with A-016; this route starts recording the moment there is a writer and
+     * an actor.
+     */
+    public record StatusRequest(
+            @NotNull(message = "say which way to set it")
+            Boolean isActive,
+
+            @Size(max = 500)
+            String reason) {
+    }
 
     /**
      * {@code BulkUserStatusRequest}.
@@ -527,9 +556,10 @@ public final class ResourceDtos {
         UNCHANGED,
 
         /**
-         * Holds open tickets and was being deactivated. Left active — the
-         * reassignment wizard (B-014) runs first, through
-         * {@code POST /tickets/bulk-reassign}.
+         * Holds open tickets and was being deactivated. Left active — the S-24
+         * reassignment wizard (Stream C's C-063) runs first, through
+         * {@code POST /tickets/bulk-reassign}, and then
+         * {@code PATCH /users/{userId}/status} finishes the job.
          */
         BLOCKED_OPEN_TICKETS,
 

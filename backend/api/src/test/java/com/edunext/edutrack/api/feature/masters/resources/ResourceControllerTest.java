@@ -8,6 +8,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -21,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -325,6 +327,78 @@ class ResourceControllerTest {
                     "EMP-0042", "Engineering", "Developer", null, List.of(), List.of(),
                     true, 0, null, null, null, null, null, null, "Asia/Kolkata",
                     new java.math.BigDecimal("8.00"), null, List.of(), List.of(), true);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // B-014 · the singular status route
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("PATCH /users/{userId}/status")
+    class SingularStatus {
+
+        /**
+         * The defect this task closed, stated as a test.
+         *
+         * <p>{@code setUserStatus} was in the contract from the first draft, the
+         * MSW mock answered it from B-010, and three javadocs in this package
+         * described what it refused. No server ever mounted it — a {@code PATCH}
+         * to the path met {@code /{userId}}'s sibling mapping and came back 405.
+         * Nothing failed, because the operation had no caller until the
+         * deactivation flow needed one.
+         *
+         * <p>{@code MasterRoutesTest} could not have caught it: it asserts where
+         * <i>classes</i> are mounted, and this was a missing <i>method</i>. The
+         * path is asserted as a literal rather than derived, so a well-meaning
+         * rename to {@code /{userId}/active} fails here instead of silently
+         * moving an operation the contract still promises.
+         */
+        @Test
+        @DisplayName("is mounted at the path the contract names")
+        void isMountedWhereTheContractSaysItIs() throws NoSuchMethodException {
+            assertThat(ResourceController.class
+                    .getDeclaredMethod("setStatus", long.class, ResourceDtos.StatusRequest.class)
+                    .getAnnotation(org.springframework.web.bind.annotation.PatchMapping.class)
+                    .path())
+                    .containsExactly("/{userId}/status");
+        }
+
+        @Test
+        @DisplayName("answers 204 with no body")
+        void answersNoContent() {
+            ResponseEntity<Void> result = controller.setStatus(7L, new ResourceDtos.StatusRequest(false, null));
+
+            assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+            assertThat(result.getBody()).isNull();
+        }
+
+        @Test
+        @DisplayName("the path id and the body flag both reach the service")
+        void delegatesBothArguments() {
+            controller.setStatus(7L, new ResourceDtos.StatusRequest(true, "back from sabbatical"));
+
+            verify(service).setStatus(7L, true);
+        }
+
+        /**
+         * Not a placeholder — a boundary somebody will otherwise cross by
+         * accident.
+         *
+         * <p>{@code reason} is on the contract and is not persisted anywhere
+         * yet: {@code audit_logs} has no writer in this repository and
+         * {@code actor_id} wants a principal {@code dev-noauth} does not supply.
+         * The risk is that a reader assumes the field is recorded because it is
+         * accepted. This asserts the service is never told about it, so the day
+         * somebody wires it up they change a test that says why it was not.
+         */
+        @Test
+        @DisplayName("reason is accepted and goes nowhere — deliberately, until A-016")
+        void reasonIsNotYetRecorded() {
+            controller.setStatus(7L, new ResourceDtos.StatusRequest(false, "left the organisation"));
+
+            verify(service).setStatus(7L, false);
+            verifyNoMoreInteractions(service);
         }
     }
 }

@@ -9,7 +9,8 @@ search, bulk activate/deactivate, and an export. `/masters/resources/new` and
 | `ResourceListPage.tsx` | The S-07 screen |
 | `columns.tsx` | The S-07 columns, in blueprint §7.4's order, including the Edit action |
 | `useResourceFilters.ts` | Filter state, held in the URL |
-| `BulkStatusBar.tsx` | The selection bar and the per-resource results dialog |
+| `BulkStatusBar.tsx` | The selection bar, the pre-flight deactivation dialog and the per-resource results dialog |
+| `reassignHandoff.ts` | **The handoff contract with Stream C's S-24 wizard** — see below |
 | `ResourceFormPage.tsx` | The S-08 form — Personal · Access · Org · Work · Projects |
 | `resourceForm.ts` | The form's shape, its Zod schema and the two translations |
 | `resourceQueries.ts` | The read with its `ETag`, and the two writes |
@@ -120,10 +121,63 @@ reapply", so it gets the banner.
   a `409` on the field. Excluding the subtree in the dropdown would mean holding
   the organisation's reporting graph in the browser and keeping it fresh, to
   pre-empt a rare mistake that already has a clear answer.
-- **The reassignment wizard (B-014).** Deactivating somebody who holds open
-  tickets is refused with a count, exactly as the grid refuses it.
+- **The reassignment wizard.** Unticking Active on somebody who holds open
+  tickets is refused with a count, exactly as the grid refuses it, and B-014
+  turned that refusal into a link into S-24 — but S-24 is Stream C's C-063 and
+  none of it is built here.
 - **Profile photo upload.** S-08 says "Profile photo"; the field takes a URL,
   because attachment storage is A-016 and there is nothing to upload to yet.
+
+## B-014 · deactivation is a three-legged flow
+
+Blueprint §S-07 says deactivating somebody with open tickets **forces** the bulk
+reassignment wizard. This screen owns two of the three legs; Stream C's C-063
+owns the middle one.
+
+1. **Refuse before the request.** The grid already carries every row's
+   open-ticket count, so `DeactivationConfirmDialog` names who is blocked
+   *before* a round trip is spent being told what was on screen. A selection
+   with nobody blocked gets **no dialog at all** — the common case must not grow
+   a confirmation step.
+2. **Hand off.** Each blocked person links into S-24 with themselves
+   preselected. `reassignHandoff.ts` builds it.
+3. **Resume.** Arriving at `/masters/resources?deactivate=<id>` finishes the
+   interrupted job through `PATCH /users/{id}/status`. Without this leg the
+   admin comes back to a grid where the person is still active and nothing
+   explains why — indistinguishable from the feature not working.
+
+### The contract with Stream C
+
+Two query parameters on `/tickets/bulk-reassign`, both optional from the
+wizard's side:
+
+| Parameter | What it does |
+|---|---|
+| `fromUserId` | Preselects step one. The admin has already said who they are removing; asking again turns a handoff into a fresh task. |
+| `returnTo` | An app-relative path to return to. Ours carries `?deactivate=<id>`, which is what makes the return leg finish the job. |
+
+**A wizard that ignores both still works** — it starts empty and returns
+nowhere. That is deliberate: a source screen that breaks because the destination
+shipped a stage late is worse than one that degrades.
+
+`isSafeReturnPath` is exported for the wizard to use on the way back.
+`navigate(searchParams.get('returnTo'))` reads as obviously fine and is an open
+redirect; the check exists so that nobody has to think of it under deadline.
+
+`/tickets/bulk-reassign` is registered in `App.tsx` as a `ScreenPlaceholder`
+until C-063 lands, following the precedent already set there for the project
+dashboard, client 360 and resource profile: an unbuilt screen and a broken link
+look identical to a user, and only one of them is worth reporting. **One line in
+a shared file, flagged for Stream C.**
+
+### Why the pre-flight check is not the authority
+
+Counts are a snapshot. A colleague can close the last ticket, or open a new one,
+between the page rendering and the button being clicked — and rows selected on
+an earlier page are not in `resources` at all, so their counts are unknown here.
+Both cases go to the server unchecked and come back through
+`BulkStatusResultDialog`, which carries the same reassignment links. The
+server's guard is the truth; this is the fast path.
 
 ## `FormField.tsx` is duplicated, on purpose
 
