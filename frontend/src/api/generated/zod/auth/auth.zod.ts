@@ -61,7 +61,7 @@ only *after* correct credentials, for the same reason.
 
  * @summary Exchange credentials for an access token
  */
-export const loginBodyUsernameMax = 100;
+export const loginBodyUsernameMax = 150;
 
 
 export const loginBodyTotpCodeRegExp = new RegExp('^\\d{6}$');

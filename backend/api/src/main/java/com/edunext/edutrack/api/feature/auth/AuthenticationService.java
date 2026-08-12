@@ -101,18 +101,24 @@ class AuthenticationService {
     }
 
     /**
-     * Verifies a username and password and resolves the caller's scope.
+     * Verifies a login identifier and password and resolves the caller's scope.
      *
      * <p>Read-only: A-020 writes nothing. {@code last_login_at} and the
      * {@code failed_attempts} reset belong with A-021's counter, and the
      * {@code LOGIN_SUCCESS} audit row with A-071 — putting a write here now
      * would mean a second, competing update path once those land.
      *
+     * <p>{@code identifier} is a username <i>or</i> an email address: S-01
+     * (blueprint §7.1) specifies one field accepting either, and resolving it
+     * is {@link AuthUserRepository#findByLoginIdentifier}'s job rather than this
+     * method's — the choice of column is a data-access concern, and doing it
+     * here would put a second copy of the rule in front of every future caller.
+     *
      * @throws InvalidCredentialsException on every failure, without saying which
      */
     @Transactional(readOnly = true)
-    AuthenticatedUser authenticate(String username, String rawPassword, String totpCode) {
-        AuthUserRow user = users.findByUsername(username).orElse(null);
+    AuthenticatedUser authenticate(String identifier, String rawPassword, String totpCode) {
+        AuthUserRow user = users.findByLoginIdentifier(identifier).orElse(null);
 
         // Both branches run the full KDF. Do not "optimise" this into an early
         // return when `user` is null — that is the enumeration oracle.

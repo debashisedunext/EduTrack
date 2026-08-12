@@ -24,16 +24,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * A-020 · the two properties blueprint §10.1 asks for, asserted directly:
+ * A-020 Â· the two properties blueprint Â§10.1 asks for, asserted directly:
  * every failure looks the same, and every failure <i>costs</i> the same.
  *
  * <p>The encoder is a mock rather than the real Argon2id one. That is not to
- * make the test fast — it is because the property under test is <b>whether the
+ * make the test fast â€” it is because the property under test is <b>whether the
  * KDF is invoked at all</b> on each path, which a mock can witness and a real
  * encoder cannot. {@link PasswordHashingTest} covers the real algorithm.
  *
  * <p>Timing is asserted structurally rather than with a stopwatch: a wall-clock
- * comparison of two code paths is the classic flaky test — it fails on a loaded
+ * comparison of two code paths is the classic flaky test â€” it fails on a loaded
  * CI runner and passes on a laptop, so it gets muted, and then the property is
  * unguarded. "The same work happens on both paths" is the same guarantee,
  * deterministically.
@@ -56,8 +56,8 @@ class AuthenticationServiceTest {
         encoder = mock(PasswordEncoder.class);
         attempts = mock(LoginAttemptRecorder.class);
         when(encoder.encode(anyString())).thenReturn(DECOY_HASH);
-        // A-028 · mocked, so isExpired answers false — the same thing the real
-        // policy does while §10.3's optional expiry is switched off, which is
+        // A-028 Â· mocked, so isExpired answers false â€” the same thing the real
+        // policy does while Â§10.3's optional expiry is switched off, which is
         // the default and therefore what this suite should see. The expiry
         // behaviour itself is PasswordPolicyTest's subject.
         passwordPolicy = mock(PasswordPolicy.class);
@@ -75,19 +75,19 @@ class AuthenticationServiceTest {
                 Instant.now(), null, false, failedAttempts, lockedUntil);
     }
 
-    // ── the enumeration oracle this task exists to close ────────────────────
+    // â”€â”€ the enumeration oracle this task exists to close â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
     @DisplayName("an unknown username still costs a full hash verification")
     void unknownUserIsVerifiedAgainstTheDecoyHash() {
-        when(users.findByUsername("ghost")).thenReturn(Optional.empty());
+        when(users.findByLoginIdentifier("ghost")).thenReturn(Optional.empty());
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
                 .isThrownBy(() -> service.authenticate("ghost", "whatever", null));
 
         // The assertion that matters. An early `return` for a missing user
         // answers in microseconds where a real user costs ~100 ms, and that
-        // difference is measurable remotely — it turns the login form into a
+        // difference is measurable remotely â€” it turns the login form into a
         // staff directory.
         verify(encoder).matches("whatever", DECOY_HASH);
     }
@@ -95,7 +95,7 @@ class AuthenticationServiceTest {
     @Test
     @DisplayName("the decoy hash is computed once, at construction, not per attempt")
     void decoyHashIsBuiltOnce() {
-        when(users.findByUsername(anyString())).thenReturn(Optional.empty());
+        when(users.findByLoginIdentifier(anyString())).thenReturn(Optional.empty());
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
                 .isThrownBy(() -> service.authenticate("ghost", "a", null));
@@ -108,12 +108,12 @@ class AuthenticationServiceTest {
         verify(encoder, times(1)).encode(anyString());
     }
 
-    // ── every failure is indistinguishable ──────────────────────────────────
+    // â”€â”€ every failure is indistinguishable â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
     @DisplayName("a wrong password fails exactly as an unknown user does")
     void wrongPasswordFailsIdentically() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true)));
         when(encoder.matches("wrong", STORED_HASH)).thenReturn(false);
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
@@ -124,7 +124,7 @@ class AuthenticationServiceTest {
     @Test
     @DisplayName("a deactivated account fails identically, even with the right password")
     void deactivatedAccountFailsIdentically() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(false)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(false)));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
@@ -140,7 +140,7 @@ class AuthenticationServiceTest {
     @Test
     @DisplayName("no failure path loads permissions, projects or reportees")
     void failedAttemptsDoNoScopeWork() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true)));
         when(encoder.matches(anyString(), eq(STORED_HASH))).thenReturn(false);
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
@@ -153,12 +153,12 @@ class AuthenticationServiceTest {
         verify(users, never()).findReporteeIdsByManagerId(anyLong());
     }
 
-    // ── the success path ────────────────────────────────────────────────────
+    // â”€â”€ the success path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
-    @DisplayName("a valid login resolves the §10.1 claim set")
+    @DisplayName("a valid login resolves the Â§10.1 claim set")
     void validLoginResolvesScope() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true)));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
         when(users.findPermissionCodesByRoleId(3)).thenReturn(List.of("ticket.read", "ticket.update"));
         when(users.findProjectIdsByUserId(7L)).thenReturn(List.of(11L, 12L));
@@ -176,13 +176,13 @@ class AuthenticationServiceTest {
         assertThat(user.reporteeIds()).isEmpty();
     }
 
-    // ── A-021 · lockout ─────────────────────────────────────────────────────
+    // â”€â”€ A-021 Â· lockout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
     @DisplayName("a wrong password against a real user is counted")
     void wrongPasswordIsRecorded() {
         AuthUserRow user = row(true);
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(user));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(user));
         when(encoder.matches("wrong", STORED_HASH)).thenReturn(false);
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
@@ -192,9 +192,9 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    @DisplayName("an unknown username is never counted — there is no row, and counting one would leak existence")
+    @DisplayName("an unknown username is never counted â€” there is no row, and counting one would leak existence")
     void unknownUserIsNotRecorded() {
-        when(users.findByUsername("ghost")).thenReturn(Optional.empty());
+        when(users.findByLoginIdentifier("ghost")).thenReturn(Optional.empty());
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
                 .isThrownBy(() -> service.authenticate("ghost", "whatever", null));
@@ -205,7 +205,7 @@ class AuthenticationServiceTest {
     @Test
     @DisplayName("a deactivated account is not counted towards a lock it cannot benefit from")
     void deactivatedAccountIsNotRecorded() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(false)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(false)));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
@@ -218,7 +218,7 @@ class AuthenticationServiceTest {
     @DisplayName("a locked account with the CORRECT password gets 423, carrying the expiry")
     void lockedAccountWithCorrectPasswordIsReported() {
         Instant lockedUntil = Instant.now().plus(Duration.ofMinutes(10));
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true, 0, lockedUntil)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true, 0, lockedUntil)));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
 
         assertThatExceptionOfType(AccountLockedException.class)
@@ -227,14 +227,14 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    @DisplayName("a locked account with the WRONG password is still just 401 — the lock is never revealed")
+    @DisplayName("a locked account with the WRONG password is still just 401 â€” the lock is never revealed")
     void lockedAccountWithWrongPasswordStaysGeneric() {
         Instant lockedUntil = Instant.now().plus(Duration.ofMinutes(10));
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true, 3, lockedUntil)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true, 3, lockedUntil)));
         when(encoder.matches("wrong", STORED_HASH)).thenReturn(false);
 
         // Revealing the lock here would confirm the account exists to someone
-        // who has not proved they own it — the enumeration oracle again.
+        // who has not proved they own it â€” the enumeration oracle again.
         assertThatExceptionOfType(InvalidCredentialsException.class)
                 .isThrownBy(() -> service.authenticate("asha.rao", "wrong", null));
     }
@@ -243,7 +243,7 @@ class AuthenticationServiceTest {
     @DisplayName("a lapsed lock lets the user straight back in, with no job needed to clear it")
     void expiredLockDoesNotBlock() {
         Instant expired = Instant.now().minus(Duration.ofMinutes(1));
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true, 0, expired)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true, 0, expired)));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
         when(users.findPermissionCodesByRoleId(3)).thenReturn(List.of());
         when(users.findProjectIdsByUserId(7L)).thenReturn(List.of());
@@ -256,7 +256,7 @@ class AuthenticationServiceTest {
     @DisplayName("a successful login clears the counter")
     void successClearsTheCounter() {
         AuthUserRow user = row(true, 3, null);
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(user));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(user));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
         when(users.findPermissionCodesByRoleId(3)).thenReturn(List.of());
         when(users.findProjectIdsByUserId(7L)).thenReturn(List.of());
@@ -270,7 +270,7 @@ class AuthenticationServiceTest {
     @Test
     @DisplayName("the password hash never reaches the result")
     void resultCarriesNoHash() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true)));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
         when(users.findPermissionCodesByRoleId(3)).thenReturn(List.of());
         when(users.findProjectIdsByUserId(7L)).thenReturn(List.of());
@@ -283,19 +283,19 @@ class AuthenticationServiceTest {
         assertThat(user.toString()).doesNotContain(STORED_HASH);
     }
 
-    // ── A-029 · where the TOTP challenge sits in the sequence ───────────────
+    // â”€â”€ A-029 Â· where the TOTP challenge sits in the sequence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
      * <b>The ordering guarantee, and the reason this test exists.</b> A
      * "this account needs a code" answer given before the password verifies
-     * confirms both that the account exists and that it is protected — a list of
+     * confirms both that the account exists and that it is protected â€” a list of
      * exactly whom to phish. The challenge must never be reached by someone who
      * failed the password.
      */
     @Test
     @DisplayName("a wrong password never reaches the two-factor challenge")
     void aWrongPasswordNeverReachesTheChallenge() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true)));
         when(encoder.matches("wrong", STORED_HASH)).thenReturn(false);
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
@@ -304,11 +304,11 @@ class AuthenticationServiceTest {
         verify(twoFactor, never()).verifyForLogin(any(), anyString());
     }
 
-    /** Nor an unknown username — there is no account whose protection to reveal. */
+    /** Nor an unknown username â€” there is no account whose protection to reveal. */
     @Test
     @DisplayName("an unknown username never reaches the two-factor challenge")
     void anUnknownUserNeverReachesTheChallenge() {
-        when(users.findByUsername(anyString())).thenReturn(Optional.empty());
+        when(users.findByLoginIdentifier(anyString())).thenReturn(Optional.empty());
 
         assertThatExceptionOfType(InvalidCredentialsException.class)
                 .isThrownBy(() -> service.authenticate("ghost", "whatever", "123456"));
@@ -324,7 +324,7 @@ class AuthenticationServiceTest {
     @Test
     @DisplayName("a locked account is refused before the two-factor challenge")
     void aLockedAccountIsRefusedBeforeTheChallenge() {
-        when(users.findByUsername("asha.rao"))
+        when(users.findByLoginIdentifier("asha.rao"))
                 .thenReturn(Optional.of(row(true, 5, Instant.now().plusSeconds(600))));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
 
@@ -337,7 +337,7 @@ class AuthenticationServiceTest {
     @Test
     @DisplayName("a correct password reaches the challenge, carrying the submitted code")
     void aCorrectPasswordReachesTheChallenge() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true)));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
         when(users.findPermissionCodesByRoleId(3)).thenReturn(List.of());
         when(users.findProjectIdsByUserId(7L)).thenReturn(List.of());
@@ -357,7 +357,7 @@ class AuthenticationServiceTest {
     @Test
     @DisplayName("a failed two-factor challenge does not clear the failure counter")
     void aFailedChallengeDoesNotClearTheLockoutCounter() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true)));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
         org.mockito.Mockito.doThrow(new InvalidTotpCodeException())
                 .when(twoFactor).verifyForLogin(any(), anyString());
@@ -369,14 +369,14 @@ class AuthenticationServiceTest {
     }
 
     /**
-     * A refused challenge must not produce a session either — the token is minted
+     * A refused challenge must not produce a session either â€” the token is minted
      * from what this method returns, so leaking past the challenge is a login
      * with no second factor at all.
      */
     @Test
     @DisplayName("a missing code stops the login before any session is resolved")
     void aMissingCodeStopsTheLogin() {
-        when(users.findByUsername("asha.rao")).thenReturn(Optional.of(row(true)));
+        when(users.findByLoginIdentifier("asha.rao")).thenReturn(Optional.of(row(true)));
         when(encoder.matches("right", STORED_HASH)).thenReturn(true);
         org.mockito.Mockito.doThrow(new TwoFactorRequiredException())
                 .when(twoFactor).verifyForLogin(any(), any());
