@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 
 import { AuthAlert, AuthField, AuthNotice } from './AuthField';
 import { AuthCard } from './AuthCard';
-import { useAuthStore } from './authStore';
+import { renderableLanding, useAuthStore } from './authStore';
 import {
   ACCOUNT_LOCKED,
   INVALID_CREDENTIALS,
@@ -65,6 +65,19 @@ export function LoginPage() {
  * ticket, not the dashboard, and losing it makes the login feel like it undid
  * the click. `landingRoute` is A-031's, decided server-side, and is the answer
  * when there is no such URL.
+ *
+ * **The server's route goes through `renderableLanding` here, not only in the
+ * store.** `authStore` guards the copy it keeps — which is what S-03 reads after
+ * a forced password change — but this navigate happens with the value straight
+ * off the response, so a guard applied only in the store would miss the single
+ * most common path through it: an ordinary sign-in. QA and Deployment are
+ * mapped to `/stages/queue` (C-062, not in the router yet), so without this they
+ * land on the not-found placeholder every time.
+ *
+ * `from` is deliberately *not* guarded. It is a route this router already
+ * matched — that is how the user reached `RequireAuth` in the first place — and
+ * putting it through a list of landing destinations would send anyone who
+ * followed a link to a ticket to the dashboard instead.
  */
 function useAfterLogin() {
   const navigate = useNavigate();
@@ -75,7 +88,7 @@ function useAfterLogin() {
     (landingRoute: string | undefined) => {
       // `replace`, so Back from the landing page does not return to a login
       // screen the user has already cleared.
-      navigate(from ?? landingRoute ?? '/dashboard', { replace: true });
+      navigate(from ?? renderableLanding(landingRoute), { replace: true });
     },
     [navigate, from],
   );
