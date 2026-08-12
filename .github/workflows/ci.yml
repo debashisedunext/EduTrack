@@ -3,22 +3,106 @@
 
 name: CI
 
+# ── Why this file is shaped around cost ──────────────────────────────────────
+#
+# The account is on the GitHub Free tier: 2,000 Actions minutes a month for a
+# private repo, which is about 91 minutes per working day. In the two days to
+# 11 Aug this workflow spent 1,202 minutes and the allowance ran out mid-sprint
+# — every job since has been refused before its first step, on every branch.
+#
+# Three things were paying for nothing:
+#
+#   1. A docs-only commit ran the whole pipeline. A quarter of all runs were
+#      `chore(plan)` schedule refreshes compiling Java because a Gantt chart
+#      moved.
+#   2. Every change was verified twice — once on the PR, then identically again
+#      on the merge push 30 seconds later.
+#   3. Every intermediate push to an in-progress branch cost a full run.
+#
+# Hence: paths-ignore, a PR-only test pass with the merge push proving only the
+# combined jar, per-path job gating, and no CI on drafts. Roughly 600 min/day
+# to roughly 72.
+#
+# If the team outgrows this, the answer is a self-hosted runner (free and
+# unlimited on any tier) rather than trimming further. Note that the `backend`
+# job needs `services:` containers, which only run on a Linux runner.
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   pull_request:
     branches: [develop, main]
+    # `ready_for_review` is NOT in the default set (opened, synchronize,
+    # reopened). Without it, the draft guard below would be a trap: a developer
+    # marks a draft ready and CI never fires, so the PR sits looking unverified
+    # forever and the one run that matters is the one we skipped.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore: ['docs/**', '**/*.md']
   push:
     branches: [develop, main]
+    paths-ignore: ['docs/**', '**/*.md']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # ---------------------------------------------------------------- changes
+  # Which areas a PR actually touches, so a Tailwind tweak does not start MySQL
+  # and Redis. Costs well under a minute and saves about nine on the average PR.
+  #
+  # Deliberately not a third-party action: this is ten lines of git, and a
+  # supply-chain dependency to compute a diff is a poor trade.
+  #
+  # It also carries the draft guard for the whole workflow — every test job
+  # needs this one, so skipping it here skips them all in one place.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      contract: ${{ steps.filter.outputs.contract }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "$FILES"
+
+          match() { echo "$FILES" | grep -qE "$1" && echo true || echo false; }
+
+          # contracts/ feeds both the Java DTOs and the generated TS client, so
+          # it appears in more than one area on purpose.
+          BACKEND=$(match '^(backend/|contracts/)')
+          FRONTEND=$(match '^frontend/')
+          CONTRACT=$(match '^(contracts/|frontend/src/api/)')
+
+          # Anything outside the four known trees — this workflow, the Makefile,
+          # docker-compose.yml, a root pom — could affect any area, so run the
+          # lot. Without this the filter fails OPEN: a PR touching only
+          # .github/workflows/ci.yml matches nothing, every job is skipped, and
+          # the PR goes green having tested precisely nothing. Found by running
+          # this filter over real commits before trusting it.
+          OTHER=$(echo "$FILES" | grep -vE '^(backend/|frontend/|contracts/|docs/)' || true)
+          if [ -n "$OTHER" ]; then
+            echo "Changed outside the known areas — running everything:"
+            echo "$OTHER"
+            BACKEND=true; FRONTEND=true; CONTRACT=true
+          fi
+
+          echo "backend=$BACKEND"   >> "$GITHUB_OUTPUT"
+          echo "frontend=$FRONTEND" >> "$GITHUB_OUTPUT"
+          echo "contract=$CONTRACT" >> "$GITHUB_OUTPUT"
+
   # ---------------------------------------------------------------- guard
   migration-guard:
     name: Migration guard
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     steps:
       - uses: actions/checkout@v5
         with:
@@ -52,9 +136,20 @@ jobs:
           echo "✓ Migration naming is correct."
 
   # ---------------------------------------------------------------- backend
+  # PR-only, here and in `frontend` and `contract`. A `pull_request` run already
+  # tests the *merge result* (refs/pull/N/merge), not the branch head — so the
+  # push run that fired seconds after the merge was re-proving a green result.
+  # The merge push now runs `package` alone, which is the one check a PR never
+  # performs.
+  #
+  # What this gives up: if `develop` moves between the PR run and the merge, a
+  # semantic conflict is caught by `package`'s compile-and-boot rather than by
+  # the test suite. Accepted deliberately — the alternative costs 240 min/day.
   backend:
     name: Backend — build & test
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     services:
       mysql:
         image: mysql:8.4
@@ -102,6 +197,8 @@ jobs:
   frontend:
     name: Frontend — lint, test & build
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -126,6 +223,8 @@ jobs:
   contract:
     name: OpenAPI contract — validity, conventions, staleness
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.contract == 'true'
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -177,7 +276,15 @@ jobs:
   package:
     name: Package — single deployable jar
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    # No `needs:` — and that is load-bearing, not an omission.
+    #
+    # This job runs only on push, and `backend`/`frontend` now run only on
+    # pull_request. A skipped dependency skips the dependent job, so keeping
+    # `needs: [backend, frontend]` would mean this never runs again — the sole
+    # check on the merge commit, silently gone, with the workflow still green.
+    #
+    # Nothing is lost by dropping it: the two jobs it waited for cannot be
+    # running at this point, and this job builds everything from source anyway.
     if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v5
