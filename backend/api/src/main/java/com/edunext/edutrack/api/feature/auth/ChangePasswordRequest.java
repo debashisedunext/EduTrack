@@ -39,7 +39,7 @@ record ChangePasswordRequest(
         String currentPassword,
 
         @NotBlank
-        @Size(min = 8, max = 128)
+        @Size(min = PasswordComplexity.MIN_LENGTH, max = PasswordComplexity.MAX_LENGTH)
         @ValidPassword
         @Schema(description = "The replacement. Must differ from the current password, must not "
                 + "match one of the last few used, and must contain an upper-case letter, a "

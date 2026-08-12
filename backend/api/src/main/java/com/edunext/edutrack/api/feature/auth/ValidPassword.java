@@ -38,6 +38,15 @@ import java.lang.annotation.Target;
  * missing, which is the difference between a form someone can complete and one
  * they abandon.
  *
+ * <h2>Where the rule itself lives</h2>
+ *
+ * <p>{@link PasswordComplexity}, since B-013. This annotation is how a
+ * <i>request field</i> opts into §10.3; the class is the rule, and it is public
+ * because Stream B's Resource Master generates temporary passwords and has to
+ * produce strings this would accept. This annotation stays package-private —
+ * nothing outside {@code feature.auth} annotates a field with it, and a caller
+ * that needs the policy needs to ask it rather than declare it.
+ *
  * <h2>Where the bounds live</h2>
  *
  * <p>Length stays on {@code @Size} at the field, because 8–128 is the contract's

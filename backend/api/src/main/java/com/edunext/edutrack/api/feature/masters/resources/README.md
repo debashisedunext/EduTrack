@@ -206,6 +206,27 @@ symbols. This string gets read off a screen, pasted into a chat window and typed
 into a login box, and a failed first login on a fresh account looks exactly like
 a provisioning bug.
 
+### The generator and the policy are one rule (B-013)
+
+§10.3 has a single statement in Java: `feature.auth.PasswordComplexity`. The
+validator applies it to a password somebody typed; `TemporaryPasswordsTest`
+asserts every generated password against the same class.
+
+The duplication this removes was **silent**. Nothing re-checks composition at
+login, so a policy strengthened in `feature.auth` with the generator left behind
+would fail no request and no build — the organisation would go on issuing
+temporary passwords its own rules reject, and the discovery would be an
+auditor's question rather than a red suite.
+
+The alphabets above are **not** shared, and should not be. The policy says what
+is permitted; the generator is deliberately narrower, for reasons that apply to
+a password somebody has to transcribe and to nothing a user chooses for
+themselves.
+
+`feature/auth` is Stream A's path — that edit is one new file plus a delegation,
+changes nothing about what auth accepts, and is flagged for their sign-off in
+`STREAM-B-MASTERS.md`.
+
 ### The form cannot get round the status route's guard
 
 `PATCH /users/{id}` refuses to deactivate somebody holding open tickets, exactly
