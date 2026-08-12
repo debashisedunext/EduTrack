@@ -192,6 +192,59 @@ class ResourceFormIT {
                             ((ResourceWriteService.DuplicateResourceException) e).fieldErrors())
                             .containsOnlyKeys("username"));
         }
+
+        /**
+         * B-013 · the check has to agree with the index, and the index is
+         * case-insensitive.
+         *
+         * <p>{@code uq_users_username} is over a {@code utf8mb4_0900_ai_ci}
+         * column, so {@code ITFRM.CASED} and {@code itfrm.cased} are one
+         * username as far as MySQL is concerned. If the service check were
+         * case-<i>sensitive</i> it would pass the second create, and the row
+         * would then be refused by the index — which arrives as a
+         * {@code DuplicateKeyException} with a constraint name in it rather than
+         * the field-keyed 409 the form knows how to display. Same refusal
+         * either way, but only one of them puts the message on the input.
+         *
+         * <p>Exercised against a real container rather than a mock precisely
+         * because the claim is about the collation. A unit test would be
+         * asserting Java's {@code equalsIgnoreCase} against itself.
+         */
+        @Test
+        @DisplayName("a username differing only in case is the same username, as the index sees it")
+        void duplicateDetectionIsCaseInsensitive() {
+            service.create(request("ITFRM006", "itfrm.cased", "DEVELOPER"));
+
+            ResourceDtos.ResourceWriteRequest shouted = request("ITFRM007", "ITFRM.CASED", "DEVELOPER");
+            shouted.setEmail("itfrm.shouted@edunext.test");
+
+            assertThatThrownBy(() -> service.create(shouted))
+                    .isInstanceOf(ResourceWriteService.DuplicateResourceException.class)
+                    .satisfies(e -> assertThat(
+                            ((ResourceWriteService.DuplicateResourceException) e).fieldErrors())
+                            .containsOnlyKeys("username"));
+        }
+
+        /**
+         * B-013 · all three at once, against the database rather than a stubbed
+         * {@code Conflicts}.
+         *
+         * <p>The reason the query names all three instead of stopping at the
+         * first: an admin who fixes the username and resubmits should not then be
+         * told about the email, and again about the employee code. One round of
+         * correction rather than three.
+         */
+        @Test
+        @DisplayName("a create colliding on all three fields names all three")
+        void everyCollidingFieldIsNamedAtOnce() {
+            service.create(request("ITFRM008", "itfrm.triple", "DEVELOPER"));
+
+            assertThatThrownBy(() -> service.create(request("ITFRM008", "itfrm.triple", "DEVELOPER")))
+                    .isInstanceOf(ResourceWriteService.DuplicateResourceException.class)
+                    .satisfies(e -> assertThat(
+                            ((ResourceWriteService.DuplicateResourceException) e).fieldErrors())
+                            .containsOnlyKeys("username", "email", "employeeCode"));
+        }
     }
 
     // ------------------------------------------------------------------
@@ -230,6 +283,55 @@ class ResourceFormIT {
             assertThat(after.department()).isEqualTo("Platform");
             assertThat(after.location()).isEqualTo("Pune");
             assertThat(after.skills()).containsExactly("Java");
+        }
+
+        /**
+         * B-013 · a resource does not collide with themselves.
+         *
+         * <p>{@code FIND_CONFLICTS} carries {@code u.id <> ?} for exactly this,
+         * and until now nothing asserted it. Every edit that leaves the three
+         * unique fields alone — which is nearly every edit, since S-08 sends the
+         * whole form back — re-submits the resource's own username, email and
+         * employee code. Without the exclusion the very first "change the
+         * department and save" would be refused with "that username is already
+         * taken", naming the row being edited.
+         *
+         * <p>Sits here rather than in {@code ResourceWriteServiceTest} because a
+         * mocked {@code findConflicts} answers whatever it was told to; the
+         * exclusion is in the SQL, so only the database can be asked.
+         */
+        @Test
+        @DisplayName("re-submitting a resource's own username, email and emp code is not a conflict")
+        void aResourceDoesNotCollideWithItself() {
+            ResourceDtos.ResourceWriteRequest unchanged =
+                    request("ITFRM010", "itfrm.subject", "DEVELOPER");
+            unchanged.setDepartment(Optional.of("Platform"));
+
+            assertThat(service.update(service.detail(userId), unchanged).department())
+                    .isEqualTo("Platform");
+        }
+
+        /**
+         * B-013 · the exclusion is for the edited row only, not a way past the
+         * check. Somebody else's username is still taken.
+         */
+        @Test
+        @DisplayName("editing onto another resource's username is still a conflict")
+        void anotherResourcesUsernameIsStillTaken() {
+            service.create(request("ITFRM011", "itfrm.occupied", "DEVELOPER"));
+
+            ResourceDtos.ResourceWriteRequest steal =
+                    request("ITFRM010", "itfrm.occupied", "DEVELOPER");
+            // Email follows the username in `request`, so without this the test
+            // would assert two conflicts while claiming to be about one.
+            steal.setEmail("itfrm.subject@edunext.test");
+
+            ResourceDtos.ResourceDetail current = service.detail(userId);
+            assertThatThrownBy(() -> service.update(current, steal))
+                    .isInstanceOf(ResourceWriteService.DuplicateResourceException.class)
+                    .satisfies(e -> assertThat(
+                            ((ResourceWriteService.DuplicateResourceException) e).fieldErrors())
+                            .containsOnlyKeys("username"));
         }
 
         @Test

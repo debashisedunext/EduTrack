@@ -10,11 +10,21 @@ import java.util.List;
  * <p>Blueprint §10.3 sets the rules it has to satisfy: at least 8 characters
  * with an upper-case letter, a lower-case letter, a digit and a symbol. Those
  * rules are enforced on user-chosen passwords by {@code @ValidPassword}, which
- * is package-private in {@code feature.auth} and validates a request field —
- * neither of which helps a generator. What this class must guarantee instead is
- * that <b>every</b> string it produces would pass that annotation, and
+ * validates a request field — no help to a generator, which has to produce a
+ * satisfying string rather than recognise one. What this class must guarantee
+ * instead is that <b>every</b> string it produces would pass, and
  * {@code TemporaryPasswordsTest} asserts exactly that over a few thousand
  * samples rather than trusting the construction.
+ *
+ * <p><b>B-013 made that assertion run against the real rule.</b> It used to run
+ * against a restatement of §10.3 in the test itself, so the two could be
+ * strengthened apart without anything failing — and the drift would have been
+ * invisible, because nothing re-checks composition at login. The test now calls
+ * {@link com.edunext.edutrack.api.feature.auth.PasswordComplexity}, which is the
+ * same rule {@code @ValidPassword} applies. <b>The alphabets below are still the
+ * generator's own</b>, and deliberately narrower than the policy: the policy
+ * says what is permitted, and the paragraphs that follow say why a password
+ * somebody has to read off a screen should use less than all of it.
  *
  * <h2>Why the alphabets have holes in them</h2>
  *
@@ -40,6 +50,11 @@ import java.util.List;
  * is transcription, which the alphabet choice above already addresses, and the
  * benefit is that a password sitting in an inbox until somebody gets round to
  * logging in is not worth attacking.
+ *
+ * <p>Sixteen is above {@code PasswordComplexity.MIN_LENGTH} and below its
+ * maximum, and B-013's test pins both ends. The lower one is the live risk: a
+ * policy raised to twenty would leave this generator quietly issuing passwords
+ * the organisation's own rules reject.
  */
 final class TemporaryPasswords {
 

@@ -33,7 +33,7 @@ record ResetPasswordRequest(
         String token,
 
         @NotBlank
-        @Size(min = 8, max = 128)
+        @Size(min = PasswordComplexity.MIN_LENGTH, max = PasswordComplexity.MAX_LENGTH)
         @ValidPassword
         @Schema(description = "The new password. Must not match one of the last few used, and must "
                 + "contain an upper-case letter, a lower-case letter, a digit and a symbol.")
