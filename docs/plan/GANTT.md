@@ -12,7 +12,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 94 of 230 (41%) | 134.0 of 347.8 (39%) |
+| Complete | 95 of 231 (41%) | 135.0 of 348.8 (39%) |
 | In flight | 0 | 0.0 |
 | On the driving chain | 51 | 72.5 |
 | Zero float (no slack at all) | 103 | 160.0 |
@@ -21,7 +21,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
-| **A** | Shivendra | 63 | 25 | 92.0 | 79 | 116% ⚠️ | Tue 10 Nov |
+| **A** | Shivendra | 64 | 26 | 93.0 | 79 | 118% ⚠️ | Tue 10 Nov |
 | **B** | Ayush | 51 | 15 | 84.8 | 79 | 107% ⚠️ | Thu 05 Nov |
 | **C** | Divyansh | 67 | 16 | 99.5 | 79 | 126% ⚠️ | Fri 20 Nov |
 | **D** | Debashis | 49 | 38 | 71.5 | 79 | 91% | Tue 10 Nov |
@@ -135,9 +135,9 @@ gantt
     section Milestones
     Sprint 0 — weeks 1–2 :done, a0, 2026-08-05, 6d
     M1 — Authentication & the scope guard — weeks :active, a1, 2026-08-07, 11d
-    M2 — Immutability core — weeks 8–9 :a2, 2026-08-22, 10d
-    M6 — Dashboard & reports — weeks 10–16 :a3, 2026-09-05, 47d
-    Hardening — weeks 17–18 :a4, 2026-10-16, 10d
+    Hardening — weeks 17–18 :active, a2, 2026-08-12, 57d
+    M2 — Immutability core — weeks 8–9 :a3, 2026-08-22, 10d
+    M6 — Dashboard & reports — weeks 10–16 :a4, 2026-09-05, 47d
 ```
 
 ### Stream B — Masters & Clients · Ayush
@@ -191,7 +191,7 @@ gantt
 `▲` critical path · `🔴` another developer is waiting on it · float is working days of slack before the finish date moves.
 
 <details>
-<summary><b>Stream A — Platform & Security · Shivendra · 63 tasks</b></summary>
+<summary><b>Stream A — Platform & Security · Shivendra · 64 tasks</b></summary>
 
 | | Task | Title | Est | Predecessors | Start | End | Float | Status |
 |---|---|---|---:|---|---|---|---:|---|
@@ -258,6 +258,7 @@ gantt
 |  | `A-073` | Performance | 2 | `A-053` `B-007` ᶦ | Wed 21 Oct | Fri 23 Oct | 2 | ▫️ to do |
 |  | `A-074` | Security | 2 | `A-036` ᶦ | Fri 23 Oct | Tue 27 Oct | 3 | ▫️ to do |
 |  | `A-075` | Go-live runbook, deployment, TLS, secrets in vault | 2 | `A-073` `A-074` ᶦ | Tue 27 Oct | Thu 29 Oct | 4 | ▫️ to do |
+|  | `A-076` | Login throttle — the half A-021 deferred | 1 | — | Wed 12 Aug | Wed 12 Aug | 72 | ✅ done |
 
 </details>
 
