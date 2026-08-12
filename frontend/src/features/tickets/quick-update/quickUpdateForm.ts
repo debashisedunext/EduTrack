@@ -19,10 +19,14 @@ import type { Ticket } from '@/api/generated/model/ticket'
  * `QuickUpdateRequest`: no ticket ID, reported by, assigned by, date
  * reported, cycle history, ribbon, prior effort logs, project, or level
  * (unless PM — C-037's PM exception has no field to hang it on yet, so it
- * waits for that). 📎 Attach is also not a field here — C-023 is what builds
- * the attachment picker every upload surface shares, and quick update is
- * explicitly one of C-023's listed surfaces; wiring `attachmentIds` before
- * that picker exists would mean inventing a second one just for this panel.
+ * waits for that).
+ *
+ * 📎 Attach **is** wired now — C-023 landed the shared picker and this panel is
+ * one of §4B.4's listed surfaces. It is not a form *value*, though: files upload
+ * the moment they are chosen (the ticket already exists here, unlike the create
+ * form), so what reaches the wire is the resulting server IDs, passed into
+ * `toQuickUpdateRequest` rather than validated by the schema. Nothing to
+ * validate — the picker refuses anything outside §4B.4 before it ever uploads.
  */
 export interface QuickUpdateFormValues {
   status: StatusCode
@@ -89,7 +93,16 @@ export const quickUpdateSchema = z
  * selection, never blank, because the form seeds it from the ticket's
  * current status rather than a placeholder.
  */
-export function toQuickUpdateRequest(values: QuickUpdateFormValues, initial: QuickUpdateFormValues): QuickUpdateRequest {
+export function toQuickUpdateRequest(
+  values: QuickUpdateFormValues,
+  initial: QuickUpdateFormValues,
+  /**
+   * IDs of files already uploaded through the picker. Optional and omitted when
+   * empty, following the same send-if-touched rule as every field above — an
+   * empty array is a claim ("no attachments"), absence is silence.
+   */
+  attachmentIds: readonly number[] = [],
+): QuickUpdateRequest {
   const workNote = values.workNote.trim()
   const effortHours = values.effortHours.trim()
 
@@ -101,5 +114,6 @@ export function toQuickUpdateRequest(values: QuickUpdateFormValues, initial: Qui
     ...(values.revisedEta
       ? { revisedEta: new Date(values.revisedEta).toISOString(), revisedEtaReason: values.revisedEtaReason.trim() }
       : {}),
+    ...(attachmentIds.length > 0 ? { attachmentIds: [...attachmentIds] } : {}),
   }
 }

@@ -21,7 +21,10 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
+import { AttachmentPicker } from '@/components/ui/attachment-picker'
+
 import { FormField } from '../create/FormField'
+import { useTicketAttachments } from '../attachments/useTicketAttachments'
 import { STATUS_LABEL } from '../list/columns'
 import { titleCase } from '../stageDisplay'
 import { useQuickUpdateMutation } from './useQuickUpdateMutation'
@@ -89,11 +92,17 @@ function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => voi
   const idempotencyKey = React.useRef(newIdempotencyKey())
   const quickUpdate = useQuickUpdateMutation()
 
+  // Immediate mode — the ticket exists, so a file goes up the moment it is
+  // picked and its ID is on hand by the time Update is pressed. No `existing`:
+  // this panel holds a `Ticket`, and attachments only ride on the aggregated
+  // `/full` payload the detail page fetches. §4B.4's flag defaults internal.
+  const attachments = useTicketAttachments({ ticketId: ticket.ticketId })
+
   async function onSubmit(values: QuickUpdateFormValues) {
     try {
       await quickUpdate.mutateAsync({
         ticketId: ticket.ticketId,
-        data: toQuickUpdateRequest(values, initial),
+        data: toQuickUpdateRequest(values, initial, attachments.attachmentIds),
         idempotencyKey: idempotencyKey.current,
       })
       toast({ variant: 'success', title: `${ticket.ticketId} updated` })
@@ -168,6 +177,24 @@ function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => voi
           )}
         </FormField>
 
+        {/*
+          Compact, because the slide-over is narrow and a 96px drop zone would
+          push % Complete and the ETA pair below the fold. Drag-and-drop still
+          works over the whole control — it just stops advertising itself.
+        */}
+        <FormField id="qu-attachments" label="Attachments">
+          {(aria) => (
+            <AttachmentPicker
+              {...aria}
+              compact
+              items={attachments.items}
+              onAdd={attachments.add}
+              onRemove={attachments.remove}
+              disabled={quickUpdate.isPending}
+            />
+          )}
+        </FormField>
+
         <FormField id="qu-pct-complete" label={`% Complete — ${pctComplete}%`}>
           {(aria) => (
             <Controller
@@ -220,8 +247,13 @@ function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => voi
         <Button type="button" variant="ghost" onClick={onDone} disabled={quickUpdate.isPending}>
           Cancel
         </Button>
-        <Button type="submit" disabled={quickUpdate.isPending}>
-          {quickUpdate.isPending ? 'Updating…' : 'Update ✓'}
+        {/*
+          Blocked while a file is in flight. Submitting mid-upload would send an
+          `attachmentIds` missing the very file the user attached — the update
+          would succeed and the attachment would silently not be on it.
+        */}
+        <Button type="submit" disabled={quickUpdate.isPending || attachments.isUploading}>
+          {quickUpdate.isPending ? 'Updating…' : attachments.isUploading ? 'Uploading…' : 'Update ✓'}
         </Button>
       </SlideOverFooter>
     </form>

@@ -23,10 +23,12 @@ import { SearchableDropdown } from '@/components/ui/searchable-dropdown'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
+import { AttachmentPicker } from '@/components/ui/attachment-picker'
 import { toast } from '@/components/ui/use-toast'
 import { createTicketBodyDescriptionMax } from '@/api/generated/zod/tickets/tickets.zod'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
 
+import { useTicketAttachments } from '../attachments/useTicketAttachments'
 import { FieldGroup, FormField, ReadOnlyField } from './FormField'
 import { LevelPicker } from './LevelPicker'
 import { WatcherPicker } from './WatcherPicker'
@@ -140,6 +142,10 @@ export function CreateTicketPage() {
   const idempotencyKey = React.useRef(newIdempotencyKey())
   const createTicket = useCreateTicket()
 
+  // `ticketId: null` — deferred mode. Nothing uploads until `flush` is handed
+  // the ID the 201 returns; see the picker in the Extra group below.
+  const attachments = useTicketAttachments({ ticketId: null })
+
   // Which action is in flight, rather than a single `isSubmitting`: with four
   // buttons the user needs to see which one they pressed, and all four have to
   // lock so a second save cannot start on the same idempotency key.
@@ -203,6 +209,23 @@ export function CreateTicketPage() {
       })
       const ticketId = response.data.ticketId
 
+      // The ticket now exists, so the staged files finally have somewhere to go.
+      // Deliberately after the create and never before it: uploading first would
+      // need a ticket ID we do not have, and `TicketCreateRequest` has no
+      // `attachmentIds` field to carry them in the create call itself.
+      //
+      // A failure here is **not** a failed create. The ticket is real and the
+      // user is told which files did not make it, rather than being shown a
+      // "ticket was not created" error for a ticket that was.
+      const upload = attachments.pendingCount > 0 ? await attachments.flush(ticketId) : null
+      if (upload && upload.failed.length > 0) {
+        toast({
+          variant: 'danger',
+          title: `${ticketId} was created, but ${upload.failed.length} file${upload.failed.length === 1 ? '' : 's'} did not upload`,
+          description: `${upload.failed.join(', ')} — attach ${upload.failed.length === 1 ? 'it' : 'them'} again from the ticket.`,
+        })
+      }
+
       // Rotated the moment a ticket exists, and before anything can submit
       // again. Save & Create Another is the one path that reaches the form a
       // second time without a remount, so it is the one path where a stale key
@@ -216,6 +239,10 @@ export function CreateTicketPage() {
         // level it stays chosen, and if it was pre-filled it re-derives when
         // they pick a different task type for the next ticket.
         reset({ ...emptyTicketForm, ...retainedForNextTicket(values) })
+        // Attachments describe one ticket, never a batch — the same rule that
+        // decides what `retainedForNextTicket` keeps. Carrying them over would
+        // silently re-upload the last ticket's screenshots onto the next one.
+        attachments.reset()
         // Confirmed in the action bar, not with a toast — see `lastCreated`.
         setLastCreated(ticketId)
         // Without this the user is left at the bottom of a form that looks
@@ -635,9 +662,31 @@ export function CreateTicketPage() {
             )}
           </FormField>
 
+          {/*
+            Deferred mode — there is no ticket to attach to until the 201 comes
+            back, and `TicketCreateRequest` carries no `attachmentIds` to send
+            even if there were. Files stage here and upload in `onSubmit` once
+            the ticket has an ID. See `useTicketAttachments`.
+          */}
+          <FormField
+            id="ticket-attachments"
+            label="Attachments"
+            className="sm:col-span-2"
+            hint="Uploaded once the ticket is created. Images, documents, zip and mp4 — scanned before anyone can open them."
+          >
+            {(aria) => (
+              <AttachmentPicker
+                {...aria}
+                items={attachments.items}
+                onAdd={attachments.add}
+                onRemove={attachments.remove}
+                disabled={isSaving}
+              />
+            )}
+          </FormField>
+
           <div className="sm:col-span-2 flex flex-wrap items-center gap-2 rounded-control bg-subtle px-3 py-2.5">
             <span className="text-caption text-content-muted">Arriving in their own tasks:</span>
-            <Chip>Attachments · C-023</Chip>
             <Chip>Clipboard paste · C-024</Chip>
             <Chip>First comment · C-029</Chip>
           </div>

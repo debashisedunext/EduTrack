@@ -13,6 +13,7 @@ import { RichTextView } from '@/components/ui/rich-text-view'
 import { ensureRichText } from '@/components/ui/rich-text'
 
 import { PendingSection } from './PendingSection'
+import { TicketAttachmentsSection } from './TicketAttachmentsSection'
 import { TicketDetailHeader } from './TicketDetailHeader'
 import { TicketDetailTabs, type DetailTab } from './TicketDetailTabs'
 import { TicketSummaryPanel } from './TicketSummaryPanel'
@@ -200,6 +201,19 @@ export function TicketDetailPage() {
               emptyText="No description was given."
             />
           </section>
+
+          {/*
+            Directly under the description, where S-20's wireframe puts it. Fed
+            from the `/full` payload this page already fetched — C-019's single
+            aggregated call stands, and `refetch` is what makes an upload or a
+            delete visible rather than a second query of our own.
+          */}
+          <TicketAttachmentsSection
+            ticketId={ticket.ticketId}
+            attachments={detail?.attachments}
+            onChanged={() => void refetch()}
+            readOnly={isEarlierCycle}
+          />
 
           <TicketDetailTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} />
         </div>
