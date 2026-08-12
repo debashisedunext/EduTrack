@@ -128,6 +128,43 @@ class ResourceWriteRepository {
 
     private static final String EXISTS_USER = "SELECT 1 FROM users u WHERE u.id = ?";
 
+    /**
+     * B-012 · the reporting line above one resource, innermost first.
+     *
+     * <p>Walked in the database rather than in Java. The alternative is one
+     * {@code SELECT} per level from a loop in the service, which is six round
+     * trips to save a resource six levels down and gets slower the deeper the
+     * organisation is — for a question the server can answer in one pass over
+     * rows it already has in the buffer pool.
+     *
+     * <p><b>The depth bound is not a tuning knob, it is what makes this
+     * terminate.</b> A recursive CTE over a table that already contains a cycle
+     * has no base case: it recurses until {@code cte_max_recursion_depth}
+     * (1,000 by default) and then fails the statement with error 3636, which
+     * arrives as a 500 on somebody's ordinary save. This guard is the only
+     * writer that refuses cycles, so it cannot assume the data has none —
+     * anything that predates it, or a hand-run {@code UPDATE}, can. Binding the
+     * cap means the walk stops on its own terms and the caller gets to decide
+     * what a chain that did not terminate means.
+     *
+     * <p>{@code depth} comes back so the caller can tell "this organisation is
+     * genuinely 64 deep" from "this chain never ended" — they are the same row
+     * count and only one of them is a refusal the admin can act on.
+     */
+    private static final String MANAGER_CHAIN = """
+            WITH RECURSIVE chain (id, reporting_manager_id, depth) AS (
+                SELECT u.id, u.reporting_manager_id, 1
+                  FROM users u
+                 WHERE u.id = ?
+                UNION ALL
+                SELECT u.id, u.reporting_manager_id, c.depth + 1
+                  FROM users u
+                  JOIN chain c ON u.id = c.reporting_manager_id
+                 WHERE c.depth < ?
+            )
+            SELECT id FROM chain ORDER BY depth
+            """;
+
     private static final String EXISTING_PROJECT_IDS =
             "SELECT p.id FROM projects p WHERE p.id IN (%s)";
 
@@ -259,6 +296,23 @@ class ResourceWriteRepository {
 
     boolean userExists(long userId) {
         return jdbc.sql(EXISTS_USER).param(userId).query(Integer.class).optional().isPresent();
+    }
+
+    /**
+     * B-012 · {@code startUserId} and everybody they report to, upward.
+     *
+     * <p>The first element is {@code startUserId} itself, so an empty list means
+     * there is no such resource — which is why {@link ResourceWriteService} can
+     * use this in place of an existence check rather than in addition to one.
+     *
+     * @param maxDepth how many levels to return before giving up. A list this
+     *                 long has <b>not</b> been walked to a root, and the caller
+     *                 must not read "the edited resource is not in it" as
+     *                 "there is no cycle" — see {@link #MANAGER_CHAIN}.
+     * @return ids from {@code startUserId} outward, innermost first
+     */
+    List<Long> managerChain(long startUserId, int maxDepth) {
+        return jdbc.sql(MANAGER_CHAIN).param(startUserId).param(maxDepth).query(Long.class).list();
     }
 
     /** @return the subset of {@code projectIds} that exist, so the caller can name the rest */

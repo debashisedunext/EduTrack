@@ -371,12 +371,14 @@ export const restHandlers = [
     if (conflicts) return conflicts;
 
     // A→B→C→A is as broken as A→A, and the database CHECK only catches the
-    // latter. **The mock is ahead of the server here** — B-012 is still open,
-    // so the real backend accepts the deeper cycle this refuses. Left in place
-    // rather than weakened to match: the mock describes the contract, and a
-    // frontend written against it will already handle the 409 when B-012 lands.
+    // latter. The mock refused this before the server could — it was written
+    // against the contract while B-012 was still open — and the server now
+    // agrees. `errors` was added when it landed, so the two produce the same
+    // document and the form highlights the picker under either.
     if (body.reportingManagerId != null && createsCycle(u.id, Number(body.reportingManagerId))) {
-      return problem(409, 'manager-cycle', 'That would create a reporting cycle');
+      return problem(409, 'manager-cycle', 'That would create a reporting cycle', {
+        errors: { reportingManagerId: ['That would create a reporting cycle'] },
+      });
     }
 
     if (body.isActive === false && u.isActive) {

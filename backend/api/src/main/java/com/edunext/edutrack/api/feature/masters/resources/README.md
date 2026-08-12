@@ -4,10 +4,45 @@ B-010 built the read half: a filterable, paginated grid of everyone in the
 organisation, a bulk activate/deactivate, and an export. B-011 added the write
 half: `GET`, `POST` and `PATCH` of one resource, behind the S-08 form.
 
-Reporting-manager cycle detection **B-012** and the bulk reassignment wizard
-**B-014** are still open. The first means `PATCH` currently accepts A→B→C→A; the
-second is why deactivating somebody who holds open tickets stops with a count
-rather than offering to fix it.
+**B-012** then closed the reporting-manager hole: a cycle at any depth is a
+`409`, not only self-reference. The bulk reassignment wizard **B-014** is still
+open, which is why deactivating somebody who holds open tickets stops with a
+count rather than offering to fix it.
+
+## B-012 · the reporting line
+
+`validateManager` walks up `reporting_manager_id` from the proposed manager in
+one recursive CTE and refuses if the edited resource is anywhere on the chain.
+Three things about it are worth knowing before changing it.
+
+**The walk is depth-bounded, and the bound is what makes it terminate.** A
+recursive CTE over a table that already contains a cycle has no base case: it
+runs to `cte_max_recursion_depth` and fails the statement, which arrives as a
+500 on somebody's unrelated save. `MAX_MANAGER_CHAIN` is 64 — well under
+MySQL's 1,000, so the recursion stops at a bound this code chose.
+
+**A chain that fills the cap is refused, not assumed clean.** This service is
+the only writer that refuses cycles, so the rows it reads may already contain
+one — from before B-012, or from a hand-run `UPDATE` the trigger allowed
+because it was not self-reference. On that data a truncated walk cannot tell
+"no cycle" from "no cycle *yet*", and the optimistic reading fails open on
+exactly the data most likely to be broken. Repairing the line above is a
+separate edit; `ResourceFormIT.aPreExistingCycleIsSurvivable` is the case.
+
+**Self-reference now returns 409, where B-011 returned 400.** Depth 1 and depth
+4 are one rule, and two status codes for one rule is a client branch that
+describes the implementation. The contract and the MSW mock both said 409
+already — the server was the odd one out. It still carries `errors` keyed by
+`reportingManagerId`, so the form behaves exactly as it did.
+
+The walk also replaced the `userExists` call it sits next to rather than being
+added alongside it: an empty chain *is* "no such manager", so the round-trip
+count per save is unchanged.
+
+One thing it does not do: name the people in the cycle. The message says how
+many levels up, and ids in prose would not help an admin who thinks in names.
+Resolving them is a second query for an error path, and worth doing only if the
+message turns out not to be enough.
 
 ## Shape
 
@@ -242,9 +277,16 @@ explicit that a local workaround becomes the permanent hole.
 - `ResourceWriteServiceTest` — the three states of a key, both guards, membership normalisation, the ETag's exclusions
 - `ResourceFormIT` — real MySQL: every section round-tripping, the Argon2id hash, a partial update leaving other columns alone, a dropped membership deactivating rather than deleting, and the new `CHECK` constraints firing
 
-`ResourceWriteServiceTest.deeperCyclesAreNotYetDetected` **documents a hole, not
-a guarantee.** When B-012 lands it inverts to assert the refusal; its presence is
-what makes that a deliberate change rather than a surprise.
+`ResourceWriteServiceTest.deeperCyclesAreNotYetDetected` **documented a hole,
+not a guarantee** — B-011 wrote it asserting that A→B→C→A was accepted, so that
+closing it would be a visible inversion rather than a silent one. B-012 inverted
+it to `deeperCyclesAreRefused`, which is the change this task is.
+
+The cycle cases split across the two suites on purpose. `ResourceWriteServiceTest`
+stubs the walk and proves what the service *decides* — that a truncated chain is
+refused, that self-reference costs no query, that a refusal happens before the
+`UPDATE`. `ResourceFormIT` is the only place the recursive CTE actually runs, and
+is what would catch it being invalid SQL or MySQL disagreeing about termination.
 
 ## One thing this task fixed on the way past
 

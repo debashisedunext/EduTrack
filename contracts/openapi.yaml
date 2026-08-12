@@ -461,16 +461,16 @@ paths:
       operationId: updateUser
       summary: Update a resource
       description: |
-        **A reporting-manager change is rejected if it creates a cycle at any
-        depth**, not merely self-reference. A→B→C→A is as broken as A→A, and the
-        database `CHECK` only catches the latter.
+        **A reporting-manager change is rejected with `409` if it creates a cycle
+        at any depth**, not merely self-reference. A→B→C→A is as broken as A→A,
+        and the database `CHECK` only catches the latter. Landed in **B-012**;
+        the `type` is `manager-cycle` and `errors` names `reportingManagerId`,
+        so the refusal lands on the picker like any field error.
 
-        > **Not yet true as implemented. B-011 enforces self-reference only.**
-        > The depth-`n` walk is **B-012**, still open. Until it lands this
-        > operation will accept A→B→C→A, and the reportee tree that results has
-        > no root. Documented here rather than quietly deferred, because a
-        > contract describing a guarantee the server does not make is worse than
-        > no guarantee at all.
+        The same `409` is returned when the proposed manager's own reporting
+        line does not terminate — a cycle that already exists further up. The
+        walk is bounded, so such data is a refusal rather than a `500`, and
+        repairing the line above is a separate edit.
 
         `If-Match` is required, not optional — a write without one is refused
         with `428`. Treating a missing precondition as "no conflict" would mean
@@ -3203,8 +3203,9 @@ components:
           type: [integer, 'null']
           format: int64
           description: |
-            Rejected with `409` if it would create a cycle at any depth. **Only
-            self-reference is enforced today — the depth-`n` walk is B-012.**
+            Rejected with `409` (`type: manager-cycle`) if it would create a
+            cycle at any depth — self-reference included, which is the one case
+            the database trigger also catches. B-012.
         location: { type: [string, 'null'], maxLength: 120 }
         timezone:
           type: string

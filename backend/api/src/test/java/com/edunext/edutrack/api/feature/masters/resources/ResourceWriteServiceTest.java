@@ -57,7 +57,12 @@ class ResourceWriteServiceTest {
         when(writes.findRoleId("DEVELOPER")).thenReturn(Optional.of(DEVELOPER_ROLE_ID));
         when(writes.findConflicts(any(), any(), any(), any()))
                 .thenReturn(new ResourceWriteRepository.Conflicts(false, false, false));
-        when(writes.userExists(anyLong())).thenReturn(true);
+        // Everybody reports to nobody unless a test says otherwise. The chain
+        // starts at the resource asked about, so a one-element list is "this
+        // person exists and is at the top" — and an empty one is "no such
+        // person", which is how the service tells the two apart.
+        when(writes.managerChain(anyLong(), anyInt()))
+                .thenAnswer(call -> List.of((Long) call.getArgument(0)));
         // Null-safe, because re-stubbing with `when(mock.method(any()))` calls
         // the method for real to capture the matcher — with null arguments,
         // through whatever answer is already registered. A `Set.copyOf(null)`
@@ -327,11 +332,115 @@ class ResourceWriteServiceTest {
             assertThat(changeSet()).containsEntry("is_active", true);
         }
 
+        /**
+         * Self-reference is a cycle of length one and raises the same exception
+         * the deeper ones do — <b>it does not reach the walk</b>, because the
+         * answer is knowable without a query and a 409 that costs a round trip
+         * to produce is a round trip spent on nothing.
+         */
         @Test
-        @DisplayName("a resource cannot be made their own reporting manager")
+        @DisplayName("a resource cannot be made their own reporting manager, and it costs no query")
         void selfReferenceIsRefused() {
             ResourceDtos.ResourceWriteRequest request = minimalRequest();
             request.setReportingManagerId(Optional.of(USER_ID));
+
+            assertThatThrownBy(() -> service.update(detail(true, 0), request))
+                    .isInstanceOf(ResourceWriteService.ManagerCycleException.class);
+
+            verify(writes, never()).managerChain(anyLong(), anyInt());
+        }
+
+        /**
+         * <b>B-012.</b> This test previously asserted the opposite — that the
+         * cycle was accepted — and inverting it is the change this task is.
+         */
+        @Test
+        @DisplayName("B-012: A→B→C→A is refused, and the resource is never written")
+        void deeperCyclesAreRefused() {
+            // C reports to B reports to A, and A is the resource being edited.
+            // Making C A's manager closes the loop.
+            long b = USER_ID + 1;
+            long c = USER_ID + 2;
+            when(writes.managerChain(eq(c), anyInt())).thenReturn(List.of(c, b, USER_ID));
+
+            ResourceDtos.ResourceWriteRequest request = minimalRequest();
+            request.setReportingManagerId(Optional.of(c));
+
+            assertThatThrownBy(() -> service.update(detail(true, 0), request))
+                    .isInstanceOf(ResourceWriteService.ManagerCycleException.class);
+
+            // Refused before the UPDATE, not rolled back after it. The guard
+            // runs while `changes` is still being assembled, so a cycle never
+            // reaches the statement at all.
+            verify(writes, never()).update(anyLong(), any());
+        }
+
+        @Test
+        @DisplayName("a manager several levels up who does not lead back here is accepted")
+        void aDeepChainThatTerminatesIsFine() {
+            long candidate = 900L;
+            when(writes.managerChain(eq(candidate), anyInt()))
+                    .thenReturn(List.of(candidate, 901L, 902L, 903L));
+
+            ResourceDtos.ResourceWriteRequest request = minimalRequest();
+            request.setReportingManagerId(Optional.of(candidate));
+
+            service.update(detail(true, 0), request);
+
+            assertThat(changeSet()).containsEntry("reporting_manager_id", candidate);
+        }
+
+        /**
+         * The case that only exists because this guard is not the only thing
+         * that has ever written the column. A chain the walk had to truncate
+         * cannot be read as "no cycle found" — it is "no cycle found <i>yet</i>",
+         * on precisely the data most likely to have one.
+         */
+        @Test
+        @DisplayName("a chain that fills the depth cap is refused rather than assumed clean")
+        void anUnterminatedChainIsRefused() {
+            long candidate = 900L;
+            List<Long> full = java.util.stream.LongStream
+                    .range(0, ResourceWriteService.MAX_MANAGER_CHAIN)
+                    .boxed().toList();
+            when(writes.managerChain(eq(candidate), anyInt())).thenReturn(full);
+
+            ResourceDtos.ResourceWriteRequest request = minimalRequest();
+            request.setReportingManagerId(Optional.of(candidate));
+
+            assertThatThrownBy(() -> service.update(detail(true, 0), request))
+                    .isInstanceOf(ResourceWriteService.ManagerCycleException.class);
+        }
+
+        /**
+         * A create has no id yet, so it cannot be on anybody's chain — but the
+         * walk still runs, because the subtree it is joining can already be
+         * broken and the manager can already not exist.
+         */
+        @Test
+        @DisplayName("a create walks the chain too, and joining a broken subtree is refused")
+        void createRefusesABrokenSubtree() {
+            long candidate = 900L;
+            when(writes.managerChain(eq(candidate), anyInt())).thenReturn(
+                    java.util.stream.LongStream.range(0, ResourceWriteService.MAX_MANAGER_CHAIN)
+                            .boxed().toList());
+
+            ResourceDtos.ResourceWriteRequest request = minimalRequest();
+            request.setReportingManagerId(Optional.of(candidate));
+
+            assertThatThrownBy(() -> service.create(request))
+                    .isInstanceOf(ResourceWriteService.ManagerCycleException.class);
+
+            verify(writes, never()).insert(any());
+        }
+
+        @Test
+        @DisplayName("a reporting manager who does not exist is a 400, not a foreign-key error")
+        void unknownManagerIsAValidationError() {
+            when(writes.managerChain(eq(77L), anyInt())).thenReturn(List.of());
+
+            ResourceDtos.ResourceWriteRequest request = minimalRequest();
+            request.setReportingManagerId(Optional.of(77L));
 
             assertThatThrownBy(() -> service.update(detail(true, 0), request))
                     .isInstanceOf(ResourceWriteService.ResourceValidationException.class)
@@ -340,33 +449,16 @@ class ResourceWriteServiceTest {
                             .isEqualTo("reportingManagerId"));
         }
 
-        /**
-         * <b>This test documents a hole, not a guarantee.</b> B-012 is the task
-         * that closes it; when it lands this test inverts to assert the refusal,
-         * and its presence here is what makes that a deliberate change rather
-         * than a surprise.
-         */
         @Test
-        @DisplayName("B-012 NOT DONE: a deeper cycle is currently accepted")
-        void deeperCyclesAreNotYetDetected() {
+        @DisplayName("clearing the manager walks nothing — there is no chain to a null")
+        void clearingTheManagerRunsNoWalk() {
             ResourceDtos.ResourceWriteRequest request = minimalRequest();
-            request.setReportingManagerId(Optional.of(USER_ID + 1));
+            request.setReportingManagerId(Optional.empty());
 
             service.update(detail(true, 0), request);
 
-            assertThat(changeSet()).containsEntry("reporting_manager_id", USER_ID + 1);
-        }
-
-        @Test
-        @DisplayName("a reporting manager who does not exist is a 400, not a foreign-key error")
-        void unknownManagerIsAValidationError() {
-            when(writes.userExists(77L)).thenReturn(false);
-
-            ResourceDtos.ResourceWriteRequest request = minimalRequest();
-            request.setReportingManagerId(Optional.of(77L));
-
-            assertThatThrownBy(() -> service.update(detail(true, 0), request))
-                    .isInstanceOf(ResourceWriteService.ResourceValidationException.class);
+            assertThat(changeSet()).containsEntry("reporting_manager_id", null);
+            verify(writes, never()).managerChain(anyLong(), anyInt());
         }
     }
 

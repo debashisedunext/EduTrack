@@ -188,7 +188,7 @@ export const createUserBody = zod.object({
   "isActive": zod.boolean().optional().describe('Defaults to `true` on create. On update, \*\*setting this `false` for\nsomebody holding open tickets is refused with `409`\*\*, exactly as\n`PATCH \/users\/{userId}\/status` is — the form must not be a way around\nthe guard the status route enforces.\n'),
   "department": zod.string().max(createUserBodyDepartmentMax).nullish(),
   "designation": zod.string().max(createUserBodyDesignationMax).nullish(),
-  "reportingManagerId": zod.number().nullish().describe('Rejected with `409` if it would create a cycle at any depth. \*\*Only\nself-reference is enforced today — the depth-`n` walk is B-012.\*\*\n'),
+  "reportingManagerId": zod.number().nullish().describe('Rejected with `409` (`type: manager-cycle`) if it would create a\ncycle at any depth — self-reference included, which is the one case\nthe database trigger also catches. B-012.\n'),
   "location": zod.string().max(createUserBodyLocationMax).nullish(),
   "timezone": zod.string().max(createUserBodyTimezoneMax).optional().describe('Display only. Storage is UTC everywhere (PLAN.md §3.1).'),
   "dailyCapacityHrs": zod.number().min(createUserBodyDailyCapacityHrsMin).max(createUserBodyDailyCapacityHrsMax).default(createUserBodyDailyCapacityHrsDefault).describe('Feeds every utilisation figure, through B-024.'),
@@ -278,16 +278,16 @@ export const getUserResponse = zod.object({
 })
 
 /**
- * **A reporting-manager change is rejected if it creates a cycle at any
-depth**, not merely self-reference. A→B→C→A is as broken as A→A, and the
-database `CHECK` only catches the latter.
+ * **A reporting-manager change is rejected with `409` if it creates a cycle
+at any depth**, not merely self-reference. A→B→C→A is as broken as A→A,
+and the database `CHECK` only catches the latter. Landed in **B-012**;
+the `type` is `manager-cycle` and `errors` names `reportingManagerId`,
+so the refusal lands on the picker like any field error.
 
-> **Not yet true as implemented. B-011 enforces self-reference only.**
-> The depth-`n` walk is **B-012**, still open. Until it lands this
-> operation will accept A→B→C→A, and the reportee tree that results has
-> no root. Documented here rather than quietly deferred, because a
-> contract describing a guarantee the server does not make is worse than
-> no guarantee at all.
+The same `409` is returned when the proposed manager's own reporting
+line does not terminate — a cycle that already exists further up. The
+walk is bounded, so such data is a refusal rather than a `500`, and
+repairing the line above is a separate edit.
 
 `If-Match` is required, not optional — a write without one is refused
 with `428`. Treating a missing precondition as "no conflict" would mean
@@ -358,7 +358,7 @@ export const updateUserBody = zod.object({
   "isActive": zod.boolean().optional().describe('Defaults to `true` on create. On update, \*\*setting this `false` for\nsomebody holding open tickets is refused with `409`\*\*, exactly as\n`PATCH \/users\/{userId}\/status` is — the form must not be a way around\nthe guard the status route enforces.\n'),
   "department": zod.string().max(updateUserBodyDepartmentMax).nullish(),
   "designation": zod.string().max(updateUserBodyDesignationMax).nullish(),
-  "reportingManagerId": zod.number().nullish().describe('Rejected with `409` if it would create a cycle at any depth. \*\*Only\nself-reference is enforced today — the depth-`n` walk is B-012.\*\*\n'),
+  "reportingManagerId": zod.number().nullish().describe('Rejected with `409` (`type: manager-cycle`) if it would create a\ncycle at any depth — self-reference included, which is the one case\nthe database trigger also catches. B-012.\n'),
   "location": zod.string().max(updateUserBodyLocationMax).nullish(),
   "timezone": zod.string().max(updateUserBodyTimezoneMax).optional().describe('Display only. Storage is UTC everywhere (PLAN.md §3.1).'),
   "dailyCapacityHrs": zod.number().min(updateUserBodyDailyCapacityHrsMin).max(updateUserBodyDailyCapacityHrsMax).default(updateUserBodyDailyCapacityHrsDefault).describe('Feeds every utilisation figure, through B-024.'),

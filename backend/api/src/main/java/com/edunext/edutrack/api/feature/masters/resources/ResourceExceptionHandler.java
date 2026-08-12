@@ -30,6 +30,7 @@ class ResourceExceptionHandler {
     private static final URI VALIDATION = URI.create("https://edutrack/errors/validation");
     private static final URI DUPLICATE = URI.create("https://edutrack/errors/duplicate");
     private static final URI OPEN_TICKETS = URI.create("https://edutrack/errors/open-tickets");
+    private static final URI MANAGER_CYCLE = URI.create("https://edutrack/errors/manager-cycle");
 
     /** 404, and — once A-034 lands — also "out of scope". CONVENTIONS.md §7. */
     @ExceptionHandler(ResourceWriteService.ResourceNotFoundException.class)
@@ -66,6 +67,29 @@ class ResourceExceptionHandler {
     @ExceptionHandler(ResourceWriteService.DuplicateResourceException.class)
     ResponseEntity<ProblemDetail> handleDuplicate(ResourceWriteService.DuplicateResourceException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(duplicate(e.fieldErrors()));
+    }
+
+    /**
+     * B-012 · a reporting cycle at any depth, including self-reference.
+     *
+     * <p>{@code type} is {@code manager-cycle} and not {@code duplicate} — the
+     * two are both 409 and are nothing alike, and a client that has to read the
+     * prose to tell them apart is reading the part of the document that is
+     * allowed to change without notice.
+     *
+     * <p>It still carries {@code errors}, keyed by the same field name the
+     * request uses, so the form treats this exactly like the 400 it replaces:
+     * the message lands on the manager picker and the picker takes focus.
+     */
+    @ExceptionHandler(ResourceWriteService.ManagerCycleException.class)
+    ResponseEntity<ProblemDetail> handleManagerCycle(ResourceWriteService.ManagerCycleException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(MANAGER_CYCLE);
+        problem.setTitle("That would create a reporting cycle");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("errors", Map.of(
+                ResourceWriteService.ManagerCycleException.FIELD, new String[]{e.getMessage()}));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 
     /**

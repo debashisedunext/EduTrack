@@ -121,8 +121,9 @@ the guard the status route enforces.
   department?: UserWriteRequestDepartment;
   /** @maxLength 80 */
   designation?: UserWriteRequestDesignation;
-  /** Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
+  /** Rejected with `409` (`type: manager-cycle`) if it would create a
+cycle at any depth — self-reference included, which is the one case
+the database trigger also catches. B-012.
  */
   reportingManagerId?: UserWriteRequestReportingManagerId;
   /** @maxLength 120 */

@@ -40,14 +40,12 @@ import java.util.function.Function;
  *
  * <h2>Reporting-manager cycles</h2>
  *
- * <p><b>Self-reference only. The depth-{@code n} walk is B-012 and is not
- * here.</b> {@code trg_users_no_self_manager_ins/upd} catches A→A at the
- * database; this refuses it earlier so the caller gets a field-keyed 400 rather
- * than a SQL error. A→B→C→A is currently accepted, which is a real hole and is
- * marked as one in the contract, the README and the backlog. The seam it will
- * plug into is {@link #validateManager} — a recursive walk up
- * {@code reporting_manager_id} from the proposed manager, refusing if the
- * edited resource appears on the chain.
+ * <p><b>Refused at any depth (B-012).</b> {@link #validateManager} walks up
+ * {@code reporting_manager_id} from the proposed manager and refuses if the
+ * edited resource is anywhere on the chain — A→B→C→A is as broken as A→A, and
+ * {@code trg_users_no_self_manager_ins/upd} only ever caught the latter. The
+ * trigger stays as the backstop for anything that writes the column without
+ * coming through here.
  */
 @Service
 public class ResourceWriteService {
@@ -64,6 +62,22 @@ public class ResourceWriteService {
 
     /** S-08's stated default. */
     static final BigDecimal DEFAULT_CAPACITY_HRS = new BigDecimal("8.00");
+
+    /**
+     * B-012 · how far up the reporting line the cycle check walks.
+     *
+     * <p>Sixty-four is not a limit on how deep an organisation may be — nothing
+     * refuses a 64-level hierarchy that already exists, and no read walks this
+     * far. It is the point past which "this chain has no end" is a better
+     * explanation than "this organisation is very tall": a 64-deep management
+     * line in a company of the size this product is built for is not a shape
+     * anybody meant.
+     *
+     * <p>Well under MySQL's {@code cte_max_recursion_depth} (1,000), so the
+     * recursion stops at a bound this code chose rather than at one the server
+     * enforces by failing the statement.
+     */
+    static final int MAX_MANAGER_CHAIN = 64;
 
     private final ResourceWriteRepository writes;
     private final ResourceRepository reads;
@@ -277,6 +291,29 @@ public class ResourceWriteService {
     }
 
     /**
+     * B-012 · refuses a manager who reports, at any remove, back to the edited
+     * resource.
+     *
+     * <p>Three refusals, in the order they are cheapest to make. Self-reference
+     * needs no query at all. Then one walk up the chain answers the other two:
+     * an empty chain is a manager who does not exist, and a chain containing the
+     * edited resource is the cycle.
+     *
+     * <p><b>A chain that reached the cap is refused as well</b>, and that is not
+     * a defensive nicety. This service is the only thing that refuses cycles, so
+     * the rows it reads may already contain one — from before B-012, or from a
+     * hand-run {@code UPDATE} the trigger let through because it was not
+     * self-reference. On such data the walk cannot distinguish "not a cycle"
+     * from "a cycle I stopped short of", and reading a truncated chain as a pass
+     * would let the one case this task exists to prevent through on exactly the
+     * data where it is already real. Attaching somebody to a reporting line with
+     * no root is refused; repairing the line is not this screen's job.
+     *
+     * <p>Run on create too. A row with no id yet cannot appear on anybody's
+     * chain, so the cycle check is vacuous — but the existence check is not, and
+     * neither is the cap: a new hire attached to an already-broken subtree
+     * inherits the break.
+     *
      * @param editedUserId the resource being edited, or null on a create
      */
     private void validateManager(Long managerId, Long editedUserId) {
@@ -284,16 +321,28 @@ public class ResourceWriteService {
             return;
         }
         if (editedUserId != null && managerId.equals(editedUserId)) {
-            throw new ResourceValidationException(
-                    "reportingManagerId", "a resource cannot be their own reporting manager");
+            throw new ManagerCycleException("a resource cannot be their own reporting manager");
         }
-        if (!writes.userExists(managerId)) {
+
+        List<Long> chain = writes.managerChain(managerId, MAX_MANAGER_CHAIN);
+        if (chain.isEmpty()) {
             throw new ResourceValidationException(
                     "reportingManagerId", "no resource with id " + managerId);
         }
-        // B-012 goes here: walk up reporting_manager_id from managerId and
-        // refuse if editedUserId appears. Deliberately absent — see the class
-        // comment.
+        if (editedUserId != null && chain.contains(editedUserId)) {
+            // The distance is worth naming: at one level the admin can see the
+            // problem on the screen they are on, and at four they cannot, which
+            // is the case this task exists for.
+            throw new ManagerCycleException(
+                    "that would create a reporting cycle — they already report to this "
+                            + "resource, " + chain.indexOf(editedUserId) + " level(s) up");
+        }
+        if (chain.size() >= MAX_MANAGER_CHAIN) {
+            throw new ManagerCycleException(
+                    "that resource's reporting line is more than " + MAX_MANAGER_CHAIN
+                            + " levels deep and does not end, which means it already "
+                            + "contains a cycle. Fix the line above them first.");
+        }
     }
 
     private void validateProjects(List<ResourceDtos.ProjectAssignment> assignments) {
@@ -477,6 +526,33 @@ public class ResourceWriteService {
 
         public Map<String, String> fieldErrors() {
             return fieldErrors;
+        }
+    }
+
+    /**
+     * B-012 · 409, because the request is well formed and the row it names is
+     * real — what is wrong is the shape the two of them would make together.
+     *
+     * <p><b>Self-reference raises this too, and that is a change from B-011</b>,
+     * which returned a 400 for A→A and would have returned nothing at all for
+     * A→B→C→A. One refusal for one rule: a client that has to branch on 400 for
+     * depth 1 and 409 for depth 4 is being told about the implementation rather
+     * than the rule. 409 is what the contract has said all along and what the
+     * MSW mock has always returned — the server was the odd one out.
+     *
+     * <p>Field-keyed at the handler, so the form still puts the message against
+     * the manager picker rather than in a banner.
+     */
+    public static class ManagerCycleException extends RuntimeException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        /** The request field this is raised against — the form's own name for it. */
+        public static final String FIELD = "reportingManagerId";
+
+        ManagerCycleException(String message) {
+            super(message);
         }
     }
 

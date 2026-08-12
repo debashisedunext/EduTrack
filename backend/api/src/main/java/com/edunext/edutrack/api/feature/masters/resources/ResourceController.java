@@ -38,9 +38,10 @@ import java.util.Set;
  * B-011 added the S-08 form: {@code GET}, {@code POST} and {@code PATCH} of one
  * resource.
  *
- * <p><b>Reporting-manager cycle detection (B-012) and the bulk reassignment
- * wizard (B-014) are still absent.</b> The former means {@code PATCH} will
- * currently accept A→B→C→A; only self-reference is refused. The latter means
+ * <p>B-012 closed the reporting-manager hole: {@code POST} and {@code PATCH}
+ * now refuse a cycle at any depth with a 409, not only self-reference.
+ *
+ * <p><b>The bulk reassignment wizard (B-014) is still absent</b>, which is why
  * deactivating somebody who holds open tickets stops with a count and a URL
  * rather than offering to fix it.
  *

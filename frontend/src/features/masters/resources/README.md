@@ -114,11 +114,12 @@ reapply", so it gets the banner.
 
 ### What the form deliberately does not do
 
-- **Cycle detection beyond self-reference (B-012).** The manager picker excludes
-  only the resource being edited. A→B→C→A is still expressible, and the server
-  still accepts it. **The MSW mock refuses it and the real backend does not** —
-  the mock describes the contract, so a frontend written against it will already
-  handle the 409 when B-012 lands.
+- **Pre-filtering the manager picker by the reporting tree.** B-012 refuses a
+  cycle at any depth, but at the server: the picker still offers everybody
+  except the resource being edited, so A→B→C→A is expressible and comes back as
+  a `409` on the field. Excluding the subtree in the dropdown would mean holding
+  the organisation's reporting graph in the browser and keeping it fresh, to
+  pre-empt a rare mistake that already has a clear answer.
 - **The reassignment wizard (B-014).** Deactivating somebody who holds open
   tickets is refused with a count, exactly as the grid refuses it.
 - **Profile photo upload.** S-08 says "Profile photo"; the field takes a URL,
