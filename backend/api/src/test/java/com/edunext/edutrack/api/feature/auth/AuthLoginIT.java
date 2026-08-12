@@ -380,8 +380,18 @@ class AuthLoginIT {
     @DisplayName("attempts against one identifier are capped, and the refusal carries Retry-After")
     void thePairBudgetIsBounded() {
         for (int i = 0; i < LoginRateLimiter.MAX_PER_PAIR; i++) {
-            assertThat(login("it.rate.pair", "Wrong-Horse-9!").getStatusCode())
-                    .isEqualTo(HttpStatus.UNAUTHORIZED);
+            ResponseEntity<String> refused = login("it.rate.pair", "Wrong-Horse-9!");
+            // Assert WHICH 401 this is, not merely that it is one. A-032 put a
+            // filter chain in front of this endpoint, and its refusal is also a
+            // 401 — so a status-only assertion would pass while the request never
+            // reached the controller, leaving the limiter un-incremented and the
+            // 429 below unexplainable. This failed once under full-suite load and
+            // was not reproducible in isolation; if it recurs, the message now
+            // says whether the chain or the credentials refused.
+            assertThat(refused.getStatusCode()).as("attempt %d", i + 1).isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(refused.getBody())
+                    .as("attempt %d must reach the controller, not be refused by the chain", i + 1)
+                    .contains("invalid-credentials");
         }
 
         ResponseEntity<String> throttled = login("it.rate.pair", "Wrong-Horse-9!");
