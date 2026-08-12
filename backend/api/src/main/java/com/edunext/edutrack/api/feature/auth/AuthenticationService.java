@@ -42,24 +42,29 @@ import java.util.List;
  * account exists and that it is protected — a list of exactly whom to phish —
  * and would answer in a measurably different time from an account without 2FA.
  *
- * <p><b>Two gaps remain after A-021, both belonging to A-074.</b>
+ * <p><b>Two gaps remained after A-021. Both are closed by A-076</b>
+ * ({@link LoginRateLimiter}), which sits in front of this method rather than
+ * inside it.
  *
- * <p>First, <b>nothing caps guess volume.</b> §10.1 opens with a "10 attempts /
- * 15 min / IP" limit that does not exist here. A-021's counter stops repeated
- * guessing against <i>one</i> account; it does nothing about one common password
- * sprayed across a thousand usernames, where no single account ever reaches five
- * failures. A purely per-IP limit was built and removed — it puts an entire
- * office behind one NAT address into a shared budget, so one colleague's typos
- * lock out everyone around them. The shape that fits is two-dimensional: cap
- * attempts per {@code (IP, username)} and separately cap how many <i>distinct</i>
- * usernames one address tries.
+ * <p>First, <b>nothing capped guess volume.</b> §10.1 opens with a "10 attempts
+ * / 15 min / IP" limit. A-021's counter stops repeated guessing against
+ * <i>one</i> account; it does nothing about one common password sprayed across a
+ * thousand usernames, where no single account ever reaches five failures. A
+ * purely per-IP limit was built and removed — it puts an entire office behind
+ * one NAT address into a shared budget, so one colleague's typos lock out
+ * everyone around them. A-076 is two-dimensional instead: attempts per
+ * {@code (client, identifier)}, and separately the number of <i>distinct</i>
+ * identifiers one source has <i>failed</i> against.
  *
  * <p>Second, and consequently, <b>a rejected attempt is expensive</b> — every
  * one costs a full Argon2id verification (~175 ms and 64 MB, measured), because
  * the lock is checked after the hash rather than before it. That ordering is
  * deliberate and must not be "optimised": checking the lock first would make a
  * locked account answer faster than an unlocked one, which leaks exactly what
- * the uniform timing above exists to hide.
+ * the uniform timing above exists to hide. A-076 bounds the cost without
+ * touching that ordering, by refusing before this method is entered at all —
+ * which it may do only because its budget is keyed on what was submitted and
+ * never resolves it, so its {@code 429} says nothing about the account.
  */
 @Service
 class AuthenticationService {

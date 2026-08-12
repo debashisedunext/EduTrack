@@ -52,6 +52,8 @@ class AuthExceptionHandler {
     private static final URI INVALID_RESET_TOKEN = URI.create("https://edutrack/errors/invalid-reset-token");
     private static final URI TOO_MANY_RESET_REQUESTS =
             URI.create("https://edutrack/errors/too-many-reset-requests");
+    private static final URI TOO_MANY_LOGIN_ATTEMPTS =
+            URI.create("https://edutrack/errors/too-many-login-attempts");
 
     private final RefreshTokenIssuer refreshTokens;
 
@@ -366,6 +368,31 @@ class AuthExceptionHandler {
         problem.setType(TOO_MANY_RESET_REQUESTS);
         problem.setTitle("Too many requests");
         problem.setDetail("Too many password reset requests. Try again shortly.");
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.retryAfter().toSeconds()))
+                .body(problem);
+    }
+
+    /**
+     * A-076 · {@code 429} with {@code Retry-After} on {@code POST /auth/login}.
+     *
+     * <p><b>The detail names no account.</b> It reports that this caller has been
+     * refused, never that the account they typed exists, is locked, or is being
+     * guessed at — {@link LoginRateLimiter} is keyed on what was submitted rather
+     * than what was found, and a message that mentioned the account would give
+     * back exactly the fact that design protects.
+     *
+     * <p>A separate type URI from the reset limiter's. Both are 429s, but a
+     * client backing off from a login throttle and one backing off from a mail
+     * throttle are different situations, and one URI for both would make them
+     * indistinguishable in logs and to the frontend.
+     */
+    @ExceptionHandler(TooManyLoginAttemptsException.class)
+    ResponseEntity<ProblemDetail> handleTooManyLoginAttempts(TooManyLoginAttemptsException exception) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.TOO_MANY_REQUESTS);
+        problem.setType(TOO_MANY_LOGIN_ATTEMPTS);
+        problem.setTitle("Too many requests");
+        problem.setDetail("Too many sign-in attempts. Try again shortly.");
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.retryAfter().toSeconds()))
                 .body(problem);
