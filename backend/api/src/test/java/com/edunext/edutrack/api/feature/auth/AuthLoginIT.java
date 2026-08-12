@@ -3,6 +3,7 @@ package com.edunext.edutrack.api.feature.auth;
 import com.edunext.edutrack.common.security.PasswordHashing;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -99,11 +101,32 @@ class AuthLoginIT {
     @Autowired
     RefreshTokenStore refreshTokens;
 
+    @Autowired
+    org.springframework.data.redis.core.StringRedisTemplate redis;
+
     private static boolean seeded;
 
     @BeforeAll
     static void resetSeedFlag() {
         seeded = false;
+    }
+
+    /**
+     * A-076 · every test in this class signs in from the same client, so without
+     * this they share one rate-limit budget and start depending on execution
+     * order — the same coupling the per-scenario A-021 fixtures above exist to
+     * avoid, arriving through Redis instead of through the users table.
+     *
+     * <p>Clearing rather than raising the limits for tests: a suite that runs
+     * against different bounds than production is a suite that cannot catch the
+     * bounds being wrong.
+     */
+    @BeforeEach
+    void clearRateLimitBudgets() {
+        Set<String> keys = redis.keys(LoginRateLimiter.PAIR_PREFIX + "*");
+        if (keys != null && !keys.isEmpty()) redis.delete(keys);
+        keys = redis.keys(LoginRateLimiter.SPRAY_PREFIX + "*");
+        if (keys != null && !keys.isEmpty()) redis.delete(keys);
     }
 
     /**
@@ -147,7 +170,15 @@ class AuthLoginIT {
                 {"ITA003", "it.counter", "it.counter@edunext.test", "Counter Probe"},
                 {"ITA004", "it.locker", "it.locker@edunext.test", "Locker Probe"},
                 {"ITA005", "it.lockedout", "it.lockedout@edunext.test", "Lockedout Probe"},
-                {"ITA006", "it.lapsed", "it.lapsed@edunext.test", "Lapsed Probe"}}) {
+                {"ITA006", "it.lapsed", "it.lapsed@edunext.test", "Lapsed Probe"},
+                // A-076. One per scenario for the reason above, and separate from
+                // the A-021 four because these spend far more than five failures
+                // and would lock accounts those tests depend on being unlocked.
+                {"ITA010", "it.rate.pair", "it.rate.pair@edunext.test", "Rate Pair Probe"},
+                {"ITA011", "it.rate.order", "it.rate.order@edunext.test", "Rate Order Probe"},
+                {"ITA012", "it.rate.success", "it.rate.success@edunext.test", "Rate Success Probe"},
+                {"ITA013", "it.rate.case", "it.rate.case@edunext.test", "Rate Case Probe"},
+                {"ITA014", "it.rate.honest", "it.rate.honest@edunext.test", "Rate Honest Probe"}}) {
             jdbc.update("""
                     INSERT INTO users (emp_code, username, email, password_hash, full_name,
                                        role_id, timezone, is_active, must_change_password)
@@ -208,6 +239,185 @@ class AuthLoginIT {
         // column to a _bin collation later would silently start rejecting people
         // who capitalise their own name.
         assertThat(login("IT.Asha", PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    @DisplayName("S-01's single field accepts an email address as well as a username")
+    void emailIsAcceptedAsTheLoginIdentifier() throws Exception {
+        // Blueprint §7.1 specifies one "Username / Email" field. This shipped
+        // resolving usernames only, and because A-020 makes every refusal
+        // byte-identical, an address typed into that box was indistinguishable
+        // from a wrong password — invisible from the outside, and it cost real
+        // attempts towards a lockout.
+        ResponseEntity<String> response = login("it.asha@edunext.test", PASSWORD);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(json(response).path("data").path("user").path("username").asText())
+                .isEqualTo("it.asha");
+    }
+
+    @Test
+    @DisplayName("the email lookup is case-insensitive too")
+    void emailMatchIsCaseInsensitive() {
+        assertThat(login("IT.Asha@Edunext.Test", PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    @DisplayName("a username cannot shadow another account's email address")
+    void aUsernameShapedLikeAnEmailCannotInterceptTheRealOwner() {
+        // The reason the resolver branches on '@' rather than running
+        // `username = ? OR email = ?`. Both columns are independently unique, so
+        // nothing stops this pair existing — and under an OR, which row comes
+        // back first is not something the schema promises.
+        //
+        // A dedicated victim rather than it.asha, following this file's own
+        // convention above: the impostor arm below is a failed login, and
+        // spending it.asha's attempts here would couple this test to A-021's
+        // lockout tests through failed_attempts.
+        seedOnce();
+        String hash = PasswordHashing.argon2id().encode(PASSWORD);
+        jdbc.update("""
+                INSERT INTO users (emp_code, username, email, password_hash, full_name,
+                                   role_id, timezone, is_active, must_change_password)
+                VALUES ('ITA007', 'it.victim', 'it.victim@edunext.test', ?, 'Victim Verma',
+                        (SELECT id FROM roles WHERE code = 'IT_AUTH_DEV'), 'Asia/Kolkata', 1, 0)
+                """, hash);
+        // The impostor holds the victim's ADDRESS as its USERNAME.
+        jdbc.update("""
+                INSERT INTO users (emp_code, username, email, password_hash, full_name,
+                                   role_id, timezone, is_active, must_change_password)
+                VALUES ('ITA008', 'it.victim@edunext.test', 'it.impostor@edunext.test', ?, 'Impostor',
+                        (SELECT id FROM roles WHERE code = 'IT_AUTH_DEV'), 'Asia/Kolkata', 1, 0)
+                """, PasswordHashing.argon2id().encode("Impostor-Pass-1!"));
+
+        // The impostor's own password must not open the address it squats on.
+        assertThat(login("it.victim@edunext.test", "Impostor-Pass-1!").getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        // The real owner's still does.
+        assertThat(login("it.victim@edunext.test", PASSWORD).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    // ── A-076 · the login throttle ──────────────────────────────────────────
+
+    /**
+     * A-021 locks at five failures, and these tests spend ten or more. Clearing
+     * the lock keeps each test about the one bound it names — a 423 arriving
+     * mid-run would fail the assertion for a reason that has nothing to do with
+     * the throttle. The ordering of the two bounds gets its own test below.
+     */
+    private void clearAccountLock(String username) {
+        jdbc.update("UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE username = ?", username);
+    }
+
+    @Test
+    @DisplayName("attempts against one identifier are capped, and the refusal carries Retry-After")
+    void thePairBudgetIsBounded() {
+        for (int i = 0; i < LoginRateLimiter.MAX_PER_PAIR; i++) {
+            assertThat(login("it.rate.pair", "Wrong-Horse-9!").getStatusCode())
+                    .isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        ResponseEntity<String> throttled = login("it.rate.pair", "Wrong-Horse-9!");
+        assertThat(throttled.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        // Without Retry-After a well-behaved client cannot tell how long to back
+        // off, retries immediately, and stays refused.
+        assertThat(throttled.getHeaders().getFirst("Retry-After")).isNotNull();
+        assertThat(throttled.getBody()).contains("too-many-login-attempts");
+    }
+
+    @Test
+    @DisplayName("the cap sits above A-021's lockout, so an account can still lock")
+    void theThrottleDoesNotPreEmptTheAccountLockout() {
+        // If this limit bit first, five failures would never be reached, no
+        // account would ever lock, and no admin would ever be told. The ordering
+        // of the two bounds is the assertion.
+        assertThat(LoginRateLimiter.MAX_PER_PAIR).isGreaterThan(5);
+
+        for (int i = 0; i < 5; i++) {
+            login("it.rate.order", "Wrong-Horse-9!");
+        }
+        assertThat(login("it.rate.order", PASSWORD).getStatusCode()).isEqualTo(HttpStatus.LOCKED);
+    }
+
+    @Test
+    @DisplayName("the 429 is keyed on what was submitted, so it says nothing about existence")
+    void theThrottleIsNotAnEnumerationOracle() {
+        // The reason this check can run before the KDF at all. A name that has
+        // never existed must be throttled on exactly the same terms as a real
+        // one — otherwise "which identifier gets 429'd" answers "which identifier
+        // exists", and running early would have traded a DoS gap for an oracle.
+        for (int i = 0; i < LoginRateLimiter.MAX_PER_PAIR; i++) {
+            login("it.no.such.person", "Wrong-Horse-9!");
+        }
+
+        assertThat(login("it.no.such.person", "Wrong-Horse-9!").getStatusCode())
+                .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    @Test
+    @DisplayName("a successful sign-in clears the pair budget")
+    void successReleasesTheBudget() {
+        // Otherwise someone signing in and out through the day is eventually
+        // refused for succeeding. Safe because a caller who can authenticate
+        // already holds the password there is nothing left to protect.
+        for (int i = 0; i < LoginRateLimiter.MAX_PER_PAIR - 1; i++) {
+            login("it.rate.success", "Wrong-Horse-9!");
+        }
+        clearAccountLock("it.rate.success");
+        assertThat(login("it.rate.success", PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // Budget reset — a fresh run of the same size is still allowed, where
+        // without the clear the very next attempt would be the eleventh.
+        for (int i = 0; i < LoginRateLimiter.MAX_PER_PAIR - 1; i++) {
+            assertThat(login("it.rate.success", "Wrong-Horse-9!").getStatusCode())
+                    .isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+    }
+
+    @Test
+    @DisplayName("failing against many distinct identifiers trips spray detection")
+    void sprayDetectionBoundsDistinctFailedIdentifiers() {
+        // The gap failed_attempts cannot close: one password against many names
+        // never reaches five failures on any single account.
+        for (int i = 0; i <= LoginRateLimiter.MAX_DISTINCT_FAILED_USERNAMES; i++) {
+            login("it.sprayed." + i, "One-Password-For-All-1!");
+        }
+
+        // A name never tried before, from the same source, is now refused —
+        // the budget is the source's, not the account's.
+        assertThat(login("it.entirely.fresh", "One-Password-For-All-1!").getStatusCode())
+                .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    @Test
+    @DisplayName("successful sign-ins never enter the spray set")
+    void honestTrafficDoesNotFeedSprayDetection() {
+        // This is what keeps the NAT problem from returning: two hundred people
+        // behind one gateway are two hundred distinct identifiers, and counting
+        // attempts rather than failures would throttle the whole office before
+        // anything had gone wrong.
+        for (int i = 0; i <= LoginRateLimiter.MAX_DISTINCT_FAILED_USERNAMES; i++) {
+            assertThat(login("it.rate.honest", PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+
+        // Still 401 rather than 429: the successes contributed nothing, so this
+        // source's spray budget is untouched.
+        assertThat(login("it.dormant", PASSWORD).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("capitalisation does not buy a fresh budget")
+    void theBudgetIsCaseInsensitiveLikeTheColumn() {
+        // Both identifier columns are utf8mb4_0900_ai_ci, so IT.Asha and it.asha
+        // are one account. Keying on the raw string would hand out a new budget
+        // per capitalisation and make the limit free to evade.
+        for (int i = 0; i < LoginRateLimiter.MAX_PER_PAIR; i++) {
+            login(i % 2 == 0 ? "it.rate.case" : "IT.Rate.Case", "Wrong-Horse-9!");
+        }
+
+        assertThat(login("It.RaTe.CaSe", "Wrong-Horse-9!").getStatusCode())
+                .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
     }
 
     // ── the failure paths, which must be indistinguishable ──────────────────

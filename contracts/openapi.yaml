@@ -2991,7 +2991,13 @@ components:
       type: object
       required: [username, password]
       properties:
-        username: { type: string, minLength: 1, maxLength: 100 }
+        # A-020 fix, Stream A change to a Stream D file — flagged for Debashis.
+        # S-01 (blueprint §7.1) specifies one "Username / Email" field, so this
+        # carries either form. maxLength follows users.email (VARCHAR(150)), not
+        # users.username (VARCHAR(50)): at 100 any address longer than that was
+        # refused by Bean Validation before the lookup ran, which read to the
+        # caller as a wrong password.
+        username: { type: string, minLength: 1, maxLength: 150 }
         password: { type: string, minLength: 1 }
         totpCode: { type: string, pattern: '^\d{6}$', description: Required when 2FA is enabled. }
         # A-029, Stream A addition — flagged for Debashis with the /me/2fa paths.

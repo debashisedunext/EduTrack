@@ -483,7 +483,7 @@ class AuthRefreshIT {
 
         assertThat(elapsed)
                 .as("login costs ~175 ms per attempt by design; refresh must not inherit that, "
-                        + "or it becomes the cheaper DoS target A-074 is already tracking")
+                        + "or it becomes the cheaper DoS target A-076 is already tracking")
                 .isLessThan(Duration.ofMillis(150));
     }
 }

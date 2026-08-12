@@ -52,6 +52,7 @@ class AuthController {
     private final ForgotPasswordService forgotPassword;
     private final ResetPasswordService resetPassword;
     private final PasswordResetRateLimiter resetRateLimiter;
+    private final LoginRateLimiter loginRateLimiter;
 
     AuthController(AuthenticationService authentication,
                    AccessTokenIssuer tokens,
@@ -60,7 +61,8 @@ class AuthController {
                    LogoutService logout,
                    ForgotPasswordService forgotPassword,
                    ResetPasswordService resetPassword,
-                   PasswordResetRateLimiter resetRateLimiter) {
+                   PasswordResetRateLimiter resetRateLimiter,
+                   LoginRateLimiter loginRateLimiter) {
         this.authentication = authentication;
         this.tokens = tokens;
         this.refreshTokens = refreshTokens;
@@ -69,6 +71,7 @@ class AuthController {
         this.forgotPassword = forgotPassword;
         this.resetPassword = resetPassword;
         this.resetRateLimiter = resetRateLimiter;
+        this.loginRateLimiter = loginRateLimiter;
     }
 
     @PostMapping(path = "/login", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -130,6 +133,28 @@ class AuthController {
                                       "detail": "Too many failed sign-in attempts. Try again later, or ask an administrator.",
                                       "lockedUntil": "2026-08-08T16:05:00Z"
                                     }""")))
+    @ApiResponse(
+            responseCode = "429",
+            description = "A-076 · this caller has been throttled, either for too many attempts "
+                    + "against one identifier or for failing against too many distinct identifiers. "
+                    + "Says nothing about whether the account exists — the budget is keyed on what "
+                    + "was submitted, never on what was found.",
+            headers = @Header(
+                    name = HttpHeaders.RETRY_AFTER,
+                    description = "Seconds until the binding budget frees up.",
+                    schema = @Schema(type = "integer")),
+            content = @Content(
+                    mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class),
+                    examples = @ExampleObject(
+                            name = "too-many-login-attempts",
+                            value = """
+                                    {
+                                      "type": "https://edutrack/errors/too-many-login-attempts",
+                                      "title": "Too many requests",
+                                      "status": 429,
+                                      "detail": "Too many sign-in attempts. Try again shortly."
+                                    }""")))
     ResponseEntity<SessionResponse> login(
             @Valid @RequestBody LoginRequest request,
             // Optional on purpose. A missing User-Agent is unusual but not a
@@ -141,13 +166,38 @@ class AuthController {
             // forbids JavaScript from overriding it, so the input box Swagger
             // would render is one the request can never honour.
             @Parameter(hidden = true)
-            @RequestHeader(value = HttpHeaders.USER_AGENT, required = false) String userAgent) {
+            @RequestHeader(value = HttpHeaders.USER_AGENT, required = false) String userAgent,
+            @Parameter(hidden = true) HttpServletRequest httpRequest) {
+
+        // A-076 · checked BEFORE the KDF, which is the whole point: a limiter
+        // that runs after the hash has already spent the 175 ms and 64 MB it
+        // exists to protect. Safe to run first only because it is keyed on what
+        // was submitted and never resolves it — see LoginRateLimiter. A-021's
+        // 423 cannot be moved here for exactly the opposite reason.
+        String clientKey = clientKeyOf(httpRequest);
+        loginRateLimiter.checkAndSpend(request.username(), clientKey)
+                .ifPresent(retryAfter -> {
+                    throw new TooManyLoginAttemptsException(retryAfter);
+                });
 
         // A-029 · totpCode was declared by the contract from the start and
         // ignored until now; the challenge itself lives in AuthenticationService,
         // which is what keeps its ordering relative to the password check.
-        AuthenticatedUser user = authentication.authenticate(
-                request.username(), request.password(), request.secondFactor());
+        AuthenticatedUser user;
+        try {
+            user = authentication.authenticate(
+                    request.username(), request.password(), request.secondFactor());
+        } catch (InvalidCredentialsException e) {
+            // Only this one feeds spray detection. A locked account and a pending
+            // two-factor challenge both mean the password was *correct*, which is
+            // the opposite of the signature being looked for — counting them
+            // would let every 2FA user inflate their own office's budget each
+            // time they signed in.
+            loginRateLimiter.recordFailure(request.username(), clientKey);
+            throw e;
+        }
+        loginRateLimiter.recordSuccess(request.username(), clientKey);
+
         AccessToken token = tokens.issue(user);
         SessionResponse body = new SessionResponse(Session.issue(user, token));
 

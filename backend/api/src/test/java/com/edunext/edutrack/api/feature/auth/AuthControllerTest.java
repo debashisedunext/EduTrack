@@ -70,6 +70,9 @@ class AuthControllerTest {
     @MockitoBean
     PasswordResetRateLimiter resetRateLimiter;
 
+    @MockitoBean
+    LoginRateLimiter loginRateLimiter;
+
     private static final String VALID_BODY = """
             {"username":"asha.rao","password":"Correct-Horse-1!"}
             """;
@@ -87,6 +90,11 @@ class AuthControllerTest {
     void issueARefreshCookieByDefault() {
         when(refreshTokens.issue(any(), any())).thenReturn(Optional.of(REFRESH_COOKIE));
         when(refreshTokens.clearing()).thenReturn(CLEARING);
+        // A-076. An unstubbed Mockito mock returns null for an Optional method,
+        // and the controller calls .ifPresent on it — without this, every login
+        // test here dies on an NPE unrelated to what it asserts. The throttle's
+        // own tests override this.
+        when(loginRateLimiter.checkAndSpend(anyString(), anyString())).thenReturn(Optional.empty());
     }
 
     @Test

@@ -43,8 +43,10 @@ import jakarta.validation.constraints.Size;
 record LoginRequest(
 
         @NotBlank
-        @Size(max = 100)
-        @Schema(description = "The user's login name. Matching is case-insensitive.")
+        @Size(max = 150)
+        @Schema(description = "The user's login name or email address — S-01 accepts either in "
+                + "one field. Matching is case-insensitive. An identifier containing '@' is "
+                + "resolved against the email column, anything else against the username.")
         String username,
 
         @NotBlank

@@ -50,7 +50,7 @@ the database rejects mutation independently via triggers and grants.
 export interface LoginRequest {
   /**
    * @minLength 1
-   * @maxLength 100
+   * @maxLength 150
    */
   username: string;
   /** @minLength 1 */

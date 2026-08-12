@@ -16,12 +16,12 @@ import java.util.Optional;
  * <h2>Why this endpoint needs one when login does not yet have one</h2>
  *
  * <p>{@code AuthenticationService} documents that §10.1's "10 attempts / 15 min
- * / IP" was deliberately deferred to A-074, and that a purely per-IP limit is
+ * / IP" was deliberately deferred to A-076, and that a purely per-IP limit is
  * the wrong shape because it puts a whole office behind one NAT address into a
  * shared budget. That reasoning is about <i>guessing</i>, where the attacker
  * needs many attempts and the honest user needs a few.
  *
- * <p>This endpoint has the opposite profile, and cannot wait for A-074. An
+ * <p>This endpoint has the opposite profile, and cannot wait for A-076. An
  * unlimited "email this address a password-reset link" endpoint is a mail
  * cannon: anyone on the internet can point it at a colleague and fill their
  * inbox, or sweep it across a list of addresses to find which ones the
@@ -42,7 +42,7 @@ import java.util.Optional;
  * </ul>
  *
  * <p>Neither alone is sufficient, which is why the check is two-dimensional in
- * the way A-074's login limit will also have to be.
+ * the way A-076's login limit will also have to be.
  *
  * <h2>The counter is keyed on what was submitted, never on what was found</h2>
  *

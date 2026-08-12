@@ -310,6 +310,42 @@ class AuthUserRepository {
         return jdbc.sql(FIND_BY_USERNAME).param(username).query(ROW_MAPPER).optional();
     }
 
+    /**
+     * A-020 · resolves whatever S-01's single "Username / Email" field carried.
+     *
+     * <p>Blueprint §7.1 specifies one field accepting either form, so the login
+     * path cannot reach for {@link #findByUsername} alone — an address typed
+     * into that box was landing on "no such user", and A-020's byte-identical
+     * refusals meant nobody could tell that from a wrong password.
+     *
+     * <p><b>Branching on {@code @} rather than {@code username = ? OR email = ?}.</b>
+     * Both columns are independently unique, but nothing stops a value in one
+     * from colliding with a value in the other: a user who takes the username
+     * {@code ceo@edunext.example} would, under an OR, intercept every login
+     * attempt aimed at the real owner of that address. Which row an OR returns
+     * first is not something the schema promises. Branching also keeps this a
+     * single indexed equality lookup instead of a disjunction the optimiser may
+     * refuse to use both indexes for.
+     *
+     * <p><b>The corollary is that a username containing {@code @} is
+     * unreachable</b> — it would be routed to the email column and not found.
+     * That is the safe direction to fail, but it is only safe while nothing
+     * issues such usernames, so B-011's Resource Master should reject {@code @}
+     * at creation. Recorded here because the constraint lives in another
+     * stream's screen and is invisible from this file.
+     *
+     * <p>No timing concern in the branch: both arms are one indexed lookup, and
+     * a miss on either returns empty to the same decoy-hash path in
+     * {@link AuthenticationService#authenticate}, which spends a full KDF either
+     * way.
+     */
+    Optional<AuthUserRow> findByLoginIdentifier(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            return Optional.empty();
+        }
+        return identifier.indexOf('@') >= 0 ? findByEmail(identifier) : findByUsername(identifier);
+    }
+
     /** A-024 · the refresh path, which holds an id rather than a username. */
     Optional<AuthUserRow> findById(long userId) {
         return jdbc.sql(FIND_BY_ID).param(userId).query(ROW_MAPPER).optional();
