@@ -5,9 +5,73 @@ organisation, a bulk activate/deactivate, and an export. B-011 added the write
 half: `GET`, `POST` and `PATCH` of one resource, behind the S-08 form.
 
 **B-012** then closed the reporting-manager hole: a cycle at any depth is a
-`409`, not only self-reference. The bulk reassignment wizard **B-014** is still
-open, which is why deactivating somebody who holds open tickets stops with a
-count rather than offering to fix it.
+`409`, not only self-reference. **B-014** added `PATCH /users/{id}/status` and
+turned the deactivation refusal into a route through S-24 rather than a dead
+end.
+
+## B-014 · deactivation has to lead somewhere
+
+Blueprint §S-07: "deactivating a resource with open tickets **forces** a bulk
+reassignment wizard." Three routes here refuse that deactivation —
+`POST /users/bulk-status`, `PATCH /users/{id}` and now
+`PATCH /users/{id}/status` — and before this task every one of them named a
+problem and offered no way through. A refusal with no exit is an obstacle, and
+the reliable response to an obstacle is to stop trying, which leaves the
+organisation with leavers whose accounts are still live.
+
+**The wizard itself is not in this package and never will be.** S-24 is Stream
+C's C-063, behind `POST /tickets/bulk-reassign`. What this package owns is the
+refusal, the information needed to resolve it, and the route back:
+reassign, then call the status route again and get a `204`.
+
+### `PATCH /users/{id}/status` was declared and never served
+
+The contract has carried `setUserStatus` from the first draft. The MSW mock has
+answered it since B-010. Three Javadocs in this package described what it
+refuses. **No server ever mounted it** — a `PATCH` to that path met
+`/{userId}`'s sibling mapping and came back `405`, and nothing noticed, because
+the operation had no caller until this flow needed one.
+
+`MasterRoutesTest` could not have caught it: it asserts where *classes* are
+mounted, and this was a missing *method*.
+`ResourceControllerTest.SingularStatus.isMountedWhereTheContractSaysItIs` is now
+the thing that would have. `ContractConformanceTest` reports unimplemented
+operations as coverage rather than failing the build, deliberately (D-005), so
+it was never going to be the alarm here.
+
+### The singular route has no decision of its own
+
+`ResourceService.setStatus(long, boolean)` calls the same `apply` the bulk route
+does and translates the outcome into a status code. The contract has always said
+the two refuse the same thing for the same reason; one `apply` is the only way
+that stays true.
+
+**`UNCHANGED` answers `204`, not `409`.** Setting a flag to the value it already
+holds succeeded — there is nothing for the caller to do differently, and a
+client retrying after a dropped response has to converge. It also matters for
+the exact row this task exists to unblock: somebody already inactive who still
+holds tickets, which is what a half-finished reassignment leaves behind, would
+otherwise be refused forever.
+
+### `reason` is accepted, validated, and not persisted
+
+Both status bodies carry it and nothing writes it down. The place it belongs is
+`audit_logs` — the table exists, and so does `domain.audit.AuditLog` — but
+**nothing in this repository writes a row to it**, and `actor_id` wants a
+principal `dev-noauth` does not supply. Introducing the first writer to a shared
+audit table from a masters branch, with a null actor, would make the audit
+trail's opening entries the ones nobody can attribute. Dropping the field from
+the contract instead would mean re-adding it later as a breaking change to
+clients that had learned to omit it. **Flagged for Stream A with A-016.**
+
+### `reassignUrl` stays an API path
+
+It names `POST /tickets/bulk-reassign`, which a browser cannot navigate to. The
+UI route the screen actually goes to lives in
+`frontend/src/features/masters/resources/reassignHandoff.ts`, along with the
+`fromUserId` / `returnTo` handoff contract Stream C's wizard reads. A server
+emitting `/tickets/bulk-reassign?fromUserId=…` would be shipping one web app's
+routing table to every consumer of the API.
 
 ## B-012 · the reporting line
 
@@ -281,6 +345,7 @@ controller's Javadoc and enforced when it lands:
 | `GET /users/{id}` | All six roles. It carries no credential: the projection names its columns and `password_hash`, `failed_attempts`, `locked_until` and `password_changed_at` are not among them. |
 | `POST /users` | Admin only, like every master write. |
 | `PATCH /users/{id}` | Admin only. |
+| `PATCH /users/{id}/status` | Admin only. |
 | `POST /users/bulk-status` | Admin only. |
 
 Until A-034's `ScopeResolver` and A-033's `@PreAuthorize` land this runs under
@@ -290,10 +355,10 @@ explicit that a local workaround becomes the permanent hole.
 ## Tests
 
 - `ResourceCursorTest` — round trip, names containing the separator, malformed input decoding to "first page" rather than a 400
-- `ResourceServiceTest` — the probe row, the exact-multiple off-by-one, batched hydration, every bulk outcome
+- `ResourceServiceTest` — the probe row, the exact-multiple off-by-one, batched hydration, every bulk outcome, and the singular route's four translations
 - `ResourceExportWriterTest` — both formats read back, the BOM, RFC 4180 quoting, formula neutralisation, 250 rows against a 100-row window
-- `ResourceControllerTest` — query string to filter, role validation, export format validation, the separate-route guard
-- `ResourceListIT` — real MySQL: `LIKE` escaping, the collation, keyset paging across duplicate names, `is_open`, the `DATETIME(6)` round trip
+- `ResourceControllerTest` — query string to filter, role validation, export format validation, the separate-route guard, and that the status route is mounted where the contract puts it
+- `ResourceListIT` — real MySQL: `LIKE` escaping, the collation, keyset paging across duplicate names, `is_open`, the `DATETIME(6)` round trip, and that the deactivation refusal clears once the tickets have a new owner
 - `TemporaryPasswordsTest` — every generated password meets §10.3, over 2,000 samples rather than by construction-and-hope
 - `ResourceWriteServiceTest` — the three states of a key, both guards, membership normalisation, the ETag's exclusions
 - `ResourceFormIT` — real MySQL: every section round-tripping, the Argon2id hash, a partial update leaving other columns alone, a dropped membership deactivating rather than deleting, and the new `CHECK` constraints firing

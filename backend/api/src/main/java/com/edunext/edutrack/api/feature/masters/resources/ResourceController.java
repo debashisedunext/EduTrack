@@ -41,9 +41,12 @@ import java.util.Set;
  * <p>B-012 closed the reporting-manager hole: {@code POST} and {@code PATCH}
  * now refuse a cycle at any depth with a 409, not only self-reference.
  *
- * <p><b>The bulk reassignment wizard (B-014) is still absent</b>, which is why
- * deactivating somebody who holds open tickets stops with a count and a URL
- * rather than offering to fix it.
+ * <p>B-014 added {@code PATCH /users/{userId}/status}, which the contract had
+ * declared and nothing had served. <b>The wizard those refusals point at is
+ * still absent</b> — it is S-24, Stream C's C-063, and lives behind
+ * {@code POST /tickets/bulk-reassign}. What this controller owns is the refusal
+ * and the route back through it: reassign, then set the flag again and get a
+ * 204.
  *
  * <h2>Permissions</h2>
  *
@@ -62,9 +65,9 @@ import java.util.Set;
  *       {@code failed_attempts}, {@code locked_until} and
  *       {@code password_changed_at} are not among them.</li>
  *   <li><b>{@code POST /users}, {@code PATCH /users/{id}},
- *       {@code POST /users/bulk-status}</b> — Admin only, like every master
- *       write. The other five roles are refused before any id in the body is
- *       read.</li>
+ *       {@code PATCH /users/{id}/status}, {@code POST /users/bulk-status}</b> —
+ *       Admin only, like every master write. The other five roles are refused
+ *       before any id in the body is read.</li>
  * </ul>
  *
  * <p>Until A-034's {@code ScopeResolver} and A-033's {@code @PreAuthorize} land
@@ -159,6 +162,39 @@ class ResourceController {
     @Operation(operationId = "setUserStatusBulk", summary = "Activate or deactivate a selection (S-07)")
     ResourceDtos.BulkStatusResponse setStatusBulk(@Valid @RequestBody ResourceDtos.BulkStatusRequest request) {
         return new ResourceDtos.BulkStatusResponse(resources.setStatus(request));
+    }
+
+    /**
+     * B-014 · activate or deactivate one resource.
+     *
+     * <p><b>The contract has declared this operation since the first draft, the
+     * MSW mock has answered it since B-010, three javadocs in this package
+     * describe what it refuses — and until now no server served it.</b> A
+     * {@code PATCH} to this path met the {@code /{userId}} mapping's sibling and
+     * came back 405. Nothing caught it, because the operation had no caller: the
+     * grid uses the bulk route and the form uses {@code PATCH /users/{userId}},
+     * and the screen that needed the singular one is the deactivation flow this
+     * task builds. {@code ResourceControllerTest.everyContractedRouteIsMounted}
+     * is now the thing that would have.
+     *
+     * <p>No {@code If-Match}, matching the contract and CONVENTIONS.md §5's
+     * exemption: this sets a flag to a stated value rather than editing a
+     * document, so a replay converges and last-write-wins is the correct
+     * semantic. The optimistic-concurrency guard on {@code PATCH /users/{userId}}
+     * is there because that route sends the whole form back and would otherwise
+     * silently discard a colleague's edit; there is nothing here to discard.
+     *
+     * <p>204 rather than the updated resource. The caller either already has the
+     * row or is about to re-read the list, and returning a body would make this
+     * the third shape of a resource in one controller.
+     */
+    @PatchMapping(path = "/{userId}/status", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "setUserStatus", summary = "Activate or deactivate")
+    ResponseEntity<Void> setStatus(@PathVariable long userId,
+                                   @Valid @RequestBody ResourceDtos.StatusRequest request) {
+
+        resources.setStatus(userId, request.isActive());
+        return ResponseEntity.noContent().build();
     }
 
     // ------------------------------------------------------------------

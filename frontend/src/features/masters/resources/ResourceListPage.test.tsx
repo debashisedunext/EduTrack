@@ -24,7 +24,11 @@ let requests: URL[] = []
 beforeAll(() =>
   server.events.on('request:start', ({ request }) => {
     const url = new URL(request.url)
-    if (url.pathname.endsWith('/users') || url.pathname.endsWith('/users/bulk-status')) {
+    if (
+      url.pathname.endsWith('/users') ||
+      url.pathname.endsWith('/users/bulk-status') ||
+      url.pathname.endsWith('/status')
+    ) {
       requests.push(url)
     }
   }),
@@ -66,11 +70,6 @@ const waitForGrid = () =>
  */
 const row = (name: string) =>
   screen.getByRole('checkbox', { name: `Select ${name}` }).closest('tr')!
-
-const closeDialog = async () => {
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Done' }))
-  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-}
 
 /**
  * An active resource holding no open tickets, and one holding several, read
@@ -243,14 +242,19 @@ describe('bulk activate and deactivate', () => {
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText(busy.displayName)).toBeInTheDocument()
-    expect(within(dialog).getByText(/open tickets? to reassign first/)).toBeInTheDocument()
+
+    // B-014 · the count is already on the grid, so the refusal comes before the
+    // round trip rather than after it. A request that is certain to be refused
+    // is one the admin waits on to be told what the screen already knew.
+    expect(requests.some((u) => u.pathname.endsWith('/users/bulk-status'))).toBe(false)
 
     // And they are still active — deactivating anyway would orphan live work.
-    await closeDialog()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(within(row(busy.displayName)).getByText('Active')).toBeInTheDocument()
   })
 
-  it('a mixed selection deactivates who it can and reports who it could not', async () => {
+  it('a mixed selection deactivates who it can and leaves the blocked one alone', async () => {
     const { clean, busy } = pickResources()
     renderPage()
     await waitForGrid()
@@ -259,17 +263,19 @@ describe('bulk activate and deactivate', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: `Select ${busy.displayName}` }))
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
 
-    // Partial success is the normal case: failing the batch would punish the
-    // clean resource for the busy one's open tickets.
+    // Partial success is the normal case: refusing the batch would punish the
+    // clean resource for the busy one's open tickets. The difference B-014 makes
+    // is that the split is offered as a choice rather than discovered afterwards.
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('heading')).toHaveTextContent('1 deactivated')
-    expect(within(dialog).getByText(/blocked by open tickets/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate the other 1' }))
 
-    await closeDialog()
     await waitFor(() =>
       expect(within(row(clean.displayName)).getByText('Inactive')).toBeInTheDocument(),
     )
     expect(within(row(busy.displayName)).getByText('Active')).toBeInTheDocument()
+    // Nothing was refused, because nothing refusable was sent — so no results
+    // dialog to dismiss either.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('select-all on the page ticks every row', async () => {
@@ -294,5 +300,104 @@ describe('bulk activate and deactivate', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Active' }))
 
     await waitFor(() => expect(screen.queryByText(/1 selected/)).not.toBeInTheDocument())
+  })
+})
+
+/**
+ * B-014 · the flow the blueprint calls *forced*.
+ *
+ * Three legs, and the third is the one that is easy to leave out: refuse, hand
+ * off to S-24, and come back to finish. A handoff with no return leg drops the
+ * admin on a grid where the person they were removing is still active and
+ * nothing on screen explains why, which is indistinguishable from the feature
+ * not working.
+ */
+describe('deactivation hands off to the reassignment wizard', () => {
+  const openDeactivationDialog = async (name: string) => {
+    fireEvent.click(screen.getByRole('checkbox', { name: `Select ${name}` }))
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
+    return screen.findByRole('dialog')
+  }
+
+  it('offers a link into S-24 with the blocked resource preselected', async () => {
+    const { busy } = pickResources()
+    renderPage()
+    await waitForGrid()
+
+    const dialog = await openDeactivationDialog(busy.displayName)
+    const href = within(dialog)
+      .getByRole('link', { name: new RegExp(`Reassign ${busy.displayName}'s \\d+ open ticket`) })
+      .getAttribute('href')!
+    const url = new URL(href, 'http://localhost')
+
+    expect(url.pathname).toBe('/tickets/bulk-reassign')
+    expect(url.searchParams.get('fromUserId')).toBe(String(busy.id))
+    // The way home, and the marker that makes the return trip finish the job
+    // rather than just land somewhere.
+    expect(url.searchParams.get('returnTo')).toBe(`/masters/resources?deactivate=${busy.id}`)
+  })
+
+  it('carries the current filters through the wizard and back', async () => {
+    renderPage('/masters/resources?role=DEVELOPER')
+    await waitFor(() => expect(screen.getByText('Sunil Menon')).toBeInTheDocument())
+
+    const db = getDb()
+    const openCount = (id: number) =>
+      db.tickets.filter((t) => t.assigneeId === id && t.status !== 'CLOSED').length
+    const busyDeveloper = db.users.find(
+      (u) => u.isActive && u.role === 'DEVELOPER' && openCount(u.id) > 0,
+    )!
+
+    const dialog = await openDeactivationDialog(busyDeveloper.displayName)
+    const href = within(dialog).getAllByRole('link')[0].getAttribute('href')!
+    const returnTo = new URL(href, 'http://localhost').searchParams.get('returnTo')!
+
+    // A round trip through another screen must not silently reset the view the
+    // admin was working in — coming back to an unfiltered grid of everybody is
+    // how somebody loses their place in a directory of hundreds.
+    expect(returnTo).toContain('role=DEVELOPER')
+    expect(returnTo).toContain(`deactivate=${busyDeveloper.id}`)
+  })
+
+  it('finishes the deactivation on the way back from the wizard', async () => {
+    // Standing in for "the wizard moved their tickets": the resource has none
+    // left, which is the state S-24 leaves behind on success.
+    const { clean } = pickResources()
+    renderPage(`/masters/resources?deactivate=${clean.id}`)
+    await waitForGrid()
+
+    await waitFor(() =>
+      expect(within(row(clean.displayName)).getByText('Inactive')).toBeInTheDocument(),
+    )
+    expect(requests.some((u) => u.pathname.endsWith(`/users/${clean.id}/status`))).toBe(true)
+  })
+
+  it('says so plainly when the wizard did not move everything', async () => {
+    const { busy } = pickResources()
+    renderPage(`/masters/resources?deactivate=${busy.id}`)
+    await waitForGrid()
+
+    // The server refuses, and it is right to: some tickets are still theirs.
+    // What matters here is that the refusal leaves the row exactly as it was
+    // rather than half-applying anything.
+    await waitFor(() =>
+      expect(requests.some((u) => u.pathname.endsWith(`/users/${busy.id}/status`))).toBe(true),
+    )
+    expect(within(row(busy.displayName)).getByText('Active')).toBeInTheDocument()
+  })
+
+  it('does not re-fire the deactivation if the page re-renders', async () => {
+    const { clean } = pickResources()
+    const { rerender } = renderPage(`/masters/resources?deactivate=${clean.id}`)
+    await waitForGrid()
+    await waitFor(() =>
+      expect(requests.filter((u) => u.pathname.endsWith('/status'))).toHaveLength(1),
+    )
+
+    // A write triggered by a URL parameter must survive a re-render without
+    // running twice — the marker is cleared from the URL in the same tick, and
+    // the ref covers the window before that navigation settles.
+    rerender(<div />)
+    expect(requests.filter((u) => u.pathname.endsWith('/status'))).toHaveLength(1)
   })
 })

@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /**
  * B-010 · the S-07 grid against a real MySQL.
@@ -351,6 +352,94 @@ class ResourceListIT {
 
             assertThat(result.changed()).isEqualTo(1);
             assertThat(isActive(zoya)).isTrue();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // B-014 · the singular status route against real tickets
+    // ------------------------------------------------------------------
+
+    /**
+     * The same guard through the route the S-24 flow returns by.
+     *
+     * <p>In this class rather than a new IT, deliberately: a second
+     * {@code @Testcontainers} class is a second MySQL image, a second Flyway
+     * migration run and roughly a minute of CI for behaviour that wants the
+     * fixtures already sitting here.
+     *
+     * <p>These are not a rerun of {@code BulkStatus} above. What they prove is
+     * the thing a mock cannot: that the count driving the refusal comes from the
+     * same {@code statuses.is_open} join, so the two routes cannot start
+     * disagreeing about what "open" means — and that the flow this task exists
+     * to build actually terminates.
+     */
+    @Nested
+    @DisplayName("PATCH /users/{userId}/status")
+    class SingularStatus {
+
+        @Test
+        @DisplayName("an open ticket refuses the deactivation and names the count")
+        void openTicketsRefuse() {
+            long priya = idOfUser("ITRES001");
+            insertTicket("ITRES-26-00010", priya, "IN_PROGRESS");
+            insertTicket("ITRES-26-00011", priya, "ON_HOLD");
+            insertTicket("ITRES-26-00012", priya, "CLOSED");
+
+            assertThatExceptionOfType(ResourceWriteService.OpenTicketsException.class)
+                    .isThrownBy(() -> service.setStatus(priya, false))
+                    .satisfies(e -> assertThat(e.openTicketCount()).isEqualTo(2));
+
+            assertThat(isActive(priya)).isTrue();
+        }
+
+        /**
+         * The whole point of the task, end to end.
+         *
+         * <p>Reassignment is C-063's write and does not exist yet, so the middle
+         * step is done here with the {@code UPDATE} it will eventually make. The
+         * claim under test is not how the tickets move — it is that the master
+         * screen's refusal is <b>resolvable</b>: the same call that was refused
+         * succeeds once the work has an owner. A guard with no exit is a
+         * defect, and until this test existed nothing said it had one.
+         */
+        @Test
+        @DisplayName("the refusal clears once the tickets have a new owner")
+        void reassignmentUnblocksTheDeactivation() {
+            long priya = idOfUser("ITRES001");
+            long bhavesh = idOfUser("ITRES004");
+            insertTicket("ITRES-26-00013", priya, "IN_PROGRESS");
+
+            assertThatExceptionOfType(ResourceWriteService.OpenTicketsException.class)
+                    .isThrownBy(() -> service.setStatus(priya, false));
+
+            jdbc.update("UPDATE tickets SET assigned_to = ? WHERE ticket_code = ?",
+                    bhavesh, "ITRES-26-00013");
+
+            service.setStatus(priya, false);
+
+            assertThat(isActive(priya)).isFalse();
+        }
+
+        @Test
+        @DisplayName("an already-inactive resource holding tickets settles at 204, not a permanent 409")
+        void alreadyInactiveIsNotBlockedForever() {
+            // A half-finished reassignment: deactivated at some point, still
+            // holding work. If the guard ran before the already-in-that-state
+            // check this row could never be resolved from any screen.
+            long zoya = idOfUser("ITRES003");
+            insertTicket("ITRES-26-00014", zoya, "NEW");
+            jdbc.update("UPDATE users SET is_active = 0 WHERE id = ?", zoya);
+
+            service.setStatus(zoya, false);
+
+            assertThat(isActive(zoya)).isFalse();
+        }
+
+        @Test
+        @DisplayName("an unknown id is 404 rather than a quiet no-op")
+        void unknownResourceIsNotFound() {
+            assertThatExceptionOfType(ResourceWriteService.ResourceNotFoundException.class)
+                    .isThrownBy(() -> service.setStatus(-1L, false));
         }
     }
 

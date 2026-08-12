@@ -11,11 +11,16 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
- * B-010 · the Resource Master's read model and its bulk status write (S-07).
+ * B-010 · the Resource Master's read model and its status writes (S-07).
  *
- * <p>Creating and editing a resource is B-011, cycle detection is B-012 and the
- * reassignment wizard is B-014. This class deliberately holds none of them:
- * everything here either reads, or moves one boolean.
+ * <p>Creating and editing a resource is B-011 and cycle detection is B-012.
+ * This class deliberately holds neither: everything here either reads, or moves
+ * one boolean.
+ *
+ * <p>B-014 added {@link #setStatus(long, boolean)} — the singular half of the
+ * bulk route, sharing its decision rather than restating it. The wizard those
+ * refusals send the caller to is <b>S-24, Stream C's C-063</b>; this stream owns
+ * the refusal and the route back, not the reassignment itself.
  */
 @Service
 public class ResourceService {
@@ -34,7 +39,22 @@ public class ResourceService {
      */
     static final int EXPORT_BATCH = 500;
 
-    /** Where the caller sends a blocked resource next. B-014 builds the wizard. */
+    /**
+     * Where the caller sends a blocked resource next — <b>the API operation, not
+     * a browser route</b>.
+     *
+     * <p>B-014 keeps it that way on purpose. The screen that acts on this
+     * refusal navigates somewhere, and the somewhere is a client route that
+     * belongs to whichever client is asking; a server that emitted
+     * {@code /tickets/bulk-reassign?fromUserId=…} would be shipping one web
+     * app's routing table to every consumer of the API, including the ones with
+     * no router at all. The React side owns its own URL, in
+     * {@code features/masters/resources/reassignHandoff.ts}.
+     *
+     * <p>{@code POST /tickets/bulk-reassign} is Stream C's (C-063) and does not
+     * exist yet. This constant names it anyway, because the refusal it decorates
+     * is meaningless without saying what resolves it.
+     */
     static final String REASSIGN_URL = "/api/v1/tickets/bulk-reassign";
 
     private final ResourceRepository resources;
@@ -108,8 +128,46 @@ public class ResourceService {
     }
 
     // ------------------------------------------------------------------
-    // Bulk activate / deactivate
+    // Activate / deactivate — one resource, and a selection
     // ------------------------------------------------------------------
+
+    /**
+     * B-014 · sets {@code is_active} on one resource, for
+     * {@code PATCH /users/{userId}/status}.
+     *
+     * <p><b>The same decision the bulk route makes</b>, translated into status
+     * codes instead of an outcome code. That reuse is the point: the contract
+     * has always said the two routes refuse the same thing for the same reason,
+     * and the only way to keep that true a year from now is for there to be one
+     * {@link #apply} rather than two implementations that agree today.
+     *
+     * <p><b>{@code UNCHANGED} answers 204, not 409.</b> Setting a flag to the
+     * value it already holds succeeded — there is nothing for the caller to do
+     * differently, and a client retrying after a dropped response must converge
+     * rather than start reporting an error. It also matters for the specific row
+     * this task exists to unblock: somebody already inactive who still holds
+     * tickets, which is what a half-finished reassignment leaves behind, would
+     * otherwise be refused forever by the guard and never settle.
+     *
+     * @throws ResourceWriteService.ResourceNotFoundException 404 — no such resource
+     * @throws ResourceWriteService.OpenTicketsException      409 — reassign first
+     */
+    @Transactional
+    public void setStatus(long userId, boolean isActive) {
+        int openTickets = isActive
+                ? 0
+                : resources.openTicketCounts(List.of(userId)).getOrDefault(userId, 0);
+
+        ResourceDtos.BulkStatusOutcome outcome = apply(userId, isActive, openTickets);
+        switch (outcome.outcome()) {
+            case NOT_FOUND -> throw new ResourceWriteService.ResourceNotFoundException(userId);
+            case BLOCKED_OPEN_TICKETS ->
+                    throw new ResourceWriteService.OpenTicketsException(userId, outcome.openTicketCount());
+            case CHANGED, UNCHANGED -> {
+                // 204 either way. See above.
+            }
+        }
+    }
 
     /**
      * Sets {@code is_active} across a selection, reporting each resource's fate.

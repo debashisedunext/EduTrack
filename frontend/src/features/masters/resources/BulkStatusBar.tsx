@@ -1,4 +1,5 @@
-import { AlertTriangle, Check, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -11,6 +12,8 @@ import {
 } from '@/components/ui/modal'
 import type { BulkUserStatusResponseData } from '@/api/generated/model/bulkUserStatusResponseData'
 import type { BulkUserStatusOutcome } from '@/api/generated/model/bulkUserStatusOutcome'
+
+import { reassignWizardHref } from './reassignHandoff'
 
 export interface BulkStatusBarProps {
   selectedCount: number
@@ -58,9 +61,166 @@ export function BulkStatusBar({ selectedCount, isPending, onApply, onClear }: Bu
   )
 }
 
+// ---------------------------------------------------------------------------
+// B-014 · the forcing function
+// ---------------------------------------------------------------------------
+
+/** Just enough of a grid row to decide and to explain. */
+export interface DeactivationCandidate {
+  id: number
+  displayName: string
+  openTicketCount: number
+}
+
+export interface DeactivationConfirmDialogProps {
+  /**
+   * The blocked members of the selection — the ones this dialog exists to name.
+   * Null when nothing is pending confirmation.
+   */
+  blocked: readonly DeactivationCandidate[] | null
+  /**
+   * How many of the selection would still be deactivated.
+   *
+   * <b>Passed in rather than derived from `blocked`.</b> The selection can span
+   * pages, and rows the admin ticked two pages back are not on screen for their
+   * counts to be read — so this component is not in a position to work out what
+   * "the rest" is, and a version that tried would quietly drop them.
+   */
+  proceedCount: number
+  /** The origin page's query string, so the return trip lands on it. */
+  returnSearch: string
+  isPending: boolean
+  /** Proceed with everyone except the blocked. */
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+/**
+ * B-014 · what stands in the way, said **before** the request rather than after.
+ *
+ * The grid already knows every row's open-ticket count — it is a column. Firing
+ * a deactivation that is certain to come back partly refused, and only then
+ * naming the people it refused, wastes a round trip to tell the admin something
+ * that was on screen the whole time. Worse, it makes the refusal feel like a
+ * failure of the click rather than a fact about the organisation.
+ *
+ * So a selection with nobody blocked goes straight through with **no dialog at
+ * all** — the common case must not grow a confirmation step — and a selection
+ * with somebody blocked stops here, names them, and offers the way through.
+ *
+ * The counts are a snapshot and can be stale: a colleague may close the last
+ * ticket, or open a new one, between the page rendering and the button being
+ * clicked. That is why this does not replace the server's guard or the result
+ * dialog behind it. It is the fast path, not the authority.
+ */
+export function DeactivationConfirmDialog({
+  blocked,
+  proceedCount,
+  returnSearch,
+  isPending,
+  onConfirm,
+  onCancel,
+}: DeactivationConfirmDialogProps) {
+  // Nothing to warn about, so nothing to interrupt. The page does not open this
+  // dialog for a clean selection, and this is the second half of that rule
+  // rather than a duplicate of it: a caller who opened it anyway would otherwise
+  // get a heading reading "0 of these still hold open tickets".
+  if (!blocked || blocked.length === 0) return null
+
+  return (
+    <Modal
+      open
+      onOpenChange={(next) => {
+        if (!next) onCancel()
+      }}
+    >
+      <ModalContent>
+        <ModalHeader>
+          <ModalTitle>
+            {blocked.length === 1
+              ? `${blocked[0].displayName} still holds open tickets`
+              : `${blocked.length} of these still hold open tickets`}
+          </ModalTitle>
+          <ModalDescription>
+            Deactivating {blocked.length === 1 ? 'them' : 'those'} now would leave live work with
+            nobody accountable for it. Reassign their tickets first
+            {/* Only true when there is somebody else. A selection of one that
+                promised the rest could go through would be describing a button
+                the footer does not render. */}
+            {proceedCount > 0
+              ? ` — the other ${proceedCount} in the selection can be deactivated straight away.`
+              : '.'}
+          </ModalDescription>
+        </ModalHeader>
+
+        <ul className="max-h-72 space-y-1 overflow-y-auto text-sm">
+          {blocked.map((candidate) => (
+            <li key={candidate.id} className="flex items-center gap-2 py-1">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-warning-text" aria-hidden />
+              <span className="text-content">{candidate.displayName}</span>
+              <ReassignLink
+                userId={candidate.id}
+                displayName={candidate.displayName}
+                openTicketCount={candidate.openTicketCount}
+                returnSearch={returnSearch}
+              />
+            </li>
+          ))}
+        </ul>
+
+        <ModalFooter>
+          <Button variant="secondary" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          {proceedCount > 0 && (
+            <Button size="sm" disabled={isPending} onClick={onConfirm}>
+              Deactivate the other {proceedCount}
+            </Button>
+          )}
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  )
+}
+
+/**
+ * The link into S-24, from wherever a blocked resource is named.
+ *
+ * One component rather than three call sites building the same href, because
+ * the accessible name is the fiddly part: "Reassign →" repeated down a list
+ * reads identically to a screen reader pulling up links, and the count belongs
+ * in the label rather than only in the row it sits beside.
+ */
+function ReassignLink({
+  userId,
+  displayName,
+  openTicketCount,
+  returnSearch,
+}: {
+  userId: number
+  displayName: string
+  openTicketCount: number
+  returnSearch: string
+}) {
+  return (
+    <Link
+      to={reassignWizardHref({ fromUserId: userId, returnSearch })}
+      aria-label={`Reassign ${displayName}'s ${openTicketCount} open ${
+        openTicketCount === 1 ? 'ticket' : 'tickets'
+      }`}
+      className="ml-auto inline-flex shrink-0 items-center gap-1 text-sm font-medium text-primary underline-offset-2 hover:underline"
+    >
+      Reassign {openTicketCount} {openTicketCount === 1 ? 'ticket' : 'tickets'}
+      <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+    </Link>
+  )
+}
+
 export interface BulkStatusResultDialogProps {
   result: BulkUserStatusResponseData | null
   isActivating: boolean
+  /** The origin page's query string, so the return trip lands on it. */
+  returnSearch: string
   onClose: () => void
 }
 
@@ -83,10 +243,23 @@ const OUTCOME_ORDER: BulkUserStatusOutcome['outcome'][] = [
  * their open-ticket count is shown, and the reassignment route is offered.
  * Deactivating them anyway would orphan live work, which is how tickets stop
  * being anybody's problem.
+ *
+ * <p><b>B-014 made "offered" literal.</b> Until now this dialog said the wizard
+ * did not exist and suggested reassigning ticket by ticket, which for somebody
+ * holding thirty is not advice anybody follows. Each blocked row now carries a
+ * link into S-24 with that resource preselected and a return trip that resumes
+ * the deactivation.
+ *
+ * <p>Reaching this dialog at all, rather than
+ * {@link DeactivationConfirmDialog}, means the counts the grid held were wrong
+ * by the time the request landed — somebody opened a ticket in the seconds in
+ * between. Rare, and exactly why the server's guard is the authority and the
+ * pre-flight check is only a courtesy.
  */
 export function BulkStatusResultDialog({
   result,
   isActivating,
+  returnSearch,
   onClose,
 }: BulkStatusResultDialogProps) {
   if (!result) return null
@@ -121,16 +294,17 @@ export function BulkStatusResultDialog({
                   {describe(outcome, isActivating)}
                 </span>
               </div>
+              {outcome.outcome === 'BLOCKED_OPEN_TICKETS' && (
+                <ReassignLink
+                  userId={outcome.userId}
+                  displayName={outcome.displayName ?? `resource #${outcome.userId}`}
+                  openTicketCount={outcome.openTicketCount ?? 0}
+                  returnSearch={returnSearch}
+                />
+              )}
             </li>
           ))}
         </ul>
-
-        {result.blocked > 0 && (
-          <p className="mt-3 rounded-control bg-subtle px-3 py-2 text-caption text-content-muted">
-            Reassign their open tickets first — the bulk reassignment wizard is not built yet
-            (B-014). Until it lands, reassign from each ticket, then deactivate again.
-          </p>
-        )}
 
         <ModalFooter>
           <Button size="sm" onClick={onClose}>
@@ -157,9 +331,12 @@ function describe(outcome: BulkUserStatusOutcome, isActivating: boolean): string
     case 'UNCHANGED':
       return isActivating ? 'Already active' : 'Already inactive'
     case 'BLOCKED_OPEN_TICKETS':
+      // The count is in the link beside this line as well, and deliberately so:
+      // this sentence explains the state, the link is the action, and a screen
+      // reader moving by links needs the number in the link's own name.
       return `Left active — ${outcome.openTicketCount ?? 0} open ticket${
         outcome.openTicketCount === 1 ? '' : 's'
-      } to reassign first`
+      }`
     case 'NOT_FOUND':
       return 'No longer exists'
     default:
