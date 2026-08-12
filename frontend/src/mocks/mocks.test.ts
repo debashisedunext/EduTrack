@@ -544,3 +544,170 @@ describe('where it happened — module, screen, feature, steps', () => {
     );
   });
 });
+
+/**
+ * C-012 · SLA resolution and the planned close date.
+ *
+ * These pin the *mock's* behaviour, not the server's — but the mock is what the
+ * create form is built and demonstrated against, so a mock that resolves
+ * differently teaches the screen the wrong thing.
+ *
+ * The seeded calendar is Mon–Fri, 09:30–18:30 **read as UTC** (`handlers/sla.ts`
+ * explains that deliberate simplification), with 15 Aug and 2 Oct recurring
+ * holidays, Anil away 24–28 Aug and Karan on a half day on 3 Sep.
+ */
+describe('planned close date — C-012', () => {
+  interface Preview {
+    from: string;
+    plannedCloseDate: string | null;
+    firstResponseDue: string | null;
+    responseHrs: number | null;
+    resolutionHrs: number | null;
+    source: string;
+    slaPolicyId: number | null;
+  }
+
+  const FRIDAY_1730 = '2026-08-14T17:30:00.000Z';
+
+  const preview = (query: string) => get<Envelope<Preview>>(`/tickets/planned-close-date?${query}`);
+
+  describe('the resolution ladder', () => {
+    it('takes the project x task type policy first', async () => {
+      // CRM's Production Bug is 8 h where the org-wide High default is 16 h.
+      const { data } = await preview(`projectId=1&taskTypeId=2&level=HIGH&from=${FRIDAY_1730}`);
+      expect(data.source).toBe('PROJECT_TASK_TYPE');
+      expect(data.resolutionHrs).toBe(8);
+      expect(data.slaPolicyId).toBe(5);
+    });
+
+    it('falls to the project default for the level when no task type matches', async () => {
+      // PAY tightens Critical for every type; task type 1 has no row of its own.
+      const { data } = await preview(`projectId=2&taskTypeId=1&level=CRITICAL&from=${FRIDAY_1730}`);
+      expect(data.source).toBe('PROJECT_LEVEL');
+      expect(data.resolutionHrs).toBe(3);
+    });
+
+    it('falls to the org-wide default when the project has nothing', async () => {
+      const { data } = await preview(`projectId=3&taskTypeId=1&level=HIGH&from=${FRIDAY_1730}`);
+      expect(data.source).toBe('ORG_DEFAULT');
+      expect(data.resolutionHrs).toBe(16);
+    });
+
+    /**
+     * The behaviour C-012 exists to produce. A matrix answering the same hours
+     * for every level still renders a date, so a test that only asserts "a date
+     * appears" passes against a broken feature.
+     */
+    it('gives a different answer for every level on the same project and type', async () => {
+      const levels = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+      const hours = await Promise.all(
+        levels.map(async (level) =>
+          (await preview(`projectId=3&taskTypeId=1&level=${level}&from=${FRIDAY_1730}`)).data.resolutionHrs,
+        ),
+      );
+      expect(hours).toEqual([120, 48, 16, 4]);
+    });
+
+    it('previews before a task type is picked, starting the ladder at rung 2', async () => {
+      const { data } = await preview(`projectId=2&level=CRITICAL&from=${FRIDAY_1730}`);
+      expect(data.source).toBe('PROJECT_LEVEL');
+      expect(data.plannedCloseDate).not.toBeNull();
+    });
+  });
+
+  describe('the working-calendar walk', () => {
+    /**
+     * The rule the whole feature is judged on: a Friday-evening ticket with a
+     * four-hour target must not land on Saturday morning. One hour is left in
+     * Friday's window, so three hours spill into Monday.
+     */
+    it('carries the remainder over the weekend rather than through it', async () => {
+      const { data } = await preview(`projectId=3&taskTypeId=1&level=CRITICAL&from=${FRIDAY_1730}`);
+      expect(data.resolutionHrs).toBe(4);
+      expect(data.plannedCloseDate).toBe('2026-08-17T12:30:00.000Z');
+    });
+
+    it('skips a recurring org holiday', async () => {
+      // 2 Oct 2026 is a Friday and Gandhi Jayanti, so the walk lands Monday 5th.
+      const { data } = await preview('projectId=3&taskTypeId=1&level=CRITICAL&from=2026-10-01T17:30:00.000Z');
+      expect(data.plannedCloseDate).toBe('2026-10-05T12:30:00.000Z');
+    });
+
+    it('stops the clock for the assignee approved leave', async () => {
+      const from = 'from=2026-08-21T17:30:00.000Z';
+      const unassigned = await preview(`projectId=3&taskTypeId=1&level=CRITICAL&${from}`);
+      // Anil (4) is away Mon 24 - Fri 28 Aug, so his week is skipped entirely.
+      const anil = await preview(`projectId=3&taskTypeId=1&level=CRITICAL&assigneeId=4&${from}`);
+
+      expect(unassigned.data.plannedCloseDate).toBe('2026-08-24T12:30:00.000Z');
+      expect(anil.data.plannedCloseDate).toBe('2026-08-31T12:30:00.000Z');
+    });
+
+    it('treats a half day as the second half of the working day', async () => {
+      const from = 'from=2026-09-03T00:00:00.000Z';
+      const karan = await preview(`projectId=1&taskTypeId=2&level=HIGH&assigneeId=5&${from}`);
+      const nobody = await preview(`projectId=1&taskTypeId=2&level=HIGH&${from}`);
+
+      // Karan starts at 14:00, so 8 h is 4.5 h on the 3rd and 3.5 h on the 4th.
+      // With nobody assigned the whole 9 h window is available and it fits in one day.
+      expect(karan.data.plannedCloseDate).toBe('2026-09-04T13:00:00.000Z');
+      expect(nobody.data.plannedCloseDate).toBe('2026-09-03T17:30:00.000Z');
+    });
+
+    it('echoes from, so the caller can check which instant it measured from', async () => {
+      const { data } = await preview(`projectId=3&taskTypeId=1&level=HIGH&from=${FRIDAY_1730}`);
+      expect(data.from).toBe(FRIDAY_1730);
+    });
+
+    it('walks the response target separately from the resolution one', async () => {
+      const { data } = await preview(`projectId=1&taskTypeId=2&level=HIGH&from=${FRIDAY_1730}`);
+      expect(data.responseHrs).toBe(2);
+      // 1 h left on Friday, 1 h into Monday.
+      expect(data.firstResponseDue).toBe('2026-08-17T10:30:00.000Z');
+      expect(data.plannedCloseDate).not.toBe(data.firstResponseDue);
+    });
+  });
+
+  describe('what it refuses', () => {
+    it('404s an unknown project rather than answering with the org default', async () => {
+      await expect(preview('projectId=999&taskTypeId=1&level=HIGH')).rejects.toSatisfy(
+        (e: unknown) => e instanceof ApiError && e.problem.status === 404,
+      );
+    });
+
+    it('400s an unknown level, against the level field', async () => {
+      await expect(preview('projectId=1&taskTypeId=1&level=URGENT')).rejects.toSatisfy(
+        (e: unknown) =>
+          e instanceof ApiError && e.problem.status === 400 && 'level' in (e.problem.errors ?? {}),
+      );
+    });
+  });
+
+  /**
+   * The defect this replaced. `POST /tickets` stamped `now + defaultSlaHrs` in
+   * wall-clock milliseconds, so the date the preview showed and the date the
+   * ticket carried differed by every weekend and holiday between them — and
+   * only one of the two was ever on screen.
+   */
+  it('stores on create what the same resolution and walk produce', async () => {
+    getDb().currentUserId = 1;
+    const created = await post<Envelope<{ ticketId: string; plannedCloseDate: string }>>('/tickets', {
+      projectId: 1, title: 'A ticket whose date must match its preview', taskTypeId: 2, level: 'HIGH',
+    });
+
+    const stored = new Date(created.data.plannedCloseDate);
+    const minutes = stored.getUTCHours() * 60 + stored.getUTCMinutes();
+    expect(minutes).toBeGreaterThanOrEqual(9 * 60 + 30);
+    expect(minutes).toBeLessThanOrEqual(18 * 60 + 30);
+    expect([0, 6]).not.toContain(stored.getUTCDay());
+  });
+
+  it('keeps an explicit planned close date on create rather than recomputing it', async () => {
+    getDb().currentUserId = 1;
+    const explicit = '2026-12-25T09:00:00.000Z';
+    const created = await post<Envelope<{ plannedCloseDate: string }>>('/tickets', {
+      projectId: 1, title: 'A date the PM chose', taskTypeId: 2, level: 'HIGH', plannedCloseDate: explicit,
+    });
+    expect(created.data.plannedCloseDate).toBe(explicit);
+  });
+});

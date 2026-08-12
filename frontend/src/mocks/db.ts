@@ -195,6 +195,7 @@ export interface ChatMessage {
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
   taskTypes: TaskType[]; modules: Module[]; stages: Stage[];
+  slaPolicies: SlaPolicy[];
   pushSubscriptions: PushSubscription[];
   tickets: Ticket[]; cycles: Cycle[]; transitions: Transition[];
   effortLogs: EffortLog[]; history: HistoryEntry[]; comments: Comment[];
@@ -238,6 +239,26 @@ export interface Db {
 export interface Holiday {
   id: number; date: string; name: string;
   projectId: number | null; isRecurring: boolean; isActive: boolean;
+}
+
+/**
+ * C-012 · the SLA matrix, layered exactly as `sla_policies` is.
+ *
+ * `projectId: null` is the org-wide default and `taskTypeId: null` means "any
+ * type", so resolution runs most-specific-first:
+ * `(project, taskType, level) → (project, level) → (null, level)`.
+ *
+ * Held as rows rather than derived from `taskTypes` — which is what
+ * `GET /projects/:id/sla-policies` did until now — because a derived matrix
+ * gives every level the same hours, and a preview that does not move when the
+ * level changes is the one thing C-012 exists to make visible.
+ *
+ * `responseHrs` and `resolutionHrs` are **working** hours. They are consumed
+ * through the calendar walk, never as wall-clock.
+ */
+export interface SlaPolicy {
+  id: number; projectId: number | null; taskTypeId: number | null; level: Level;
+  responseHrs: number | null; resolutionHrs: number; isActive: boolean;
 }
 
 export interface ResourceLeave {
@@ -359,6 +380,28 @@ const MODULES: Module[] = [
 }));
 MODULES.push({ id: 9, code: 'TRANSPORT', name: 'Transport', seq: 90, isActive: false });
 
+/**
+ * The SLA matrix, seeded so that **every rung of the ladder is reachable in
+ * `npm run dev`** — a fixture where only the org-wide default ever answers
+ * cannot tell a working resolution from one that skips straight to the bottom.
+ *
+ * The org-wide rows match `GET /masters/priorities`'s `defaultSlaHrs`, because
+ * on the real server rung 3 and rung 4 must agree wherever both exist. CRM has
+ * a tighter Production Bug policy (rung 1) and PAY a tighter Critical default
+ * for every type (rung 2).
+ */
+const SLA_POLICIES: SlaPolicy[] = [
+  { id: 1, projectId: null, taskTypeId: null, level: 'LOW', responseHrs: 24, resolutionHrs: 120, isActive: true },
+  { id: 2, projectId: null, taskTypeId: null, level: 'MEDIUM', responseHrs: 8, resolutionHrs: 48, isActive: true },
+  { id: 3, projectId: null, taskTypeId: null, level: 'HIGH', responseHrs: 4, resolutionHrs: 16, isActive: true },
+  { id: 4, projectId: null, taskTypeId: null, level: 'CRITICAL', responseHrs: 1, resolutionHrs: 4, isActive: true },
+  // Rung 1 — CRM's Production Bug (task type 2) is tighter than the org default.
+  { id: 5, projectId: 1, taskTypeId: 2, level: 'HIGH', responseHrs: 2, resolutionHrs: 8, isActive: true },
+  { id: 6, projectId: 1, taskTypeId: 2, level: 'CRITICAL', responseHrs: 0.5, resolutionHrs: 2, isActive: true },
+  // Rung 2 — PAY tightens Critical for every task type.
+  { id: 7, projectId: 2, taskTypeId: null, level: 'CRITICAL', responseHrs: 0.5, resolutionHrs: 3, isActive: true },
+];
+
 /** Standard Dev Flow — the 8 stages of blueprint §4A.9. */
 const STAGES: Stage[] = [
   { stageCode: 'INTAKE', displayName: 'Intake', sequence: 1, ownerRole: 'SUPPORT', icon: 'inbox', stageSlaHrs: 2, isOptional: false, canReturnTo: [] },
@@ -380,6 +423,7 @@ export function createDb(): Db {
     taskTypes: structuredClone(TASK_TYPES),
     modules: structuredClone(MODULES),
     stages: structuredClone(STAGES),
+    slaPolicies: structuredClone(SLA_POLICIES),
     pushSubscriptions: [],
     tickets: [], cycles: [], transitions: [], effortLogs: [], history: [],
     comments: [], attachments: [], notifications: [], notificationPreferences: [], emailLog: [],

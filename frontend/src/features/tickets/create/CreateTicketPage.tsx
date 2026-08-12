@@ -29,6 +29,8 @@ import { createTicketBodyDescriptionMax } from '@/api/generated/zod/tickets/tick
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
 
 import { useTicketAttachments } from '../attachments/useTicketAttachments'
+import { SlaPreview } from '../sla/SlaPreview'
+import { usePlannedCloseDate } from '../sla/usePlannedCloseDate'
 import { FieldGroup, FormField, ReadOnlyField } from './FormField'
 import { LevelPicker } from './LevelPicker'
 import { WatcherPicker } from './WatcherPicker'
@@ -108,6 +110,22 @@ export function CreateTicketPage() {
   const projectId = watch('projectId')
   const taskTypeId = watch('taskTypeId')
   const clientId = watch('clientId')
+  const level = watch('level')
+  const assigneeId = watch('assigneeId')
+  const plannedCloseDate = watch('plannedCloseDate')
+
+  /**
+   * C-012 · recomputed server-side on every change to the four inputs that move
+   * it, and shown before the user commits (§4B.1).
+   *
+   * The assignee is in there because their approved leave stops the SLA clock —
+   * promising a date against someone who is away all next week is the kind of
+   * commitment that reaches a client. `from` is omitted rather than passed as
+   * `new Date()`: a fresh instant every render would mint a new query key and
+   * refetch forever. The server defaults it to now, which is what a ticket being
+   * raised right now means.
+   */
+  const slaPreview = usePlannedCloseDate({ projectId, taskTypeId, level, assigneeId })
 
   // Only the project's members can be assigned or watch — §7.5. Both lists wait
   // for a project rather than showing everyone and filtering after the fact.
@@ -625,7 +643,7 @@ export function CreateTicketPage() {
               id="plannedCloseDate"
               label="Planned close date"
               error={errors.plannedCloseDate?.message}
-              hint="Leave blank to compute it from the SLA policy against the working calendar. The inline preview is C-012."
+              hint="Leave blank to use the computed date. Overriding it is a PM and Admin decision, and the ticket is measured against whatever is here."
             >
               {(aria) => <Input {...aria} {...register('plannedCloseDate')} type="datetime-local" />}
             </FormField>
@@ -633,11 +651,30 @@ export function CreateTicketPage() {
             <ReadOnlyField
               label="Planned close date"
               value="Computed from the SLA policy on save"
-              hint="Weekends, holidays and resource leave are taken out of the clock. Overriding it requires PM or Admin."
+              hint="Overriding it requires PM or Admin."
             />
           )}
 
           <ReadOnlyField label="Actual close date" value="—" hint="Set at closure, never here." />
+
+          {/*
+            Full width and below both dates, because it is about the pair of
+            them: for everyone it explains the date the server will store, and
+            for a PM who has typed one it is the alternative they are choosing
+            against. `setValue` marks it dirty and validates, so pressing Use
+            the computed date behaves exactly as typing that value would.
+          */}
+          <SlaPreview
+            {...slaPreview}
+            className="sm:col-span-2"
+            overrideValue={canBackdateOrOverride ? plannedCloseDate : ''}
+            onUseComputed={
+              canBackdateOrOverride
+                ? (value) =>
+                    setValue('plannedCloseDate', value, { shouldDirty: true, shouldValidate: true })
+                : undefined
+            }
+          />
         </FieldGroup>
 
         {/* ── Extra ────────────────────────────────────────────────────── */}

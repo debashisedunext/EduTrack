@@ -1,6 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
 import type { Holiday, User } from '../db';
+import { resolveSla } from './sla';
 import { round } from './tickets';
 import {
   clientRef, currentUser, noContent, notFound, ok, paginate, problem, projectRef,
@@ -470,15 +471,33 @@ export const restHandlers = [
   }),
   http.post(url('/projects/:projectId/members'), () => new HttpResponse(null, { status: 201 })),
   http.delete(url('/projects/:projectId/members/:userId'), () => noContent()),
-  http.get(url('/projects/:projectId/sla-policies'), () =>
-    ok(getDb().taskTypes.flatMap((tt) =>
-      (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const).map((level) => ({
-        taskTypeId: tt.id, level,
-        responseHrs: tt.defaultSlaHrs / 4, resolutionHrs: tt.defaultSlaHrs,
-        l1EscalationUserId: 2, l2EscalationUserId: 1,
-      })),
-    )),
-  ),
+  /**
+   * The matrix S-13 edits, which the contract shapes as an exhaustive
+   * `taskType × level` grid — `SlaPolicyWrite.taskTypeId` is required, so the
+   * layered `(project, null, level)` and org-wide rows the table actually
+   * stores cannot be expressed in this response at all.
+   *
+   * So each cell is **resolved** rather than derived from the task type's
+   * default: whatever `resolveSla` would apply is what the grid shows. Deriving
+   * it (`resolutionHrs: tt.defaultSlaHrs` for every level, as this did until
+   * C-012) made the matrix disagree with both the preview and the create path,
+   * and gave every level identical hours.
+   */
+  http.get(url('/projects/:projectId/sla-policies'), ({ params }) => {
+    const db = getDb();
+    const projectId = Number(params.projectId);
+    if (!db.projects.some((p) => p.id === projectId)) return notFound('Project');
+    return ok(db.taskTypes.flatMap((tt) =>
+      (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const).map((level) => {
+        const sla = resolveSla(projectId, tt.id, level, db);
+        return {
+          taskTypeId: tt.id, level,
+          responseHrs: sla.responseHrs, resolutionHrs: sla.resolutionHrs,
+          l1EscalationUserId: 2, l2EscalationUserId: 1,
+        };
+      }),
+    ));
+  }),
   http.put(url('/projects/:projectId/sla-policies'), async ({ request }) =>
     ok(await request.json()),
   ),

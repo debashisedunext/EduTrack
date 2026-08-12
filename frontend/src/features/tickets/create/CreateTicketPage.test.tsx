@@ -162,6 +162,53 @@ describe('S-19 Create Ticket', () => {
     expect(screen.getByText('Computed from the SLA policy on save')).toBeInTheDocument()
   })
 
+  /**
+   * C-012 · §4B.1 — changing the priority recomputes and previews the planned
+   * close date **before the user commits**. The screen calls the server for it
+   * rather than estimating: the date depends on the working calendar and on the
+   * assignee's approved leave, and a browser-side guess would disagree by a
+   * weekend without saying so.
+   */
+  describe('the inline planned-close-date preview', () => {
+    it('claims nothing until a project and a priority are both chosen', async () => {
+      renderPage()
+      await formReady()
+
+      expect(screen.getByText(/pick a project and a priority/i)).toBeInTheDocument()
+    })
+
+    it('shows the date with its target in working hours and where it came from', async () => {
+      renderPage()
+      await formReady()
+      await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+      // Production Bug defaults to HIGH, and CRM has its own policy for that
+      // pair — 8 working hours where the org-wide High default is 16.
+      await pickFromDropdown('taskTypeId', /^Production Bug$/)
+
+      await waitFor(() => expect(screen.getByText(/8 working hours/)).toBeInTheDocument(), { timeout: 4000 })
+      expect(
+        screen.getByText(/this project's policy for this task type and priority/),
+      ).toBeInTheDocument()
+    })
+
+    it('recomputes when the priority changes', async () => {
+      renderPage()
+      await formReady()
+      await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+      await pickFromDropdown('taskTypeId', /^Production Bug$/)
+      await waitFor(() => expect(screen.getByText(/8 working hours/)).toBeInTheDocument(), { timeout: 4000 })
+
+      const levels = screen.getByRole('radiogroup', { name: /Level/ })
+      fireEvent.click(within(levels).getByRole('radio', { name: 'CRITICAL' }))
+
+      // CRM's Critical Production Bug policy is 2 h. A preview that did not
+      // re-resolve would still show a date, which is why the hours are asserted
+      // rather than merely that something is rendered.
+      await waitFor(() => expect(screen.getByText(/2 working hours/)).toBeInTheDocument(), { timeout: 4000 })
+      expect(screen.queryByText(/8 working hours/)).not.toBeInTheDocument()
+    })
+  })
+
   it('pre-fills the level from the task type default and lets the user override it', async () => {
     renderPage()
     await formReady()

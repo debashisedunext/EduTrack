@@ -1,6 +1,7 @@
 import { delay, http } from 'msw';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
+import { slaHandlers } from './sla';
 import { ticketHandlers } from './tickets';
 import { BASE, LATENCY_MS, problem } from './util';
 
@@ -21,6 +22,11 @@ export const handlers = [
     await delay(LATENCY_MS);
   }),
 
+  // Before `ticketHandlers`: `/tickets/planned-close-date` is a literal segment
+  // sitting where `/tickets/:ticketId` also matches, and MSW takes the first
+  // handler that does. The literal could never be a valid ticket id, but the
+  // pattern does not know that.
+  ...slaHandlers,
   ...ticketHandlers,
   ...ribbonHandlers,
   ...restHandlers,

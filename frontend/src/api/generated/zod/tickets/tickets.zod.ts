@@ -221,6 +221,63 @@ export const createTicketBody = zod.object({
 })
 
 /**
+ * Answers **when** a ticket raised now — or at `from` — would be due, and
+**why**, without creating anything.
+
+The date is the SLA target walked forward over the working calendar:
+weekends, org and project holidays, and the assignee's approved leave are
+skipped rather than counted, so a Friday-18:00 ticket with a four-hour
+target lands on Monday morning. That calculation cannot be done in the
+browser — leave belongs to a resource the caller may not be able to read,
+and a second implementation of it would disagree with the server quietly,
+by a weekend.
+
+Resolution runs most-specific-first and stops at the first rung that
+answers, reported back as `source`:
+
+| `source` | rung |
+|---|---|
+| `PROJECT_TASK_TYPE` | this project's policy for this task type and level |
+| `PROJECT_LEVEL` | this project's default for the level |
+| `ORG_DEFAULT` | the org-wide default for the level |
+| `PRIORITY_DEFAULT` | the priority master's `defaultSlaHrs` (S-12) |
+| `TASK_TYPE_DEFAULT` | the task type master's `defaultSlaHrs` (S-11) |
+| `NONE` | nothing matched — `plannedCloseDate` is null |
+
+The last two rungs go beyond §6's three policy rungs deliberately. A
+project whose SLA matrix has not been configured — every project on its
+first day — would otherwise give every ticket a null planned close date,
+which silently removes it from the breach sweep, the pre-breach warning,
+the delayed KPI and the Due Today saved view.
+
+Safe to call on every change to project, task type, level or assignee.
+It takes no request body: previewing must not require a valid draft, and
+§4B.1's rule is that changing the level recomputes the date *while the
+form is still being filled in*.
+
+ * @summary Resolve the SLA policy and preview the planned close date (C-012)
+ */
+export const previewPlannedCloseDateQueryParams = zod.object({
+  "projectId": zod.number().describe('The SLA matrix is per project; resolving without one would answer with the org-wide default.'),
+  "taskTypeId": zod.number().optional().describe('Optional — without it the first rung cannot match and resolution\nstarts at the project\'s default for the level, so the form can\npreview before a task type is picked.\n'),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "assigneeId": zod.number().optional().describe('Whose approved leave stops the clock. Omitted honours only the org\nand project calendar — correct rather than a shortcut, since nothing\nelse knows whose leave would apply.\n'),
+  "from": zod.string().datetime({}).optional().describe('When the clock starts, defaulting to now. Present because §7.5 lets a\nPM or Admin backdate Date Reported, and a preview measured from the\nwrong instant is worse than no preview.\n')
+})
+
+export const previewPlannedCloseDateResponse = zod.object({
+  "data": zod.object({
+  "from": zod.string().datetime({}).describe('The instant the clock started. Echoed back because the caller may\nhave omitted it, and \"computed from now\" needs a \*which\* now to be\ncheckable.\n'),
+  "plannedCloseDate": zod.string().datetime({}).nullish().describe('Null when `source` is `NONE`. The ticket genuinely has no planned\nclose date, and the form must say so rather than showing a blank.\n'),
+  "firstResponseDue": zod.string().datetime({}).nullish().describe('Null unless the rung that answered carries a response target. The two\nmaster defaults hold one figure each, and deriving a response target\nfrom a resolution one would put a commitment on screen that no\nadministrator typed.\n'),
+  "responseHrs": zod.number().nullish().describe('\*\*Working\*\* hours, not elapsed.'),
+  "resolutionHrs": zod.number().nullish().describe('\*\*Working\*\* hours, not elapsed.'),
+  "source": zod.enum(['PROJECT_TASK_TYPE', 'PROJECT_LEVEL', 'ORG_DEFAULT', 'PRIORITY_DEFAULT', 'TASK_TYPE_DEFAULT', 'NONE']).describe('Which rung of the resolution ladder answered — see\n`previewPlannedCloseDate`. Carried onto the wire so a planned close date\nis explicable: \"16 working hours, this project\'s Production Bug × High\npolicy\" is checkable where a bare date is not, and it is the only way\nsomeone editing the SLA matrix can see which row is being applied.\n'),
+  "slaPolicyId": zod.number().nullish().describe('The `sla_policies` row, or null where a master default answered instead.')
+})
+})
+
+/**
  * **Each ticket gets its own history entry** — a bulk operation that writes
 one summary row destroys the per-ticket audit trail, which is the point of
 having one.
