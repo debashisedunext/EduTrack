@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.fixtures;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,7 @@ import java.time.ZoneOffset;
  * allocates {@code CRM-26-00071}, never re-using a fixture code.
  */
 @Component
+@Profile("fixtures")
 class TicketCodeAllocator {
 
     private static final String ALLOCATE = """

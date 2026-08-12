@@ -5,6 +5,7 @@ import com.edunext.edutrack.domain.masters.PriorityRepository;
 import com.edunext.edutrack.domain.masters.TaskType;
 import com.edunext.edutrack.domain.masters.TaskTypeRepository;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -65,6 +66,7 @@ import java.util.Random;
  * </ul>
  */
 @Component
+@Profile("fixtures")
 class TicketFixtureGenerator {
 
     private static final int TOTAL_TICKETS = 200;
