@@ -47,9 +47,9 @@ const STATUS_OPTIONS = [
  * S-07 Resource Master — List (B-010), with B-011's entry points into the form.
  *
  * "New resource" and the per-row Edit link both go to `ResourceFormPage`.
- * Reporting-manager cycle detection is still B-012 and the bulk reassignment
- * wizard still B-014 — which is why deactivating somebody who holds open
- * tickets stops here with a named list rather than offering to fix it.
+ * The bulk reassignment wizard is still B-014, which is why deactivating
+ * somebody who holds open tickets stops here with a named list rather than
+ * offering to fix it.
  */
 export function ResourceListPage() {
   const { filters, setFilter, resetFilters, activeCount } = useResourceFilters()

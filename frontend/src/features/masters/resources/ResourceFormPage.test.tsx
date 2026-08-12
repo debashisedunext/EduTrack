@@ -190,6 +190,29 @@ describe('S-08 edit', () => {
     expect(getDb().users.find((u) => u.id === 3)?.isActive).toBe(true)
   })
 
+  /**
+   * B-012. Anita (1) manages Meera (2) manages Ravi (3), so making Ravi
+   * Meera's manager closes a loop the form is perfectly able to express — the
+   * picker offers everybody but the resource being edited, and the subtree
+   * below them is not something the browser knows.
+   *
+   * The assertion is that it lands *on the field*: a cycle three levels deep is
+   * exactly the mistake an admin cannot see from the screen they are on, so a
+   * banner above a five-section form is the wrong place to explain it.
+   */
+  it('puts a reporting-cycle 409 on the manager picker, not in a banner', async () => {
+    renderForm('/masters/resources/2/edit')
+
+    await screen.findByDisplayValue('Meera Iyer')
+    fireEvent.click(screen.getByRole('button', { name: 'Reporting manager' }))
+    fireEvent.click(await screen.findByRole('option', { name: /Ravi Kumar/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(await screen.findByText(/reporting cycle/i)).toBeInTheDocument()
+    expect(screen.queryByText('Resource list')).not.toBeInTheDocument()
+    expect(getDb().users.find((u) => u.id === 2)?.reportingManagerId).toBe(1)
+  })
+
   it('distinguishes somebody still on their temporary password from somebody who has logged in', async () => {
     renderForm('/masters/resources/3/edit')
     expect(await screen.findByText('Has set their own password')).toBeInTheDocument()

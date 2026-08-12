@@ -48,8 +48,9 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Rejected with `409` if it would create a cycle at any depth. **Only
-self-reference is enforced today — the depth-`n` walk is B-012.**
+ * Rejected with `409` (`type: manager-cycle`) if it would create a
+cycle at any depth — self-reference included, which is the one case
+the database trigger also catches. B-012.
 
  */
 export type UserWriteRequestReportingManagerId = number | null;

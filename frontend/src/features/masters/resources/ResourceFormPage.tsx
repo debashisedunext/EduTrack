@@ -48,9 +48,13 @@ const ROLES = Object.keys(ROLE_LABEL) as RoleCode[]
  *
  * <h2>What is deliberately not here</h2>
  *
- * - **Reporting-manager cycle detection beyond self-reference (B-012).** The
- *   manager picker excludes only the resource being edited. A→B→C→A is still
- *   expressible and the server still accepts it.
+ * - **Pre-filtering the manager picker by the reporting tree.** B-012 refuses a
+ *   cycle at any depth, but it does so at the server: the picker still lists
+ *   everyone except the resource being edited, so A→B→C→A is expressible and
+ *   comes back as a 409 on the field. Excluding the whole subtree in the
+ *   dropdown would mean holding the organisation's reporting graph in the
+ *   browser and keeping it fresh, to pre-empt a mistake that is rare and
+ *   already has a clear answer.
  * - **The bulk reassignment wizard (B-014).** Deactivating somebody who holds
  *   open tickets is refused with a count, exactly as the grid refuses it.
  * - **Profile photo upload.** S-08 says "Profile photo"; this takes a URL,
@@ -369,7 +373,7 @@ export function ResourceFormPage() {
         <FormField
           id="reportingManagerId"
           label="Reporting manager"
-          hint="Cycles beyond self-reference are not detected yet (B-012)."
+          hint="Anyone except this resource and the people who report up to them."
           error={errors.reportingManagerId?.message}
         >
           {(aria) => (

@@ -395,6 +395,98 @@ class ResourceFormIT {
     }
 
     // ------------------------------------------------------------------
+    // B-012 · the reporting line, walked in MySQL
+    // ------------------------------------------------------------------
+
+    /**
+     * B-012 against a real database, which is the only place the recursive CTE
+     * is actually exercised — {@code ResourceWriteServiceTest} stubs the walk
+     * and so proves what the service decides, not that MySQL agrees to do it.
+     */
+    @Nested
+    @DisplayName("B-012 · reporting-manager cycles")
+    class ManagerCycles {
+
+        @Test
+        @DisplayName("A→B→C→A is refused, three levels up")
+        void aDeepCycleIsRefused() {
+            long a = service.create(request("ITFRM040", "itfrm.chain.a", "PM")).resource().id();
+            long b = reportingTo("ITFRM041", "itfrm.chain.b", a);
+            long c = reportingTo("ITFRM042", "itfrm.chain.c", b);
+
+            // C reports to B reports to A. Making C A's manager closes the loop
+            // — the case the database CHECK has never caught.
+            ResourceDtos.ResourceWriteRequest patch = request("ITFRM040", "itfrm.chain.a", "PM");
+            patch.setReportingManagerId(Optional.of(c));
+
+            assertThatThrownBy(() -> service.update(service.detail(a), patch))
+                    .isInstanceOf(ResourceWriteService.ManagerCycleException.class);
+
+            assertThat(service.detail(a).reportingManager()).isNull();
+        }
+
+        @Test
+        @DisplayName("a chain of the same depth that does not lead back is saved")
+        void aDeepChainThatTerminatesIsAccepted() {
+            long a = service.create(request("ITFRM043", "itfrm.line.a", "PM")).resource().id();
+            long b = reportingTo("ITFRM044", "itfrm.line.b", a);
+            long c = reportingTo("ITFRM045", "itfrm.line.c", b);
+
+            // Same shape as the refused case, minus the edge that closes it:
+            // this is the test that would still pass if the guard simply
+            // refused everything more than one level deep.
+            long d = reportingTo("ITFRM046", "itfrm.line.d", c);
+
+            assertThat(service.detail(d).reportingManager().id()).isEqualTo(c);
+        }
+
+        /**
+         * The reason the walk is depth-bounded rather than run to a root.
+         *
+         * <p>The two rows below are a cycle the trigger permits, because neither
+         * of them is self-reference — which is exactly what somebody repairing
+         * data by hand can leave behind. An unbounded recursive CTE over them
+         * runs to {@code cte_max_recursion_depth} and fails the statement, so an
+         * admin editing a third, unrelated resource would get a 500 caused by
+         * two rows they have never seen.
+         */
+        @Test
+        @DisplayName("a cycle that already exists in the data stops the walk instead of the server")
+        void aPreExistingCycleIsSurvivable() {
+            long x = service.create(request("ITFRM047", "itfrm.loop.x", "PM")).resource().id();
+            long y = service.create(request("ITFRM048", "itfrm.loop.y", "PM")).resource().id();
+            jdbc.update("UPDATE users SET reporting_manager_id = ? WHERE id = ?", y, x);
+            jdbc.update("UPDATE users SET reporting_manager_id = ? WHERE id = ?", x, y);
+
+            long outsider = service.create(request("ITFRM049", "itfrm.loop.z", "DEVELOPER")).resource().id();
+            ResourceDtos.ResourceWriteRequest patch = request("ITFRM049", "itfrm.loop.z", "DEVELOPER");
+            patch.setReportingManagerId(Optional.of(x));
+
+            // A refusal, not a 500 and not a hang. The outsider is not in the
+            // cycle, so this is the depth cap firing and nothing else.
+            assertThatThrownBy(() -> service.update(service.detail(outsider), patch))
+                    .isInstanceOf(ResourceWriteService.ManagerCycleException.class);
+        }
+
+        @Test
+        @DisplayName("a manager id that is not a resource is a validation error, not a foreign-key crash")
+        void unknownManagerIsRefusedBeforeTheForeignKey() {
+            long id = service.create(request("ITFRM050", "itfrm.nomgr", "DEVELOPER")).resource().id();
+            ResourceDtos.ResourceWriteRequest patch = request("ITFRM050", "itfrm.nomgr", "DEVELOPER");
+            patch.setReportingManagerId(Optional.of(Long.MAX_VALUE));
+
+            assertThatThrownBy(() -> service.update(service.detail(id), patch))
+                    .isInstanceOf(ResourceWriteService.ResourceValidationException.class);
+        }
+
+        private long reportingTo(String empCode, String username, long managerId) {
+            ResourceDtos.ResourceWriteRequest request = request(empCode, username, "DEVELOPER");
+            request.setReportingManagerId(Optional.of(managerId));
+            return service.create(request).resource().id();
+        }
+    }
+
+    // ------------------------------------------------------------------
     // the deactivation guard, against real tickets
     // ------------------------------------------------------------------
 
