@@ -1,0 +1,68 @@
+package com.edunext.edutrack.api.feature.tickets;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.net.URI;
+import java.util.Map;
+
+/**
+ * RFC 9457 problem documents for the ticket routes ({@code CONVENTIONS.md} §3).
+ *
+ * <p>{@link UnknownProjectException} was written by C-011 with a note that its
+ * handler "lives with C-010's {@code TicketController} … there is no ticket
+ * route yet, and a handler with no controller to advise cannot be tested."
+ * C-012's preview is the first ticket route, so this is that handler. Every
+ * later ticket failure belongs here too rather than in a new advice class.
+ *
+ * <p><b>Scoped by {@code assignableTypes}</b>, for the reason
+ * {@code AuthExceptionHandler} and {@code CalendarExceptionHandler} both give: a
+ * repository-wide {@code @RestControllerAdvice} is shared surface four streams
+ * would edit daily, and no stream should introduce one unilaterally. The list
+ * grows as this feature gains controllers.
+ *
+ * <p>{@code type} is the stable part clients branch on; {@code title} and
+ * {@code detail} are prose and may be reworded.
+ */
+@RestControllerAdvice(assignableTypes = PlannedCloseDateController.class)
+class TicketExceptionHandler {
+
+    private static final URI NOT_FOUND = URI.create("https://edutrack/errors/not-found");
+    private static final URI VALIDATION = URI.create("https://edutrack/errors/validation");
+
+    /**
+     * <b>404, never 403</b>, and the body says nothing more than "not found".
+     *
+     * <p>The project id is on the exception for the server log and is
+     * deliberately not echoed: once A-034's {@code ScopeResolver} lands, a
+     * project outside the caller's scope arrives here as "does not exist", and a
+     * response that distinguished the two would confirm which project ids are
+     * real to anyone willing to enumerate them.
+     */
+    @ExceptionHandler(UnknownProjectException.class)
+    ResponseEntity<ProblemDetail> handleUnknownProject(UnknownProjectException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problem.setType(NOT_FOUND);
+        problem.setTitle("Not found");
+        problem.setDetail("Not found");
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+    }
+
+    /**
+     * The same {@code errors: {field: [messages]}} shape the contract's
+     * {@code ValidationFailed} uses, so the form can put the message against the
+     * level picker rather than in a banner.
+     */
+    @ExceptionHandler(UnknownLevelException.class)
+    ResponseEntity<ProblemDetail> handleUnknownLevel(UnknownLevelException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+        problem.setType(VALIDATION);
+        problem.setTitle("Validation failed");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("errors", Map.of("level", new String[]{e.getMessage()}));
+        return ResponseEntity.badRequest().body(problem);
+    }
+}

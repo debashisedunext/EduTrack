@@ -875,6 +875,85 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /tickets/planned-close-date:
+    get:
+      tags: [tickets]
+      operationId: previewPlannedCloseDate
+      summary: Resolve the SLA policy and preview the planned close date (C-012)
+      description: |
+        Answers **when** a ticket raised now — or at `from` — would be due, and
+        **why**, without creating anything.
+
+        The date is the SLA target walked forward over the working calendar:
+        weekends, org and project holidays, and the assignee's approved leave are
+        skipped rather than counted, so a Friday-18:00 ticket with a four-hour
+        target lands on Monday morning. That calculation cannot be done in the
+        browser — leave belongs to a resource the caller may not be able to read,
+        and a second implementation of it would disagree with the server quietly,
+        by a weekend.
+
+        Resolution runs most-specific-first and stops at the first rung that
+        answers, reported back as `source`:
+
+        | `source` | rung |
+        |---|---|
+        | `PROJECT_TASK_TYPE` | this project's policy for this task type and level |
+        | `PROJECT_LEVEL` | this project's default for the level |
+        | `ORG_DEFAULT` | the org-wide default for the level |
+        | `PRIORITY_DEFAULT` | the priority master's `defaultSlaHrs` (S-12) |
+        | `TASK_TYPE_DEFAULT` | the task type master's `defaultSlaHrs` (S-11) |
+        | `NONE` | nothing matched — `plannedCloseDate` is null |
+
+        The last two rungs go beyond §6's three policy rungs deliberately. A
+        project whose SLA matrix has not been configured — every project on its
+        first day — would otherwise give every ticket a null planned close date,
+        which silently removes it from the breach sweep, the pre-breach warning,
+        the delayed KPI and the Due Today saved view.
+
+        Safe to call on every change to project, task type, level or assignee.
+        It takes no request body: previewing must not require a valid draft, and
+        §4B.1's rule is that changing the level recomputes the date *while the
+        form is still being filled in*.
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+          description: The SLA matrix is per project; resolving without one would answer with the org-wide default.
+        - name: taskTypeId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: |
+            Optional — without it the first rung cannot match and resolution
+            starts at the project's default for the level, so the form can
+            preview before a task type is picked.
+        - name: level
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Level' }
+        - name: assigneeId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: |
+            Whose approved leave stops the clock. Omitted honours only the org
+            and project calendar — correct rather than a shortcut, since nothing
+            else knows whose leave would apply.
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+          description: |
+            When the clock starts, defaulting to now. Present because §7.5 lets a
+            PM or Admin backdate Date Reported, and a preview measured from the
+            wrong instant is worse than no preview.
+      responses:
+        '200':
+          description: OK. A `NONE` source with null dates is a valid answer, not an error.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlannedCloseDateResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /tickets/bulk-reassign:
     post:
       tags: [tickets]
@@ -3597,6 +3676,51 @@ components:
         assigneeId: { type: [integer, 'null'], format: int64 }
         plannedCloseDate: { type: [string, 'null'], format: date-time }
         estimatedHrs: { type: [number, 'null'], format: double }
+    SlaSource:
+      type: string
+      description: |
+        Which rung of the resolution ladder answered — see
+        `previewPlannedCloseDate`. Carried onto the wire so a planned close date
+        is explicable: "16 working hours, this project's Production Bug × High
+        policy" is checkable where a bare date is not, and it is the only way
+        someone editing the SLA matrix can see which row is being applied.
+      enum: [PROJECT_TASK_TYPE, PROJECT_LEVEL, ORG_DEFAULT, PRIORITY_DEFAULT, TASK_TYPE_DEFAULT, NONE]
+    PlannedCloseDatePreview:
+      type: object
+      required: [from, source]
+      properties:
+        from:
+          type: string
+          format: date-time
+          description: |
+            The instant the clock started. Echoed back because the caller may
+            have omitted it, and "computed from now" needs a *which* now to be
+            checkable.
+        plannedCloseDate:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Null when `source` is `NONE`. The ticket genuinely has no planned
+            close date, and the form must say so rather than showing a blank.
+        firstResponseDue:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Null unless the rung that answered carries a response target. The two
+            master defaults hold one figure each, and deriving a response target
+            from a resolution one would put a commitment on screen that no
+            administrator typed.
+        responseHrs: { type: [number, 'null'], format: double, description: '**Working** hours, not elapsed.' }
+        resolutionHrs: { type: [number, 'null'], format: double, description: '**Working** hours, not elapsed.' }
+        source: { $ref: '#/components/schemas/SlaSource' }
+        slaPolicyId:
+          type: [integer, 'null']
+          format: int64
+          description: The `sla_policies` row, or null where a master default answered instead.
+    PlannedCloseDateResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/PlannedCloseDatePreview' } }
     TicketResponse:
       type: object
       required: [data]

@@ -1,6 +1,7 @@
 import { http } from 'msw';
 import { getDb, nextId } from '../db';
 import type { Ticket } from '../db';
+import { plannedCloseDateFor } from './sla';
 import {
   currentUser, findTicket, noContent, notFound, ok, paginate,
   problem, scopedTickets, ticketDto, unprocessable, url, userRef, validationFailed,
@@ -133,9 +134,23 @@ export const ticketHandlers = [
       cycleNo: 1,
       iterationNo: 1,
       reopenCount: 0,
+      // C-012 · the same resolution and the same calendar walk the preview
+      // uses. It used to be `now + defaultSlaHrs` in wall-clock milliseconds,
+      // which meant the date the form showed before saving and the date stored
+      // on save differed by every weekend and holiday between them — a preview
+      // that is confidently wrong is worse than none.
       plannedCloseDate:
         (body.plannedCloseDate as string) ??
-        new Date(Date.now() + (taskType?.defaultSlaHrs ?? 48) * 3_600_000).toISOString(),
+        plannedCloseDateFor(
+          {
+            projectId: project.id,
+            taskTypeId: Number(body.taskTypeId),
+            level,
+            assigneeId: (body.assigneeId as number) ?? null,
+            from: now,
+          },
+          db,
+        ).plannedCloseDate,
       actualCloseDate: null,
       isDelayed: false,
       delayedSince: null,

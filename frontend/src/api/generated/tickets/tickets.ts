@@ -83,7 +83,9 @@ import type {
   ListTicketHistoryParams,
   ListTicketsParams,
   NotFoundResponse,
+  PlannedCloseDateResponse,
   PreconditionFailedResponse,
+  PreviewPlannedCloseDateParams,
   Problem,
   QuickUpdateRequest,
   ReopenRequest,
@@ -273,6 +275,133 @@ export const useCreateTicket = <TError = ValidationFailedResponse | Problem,
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * Answers **when** a ticket raised now — or at `from` — would be due, and
+**why**, without creating anything.
+
+The date is the SLA target walked forward over the working calendar:
+weekends, org and project holidays, and the assignee's approved leave are
+skipped rather than counted, so a Friday-18:00 ticket with a four-hour
+target lands on Monday morning. That calculation cannot be done in the
+browser — leave belongs to a resource the caller may not be able to read,
+and a second implementation of it would disagree with the server quietly,
+by a weekend.
+
+Resolution runs most-specific-first and stops at the first rung that
+answers, reported back as `source`:
+
+| `source` | rung |
+|---|---|
+| `PROJECT_TASK_TYPE` | this project's policy for this task type and level |
+| `PROJECT_LEVEL` | this project's default for the level |
+| `ORG_DEFAULT` | the org-wide default for the level |
+| `PRIORITY_DEFAULT` | the priority master's `defaultSlaHrs` (S-12) |
+| `TASK_TYPE_DEFAULT` | the task type master's `defaultSlaHrs` (S-11) |
+| `NONE` | nothing matched — `plannedCloseDate` is null |
+
+The last two rungs go beyond §6's three policy rungs deliberately. A
+project whose SLA matrix has not been configured — every project on its
+first day — would otherwise give every ticket a null planned close date,
+which silently removes it from the breach sweep, the pre-breach warning,
+the delayed KPI and the Due Today saved view.
+
+Safe to call on every change to project, task type, level or assignee.
+It takes no request body: previewing must not require a valid draft, and
+§4B.1's rule is that changing the level recomputes the date *while the
+form is still being filled in*.
+
+ * @summary Resolve the SLA policy and preview the planned close date (C-012)
+ */
+export const previewPlannedCloseDate = (
+    params: PreviewPlannedCloseDateParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PlannedCloseDateResponse>(
+      {url: `/tickets/planned-close-date`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getPreviewPlannedCloseDateQueryKey = (params?: PreviewPlannedCloseDateParams,) => {
+    return [
+    `/tickets/planned-close-date`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getPreviewPlannedCloseDateQueryOptions = <TData = Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError = ValidationFailedResponse | NotFoundResponse>(params: PreviewPlannedCloseDateParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getPreviewPlannedCloseDateQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof previewPlannedCloseDate>>> = ({ signal }) => previewPlannedCloseDate(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type PreviewPlannedCloseDateQueryResult = NonNullable<Awaited<ReturnType<typeof previewPlannedCloseDate>>>
+export type PreviewPlannedCloseDateQueryError = ValidationFailedResponse | NotFoundResponse
+
+
+export function usePreviewPlannedCloseDate<TData = Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError = ValidationFailedResponse | NotFoundResponse>(
+ params: PreviewPlannedCloseDateParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof previewPlannedCloseDate>>,
+          TError,
+          Awaited<ReturnType<typeof previewPlannedCloseDate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function usePreviewPlannedCloseDate<TData = Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError = ValidationFailedResponse | NotFoundResponse>(
+ params: PreviewPlannedCloseDateParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof previewPlannedCloseDate>>,
+          TError,
+          Awaited<ReturnType<typeof previewPlannedCloseDate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function usePreviewPlannedCloseDate<TData = Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError = ValidationFailedResponse | NotFoundResponse>(
+ params: PreviewPlannedCloseDateParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Resolve the SLA policy and preview the planned close date (C-012)
+ */
+
+export function usePreviewPlannedCloseDate<TData = Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError = ValidationFailedResponse | NotFoundResponse>(
+ params: PreviewPlannedCloseDateParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewPlannedCloseDate>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getPreviewPlannedCloseDateQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
  * **Each ticket gets its own history entry** — a bulk operation that writes
 one summary row destroys the per-ticket audit trail, which is the point of
 having one.
