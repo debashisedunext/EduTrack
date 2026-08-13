@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.masters.resources;
 
+import com.edunext.edutrack.domain.identity.Role;
+import com.edunext.edutrack.domain.identity.RoleRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,9 +60,39 @@ public class ResourceService {
     static final String REASSIGN_URL = "/api/v1/tickets/bulk-reassign";
 
     private final ResourceRepository resources;
+    private final RoleRepository roles;
 
-    ResourceService(ResourceRepository resources) {
+    ResourceService(ResourceRepository resources, RoleRepository roles) {
         this.resources = resources;
+        this.roles = roles;
+    }
+
+    // ------------------------------------------------------------------
+    // Role codes — the ?role= filter's vocabulary
+    // ------------------------------------------------------------------
+
+    /**
+     * The authoritative list of role codes, sorted so a 400 reads the same
+     * twice running.
+     *
+     * <p>B-015 replaced a hardcoded set of six with a read of the table: role
+     * codes are master data an Admin extends through S-09, so a compiled copy
+     * starts drifting the moment that screen exists. The Role Master is in this
+     * feature; the <em>repository</em> is Stream A's identity domain, which is
+     * where every other consumer of {@code roles} reads from too.
+     *
+     * <p>A-037 moved the two calls here from {@code ResourceController}, which
+     * held {@link RoleRepository} directly. Nothing about the query changed —
+     * the point is only that a handler cannot query, because a handler that can
+     * is a handler that can answer without whatever the service enforces next.
+     */
+    public List<String> knownRoleCodes() {
+        return roles.findAll().stream().map(Role::getCode).sorted().toList();
+    }
+
+    /** Whether {@code code} — already upper-cased — names a real role. */
+    public boolean roleExists(String code) {
+        return roles.existsByCode(code);
     }
 
     // ------------------------------------------------------------------

@@ -1,7 +1,5 @@
 package com.edunext.edutrack.api.feature.masters.resources;
 
-import com.edunext.edutrack.domain.identity.Role;
-import com.edunext.edutrack.domain.identity.RoleRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -96,26 +94,11 @@ class ResourceController {
     private final ResourceExportWriter exporter;
     private final ResourceWriteService writes;
 
-    /**
-     * The authoritative list of role codes, replacing the hardcoded set of six
-     * this class carried until B-015.
-     *
-     * <p>The set was only ever there to turn a typo'd {@code ?role=} into a 400
-     * naming the valid codes, instead of an empty grid that looks like an empty
-     * organisation — but role codes are master data an Admin extends through
-     * S-09, so a compiled copy of them starts drifting the moment that screen
-     * exists. It now reads the table. The Role Master is in this feature, but
-     * the <em>repository</em> is Stream A's identity domain, which is where
-     * every other consumer of {@code roles} reads from too.
-     */
-    private final RoleRepository roles;
-
     ResourceController(ResourceService resources, ResourceExportWriter exporter,
-                       ResourceWriteService writes, RoleRepository roles) {
+                       ResourceWriteService writes) {
         this.resources = resources;
         this.exporter = exporter;
         this.writes = writes;
-        this.roles = roles;
     }
 
     /** A page of the grid. */
@@ -395,15 +378,10 @@ class ResourceController {
             return null;
         }
         String code = role.trim().toUpperCase(Locale.ROOT);
-        if (!roles.existsByCode(code)) {
+        if (!resources.roleExists(code)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "role must be one of " + knownRoleCodes());
+                    "role must be one of " + resources.knownRoleCodes());
         }
         return code;
-    }
-
-    /** Sorted, so a 400 reads the same twice running. */
-    private List<String> knownRoleCodes() {
-        return roles.findAll().stream().map(Role::getCode).sorted().toList();
     }
 }

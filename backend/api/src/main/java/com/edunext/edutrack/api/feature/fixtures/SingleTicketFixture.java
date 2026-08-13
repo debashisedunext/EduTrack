@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.fixtures;
 
+import com.edunext.edutrack.api.security.scope.UnscopedAccess;
 import com.edunext.edutrack.domain.masters.Priority;
 import com.edunext.edutrack.domain.masters.TaskType;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
@@ -53,6 +54,13 @@ import java.util.Set;
  */
 @Component
 @Profile("fixtures")
+@UnscopedAccess("""
+        Seed data has no caller. This runs under the `fixtures` profile only and \
+        writes the rows the scope guard later filters, so it is upstream of §10.2 \
+        rather than exempt from it — going through ScopedTickets would mean asking \
+        which tickets a nonexistent user may see. It is also the one legitimate \
+        holder of the three append-only repositories outside A-040: it only ever \
+        calls insert().""")
 class SingleTicketFixture {
 
     private static final List<String> TITLES = List.of(

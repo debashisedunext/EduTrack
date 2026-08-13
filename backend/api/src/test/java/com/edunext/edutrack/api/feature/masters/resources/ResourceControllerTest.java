@@ -1,7 +1,5 @@
 package com.edunext.edutrack.api.feature.masters.resources;
 
-import com.edunext.edutrack.domain.identity.Role;
-import com.edunext.edutrack.domain.identity.RoleRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -44,7 +42,6 @@ class ResourceControllerTest {
     private ResourceService service;
     private ResourceExportWriter exporter;
     private ResourceWriteService writes;
-    private RoleRepository roles;
     private ResourceController controller;
 
     @BeforeEach
@@ -52,20 +49,19 @@ class ResourceControllerTest {
         service = mock(ResourceService.class);
         exporter = mock(ResourceExportWriter.class);
         writes = mock(ResourceWriteService.class);
-        roles = mock(RoleRepository.class);
-        controller = new ResourceController(service, exporter, writes, roles);
+        controller = new ResourceController(service, exporter, writes);
 
         // B-015 replaced the hardcoded Set.of(...) here with the roles table, so
         // the stub stands in for it. The codes are B-001's six because that is
         // what the seed puts there — a seventh an Admin adds is now accepted
         // without touching this class, which is the point of the change.
-        when(roles.existsByCode(any())).thenAnswer(
+        //
+        // A-037 moved the read behind ResourceService: the controller no longer
+        // holds RoleRepository, so the stub moves with it. Same two questions,
+        // asked of the service instead of the table.
+        when(service.roleExists(any())).thenAnswer(
                 call -> SEEDED_ROLE_CODES.contains(call.getArgument(0, String.class)));
-        when(roles.findAll()).thenAnswer(call -> SEEDED_ROLE_CODES.stream().map(code -> {
-            Role role = new Role();
-            role.setCode(code);
-            return role;
-        }).toList());
+        when(service.knownRoleCodes()).thenReturn(SEEDED_ROLE_CODES.stream().sorted().toList());
 
         when(service.list(any(), any(), any())).thenReturn(
                 new ResourceDtos.ResourceListResponse(List.of(),
@@ -134,7 +130,7 @@ class ResourceControllerTest {
             // The reason B-015 replaced the compiled Set.of(...): with it, the
             // first custom role would have 400'd on a grid filter and the
             // failure would have looked like a bug in the Role Master.
-            when(roles.existsByCode("AUDITOR")).thenReturn(true);
+            when(service.roleExists("AUDITOR")).thenReturn(true);
 
             controller.list(null, null, null, "auditor", null, null, null);
 

@@ -43,7 +43,11 @@ class ResourceServiceTest {
     @BeforeEach
     void setUp() {
         repository = mock(ResourceRepository.class);
-        service = new ResourceService(repository);
+        // A-037 gave ResourceService the roles table, so the ?role= filter's
+        // vocabulary is read behind a service rather than by the controller.
+        // Nothing in this class exercises it; the mock is here to construct.
+        service = new ResourceService(repository,
+                mock(com.edunext.edutrack.domain.identity.RoleRepository.class));
 
         when(repository.projectsFor(any())).thenReturn(Map.of());
         when(repository.openTicketCounts(any())).thenReturn(Map.of());

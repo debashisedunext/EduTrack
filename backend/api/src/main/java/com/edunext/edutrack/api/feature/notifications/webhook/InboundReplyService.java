@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.notifications.webhook;
 
+import com.edunext.edutrack.api.security.scope.UnscopedAccess;
 import com.edunext.edutrack.domain.identity.User;
 import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.mail.EmailLogRepository;
@@ -79,6 +80,15 @@ import java.util.Optional;
  */
 @Service
 @Lazy
+@UnscopedAccess("""
+        An inbound mail is answered on behalf of a mail server, not a user. There is \
+        no Authentication and therefore no §10.2 scope to apply — ScopedTickets has \
+        nothing to ask. The ticket is not chosen by a caller either: it is recovered \
+        from the In-Reply-To/References headers of a mail this system sent, so the \
+        only reachable tickets are ones we already mailed the recipient about. \
+        Authorisation is the sender check below (a matching active user who appears \
+        in email_log for this ticket), which is a different question from row scope \
+        and is deliberately not weakened into one.""")
 public class InboundReplyService {
 
     private static final Logger log = LoggerFactory.getLogger(InboundReplyService.class);
