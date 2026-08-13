@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Set;
 
 import static com.edunext.edutrack.api.security.permission.RolePermissions.ADMIN;
+import static com.edunext.edutrack.api.security.permission.RolePermissions.PM;
 
 /**
  * A-036 · the role × route matrix, written down by hand.
@@ -87,6 +88,24 @@ final class PermissionMatrix {
     /** {@code master.write}, {@code resource.manage} and {@code audit.view} are Admin's alone today. */
     static final Set<String> ADMIN_ONLY = Set.of(ADMIN);
 
+    /**
+     * {@code project.manage} — the one §2 capability that is not Admin's alone.
+     *
+     * <p>§2 row 2: "Create/edit projects, map resources to project — Admin ✅,
+     * PM ✅ (own), Support ❌, Developer ❌, QA ❌, Deployment ❌". <b>The
+     * "(own)" is a row-scope qualifier, not a capability one</b>, and that
+     * distinction is why this set has two members rather than one: PM holds the
+     * capability outright, and <em>which</em> projects a PM may edit is A-034's
+     * question, asked of rows, after this one has been answered. Encoding "own"
+     * here would mean answering a row question with a token claim, which is the
+     * confusion §10.2 exists to prevent.
+     *
+     * <p>It also makes this the only pair of rows in the file where a wrong
+     * answer is invisible from the Admin smoke test everybody runs: Support,
+     * Developer, QA and Deployment must all be refused, and PM must not be.
+     */
+    static final Set<String> ADMIN_AND_PM = Set.of(ADMIN, PM);
+
     // ── request bodies that satisfy their DTO's constraints ──────────────────
     //
     // None of these has to succeed. They have to be *valid*, so that argument
@@ -160,6 +179,16 @@ final class PermissionMatrix {
     /** {@code RolePermissionsWrite}: the array must be present; empty is valid. */
     private static final String ROLE_PERMISSIONS = """
             {"permissionCodes":[]}""";
+
+    /**
+     * {@code ProjectDtos.ProjectWrite}: {@code projectCode} matches
+     * {@code ^[A-Za-z][A-Za-z0-9]{1,9}$}, {@code name} is {@code @NotBlank} and
+     * {@code projectManagerId} is {@code @NotNull}. The manager id need not
+     * exist — resolving it happens in the handler, which an allowed row is
+     * entitled to reach and a denied row never gets to.
+     */
+    private static final String PROJECT = """
+            {"projectCode":"MTX","name":"Matrix Fixture","projectManagerId":1}""";
 
     /** {@code ResourceWriteRequest}: five required fields, role from the §2 set. */
     private static final String RESOURCE = """
@@ -293,6 +322,42 @@ final class PermissionMatrix {
             adminOnly("DELETE", "/api/v1/masters/roles/{roleId}"),
             adminOnly("PUT", "/api/v1/masters/roles/{roleId}/permissions", ROLE_PERMISSIONS),
 
+            // ── projects · S-10 ─────────────────────────────────────────────
+            // Reads open to all six. §2 has no "view projects" row, so this is
+            // reasoned rather than read off: every role may create a ticket
+            // (§2 row 3), a ticket must name a project, and the create form's
+            // project picker is this route. A role that could not list projects
+            // could not raise a ticket at all — which would contradict a row
+            // §2 does state. The detail read carries the manager, dates, SLA
+            // policy and colour tag; none of it is a credential and all of it
+            // is already on any ticket belonging to the project.
+            everyRole("GET", "/api/v1/projects"),
+            everyRole("GET", "/api/v1/projects/{projectId}"),
+            // Writes are project.manage — Admin and PM, per §2 row 2. This is
+            // the only capability in the product that PM holds and Support does
+            // not, which makes Support the row that matters here: Support runs
+            // the desk for its own projects and reads like a privileged role,
+            // and §2 says plainly it may not create or edit one.
+            //
+            // ⚠ NOTE the qualifier §2 puts on PM that this matrix cannot state:
+            // "✅ (own)". A row here is a role-scope claim — did authorisation
+            // let the request through — and "own" is row scope. For tickets that
+            // is ScopeResolver's job; for projects it is nobody's yet. The
+            // handler takes no Authentication and ProjectService.update sees
+            // only (projectId, patch), so **a PM today may edit any project,
+            // not only the ones they manage** — wider than §2 specifies, and
+            // not visible from an Admin smoke test because Admin is entitled to
+            // all of them anyway.
+            //
+            // Recorded as the current answer rather than the settled one, like
+            // the leave-approval row above. Closing it means scoping the write
+            // by projects.manager_id, which is a Stream A decision about where
+            // row scope lives and not a narrowed annotation on a masters
+            // branch. Found by Ayush on the parallel B-016 fix; carried here so
+            // it does not die with the branch that is being closed.
+            adminAndPm("POST", "/api/v1/projects", PROJECT),
+            adminAndPm("PATCH", "/api/v1/projects/{projectId}", EMPTY_PATCH),
+
             // ── resources · S-07 and S-08 ───────────────────────────────────
             // The directory is the assignee picker and the @mention source, so
             // it must answer for all six roles. Over-restricting a read is the
@@ -367,6 +432,10 @@ final class PermissionMatrix {
 
     private static Entry adminOnly(String method, String pattern) {
         return new Entry(method, pattern, null, ADMIN_ONLY);
+    }
+
+    private static Entry adminAndPm(String method, String pattern, String body) {
+        return new Entry(method, pattern, body, ADMIN_AND_PM);
     }
 
     private static Entry adminOnly(String method, String pattern, String body) {
