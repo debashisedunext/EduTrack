@@ -1592,7 +1592,23 @@ export const listTicketEmailsResponse = zod.object({
 response time is recorded as a reportable metric** — the round trip is the
 thing worth measuring, not just the ask.
 
- * @summary Request a status update from the assignee
+The card is an ordinary `ChatMessage` with `kind: STATUS_REQUEST`, posted
+by the manager. Draw the card from that: the author is who asked, the body
+is what they asked, and the two buttons belong to the kind. No action list
+is sent — both buttons navigate, and neither calls anything here.
+
+**Reporting Manager, PM or Admin only**, and a caller who is none of those
+gets `404` rather than `403`: whether you are this assignee's reporting
+manager depends entirely on the row, and CONVENTIONS.md §7 reserves 403
+for failures that do not.
+
+Repeat clicks are idempotent. While your own request is unanswered, asking
+again returns that one and posts nothing new — a second card, a second
+bell entry and a second row in your awaiting-response list would all be
+noise, and would make the metric count one wait as two. Two *different*
+managers may each have one open; a single reply closes both.
+
+ * @summary Request a status update from the assignee (S-25)
  */
 export const askTicketStatusPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
@@ -1606,6 +1622,54 @@ export const askTicketStatusBodyNoteMax = 1000;
 
 
 export const askTicketStatusBody = zod.object({
-  "note": zod.string().max(askTicketStatusBodyNoteMax).optional()
+  "note": zod.string().max(askTicketStatusBodyNoteMax).optional().describe('Defaults to \"Please share the current status and expected closure.\"\n')
+})
+
+/**
+ * The distinct badge §7.6 asks for. Every request still unanswered on this
+ticket, whoever asked, oldest first.
+
+Scoped by chat membership, like the rest of chat: somebody who is not in
+the ticket's thread sees an empty list rather than a 404, because the
+question is "is anything outstanding here" and the truthful answer to
+someone who cannot see the conversation is "nothing you can see".
+
+ * @summary Open status requests on this ticket (S-25)
+ */
+export const listTicketStatusRequestsPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
+
+export const listTicketStatusRequestsParams = zod.object({
+  "ticketId": zod.string().regex(listTicketStatusRequestsPathTicketIdRegExp)
+})
+
+export const listTicketStatusRequestsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "ticketId": zod.string().describe('Ticket code, not the row id.'),
+  "ticketTitle": zod.string().optional(),
+  "threadId": zod.number(),
+  "requestMessageId": zod.number().describe('The `kind: STATUS_REQUEST` message in the thread.'),
+  "requestedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),
+  "askedOf": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).describe('The assignee at the moment of asking. Never rewritten by a later reassignment — the metric is about the person actually asked.\n'),
+  "requestedAt": zod.string().datetime({}),
+  "note": zod.string().nullish().describe('The request message\'s body as it stands, and `null` once its author has deleted it. Read from the message rather than copied, so §7.6\'s tombstone reaches it like anything else said on the ticket.\n'),
+  "isAnswered": zod.boolean(),
+  "answerMessageId": zod.number().nullish(),
+  "answeredAt": zod.string().datetime({}).nullish(),
+  "responseWorkingMinutes": zod.number().nullish().describe('\*\*Working minutes, not wall clock.\*\* A manager who asks at 18:00 on Friday and is answered at 09:30 on Monday waited half a working hour, not sixty-three hours; the org calendar, project holidays and the resource\'s approved leave are all honoured (B-024). Stamped once when the request is answered and never recomputed, so a holiday added later cannot restate a figure somebody has already reported. Both instants are here too, so wall-clock stays derivable.\n')
+}).describe('One \"Ask Status\" (§7.6) and, once it has been answered, how long it took.\n'))
 })
 

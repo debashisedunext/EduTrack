@@ -1,8 +1,8 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
 import type { Holiday, User } from '../db';
-import { resolveSla } from './sla';
-import { round } from './tickets';
+import { resolveSla, workingMinutesBetween } from './sla';
+import { round, statusRequestDto } from './tickets';
 import {
   clientRef, currentUser, noContent, notFound, ok, paginate, problem, projectRef,
   scopedTickets, ticketDto, url, userRef, validationFailed,
@@ -1034,7 +1034,37 @@ export const restHandlers = [
     };
     db.chatMessages.push(m);
     thread.lastMessageAt = m.createdAt;
+
+    // D-056. A reply closes whatever it answers, here as on the server —
+    // otherwise the badge and the awaiting-response list would only ever grow
+    // in the mock, and the client would be built against a list that never
+    // clears. Not the poster's own request: a manager chasing their own
+    // question must not close it.
+    for (const r of db.statusRequests) {
+      if (r.threadId !== thread.id || r.answeredAt !== null) continue;
+      if (r.requestedById === db.currentUserId) continue;
+      const ticket = db.tickets.find((t) => t.ticketId === r.ticketId);
+      if (r.askedOfId !== db.currentUserId && ticket?.assigneeId !== db.currentUserId) continue;
+      r.answerMessageId = m.id;
+      r.answeredAt = m.createdAt;
+      // Working minutes, so the mock cannot teach a wall-clock reading. Same
+      // calendar the planned-close-date preview walks.
+      r.responseWorkingMinutes = workingMinutesBetween(
+        r.requestedAt, m.createdAt, ticket?.projectId ?? null, r.askedOfId, db,
+      );
+    }
     return ok(messageDto(m), undefined, { status: 201 });
+  }),
+
+  /** D-056 · the manager's "Awaiting response" list, longest wait first. */
+  http.get(url('/me/awaiting-response'), () => {
+    const db = getDb();
+    return ok(
+      db.statusRequests
+        .filter((r) => r.requestedById === db.currentUserId && r.answeredAt === null)
+        .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt))
+        .map((r) => statusRequestDto(r, db)),
+    );
   }),
 
   /**

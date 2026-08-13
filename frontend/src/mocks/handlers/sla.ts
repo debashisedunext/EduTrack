@@ -167,6 +167,44 @@ function windowOn(db: Db, date: Date, projectId: number | null, userId: number |
 }
 
 /**
+ * How much working time actually elapsed between two instants, in minutes.
+ *
+ * The inverse of {@link addWorkingHours}, and the mock's stand-in for B-024's
+ * `workingHoursBetween`. D-056 needs it: a manager who asks at 17:40 on Friday
+ * and is answered at 09:30 on Monday waited a few working minutes, not
+ * sixty-four hours, and a mock that returned wall clock would have the client
+ * rendering a response time the server never produces.
+ *
+ * Returns 0 rather than a negative number when the window is inverted — the
+ * caller is measuring a wait, and "answered before it was asked" is a clock
+ * problem, not a figure to report.
+ */
+export function workingMinutesBetween(
+  fromIso: string,
+  toIso: string,
+  projectId: number | null = null,
+  userId: number | null = null,
+  db: Db = getDb(),
+): number {
+  const start = new Date(fromIso).getTime();
+  const end = new Date(toIso).getTime();
+  if (!(end > start)) return 0;
+
+  let total = 0;
+  let cursor = start;
+  for (let walked = 0; walked <= MAX_WALK_DAYS && cursor < end; walked += 1) {
+    const day = windowOn(db, new Date(cursor), projectId, userId);
+    if (day) {
+      const from = Math.max(day.start, start);
+      const to = Math.min(day.end, end);
+      if (to > from) total += to - from;
+    }
+    cursor = Math.floor(cursor / DAY_MS) * DAY_MS + DAY_MS;
+  }
+  return Math.round(total / MINUTES);
+}
+
+/**
  * Where `hours` of working time lands, starting at `fromIso`.
  *
  * Returns a precise instant inside a working day, not a date: "Friday 18:00

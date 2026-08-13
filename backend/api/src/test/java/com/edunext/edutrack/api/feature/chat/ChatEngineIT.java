@@ -77,6 +77,12 @@ class ChatEngineIT {
     ChatService chat;
 
     @Autowired
+    StatusRequestService statusRequests;
+
+    @Autowired
+    StatusRequestRepository statusRequestRepository;
+
+    @Autowired
     JdbcTemplate jdbc;
 
     @MockitoBean
@@ -93,13 +99,22 @@ class ChatEngineIT {
 
     @BeforeEach
     void seed() {
+        jdbc.update("DELETE FROM ticket_status_requests");
         jdbc.update("DELETE FROM notifications");
         jdbc.update("DELETE FROM chat_messages");
         jdbc.update("DELETE FROM chat_participants");
         jdbc.update("DELETE FROM chat_threads");
         jdbc.update("DELETE FROM tickets");
+        jdbc.update("DELETE FROM project_members WHERE user_id IN "
+                + "(SELECT id FROM users WHERE username LIKE 'it_chat_%')");
+        // users.reporting_manager_id is a self-referencing FK, so a fixture that
+        // wires a reporting line makes its own users undeletable. D-055's tests
+        // are the first to set one; clearing it here rather than in their
+        // teardown means a test that fails midway still leaves a droppable
+        // fixture behind.
+        jdbc.update("UPDATE users SET reporting_manager_id = NULL WHERE username LIKE 'it_chat_%'");
         jdbc.update("DELETE FROM users WHERE username LIKE 'it_chat_%'");
-        jdbc.update("DELETE FROM projects WHERE project_code = 'ITC'");
+        jdbc.update("DELETE FROM projects WHERE project_code IN ('ITC', 'ITC2')");
 
         // Fixture ids are forced past 127 deliberately. Java caches boxed Long
         // values in -128..127, so comparing two boxed ids with `==` is
@@ -935,6 +950,573 @@ class ChatEngineIT {
     private long idOfLatest() {
         Long id = jdbc.queryForObject("SELECT MAX(id) FROM chat_messages", Long.class);
         return id == null ? 0L : id;
+    }
+
+    // ------------------------------------ D-055 / D-056 · Ask Status
+
+    /**
+     * §7.6 — a Reporting Manager or PM asks, the card lands in the thread, the
+     * reply is timestamped, and the wait becomes a reportable number.
+     *
+     * <p>Three properties carry the feature, and each is a way it could look
+     * right and be wrong:
+     *
+     * <ul>
+     *   <li><strong>Who may ask.</strong> Not everyone who can post in the
+     *       thread — a developer who can chat about a ticket is not thereby
+     *       entitled to demand an update from a colleague.</li>
+     *   <li><strong>What counts as an answer.</strong> The whole metric rests
+     *       on this clause, and the tempting simplifications (any reply; the
+     *       assignee only) are each wrong in a way that only shows up months
+     *       later in a scorecard.</li>
+     *   <li><strong>Working hours.</strong> A wait measured in wall clock
+     *       charges people for weekends, and a test whose window sits inside a
+     *       working day cannot tell the two apart.</li>
+     * </ul>
+     */
+    @org.junit.jupiter.api.Nested
+    class StatusRequests {
+
+        private long anil;
+
+        @BeforeEach
+        void assignAndSetTheChain() {
+            jdbc.update("DELETE FROM ticket_status_requests");
+
+            anil = insertUser("it_chat_anil", "Anil Shah");
+            join(ticketThread, anil);
+
+            // EVERY FIXTURE USER IS AN ADMIN UNTIL THIS RUNS, and that is not a
+            // detail. insertUser takes `SELECT id FROM roles ORDER BY id LIMIT
+            // 1`, and A-006 seeds ADMIN first — so the four "may not ask" tests
+            // below all passed the authorisation check on the admin branch and
+            // failed, which is the good outcome. Had the branch order been
+            // different they would have passed while proving nothing.
+            jdbc.update("UPDATE users SET role_id = (SELECT id FROM roles WHERE code = 'DEVELOPER') "
+                    + "WHERE username LIKE 'it_chat_%'");
+
+            // Ravi is the assignee; Meera is his reporting manager, which is
+            // now the only way she qualifies to ask. Anil is in the thread and
+            // is neither — the case that separates "can talk about this ticket"
+            // from "may demand an update on it".
+            jdbc.update("UPDATE tickets SET assigned_to = ? WHERE id = ?", ravi, ticketId);
+            jdbc.update("UPDATE users SET reporting_manager_id = ? WHERE id = ?", meera, ravi);
+        }
+
+        // ---------------------------------------------------------- the ask
+
+        @Test
+        @DisplayName("the manager asks, and the card lands in the ticket's own thread")
+        void theCardLandsInTheThread() {
+            StatusRequestService.Outcome outcome = statusRequests.ask(ticketId, meera, null);
+
+            assertThat(outcome).isInstanceOf(StatusRequestService.Outcome.Asked.class);
+            ChatDtos.ChatMessage card = latestMessageOn(ticketThread);
+            assertThat(card.kind()).isEqualTo(MessageKind.STATUS_REQUEST);
+            assertThat(card.body()).isEqualTo(StatusRequestService.DEFAULT_NOTE);
+            assertThat(card.author().id()).isEqualTo(meera);
+        }
+
+        @Test
+        @DisplayName("the manager's own wording is what gets posted")
+        void theManagersWording() {
+            statusRequests.ask(ticketId, meera, "  Client call at four — where are we?  ");
+
+            assertThat(latestMessageOn(ticketThread).body())
+                    .isEqualTo("Client call at four — where are we?");
+        }
+
+        @Test
+        @DisplayName("the card broadcasts to the ticket's room like any other message")
+        void theCardIsBroadcast() {
+            statusRequests.ask(ticketId, meera, null);
+
+            assertThat(published()).contains("/topic/ticket." + ticketId);
+        }
+
+        @Test
+        @DisplayName("clicking twice asks once")
+        void repeatClicksAreIdempotent() {
+            StatusRequestService.Outcome first = statusRequests.ask(ticketId, meera, "any update?");
+            StatusRequestService.Outcome second = statusRequests.ask(ticketId, meera, "any update?");
+
+            assertThat(asked(first).request().id()).isEqualTo(asked(second).request().id());
+            assertThat(asked(first).alreadyOpen()).isFalse();
+            assertThat(asked(second).alreadyOpen()).isTrue();
+            assertThat(openRequestCount()).isEqualTo(1);
+            assertThat(cardCount())
+                    .as("a second card in the thread would be the manager nagging on our behalf")
+                    .isEqualTo(1);
+            assertThat(notificationsFor(ravi, "STATUS_REQUESTED"))
+                    .as("nor a second bell entry")
+                    .isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("two different managers may each have one open, and each is owed an answer")
+        void twoManagersMayBothAsk() {
+            // Anil is a PM on the project, so he qualifies a different way from
+            // Meera — and they are two people waiting, not one question asked
+            // twice.
+            makePm(anil);
+
+            statusRequests.ask(ticketId, meera, "status?");
+            statusRequests.ask(ticketId, anil, "status?");
+
+            assertThat(openRequestCount()).isEqualTo(2);
+        }
+
+        // ------------------------------------------------------ who may ask
+
+        @Test
+        @DisplayName("somebody in the thread who is neither the manager nor a PM cannot ask")
+        void aColleagueInTheThreadCannotAsk() {
+            assertThat(statusRequests.ask(ticketId, anil, null))
+                    .isInstanceOf(StatusRequestService.Outcome.NotFound.class);
+            assertThat(openRequestCount()).isZero();
+            assertThat(cardCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("a PM on the ticket's project may ask, without reporting-line involvement")
+        void aProjectPmMayAsk() {
+            makePm(anil);
+
+            assertThat(statusRequests.ask(ticketId, anil, null))
+                    .isInstanceOf(StatusRequestService.Outcome.Asked.class);
+        }
+
+        @Test
+        @DisplayName("an Admin may ask, with no reporting line and no project membership")
+        void anAdminMayAsk() {
+            jdbc.update("UPDATE users SET role_id = (SELECT id FROM roles WHERE code = 'ADMIN') "
+                    + "WHERE id = ?", anil);
+
+            assertThat(statusRequests.ask(ticketId, anil, null))
+                    .isInstanceOf(StatusRequestService.Outcome.Asked.class);
+        }
+
+        @Test
+        @DisplayName("a PM on a different project may not")
+        void aPmElsewhereMayNot() {
+            jdbc.update("INSERT INTO projects (project_code, name) VALUES ('ITC2', 'Another')");
+            long otherProject = lastId();
+            jdbc.update("""
+                    INSERT INTO project_members (project_id, user_id, role_in_project, is_active)
+                    VALUES (?, ?, 'PM', 1)
+                    """, otherProject, anil);
+
+            assertThat(statusRequests.ask(ticketId, anil, null))
+                    .isInstanceOf(StatusRequestService.Outcome.NotFound.class);
+        }
+
+        @Test
+        @DisplayName("a deactivated project membership does not qualify")
+        void aFormerPmMayNot() {
+            jdbc.update("""
+                    INSERT INTO project_members (project_id, user_id, role_in_project, is_active)
+                    VALUES (?, ?, 'PM', 0)
+                    """, projectId, anil);
+
+            assertThat(statusRequests.ask(ticketId, anil, null))
+                    .isInstanceOf(StatusRequestService.Outcome.NotFound.class);
+        }
+
+        @Test
+        @DisplayName("not being entitled to ask answers exactly like a ticket that is not there")
+        void refusalIsIndistinguishableFromAbsence() {
+            // CONVENTIONS.md §7: 403 only where the failure does not depend on
+            // a row. Whether Anil is Ravi's manager depends entirely on the
+            // row, so a 403 here would confirm the ticket exists to anyone
+            // willing to try ids.
+            assertThat(statusRequests.ask(ticketId, anil, null))
+                    .isEqualTo(statusRequests.ask(9_999_999L, anil, null));
+        }
+
+        @Test
+        @DisplayName("an unassigned ticket has nobody to ask")
+        void nobodyToAsk() {
+            makePm(anil);
+            jdbc.update("UPDATE tickets SET assigned_to = NULL WHERE id = ?", ticketId);
+
+            assertThat(statusRequests.ask(ticketId, anil, null))
+                    .isInstanceOf(StatusRequestService.Outcome.Rejected.class);
+            assertThat(cardCount())
+                    .as("a question in the thread with nobody's name against it, and a clock "
+                            + "that can never be stopped")
+                    .isZero();
+        }
+
+        @Test
+        @DisplayName("a reporting-line manager loses the ticket when it loses its assignee")
+        void anUnassignedTicketHasNoReportingLine() {
+            jdbc.update("UPDATE tickets SET assigned_to = NULL WHERE id = ?", ticketId);
+
+            // Meera qualifies only because Ravi reports to her and Ravi has the
+            // ticket. With nobody assigned there is no reporting line to this
+            // ticket at all, so she is refused before the "nobody to ask" check
+            // is ever reached — 404, not 422. Pinned because it is the kind of
+            // ordering that looks like a bug the first time somebody hits it:
+            // a PM or Admin on the same ticket gets the 422 above.
+            assertThat(statusRequests.ask(ticketId, meera, null))
+                    .isInstanceOf(StatusRequestService.Outcome.NotFound.class);
+        }
+
+        @Test
+        @DisplayName("you cannot ask yourself")
+        void theAssigneeCannotAskThemselves() {
+            makePm(anil);
+            jdbc.update("UPDATE tickets SET assigned_to = ? WHERE id = ?", anil, ticketId);
+
+            assertThat(statusRequests.ask(ticketId, anil, null))
+                    .isInstanceOf(StatusRequestService.Outcome.Rejected.class);
+        }
+
+        // ------------------------------------------------- thread and notice
+
+        @Test
+        @DisplayName("a ticket nobody has ever chatted about still gets its card")
+        void aThreadIsCreatedIfThereIsNone() {
+            jdbc.update("DELETE FROM chat_messages WHERE thread_id = ?", ticketThread);
+            jdbc.update("DELETE FROM chat_participants WHERE thread_id = ?", ticketThread);
+            jdbc.update("DELETE FROM chat_threads WHERE id = ?", ticketThread);
+
+            StatusRequestService.Outcome outcome = statusRequests.ask(ticketId, meera, null);
+
+            // Nothing else in the system creates a ticket thread. Refusing here
+            // would mean "you may not ask for a status because nobody has
+            // chatted about this ticket yet".
+            assertThat(asked(outcome).request().threadId()).isNotEqualTo(ticketThread);
+            assertThat(participantsOf(asked(outcome).request().threadId()))
+                    .containsExactlyInAnyOrder(meera, ravi);
+        }
+
+        @Test
+        @DisplayName("the assignee is put in the thread before being sent a link to it")
+        void theAssigneeIsAddedToTheThread() {
+            jdbc.update("DELETE FROM chat_participants WHERE thread_id = ? AND user_id = ?",
+                    ticketThread, ravi);
+
+            statusRequests.ask(ticketId, meera, null);
+
+            // A notification that deep-links somebody to a 404 is worse than
+            // none: membership is what makes the thread readable at all.
+            assertThat(participantsOf(ticketThread)).contains(ravi);
+        }
+
+        @Test
+        @DisplayName("the assignee gets a bell entry in the Status requests tab")
+        void theAssigneeIsNotified() {
+            statusRequests.ask(ticketId, meera, null);
+
+            assertThat(notificationsFor(ravi, "STATUS_REQUESTED")).isEqualTo(1);
+            assertThat(notificationsFor(meera, "STATUS_REQUESTED"))
+                    .as("the person asking is not told they asked")
+                    .isZero();
+        }
+
+        // ------------------------------------------------------- the answer
+
+        @Test
+        @DisplayName("the assignee's reply closes it and the wait is recorded")
+        void theReplyClosesIt() {
+            statusRequests.ask(ticketId, meera, null);
+            chat.post(ticketThread, ravi, "Fix is in review, closing today.");
+
+            StatusRequestDtos.StatusRequest answered = onlyRequest();
+            assertThat(answered.isAnswered()).isTrue();
+            assertThat(answered.answeredAt()).isNotNull();
+            assertThat(answered.responseWorkingMinutes()).isNotNull();
+            assertThat(statusRequests.awaiting(meera)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("the manager chasing their own question does not answer it")
+        void theManagersFollowUpDoesNotClose() {
+            statusRequests.ask(ticketId, meera, null);
+            chat.post(ticketThread, meera, "any update on this?");
+
+            // Without this the metric would record a flattering response time
+            // measured against the manager's own impatience.
+            assertThat(onlyRequest().isAnswered()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a manager who ends up holding the ticket still cannot answer their own question")
+        void theManagerCannotAnswerEvenWhenTheTicketBecomesTheirs() {
+            statusRequests.ask(ticketId, meera, null);
+            // S-24 reassigns the ticket to Meera herself — she asked Ravi, and
+            // now she owns the work.
+            jdbc.update("UPDATE tickets SET assigned_to = ? WHERE id = ?", meera, ticketId);
+
+            chat.post(ticketThread, meera, "never mind, I'll take it");
+
+            // Mutation-found. theManagersFollowUpDoesNotClose does NOT cover
+            // this: with Meera neither the assignee nor the person asked, the
+            // other half of the clause already refuses her, so deleting
+            // `requested_by_id <> :senderId` changed nothing and the test still
+            // passed. This is the only arrangement that reaches it — and it is
+            // reachable in production, where it would close a question nobody
+            // answered and record a response time measured against the
+            // manager's own typing.
+            assertThat(onlyRequest().isAnswered()).isFalse();
+        }
+
+        @Test
+        @DisplayName("two replies racing the same request close it once")
+        void theClaimIsSafeWithoutTheCandidateQuery() {
+            statusRequests.ask(ticketId, meera, null);
+            long id = onlyRequest().id();
+            long messageId = idOfLatest();
+
+            assertThat(statusRequestRepository.close(id, messageId, ravi, java.time.Instant.now(), 5))
+                    .isTrue();
+            // Mutation-found, and the same shape as D-025's claim guard: the
+            // candidate query already filters answered rows out, so nothing
+            // reaching close() through a chat post can exercise the WHERE
+            // clause — deleting `answered_at IS NULL` from the UPDATE broke
+            // nothing. It is there for two replies committed together, both
+            // having read the row as open, and without it the manager is
+            // notified twice and the second wins the recorded duration.
+            assertThat(statusRequestRepository.close(id, messageId, anil, java.time.Instant.now(), 9))
+                    .as("the second caller must learn it was not the one that closed it")
+                    .isFalse();
+            assertThat(onlyRequest().responseWorkingMinutes()).isEqualTo(5);
+        }
+
+        @Test
+        @DisplayName("a bystander talking in the thread does not answer it")
+        void aBystanderDoesNotClose() {
+            statusRequests.ask(ticketId, meera, null);
+            chat.post(ticketThread, anil, "I saw something similar last week");
+
+            assertThat(onlyRequest().isAnswered()).isFalse();
+        }
+
+        @Test
+        @DisplayName("one reply answers every manager who was waiting")
+        void oneReplyClosesThemAll() {
+            makePm(anil);
+            statusRequests.ask(ticketId, meera, "status?");
+            statusRequests.ask(ticketId, anil, "status?");
+
+            chat.post(ticketThread, ravi, "Deployed to staging, verifying now.");
+
+            assertThat(openRequestCount()).isZero();
+            assertThat(notificationsFor(meera, "STATUS_REQUEST_ANSWERED")).isEqualTo(1);
+            assertThat(notificationsFor(anil, "STATUS_REQUEST_ANSWERED")).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("after a reassignment the new owner can close what the old one was asked")
+        void theNewOwnerCanAnswer() {
+            statusRequests.ask(ticketId, meera, null);
+            // The ticket moves to Anil. Ravi has no reason to answer any more,
+            // and without this clause nobody can clear the row — the manager's
+            // list would fill with questions that cannot be closed.
+            jdbc.update("UPDATE tickets SET assigned_to = ? WHERE id = ?", anil, ticketId);
+
+            chat.post(ticketThread, anil, "Picked this up this morning — ETA Thursday.");
+
+            assertThat(onlyRequest().isAnswered()).isTrue();
+            assertThat(onlyRequest().askedOf().id())
+                    .as("who was asked is a fact about the past and must survive the reassignment")
+                    .isEqualTo(ravi);
+        }
+
+        @Test
+        @DisplayName("after a reassignment the person who was asked can still answer")
+        void theOriginalOwnerCanStillAnswer() {
+            statusRequests.ask(ticketId, meera, null);
+            jdbc.update("UPDATE tickets SET assigned_to = ? WHERE id = ?", anil, ticketId);
+
+            // The mirror of theNewOwnerCanAnswer, and the reason the clause is
+            // an OR rather than just "the current assignee": Ravi was asked, and
+            // handing the ticket on does not unask him. Without this the
+            // question he answers stays open and his manager keeps chasing it.
+            chat.post(ticketThread, ravi, "Handed to Anil, but the root cause is the token refresh.");
+
+            assertThat(onlyRequest().isAnswered()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a second reply neither reopens it nor rings the manager again")
+        void aSecondReplyChangesNothing() {
+            statusRequests.ask(ticketId, meera, null);
+            chat.post(ticketThread, ravi, "Fix is in review.");
+            java.time.Instant firstAnswer = onlyRequest().answeredAt();
+
+            chat.post(ticketThread, ravi, "…and now merged.");
+
+            assertThat(onlyRequest().answeredAt()).isEqualTo(firstAnswer);
+            assertThat(notificationsFor(meera, "STATUS_REQUEST_ANSWERED")).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("the manager is told their question was answered")
+        void theManagerIsNotified() {
+            statusRequests.ask(ticketId, meera, null);
+            chat.post(ticketThread, ravi, "Fix is in review.");
+
+            assertThat(notificationsFor(meera, "STATUS_REQUEST_ANSWERED")).isEqualTo(1);
+            assertThat(notificationsFor(ravi, "STATUS_REQUEST_ANSWERED"))
+                    .as("the person who answered does not need telling")
+                    .isZero();
+        }
+
+        // ---------------------------------------------- D-027 · the calendar
+
+        @Test
+        @DisplayName("the wait is working minutes, so a weekend is not held against anybody")
+        void theWaitIsMeasuredAgainstTheWorkingCalendar() {
+            statusRequests.ask(ticketId, meera, null);
+            // Asked at 18:00 IST on Friday 7 Aug — half an hour before the
+            // 18:30 close on the seeded calendar.
+            jdbc.update("UPDATE ticket_status_requests SET requested_at = ? WHERE id = ?",
+                    java.sql.Timestamp.from(java.time.Instant.parse("2026-08-07T12:30:00Z")),
+                    onlyRequest().id());
+
+            chat.post(ticketThread, ravi, "Sorry — was off over the weekend. Looking now.");
+
+            // Monday morning. Wall clock is over 60 hours; the working answer is
+            // the 30 minutes left on Friday plus whatever of Monday has passed.
+            // Bounded on both sides deliberately: a one-sided "< 600" would
+            // also pass if the calendar returned 0, which is exactly what a
+            // misconfigured calendar with no working days gives — and the test
+            // would then certify the rule while proving nothing.
+            assertThat(onlyRequest().responseWorkingMinutes())
+                    .isNotNull()
+                    .isGreaterThan(0)
+                    .isLessThan(60 * 60);
+        }
+
+        // -------------------------------------------------------- the lists
+
+        @Test
+        @DisplayName("the awaiting list is longest wait first, and only your own")
+        void theAwaitingList() {
+            makePm(anil);
+            statusRequests.ask(ticketId, meera, "older");
+            long older = onlyRequest().id();
+            jdbc.update("UPDATE ticket_status_requests SET requested_at = ? WHERE id = ?",
+                    java.sql.Timestamp.from(java.time.Instant.parse("2026-08-01T09:00:00Z")), older);
+            statusRequests.ask(ticketId, anil, "newer");
+
+            assertThat(statusRequests.awaiting(meera))
+                    .extracting(StatusRequestDtos.StatusRequest::id)
+                    .as("the list exists to be cleared, so the longest-ignored question comes first")
+                    .containsExactly(older);
+            assertThat(statusRequests.awaiting(ravi))
+                    .as("the assignee asked nobody anything")
+                    .isEmpty();
+        }
+
+        @Test
+        @DisplayName("the badge shows what is outstanding on the ticket, whoever asked")
+        void theBadge() {
+            makePm(anil);
+            statusRequests.ask(ticketId, meera, "one");
+            statusRequests.ask(ticketId, anil, "two");
+
+            assertThat(statusRequests.openOnTicket(ticketId, ravi)).hasSize(2);
+
+            chat.post(ticketThread, ravi, "both answered at once");
+            assertThat(statusRequests.openOnTicket(ticketId, ravi)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("somebody who cannot see the conversation sees no badge")
+        void theBadgeIsScopedByMembership() {
+            statusRequests.ask(ticketId, meera, null);
+
+            assertThat(statusRequests.openOnTicket(ticketId, outsider)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("deleting the question withholds it here too")
+        void theTombstoneReachesTheNote() {
+            statusRequests.ask(ticketId, meera, "Where are we on this?");
+            long messageId = onlyRequest().requestMessageId();
+            assertThat(onlyRequest().note()).isEqualTo("Where are we on this?");
+
+            chat.delete(ticketThread, messageId, meera);
+
+            // A copy of the note in this row would be the one place §7.6's
+            // tombstone does not reach, and it would sit in the manager's list
+            // indefinitely.
+            assertThat(onlyRequest().note()).isNull();
+        }
+
+        // ----------------------------------------------------------- helpers
+
+        private void makePm(long userId) {
+            jdbc.update("""
+                    INSERT INTO project_members (project_id, user_id, role_in_project, is_active)
+                    VALUES (?, ?, 'PM', 1)
+                    """, projectId, userId);
+        }
+
+        private StatusRequestService.Outcome.Asked asked(StatusRequestService.Outcome outcome) {
+            assertThat(outcome).isInstanceOf(StatusRequestService.Outcome.Asked.class);
+            return (StatusRequestService.Outcome.Asked) outcome;
+        }
+
+        private StatusRequestDtos.StatusRequest onlyRequest() {
+            Long id = jdbc.queryForObject("SELECT MIN(id) FROM ticket_status_requests", Long.class);
+            assertThat(id).as("exactly one status request was expected").isNotNull();
+            return requestById(id);
+        }
+
+        private StatusRequestDtos.StatusRequest requestById(long id) {
+            return java.util.stream.Stream
+                    .concat(statusRequests.awaiting(meera).stream(), answeredRequests().stream())
+                    .filter(r -> r.id() == id)
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("no status request " + id));
+        }
+
+        /**
+         * Answered rows have no endpoint of their own — the badge and the
+         * awaiting list both show open ones — so the assertions read them back
+         * through the repository the metric will be reported from.
+         */
+        private List<StatusRequestDtos.StatusRequest> answeredRequests() {
+            List<Long> ids = jdbc.queryForList(
+                    "SELECT id FROM ticket_status_requests", Long.class);
+            return ids.stream()
+                    .map(id -> statusRequestRepository.byId(id).orElseThrow())
+                    .map(StatusRequestService::toDto)
+                    .toList();
+        }
+
+        private int openRequestCount() {
+            Integer count = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM ticket_status_requests WHERE answered_at IS NULL",
+                    Integer.class);
+            return count == null ? 0 : count;
+        }
+
+        private int cardCount() {
+            Integer count = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM chat_messages WHERE kind = 'STATUS_REQUEST'", Integer.class);
+            return count == null ? 0 : count;
+        }
+
+        private int notificationsFor(long userId, String eventCode) {
+            Integer count = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND event_code = ?",
+                    Integer.class, userId, eventCode);
+            return count == null ? 0 : count;
+        }
+
+        private List<Long> participantsOf(long threadId) {
+            return jdbc.queryForList(
+                    "SELECT user_id FROM chat_participants WHERE thread_id = ?", Long.class, threadId);
+        }
+
+        private ChatDtos.ChatMessage latestMessageOn(long threadId) {
+            return chat.messages(threadId, meera, null, 1).orElseThrow().getFirst();
+        }
     }
 
     private long insertProject() {

@@ -47,11 +47,8 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type AskTicketStatusBody = {
-  /**
-   * Defaults to "Please share the current status and expected closure."
+/**
+ * **Working minutes, not wall clock.** A manager who asks at 18:00 on Friday and is answered at 09:30 on Monday waited half a working hour, not sixty-three hours; the org calendar, project holidays and the resource's approved leave are all honoured (B-024). Stamped once when the request is answered and never recomputed, so a holiday added later cannot restate a figure somebody has already reported. Both instants are here too, so wall-clock stays derivable.
 
-   * @maxLength 1000
-   */
-  note?: string;
-};
+ */
+export type StatusRequestResponseWorkingMinutes = number | null;

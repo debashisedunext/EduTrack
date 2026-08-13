@@ -46,12 +46,36 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { UserRef } from './userRef';
+import type { StatusRequestNote } from './statusRequestNote';
+import type { StatusRequestAnswerMessageId } from './statusRequestAnswerMessageId';
+import type { StatusRequestAnsweredAt } from './statusRequestAnsweredAt';
+import type { StatusRequestResponseWorkingMinutes } from './statusRequestResponseWorkingMinutes';
 
-export type AskTicketStatusBody = {
-  /**
-   * Defaults to "Please share the current status and expected closure."
+/**
+ * One "Ask Status" (§7.6) and, once it has been answered, how long it took.
 
-   * @maxLength 1000
-   */
-  note?: string;
-};
+ */
+export interface StatusRequest {
+  id: number;
+  /** Ticket code, not the row id. */
+  ticketId: string;
+  ticketTitle?: string;
+  threadId: number;
+  /** The `kind: STATUS_REQUEST` message in the thread. */
+  requestMessageId: number;
+  requestedBy: UserRef;
+  /** The assignee at the moment of asking. Never rewritten by a later reassignment — the metric is about the person actually asked.
+ */
+  askedOf: UserRef;
+  requestedAt: string;
+  /** The request message's body as it stands, and `null` once its author has deleted it. Read from the message rather than copied, so §7.6's tombstone reaches it like anything else said on the ticket.
+ */
+  note?: StatusRequestNote;
+  isAnswered: boolean;
+  answerMessageId?: StatusRequestAnswerMessageId;
+  answeredAt?: StatusRequestAnsweredAt;
+  /** **Working minutes, not wall clock.** A manager who asks at 18:00 on Friday and is answered at 09:30 on Monday waited half a working hour, not sixty-three hours; the org calendar, project holidays and the resource's approved leave are all honoured (B-024). Stamped once when the request is answered and never recomputed, so a holiday added later cannot restate a figure somebody has already reported. Both instants are here too, so wall-clock stays derivable.
+ */
+  responseWorkingMinutes?: StatusRequestResponseWorkingMinutes;
+}

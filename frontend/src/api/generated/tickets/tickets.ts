@@ -90,6 +90,8 @@ import type {
   QuickUpdateRequest,
   ReopenRequest,
   ResolveTicketBody,
+  StatusRequestListResponse,
+  StatusRequestResponse,
   TicketCreateRequest,
   TicketDetailResponse,
   TicketListResponse,
@@ -1454,7 +1456,23 @@ export function useListTicketEmails<TData = Awaited<ReturnType<typeof listTicket
 response time is recorded as a reportable metric** — the round trip is the
 thing worth measuring, not just the ask.
 
- * @summary Request a status update from the assignee
+The card is an ordinary `ChatMessage` with `kind: STATUS_REQUEST`, posted
+by the manager. Draw the card from that: the author is who asked, the body
+is what they asked, and the two buttons belong to the kind. No action list
+is sent — both buttons navigate, and neither calls anything here.
+
+**Reporting Manager, PM or Admin only**, and a caller who is none of those
+gets `404` rather than `403`: whether you are this assignee's reporting
+manager depends entirely on the row, and CONVENTIONS.md §7 reserves 403
+for failures that do not.
+
+Repeat clicks are idempotent. While your own request is unanswered, asking
+again returns that one and posts nothing new — a second card, a second
+bell entry and a second row in your awaiting-response list would all be
+noise, and would make the metric count one wait as two. Two *different*
+managers may each have one open; a single reply closes both.
+
+ * @summary Request a status update from the assignee (S-25)
  */
 export const askTicketStatus = (
     ticketId: string,
@@ -1463,7 +1481,7 @@ export const askTicketStatus = (
 ) => {
       
       
-      return http<void>(
+      return http<StatusRequestResponse>(
       {url: `/tickets/${ticketId}/ask-status`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: askTicketStatusBody, signal
@@ -1473,7 +1491,7 @@ export const askTicketStatus = (
   
 
 
-export const getAskTicketStatusMutationOptions = <TError = NotFoundResponse,
+export const getAskTicketStatusMutationOptions = <TError = NotFoundResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof askTicketStatus>>, TError,{ticketId: string;data: AskTicketStatusBody}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof askTicketStatus>>, TError,{ticketId: string;data: AskTicketStatusBody}, TContext> => {
 
@@ -1500,12 +1518,12 @@ const {mutation: mutationOptions} = options ?
 
     export type AskTicketStatusMutationResult = NonNullable<Awaited<ReturnType<typeof askTicketStatus>>>
     export type AskTicketStatusMutationBody = AskTicketStatusBody
-    export type AskTicketStatusMutationError = NotFoundResponse
+    export type AskTicketStatusMutationError = NotFoundResponse | Problem
 
     /**
- * @summary Request a status update from the assignee
+ * @summary Request a status update from the assignee (S-25)
  */
-export const useAskTicketStatus = <TError = NotFoundResponse,
+export const useAskTicketStatus = <TError = NotFoundResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof askTicketStatus>>, TError,{ticketId: string;data: AskTicketStatusBody}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof askTicketStatus>>,
@@ -1518,4 +1536,103 @@ export const useAskTicketStatus = <TError = NotFoundResponse,
 
       return useMutation(mutationOptions, queryClient);
     }
+    /**
+ * The distinct badge §7.6 asks for. Every request still unanswered on this
+ticket, whoever asked, oldest first.
+
+Scoped by chat membership, like the rest of chat: somebody who is not in
+the ticket's thread sees an empty list rather than a 404, because the
+question is "is anything outstanding here" and the truthful answer to
+someone who cannot see the conversation is "nothing you can see".
+
+ * @summary Open status requests on this ticket (S-25)
+ */
+export const listTicketStatusRequests = (
+    ticketId: string,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<StatusRequestListResponse>(
+      {url: `/tickets/${ticketId}/status-requests`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListTicketStatusRequestsQueryKey = (ticketId?: string,) => {
+    return [
+    `/tickets/${ticketId}/status-requests`
+    ] as const;
+    }
+
     
+export const getListTicketStatusRequestsQueryOptions = <TData = Awaited<ReturnType<typeof listTicketStatusRequests>>, TError = UnauthorizedResponse>(ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketStatusRequests>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTicketStatusRequestsQueryKey(ticketId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTicketStatusRequests>>> = ({ signal }) => listTicketStatusRequests(ticketId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(ticketId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTicketStatusRequests>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListTicketStatusRequestsQueryResult = NonNullable<Awaited<ReturnType<typeof listTicketStatusRequests>>>
+export type ListTicketStatusRequestsQueryError = UnauthorizedResponse
+
+
+export function useListTicketStatusRequests<TData = Awaited<ReturnType<typeof listTicketStatusRequests>>, TError = UnauthorizedResponse>(
+ ticketId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketStatusRequests>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTicketStatusRequests>>,
+          TError,
+          Awaited<ReturnType<typeof listTicketStatusRequests>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTicketStatusRequests<TData = Awaited<ReturnType<typeof listTicketStatusRequests>>, TError = UnauthorizedResponse>(
+ ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketStatusRequests>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTicketStatusRequests>>,
+          TError,
+          Awaited<ReturnType<typeof listTicketStatusRequests>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTicketStatusRequests<TData = Awaited<ReturnType<typeof listTicketStatusRequests>>, TError = UnauthorizedResponse>(
+ ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketStatusRequests>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Open status requests on this ticket (S-25)
+ */
+
+export function useListTicketStatusRequests<TData = Awaited<ReturnType<typeof listTicketStatusRequests>>, TError = UnauthorizedResponse>(
+ ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketStatusRequests>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListTicketStatusRequestsQueryOptions(ticketId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+

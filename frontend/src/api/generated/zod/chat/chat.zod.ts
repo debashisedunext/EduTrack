@@ -50,6 +50,51 @@ import * as zod from 'zod';
 
 
 /**
+ * D-056's "Awaiting response" list — every status request *you* asked that
+nobody has answered yet, **longest wait first**. The opposite order to
+every other list in chat, and deliberately: this list exists to be
+cleared, and the thing most in need of clearing is the question that has
+been ignored longest.
+
+Under `/me` rather than `/users/{id}/…` for the reason
+`/me/notification-preferences` is: a path taking a user id is one an
+Admin would reasonably expect to work, and "who is ignoring whom" is not
+a report to hand out as a side effect of a URL shape nobody decided to
+build.
+
+ * @summary Status requests you are still waiting on (S-25)
+ */
+export const listAwaitingResponseResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "ticketId": zod.string().describe('Ticket code, not the row id.'),
+  "ticketTitle": zod.string().optional(),
+  "threadId": zod.number(),
+  "requestMessageId": zod.number().describe('The `kind: STATUS_REQUEST` message in the thread.'),
+  "requestedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),
+  "askedOf": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).describe('The assignee at the moment of asking. Never rewritten by a later reassignment — the metric is about the person actually asked.\n'),
+  "requestedAt": zod.string().datetime({}),
+  "note": zod.string().nullish().describe('The request message\'s body as it stands, and `null` once its author has deleted it. Read from the message rather than copied, so §7.6\'s tombstone reaches it like anything else said on the ticket.\n'),
+  "isAnswered": zod.boolean(),
+  "answerMessageId": zod.number().nullish(),
+  "answeredAt": zod.string().datetime({}).nullish(),
+  "responseWorkingMinutes": zod.number().nullish().describe('\*\*Working minutes, not wall clock.\*\* A manager who asks at 18:00 on Friday and is answered at 09:30 on Monday waited half a working hour, not sixty-three hours; the org calendar, project holidays and the resource\'s approved leave are all honoured (B-024). Stamped once when the request is answered and never recomputed, so a holiday added later cannot restate a figure somebody has already reported. Both instants are here too, so wall-clock stays derivable.\n')
+}).describe('One \"Ask Status\" (§7.6) and, once it has been answered, how long it took.\n'))
+})
+
+/**
  * Three surfaces, one engine.
  * @summary Threads — ticket, direct message and project channel (S-25)
  */

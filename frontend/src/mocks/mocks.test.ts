@@ -711,3 +711,121 @@ describe('planned close date — C-012', () => {
     expect(created.data.plannedCloseDate).toBe(explicit);
   });
 });
+
+/**
+ * D-055 / D-056 · Ask Status.
+ *
+ * The mock is what Divyansh builds S-25's card and badge against, so what these
+ * pin is the behaviour a screen would otherwise get wrong: that a second click
+ * is not a second question, and that a reply clears the list.
+ */
+describe('ask status', () => {
+  interface StatusRequest {
+    id: number; ticketId: string; isAnswered: boolean; note: string | null;
+    responseWorkingMinutes: number | null;
+  }
+  const RAVI = 3;
+  let T: string;
+
+  beforeEach(() => {
+    // Meera — a PM, and the manager the seeded requests come from.
+    getDb().currentUserId = 2;
+    // Chosen rather than hard-coded. The walkthrough ticket is CLOSED and
+    // assigned to Meera herself, so asking about it is refused for a reason
+    // that has nothing to do with what these tests are checking — and a
+    // hard-coded id would make that look like a bug in Ask Status.
+    T = getDb().tickets.find((t) => t.assigneeId === RAVI && t.status !== 'CLOSED')!.ticketId;
+  });
+
+  it('posts the card as a STATUS_REQUEST message the client can draw', async () => {
+    const before = getDb().chatMessages.length;
+    const asked = await post<Envelope<StatusRequest>>(`/tickets/${T}/ask-status`, {
+      note: 'Client call at four — where are we?',
+    });
+
+    const card = getDb().chatMessages.at(-1);
+    expect(getDb().chatMessages).toHaveLength(before + 1);
+    expect(card?.kind).toBe('STATUS_REQUEST');
+    expect(card?.body).toBe('Client call at four — where are we?');
+    expect(asked.data.note).toBe('Client call at four — where are we?');
+    expect(asked.data.isAnswered).toBe(false);
+  });
+
+  it('defaults to the blueprint’s own wording', async () => {
+    await post(`/tickets/${T}/ask-status`);
+    expect(getDb().chatMessages.at(-1)?.body)
+      .toBe('Please share the current status and expected closure.');
+  });
+
+  it('clicking twice asks once', async () => {
+    const first = await post<Envelope<StatusRequest>>(`/tickets/${T}/ask-status`);
+    const cards = getDb().chatMessages.length;
+    const second = await post<Envelope<StatusRequest>>(`/tickets/${T}/ask-status`);
+
+    expect(second.data.id).toBe(first.data.id);
+    expect(getDb().chatMessages).toHaveLength(cards);
+  });
+
+  it('refuses when there is nobody to ask', async () => {
+    const db = getDb();
+    db.tickets.find((t) => t.ticketId === T)!.assigneeId = null;
+
+    await expect(post(`/tickets/${T}/ask-status`)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('the badge is one ticket’s and the awaiting list is one manager’s', async () => {
+    const db = getDb();
+    const asked = await post<Envelope<StatusRequest>>(`/tickets/${T}/ask-status`);
+
+    // Two different questions. The badge answers "what is outstanding HERE",
+    // the awaiting list answers "what am I waiting on ANYWHERE" — and the
+    // seeded request on the walkthrough ticket is in the second and not the
+    // first. Asserting the two lists were the same length would have passed on
+    // a fixture with one ticket and hidden the difference entirely.
+    const badge = await get<Envelope<StatusRequest[]>>(`/tickets/${T}/status-requests`);
+    const awaiting = await get<Envelope<StatusRequest[]>>('/me/awaiting-response');
+    expect(badge.data.map((r) => r.id)).toEqual([asked.data.id]);
+    expect(awaiting.data.map((r) => r.id)).toContain(asked.data.id);
+    expect(awaiting.data.length).toBeGreaterThan(badge.data.length);
+
+    // Longest wait first: the seeded 7 Aug ask comes before the one just made.
+    expect(awaiting.data.at(-1)!.id).toBe(asked.data.id);
+
+    const thread = db.chatThreads.find((t) => t.ticketId === T)!;
+    db.currentUserId = RAVI; // the assignee
+    await post(`/chat/threads/${thread.id}/messages`, { body: 'Fix is in review, closing today.' });
+
+    db.currentUserId = 2;
+    expect((await get<Envelope<StatusRequest[]>>(`/tickets/${T}/status-requests`)).data).toHaveLength(0);
+    expect((await get<Envelope<StatusRequest[]>>('/me/awaiting-response')).data.map((r) => r.id))
+      .not.toContain(asked.data.id);
+  });
+
+  it('measures the wait in working minutes, so a weekend is not held against anybody', async () => {
+    const db = getDb();
+    // The seeded open request was asked at 17:40 on Friday 7 Aug and is still
+    // unanswered. Wall clock to any later weekday is days; the working answer
+    // is minutes on Friday plus whatever of the working week has elapsed since.
+    const waiting = db.statusRequests.find((r) => r.answeredAt === null)!;
+    const thread = db.chatThreads.find((t) => t.id === waiting.threadId)!;
+
+    db.currentUserId = waiting.askedOfId;
+    await post(`/chat/threads/${thread.id}/messages`, { body: 'Sorry — was off. Looking now.' });
+
+    const minutes = db.statusRequests.find((r) => r.id === waiting.id)!.responseWorkingMinutes!;
+    const wallClock = (Date.now() - new Date(waiting.requestedAt).getTime()) / 60_000;
+    expect(minutes).toBeGreaterThan(0);
+    expect(minutes).toBeLessThan(wallClock);
+  });
+
+  it('withholds the note once the manager deletes their own question', async () => {
+    const db = getDb();
+    const asked = await post<Envelope<StatusRequest>>(`/tickets/${T}/ask-status`, { note: 'Where are we?' });
+    const card = db.chatMessages.at(-1)!;
+
+    card.isDeleted = true;
+
+    const open = await get<Envelope<StatusRequest[]>>(`/tickets/${T}/status-requests`);
+    expect(open.data.find((r) => r.id === asked.data.id)?.note).toBeNull();
+  });
+});
