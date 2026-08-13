@@ -29,4 +29,23 @@ public interface SubscriptionScope {
     default boolean mayObserveProject(long userId, long projectId) {
         return false;
     }
+
+    /**
+     * D-059 · may this user watch one team's queue on one project?
+     *
+     * <p>Narrower than it sounds, and deliberately so. What travels on a stage
+     * topic is a <strong>nudge and nothing else</strong> — "the QA queue on
+     * project 7 moved" — with no ticket id, code, title or assignee in the
+     * frame. The rows themselves come from {@code GET /stages/queue}, which
+     * applies whatever scope that endpoint applies. So granting this is not
+     * granting a view of anybody's tickets, and this question can be answered
+     * without settling the one C-062 has to.
+     *
+     * <p><strong>If a ticket identity is ever put into a stage frame, this rule
+     * has to be revisited first.</strong> That is the change that would turn a
+     * nudge into a feed, and it would not look like a security change in a diff.
+     */
+    default boolean mayObserveStage(long userId, String stageCode, long projectId) {
+        return false;
+    }
 }
