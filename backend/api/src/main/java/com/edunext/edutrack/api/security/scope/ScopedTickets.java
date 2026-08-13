@@ -65,6 +65,29 @@ public class ScopedTickets {
         return tickets.findOne(scoped(caller, hasCode(ticketCode)));
     }
 
+    /**
+     * A-035 · the same lookup for a detail route, with the 404 already decided.
+     *
+     * <p>Prefer this over {@link #byId} in a handler. {@code byId} hands back an
+     * {@link Optional} and leaves the status code to whoever is writing the
+     * endpoint, which means the correct answer depends on their remembering a
+     * rule — and the wrong answer, {@code 403}, is the one a reviewer's eye
+     * slides past because it reads as "access denied", which is what happened.
+     * This method removes the choice: there is no branch to write, so there is
+     * nothing to write incorrectly.
+     *
+     * @throws TicketNotFoundException identically for a ticket that does not
+     *         exist and one the caller may not see
+     */
+    public Ticket require(Authentication caller, long ticketId) {
+        return byId(caller, ticketId).orElseThrow(TicketNotFoundException::new);
+    }
+
+    /** As {@link #require}, by ticket code. */
+    public Ticket requireByCode(Authentication caller, String ticketCode) {
+        return byCode(caller, ticketCode).orElseThrow(TicketNotFoundException::new);
+    }
+
     public List<Ticket> list(Authentication caller, Specification<Ticket> criteria, Sort sort) {
         return tickets.findAll(scoped(caller, criteria), sort);
     }
