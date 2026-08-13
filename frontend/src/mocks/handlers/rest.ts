@@ -1244,6 +1244,18 @@ export const restHandlers = [
     return ok(messageDto(m), undefined, { status: 201 });
   }),
 
+  /**
+   * D-054 · cards for codes a client already has, for the live path.
+   *
+   * A message arriving over the socket is one frame to a whole room, so it
+   * carries no cards — each client resolves its own. Scoped, and silent about
+   * what it withheld.
+   */
+  http.get(url('/chat/ticket-cards'), ({ request }) => {
+    const raw = new URL(request.url).searchParams.get('codes') ?? '';
+    return ok(ticketCardsFor(ticketCodesIn(raw.replace(/,/g, ' '))));
+  }),
+
   /** D-056 · the manager's "Awaiting response" list, longest wait first. */
   http.get(url('/me/awaiting-response'), () => {
     const db = getDb();
@@ -1552,6 +1564,44 @@ function clientDto(c: import('../db').Client) {
   };
 }
 
+/**
+ * D-054 · the ticket codes a body names.
+ *
+ * The same pattern the server uses — `{PROJECT}-{YY}-{NNNNN}` from C-011, not
+ * the blueprint's illustrative `TKT-xxxx`, which matches nothing real — with the
+ * same lookarounds, so a code inside `builds/CRM-26-00347-final.zip` is a
+ * filename here too. A mock that were more generous would have the UI rendering
+ * cards that vanish against the real server.
+ */
+const TICKET_CODE = /(?<![A-Za-z0-9-])([A-Z][A-Z0-9]{1,9}-\d{2}-\d{5})(?![A-Za-z0-9-])/g;
+const MAX_REFS = 10;
+
+export function ticketCodesIn(body: string | null | undefined): string[] {
+  if (!body) return [];
+  return [...new Set(body.match(TICKET_CODE) ?? [])].slice(0, MAX_REFS);
+}
+
+/**
+ * D-054 · cards for the codes a reader may actually see.
+ *
+ * Goes through `scopedTickets`, which is the mock's stand-in for A-034 — so a
+ * code naming a ticket outside the current user's scope produces no card and
+ * stays plain text, exactly as on the server. A mock that resolved every code
+ * would teach the UI that a reference always unfurls.
+ */
+export function ticketCardsFor(codes: string[], db = getDb()) {
+  const visible = scopedTickets(db);
+  return codes
+    .map((code) => visible.find((t) => t.ticketId === code))
+    .filter((t): t is NonNullable<typeof t> => t != null)
+    .map((t) => ({
+      ticketId: t.ticketId, title: t.title, level: t.level, status: t.status,
+      currentStageCode: t.currentStageCode,
+      assignee: t.assigneeId == null ? null : userRef(t.assigneeId, db),
+      plannedCloseDate: t.plannedCloseDate, isDelayed: t.isDelayed,
+    }));
+}
+
 function messageDto(m: import('../db').ChatMessage) {
   return {
     // The tombstone: the row is still here, the words are not (D-057). A mock
@@ -1560,7 +1610,12 @@ function messageDto(m: import('../db').ChatMessage) {
     id: m.id, body: m.isDeleted ? null : m.body, author: userRef(m.authorId), kind: m.kind,
     isEdited: m.isEdited, isDeleted: m.isDeleted,
     editableUntil: new Date(Date.parse(m.createdAt) + 5 * 60_000).toISOString(),
-    attachments: [], readBy: m.readBy, createdAt: m.createdAt,
+    attachments: [], readBy: m.readBy,
+    // Resolved per read against the caller's scope, never stored on the row —
+    // and always empty on a tombstone, whose body named nothing the reader can
+    // still see.
+    ticketRefs: m.isDeleted ? [] : ticketCardsFor(ticketCodesIn(m.body)),
+    createdAt: m.createdAt,
   };
 }
 

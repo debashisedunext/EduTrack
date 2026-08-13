@@ -133,6 +133,49 @@ export const listChatThreadsResponse = zod.object({
 })
 
 /**
+ * D-054. A page of messages already carries its cards in `ticketRefs`; this
+exists for the one case that cannot.
+
+A live message arrives as a **single frame delivered to a whole room**,
+so it cannot carry cards — whose cards would they be? Each client
+resolves for itself and gets exactly what its own scope allows.
+
+Passing codes in is not a way to ask what exists. Every code is scoped,
+and one the caller may not see is simply absent from the answer,
+indistinguishable from one that was never issued. Anything that is not a
+well-formed ticket code is dropped by the same parser the server runs
+over a message body, so this endpoint cannot be handed a pattern the read
+path would not have matched either.
+
+ * @summary Ticket cards for codes named in a live message (S-25)
+ */
+export const resolveTicketCardsQueryParams = zod.object({
+  "codes": zod.string().describe('Comma- or space-separated ticket codes, e.g. `CRM-26-00347,WEB-26-00012`. Capped server-side; the surplus is dropped rather than rejected, since the client\'s fallback for a missing card is the plain text it already has.\n')
+})
+
+export const resolveTicketCardsResponseDataItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
+
+export const resolveTicketCardsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "ticketId": zod.string().regex(resolveTicketCardsResponseDataItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "title": zod.string(),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
+  "currentStageCode": zod.string().nullish(),
+  "assignee": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "plannedCloseDate": zod.string().datetime({}).nullish(),
+  "isDelayed": zod.boolean()
+}).describe('A ticket reference unfurled inside a chat message (§7.6). The fields are\n§4A.1\'s own compact row plus the stage, because a reference in chat is\nusually asking where something has got to.\n\nDeliberately carries no description, steps to reproduce or client: a\npreview is a convenience, and one that copies a client\'s words into a\nthread they were never sent to is not.\n'))
+})
+
+/**
  * Scoped to threads the caller participates in — search is the one chat surface with no thread id in the request, so nothing else narrows it. Deleted messages never match: their body survives in the row and is withheld on read, and a search that returned it would be the one path around the tombstone.
 
 Results are ordered by recency, not relevance. Chat search is "find the thing we said", and a relevance order would need an offset cursor since a score is not monotonic in id.
@@ -194,7 +237,8 @@ export const listChatMessagesQueryParams = zod.object({
   "limit": zod.number().min(1).max(listChatMessagesQueryLimitMax).default(listChatMessagesQueryLimitDefault)
 })
 
-export const listChatMessagesResponseDataItemKindDefault = "TEXT";
+export const listChatMessagesResponseDataItemKindDefault = "TEXT";export const listChatMessagesResponseDataItemTicketRefsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
 
 export const listChatMessagesResponse = zod.object({
   "data": zod.array(zod.object({
@@ -240,6 +284,22 @@ export const listChatMessagesResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 })).optional().describe('Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.\n'),
+  "ticketRefs": zod.array(zod.object({
+  "ticketId": zod.string().regex(listChatMessagesResponseDataItemTicketRefsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "title": zod.string(),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
+  "currentStageCode": zod.string().nullish(),
+  "assignee": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "plannedCloseDate": zod.string().datetime({}).nullish(),
+  "isDelayed": zod.boolean()
+}).describe('A ticket reference unfurled inside a chat message (§7.6). The fields are\n§4A.1\'s own compact row plus the stage, because a reference in chat is\nusually asking where something has got to.\n\nDeliberately carries no description, steps to reproduce or client: a\npreview is a convenience, and one that copies a client\'s words into a\nthread they were never sent to is not.\n')).optional().describe('D-054 · the `CRM-26-00347` mentions in the body, resolved into cards\n(§7.6). Parsed server-side from the body, like `mentions`.\n\n\*\*Resolved per reader, on every read — never stored.\*\* Two people\nreading the same message are entitled to different answers, and the\ncard carries live state (level, status, stage, holder, lateness)\nrather than how the ticket looked when somebody typed its code.\n\nA code with no card here \*\*renders as plain text\*\*. That covers a\nticket the reader may not see and one that does not exist, and the\ntwo are deliberately indistinguishable — otherwise pasting a range\nof codes would report back which are real.\n\nAlways empty on a deleted message: the body is withheld, so nothing\nin it named anything.\n\nThe blueprint writes this as `TKT-xxxx`; no ticket has ever looked\nlike that. C-011 mints `{PROJECT}-{YY}-{NNNNN}`, and that is what is\nmatched — see `TicketId`.\n'),
   "createdAt": zod.string().datetime({}).optional()
 })),
   "meta": zod.object({
@@ -303,7 +363,8 @@ export const editChatMessageBody = zod.object({
   "body": zod.string().min(1).max(editChatMessageBodyBodyMax)
 })
 
-export const editChatMessageResponseDataKindDefault = "TEXT";
+export const editChatMessageResponseDataKindDefault = "TEXT";export const editChatMessageResponseDataTicketRefsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
 
 export const editChatMessageResponse = zod.object({
   "data": zod.object({
@@ -349,6 +410,22 @@ export const editChatMessageResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 })).optional().describe('Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.\n'),
+  "ticketRefs": zod.array(zod.object({
+  "ticketId": zod.string().regex(editChatMessageResponseDataTicketRefsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "title": zod.string(),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
+  "currentStageCode": zod.string().nullish(),
+  "assignee": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "plannedCloseDate": zod.string().datetime({}).nullish(),
+  "isDelayed": zod.boolean()
+}).describe('A ticket reference unfurled inside a chat message (§7.6). The fields are\n§4A.1\'s own compact row plus the stage, because a reference in chat is\nusually asking where something has got to.\n\nDeliberately carries no description, steps to reproduce or client: a\npreview is a convenience, and one that copies a client\'s words into a\nthread they were never sent to is not.\n')).optional().describe('D-054 · the `CRM-26-00347` mentions in the body, resolved into cards\n(§7.6). Parsed server-side from the body, like `mentions`.\n\n\*\*Resolved per reader, on every read — never stored.\*\* Two people\nreading the same message are entitled to different answers, and the\ncard carries live state (level, status, stage, holder, lateness)\nrather than how the ticket looked when somebody typed its code.\n\nA code with no card here \*\*renders as plain text\*\*. That covers a\nticket the reader may not see and one that does not exist, and the\ntwo are deliberately indistinguishable — otherwise pasting a range\nof codes would report back which are real.\n\nAlways empty on a deleted message: the body is withheld, so nothing\nin it named anything.\n\nThe blueprint writes this as `TKT-xxxx`; no ticket has ever looked\nlike that. C-011 mints `{PROJECT}-{YY}-{NNNNN}`, and that is what is\nmatched — see `TicketId`.\n'),
   "createdAt": zod.string().datetime({}).optional()
 })
 })
@@ -372,7 +449,8 @@ export const deleteChatMessageParams = zod.object({
   "messageId": zod.number()
 })
 
-export const deleteChatMessageResponseDataKindDefault = "TEXT";
+export const deleteChatMessageResponseDataKindDefault = "TEXT";export const deleteChatMessageResponseDataTicketRefsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
 
 export const deleteChatMessageResponse = zod.object({
   "data": zod.object({
@@ -418,6 +496,22 @@ export const deleteChatMessageResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 })).optional().describe('Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.\n'),
+  "ticketRefs": zod.array(zod.object({
+  "ticketId": zod.string().regex(deleteChatMessageResponseDataTicketRefsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "title": zod.string(),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
+  "currentStageCode": zod.string().nullish(),
+  "assignee": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "plannedCloseDate": zod.string().datetime({}).nullish(),
+  "isDelayed": zod.boolean()
+}).describe('A ticket reference unfurled inside a chat message (§7.6). The fields are\n§4A.1\'s own compact row plus the stage, because a reference in chat is\nusually asking where something has got to.\n\nDeliberately carries no description, steps to reproduce or client: a\npreview is a convenience, and one that copies a client\'s words into a\nthread they were never sent to is not.\n')).optional().describe('D-054 · the `CRM-26-00347` mentions in the body, resolved into cards\n(§7.6). Parsed server-side from the body, like `mentions`.\n\n\*\*Resolved per reader, on every read — never stored.\*\* Two people\nreading the same message are entitled to different answers, and the\ncard carries live state (level, status, stage, holder, lateness)\nrather than how the ticket looked when somebody typed its code.\n\nA code with no card here \*\*renders as plain text\*\*. That covers a\nticket the reader may not see and one that does not exist, and the\ntwo are deliberately indistinguishable — otherwise pasting a range\nof codes would report back which are real.\n\nAlways empty on a deleted message: the body is withheld, so nothing\nin it named anything.\n\nThe blueprint writes this as `TKT-xxxx`; no ticket has ever looked\nlike that. C-011 mints `{PROJECT}-{YY}-{NNNNN}`, and that is what is\nmatched — see `TicketId`.\n'),
   "createdAt": zod.string().datetime({}).optional()
 })
 })

@@ -80,6 +80,9 @@ class ChatEngineIT {
     StatusRequestService statusRequests;
 
     @Autowired
+    TicketCardResolver ticketCards;
+
+    @Autowired
     StatusRequestRepository statusRequestRepository;
 
     @Autowired
@@ -952,6 +955,273 @@ class ChatEngineIT {
         return id == null ? 0L : id;
     }
 
+    // ------------------------------------------ D-054 · ticket link preview
+
+    /**
+     * §7.6 — "link preview of any ticket mention into a rich ticket card".
+     *
+     * <p>The card itself is the easy half. What these pin is the half that can
+     * be wrong without looking wrong:
+     *
+     * <ul>
+     *   <li><strong>Per reader.</strong> Two people reading one message must be
+     *       able to get different answers. A stored card would be identical for
+     *       everybody, and the leak would be invisible.</li>
+     *   <li><strong>Silent about what it withheld.</strong> A code the reader
+     *       may not see must be indistinguishable from one that was never
+     *       issued, or a message full of guesses becomes a probe for which
+     *       tickets exist.</li>
+     *   <li><strong>Live, not remembered.</strong> The card reflects the ticket
+     *       now, not when somebody typed its code.</li>
+     * </ul>
+     */
+    @org.junit.jupiter.api.Nested
+    class TicketLinkPreview {
+
+        private long otherProject;
+        private long otherTicket;
+        private String otherCode;
+
+        @BeforeEach
+        void aTicketOnAProjectRaviIsNotOn() {
+            jdbc.update("INSERT INTO projects (project_code, name) VALUES ('ITC2', 'Another project')");
+            otherProject = lastId();
+            otherCode = "ITD-26-00042";
+            jdbc.update("""
+                    INSERT INTO tickets (ticket_code, project_id, title, level, original_level, status)
+                    VALUES (?, ?, 'Payment gateway timeout', 'CRITICAL', 'HIGH', 'IN_PROGRESS')
+                    """, otherCode, otherProject);
+            otherTicket = lastId();
+
+            jdbc.update("UPDATE tickets SET assigned_to = ? WHERE id = ?", ravi, ticketId);
+        }
+
+        @Test
+        @DisplayName("a code the reader can see unfurls into a card")
+        void theCardAppears() {
+            chat.post(ticketThread, ravi, "same root cause as ITC-26-00001, look there first");
+
+            ChatDtos.TicketCard card = onlyCardFor(ravi);
+            assertThat(card.ticketId()).isEqualTo("ITC-26-00001");
+            assertThat(card.title()).isEqualTo("chat fixture");
+            assertThat(card.assignee().id()).isEqualTo(ravi);
+        }
+
+        @Test
+        @DisplayName("the card carries what §4A.1's own row shows, and the stage")
+        void theCardCarriesTheRowFields() {
+            jdbc.update("UPDATE tickets SET level = 'CRITICAL', status = 'IN_PROGRESS', "
+                    + "current_stage = 'DEVELOPMENT', is_delayed = 1 WHERE id = ?", ticketId);
+            chat.post(ticketThread, ravi, "see ITC-26-00001");
+
+            ChatDtos.TicketCard card = onlyCardFor(ravi);
+            assertThat(card.level()).isEqualTo("CRITICAL");
+            assertThat(card.status()).isEqualTo("IN_PROGRESS");
+            assertThat(card.currentStageCode()).isEqualTo("DEVELOPMENT");
+            assertThat(card.isDelayed()).isTrue();
+        }
+
+        @Test
+        @DisplayName("the card is read now, not remembered from when the code was typed")
+        void theCardIsLive() {
+            chat.post(ticketThread, ravi, "see ITC-26-00001");
+            assertThat(onlyCardFor(ravi).level()).isEqualTo("MEDIUM");
+
+            // D-020 escalates it an hour later. The message is untouched.
+            jdbc.update("UPDATE tickets SET level = 'CRITICAL', is_delayed = 1 WHERE id = ?", ticketId);
+
+            assertThat(onlyCardFor(ravi).level())
+                    .as("a stored card would still say MEDIUM, and the reader would act on it")
+                    .isEqualTo("CRITICAL");
+            assertThat(onlyCardFor(ravi).isDelayed()).isTrue();
+        }
+
+        @Test
+        @DisplayName("two readers of one message get different cards")
+        void theSameMessageResolvesDifferentlyPerReader() {
+            // Meera is a PM on the other project and can see both tickets; Ravi
+            // is a Developer and sees only what is assigned to him.
+            makePmOn(meera, otherProject);
+            chat.post(ticketThread, ravi, "ITC-26-00001 is a duplicate of " + otherCode);
+
+            assertThat(codesOnCardsFor(ravi))
+                    .as("Ravi holds ITC-26-00001 and has never been near the other project")
+                    .containsExactly("ITC-26-00001");
+            assertThat(codesOnCardsFor(meera))
+                    .as("Meera's projects cover the referenced ticket")
+                    .contains(otherCode);
+        }
+
+        @Test
+        @DisplayName("a code you may not see stays plain text, exactly like one that does not exist")
+        void anInvisibleCodeIsIndistinguishableFromAMissingOne() {
+            chat.post(ticketThread, ravi,
+                    "compare " + otherCode + " with ITC-26-09999");
+
+            // ITD-26-00042 exists and is out of scope; ITC-26-09999 was never
+            // issued. If these two answered differently, pasting a range of
+            // codes would report back which of them are real.
+            assertThat(codesOnCardsFor(ravi)).isEmpty();
+            assertThat(cardsFor(ravi)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("the body is untouched — the code stays in the text it was typed in")
+        void theBodyKeepsTheCode() {
+            chat.post(ticketThread, ravi, "see ITC-26-00001 for the trace");
+
+            assertThat(onlyMessageFor(ravi).body())
+                    .as("§7.6 keeps chat as evidence; rewriting the body into a token "
+                            + "would make the message unreadable without our renderer")
+                    .isEqualTo("see ITC-26-00001 for the trace");
+        }
+
+        @Test
+        @DisplayName("a deleted message unfurls nothing")
+        void aTombstoneHasNoCards() {
+            chat.post(ticketThread, ravi, "see ITC-26-00001");
+            long messageId = idOfLatest();
+
+            chat.delete(ticketThread, messageId, ravi);
+
+            assertThat(cardsFor(ravi)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a tombstone that still carried its body would unfurl nothing either")
+        void theTombstoneGuardIsNotOnlyTheWithheldBody() {
+            // Mutation-found. Deleting the isDeleted check changed nothing,
+            // because a tombstone's body is already null by the time the
+            // resolver sees it — so the test above proves the withholding, not
+            // the guard. Handed a deleted message that DOES carry a body, the
+            // guard is the only thing between a reader and part of what the
+            // author removed. Unreachable through the service today, and it
+            // stops being unreachable the moment anyone gives moderators the
+            // deleted text.
+            ChatDtos.ChatMessage undead = new ChatDtos.ChatMessage(
+                    1L, "see ITC-26-00001", null, MessageKind.TEXT, false, true,
+                    null, List.of(), List.of(), List.of(), java.time.Instant.now());
+
+            assertThat(ticketCards.attach(auth(ravi), List.of(undead)).getFirst().ticketRefs())
+                    .isEmpty();
+        }
+
+        @Test
+        @DisplayName("a message naming no ticket costs no lookup and carries no cards")
+        void theOrdinaryMessage() {
+            chat.post(ticketThread, ravi, "on it, will update after standup");
+
+            assertThat(onlyMessageFor(ravi).ticketRefs()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("the same ticket named twice is one card")
+        void repeatsCollapse() {
+            chat.post(ticketThread, ravi, "ITC-26-00001 blocks ITC-26-00001");
+
+            assertThat(cardsFor(ravi)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a page stops unfurling at the cap, and the surplus stays plain text")
+        void thePageCapHolds() {
+            // TicketRefParser caps ONE message at MAX_REFS; this is the other
+            // bound, across the page. A reader sees a handful of cards without
+            // scrolling, so the surplus stays plain text rather than costing a
+            // sixty-key lookup on every thread open.
+            int total = TicketCardResolver.MAX_CODES_PER_PAGE + 10;
+            for (int i = 1; i <= total; i++) {
+                jdbc.update("""
+                        INSERT INTO tickets (ticket_code, project_id, title, level, original_level, assigned_to)
+                        VALUES (?, ?, 'bulk fixture', 'MEDIUM', 'MEDIUM', ?)
+                        """, "ITC-26-%05d".formatted(i + 1000), projectId, ravi);
+            }
+            for (int message = 0; message < total / TicketRefParser.MAX_REFS; message++) {
+                StringBuilder body = new StringBuilder();
+                for (int i = 1; i <= TicketRefParser.MAX_REFS; i++) {
+                    body.append("ITC-26-%05d ".formatted(message * TicketRefParser.MAX_REFS + i + 1000));
+                }
+                chat.post(ticketThread, ravi, body.toString());
+            }
+
+            assertThat(cardsFor(ravi))
+                    .as("every one of these is visible to Ravi, so only the cap can bound it")
+                    .hasSize(TicketCardResolver.MAX_CODES_PER_PAGE);
+        }
+
+        @Test
+        @DisplayName("the explicit lookup is scoped the same way as the read path")
+        void theLiveLookupIsScopedToo() {
+            // The endpoint the socket path uses. It takes codes from the caller,
+            // which is exactly why it must scope them — otherwise it would be a
+            // way to ask which ticket codes exist, with no message required.
+            assertThat(cardCodes(auth(ravi), "ITC-26-00001," + otherCode))
+                    .containsExactly("ITC-26-00001");
+
+            makePmOn(meera, otherProject);
+            assertThat(cardCodes(auth(meera), "ITC-26-00001," + otherCode))
+                    .contains(otherCode);
+        }
+
+        @Test
+        @DisplayName("the explicit lookup drops anything that is not a ticket code")
+        void theLiveLookupParsesRatherThanSplits() {
+            // One definition of a ticket code, shared with the read path — so
+            // this endpoint cannot be handed a pattern a message body would not
+            // have matched either.
+            assertThat(cardCodes(auth(ravi), "'; DROP TABLE tickets; --,TKT-000871,crm-26-00347"))
+                    .isEmpty();
+        }
+
+        // ----------------------------------------------------------- helpers
+
+        private void makePmOn(long userId, long projectId) {
+            jdbc.update("UPDATE users SET role_id = (SELECT id FROM roles WHERE code = 'PM') WHERE id = ?",
+                    userId);
+            jdbc.update("""
+                    INSERT INTO project_members (project_id, user_id, role_in_project, is_active)
+                    VALUES (?, ?, 'PM', 1)
+                    """, projectId, userId);
+        }
+
+        private org.springframework.security.core.Authentication auth(long userId) {
+            String role = jdbc.queryForObject(
+                    "SELECT r.code FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?",
+                    String.class, userId);
+            List<Long> projectIds = jdbc.queryForList(
+                    "SELECT project_id FROM project_members WHERE user_id = ? AND is_active = 1",
+                    Long.class, userId);
+            return new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                    new com.edunext.edutrack.api.security.dev.DevPrincipal(
+                            userId, "it_chat", "Fixture", role, projectIds, List.of()),
+                    null, List.of());
+        }
+
+        private List<ChatDtos.TicketCard> cardsFor(long userId) {
+            List<ChatDtos.ChatMessage> page =
+                    ticketCards.attach(auth(userId), chat.messages(ticketThread, userId, null, 50).orElseThrow());
+            return page.stream().flatMap(m -> m.ticketRefs().stream()).toList();
+        }
+
+        private List<String> codesOnCardsFor(long userId) {
+            return cardsFor(userId).stream().map(ChatDtos.TicketCard::ticketId).toList();
+        }
+
+        private ChatDtos.TicketCard onlyCardFor(long userId) {
+            List<ChatDtos.TicketCard> cards = cardsFor(userId);
+            assertThat(cards).hasSize(1);
+            return cards.getFirst();
+        }
+
+        private List<String> cardCodes(org.springframework.security.core.Authentication caller, String codes) {
+            return ticketCards
+                    .cardsFor(caller, TicketRefParser.codesIn(codes.replace(',', ' ')))
+                    .stream()
+                    .map(ChatDtos.TicketCard::ticketId)
+                    .toList();
+        }
+    }
+
     // ------------------------------------ D-055 / D-056 · Ask Status
 
     /**
@@ -985,15 +1255,6 @@ class ChatEngineIT {
 
             anil = insertUser("it_chat_anil", "Anil Shah");
             join(ticketThread, anil);
-
-            // EVERY FIXTURE USER IS AN ADMIN UNTIL THIS RUNS, and that is not a
-            // detail. insertUser takes `SELECT id FROM roles ORDER BY id LIMIT
-            // 1`, and A-006 seeds ADMIN first — so the four "may not ask" tests
-            // below all passed the authorisation check on the admin branch and
-            // failed, which is the good outcome. Had the branch order been
-            // different they would have passed while proving nothing.
-            jdbc.update("UPDATE users SET role_id = (SELECT id FROM roles WHERE code = 'DEVELOPER') "
-                    + "WHERE username LIKE 'it_chat_%'");
 
             // Ravi is the assignee; Meera is his reporting manager, which is
             // now the only way she qualifies to ask. Anil is in the thread and
@@ -1524,8 +1785,28 @@ class ChatEngineIT {
         return lastId();
     }
 
+    /**
+     * Fixture users are DEVELOPERs, and that is load-bearing rather than tidy.
+     *
+     * <p>This used to take {@code SELECT id FROM roles ORDER BY id LIMIT 1},
+     * and A-006 seeds {@code ADMIN} first — so <em>every</em> user any test in
+     * this class created was an Admin. Two separate features have since written
+     * authorisation tests against that fixture and had them quietly answered on
+     * the admin branch: D-055's four "may not ask" cases, and D-054's scope
+     * tests, which handed a Developer a card for a ticket on a project he had
+     * never been near. Both failed loudly only by luck of branch ordering.
+     *
+     * <p>The least-privileged role is the right default for a fixture: a test
+     * that needs more says so, in its own body, where a reviewer sees it.
+     */
     private long insertUser(String username, String fullName) {
-        Long roleId = jdbc.queryForObject("SELECT id FROM roles ORDER BY id LIMIT 1", Long.class);
+        return insertUser(username, fullName, "DEVELOPER");
+    }
+
+    private long insertUser(String username, String fullName, String roleCode) {
+        Long roleId = jdbc.queryForObject(
+                "SELECT id FROM roles WHERE code = ?", Long.class, roleCode);
+        assertThat(roleId).as("seeded role %s", roleCode).isNotNull();
         jdbc.update("""
                 INSERT INTO users (emp_code, username, email, password_hash, full_name, role_id)
                 VALUES (?, ?, ?, 'not-a-real-hash', ?, ?)

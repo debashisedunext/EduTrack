@@ -46,45 +46,30 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { TicketId } from './ticketId';
+import type { Level } from './level';
+import type { StatusCode } from './statusCode';
+import type { TicketCardCurrentStageCode } from './ticketCardCurrentStageCode';
 import type { UserRef } from './userRef';
-import type { ChatMessageKind } from './chatMessageKind';
-import type { ChatMessageEditableUntil } from './chatMessageEditableUntil';
-import type { Attachment } from './attachment';
-import type { TicketCard } from './ticketCard';
+import type { TicketCardPlannedCloseDate } from './ticketCardPlannedCloseDate';
 
-export interface ChatMessage {
-  id?: number;
-  body?: string;
-  author?: UserRef;
-  kind?: ChatMessageKind;
-  isEdited?: boolean;
-  isDeleted?: boolean;
-  editableUntil?: ChatMessageEditableUntil;
-  attachments?: Attachment[];
-  readBy?: number[];
-  /** Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.
+/**
+ * A ticket reference unfurled inside a chat message (§7.6). The fields are
+§4A.1's own compact row plus the stage, because a reference in chat is
+usually asking where something has got to.
+
+Deliberately carries no description, steps to reproduce or client: a
+preview is a convenience, and one that copies a client's words into a
+thread they were never sent to is not.
+
  */
-  mentions?: UserRef[];
-  /** D-054 · the `CRM-26-00347` mentions in the body, resolved into cards
-(§7.6). Parsed server-side from the body, like `mentions`.
-
-**Resolved per reader, on every read — never stored.** Two people
-reading the same message are entitled to different answers, and the
-card carries live state (level, status, stage, holder, lateness)
-rather than how the ticket looked when somebody typed its code.
-
-A code with no card here **renders as plain text**. That covers a
-ticket the reader may not see and one that does not exist, and the
-two are deliberately indistinguishable — otherwise pasting a range
-of codes would report back which are real.
-
-Always empty on a deleted message: the body is withheld, so nothing
-in it named anything.
-
-The blueprint writes this as `TKT-xxxx`; no ticket has ever looked
-like that. C-011 mints `{PROJECT}-{YY}-{NNNNN}`, and that is what is
-matched — see `TicketId`.
- */
-  ticketRefs?: TicketCard[];
-  createdAt?: string;
+export interface TicketCard {
+  ticketId: TicketId;
+  title: string;
+  level: Level;
+  status: StatusCode;
+  currentStageCode?: TicketCardCurrentStageCode;
+  assignee?: UserRef;
+  plannedCloseDate?: TicketCardPlannedCloseDate;
+  isDelayed: boolean;
 }

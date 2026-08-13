@@ -79,7 +79,46 @@ public final class ChatDtos {
              * called into the conversation is part of the record that survives.
              */
             List<UserRef> mentions,
+
+            /*
+             * D-054. Resolved per reader on every read rather than stored with
+             * the message, because two people are entitled to different answers
+             * — see TicketCardResolver. Empty when the body names no ticket, when
+             * none of the ones it names are visible to this reader, and always on
+             * a deleted message.
+             *
+             * A code with no card here is a code the client renders as plain
+             * text. It does not distinguish "not yours" from "does not exist",
+             * and must not be made to.
+             */
+            List<TicketCard> ticketRefs,
             Instant createdAt) {
+
+        ChatMessage withTicketRefs(List<TicketCard> cards) {
+            return new ChatMessage(id, body, author, kind, isEdited, isDeleted,
+                    editableUntil, readBy, mentions, cards, createdAt);
+        }
+    }
+
+    /**
+     * D-054 · the rich ticket card a {@code CRM-26-00347} mention unfurls into
+     * (blueprint §7.6).
+     *
+     * <p>The fields are §4A.1's own compact row — code, title, level, who holds
+     * it, whether it is late — plus the stage, because a reference in chat is
+     * usually asking where something has got to. Live state, read at the moment
+     * the message is read; nothing here is a snapshot of how the ticket looked
+     * when somebody typed its code.
+     */
+    public record TicketCard(
+            String ticketId,
+            String title,
+            String level,
+            String status,
+            String currentStageCode,
+            UserRef assignee,
+            Instant plannedCloseDate,
+            boolean isDelayed) {
     }
 
     /**

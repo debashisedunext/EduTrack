@@ -2957,6 +2957,44 @@ paths:
               schema: { $ref: '#/components/schemas/ChatThreadListResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /chat/ticket-cards:
+    get:
+      tags: [chat]
+      operationId: resolveTicketCards
+      summary: Ticket cards for codes named in a live message (S-25)
+      description: |
+        D-054. A page of messages already carries its cards in `ticketRefs`; this
+        exists for the one case that cannot.
+
+        A live message arrives as a **single frame delivered to a whole room**,
+        so it cannot carry cards — whose cards would they be? Each client
+        resolves for itself and gets exactly what its own scope allows.
+
+        Passing codes in is not a way to ask what exists. Every code is scoped,
+        and one the caller may not see is simply absent from the answer,
+        indistinguishable from one that was never issued. Anything that is not a
+        well-formed ticket code is dropped by the same parser the server runs
+        over a message body, so this endpoint cannot be handed a pattern the read
+        path would not have matched either.
+      parameters:
+        - name: codes
+          in: query
+          required: true
+          schema: { type: string }
+          description: >
+            Comma- or space-separated ticket codes, e.g.
+            `CRM-26-00347,WEB-26-00012`. Capped server-side; the surplus is
+            dropped rather than rejected, since the client's fallback for a
+            missing card is the plain text it already has.
+          example: CRM-26-00347,WEB-26-00012
+      responses:
+        '200':
+          description: The cards this caller may see. Never reports what it withheld.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketCardListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /chat/messages/search:
     get:
       tags: [chat]
@@ -5165,7 +5203,55 @@ components:
             a caller could aim the notification fan-out at anybody. Only thread
             participants resolve — any other `@handle` stays plain text. Retained
             on a deleted message, whose body is withheld.
+        ticketRefs:
+          type: array
+          items: { $ref: '#/components/schemas/TicketCard' }
+          description: |
+            D-054 · the `CRM-26-00347` mentions in the body, resolved into cards
+            (§7.6). Parsed server-side from the body, like `mentions`.
+
+            **Resolved per reader, on every read — never stored.** Two people
+            reading the same message are entitled to different answers, and the
+            card carries live state (level, status, stage, holder, lateness)
+            rather than how the ticket looked when somebody typed its code.
+
+            A code with no card here **renders as plain text**. That covers a
+            ticket the reader may not see and one that does not exist, and the
+            two are deliberately indistinguishable — otherwise pasting a range
+            of codes would report back which are real.
+
+            Always empty on a deleted message: the body is withheld, so nothing
+            in it named anything.
+
+            The blueprint writes this as `TKT-xxxx`; no ticket has ever looked
+            like that. C-011 mints `{PROJECT}-{YY}-{NNNNN}`, and that is what is
+            matched — see `TicketId`.
         createdAt: { type: string, format: date-time }
+    TicketCard:
+      type: object
+      description: |
+        A ticket reference unfurled inside a chat message (§7.6). The fields are
+        §4A.1's own compact row plus the stage, because a reference in chat is
+        usually asking where something has got to.
+
+        Deliberately carries no description, steps to reproduce or client: a
+        preview is a convenience, and one that copies a client's words into a
+        thread they were never sent to is not.
+      required: [ticketId, title, level, status, isDelayed]
+      properties:
+        ticketId: { $ref: '#/components/schemas/TicketId' }
+        title: { type: string }
+        level: { $ref: '#/components/schemas/Level' }
+        status: { $ref: '#/components/schemas/StatusCode' }
+        currentStageCode: { type: [string, 'null'] }
+        assignee: { $ref: '#/components/schemas/UserRef' }
+        plannedCloseDate: { type: [string, 'null'], format: date-time }
+        isDelayed: { type: boolean }
+    TicketCardListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/TicketCard' } }
     ChatMessageResponse:
       type: object
       required: [data]

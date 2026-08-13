@@ -148,6 +148,7 @@ product already enforces:
 | `/me/notification-preferences` | One row per `NotificationEvent` — 25, bounded by the enum |
 | `/tickets/{id}/status-requests` | At most one open ask per manager entitled to make one |
 | `/me/awaiting-response` | Your own unanswered asks, capped server-side |
+| `/chat/ticket-cards` | Bounded by the caller's own `codes` list, and capped below that |
 
 These return `data` with no `meta`. That is the signal that the list is complete.
 

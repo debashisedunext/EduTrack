@@ -53,6 +53,7 @@ NO_PAGINATION = {
     "/me/notification-preferences":      "one row per NotificationEvent — 25, and bounded by the enum",
     "/tickets/{ticketId}/status-requests": "open requests on one ticket, and at most one per manager who can ask about it",
     "/me/awaiting-response":             "your own unanswered asks; bounded server-side and ordered longest-wait-first, which a cursor would fight",
+    "/chat/ticket-cards":                "bounded by the caller's own `codes` list, and capped below that; paging a lookup you supplied the keys for is not a page",
 }
 
 # §8 — GET only. No mutation verb, ever.

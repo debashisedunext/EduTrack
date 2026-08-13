@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * D-050 · {@code /chat} per {@code contracts/openapi.yaml}.
@@ -61,10 +62,19 @@ class ChatController {
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 200;
 
-    private final ChatService chat;
+    /**
+     * D-054 · a page of messages names at most this many distinct tickets in one
+     * explicit request. Matches {@link TicketCardResolver#MAX_CODES_PER_PAGE},
+     * since both are the same resource decision reached from opposite sides.
+     */
+    private static final int MAX_CARD_CODES = TicketCardResolver.MAX_CODES_PER_PAGE;
 
-    ChatController(ChatService chat) {
+    private final ChatService chat;
+    private final TicketCardResolver ticketCards;
+
+    ChatController(ChatService chat, TicketCardResolver ticketCards) {
         this.chat = chat;
+        this.ticketCards = ticketCards;
     }
 
     @GetMapping(path = "/threads", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -82,7 +92,10 @@ class ChatController {
                                                  @RequestParam(required = false) Long cursor,
                                                  @RequestParam(required = false) Integer limit) {
         return chat.messages(threadId, CurrentUser.idOf(authentication), cursor, clamp(limit))
-                .map(messages -> ResponseEntity.ok(new MessageListResponse(messages)))
+                // D-054. The cards are attached here rather than in the service
+                // because this is where the caller is, and a card is per-reader.
+                .map(messages -> ResponseEntity.ok(
+                        new MessageListResponse(ticketCards.attach(authentication, messages))))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
@@ -107,7 +120,8 @@ class ChatController {
                                          @PathVariable long threadId,
                                          @Valid @RequestBody ChatDtos.PostMessage request) {
         return chat.post(threadId, CurrentUser.idOf(authentication), request.body())
-                .map(message -> ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponse(message)))
+                .map(message -> ResponseEntity.status(HttpStatus.CREATED)
+                        .body(new MessageResponse(withCards(authentication, message))))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
@@ -119,7 +133,8 @@ class ChatController {
                            @PathVariable long threadId,
                            @PathVariable long messageId,
                            @Valid @RequestBody ChatDtos.EditMessage request) {
-        return respond(chat.edit(threadId, messageId, CurrentUser.idOf(authentication), request.body()));
+        return respond(authentication,
+                chat.edit(threadId, messageId, CurrentUser.idOf(authentication), request.body()));
     }
 
     @DeleteMapping(path = "/threads/{threadId}/messages/{messageId}",
@@ -128,7 +143,8 @@ class ChatController {
     ResponseEntity<?> delete(Authentication authentication,
                              @PathVariable long threadId,
                              @PathVariable long messageId) {
-        return respond(chat.delete(threadId, messageId, CurrentUser.idOf(authentication)));
+        return respond(authentication,
+                chat.delete(threadId, messageId, CurrentUser.idOf(authentication)));
     }
 
     /**
@@ -142,10 +158,10 @@ class ChatController {
      * to edit their own message, and did until five minutes ago. The conflict
      * is with the state of the resource, not with their authority over it.
      */
-    private ResponseEntity<?> respond(ChatService.Outcome outcome) {
+    private ResponseEntity<?> respond(Authentication caller, ChatService.Outcome outcome) {
         return switch (outcome) {
             case ChatService.Outcome.Applied applied ->
-                    ResponseEntity.ok(new MessageResponse(applied.message()));
+                    ResponseEntity.ok(new MessageResponse(withCards(caller, applied.message())));
             case ChatService.Outcome.NotFound ignored ->
                     ResponseEntity.notFound().build();
             case ChatService.Outcome.Immutable immutable ->
@@ -153,6 +169,51 @@ class ChatController {
                             .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                             .body(problem(immutable.reason()));
         };
+    }
+
+    /**
+     * D-054 · one message's cards, for the caller who just wrote or changed it.
+     *
+     * <p>An edit matters here as much as a post: somebody who fixes a typo in a
+     * ticket code expects the card to appear, and returning the edited message
+     * without one would look like the reference had not been recognised.
+     */
+    private ChatDtos.ChatMessage withCards(Authentication caller, ChatDtos.ChatMessage message) {
+        return ticketCards.attach(caller, List.of(message)).getFirst();
+    }
+
+    /**
+     * D-054 · cards for codes a client has in hand.
+     *
+     * <p>This exists because of the one thing the read path cannot do. A live
+     * message goes out as a <em>single frame to a whole room</em>, so it cannot
+     * carry cards — whose cards would they be? Each client therefore resolves
+     * for itself, and gets exactly what its own scope allows.
+     *
+     * <p>Passing codes in is not a way to ask what exists. The scope is applied
+     * to every one of them, and a code the caller may not see is simply missing
+     * from the answer, indistinguishable from one that was never issued —
+     * which is also what happens when the code is in a message body they are
+     * reading. Malformed codes are dropped by the same parser the server uses
+     * on a body, so the endpoint cannot be handed a pattern the read path would
+     * not have matched either.
+     */
+    @GetMapping(path = "/ticket-cards", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "resolveTicketCards",
+            summary = "Ticket cards for codes named in a live message (S-25)")
+    TicketCardListResponse ticketCards(Authentication authentication,
+                                       @RequestParam(name = "codes", required = false) String codes) {
+        if (codes == null || codes.isBlank()) {
+            return new TicketCardListResponse(List.of());
+        }
+        // Parsed rather than split, so the endpoint and the message body agree
+        // on what a ticket code is — one definition, one place.
+        Set<String> wanted = TicketRefParser.codesIn(codes.replace(',', ' '));
+        if (wanted.size() > MAX_CARD_CODES) {
+            wanted = wanted.stream().limit(MAX_CARD_CODES)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        }
+        return new TicketCardListResponse(ticketCards.cardsFor(authentication, wanted));
     }
 
     /** RFC 9457, per CONVENTIONS.md §3. */
@@ -186,6 +247,9 @@ class ChatController {
     }
 
     record SearchResponse(List<ChatDtos.ChatSearchHit> data, ChatDtos.SearchMeta meta) {
+    }
+
+    record TicketCardListResponse(List<ChatDtos.TicketCard> data) {
     }
 
     /**
