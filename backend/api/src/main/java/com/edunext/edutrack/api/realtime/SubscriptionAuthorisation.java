@@ -106,11 +106,24 @@ class SubscriptionAuthorisation implements ChannelInterceptor {
                     // mistake surfaces at the point it is made.
                     case UserQueue ignored -> false;
 
-                    // Both need A-034's ScopeResolver to answer "could you GET
-                    // the tickets behind this room". Closed until then, because
-                    // a stage queue open to everyone is a list of who is working
-                    // on what across the whole organisation.
-                    case StageTopic ignored -> false;
+                    // D-059. Open now, and not because A-034 landed — because
+                    // the frame turned out not to need it. What travels here is
+                    // a nudge with no ticket in it, so the question is "may this
+                    // person be told their team's queue moved", which project
+                    // membership answers. StageQueueSubscriptionScope records
+                    // the argument, including what has to change first if a
+                    // ticket identity is ever put in the frame.
+                    case StageTopic stage ->
+                            any(scope -> scope.mayObserveStage(
+                                    userId, stage.stageCode(), stage.projectId()));
+
+                    // Still shut, and no task opens it. §9.3 lists the room;
+                    // nothing publishes to it, and the only rule that would fit
+                    // — "the people who report to you" — is the one A-034
+                    // explicitly refuses to use for scope, since a manager's
+                    // visibility comes from their projects rather than from who
+                    // reports to them. A room with no publisher and no agreed
+                    // rule stays closed.
                     case ManagerTopic ignored -> false;
                 })
                 .orElse(false);

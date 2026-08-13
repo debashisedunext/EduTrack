@@ -44,8 +44,16 @@ class SubscriptionAuthorisationTest {
         }
     };
 
+    /** D-059 · stands in for the stage queue: Ravi is on one project. */
+    private final SubscriptionScope stageQueue = new SubscriptionScope() {
+        @Override
+        public boolean mayObserveStage(long userId, String stageCode, long projectId) {
+            return userId == RAVI && projectId == PROJECT_HE_IS_IN;
+        }
+    };
+
     private final SubscriptionAuthorisation interceptor =
-            new SubscriptionAuthorisation(List.of(chat));
+            new SubscriptionAuthorisation(List.of(chat, stageQueue));
 
     // ------------------------------------------------------------- allowed
 
@@ -83,14 +91,45 @@ class SubscriptionAuthorisationTest {
     }
 
     @Test
-    @DisplayName("stage and manager rooms stay shut until A-034")
-    void roomsNeedingScopeResolverAreRefused() {
-        // A stage queue open to everyone is a list of who is working on what
-        // across the whole organisation. Closed is the safe default while the
-        // rule that would open it correctly does not exist yet.
-        assertThatThrownBy(() -> subscribe(RAVI, "/topic/stage.QA.7"))
+    @DisplayName("D-059 · your own project's team queue is allowed")
+    void yourOwnTeamQueueIsAllowed() {
+        // Any stage on a project you are on. The queue is per project, and
+        // somebody on it may watch any of its teams — a Developer watching the
+        // QA queue is how they see their own handoff land.
+        assertThatCode(() -> subscribe(RAVI, "/topic/stage.QA." + PROJECT_HE_IS_IN))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> subscribe(RAVI, "/topic/stage.DEPLOYMENT." + PROJECT_HE_IS_IN))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("D-059 · another project's team queue is refused")
+    void anotherProjectsTeamQueueIsRefused() {
+        // The room is a nudge rather than a feed, but it still says a team on
+        // that project is doing something, and §16's walkthrough is explicit
+        // that these resources never see a project they are not on.
+        assertThatThrownBy(() -> subscribe(RAVI, "/topic/stage.QA.999"))
                 .isInstanceOf(MessageDeliveryException.class);
+    }
+
+    @Test
+    @DisplayName("D-059 · a stage room is refused for somebody with no scope granting it")
+    void aStageRoomIsRefusedForAnyoneElse() {
+        assertThatThrownBy(() -> subscribe(99L, "/topic/stage.QA." + PROJECT_HE_IS_IN))
+                .isInstanceOf(MessageDeliveryException.class);
+    }
+
+    @Test
+    @DisplayName("the manager room stays shut — nothing publishes to it and no rule fits")
+    void theManagerRoomIsStillRefused() {
+        // §9.3 lists it; nothing sends to it, and the only rule that would fit
+        // — "the people who report to you" — is the one A-034 explicitly
+        // refuses to use for scope. A room with no publisher and no agreed rule
+        // stays closed rather than being opened on a guess.
         assertThatThrownBy(() -> subscribe(RAVI, "/topic/manager.3"))
+                .isInstanceOf(MessageDeliveryException.class);
+        assertThatThrownBy(() -> subscribe(RAVI, "/topic/manager." + RAVI))
+                .as("not even your own — there is nothing on the other end of it")
                 .isInstanceOf(MessageDeliveryException.class);
     }
 
@@ -134,6 +173,10 @@ class SubscriptionAuthorisationTest {
 
         assertThatThrownBy(() -> bare.preSend(
                 subscribeMessage(authenticated(RAVI), "/topic/ticket." + TICKET_HE_IS_IN), null))
+                .isInstanceOf(MessageDeliveryException.class);
+        assertThatThrownBy(() -> bare.preSend(
+                subscribeMessage(authenticated(RAVI), "/topic/stage.QA." + PROJECT_HE_IS_IN), null))
+                .as("D-059's room opens because a scope grants it, not because the case exists")
                 .isInstanceOf(MessageDeliveryException.class);
         assertThatCode(() -> bare.preSend(
                 subscribeMessage(authenticated(RAVI), SubscriptionAuthorisation.OWN_QUEUE), null))
