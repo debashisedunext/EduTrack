@@ -12,7 +12,7 @@ Filter chain, permission model, ScopeResolver. Every ticket query is scoped here
 |---|---|---|
 | Is the caller who they say they are, with a live token? | `SecurityConfig` + `JwtDecoderConfig` | A-032 ✅ |
 | May this role do this thing at all? | `@PreAuthorize` on the handler, `permission/` | A-033 ✅ |
-| Which rows may they see? | `ScopeResolver` | A-034 |
+| Which rows may they see? | `scope/ScopeResolver` | A-034 ✅ |
 | Does an out-of-scope id answer 404? | detail routes | A-035 |
 
 Keeping them separate is deliberate. Row scope in an annotation would be an authorisation rule expressed per controller, which is the thing CLAUDE.md forbids and blueprint §17 names as the top risk.
@@ -43,6 +43,25 @@ The literals are validated: a `hasAuthority('typo')` that names no seeded code f
 
 **Only proxied calls are advised.** A `private` or `final` handler, or one invoked from inside the same bean, is not intercepted and its annotation silently does nothing. Handlers here are package-private instance methods called through the CGLIB proxy, which is the advised path.
 
+## scope/
+
+Row scope. `ScopeResolver` turns the caller into a `Specification<Ticket>`; `ScopedTickets` is the only place it gets composed in, and every ticket read in the application goes through that bean rather than through `TicketRepository`.
+
+| Role | Sees |
+|---|---|
+| ADMIN | every ticket |
+| PM, SUPPORT | `project_id IN (their projects)` |
+| DEVELOPER, QA, DEPLOYMENT | `assigned_to = them` |
+| anything else | nothing |
+
+**Everything not in the first three rows is deny-all** — a PM in no projects, a role code the §2 matrix does not contain, an unidentifiable caller. The `IN ()` case is the one that matters: dropping an empty-list predicate is the usual defence and it promotes that PM to Admin with no error and no log line. `TicketScopeIT` pins it.
+
+Admin is an always-true predicate, not a `null` specification, so "unrestricted" and "the guard was never consulted" cannot be the same value.
+
+**Adding a ticket query:** call `ScopedTickets`, and pass your own filter as the `criteria` argument — it is `AND`-ed onto the scope and cannot replace it. Do not autowire `TicketRepository`; A-037's ArchUnit rule will make that a build failure, and until then it is the convention `TicketRepository`'s javadoc already states.
+
+`CallerIdentity` (in this package, not `scope/`) is the one reading of "who is calling", resolved from either principal — `JwtAuthenticationToken` on the real chain, `DevPrincipal` under `dev-noauth`. It is the shared home the two copied `CurrentUser` classes in `feature/chat` and `feature/notifications` were waiting for.
+
 ## permission/
 
 `Permissions` — the eighteen codes as constants. `RolePermissions` — the §2 matrix as a static map.
@@ -60,5 +79,7 @@ Permissions are trusted from the token rather than re-read per request, so a rev
 | `JwtAuthoritiesConverterTest` | Claims → authorities, including absent and malformed ones. |
 | `PermissionModelIT` | The whole chain against real MySQL and Redis, from a real login. |
 | `SecurityChainIT` | A-032 — authentication, revocation, refusal shape. |
+| `CallerIdentityTest` | Both principal shapes read as one caller; every unreadable shape reads as none. No Docker. |
+| `TicketScopeIT` | A-034 — which rows each role actually gets back, against real MySQL. |
 
 The rest of the suite is the allow-path net: everything runs as an authenticated principal and would start answering 403 if an annotation over-restricted. Keeping it green is part of the check, not incidental to it.
