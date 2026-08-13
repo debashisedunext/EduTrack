@@ -60,6 +60,30 @@ Admin is an always-true predicate, not a `null` specification, so "unrestricted"
 
 **Adding a ticket query:** call `ScopedTickets`, and pass your own filter as the `criteria` argument — it is `AND`-ed onto the scope and cannot replace it. Do not autowire `TicketRepository`; A-037's ArchUnit rule will make that a build failure, and until then it is the convention `TicketRepository`'s javadoc already states.
 
+### 404, never 403 (A-035)
+
+Two different questions produce two different codes, and getting them the wrong way round is the leak:
+
+| Refusal | Code | Because |
+|---|---|---|
+| the role lacks the capability | **403** | it is a fact about the caller, not about any ticket |
+| the ticket is not in the caller's scope | **404** | a 403 confirms the ticket exists |
+| the ticket id was never issued | **404** | genuinely absent |
+
+The last two are not "both mapped to 404" — they are the *same* `TicketNotFoundException`, thrown from the same line in `ScopedTickets.require`, so the responses cannot drift apart. It carries no reason code: a value that was never recorded cannot leak into a log, a `detail` string or a debug header.
+
+**In a detail handler, call `require`, not `byId`:**
+
+```java
+Ticket t = tickets.require(caller, id);   // no Optional, no status code, nothing to get wrong
+```
+
+`byId` still exists for callers that genuinely want the `Optional`. `require` is for anything that answers an HTTP request — the status code is already decided, so it cannot be decided wrongly.
+
+**Two things that put the 403 back.** Neither exists today; both are one careless line away.
+- Throwing `AccessDeniedException` anywhere in a scoped path — `ProblemErrorResponses` turns it into a 403.
+- `@PostAuthorize("returnObject.assignedTo == …")` — reads the row, then answers **403**. Never use it on a ticket route; `require` is the replacement.
+
 `CallerIdentity` (in this package, not `scope/`) is the one reading of "who is calling", resolved from either principal — `JwtAuthenticationToken` on the real chain, `DevPrincipal` under `dev-noauth`. It is the shared home the two copied `CurrentUser` classes in `feature/chat` and `feature/notifications` were waiting for.
 
 ## permission/
@@ -81,5 +105,6 @@ Permissions are trusted from the token rather than re-read per request, so a rev
 | `SecurityChainIT` | A-032 — authentication, revocation, refusal shape. |
 | `CallerIdentityTest` | Both principal shapes read as one caller; every unreadable shape reads as none. No Docker. |
 | `TicketScopeIT` | A-034 — which rows each role actually gets back, against real MySQL. |
+| `ScopedNotFoundIT` | A-035 — out-of-scope and never-existed are byte-identical, from a real login. |
 
 The rest of the suite is the allow-path net: everything runs as an authenticated principal and would start answering 403 if an annotation over-restricted. Keeping it green is part of the check, not incidental to it.
