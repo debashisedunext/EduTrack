@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.security.permission;
 
+import com.edunext.edutrack.api.security.TestPrincipals;
 import com.edunext.edutrack.api.security.jwt.JwtAuthoritiesConverter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,14 +12,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
-import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -69,9 +67,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnableAutoConfiguration(exclude = FlywayAutoConfiguration.class)
 @AutoConfigureMockMvc
 class RouteAuthorizationTest {
-
-    /** Ours. springdoc's and Boot's own controllers cannot be annotated and are not ours to. */
-    private static final String APPLICATION_PACKAGE = "com.edunext.edutrack";
 
     private static final Pattern AUTHORITY_LITERAL =
             Pattern.compile("hasAnyAuthority\\(([^)]*)\\)|hasAuthority\\(\\s*'([^']*)'\\s*\\)");
@@ -318,22 +313,16 @@ class RouteAuthorizationTest {
      * in its own unit test.
      */
     private AbstractAuthenticationToken principal(String roleCode) {
-        Instant now = Instant.now();
-        Jwt jwt = Jwt.withTokenValue("test-token")
-                .header("alg", "HS256")
-                .subject("1")
-                .issuedAt(now)
-                .expiresAt(now.plusSeconds(900))
-                .claim("role", roleCode)
-                .claim("permissions", List.copyOf(RolePermissions.of(roleCode)))
-                .build();
-        return authorities.convert(jwt);
+        return TestPrincipals.of(authorities, roleCode);
     }
 
+    /**
+     * Shared with A-036's matrix through {@link RouteInventory} — one definition
+     * of which routes exist, or the coverage check built on each would drift
+     * from the other.
+     */
     private Map<RequestMappingInfo, HandlerMethod> applicationHandlers() {
-        return handlerMapping.getHandlerMethods().entrySet().stream()
-                .filter(entry -> entry.getValue().getBeanType().getName().startsWith(APPLICATION_PACKAGE))
-                .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        return RouteInventory.handlers(handlerMapping);
     }
 
     /**
@@ -367,9 +356,6 @@ class RouteAuthorizationTest {
 
     /** {@code POST /api/v1/masters/holidays} — the failure message has to be actionable. */
     private static String describe(RequestMappingInfo info, HandlerMethod handler) {
-        String methods = info.getMethodsCondition().getMethods().stream()
-                .map(Enum::name).sorted().reduce((a, b) -> a + "|" + b).orElse("ANY");
-        String paths = String.join(",", new TreeSet<>(info.getPatternValues()));
-        return methods + " " + paths;
+        return RouteInventory.describe(info, handler);
     }
 }
