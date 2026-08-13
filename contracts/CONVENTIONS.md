@@ -138,6 +138,8 @@ product already enforces:
 |---|---|
 | `/masters/task-types`, `/masters/priorities` | 11 and 4 rows |
 | `/masters/modules` | 8 seeded rows; a ninth is a row somebody adds |
+| `/masters/permissions` | 18 rows, and reference data — a nineteenth arrives by migration, not by a screen |
+| `/masters/roles` | The six of blueprint §2 plus whatever an Admin adds; the matrix is unreadable long before it is unpageable |
 | `/masters/workflow-templates` | A handful per project |
 | `/projects/{id}/sla-policies` | Task types × 4 levels |
 | `/clients/{id}/contacts` | A short list per client |

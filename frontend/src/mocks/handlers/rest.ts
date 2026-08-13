@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
-import type { Holiday, User } from '../db';
+import type { Holiday, Role, User } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
 import { round, statusRequestDto } from './tickets';
 import {
@@ -16,7 +16,7 @@ const me = () => {
   return {
     id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl, role: u.role,
     username: u.username, email: u.email,
-    permissions: PERMISSIONS[u.role],
+    permissions: permissionsOf(u.role),
     projectIds: u.projectIds,
     reporteeIds: db.users.filter((x) => x.reportingManagerId === u.id).map((x) => x.id),
     timezone: u.timezone,
@@ -61,13 +61,24 @@ function preferenceMatrix(db: ReturnType<typeof getDb>) {
   });
 }
 
-const PERMISSIONS: Record<string, string[]> = {
-  ADMIN: ['ticket.read', 'ticket.write', 'ticket.assign', 'master.write', 'report.read', 'audit.read'],
-  PM: ['ticket.read', 'ticket.write', 'ticket.assign', 'master.write', 'report.read'],
-  DEVELOPER: ['ticket.read', 'ticket.write'],
-  QA: ['ticket.read', 'ticket.write'],
-  DEPLOYMENT: ['ticket.read', 'ticket.write'],
-  SUPPORT: ['ticket.read', 'ticket.write'],
+/**
+ * The caller's own grants, read from the same matrix S-09 edits.
+ *
+ * **This used to be a hardcoded map of a different vocabulary** —
+ * `ticket.read`, `ticket.write`, `report.read`, `audit.read` — none of which
+ * are among the eighteen codes B-001 seeds or the ones A-033's
+ * `@PreAuthorize` expressions name. Nothing read them, so nothing broke; but
+ * once S-09 renders the real matrix, `/me` claiming a role holds
+ * `ticket.write` while the Role Master shows `ticket.update_progress` is two
+ * answers to one question in the same session. B-015 made it one.
+ *
+ * A role S-09 has never touched still answers here — `roleGrants` is seeded
+ * from the §2 matrix for all six.
+ */
+const permissionsOf = (roleCode: string): string[] => {
+  const db = getDb();
+  const role = db.roles.find((r) => r.code === roleCode);
+  return role ? [...(db.roleGrants[role.id] ?? [])].sort() : [];
 };
 
 const LANDING: Record<string, string> = {
@@ -96,6 +107,54 @@ const workingWeek = () => {
 
 /** The settings resource, which also carries the zone those bounds are read in. */
 const workingWeekFull = () => ({ ...calendarState().week });
+
+// ── roles & permissions · S-09 (B-015) ──────────────────────────────────────
+
+/**
+ * Sorted by code, so a save and a reload compare byte for byte.
+ *
+ * The real service sorts by `(category, code)` — a different order, and
+ * deliberately not mirrored: the screen builds a `Set` from this, so nothing
+ * depends on the order, and a second copy of the catalogue's categories here
+ * would be a second thing to keep in step.
+ */
+const grantsOf = (roleId: number) => [...(getDb().roleGrants[roleId] ?? [])].sort();
+
+const roleDto = (role: Role) => ({
+  ...role,
+  userCount: getDb().users.filter((u) => u.role === role.code).length,
+  permissionCount: grantsOf(role.id).length,
+});
+
+const roleDetailDto = (role: Role) => ({
+  ...roleDto(role),
+  permissionCodes: grantsOf(role.id),
+});
+
+/**
+ * Content-derived, and it covers `permissionCodes` — so a colleague's matrix
+ * save invalidates a rename in progress, which is correct: they are two edits
+ * to the same screen.
+ */
+const roleEtag = (role: Role) =>
+  `"${Math.abs([...JSON.stringify(roleDetailDto(role))]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/**
+ * The mock enforces `If-Match` too. A guard the real backend has and the mock
+ * waves through is a guard the frontend never gets to exercise.
+ */
+function rolePrecondition(role: Role, ifMatch: string | null) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the role first and send back its ETag.');
+  }
+  if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== roleEtag(role).replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'This role changed since you read it. Reload and reapply your edit.');
+  }
+  return null;
+}
 
 /**
  * Content-derived, like the real controller's. A timestamp would change on a
@@ -694,6 +753,135 @@ export const restHandlers = [
       { id: 4, level: 'CRITICAL', colour: '#BE185D', defaultSlaHrs: 4, autoEscalates: true },
     ]),
   ),
+  // ── roles & permissions · S-09 (B-015) ────────────────────────────────────
+  // Reference data. No create, edit or delete: a capability exists because code
+  // checks for it, so a row an admin could add would grant nothing.
+  http.get(url('/masters/permissions'), () => ok(getDb().permissions)),
+
+  http.get(url('/masters/roles'), ({ request }) => {
+    const isActive = new URL(request.url).searchParams.get('isActive');
+    const rows = getDb().roles
+      .filter((r) => isActive == null || r.isActive === (isActive === 'true'))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return ok(rows.map(roleDto));
+  }),
+
+  http.post(url('/masters/roles'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as Record<string, unknown>;
+    const code = String(body.code ?? '').trim().toUpperCase();
+
+    if (db.roles.some((r) => r.code === code)) {
+      return problem(409, 'duplicate', 'Duplicate role code',
+        { detail: `A role with code '${code}' already exists`, errors: { code: ['already taken'] } });
+    }
+    // isSystem is never taken from the body. Nothing created here is one of the six.
+    const created = {
+      // Max-plus-one rather than a counter: a test that pushes a fixture role
+      // with an explicit id would otherwise get a collision on the next create.
+      id: Math.max(0, ...db.roles.map((r) => r.id)) + 1,
+      code,
+      name: String(body.name ?? '').trim(),
+      description: (body.description as string | null) || null,
+      isSystem: false,
+      isActive: body.isActive == null ? true : Boolean(body.isActive),
+    };
+    db.roles.push(created);
+    db.roleGrants[created.id] = [];
+    return ok(roleDetailDto(created), undefined,
+      { status: 201, headers: { ETag: roleEtag(created) } });
+  }),
+
+  http.get(url('/masters/roles/:roleId'), ({ params }) => {
+    const role = getDb().roles.find((r) => r.id === Number(params.roleId));
+    if (!role) return notFound('Role');
+    return HttpResponse.json({ data: roleDetailDto(role) },
+      { headers: { ETag: roleEtag(role) } });
+  }),
+
+  http.patch(url('/masters/roles/:roleId'), async ({ params, request }) => {
+    const role = getDb().roles.find((r) => r.id === Number(params.roleId));
+    if (!role) return notFound('Role');
+
+    const stale = rolePrecondition(role, request.headers.get('If-Match'));
+    if (stale) return stale;
+
+    const body = (await request.json()) as Record<string, unknown>;
+    // A code change is refused even on a non-system role: the code is carried
+    // in issued tokens, in @PreAuthorize and in workflow_transitions.
+    if (body.code != null && String(body.code).trim().toUpperCase() !== role.code) {
+      return problem(409, 'immutable-field', 'Role code cannot be changed', {
+        detail: 'A role code cannot be changed once created. Deactivate this role and create a replacement.',
+        errors: { code: ['immutable'] },
+      });
+    }
+    if (body.name != null) role.name = String(body.name).trim();
+    if (body.description !== undefined) role.description = (body.description as string | null) || null;
+    if (body.isActive != null) role.isActive = Boolean(body.isActive);
+
+    return HttpResponse.json({ data: roleDetailDto(role) },
+      { headers: { ETag: roleEtag(role) } });
+  }),
+
+  http.delete(url('/masters/roles/:roleId'), ({ params }) => {
+    const db = getDb();
+    const role = db.roles.find((r) => r.id === Number(params.roleId));
+    if (!role) return notFound('Role');
+
+    // The system check comes first. A system role always has holders, so
+    // reporting in-use first would say "reassign 6 people" for a role that
+    // could never be deleted however many people were reassigned.
+    if (role.isSystem) {
+      return problem(409, 'system-role-undeletable', 'System role', {
+        detail: `'${role.code}' is a system role and cannot be deleted. Deactivate it instead.`,
+        userCount: 0,
+      });
+    }
+    const holders = db.users.filter((u) => u.role === role.code).length;
+    if (holders > 0) {
+      return problem(409, 'role-in-use', 'Role still in use', {
+        detail: `${holders} resource${holders === 1 ? '' : 's'} still hold '${role.code}'. Reassign them before deleting the role.`,
+        userCount: holders,
+      });
+    }
+    db.roles.splice(db.roles.indexOf(role), 1);
+    delete db.roleGrants[role.id];
+    return noContent();
+  }),
+
+  http.put(url('/masters/roles/:roleId/permissions'), async ({ params, request }) => {
+    const db = getDb();
+    const role = db.roles.find((r) => r.id === Number(params.roleId));
+    if (!role) return notFound('Role');
+
+    const stale = rolePrecondition(role, request.headers.get('If-Match'));
+    if (stale) return stale;
+
+    const body = (await request.json()) as { permissionCodes?: string[] };
+    const wanted = [...new Set((body.permissionCodes ?? []).map((c) => c.trim()).filter(Boolean))];
+
+    // 422, not a disabled checkbox. This is the one reachable UI edge on the
+    // append-only guarantee, so the refusal is server-side.
+    const ungrantable = wanted.filter(
+      (c) => db.permissions.find((p) => p.code === c)?.isGrantable === false,
+    );
+    if (ungrantable.length > 0) {
+      return problem(422, 'ungrantable-permission', 'Permission cannot be granted', {
+        detail: `${ungrantable.join(', ')} cannot be granted to any role. Blueprint §2: ticket history and the ribbon are append-only, and nobody may edit them.`,
+      });
+    }
+    // Unknown codes are named, not skipped: a typo that quietly grants nothing
+    // is a permission bug found in production.
+    const unknown = wanted.filter((c) => !db.permissions.some((p) => p.code === c));
+    if (unknown.length > 0) {
+      return validationFailed({ permissionCodes: [`No such permission: ${unknown.join(', ')}`] });
+    }
+
+    db.roleGrants[role.id] = wanted;
+    return HttpResponse.json({ data: roleDetailDto(role) },
+      { headers: { ETag: roleEtag(role) } });
+  }),
+
   // ── working calendar · S-14 (B-023) ───────────────────────────────────────
   http.get(url('/masters/holidays'), () =>
     ok({

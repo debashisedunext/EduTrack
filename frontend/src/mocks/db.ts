@@ -100,6 +100,30 @@ export interface PushSubscription {
 export interface Module {
   id: number; code: string; name: string; seq: number; isActive: boolean;
 }
+
+/**
+ * B-015 · S-09. One capability, as `GET /masters/permissions` returns it.
+ *
+ * `category` is the **application** area the Role Master groups by — not
+ * `Module` above, which is the *product* area a ticket is raised against.
+ * Blueprint §7 overloads the word and the two must never be joined.
+ */
+export interface Permission {
+  id: number; code: string; name: string; description: string | null;
+  category: string;
+  /**
+   * False means no role may hold it and S-09 renders the checkbox disabled.
+   * Computed by the server from a constant, not stored — it is a property of
+   * the append-only guarantee, not a flag anyone can flip.
+   */
+  isGrantable: boolean;
+}
+
+/** B-015 · S-09. A role, plus the two counts the grid renders. */
+export interface Role {
+  id: number; code: string; name: string; description: string | null;
+  isSystem: boolean; isActive: boolean;
+}
 export interface Stage {
   stageCode: string; displayName: string; sequence: number; ownerRole: RoleCode;
   icon: string; stageSlaHrs: number | null; isOptional: boolean; canReturnTo: string[];
@@ -215,6 +239,8 @@ export interface StatusRequest {
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
   taskTypes: TaskType[]; modules: Module[]; stages: Stage[];
+  /** B-015 · S-09. `roleGrants` is keyed by role id — the matrix, one row per role. */
+  permissions: Permission[]; roles: Role[]; roleGrants: Record<number, string[]>;
   slaPolicies: SlaPolicy[];
   pushSubscriptions: PushSubscription[];
   tickets: Ticket[]; cycles: Cycle[]; transitions: Transition[];
@@ -402,6 +428,80 @@ const MODULES: Module[] = [
 MODULES.push({ id: 9, code: 'TRANSPORT', name: 'Transport', seq: 90, isActive: false });
 
 /**
+ * B-001's eighteen capabilities, transcribed from the same §2 matrix the
+ * migration seeds — so the mock world and a real database render S-09
+ * identically.
+ *
+ * `history.edit_delete` is here **and held by nobody**, which is the point of
+ * including it: blueprint §2 says "Edit / delete history or ribbon — ❌ (nobody
+ * can)", and the screen renders it disabled rather than omitting it. A fixture
+ * without it cannot tell "disabled" and "absent" apart, so the bug ships.
+ */
+const PERMISSIONS: Permission[] = [
+  ['resource.manage', 'Manage resources, roles, reporting manager', 'admin', 'Create/edit resources, roles and reporting-manager assignment.'],
+  ['project.manage', 'Manage projects', 'admin', 'Create/edit projects; map resources to a project.'],
+  ['audit.view', 'Audit log viewer', 'audit', 'View the audit log.'],
+  ['history.edit_delete', 'Edit / delete history or ribbon', 'history', 'Granted to nobody — ticket history is append-only.'],
+  ['history.view_team', 'View team member history', 'history', 'View ticket history belonging to other team members.'],
+  ['master.write', 'Master data', 'master', 'Create/edit task types, SLA, workflow, holidays and other masters.'],
+  ['reports.view', 'Reports section', 'reports', 'View the reports section, scope resolved per role.'],
+  ['ticket.assign', 'Assign / reassign ticket', 'ticket', 'Assign or reassign a ticket to a resource.'],
+  ['ticket.close', 'Close ticket', 'ticket', 'Close a ticket.'],
+  ['ticket.create', 'Create ticket', 'ticket', 'Raise a new ticket.'],
+  ['ticket.force_move', 'Force-move ribbon backwards', 'ticket', 'Force-move the ribbon backwards outside the normal flow.'],
+  ['ticket.handoff', 'Hand off to next stage', 'ticket', 'Move a ticket forward along the ribbon.'],
+  ['ticket.reopen', 'Reopen ticket', 'ticket', 'Reopen a closed ticket.'],
+  ['ticket.rework', 'Send back for rework', 'ticket', 'Return a ticket to a prior stage for rework.'],
+  ['ticket.skip_stage', 'Skip a stage', 'ticket', 'Skip a ribbon stage, with a mandatory reason.'],
+  ['ticket.update_progress', 'Update status/effort on assigned ticket', 'ticket', 'Update status or log effort on an assigned ticket.'],
+  ['ticket.view_all', 'View all tickets', 'ticket', 'View tickets beyond only those assigned to the caller.'],
+  ['ticket.view_assigned', 'View only assigned tickets', 'ticket', 'View tickets assigned to the caller.'],
+  // (category, code) — the order the server returns and the screen groups by.
+].map(([code, name, category, description], i) => ({
+  id: i + 1, code, name, category, description,
+  isGrantable: code !== 'history.edit_delete',
+}));
+
+/** The six of blueprint §2, all `isSystem` and therefore all undeletable. */
+const ROLES: Role[] = [
+  ['ADMIN', 'Admin', 'Full system access: masters, roles, audit log, all tickets.'],
+  ['DEPLOYMENT', 'Deployment', 'Deploys assigned tickets through the ribbon.'],
+  ['DEVELOPER', 'Developer', 'Works assigned tickets through the ribbon.'],
+  ['PM', 'PM', 'Owns projects; assigns, escalates and closes within them.'],
+  ['QA', 'QA', 'Verifies assigned tickets through the ribbon.'],
+  ['SUPPORT', 'Support Desk', 'Intake, assignment and closure within assigned projects.'],
+].map(([code, name, description], i) => ({
+  id: i + 1, code, name, description, isSystem: true, isActive: true,
+}));
+
+/**
+ * The §2 grant matrix, one entry per role. Keyed by role code rather than id so
+ * a reordered `ROLES` cannot silently reassign somebody's permissions.
+ *
+ * `history.edit_delete` appears in none of them, deliberately.
+ */
+const ROLE_GRANTS: Record<string, string[]> = {
+  ADMIN: [
+    'resource.manage', 'project.manage', 'master.write', 'audit.view', 'reports.view',
+    'history.view_team', 'ticket.create', 'ticket.assign', 'ticket.handoff', 'ticket.rework',
+    'ticket.skip_stage', 'ticket.force_move', 'ticket.view_all', 'ticket.update_progress',
+    'ticket.close', 'ticket.reopen',
+  ],
+  PM: [
+    'project.manage', 'master.write', 'reports.view', 'history.view_team', 'ticket.create',
+    'ticket.assign', 'ticket.handoff', 'ticket.rework', 'ticket.skip_stage', 'ticket.view_all',
+    'ticket.update_progress', 'ticket.close', 'ticket.reopen',
+  ],
+  SUPPORT: [
+    'reports.view', 'ticket.create', 'ticket.assign', 'ticket.handoff', 'ticket.view_all',
+    'ticket.update_progress', 'ticket.close', 'ticket.reopen',
+  ],
+  DEVELOPER: ['ticket.handoff', 'ticket.view_assigned', 'ticket.update_progress', 'reports.view'],
+  QA: ['ticket.handoff', 'ticket.rework', 'ticket.view_assigned', 'ticket.update_progress', 'reports.view'],
+  DEPLOYMENT: ['ticket.handoff', 'ticket.rework', 'ticket.view_assigned', 'ticket.update_progress', 'reports.view'],
+};
+
+/**
  * The SLA matrix, seeded so that **every rung of the ladder is reachable in
  * `npm run dev`** — a fixture where only the org-wide default ever answers
  * cannot tell a working resolution from one that skips straight to the bottom.
@@ -443,6 +543,11 @@ export function createDb(): Db {
     contacts: structuredClone(CONTACTS),
     taskTypes: structuredClone(TASK_TYPES),
     modules: structuredClone(MODULES),
+    permissions: structuredClone(PERMISSIONS),
+    roles: structuredClone(ROLES),
+    roleGrants: Object.fromEntries(
+      ROLES.map((role) => [role.id, [...(ROLE_GRANTS[role.code] ?? [])]]),
+    ),
     stages: structuredClone(STAGES),
     slaPolicies: structuredClone(SLA_POLICIES),
     pushSubscriptions: [],

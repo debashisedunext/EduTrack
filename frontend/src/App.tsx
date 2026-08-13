@@ -13,6 +13,8 @@ import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
+import { RoleListPage } from './features/masters/roles/RoleListPage'
+import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
 import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage'
 import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage'
@@ -98,6 +100,9 @@ export default function App() {
                         <Link to="/masters/resources">Resources</Link>
                       </Button>
                       <Button asChild variant="secondary">
+                        <Link to="/masters/roles">Roles &amp; permissions</Link>
+                      </Button>
+                      <Button asChild variant="secondary">
                         <Link to="/masters/calendar">Working calendar</Link>
                       </Button>
                     </div>
@@ -113,6 +118,8 @@ export default function App() {
                 A-030's four shell-less auth routes. */}
             <Route path="/masters/resources/new" element={<ResourceFormPage />} />
             <Route path="/masters/resources/:userId/edit" element={<ResourceFormPage />} />
+            <Route path="/masters/roles" element={<RoleListPage />} />
+            <Route path="/masters/roles/:roleId" element={<RolePermissionsPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />

@@ -45,7 +45,8 @@ class MasterRoutesTest {
      */
     private static final List<String> CONTROLLERS = List.of(
             "com.edunext.edutrack.api.feature.masters.CalendarController",
-            "com.edunext.edutrack.api.feature.masters.resources.ResourceController");
+            "com.edunext.edutrack.api.feature.masters.resources.ResourceController",
+            "com.edunext.edutrack.api.feature.masters.roles.RoleController");
 
     @Test
     @DisplayName("every masters controller is mapped under /api/v1")
@@ -69,6 +70,14 @@ class MasterRoutesTest {
     @DisplayName("the calendar is where the contract says it is")
     void calendarIsMountedWhereTheContractPutsIt() {
         assertThat(paths(CalendarController.class.getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/masters");
+    }
+
+    @Test
+    @DisplayName("the role master is where the contract says it is")
+    void roleMasterIsMountedWhereTheContractPutsIt() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.roles.RoleController")
+                .getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/masters");
     }
 

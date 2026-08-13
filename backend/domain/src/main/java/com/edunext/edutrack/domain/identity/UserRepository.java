@@ -26,6 +26,19 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /** Assignee pickers and the capacity heatmap. */
     List<User> findByIsActiveTrueOrderByFullNameAsc();
 
+    /**
+     * How many resources hold a role (B-015).
+     *
+     * <p>The Role Master shows it on every row and quotes it when it refuses a
+     * delete. {@code users.role_id} is a foreign key <em>without</em> a cascade,
+     * so without this check the database refuses the delete anyway — as a
+     * constraint violation naming a MySQL index rather than a way forward.
+     *
+     * <p>Counts inactive resources too. They still point at the row, so the
+     * delete would still fail.
+     */
+    long countByRoleId(Integer roleId);
+
     /** Both are unique keys; the import dry run (B-034) tests them per row
      *  without attempting the insert. */
     boolean existsByEmpCode(String empCode);

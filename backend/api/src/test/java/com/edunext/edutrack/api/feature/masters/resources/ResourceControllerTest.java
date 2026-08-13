@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.masters.resources;
 
+import com.edunext.edutrack.domain.identity.Role;
+import com.edunext.edutrack.domain.identity.RoleRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -35,9 +37,14 @@ import static org.mockito.Mockito.when;
  */
 class ResourceControllerTest {
 
+    /** B-001's six, as the role master returns them. */
+    private static final List<String> SEEDED_ROLE_CODES =
+            List.of("ADMIN", "PM", "SUPPORT", "DEVELOPER", "QA", "DEPLOYMENT");
+
     private ResourceService service;
     private ResourceExportWriter exporter;
     private ResourceWriteService writes;
+    private RoleRepository roles;
     private ResourceController controller;
 
     @BeforeEach
@@ -45,7 +52,20 @@ class ResourceControllerTest {
         service = mock(ResourceService.class);
         exporter = mock(ResourceExportWriter.class);
         writes = mock(ResourceWriteService.class);
-        controller = new ResourceController(service, exporter, writes);
+        roles = mock(RoleRepository.class);
+        controller = new ResourceController(service, exporter, writes, roles);
+
+        // B-015 replaced the hardcoded Set.of(...) here with the roles table, so
+        // the stub stands in for it. The codes are B-001's six because that is
+        // what the seed puts there — a seventh an Admin adds is now accepted
+        // without touching this class, which is the point of the change.
+        when(roles.existsByCode(any())).thenAnswer(
+                call -> SEEDED_ROLE_CODES.contains(call.getArgument(0, String.class)));
+        when(roles.findAll()).thenAnswer(call -> SEEDED_ROLE_CODES.stream().map(code -> {
+            Role role = new Role();
+            role.setCode(code);
+            return role;
+        }).toList());
 
         when(service.list(any(), any(), any())).thenReturn(
                 new ResourceDtos.ResourceListResponse(List.of(),
@@ -98,7 +118,7 @@ class ResourceControllerTest {
 
         @ParameterizedTest
         @ValueSource(strings = {"DEV", "SUPPORT_DESK", "administrator"})
-        @DisplayName("an unknown role is a 400 naming the six, not an empty grid")
+        @DisplayName("an unknown role is a 400 naming the known codes, not an empty grid")
         void unknownRoleIsRejected(String role) {
             // SUPPORT_DESK is in the list on purpose: it is the pre-V20260807_1030
             // spelling, so it is the wrong code somebody is most likely to send.
@@ -106,6 +126,19 @@ class ResourceControllerTest {
                     .isInstanceOf(ResponseStatusException.class)
                     .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
                             .isEqualTo(HttpStatus.BAD_REQUEST));
+        }
+
+        @Test
+        @DisplayName("a role an Admin added through S-09 filters like any other")
+        void acceptsARoleAddedAfterTheSeed() {
+            // The reason B-015 replaced the compiled Set.of(...): with it, the
+            // first custom role would have 400'd on a grid filter and the
+            // failure would have looked like a bug in the Role Master.
+            when(roles.existsByCode("AUDITOR")).thenReturn(true);
+
+            controller.list(null, null, null, "auditor", null, null, null);
+
+            assertThat(capturedFilter().role()).isEqualTo("AUDITOR");
         }
 
         private ResourceFilter capturedFilter() {
