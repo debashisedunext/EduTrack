@@ -58,7 +58,9 @@ Row scope. `ScopeResolver` turns the caller into a `Specification<Ticket>`; `Sco
 
 Admin is an always-true predicate, not a `null` specification, so "unrestricted" and "the guard was never consulted" cannot be the same value.
 
-**Adding a ticket query:** call `ScopedTickets`, and pass your own filter as the `criteria` argument — it is `AND`-ed onto the scope and cannot replace it. Do not autowire `TicketRepository`; A-037's ArchUnit rule will make that a build failure, and until then it is the convention `TicketRepository`'s javadoc already states.
+**Adding a ticket query:** call `ScopedTickets`, and pass your own filter as the `criteria` argument — it is `AND`-ed onto the scope and cannot replace it. **Do not autowire `TicketRepository`** — since A-037 that is a build failure, not a convention.
+
+If your class genuinely has no caller to scope by, annotate it `@UnscopedAccess("why")` and say so in the reason. Two classes do today, both because they answer something other than a user: `InboundReplyService` (a mail server) and `SingleTicketFixture` (seed data, `fixtures` profile). The reason is mandatory and a blank one fails the build — an exemption you cannot justify in a sentence is one to reconsider rather than to write. The `worker` SLA scanners are outside the rule rather than exempt from it: they are a different module, with no request and no caller at all.
 
 ### 404, never 403 (A-035)
 
@@ -106,5 +108,6 @@ Permissions are trusted from the token rather than re-read per request, so a rev
 | `CallerIdentityTest` | Both principal shapes read as one caller; every unreadable shape reads as none. No Docker. |
 | `TicketScopeIT` | A-034 — which rows each role actually gets back, against real MySQL. |
 | `ScopedNotFoundIT` | A-035 — out-of-scope and never-existed are byte-identical, from a real login. |
+| `arch/ScopeGuardRulesTest` | A-037 — the guard cannot be walked around: no `TicketRepository` outside `scope/`, no `@PostAuthorize` anywhere. No Docker. |
 
 The rest of the suite is the allow-path net: everything runs as an authenticated principal and would start answering 403 if an annotation over-restricted. Keeping it green is part of the check, not incidental to it.

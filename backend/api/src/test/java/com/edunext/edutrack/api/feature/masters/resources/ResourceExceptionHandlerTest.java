@@ -53,8 +53,7 @@ class ResourceExceptionHandlerTest {
         writes = mock(ResourceWriteService.class);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new ResourceController(
-                        mock(ResourceService.class), mock(ResourceExportWriter.class), writes,
-                        mock(com.edunext.edutrack.domain.identity.RoleRepository.class)))
+                        mock(ResourceService.class), mock(ResourceExportWriter.class), writes))
                 .setControllerAdvice(new ResourceExceptionHandler())
                 .build();
 

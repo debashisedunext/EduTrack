@@ -28,11 +28,13 @@ import java.util.Optional;
  * criteria a feature needs are {@code AND}-ed <em>on top of</em> the scope,
  * never instead of it.
  *
- * <p>A-037's ArchUnit rule makes that structural, by forbidding calls to
- * {@link TicketRepository} from outside this package. Until it lands the rule
- * is convention; the convention is stated here and in
- * {@code TicketRepository}'s own javadoc, which already says no finder applies
- * a scope of its own.
+ * <p>A-037 made that structural. {@code ScopeGuardRulesTest} fails the build if
+ * any class in {@code api} outside this package touches
+ * {@link TicketRepository}, so the convention stated here and in
+ * {@code TicketRepository}'s own javadoc is now checked rather than remembered.
+ * The two classes that genuinely have no caller to scope by — the inbound mail
+ * webhook and the fixture generator — declare it with {@link UnscopedAccess}
+ * and say why, at the site.
  *
  * <h2>Absence, not refusal</h2>
  *
