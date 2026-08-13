@@ -67,21 +67,31 @@ import type {
 
 import type {
   ConflictResponse,
+  ForbiddenResponse,
   GetWorkingCalendarParams,
   HolidayListResponse,
   HolidayPatchRequest,
   HolidayResponse,
   HolidayWriteRequest,
   ListResourceLeavesParams,
+  ListRolesParams,
   ListWorkflowTemplatesParams,
   ModuleListResponse,
   NotFoundResponse,
+  PermissionListResponse,
   PreconditionFailedResponse,
   PriorityListResponse,
+  Problem,
   ResourceLeaveListResponse,
   ResourceLeavePatchRequest,
   ResourceLeaveResponse,
   ResourceLeaveWriteRequest,
+  RoleDetailResponse,
+  RoleInUseProblem,
+  RoleListResponse,
+  RolePatchRequest,
+  RolePermissionsRequest,
+  RoleWriteRequest,
   TaskTypeListResponse,
   UnauthorizedResponse,
   ValidationFailedResponse,
@@ -384,6 +394,647 @@ export function useListPriorities<TData = Awaited<ReturnType<typeof listPrioriti
 
 
 /**
+ * Every capability the system knows about — the row axis of the Role &
+Permission Master's matrix. Eighteen rows seeded from blueprint §2,
+grouped by `category`, returned in `(category, code)` order so the
+screen renders its sections without sorting.
+
+**Permissions are reference data, not master data.** There is no create,
+edit or delete: a capability exists because code checks for it, so a row
+an admin could add would grant nothing and a row they could delete would
+silently un-guard a route. New capabilities arrive by migration
+alongside the code that enforces them.
+
+Readable by every role. Knowing that `ticket.force_move` exists is
+blueprint documentation, and `GET /me` already returns the caller's own
+grants.
+
+ * @summary The permission catalogue (S-09)
+ */
+export const listPermissions = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PermissionListResponse>(
+      {url: `/masters/permissions`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListPermissionsQueryKey = () => {
+    return [
+    `/masters/permissions`
+    ] as const;
+    }
+
+    
+export const getListPermissionsQueryOptions = <TData = Awaited<ReturnType<typeof listPermissions>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPermissions>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPermissionsQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPermissions>>> = ({ signal }) => listPermissions(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPermissions>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPermissionsQueryResult = NonNullable<Awaited<ReturnType<typeof listPermissions>>>
+export type ListPermissionsQueryError = UnauthorizedResponse
+
+
+export function useListPermissions<TData = Awaited<ReturnType<typeof listPermissions>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPermissions>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPermissions>>,
+          TError,
+          Awaited<ReturnType<typeof listPermissions>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPermissions<TData = Awaited<ReturnType<typeof listPermissions>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPermissions>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPermissions>>,
+          TError,
+          Awaited<ReturnType<typeof listPermissions>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPermissions<TData = Awaited<ReturnType<typeof listPermissions>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPermissions>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The permission catalogue (S-09)
+ */
+
+export function useListPermissions<TData = Awaited<ReturnType<typeof listPermissions>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPermissions>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPermissionsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * The Role Master grid, and the role picker on the S-08 resource form.
+
+Inactive roles are returned too, carrying `isActive: false`, for the same
+reason task types and modules are: a resource still holding a since-
+retired role has to render its name. Offer only the active ones in a
+picker.
+
+`userCount` is how many resources currently hold the role — the number
+the delete refusal quotes, shown up front so an admin does not discover
+it only by being refused. Readable by every role.
+
+ * @summary Roles (S-09)
+ */
+export const listRoles = (
+    params?: ListRolesParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<RoleListResponse>(
+      {url: `/masters/roles`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListRolesQueryKey = (params?: ListRolesParams,) => {
+    return [
+    `/masters/roles`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListRolesQueryOptions = <TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse>(params?: ListRolesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListRolesQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRoles>>> = ({ signal }) => listRoles(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListRolesQueryResult = NonNullable<Awaited<ReturnType<typeof listRoles>>>
+export type ListRolesQueryError = UnauthorizedResponse
+
+
+export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse>(
+ params: undefined |  ListRolesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRoles>>,
+          TError,
+          Awaited<ReturnType<typeof listRoles>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse>(
+ params?: ListRolesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRoles>>,
+          TError,
+          Awaited<ReturnType<typeof listRoles>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse>(
+ params?: ListRolesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Roles (S-09)
+ */
+
+export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse>(
+ params?: ListRolesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListRolesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only. Creates a non-system role — `isSystem` is not writable, so
+nothing created here can ever masquerade as one of the six that scope
+resolution and the §2 matrix are built on.
+
+`code` is upper-cased and must be unique. It is the identifier that
+appears in the JWT `role` claim, in `@PreAuthorize` expressions and in
+`workflow_transitions.role_code`, which is why it **cannot be changed
+afterwards** — see `PATCH /masters/roles/{roleId}`.
+
+A new role starts with no grants. Give it some through
+`PUT /masters/roles/{roleId}/permissions`.
+
+> **A custom role cannot yet be assigned to a resource.** `RoleCode` is
+> a closed six-value enum here, so the S-08 role picker and every
+> `UserRef` in this contract reject anything else. Opening it touches
+> Streams A, C and D and is not B-015's to make; until then a custom
+> role is definable and grantable but not yet selectable.
+
+ * @summary Create a role
+ */
+export const createRole = (
+    roleWriteRequest: RoleWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<RoleDetailResponse>(
+      {url: `/masters/roles`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: roleWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateRoleMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRole>>, TError,{data: RoleWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createRole>>, TError,{data: RoleWriteRequest}, TContext> => {
+
+const mutationKey = ['createRole'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createRole>>, {data: RoleWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createRole(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateRoleMutationResult = NonNullable<Awaited<ReturnType<typeof createRole>>>
+    export type CreateRoleMutationBody = RoleWriteRequest
+    export type CreateRoleMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse
+
+    /**
+ * @summary Create a role
+ */
+export const useCreateRole = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRole>>, TError,{data: RoleWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createRole>>,
+        TError,
+        {data: RoleWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateRoleMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The matrix's read: the role, plus `permissionCodes` — every capability
+it currently holds.
+
+**This carries the `ETag` that both writes on this role require as
+`If-Match`**, per CONVENTIONS.md §5. The tag covers the grants as well
+as the fields, so a concurrent matrix save and a concurrent rename
+conflict with each other, which is correct — they are edits to the same
+screen.
+
+ * @summary One role, with its grants (S-09)
+ */
+export const getRole = (
+    roleId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<RoleDetailResponse>(
+      {url: `/masters/roles/${roleId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetRoleQueryKey = (roleId?: number,) => {
+    return [
+    `/masters/roles/${roleId}`
+    ] as const;
+    }
+
+    
+export const getGetRoleQueryOptions = <TData = Awaited<ReturnType<typeof getRole>>, TError = UnauthorizedResponse | NotFoundResponse>(roleId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRole>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRoleQueryKey(roleId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRole>>> = ({ signal }) => getRole(roleId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(roleId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRole>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetRoleQueryResult = NonNullable<Awaited<ReturnType<typeof getRole>>>
+export type GetRoleQueryError = UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetRole<TData = Awaited<ReturnType<typeof getRole>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ roleId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRole>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRole>>,
+          TError,
+          Awaited<ReturnType<typeof getRole>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRole<TData = Awaited<ReturnType<typeof getRole>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ roleId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRole>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRole>>,
+          TError,
+          Awaited<ReturnType<typeof getRole>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRole<TData = Awaited<ReturnType<typeof getRole>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ roleId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRole>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One role, with its grants (S-09)
+ */
+
+export function useGetRole<TData = Awaited<ReturnType<typeof getRole>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ roleId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRole>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetRoleQueryOptions(roleId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`code` is absent from the request body on purpose, and sending one is
+a `409`.** It is the ticket-ID-prefix problem in a different table: the
+code is denormalised into every issued JWT, into `@PreAuthorize`
+expressions compiled at startup and into `workflow_transitions.
+role_code`, and changing it would orphan all three at once while leaving
+every one of them looking healthy. Deactivate and create a replacement.
+
+A **system role may be renamed and deactivated but not deleted** —
+`name` and `description` are display text, `isSystem` is the guarantee.
+Deactivating one is allowed and deliberately not blocked: it removes the
+role from pickers without breaking the resources that hold it.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the current tag from `GET /masters/roles/{roleId}`.
+
+ * @summary Rename a role or change its status
+ */
+export const updateRole = (
+    roleId: number,
+    rolePatchRequest: RolePatchRequest,
+ ) => {
+      
+      
+      return http<RoleDetailResponse>(
+      {url: `/masters/roles/${roleId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: rolePatchRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateRoleMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRole>>, TError,{roleId: number;data: RolePatchRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateRole>>, TError,{roleId: number;data: RolePatchRequest}, TContext> => {
+
+const mutationKey = ['updateRole'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateRole>>, {roleId: number;data: RolePatchRequest}> = (props) => {
+          const {roleId,data} = props ?? {};
+
+          return  updateRole(roleId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateRoleMutationResult = NonNullable<Awaited<ReturnType<typeof updateRole>>>
+    export type UpdateRoleMutationBody = RolePatchRequest
+    export type UpdateRoleMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Rename a role or change its status
+ */
+export const useUpdateRole = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRole>>, TError,{roleId: number;data: RolePatchRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateRole>>,
+        TError,
+        {roleId: number;data: RolePatchRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateRoleMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Admin only, and refused in two cases that are reported separately
+because the remedy differs.
+
+**A system role is never deletable** — `type` is
+`system-role-undeletable`. The six seeded roles are the input to every
+scope decision and to the whole §2 matrix; deleting one would leave
+existing users pointing at nothing. Deactivate instead.
+
+**A role still held by resources is refused** — `type` is
+`role-in-use`, and `userCount` on the problem says how many. Reassign
+them first. `users.role_id` is a foreign key without a cascade, so
+without this check the database would refuse it anyway, as a raw
+constraint violation that names a MySQL index rather than a way forward.
+
+ * @summary Delete a role
+ */
+export const deleteRole = (
+    roleId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/masters/roles/${roleId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteRoleMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | RoleInUseProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRole>>, TError,{roleId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteRole>>, TError,{roleId: number}, TContext> => {
+
+const mutationKey = ['deleteRole'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteRole>>, {roleId: number}> = (props) => {
+          const {roleId} = props ?? {};
+
+          return  deleteRole(roleId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteRoleMutationResult = NonNullable<Awaited<ReturnType<typeof deleteRole>>>
+    
+    export type DeleteRoleMutationError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | RoleInUseProblem
+
+    /**
+ * @summary Delete a role
+ */
+export const useDeleteRole = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | RoleInUseProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRole>>, TError,{roleId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteRole>>,
+        TError,
+        {roleId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteRoleMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Admin only. **Replace-all**: `permissionCodes` is the complete set the
+role should hold afterwards, not a delta. Codes absent from the body are
+revoked. `PUT` rather than `PATCH` because the screen submits every
+checkbox's state at once, and a partial save of a permission matrix is
+an ambiguous thing to have to reason about later.
+
+Delete is legitimate here, unlike everywhere else in this contract:
+`role_permissions` is *current state*, not the append-only audit. The
+change itself is recorded in the audit log.
+
+**`history.edit_delete` is refused with `422`.** Blueprint §2: "Edit /
+delete history or ribbon — ❌ (nobody can)". It is seeded with zero
+grants and `isGrantable: false` so the matrix can render it, disabled,
+rather than silently omitting it — hiding a permission nobody holds
+would leave an admin unsure whether the guarantee exists. Granting it
+through this route is the one way the append-only rule CLAUDE.md calls
+"the guarantee that erodes first" could be unlocked from a UI, so the
+refusal is server-side and not merely a disabled checkbox.
+
+Unknown codes are a `400` naming each one, not a silent skip: a typo
+that quietly grants nothing is a permission bug discovered in
+production.
+
+`If-Match` is required — this is the wholesale replace that
+CONVENTIONS.md §5 calls the worst case for a lost update, the same
+reasoning as `PUT /projects/{projectId}/sla-policies`.
+
+ * @summary Save the permission matrix for a role (S-09)
+ */
+export const replaceRolePermissions = (
+    roleId: number,
+    rolePermissionsRequest: RolePermissionsRequest,
+ ) => {
+      
+      
+      return http<RoleDetailResponse>(
+      {url: `/masters/roles/${roleId}/permissions`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: rolePermissionsRequest
+    },
+      );
+    }
+  
+
+
+export const getReplaceRolePermissionsMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceRolePermissions>>, TError,{roleId: number;data: RolePermissionsRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof replaceRolePermissions>>, TError,{roleId: number;data: RolePermissionsRequest}, TContext> => {
+
+const mutationKey = ['replaceRolePermissions'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceRolePermissions>>, {roleId: number;data: RolePermissionsRequest}> = (props) => {
+          const {roleId,data} = props ?? {};
+
+          return  replaceRolePermissions(roleId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplaceRolePermissionsMutationResult = NonNullable<Awaited<ReturnType<typeof replaceRolePermissions>>>
+    export type ReplaceRolePermissionsMutationBody = RolePermissionsRequest
+    export type ReplaceRolePermissionsMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Save the permission matrix for a role (S-09)
+ */
+export const useReplaceRolePermissions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceRolePermissions>>, TError,{roleId: number;data: RolePermissionsRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof replaceRolePermissions>>,
+        TError,
+        {roleId: number;data: RolePermissionsRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getReplaceRolePermissionsMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * Consumed by the working-hours service that **every** SLA, duration and
 utilisation figure routes through. A Friday-18:00 ticket with a four-hour
 SLA must not breach on Saturday morning, and four private implementations

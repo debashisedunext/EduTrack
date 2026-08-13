@@ -43,6 +43,8 @@ NO_PAGINATION = {
     "/masters/task-types":               "11 rows",
     "/masters/priorities":               "4 rows",
     "/masters/modules":                  "8 rows, seeded; a ninth is a row somebody adds",
+    "/masters/permissions":              "18 rows, and reference data — a nineteenth arrives by migration, not by a screen",
+    "/masters/roles":                    "the six of blueprint §2 plus whatever an Admin adds; the S-09 matrix is unreadable long before it is unpageable",
     "/masters/workflow-templates":       "a handful per project",
     "/projects/{projectId}/sla-policies": "task types x 4 levels",
     "/clients/{clientId}/contacts":      "a short list per client",
@@ -57,7 +59,16 @@ NO_PAGINATION = {
 APPEND_ONLY = ("/history", "/effort-logs", "/audit-logs")
 
 # §7 — 403 is legitimate only where the failure does not depend on a row.
-ROWLESS_403 = {"/audit-logs"}
+#
+# Held as a dict rather than a set since B-015, because the violation message
+# already says "add it to ROWLESS_403 with a reason" and there was nowhere to
+# put one. Membership tests read the same either way.
+ROWLESS_403 = {
+    "/audit-logs":                        "Admin-only regardless of what is in it",
+    "/masters/roles":                     "Admin-only screen; there is no row yet on a create",
+    "/masters/roles/{roleId}":            "master data, not row-scoped — every role is already public through listRoles, so a 403 leaks nothing a 404 would hide",
+    "/masters/roles/{roleId}/permissions": "same: the role's existence is public, only the write is Admin-only",
+}
 
 
 def main():
@@ -104,6 +115,9 @@ def main():
             print("  %-46s %s" % (k, v))
         print("\nPagination exemptions:")
         for k, v in NO_PAGINATION.items():
+            print("  %-46s %s" % (k, v))
+        print("\nRowless 403 exemptions:")
+        for k, v in ROWLESS_403.items():
             print("  %-46s %s" % (k, v))
         return 0
 

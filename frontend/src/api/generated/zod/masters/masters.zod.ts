@@ -113,6 +113,315 @@ export const listPrioritiesResponse = zod.object({
 })
 
 /**
+ * Every capability the system knows about — the row axis of the Role &
+Permission Master's matrix. Eighteen rows seeded from blueprint §2,
+grouped by `category`, returned in `(category, code)` order so the
+screen renders its sections without sorting.
+
+**Permissions are reference data, not master data.** There is no create,
+edit or delete: a capability exists because code checks for it, so a row
+an admin could add would grant nothing and a row they could delete would
+silently un-guard a route. New capabilities arrive by migration
+alongside the code that enforces them.
+
+Readable by every role. Knowing that `ticket.force_move` exists is
+blueprint documentation, and `GET /me` already returns the caller's own
+grants.
+
+ * @summary The permission catalogue (S-09)
+ */
+export const listPermissionsResponseDataItemCodeMax = 60;
+
+export const listPermissionsResponseDataItemNameMax = 120;
+
+export const listPermissionsResponseDataItemDescriptionMax = 255;
+
+export const listPermissionsResponseDataItemCategoryMax = 40;
+
+
+
+export const listPermissionsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "code": zod.string().max(listPermissionsResponseDataItemCodeMax).describe('A dotted capability string — `{module}.{action}`. This is what\n`@PreAuthorize` checks and what the JWT `permissions[]` claim\ncarries, so it is stable: renaming one revokes it everywhere at once.\n'),
+  "name": zod.string().max(listPermissionsResponseDataItemNameMax),
+  "description": zod.string().max(listPermissionsResponseDataItemDescriptionMax).nullish(),
+  "category": zod.string().max(listPermissionsResponseDataItemCategoryMax).describe('The matrix\'s module grouping — `admin`, `ticket`, `history`,\n`reports`, `master`, `audit`.\n\n> \*\*Not the same \"module\" as `\/masters\/modules`.\*\* That one is the\n> product area a ticket is raised against (Fees, Admissions); this\n> one is an area of the application. Blueprint §7 overloads the word\n> and the two must not be joined.\n'),
+  "isGrantable": zod.boolean().describe('`false` means no role may hold it and the matrix renders the\ncheckbox disabled. Today that is exactly `history.edit_delete`,\nwhich exists so S-09 can \*show\* the append-only guarantee rather\nthan omit the row and leave an admin wondering.\n\nThis is a property of the code, not a column an admin can flip — it\nis computed server-side and read-only here.\n')
+}))
+})
+
+/**
+ * The Role Master grid, and the role picker on the S-08 resource form.
+
+Inactive roles are returned too, carrying `isActive: false`, for the same
+reason task types and modules are: a resource still holding a since-
+retired role has to render its name. Offer only the active ones in a
+picker.
+
+`userCount` is how many resources currently hold the role — the number
+the delete refusal quotes, shown up front so an admin does not discover
+it only by being refused. Readable by every role.
+
+ * @summary Roles (S-09)
+ */
+export const listRolesQueryParams = zod.object({
+  "isActive": zod.boolean().optional().describe('Omit for all roles; `true` for the picker.')
+})
+
+export const listRolesResponseDataItemCodeMax = 30;
+
+export const listRolesResponseDataItemNameMax = 80;
+
+export const listRolesResponseDataItemDescriptionMax = 255;
+
+
+
+export const listRolesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "code": zod.string().max(listRolesResponseDataItemCodeMax),
+  "name": zod.string().max(listRolesResponseDataItemNameMax),
+  "description": zod.string().max(listRolesResponseDataItemDescriptionMax).nullish(),
+  "isSystem": zod.boolean().describe('One of the six seeded roles of blueprint §2. Renameable and\ndeactivatable; never deletable. Read-only — nothing this API accepts\ncan set it.\n'),
+  "isActive": zod.boolean(),
+  "userCount": zod.number().describe('Resources currently holding this role. Non-zero blocks the delete.'),
+  "permissionCount": zod.number()
+}))
+})
+
+/**
+ * Admin only. Creates a non-system role — `isSystem` is not writable, so
+nothing created here can ever masquerade as one of the six that scope
+resolution and the §2 matrix are built on.
+
+`code` is upper-cased and must be unique. It is the identifier that
+appears in the JWT `role` claim, in `@PreAuthorize` expressions and in
+`workflow_transitions.role_code`, which is why it **cannot be changed
+afterwards** — see `PATCH /masters/roles/{roleId}`.
+
+A new role starts with no grants. Give it some through
+`PUT /masters/roles/{roleId}/permissions`.
+
+> **A custom role cannot yet be assigned to a resource.** `RoleCode` is
+> a closed six-value enum here, so the S-08 role picker and every
+> `UserRef` in this contract reject anything else. Opening it touches
+> Streams A, C and D and is not B-015's to make; until then a custom
+> role is definable and grantable but not yet selectable.
+
+ * @summary Create a role
+ */
+export const createRoleHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createRoleBodyCodeMin = 2;
+export const createRoleBodyCodeMax = 30;
+
+
+export const createRoleBodyCodeRegExp = new RegExp('^[A-Z][A-Z0-9_]{1,29}$');
+export const createRoleBodyNameMax = 80;
+
+export const createRoleBodyDescriptionMax = 255;
+
+export const createRoleBodyIsActiveDefault = true;
+
+export const createRoleBody = zod.object({
+  "code": zod.string().min(createRoleBodyCodeMin).max(createRoleBodyCodeMax).regex(createRoleBodyCodeRegExp).describe('Upper-cased server-side. Unique, and immutable once created.'),
+  "name": zod.string().min(1).max(createRoleBodyNameMax),
+  "description": zod.string().max(createRoleBodyDescriptionMax).nullish(),
+  "isActive": zod.boolean().default(createRoleBodyIsActiveDefault)
+})
+
+/**
+ * The matrix's read: the role, plus `permissionCodes` — every capability
+it currently holds.
+
+**This carries the `ETag` that both writes on this role require as
+`If-Match`**, per CONVENTIONS.md §5. The tag covers the grants as well
+as the fields, so a concurrent matrix save and a concurrent rename
+conflict with each other, which is correct — they are edits to the same
+screen.
+
+ * @summary One role, with its grants (S-09)
+ */
+export const getRoleParams = zod.object({
+  "roleId": zod.number().describe('`roles.id` is an `INT`, not a `BIGINT` like every other identifier here:\nblueprint §8.2 declares `users.role_id INT` and A-003 kept it, so the key\ntype follows the column rather than the house convention.\n')
+})
+
+export const getRoleResponseDataCodeMax = 30;
+
+export const getRoleResponseDataNameMax = 80;
+
+export const getRoleResponseDataDescriptionMax = 255;
+
+
+
+export const getRoleResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "code": zod.string().max(getRoleResponseDataCodeMax),
+  "name": zod.string().max(getRoleResponseDataNameMax),
+  "description": zod.string().max(getRoleResponseDataDescriptionMax).nullish(),
+  "isSystem": zod.boolean().describe('One of the six seeded roles of blueprint §2. Renameable and\ndeactivatable; never deletable. Read-only — nothing this API accepts\ncan set it.\n'),
+  "isActive": zod.boolean(),
+  "userCount": zod.number().describe('Resources currently holding this role. Non-zero blocks the delete.'),
+  "permissionCount": zod.number()
+}).and(zod.object({
+  "permissionCodes": zod.array(zod.string()).describe('Every capability granted, in `(category, code)` order. The ticked\ncells of the matrix; `listPermissions` is the full row set.\n')
+}))
+})
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`code` is absent from the request body on purpose, and sending one is
+a `409`.** It is the ticket-ID-prefix problem in a different table: the
+code is denormalised into every issued JWT, into `@PreAuthorize`
+expressions compiled at startup and into `workflow_transitions.
+role_code`, and changing it would orphan all three at once while leaving
+every one of them looking healthy. Deactivate and create a replacement.
+
+A **system role may be renamed and deactivated but not deleted** —
+`name` and `description` are display text, `isSystem` is the guarantee.
+Deactivating one is allowed and deliberately not blocked: it removes the
+role from pickers without breaking the resources that hold it.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the current tag from `GET /masters/roles/{roleId}`.
+
+ * @summary Rename a role or change its status
+ */
+export const updateRoleParams = zod.object({
+  "roleId": zod.number().describe('`roles.id` is an `INT`, not a `BIGINT` like every other identifier here:\nblueprint §8.2 declares `users.role_id INT` and A-003 kept it, so the key\ntype follows the column rather than the house convention.\n')
+})
+
+export const updateRoleHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateRoleBodyNameMax = 80;
+
+export const updateRoleBodyDescriptionMax = 255;
+
+
+
+export const updateRoleBody = zod.object({
+  "name": zod.string().min(1).max(updateRoleBodyNameMax).optional(),
+  "description": zod.string().max(updateRoleBodyDescriptionMax).nullish(),
+  "isActive": zod.boolean().optional()
+}).describe('Every field optional; an omitted one keeps its stored value. \*\*`code` is\ndeliberately not here\*\* — see `PATCH \/masters\/roles\/{roleId}`. Sending\none anyway is a `409` rather than being ignored, because silently\ndropping a field the caller believed it changed is how a rename appears\nto succeed and does not.\n')
+
+export const updateRoleResponseDataCodeMax = 30;
+
+export const updateRoleResponseDataNameMax = 80;
+
+export const updateRoleResponseDataDescriptionMax = 255;
+
+
+
+export const updateRoleResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "code": zod.string().max(updateRoleResponseDataCodeMax),
+  "name": zod.string().max(updateRoleResponseDataNameMax),
+  "description": zod.string().max(updateRoleResponseDataDescriptionMax).nullish(),
+  "isSystem": zod.boolean().describe('One of the six seeded roles of blueprint §2. Renameable and\ndeactivatable; never deletable. Read-only — nothing this API accepts\ncan set it.\n'),
+  "isActive": zod.boolean(),
+  "userCount": zod.number().describe('Resources currently holding this role. Non-zero blocks the delete.'),
+  "permissionCount": zod.number()
+}).and(zod.object({
+  "permissionCodes": zod.array(zod.string()).describe('Every capability granted, in `(category, code)` order. The ticked\ncells of the matrix; `listPermissions` is the full row set.\n')
+}))
+})
+
+/**
+ * Admin only, and refused in two cases that are reported separately
+because the remedy differs.
+
+**A system role is never deletable** — `type` is
+`system-role-undeletable`. The six seeded roles are the input to every
+scope decision and to the whole §2 matrix; deleting one would leave
+existing users pointing at nothing. Deactivate instead.
+
+**A role still held by resources is refused** — `type` is
+`role-in-use`, and `userCount` on the problem says how many. Reassign
+them first. `users.role_id` is a foreign key without a cascade, so
+without this check the database would refuse it anyway, as a raw
+constraint violation that names a MySQL index rather than a way forward.
+
+ * @summary Delete a role
+ */
+export const deleteRoleParams = zod.object({
+  "roleId": zod.number().describe('`roles.id` is an `INT`, not a `BIGINT` like every other identifier here:\nblueprint §8.2 declares `users.role_id INT` and A-003 kept it, so the key\ntype follows the column rather than the house convention.\n')
+})
+
+/**
+ * Admin only. **Replace-all**: `permissionCodes` is the complete set the
+role should hold afterwards, not a delta. Codes absent from the body are
+revoked. `PUT` rather than `PATCH` because the screen submits every
+checkbox's state at once, and a partial save of a permission matrix is
+an ambiguous thing to have to reason about later.
+
+Delete is legitimate here, unlike everywhere else in this contract:
+`role_permissions` is *current state*, not the append-only audit. The
+change itself is recorded in the audit log.
+
+**`history.edit_delete` is refused with `422`.** Blueprint §2: "Edit /
+delete history or ribbon — ❌ (nobody can)". It is seeded with zero
+grants and `isGrantable: false` so the matrix can render it, disabled,
+rather than silently omitting it — hiding a permission nobody holds
+would leave an admin unsure whether the guarantee exists. Granting it
+through this route is the one way the append-only rule CLAUDE.md calls
+"the guarantee that erodes first" could be unlocked from a UI, so the
+refusal is server-side and not merely a disabled checkbox.
+
+Unknown codes are a `400` naming each one, not a silent skip: a typo
+that quietly grants nothing is a permission bug discovered in
+production.
+
+`If-Match` is required — this is the wholesale replace that
+CONVENTIONS.md §5 calls the worst case for a lost update, the same
+reasoning as `PUT /projects/{projectId}/sla-policies`.
+
+ * @summary Save the permission matrix for a role (S-09)
+ */
+export const replaceRolePermissionsParams = zod.object({
+  "roleId": zod.number().describe('`roles.id` is an `INT`, not a `BIGINT` like every other identifier here:\nblueprint §8.2 declares `users.role_id INT` and A-003 kept it, so the key\ntype follows the column rather than the house convention.\n')
+})
+
+export const replaceRolePermissionsHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const replaceRolePermissionsBody = zod.object({
+  "permissionCodes": zod.array(zod.string()).describe('The complete set the role should hold afterwards. Absent codes are\nrevoked. Duplicates are collapsed; an empty array revokes everything,\nwhich is a legitimate save and not mistaken for an unsent form.\n')
+})
+
+export const replaceRolePermissionsResponseDataCodeMax = 30;
+
+export const replaceRolePermissionsResponseDataNameMax = 80;
+
+export const replaceRolePermissionsResponseDataDescriptionMax = 255;
+
+
+
+export const replaceRolePermissionsResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "code": zod.string().max(replaceRolePermissionsResponseDataCodeMax),
+  "name": zod.string().max(replaceRolePermissionsResponseDataNameMax),
+  "description": zod.string().max(replaceRolePermissionsResponseDataDescriptionMax).nullish(),
+  "isSystem": zod.boolean().describe('One of the six seeded roles of blueprint §2. Renameable and\ndeactivatable; never deletable. Read-only — nothing this API accepts\ncan set it.\n'),
+  "isActive": zod.boolean(),
+  "userCount": zod.number().describe('Resources currently holding this role. Non-zero blocks the delete.'),
+  "permissionCount": zod.number()
+}).and(zod.object({
+  "permissionCodes": zod.array(zod.string()).describe('Every capability granted, in `(category, code)` order. The ticked\ncells of the matrix; `listPermissions` is the full row set.\n')
+}))
+})
+
+/**
  * Consumed by the working-hours service that **every** SLA, duration and
 utilisation figure routes through. A Friday-18:00 ticket with a four-hour
 SLA must not breach on Saturday morning, and four private implementations

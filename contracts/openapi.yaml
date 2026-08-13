@@ -2047,6 +2047,266 @@ paths:
               schema: { $ref: '#/components/schemas/PriorityListResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /masters/permissions:
+    get:
+      tags: [masters]
+      operationId: listPermissions
+      summary: The permission catalogue (S-09)
+      description: |
+        Every capability the system knows about — the row axis of the Role &
+        Permission Master's matrix. Eighteen rows seeded from blueprint §2,
+        grouped by `category`, returned in `(category, code)` order so the
+        screen renders its sections without sorting.
+
+        **Permissions are reference data, not master data.** There is no create,
+        edit or delete: a capability exists because code checks for it, so a row
+        an admin could add would grant nothing and a row they could delete would
+        silently un-guard a route. New capabilities arrive by migration
+        alongside the code that enforces them.
+
+        Readable by every role. Knowing that `ticket.force_move` exists is
+        blueprint documentation, and `GET /me` already returns the caller's own
+        grants.
+      responses:
+        '200':
+          description: OK. A bounded list — no `meta`, the set is complete.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermissionListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /masters/roles:
+    get:
+      tags: [masters]
+      operationId: listRoles
+      summary: Roles (S-09)
+      description: |
+        The Role Master grid, and the role picker on the S-08 resource form.
+
+        Inactive roles are returned too, carrying `isActive: false`, for the same
+        reason task types and modules are: a resource still holding a since-
+        retired role has to render its name. Offer only the active ones in a
+        picker.
+
+        `userCount` is how many resources currently hold the role — the number
+        the delete refusal quotes, shown up front so an admin does not discover
+        it only by being refused. Readable by every role.
+      parameters:
+        - name: isActive
+          in: query
+          schema: { type: boolean }
+          description: Omit for all roles; `true` for the picker.
+      responses:
+        '200':
+          description: OK. A bounded list — no `meta`, the set is complete.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [masters]
+      operationId: createRole
+      summary: Create a role
+      description: |
+        Admin only. Creates a non-system role — `isSystem` is not writable, so
+        nothing created here can ever masquerade as one of the six that scope
+        resolution and the §2 matrix are built on.
+
+        `code` is upper-cased and must be unique. It is the identifier that
+        appears in the JWT `role` claim, in `@PreAuthorize` expressions and in
+        `workflow_transitions.role_code`, which is why it **cannot be changed
+        afterwards** — see `PATCH /masters/roles/{roleId}`.
+
+        A new role starts with no grants. Give it some through
+        `PUT /masters/roles/{roleId}/permissions`.
+
+        > **A custom role cannot yet be assigned to a resource.** `RoleCode` is
+        > a closed six-value enum here, so the S-08 role picker and every
+        > `UserRef` in this contract reject anything else. Opening it touches
+        > Streams A, C and D and is not B-015's to make; until then a custom
+        > role is definable and grantable but not yet selectable.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleWriteRequest' }
+      responses:
+        '201':
+          description: Created, with no permissions granted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /masters/roles/{roleId}:
+    parameters: [{ $ref: '#/components/parameters/RoleId' }]
+    get:
+      tags: [masters]
+      operationId: getRole
+      summary: One role, with its grants (S-09)
+      description: |
+        The matrix's read: the role, plus `permissionCodes` — every capability
+        it currently holds.
+
+        **This carries the `ETag` that both writes on this role require as
+        `If-Match`**, per CONVENTIONS.md §5. The tag covers the grants as well
+        as the fields, so a concurrent matrix save and a concurrent rename
+        conflict with each other, which is correct — they are edits to the same
+        screen.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH` or the `PUT`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [masters]
+      operationId: updateRole
+      summary: Rename a role or change its status
+      description: |
+        Admin only. A partial update — an omitted field keeps its stored value.
+
+        **`code` is absent from the request body on purpose, and sending one is
+        a `409`.** It is the ticket-ID-prefix problem in a different table: the
+        code is denormalised into every issued JWT, into `@PreAuthorize`
+        expressions compiled at startup and into `workflow_transitions.
+        role_code`, and changing it would orphan all three at once while leaving
+        every one of them looking healthy. Deactivate and create a replacement.
+
+        A **system role may be renamed and deactivated but not deleted** —
+        `name` and `description` are display text, `isSystem` is the guarantee.
+        Deactivating one is allowed and deliberately not blocked: it removes the
+        role from pickers without breaking the resources that hold it.
+
+        `If-Match` is required, not optional; a write without one is refused with
+        `428`. Read the current tag from `GET /masters/roles/{roleId}`.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RolePatchRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: '`If-Match` absent. The precondition is required, not opt-in.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    delete:
+      tags: [masters]
+      operationId: deleteRole
+      summary: Delete a role
+      description: |
+        Admin only, and refused in two cases that are reported separately
+        because the remedy differs.
+
+        **A system role is never deletable** — `type` is
+        `system-role-undeletable`. The six seeded roles are the input to every
+        scope decision and to the whole §2 matrix; deleting one would leave
+        existing users pointing at nothing. Deactivate instead.
+
+        **A role still held by resources is refused** — `type` is
+        `role-in-use`, and `userCount` on the problem says how many. Reassign
+        them first. `users.role_id` is a foreign key without a cascade, so
+        without this check the database would refuse it anyway, as a raw
+        constraint violation that names a MySQL index rather than a way forward.
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: System role, or still held by resources.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/RoleInUseProblem' }
+
+  /masters/roles/{roleId}/permissions:
+    parameters: [{ $ref: '#/components/parameters/RoleId' }]
+    put:
+      tags: [masters]
+      operationId: replaceRolePermissions
+      summary: Save the permission matrix for a role (S-09)
+      description: |
+        Admin only. **Replace-all**: `permissionCodes` is the complete set the
+        role should hold afterwards, not a delta. Codes absent from the body are
+        revoked. `PUT` rather than `PATCH` because the screen submits every
+        checkbox's state at once, and a partial save of a permission matrix is
+        an ambiguous thing to have to reason about later.
+
+        Delete is legitimate here, unlike everywhere else in this contract:
+        `role_permissions` is *current state*, not the append-only audit. The
+        change itself is recorded in the audit log.
+
+        **`history.edit_delete` is refused with `422`.** Blueprint §2: "Edit /
+        delete history or ribbon — ❌ (nobody can)". It is seeded with zero
+        grants and `isGrantable: false` so the matrix can render it, disabled,
+        rather than silently omitting it — hiding a permission nobody holds
+        would leave an admin unsure whether the guarantee exists. Granting it
+        through this route is the one way the append-only rule CLAUDE.md calls
+        "the guarantee that erodes first" could be unlocked from a UI, so the
+        refusal is server-side and not merely a disabled checkbox.
+
+        Unknown codes are a `400` naming each one, not a silent skip: a typo
+        that quietly grants nothing is a permission bug discovered in
+        production.
+
+        `If-Match` is required — this is the wholesale replace that
+        CONVENTIONS.md §5 calls the worst case for a lost update, the same
+        reasoning as `PUT /projects/{projectId}/sla-policies`.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RolePermissionsRequest' }
+      responses:
+        '200':
+          description: Saved. Returns the role with its new grants.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422':
+          description: A permission that cannot be granted to anybody.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '428':
+          description: '`If-Match` absent. The precondition is required, not opt-in.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /masters/holidays:
     get:
       tags: [masters]
@@ -2956,6 +3216,15 @@ components:
       in: path
       required: true
       schema: { type: integer, format: int64 }
+    RoleId:
+      name: roleId
+      in: path
+      required: true
+      schema: { type: integer, format: int32 }
+      description: |
+        `roles.id` is an `INT`, not a `BIGINT` like every other identifier here:
+        blueprint §8.2 declares `users.role_id INT` and A-003 kept it, so the key
+        type follows the column rather than the house convention.
     HolidayId:
       name: holidayId
       in: path
@@ -4285,6 +4554,133 @@ components:
               description: '`.xlsx` of rejected rows with an appended Reason column.'
 
     # ── masters ───────────────────────────────────────────────────────────
+    Permission:
+      type: object
+      required: [id, code, name, category, isGrantable]
+      properties:
+        id: { type: integer, format: int32 }
+        code:
+          type: string
+          maxLength: 60
+          examples: ['ticket.force_move']
+          description: |
+            A dotted capability string — `{module}.{action}`. This is what
+            `@PreAuthorize` checks and what the JWT `permissions[]` claim
+            carries, so it is stable: renaming one revokes it everywhere at once.
+        name: { type: string, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 255 }
+        category:
+          type: string
+          maxLength: 40
+          examples: [ticket]
+          description: |
+            The matrix's module grouping — `admin`, `ticket`, `history`,
+            `reports`, `master`, `audit`.
+
+            > **Not the same "module" as `/masters/modules`.** That one is the
+            > product area a ticket is raised against (Fees, Admissions); this
+            > one is an area of the application. Blueprint §7 overloads the word
+            > and the two must not be joined.
+        isGrantable:
+          type: boolean
+          description: |
+            `false` means no role may hold it and the matrix renders the
+            checkbox disabled. Today that is exactly `history.edit_delete`,
+            which exists so S-09 can *show* the append-only guarantee rather
+            than omit the row and leave an admin wondering.
+
+            This is a property of the code, not a column an admin can flip — it
+            is computed server-side and read-only here.
+    PermissionListResponse:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/Permission' } } }
+    Role:
+      type: object
+      required: [id, code, name, isSystem, isActive, userCount, permissionCount]
+      properties:
+        id: { type: integer, format: int32 }
+        code: { type: string, maxLength: 30, examples: [DEVELOPER] }
+        name: { type: string, maxLength: 80, examples: [Developer] }
+        description: { type: [string, 'null'], maxLength: 255 }
+        isSystem:
+          type: boolean
+          description: |
+            One of the six seeded roles of blueprint §2. Renameable and
+            deactivatable; never deletable. Read-only — nothing this API accepts
+            can set it.
+        isActive: { type: boolean }
+        userCount:
+          type: integer
+          description: Resources currently holding this role. Non-zero blocks the delete.
+        permissionCount: { type: integer }
+    RoleListResponse:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/Role' } } }
+    RoleDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Role' }
+        - type: object
+          required: [permissionCodes]
+          properties:
+            permissionCodes:
+              type: array
+              items: { type: string }
+              description: |
+                Every capability granted, in `(category, code)` order. The ticked
+                cells of the matrix; `listPermissions` is the full row set.
+    RoleDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/RoleDetail' }
+    RoleWriteRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: '^[A-Z][A-Z0-9_]{1,29}$'
+          description: Upper-cased server-side. Unique, and immutable once created.
+        name: { type: string, minLength: 1, maxLength: 80 }
+        description: { type: [string, 'null'], maxLength: 255 }
+        isActive: { type: boolean, default: true }
+    RolePatchRequest:
+      type: object
+      description: |
+        Every field optional; an omitted one keeps its stored value. **`code` is
+        deliberately not here** — see `PATCH /masters/roles/{roleId}`. Sending
+        one anyway is a `409` rather than being ignored, because silently
+        dropping a field the caller believed it changed is how a rename appears
+        to succeed and does not.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        description: { type: [string, 'null'], maxLength: 255 }
+        isActive: { type: boolean }
+    RolePermissionsRequest:
+      type: object
+      required: [permissionCodes]
+      properties:
+        permissionCodes:
+          type: array
+          items: { type: string }
+          description: |
+            The complete set the role should hold afterwards. Absent codes are
+            revoked. Duplicates are collapsed; an empty array revokes everything,
+            which is a legitimate save and not mistaken for an unsent form.
+    RoleInUseProblem:
+      allOf:
+        - { $ref: '#/components/schemas/Problem' }
+        - type: object
+          properties:
+            userCount:
+              type: integer
+              description: |
+                Resources still holding the role. Zero when the refusal is
+                `system-role-undeletable` rather than `role-in-use`.
     TaskType:
       type: object
       properties:
