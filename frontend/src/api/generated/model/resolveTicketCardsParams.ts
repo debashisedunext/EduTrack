@@ -46,45 +46,11 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { UserRef } from './userRef';
-import type { ChatMessageKind } from './chatMessageKind';
-import type { ChatMessageEditableUntil } from './chatMessageEditableUntil';
-import type { Attachment } from './attachment';
-import type { TicketCard } from './ticketCard';
 
-export interface ChatMessage {
-  id?: number;
-  body?: string;
-  author?: UserRef;
-  kind?: ChatMessageKind;
-  isEdited?: boolean;
-  isDeleted?: boolean;
-  editableUntil?: ChatMessageEditableUntil;
-  attachments?: Attachment[];
-  readBy?: number[];
-  /** Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.
+export type ResolveTicketCardsParams = {
+/**
+ * Comma- or space-separated ticket codes, e.g. `CRM-26-00347,WEB-26-00012`. Capped server-side; the surplus is dropped rather than rejected, since the client's fallback for a missing card is the plain text it already has.
+
  */
-  mentions?: UserRef[];
-  /** D-054 · the `CRM-26-00347` mentions in the body, resolved into cards
-(§7.6). Parsed server-side from the body, like `mentions`.
-
-**Resolved per reader, on every read — never stored.** Two people
-reading the same message are entitled to different answers, and the
-card carries live state (level, status, stage, holder, lateness)
-rather than how the ticket looked when somebody typed its code.
-
-A code with no card here **renders as plain text**. That covers a
-ticket the reader may not see and one that does not exist, and the
-two are deliberately indistinguishable — otherwise pasting a range
-of codes would report back which are real.
-
-Always empty on a deleted message: the body is withheld, so nothing
-in it named anything.
-
-The blueprint writes this as `TKT-xxxx`; no ticket has ever looked
-like that. C-011 mints `{PROJECT}-{YY}-{NNNNN}`, and that is what is
-matched — see `TicketId`.
- */
-  ticketRefs?: TicketCard[];
-  createdAt?: string;
-}
+codes: string;
+};

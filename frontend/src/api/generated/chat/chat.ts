@@ -76,8 +76,10 @@ import type {
   ListChatThreadsParams,
   NotFoundResponse,
   PostChatMessageBody,
+  ResolveTicketCardsParams,
   SearchChatMessagesParams,
   StatusRequestListResponse,
+  TicketCardListResponse,
   UnauthorizedResponse
 } from '.././model';
 
@@ -273,6 +275,113 @@ export function useListChatThreads<TData = Awaited<ReturnType<typeof listChatThr
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getListChatThreadsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * D-054. A page of messages already carries its cards in `ticketRefs`; this
+exists for the one case that cannot.
+
+A live message arrives as a **single frame delivered to a whole room**,
+so it cannot carry cards — whose cards would they be? Each client
+resolves for itself and gets exactly what its own scope allows.
+
+Passing codes in is not a way to ask what exists. Every code is scoped,
+and one the caller may not see is simply absent from the answer,
+indistinguishable from one that was never issued. Anything that is not a
+well-formed ticket code is dropped by the same parser the server runs
+over a message body, so this endpoint cannot be handed a pattern the read
+path would not have matched either.
+
+ * @summary Ticket cards for codes named in a live message (S-25)
+ */
+export const resolveTicketCards = (
+    params: ResolveTicketCardsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<TicketCardListResponse>(
+      {url: `/chat/ticket-cards`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getResolveTicketCardsQueryKey = (params?: ResolveTicketCardsParams,) => {
+    return [
+    `/chat/ticket-cards`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getResolveTicketCardsQueryOptions = <TData = Awaited<ReturnType<typeof resolveTicketCards>>, TError = UnauthorizedResponse>(params: ResolveTicketCardsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof resolveTicketCards>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getResolveTicketCardsQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof resolveTicketCards>>> = ({ signal }) => resolveTicketCards(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof resolveTicketCards>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ResolveTicketCardsQueryResult = NonNullable<Awaited<ReturnType<typeof resolveTicketCards>>>
+export type ResolveTicketCardsQueryError = UnauthorizedResponse
+
+
+export function useResolveTicketCards<TData = Awaited<ReturnType<typeof resolveTicketCards>>, TError = UnauthorizedResponse>(
+ params: ResolveTicketCardsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof resolveTicketCards>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof resolveTicketCards>>,
+          TError,
+          Awaited<ReturnType<typeof resolveTicketCards>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useResolveTicketCards<TData = Awaited<ReturnType<typeof resolveTicketCards>>, TError = UnauthorizedResponse>(
+ params: ResolveTicketCardsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof resolveTicketCards>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof resolveTicketCards>>,
+          TError,
+          Awaited<ReturnType<typeof resolveTicketCards>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useResolveTicketCards<TData = Awaited<ReturnType<typeof resolveTicketCards>>, TError = UnauthorizedResponse>(
+ params: ResolveTicketCardsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof resolveTicketCards>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Ticket cards for codes named in a live message (S-25)
+ */
+
+export function useResolveTicketCards<TData = Awaited<ReturnType<typeof resolveTicketCards>>, TError = UnauthorizedResponse>(
+ params: ResolveTicketCardsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof resolveTicketCards>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getResolveTicketCardsQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

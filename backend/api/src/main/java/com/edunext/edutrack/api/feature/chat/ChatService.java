@@ -487,6 +487,15 @@ public class ChatService {
                         .map(mentioned -> new ChatDtos.UserRef(
                                 mentioned.id(), mentioned.fullName(), mentioned.username()))
                         .toList(),
+                // D-054. Empty here on purpose, and filled in by
+                // TicketCardResolver at the edge where the caller is known: a
+                // card is per-reader, and this method has a user id rather than
+                // an Authentication precisely because everything else it builds
+                // is the same for everybody. Leaving the field for the resolver
+                // is what stops a card ever being computed for the wrong person
+                // — including on the broadcast path, which reaches a whole room
+                // through one frame and so must carry none at all.
+                List.of(),
                 createdAt);
     }
 
