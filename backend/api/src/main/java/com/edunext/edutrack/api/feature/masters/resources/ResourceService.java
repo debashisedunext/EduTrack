@@ -56,8 +56,15 @@ public class ResourceService {
      * <p>{@code POST /tickets/bulk-reassign} is Stream C's (C-063) and does not
      * exist yet. This constant names it anyway, because the refusal it decorates
      * is meaningless without saying what resolves it.
+     *
+     * <p><b>Widened from package-private by B-017</b>, which emits the same
+     * {@code OpenTicketsProblem} when a team member holding open work is removed
+     * from a project. The alternative was a second copy of the URL in
+     * {@code masters.projects}, and two copies of a string that must agree is the
+     * drift {@code masters.ProjectRoles} exists one package up to prevent. The
+     * two features are both Stream B's and both under {@code masters}.
      */
-    static final String REASSIGN_URL = "/api/v1/tickets/bulk-reassign";
+    public static final String REASSIGN_URL = "/api/v1/tickets/bulk-reassign";
 
     private final ResourceRepository resources;
     private final RoleRepository roles;

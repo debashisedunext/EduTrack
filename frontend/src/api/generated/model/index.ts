@@ -47,7 +47,6 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export * from './addProjectMemberBody';
 export * from './askTicketStatusBody';
 export * from './assignTicketBody';
 export * from './attachment';
@@ -296,6 +295,18 @@ export * from './projectDetailAllOfDescription';
 export * from './projectDetailResponse';
 export * from './projectEndDate';
 export * from './projectListResponse';
+export * from './projectMember';
+export * from './projectMemberAllocationPct';
+export * from './projectMemberEmail';
+export * from './projectMemberListResponse';
+export * from './projectMemberPatch';
+export * from './projectMemberPatchAllocationPct';
+export * from './projectMemberPatchProjectRole';
+export * from './projectMemberProjectRole';
+export * from './projectMemberResponse';
+export * from './projectMemberWrite';
+export * from './projectMemberWriteAllocationPct';
+export * from './projectMemberWriteProjectRole';
 export * from './projectPatchRequest';
 export * from './projectPatchRequestClientName';
 export * from './projectPatchRequestColourTag';

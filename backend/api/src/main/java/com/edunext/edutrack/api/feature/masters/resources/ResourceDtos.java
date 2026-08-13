@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.masters.resources;
 
+import com.edunext.edutrack.api.feature.masters.ProjectRoles;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
@@ -124,8 +125,16 @@ public final class ResourceDtos {
             @NotNull(message = "projectId is required")
             Long projectId,
 
-            @Pattern(regexp = "PM|DEVELOPER|SUPPORT|QA|DEPLOYMENT|VIEWER",
-                    message = "roleInProject must be PM, DEVELOPER, SUPPORT, QA, DEPLOYMENT or VIEWER")
+            /**
+             * The six codes were spelled out here, and B-017 needed the same six
+             * on the Team tab's write and patch. Extracted to
+             * {@link ProjectRoles} rather than copied: nothing re-checks a regex
+             * against {@code ck_project_members_role}, so a divergence between
+             * two copies would surface as one screen accepting a role the other
+             * refuses rather than as a failure. Identical string, so springdoc
+             * emits the same schema and the generated client is unchanged.
+             */
+            @Pattern(regexp = ProjectRoles.REGEX, message = ProjectRoles.MESSAGE)
             String roleInProject) {
     }
 

@@ -112,6 +112,7 @@ each other:**
 | `PATCH /notifications/{id}/read`, `/read-all` | Idempotent; a race is harmless |
 | `PATCH /tickets/{id}/priority` | Reason is mandatory and every change is logged, so concurrent changes are visible rather than lost |
 | `PATCH .../comments/{id}` | Author-only, five-minute window — nobody else can be editing it |
+| `PATCH /projects/{id}/members/{userId}` | Two fields on one membership row. The tag would have to come from `listProjectMembers`, a collection with no `ETag` of its own — so honouring it would mean minting a per-member tag on a read nothing else preconditions, to guard a race whose loser typed a number a moment later and meant it |
 
 `ETag` is on every detail read plus the three that are polled or expensive:
 `/import-batches/{batchId}` (polled every couple of seconds while a job runs),
@@ -149,6 +150,7 @@ product already enforces:
 | `/tickets/{id}/status-requests` | At most one open ask per manager entitled to make one |
 | `/me/awaiting-response` | Your own unanswered asks, capped server-side |
 | `/chat/ticket-cards` | Bounded by the caller's own `codes` list, and capped below that |
+| `/projects/{id}/members` | One project's team — tens of people, and the S-10 Team tab totals their allocations, so it reads the whole set every time regardless |
 
 These return `data` with no `meta`. That is the signal that the list is complete.
 

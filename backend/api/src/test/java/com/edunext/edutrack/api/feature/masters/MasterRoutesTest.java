@@ -47,7 +47,8 @@ class MasterRoutesTest {
             "com.edunext.edutrack.api.feature.masters.CalendarController",
             "com.edunext.edutrack.api.feature.masters.resources.ResourceController",
             "com.edunext.edutrack.api.feature.masters.roles.RoleController",
-            "com.edunext.edutrack.api.feature.masters.projects.ProjectController");
+            "com.edunext.edutrack.api.feature.masters.projects.ProjectController",
+            "com.edunext.edutrack.api.feature.masters.projects.ProjectMemberController");
 
     @Test
     @DisplayName("every masters controller is mapped under /api/v1")
@@ -98,6 +99,25 @@ class MasterRoutesTest {
         assertThat(paths(load("com.edunext.edutrack.api.feature.masters.projects.ProjectController")
                 .getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/projects");
+    }
+
+    /**
+     * B-017 · the Team tab hangs off the project, not off {@code /masters}.
+     *
+     * <p>Asserted separately from the prefix rule because the interesting part
+     * is the whole path: the contract nests the roster under the project id, and
+     * a controller mapped at {@code /api/v1/project-members} would satisfy the
+     * prefix check and answer nowhere any client calls. That is the shape of the
+     * mistake B-023 shipped, and B-014 found the same class of gap again when
+     * {@code PATCH /users/{userId}/status} turned out to have been declared,
+     * mocked and never mounted.
+     */
+    @Test
+    @DisplayName("the team tab is nested under the project it belongs to")
+    void projectMembersAreMountedWhereTheContractPutsThem() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.projects.ProjectMemberController")
+                .getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/projects/{projectId}/members");
     }
 
     /** {@code value} and {@code path} are aliases; either may carry the mapping. */

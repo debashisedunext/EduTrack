@@ -279,6 +279,55 @@ export const updateProjectResponse = zod.object({
 })
 
 /**
+ * The roster, ordered by name. **Every authenticated role may read it** —
+this is who a ticket on the project can be assigned to, and a Developer
+who cannot see the team cannot pick a handoff target.
+
+Not paged. A project team is tens of people, not thousands; a cursor
+here would be pagination machinery on a list that fits on one screen,
+and the Team tab needs the whole set anyway to total the allocations.
+
+**Deactivated memberships are not returned.** Removing somebody sets
+`is_active = 0` rather than deleting the row, so the record that they
+were once on the project survives — but they are not on the team now,
+and a roster that showed them would be answering a different question.
+
+ * @summary The project team (S-10 Team tab)
+ */
+export const listProjectMembersParams = zod.object({
+  "projectId": zod.number()
+})
+
+export const listProjectMembersResponseDataItemAllocationPctMin = 0;
+export const listProjectMembersResponseDataItemAllocationPctMax = 100;
+
+
+
+export const listProjectMembersResponse = zod.object({
+  "data": zod.array(zod.object({
+  "userId": zod.number(),
+  "displayName": zod.string(),
+  "email": zod.string().email().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']),
+  "projectRole": zod.union([zod.enum(['PM', 'DEVELOPER', 'SUPPORT', 'QA', 'DEPLOYMENT', 'VIEWER']).describe('A resource\'s role \*\*on one project\*\*, which may differ from their global\n`RoleCode`: a Developer globally can be mapped as QA on one project.\n\n\*\*Deliberately not `RoleCode`\*\*, and it differs in both directions.\n`VIEWER` exists here and not there — read-only access to one project is a\nper-project grant, and a global viewer role would mean read-only access to\neverything, which is the opposite thing. `ADMIN` exists there and not here\n— an Admin already sees every project through `ScopeResolver`, so an\n`ADMIN` membership would be a grant that changes nothing, and a grant that\nchanges nothing is one somebody later assumes does something.\n\nBlueprint §7.4 S-10 names these six as \"PM \/ Dev \/ Support \/ QA \/ Deploy \/\nViewer\". `ck_project_members_role` holds the same set in the database.\n'),zod.null()]).optional().describe('Their role \*\*on this project\*\*. `null` means \"same as their global\nrole\", which is the common case — a required value here would make\nevery membership restate the person\'s role, and the first time\nsomebody\'s global role changed, every restatement would be a stale\noverride nobody knew was there.\n'),
+  "allocationPct": zod.number().min(listProjectMembersResponseDataItemAllocationPctMin).max(listProjectMembersResponseDataItemAllocationPctMax).nullish().describe('Percent of this resource\'s capacity committed to this project.\n\n\*\*`null` means not stated, and is not 100.\*\* Every row written\nbefore B-017 — B-011\'s resource form, B-007\'s fixture corpus — has\nno allocation because no screen had an input for one, and\nbackfilling those to a full allocation would tell B-061\'s capacity\nreport that a resource on three projects is committed at 300%.\n'),
+  "isActive": zod.boolean().describe('The \*\*resource\'s\*\* status, not the membership\'s — a deactivated\nmembership is not returned at all. A leaver still on the team is\nwhat the tab needs to show, since that is what B-014\'s reassignment\nflow exists to clear up.\n'),
+  "openTicketCount": zod.number().optional().describe('Open tickets this member holds \*\*on this project\*\*. It is what makes\nthe removal refusal predictable: the number is on screen before the\nclick, the way B-014 put it on the resource grid.\n'),
+  "addedAt": zod.string().datetime({})
+}).describe('One active `project_members` row, as the S-10 Team tab renders it.\n\nCarries the person\'s name and \*\*global\*\* role as well as their project\nrole, because the tab\'s whole job is showing where the two differ — a\nDeveloper mapped as QA on this project is the case the column exists\nfor, and a roster showing only one of the two cannot express it.\n'))
+})
+
+/**
+ * **Re-adding somebody who was removed reactivates their row rather than
+conflicting with it.** `uq_project_members (project_id, user_id)` means
+there is only ever one row per pair, and a removal deactivates it; a
+`409` here would make every removal permanent, which reads as a bug in
+the remove button rather than as a rule. `409` is for somebody who is
+*already on the team*, which is a request that has nothing to do.
+
+Requires `project.manage` — blueprint §2's "map resources to a project",
+which B-001 grants to Admin and PM.
+
  * @summary Add a member with a per-project role and allocation
  */
 export const addProjectMemberParams = zod.object({
@@ -289,7 +338,6 @@ export const addProjectMemberHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
 })
 
-export const addProjectMemberBodyAllocationPctDefault = 100;
 export const addProjectMemberBodyAllocationPctMin = 0;
 export const addProjectMemberBodyAllocationPctMax = 100;
 
@@ -297,12 +345,73 @@ export const addProjectMemberBodyAllocationPctMax = 100;
 
 export const addProjectMemberBody = zod.object({
   "userId": zod.number(),
-  "projectRole": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']),
-  "allocationPct": zod.number().min(addProjectMemberBodyAllocationPctMin).max(addProjectMemberBodyAllocationPctMax).default(addProjectMemberBodyAllocationPctDefault)
+  "projectRole": zod.union([zod.enum(['PM', 'DEVELOPER', 'SUPPORT', 'QA', 'DEPLOYMENT', 'VIEWER']).describe('A resource\'s role \*\*on one project\*\*, which may differ from their global\n`RoleCode`: a Developer globally can be mapped as QA on one project.\n\n\*\*Deliberately not `RoleCode`\*\*, and it differs in both directions.\n`VIEWER` exists here and not there — read-only access to one project is a\nper-project grant, and a global viewer role would mean read-only access to\neverything, which is the opposite thing. `ADMIN` exists there and not here\n— an Admin already sees every project through `ScopeResolver`, so an\n`ADMIN` membership would be a grant that changes nothing, and a grant that\nchanges nothing is one somebody later assumes does something.\n\nBlueprint §7.4 S-10 names these six as \"PM \/ Dev \/ Support \/ QA \/ Deploy \/\nViewer\". `ck_project_members_role` holds the same set in the database.\n'),zod.null()]).optional(),
+  "allocationPct": zod.number().min(addProjectMemberBodyAllocationPctMin).max(addProjectMemberBodyAllocationPctMax).nullish()
+}).describe('Add one resource to the team.\n\n\*\*`projectRole` is optional\*\*, unlike the first draft of this operation,\nwhich required it and typed it as `RoleCode`. That enum was wrong in\nboth directions: it contains `ADMIN`, which `ck_project_members_role`\nrefuses — so the contract permitted a value that could only arrive as a\n500 — and it lacks `VIEWER`, which S-10 names and this screen has to\noffer. `ProjectRoleCode` exists for exactly this and B-011 already\nwrites the column through it.\n')
+
+/**
+ * The Team tab's inline edit. An omitted field keeps its stored value; an
+explicit `null` clears it, which is the only way to get back to "same as
+their global role" or "allocation not stated".
+
+**Without this, changing an allocation would mean remove-and-re-add** —
+which deactivates and reactivates the membership row and resets
+`addedAt`, turning an edit into a fabricated departure and return.
+
+No `If-Match`. Two people editing one member's allocation is a race
+whose loser typed a number a moment later and meant it; CONVENTIONS.md
+§5 puts the precondition where a lost update is silent and costly, and
+this row has two fields.
+
+ * @summary Change a member's project role or allocation
+ */
+export const updateProjectMemberParams = zod.object({
+  "projectId": zod.number(),
+  "userId": zod.number()
+})
+
+export const updateProjectMemberBodyAllocationPctMin = 0;
+export const updateProjectMemberBodyAllocationPctMax = 100;
+
+
+
+export const updateProjectMemberBody = zod.object({
+  "projectRole": zod.union([zod.enum(['PM', 'DEVELOPER', 'SUPPORT', 'QA', 'DEPLOYMENT', 'VIEWER']).describe('A resource\'s role \*\*on one project\*\*, which may differ from their global\n`RoleCode`: a Developer globally can be mapped as QA on one project.\n\n\*\*Deliberately not `RoleCode`\*\*, and it differs in both directions.\n`VIEWER` exists here and not there — read-only access to one project is a\nper-project grant, and a global viewer role would mean read-only access to\neverything, which is the opposite thing. `ADMIN` exists there and not here\n— an Admin already sees every project through `ScopeResolver`, so an\n`ADMIN` membership would be a grant that changes nothing, and a grant that\nchanges nothing is one somebody later assumes does something.\n\nBlueprint §7.4 S-10 names these six as \"PM \/ Dev \/ Support \/ QA \/ Deploy \/\nViewer\". `ck_project_members_role` holds the same set in the database.\n'),zod.null()]).optional(),
+  "allocationPct": zod.number().min(updateProjectMemberBodyAllocationPctMin).max(updateProjectMemberBodyAllocationPctMax).nullish()
+}).describe('Both fields optional and both nullable, and the difference matters:\nomitted keeps the stored value, explicit `null` clears it. Clearing is\nthe only way back to \"same as their global role\" and to \"not stated\",\nand a shape that could not express it would make both states\nwrite-once.\n')
+
+export const updateProjectMemberResponseDataAllocationPctMin = 0;
+export const updateProjectMemberResponseDataAllocationPctMax = 100;
+
+
+
+export const updateProjectMemberResponse = zod.object({
+  "data": zod.object({
+  "userId": zod.number(),
+  "displayName": zod.string(),
+  "email": zod.string().email().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']),
+  "projectRole": zod.union([zod.enum(['PM', 'DEVELOPER', 'SUPPORT', 'QA', 'DEPLOYMENT', 'VIEWER']).describe('A resource\'s role \*\*on one project\*\*, which may differ from their global\n`RoleCode`: a Developer globally can be mapped as QA on one project.\n\n\*\*Deliberately not `RoleCode`\*\*, and it differs in both directions.\n`VIEWER` exists here and not there — read-only access to one project is a\nper-project grant, and a global viewer role would mean read-only access to\neverything, which is the opposite thing. `ADMIN` exists there and not here\n— an Admin already sees every project through `ScopeResolver`, so an\n`ADMIN` membership would be a grant that changes nothing, and a grant that\nchanges nothing is one somebody later assumes does something.\n\nBlueprint §7.4 S-10 names these six as \"PM \/ Dev \/ Support \/ QA \/ Deploy \/\nViewer\". `ck_project_members_role` holds the same set in the database.\n'),zod.null()]).optional().describe('Their role \*\*on this project\*\*. `null` means \"same as their global\nrole\", which is the common case — a required value here would make\nevery membership restate the person\'s role, and the first time\nsomebody\'s global role changed, every restatement would be a stale\noverride nobody knew was there.\n'),
+  "allocationPct": zod.number().min(updateProjectMemberResponseDataAllocationPctMin).max(updateProjectMemberResponseDataAllocationPctMax).nullish().describe('Percent of this resource\'s capacity committed to this project.\n\n\*\*`null` means not stated, and is not 100.\*\* Every row written\nbefore B-017 — B-011\'s resource form, B-007\'s fixture corpus — has\nno allocation because no screen had an input for one, and\nbackfilling those to a full allocation would tell B-061\'s capacity\nreport that a resource on three projects is committed at 300%.\n'),
+  "isActive": zod.boolean().describe('The \*\*resource\'s\*\* status, not the membership\'s — a deactivated\nmembership is not returned at all. A leaver still on the team is\nwhat the tab needs to show, since that is what B-014\'s reassignment\nflow exists to clear up.\n'),
+  "openTicketCount": zod.number().optional().describe('Open tickets this member holds \*\*on this project\*\*. It is what makes\nthe removal refusal predictable: the number is on screen before the\nclick, the way B-014 put it on the resource grid.\n'),
+  "addedAt": zod.string().datetime({})
+}).describe('One active `project_members` row, as the S-10 Team tab renders it.\n\nCarries the person\'s name and \*\*global\*\* role as well as their project\nrole, because the tab\'s whole job is showing where the two differ — a\nDeveloper mapped as QA on this project is the case the column exists\nfor, and a roster showing only one of the two cannot express it.\n')
 })
 
 /**
  * Rejected with `409` while that member holds open tickets on the project.
+"Open" is `statuses.is_open`, not a hardcoded status list — the status
+vocabulary is master data an Admin extends (S-13).
+
+The row is **deactivated, not deleted**: it is the record that this
+person was on the project while the tickets assigned to them then were
+being worked, and a `DELETE` would make historical project attribution
+depend on current team composition.
+
+Removing somebody who is not on the team answers `204`. It is a setter,
+and a client retrying after a dropped response has to converge.
+
  * @summary Remove a member
  */
 export const removeProjectMemberParams = zod.object({

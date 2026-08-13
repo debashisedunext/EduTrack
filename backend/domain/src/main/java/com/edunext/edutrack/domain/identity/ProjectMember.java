@@ -50,6 +50,20 @@ public class ProjectMember {
     @Column(name = "role_in_project", length = 30)
     private String roleInProject;
 
+    /**
+     * B-017 · S-10's Team tab — percent of this resource's capacity committed
+     * to this project.
+     *
+     * <p><b>Null means not stated, and is never read as 100.</b> The Team tab is
+     * the only screen with an input for it; every row written by B-011's
+     * resource form and by B-007's fixture corpus predates the column, and
+     * defaulting those to a full allocation would have told B-061's capacity
+     * report that a fixture resource on three projects is committed at 300%.
+     * See {@code V20260813_1810__project_member_allocation.sql}.
+     */
+    @Column(name = "allocation_pct")
+    private Short allocationPct;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;
 

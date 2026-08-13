@@ -1,0 +1,89 @@
+import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
+
+import { cn } from '@/lib/utils'
+
+import { useProject } from './projectQueries'
+
+/**
+ * B-017 · the header and tab strip a project's screens share.
+ *
+ * <h2>Two tabs, not four</h2>
+ *
+ * S-10 describes four — General, Team, SLA, Settings — and two of them are
+ * B-018 and B-019. **They are not rendered as disabled stubs.** B-016 refused to
+ * stub them for the reason that still applies: a greyed-out tab and a broken one
+ * look identical to a user, and three unbuilt screens rendered as tabs make the
+ * feature look finished. They arrive as entries in {@link TABS} when the screens
+ * behind them exist.
+ *
+ * <h2>Why the tab strip is not a router `Outlet`</h2>
+ *
+ * The two tabs are two routes and each owns its own data. Nesting them under a
+ * layout route would put this component in the tree above both, which is right,
+ * and would also make the project read a shared parent fetch — which is wrong:
+ * the General tab reads the project *with its `ETag`* because its `PATCH`
+ * requires one, and a shared read handed to a tab that never writes would be
+ * caching a precondition nobody uses. Two routes, one header, one cheap query
+ * each, and react-query dedupes the overlap.
+ */
+
+const TABS = [
+  { to: (id: number) => `/masters/projects/${id}/edit`, label: 'General' },
+  { to: (id: number) => `/masters/projects/${id}/team`, label: 'Team' },
+] as const
+
+export function ProjectTabs({ active }: { active: 'General' | 'Team' }) {
+  const params = useParams<{ projectId?: string }>()
+  const projectId = params.projectId ? Number(params.projectId) : null
+
+  const { data } = useProject(projectId)
+
+  return (
+    <header className="flex flex-col gap-3">
+      <Link
+        to="/masters/projects"
+        className="inline-flex w-fit items-center gap-1 text-sm text-content-muted hover:text-content"
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden />
+        Projects
+      </Link>
+
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h1 className="text-2xl font-semibold text-content">{data?.project.name ?? 'Project'}</h1>
+        {data?.project.projectCode ? (
+          <code className="text-sm text-content-muted">{data.project.projectCode}</code>
+        ) : null}
+      </div>
+
+      {projectId != null ? (
+        // A real tab list: roving focus and arrow keys come free from the
+        // links, and `aria-current` is what tells a screen reader which one it
+        // is on. WCAG AA is not optional (CLAUDE.md).
+        <nav aria-label="Project sections" className="border-b border-border">
+          <ul className="flex gap-1">
+            {TABS.map((tab) => {
+              const isActive = tab.label === active
+              return (
+                <li key={tab.label}>
+                  <Link
+                    to={tab.to(projectId)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={cn(
+                      'inline-block border-b-2 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                      isActive
+                        ? 'border-primary font-medium text-content'
+                        : 'border-transparent text-content-muted hover:text-content',
+                    )}
+                  >
+                    {tab.label}
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        </nav>
+      ) : null}
+    </header>
+  )
+}

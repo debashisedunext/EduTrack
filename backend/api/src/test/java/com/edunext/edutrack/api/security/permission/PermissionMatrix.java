@@ -199,6 +199,14 @@ final class PermissionMatrix {
     private static final String BULK_STATUS = """
             {"userIds":[1],"isActive":false}""";
 
+    /**
+     * {@code TeamMemberWrite}: {@code userId} is the only required field —
+     * {@code projectRole} null means "same as their global role" and
+     * {@code allocationPct} null means "not stated".
+     */
+    private static final String PROJECT_MEMBER = """
+            {"userId":1,"projectRole":"DEVELOPER","allocationPct":50}""";
+
     /** {@code StatusRequest}: isActive is boxed so omitting it is a 400. */
     private static final String USER_STATUS = """
             {"isActive":false}""";
@@ -358,6 +366,25 @@ final class PermissionMatrix {
             adminAndPm("POST", "/api/v1/projects", PROJECT),
             adminAndPm("PATCH", "/api/v1/projects/{projectId}", EMPTY_PATCH),
 
+            // ── the project team · S-10's Team tab (B-017) ───────────────────
+            // The three writes are the second half of the very row above —
+            // "Create/edit projects, **map resources to project**" — so they
+            // take the same two roles from the same sentence, and the "(own)"
+            // note above applies here unchanged: a PM may today edit the team of
+            // any project, not only their own.
+            //
+            // The roster read is every role, and the argument is §2's rather
+            // than convenience: "Hand off to next stage" is ✅ for all six, and
+            // §4A's handoff modal fills its "assign to" from *members of the
+            // receiving role on that project*. A Developer who cannot read this
+            // cannot hand off — a move §2 explicitly grants them. The create
+            // form's assignee picker is filtered the same way, and "Create
+            // ticket" is likewise ✅ for all six.
+            everyRole("GET", "/api/v1/projects/{projectId}/members"),
+            adminAndPm("POST", "/api/v1/projects/{projectId}/members", PROJECT_MEMBER),
+            adminAndPm("PATCH", "/api/v1/projects/{projectId}/members/{userId}", EMPTY_PATCH),
+            adminAndPm("DELETE", "/api/v1/projects/{projectId}/members/{userId}"),
+
             // ── resources · S-07 and S-08 ───────────────────────────────────
             // The directory is the assignee picker and the @mention source, so
             // it must answer for all six roles. Over-restricting a read is the
@@ -433,6 +460,12 @@ final class PermissionMatrix {
     private static Entry adminOnly(String method, String pattern) {
         return new Entry(method, pattern, null, ADMIN_ONLY);
     }
+
+    /** B-017 · the roster DELETE is the only Admin-and-PM route with no body. */
+    private static Entry adminAndPm(String method, String pattern) {
+        return new Entry(method, pattern, null, ADMIN_AND_PM);
+    }
+
 
     private static Entry adminAndPm(String method, String pattern, String body) {
         return new Entry(method, pattern, body, ADMIN_AND_PM);
