@@ -12,6 +12,8 @@ import {
 import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
+import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
+import { ProjectListPage } from './features/masters/projects/ProjectListPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
@@ -103,6 +105,9 @@ export default function App() {
                         <Link to="/masters/roles">Roles &amp; permissions</Link>
                       </Button>
                       <Button asChild variant="secondary">
+                        <Link to="/masters/projects">Projects</Link>
+                      </Button>
+                      <Button asChild variant="secondary">
                         <Link to="/masters/calendar">Working calendar</Link>
                       </Button>
                     </div>
@@ -118,6 +123,14 @@ export default function App() {
                 A-030's four shell-less auth routes. */}
             <Route path="/masters/resources/new" element={<ResourceFormPage />} />
             <Route path="/masters/resources/:userId/edit" element={<ResourceFormPage />} />
+            {/* B-016 · S-10. `/new` before `/:projectId/edit` for the same
+                reason the resource routes give — otherwise "new" matches as a
+                projectId and the form loads project NaN. `/projects/:id` (the
+                project *dashboard*, Stream A's A-069) is a different screen at
+                a different path and is untouched. */}
+            <Route path="/masters/projects" element={<ProjectListPage />} />
+            <Route path="/masters/projects/new" element={<ProjectFormPage />} />
+            <Route path="/masters/projects/:projectId/edit" element={<ProjectFormPage />} />
             <Route path="/masters/roles" element={<RoleListPage />} />
             <Route path="/masters/roles/:roleId" element={<RolePermissionsPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />

@@ -69,9 +69,22 @@ export interface User {
  * differ in both directions.
  */
 export type ProjectRoleCode = 'PM' | 'DEVELOPER' | 'SUPPORT' | 'QA' | 'DEPLOYMENT' | 'VIEWER';
+export type ProjectStatus = 'ACTIVE' | 'ON_HOLD' | 'CLOSED';
+export type AutoAssignRule = 'ROUND_ROBIN' | 'LEAST_LOADED' | 'MANUAL';
+/**
+ * B-016 · `status` replaced the stored `isActive`.
+ *
+ * Blueprint S-10 gives projects three states and a boolean cannot hold On Hold.
+ * `isActive` is still on the wire — five screens filter on it — but it is
+ * **derived** (`status !== 'CLOSED'`) rather than stored, so the two can no
+ * longer disagree. See `projectDto` in `handlers/rest.ts`.
+ */
 export interface Project {
-  id: number; projectCode: string; name: string; projectManagerId: number;
-  colourTag: string; isActive: boolean; ticketSeq: number;
+  id: number; projectCode: string; name: string; description: string | null;
+  clientName: string | null; projectManagerId: number;
+  colourTag: string; status: ProjectStatus;
+  startDate: string | null; endDate: string | null;
+  autoAssignRule: AutoAssignRule; ticketSeq: number;
 }
 export interface Client {
   id: number; clientCode: string; name: string; domain: string;
@@ -364,10 +377,19 @@ const USERS: User[] = [
   mustChangePassword: lastLoginAt == null,
 }));
 
+/**
+ * B-016 · the three all have a non-zero `ticketSeq`, which is what fixes their
+ * `projectCode` — so the immutability refusal is exercisable out of the box.
+ * `ARCH` is the fourth, deliberately: it is `CLOSED` and has issued nothing, so
+ * the S-10 grid has a retired row to render and the code-editable path has a
+ * project to exercise. It is excluded from `?isActive=true`, which is what the
+ * five pickers send.
+ */
 const PROJECTS: Project[] = [
-  { id: 1, projectCode: 'CRM', name: 'Client CRM Platform', projectManagerId: 2, colourTag: '#4F46E5', isActive: true, ticketSeq: 347 },
-  { id: 2, projectCode: 'PAY', name: 'Payments Gateway', projectManagerId: 2, colourTag: '#F59E0B', isActive: true, ticketSeq: 128 },
-  { id: 3, projectCode: 'WEB', name: 'Marketing Website', projectManagerId: 2, colourTag: '#06B6D4', isActive: true, ticketSeq: 64 },
+  { id: 1, projectCode: 'CRM', name: 'Client CRM Platform', description: 'The client-facing CRM, and the busiest project on the desk.', clientName: 'Acme Retail Ltd', projectManagerId: 2, colourTag: '#4F46E5', status: 'ACTIVE', startDate: '2026-01-05', endDate: '2026-12-18', autoAssignRule: 'LEAST_LOADED', ticketSeq: 347 },
+  { id: 2, projectCode: 'PAY', name: 'Payments Gateway', description: null, clientName: 'Northwind Logistics', projectManagerId: 2, colourTag: '#F59E0B', status: 'ACTIVE', startDate: '2026-02-02', endDate: null, autoAssignRule: 'MANUAL', ticketSeq: 128 },
+  { id: 3, projectCode: 'WEB', name: 'Marketing Website', description: null, clientName: null, projectManagerId: 2, colourTag: '#06B6D4', status: 'ON_HOLD', startDate: null, endDate: null, autoAssignRule: 'MANUAL', ticketSeq: 64 },
+  { id: 4, projectCode: 'ARCH', name: 'Archived Pilot', description: 'Retired. Kept because its tickets are still readable.', clientName: 'Oldco Industries', projectManagerId: 1, colourTag: '#8B5CF6', status: 'CLOSED', startDate: '2025-04-01', endDate: '2025-11-30', autoAssignRule: 'MANUAL', ticketSeq: 0 },
 ];
 
 const CLIENTS: Client[] = [

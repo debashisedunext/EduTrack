@@ -130,7 +130,12 @@ export function ticketDto(t: Ticket, db: Db = getDb()) {
     project: {
       id: project.id, projectCode: project.projectCode, name: project.name,
       projectManager: userRef(project.projectManagerId, db),
-      colourTag: project.colourTag, isActive: project.isActive,
+      // B-016 · `isActive` is derived from `status`, never stored — see
+      // `projectDto` in rest.ts, which is the same derivation for the same
+      // reason. Both are emitted so a ticket's embedded project reads exactly
+      // like one from `/projects`.
+      colourTag: project.colourTag,
+      status: project.status, isActive: project.status !== 'CLOSED',
     },
     client: clientRef(t.clientId, db),
     clientContactId: t.clientContactId,

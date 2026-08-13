@@ -46,34 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ProjectClientName } from './projectClientName';
-import type { UserRef } from './userRef';
-import type { ProjectColourTag } from './projectColourTag';
-import type { ProjectStartDate } from './projectStartDate';
-import type { ProjectEndDate } from './projectEndDate';
-import type { ProjectStatus } from './projectStatus';
-import type { AutoAssignRule } from './autoAssignRule';
 
-export interface Project {
-  id: number;
-  /** Ticket-ID prefix. Immutable once the project has issued one. */
-  projectCode: string;
-  name: string;
-  /** The denormalised label from blueprint §8.2 — free text, and the
-fallback for a project with no row in `clients`. The real client link
-arrives with B-026; this column is not it.
+/**
+ * @maxLength 150
  */
-  clientName?: ProjectClientName;
-  projectManager?: UserRef;
-  /** @pattern ^#[0-9A-Fa-f]{6}$ */
-  colourTag?: ProjectColourTag;
-  startDate?: ProjectStartDate;
-  endDate?: ProjectEndDate;
-  status?: ProjectStatus;
-  /** `status <> 'CLOSED'`, derived. Kept because five screens have always
-filtered on it; see `listProjects` for why it is not
-`status = 'ACTIVE'`.
- */
-  isActive?: boolean;
-  autoAssignRule?: AutoAssignRule;
-}
+export type ProjectPatchRequestClientName = string | null;

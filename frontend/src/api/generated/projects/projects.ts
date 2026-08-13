@@ -72,13 +72,16 @@ import type {
   NotFoundResponse,
   OpenTicketsProblem,
   PreconditionFailedResponse,
+  Problem,
+  ProjectDetailResponse,
   ProjectListResponse,
-  ProjectResponse,
+  ProjectPatchRequest,
   ProjectWriteRequest,
   SlaPolicyListResponse,
   SlaPolicyWrite,
   UnauthorizedResponse,
-  ValidationFailedResponse
+  ValidationFailedResponse,
+  ValidationProblem
 } from '.././model';
 
 import { http } from '../../http';
@@ -87,7 +90,25 @@ import { http } from '../../http';
 
 
 /**
- * @summary List projects
+ * The S-10 grid, and the picker five other screens fill from.
+
+**`isActive` and `status` are two questions, not one.** `status` is the
+blueprint's three-way Active / On Hold / Closed and is what the master
+grid renders and filters on. `isActive` is the derived boolean the
+pickers have always sent — the project switcher, the ticket list, the
+create-ticket form and both resource screens — and it means
+`status <> 'CLOSED'`, so an On Hold project still appears in them.
+
+Deriving it from `status = 'ACTIVE'` instead would have made putting a
+project on hold silently remove it from the create-ticket picker, with
+nothing on the form saying why. Whether On Hold should stop new tickets
+is a product decision that belongs on that form with a visible message,
+not one a boolean makes on its way past.
+
+Sending both is an `AND`: `?status=ON_HOLD&isActive=false` is a
+contradiction and correctly returns nothing.
+
+ * @summary List projects (S-10)
  */
 export const listProjects = (
     params?: ListProjectsParams,
@@ -159,7 +180,7 @@ export function useListProjects<TData = Awaited<ReturnType<typeof listProjects>>
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List projects
+ * @summary List projects (S-10)
  */
 
 export function useListProjects<TData = Awaited<ReturnType<typeof listProjects>>, TError = UnauthorizedResponse>(
@@ -180,7 +201,14 @@ export function useListProjects<TData = Awaited<ReturnType<typeof listProjects>>
 
 
 /**
- * @summary Create a project
+ * `projectCode` is upper-cased server-side and must be unique — a duplicate
+is a `409` keyed on the field, because it is the ticket-ID prefix and two
+projects sharing one would issue colliding codes.
+
+This is the **only** operation that may set it freely. See
+`PATCH /projects/{projectId}` for what happens afterwards.
+
+ * @summary Create a project (S-10)
  */
 export const createProject = (
     projectWriteRequest: ProjectWriteRequest,
@@ -188,7 +216,7 @@ export const createProject = (
 ) => {
       
       
-      return http<ProjectResponse>(
+      return http<ProjectDetailResponse>(
       {url: `/projects`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: projectWriteRequest, signal
@@ -198,7 +226,7 @@ export const createProject = (
   
 
 
-export const getCreateProjectMutationOptions = <TError = ConflictResponse,
+export const getCreateProjectMutationOptions = <TError = ValidationFailedResponse | ValidationProblem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createProject>>, TError,{data: ProjectWriteRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof createProject>>, TError,{data: ProjectWriteRequest}, TContext> => {
 
@@ -225,12 +253,12 @@ const {mutation: mutationOptions} = options ?
 
     export type CreateProjectMutationResult = NonNullable<Awaited<ReturnType<typeof createProject>>>
     export type CreateProjectMutationBody = ProjectWriteRequest
-    export type CreateProjectMutationError = ConflictResponse
+    export type CreateProjectMutationError = ValidationFailedResponse | ValidationProblem
 
     /**
- * @summary Create a project
+ * @summary Create a project (S-10)
  */
-export const useCreateProject = <TError = ConflictResponse,
+export const useCreateProject = <TError = ValidationFailedResponse | ValidationProblem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createProject>>, TError,{data: ProjectWriteRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createProject>>,
@@ -244,32 +272,147 @@ export const useCreateProject = <TError = ConflictResponse,
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * **`projectCode` is immutable once any ticket exists on the project** — it
-is the prefix of every ticket ID already issued, and changing it would
-orphan every reference in mail, chat and history. Attempting it returns
-`409`.
+ * The read half of the edit form, and **the only place the `ETag` that
+`PATCH` requires can be obtained**. Without it the write below declared a
+precondition with nowhere to satisfy it — the same gap B-011 closed for
+`GET /users/{userId}`.
 
- * @summary Update a project
+`ticketsIssued` is on the detail and not on the list row: it is what
+makes `projectCode` immutable, and the form needs it in order to disable
+the field and say why rather than letting an admin type a new code and
+discover the refusal on save.
+
+ * @summary One project (S-10)
  */
-export const updateProject = (
+export const getProject = (
     projectId: number,
-    projectWriteRequest: ProjectWriteRequest,
- ) => {
+ signal?: AbortSignal
+) => {
       
       
-      return http<ProjectResponse>(
-      {url: `/projects/${projectId}`, method: 'PATCH',
-      headers: {'Content-Type': 'application/json', },
-      data: projectWriteRequest
+      return http<ProjectDetailResponse>(
+      {url: `/projects/${projectId}`, method: 'GET', signal
     },
       );
     }
   
 
 
-export const getUpdateProjectMutationOptions = <TError = NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProject>>, TError,{projectId: number;data: ProjectWriteRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof updateProject>>, TError,{projectId: number;data: ProjectWriteRequest}, TContext> => {
+
+export const getGetProjectQueryKey = (projectId?: number,) => {
+    return [
+    `/projects/${projectId}`
+    ] as const;
+    }
+
+    
+export const getGetProjectQueryOptions = <TData = Awaited<ReturnType<typeof getProject>>, TError = NotFoundResponse>(projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProject>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectQueryKey(projectId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProject>>> = ({ signal }) => getProject(projectId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(projectId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProject>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetProjectQueryResult = NonNullable<Awaited<ReturnType<typeof getProject>>>
+export type GetProjectQueryError = NotFoundResponse
+
+
+export function useGetProject<TData = Awaited<ReturnType<typeof getProject>>, TError = NotFoundResponse>(
+ projectId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProject>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getProject>>,
+          TError,
+          Awaited<ReturnType<typeof getProject>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetProject<TData = Awaited<ReturnType<typeof getProject>>, TError = NotFoundResponse>(
+ projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProject>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getProject>>,
+          TError,
+          Awaited<ReturnType<typeof getProject>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetProject<TData = Awaited<ReturnType<typeof getProject>>, TError = NotFoundResponse>(
+ projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProject>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One project (S-10)
+ */
+
+export function useGetProject<TData = Awaited<ReturnType<typeof getProject>>, TError = NotFoundResponse>(
+ projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProject>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetProjectQueryOptions(projectId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * **`projectCode` is immutable once the project has issued a ticket ID** —
+it is the prefix of every code already quoted in mail, chat and client
+conversations, and changing it orphans all of them at once while leaving
+each looking healthy. Attempting it returns `409` with type
+`immutable-project-code`.
+
+The test is `projects.ticket_seq > 0`, **not** whether a ticket row still
+exists. The counter records that a code was *issued*; a ticket created
+and later deleted still had `CRM-26-00347` sent to a client, so a
+cleanup must not quietly re-open the prefix for editing.
+
+Sending the *same* code back is always fine, and has to be — S-10 submits
+the whole form on every save, so any other reading would make every edit
+to a live project a `409`.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the current tag from `GET /projects/{projectId}`.
+
+ * @summary Update a project (S-10)
+ */
+export const updateProject = (
+    projectId: number,
+    projectPatchRequest: ProjectPatchRequest,
+ ) => {
+      
+      
+      return http<ProjectDetailResponse>(
+      {url: `/projects/${projectId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: projectPatchRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateProjectMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | ValidationProblem | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProject>>, TError,{projectId: number;data: ProjectPatchRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateProject>>, TError,{projectId: number;data: ProjectPatchRequest}, TContext> => {
 
 const mutationKey = ['updateProject'];
 const {mutation: mutationOptions} = options ?
@@ -281,7 +424,7 @@ const {mutation: mutationOptions} = options ?
       
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProject>>, {projectId: number;data: ProjectWriteRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProject>>, {projectId: number;data: ProjectPatchRequest}> = (props) => {
           const {projectId,data} = props ?? {};
 
           return  updateProject(projectId,data,)
@@ -293,18 +436,18 @@ const {mutation: mutationOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type UpdateProjectMutationResult = NonNullable<Awaited<ReturnType<typeof updateProject>>>
-    export type UpdateProjectMutationBody = ProjectWriteRequest
-    export type UpdateProjectMutationError = NotFoundResponse | ConflictResponse | PreconditionFailedResponse
+    export type UpdateProjectMutationBody = ProjectPatchRequest
+    export type UpdateProjectMutationError = ValidationFailedResponse | NotFoundResponse | ValidationProblem | PreconditionFailedResponse | Problem
 
     /**
- * @summary Update a project
+ * @summary Update a project (S-10)
  */
-export const useUpdateProject = <TError = NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProject>>, TError,{projectId: number;data: ProjectWriteRequest}, TContext>, }
+export const useUpdateProject = <TError = ValidationFailedResponse | NotFoundResponse | ValidationProblem | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProject>>, TError,{projectId: number;data: ProjectPatchRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateProject>>,
         TError,
-        {projectId: number;data: ProjectWriteRequest},
+        {projectId: number;data: ProjectPatchRequest},
         TContext
       > => {
 

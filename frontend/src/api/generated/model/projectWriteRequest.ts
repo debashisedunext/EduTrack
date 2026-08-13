@@ -46,23 +46,48 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ProjectWriteRequestClientName } from './projectWriteRequestClientName';
+import type { ProjectWriteRequestDescription } from './projectWriteRequestDescription';
+import type { ProjectWriteRequestColourTag } from './projectWriteRequestColourTag';
 import type { ProjectWriteRequestStartDate } from './projectWriteRequestStartDate';
 import type { ProjectWriteRequestEndDate } from './projectWriteRequestEndDate';
-import type { ProjectWriteRequestAutoAssignRule } from './projectWriteRequestAutoAssignRule';
+import type { ProjectStatus } from './projectStatus';
+import type { AutoAssignRule } from './autoAssignRule';
 
+/**
+ * `projectManagerId` is required, per S-10's asterisk. A project with no
+manager has nobody for the SLA engine to escalate to — Stream D's
+scanners already log a warning and give up when they cannot find one.
+
+**`allowedTaskTypeIds` is deliberately not here.** It was, and nothing
+ever sent it: it is a join table rather than a project column, and it
+belongs to B-019's Settings tab alongside mandatory fields, where it
+will arrive as its own sub-resource. Accepting it on this shape would
+have meant taking a list and storing nothing, which is how a save looks
+like it worked and did not.
+
+ */
 export interface ProjectWriteRequest {
-  /** @pattern ^[A-Z][A-Z0-9]{1,9}$ */
+  /**
+   * Upper-cased server-side. Unique; ten characters, because it prefixes every ticket ID.
+   * @pattern ^[A-Z][A-Z0-9]{1,9}$
+   */
   projectCode: string;
   /**
    * @minLength 1
-   * @maxLength 200
+   * @maxLength 150
    */
   name: string;
-  projectManagerId?: number;
+  /** @maxLength 150 */
+  clientName?: ProjectWriteRequestClientName;
+  /** @maxLength 1000 */
+  description?: ProjectWriteRequestDescription;
+  projectManagerId: number;
   /** @pattern ^#[0-9A-Fa-f]{6}$ */
-  colourTag?: string;
+  colourTag?: ProjectWriteRequestColourTag;
   startDate?: ProjectWriteRequestStartDate;
+  /** Target end date. Rejected with `400` if it precedes `startDate`. */
   endDate?: ProjectWriteRequestEndDate;
-  allowedTaskTypeIds?: number[];
-  autoAssignRule?: ProjectWriteRequestAutoAssignRule;
+  status?: ProjectStatus;
+  autoAssignRule?: AutoAssignRule;
 }

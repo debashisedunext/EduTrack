@@ -494,39 +494,154 @@ export const restHandlers = [
     return ok(page.map(userDto), meta);
   }),
 
-  // ── projects ──────────────────────────────────────────────────────────────
+  // ── projects (B-016 · S-10) ───────────────────────────────────────────────
   http.get(url('/projects'), ({ request }) => {
-    const { page, meta } = paginate(getDb().projects, new URL(request.url));
+    const db = getDb();
+    const q = new URL(request.url).searchParams;
+    let rows = db.projects;
+
+    const status = q.get('status');
+    if (status) rows = rows.filter((p) => p.status === status.toUpperCase());
+
+    // `isActive` is `status !== 'CLOSED'` — see projectDto. An On Hold project
+    // stays in the pickers; only a closed one leaves.
+    const isActive = q.get('isActive');
+    if (isActive != null) {
+      const want = isActive === 'true';
+      rows = rows.filter((p) => (p.status !== 'CLOSED') === want);
+    }
+
+    const managerId = q.get('managerId');
+    if (managerId) rows = rows.filter((p) => p.projectManagerId === Number(managerId));
+
+    const text = q.get('q')?.trim().toLowerCase();
+    if (text) {
+      rows = rows.filter((p) =>
+        p.name.toLowerCase().includes(text) || p.projectCode.toLowerCase().includes(text));
+    }
+
+    // The server sorts by (name, id), which is what its keyset cursor pages
+    // over. Sorting here too means the mock and the real backend put the same
+    // row at the top of the grid.
+    rows = [...rows].sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
+
+    const { page, meta } = paginate(rows, new URL(request.url));
     return ok(page.map(projectDto), meta);
+  }),
+  http.get(url('/projects/:projectId'), ({ params }) => {
+    const p = getDb().projects.find((x) => x.id === Number(params.projectId));
+    if (!p) return notFound('Project');
+    return ok(projectDetailDto(p), undefined, { headers: { ETag: projectEtag(p) } });
   }),
   http.post(url('/projects'), async ({ request }) => {
     const db = getDb();
     const body = (await request.json()) as Record<string, string>;
-    if (db.projects.some((p) => p.projectCode === body.projectCode)) {
-      return problem(409, 'duplicate', 'That project code is already in use');
+    const code = String(body.projectCode ?? '').trim().toUpperCase();
+
+    if (db.projects.some((p) => p.projectCode === code)) {
+      return problem(409, 'duplicate', 'Already in use',
+        { detail: `${code} is already the prefix of another project`,
+          errors: { projectCode: [`${code} is already the prefix of another project`] } });
     }
-    const p = {
-      id: db.projects.length + 1, projectCode: body.projectCode, name: body.name,
-      projectManagerId: Number(body.projectManagerId ?? 2),
-      colourTag: body.colourTag ?? '#4F46E5', isActive: true, ticketSeq: 0,
+    const manager = db.users.find((u) => u.id === Number(body.projectManagerId));
+    if (!manager) {
+      return problem(400, 'validation', 'Validation failed',
+        { errors: { projectManagerId: ['no such resource'] } });
+    }
+    if (!manager.isActive) {
+      return problem(400, 'validation', 'Validation failed',
+        { errors: { projectManagerId: [`${manager.displayName} is deactivated and cannot be a project manager`] } });
+    }
+    if (body.startDate && body.endDate && body.endDate < body.startDate) {
+      return problem(400, 'validation', 'Validation failed',
+        { errors: { endDate: ['the target end date cannot be before the start date'] } });
+    }
+
+    const p: import('../db').Project = {
+      id: Math.max(0, ...db.projects.map((x) => x.id)) + 1,
+      projectCode: code,
+      name: body.name,
+      description: body.description || null,
+      clientName: body.clientName || null,
+      projectManagerId: Number(body.projectManagerId),
+      colourTag: body.colourTag ?? '#4F46E5',
+      status: (body.status as import('../db').ProjectStatus) ?? 'ACTIVE',
+      startDate: body.startDate ?? null,
+      endDate: body.endDate ?? null,
+      autoAssignRule: (body.autoAssignRule as import('../db').AutoAssignRule) ?? 'MANUAL',
+      ticketSeq: 0,
     };
     db.projects.push(p);
-    return ok(projectDto(p), undefined, { status: 201 });
+    return ok(projectDetailDto(p), undefined,
+      { status: 201, headers: { ETag: projectEtag(p) } });
   }),
   http.patch(url('/projects/:projectId'), async ({ params, request }) => {
     const db = getDb();
     const p = db.projects.find((x) => x.id === Number(params.projectId));
     if (!p) return notFound('Project');
-    const body = (await request.json()) as Record<string, unknown>;
-    // Immutable once a ticket exists — it is the prefix of every ID already
-    // issued, and changing it orphans every reference in mail, chat and history.
-    if (body.projectCode && body.projectCode !== p.projectCode &&
-        db.tickets.some((t) => t.projectId === p.id)) {
-      return problem(409, 'immutable-project-code',
-        'Project code cannot change once tickets exist on the project');
+
+    // If-Match is required, not opt-in — treating a missing precondition as
+    // "no conflict" protects only the clients that already sent one.
+    const ifMatch = request.headers.get('If-Match');
+    if (!ifMatch?.trim()) {
+      return problem(428, 'precondition-required', 'If-Match is required',
+        { detail: 'GET the project first and send back its ETag.' });
     }
-    Object.assign(p, body);
-    return ok(projectDto(p));
+    if (ifMatch.trim() !== '*' && ifMatch.trim() !== projectEtag(p)) {
+      return problem(412, 'precondition-failed', 'This project changed since you read it',
+        { detail: 'Reload and reapply your edit.' });
+    }
+
+    const body = (await request.json()) as Record<string, unknown>;
+
+    if (body.projectCode != null) {
+      const code = String(body.projectCode).trim().toUpperCase();
+      if (code !== p.projectCode) {
+        // The test is `ticketSeq > 0`, not "a ticket row exists": the counter
+        // records codes ISSUED, and a ticket created and later deleted still
+        // had its code quoted in mail. Same rule as the server's.
+        if (p.ticketSeq > 0) {
+          const detail = `this project has issued ${p.ticketSeq} ticket `
+            + `${p.ticketSeq === 1 ? 'ID' : 'IDs'} under ${p.projectCode}, `
+            + 'so its code can no longer change';
+          return problem(409, 'immutable-project-code',
+            'The project code can no longer change',
+            { detail, ticketsIssued: p.ticketSeq, errors: { projectCode: [detail] } });
+        }
+        if (db.projects.some((x) => x.id !== p.id && x.projectCode === code)) {
+          return problem(409, 'duplicate', 'Already in use',
+            { errors: { projectCode: [`${code} is already the prefix of another project`] } });
+        }
+      }
+      p.projectCode = code;
+    }
+
+    const startDate = (body.startDate as string) ?? p.startDate;
+    const endDate = (body.endDate as string) ?? p.endDate;
+    if (startDate && endDate && endDate < startDate) {
+      return problem(400, 'validation', 'Validation failed',
+        { errors: { endDate: ['the target end date cannot be before the start date'] } });
+    }
+
+    if (body.projectManagerId != null) {
+      const manager = db.users.find((u) => u.id === Number(body.projectManagerId));
+      if (!manager?.isActive) {
+        return problem(400, 'validation', 'Validation failed',
+          { errors: { projectManagerId: [manager ? 'that resource is deactivated' : 'no such resource'] } });
+      }
+      p.projectManagerId = manager.id;
+    }
+
+    if (body.name != null) p.name = String(body.name);
+    if (body.description !== undefined) p.description = (body.description as string) || null;
+    if (body.clientName !== undefined) p.clientName = (body.clientName as string) || null;
+    if (body.colourTag !== undefined) p.colourTag = (body.colourTag as string) ?? p.colourTag;
+    if (body.status != null) p.status = body.status as import('../db').ProjectStatus;
+    if (body.autoAssignRule != null) p.autoAssignRule = body.autoAssignRule as import('../db').AutoAssignRule;
+    p.startDate = startDate;
+    p.endDate = endDate;
+
+    return ok(projectDetailDto(p), undefined, { headers: { ETag: projectEtag(p) } });
   }),
   http.post(url('/projects/:projectId/members'), () => new HttpResponse(null, { status: 201 })),
   http.delete(url('/projects/:projectId/members/:userId'), () => noContent()),
@@ -1544,12 +1659,45 @@ function applyProjects(u: User, projects: unknown) {
   );
 }
 
+/**
+ * B-016 · one row of the S-10 grid.
+ *
+ * **`isActive` is derived, not stored, and it is `status !== 'CLOSED'`.** Five
+ * screens send `?isActive=true` to fill a picker; deriving it from
+ * `status === 'ACTIVE'` would make putting a project on hold silently remove it
+ * from the create-ticket form. The server does the same thing for the same
+ * reason — `ProjectService.isActive`.
+ *
+ * `startDate` and `endDate` used to be hardcoded `null` here, which is why
+ * nothing noticed the columns had no reader until this task.
+ */
 function projectDto(p: import('../db').Project) {
   return {
-    id: p.id, projectCode: p.projectCode, name: p.name,
+    id: p.id, projectCode: p.projectCode, name: p.name, clientName: p.clientName,
     projectManager: userRef(p.projectManagerId), colourTag: p.colourTag,
-    startDate: null, endDate: null, isActive: p.isActive, autoAssignRule: 'LEAST_LOADED',
+    startDate: p.startDate, endDate: p.endDate,
+    status: p.status, isActive: p.status !== 'CLOSED',
+    autoAssignRule: p.autoAssignRule,
   };
+}
+
+/**
+ * The edit form's read. `ticketsIssued` is what makes `projectCode` immutable,
+ * so the form disables the input and says why rather than letting the refusal
+ * arrive on save.
+ */
+function projectDetailDto(p: import('../db').Project) {
+  return { ...projectDto(p), description: p.description, ticketsIssued: p.ticketSeq };
+}
+
+/**
+ * Content-derived, like the server's — a timestamp tag moves when a save
+ * rewrites identical values, failing an edit that conflicts with nothing.
+ * `ticketsIssued` is in the hash on purpose: a ticket allocated while the form
+ * is open is precisely the event that fixes the code.
+ */
+function projectEtag(p: import('../db').Project) {
+  return `"${JSON.stringify(projectDetailDto(p)).length.toString(16)}-${p.ticketSeq}-${p.projectCode}"`;
 }
 
 function clientDto(c: import('../db').Client) {
