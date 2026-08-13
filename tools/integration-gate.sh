@@ -146,9 +146,28 @@ python3 contracts/check-conventions.py \
     && ok "conventions" || bad "API conventions violated"
 
 (cd frontend && npm run api:generate >/dev/null 2>&1) || bad "Client generation failed"
-if [ -n "$(git status --porcelain frontend/src/api/generated)" ]; then
+
+# Two questions, and `git status --porcelain` answers neither one correctly here.
+#
+# This gate runs on a STAGED merge (`git merge --no-ff --no-commit`), so every
+# file the merge brought in is already in the index — and `git status` reports
+# staged changes just as loudly as unstaged ones. The first PR to touch a
+# generated file therefore failed this check while being perfectly up to date,
+# and the message told its author to run the exact command that had just been
+# run. A gate that reports a failure nobody can act on is the cry-wolf problem
+# the retry logic above exists to prevent, arriving by a different door.
+#
+# What actually needs asking:
+#   · did regeneration CHANGE a committed file — working tree vs index, which
+#     is what `git diff` compares and what `git status` conflates; and
+#   · did regeneration produce a file that was never committed at all, which
+#     `git diff` cannot see because git does not track it yet.
+GENERATED=frontend/src/api/generated
+UNTRACKED=$(git ls-files --others --exclude-standard -- "$GENERATED")
+if ! git diff --quiet -- "$GENERATED" || [ -n "$UNTRACKED" ]; then
     bad "Generated API client is stale — run 'npm run api:generate' and commit"
-    git --no-pager diff --stat frontend/src/api/generated
+    git --no-pager diff --stat -- "$GENERATED"
+    [ -n "$UNTRACKED" ] && printf '   never committed:\n%s\n' "$UNTRACKED"
 else
     ok "generated client is up to date"
 fi
