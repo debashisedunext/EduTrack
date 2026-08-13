@@ -115,6 +115,22 @@ public enum NotificationEvent {
      * this enum is mandatory the moment it is declared, with nothing else to
      * remember.
      *
+     * <p><strong>{@link Category#STATUS_REQUEST} was missing, and D-055 found
+     * it.</strong> That prose sentence is a summary of §4B.6's table, and the
+     * table is the precise version: its "can be disabled" column marks
+     * <em>"Status requested by manager → Assignee →
+     * {@code [CRM-26-00347] Status requested}"</em> as <strong>❌ never</strong>,
+     * exactly like the four the sentence lists. The sentence simply did not
+     * enumerate it. Checked row by row against the whole table, that is the
+     * only place the category rule and the table disagreed — every other ❌
+     * never is an assignment or an escalation, and every ✅ is neither.
+     *
+     * <p>The category has a second member, {@code STATUS_REQUEST_ANSWERED},
+     * and §11 gives that one no email at all — a dash in the Email column of
+     * the "Reply to status request" row. Whether an event that sends nothing is
+     * "mandatory" is moot, so covering the category rather than naming the one
+     * code keeps the rule stated the way D-036 argued it should be.
+     *
      * <p><strong>Mail only, deliberately.</strong> §7.7 calls mail "the
      * guaranteed channel" and gives the guarantee to it: an in-app toast only
      * reaches somebody who is logged in, so it was never the thing making an
@@ -125,7 +141,9 @@ public enum NotificationEvent {
      * record.
      */
     public boolean isMandatoryMail() {
-        return category == Category.ASSIGNMENT || category == Category.ESCALATION;
+        return category == Category.ASSIGNMENT
+                || category == Category.ESCALATION
+                || category == Category.STATUS_REQUEST;
     }
 
     /**

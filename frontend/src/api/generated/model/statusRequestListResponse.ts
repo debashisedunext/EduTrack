@@ -46,12 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { StatusRequest } from './statusRequest';
 
-export type AskTicketStatusBody = {
-  /**
-   * Defaults to "Please share the current status and expected closure."
-
-   * @maxLength 1000
-   */
-  note?: string;
-};
+export interface StatusRequestListResponse {
+  data: StatusRequest[];
+}

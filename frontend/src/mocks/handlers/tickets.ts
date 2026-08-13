@@ -641,25 +641,114 @@ export const ticketHandlers = [
     return ok(page, meta);
   }),
 
-  http.post(url('/tickets/:ticketId/ask-status'), ({ params }) => {
+  /**
+   * D-055 · Ask Status.
+   *
+   * Mirrors the three server behaviours a UI would otherwise learn wrong:
+   * **422 when nobody is assigned** (there is no one to ask), **idempotent
+   * repeat clicks** while the caller's own request is unanswered, and a `202`
+   * carrying the request so the caller can render the badge without refetching.
+   *
+   * It does not mirror the "Reporting Manager, PM or Admin only" rule: the mock
+   * has no notion of who reports to whom, and a guess at it here would either
+   * block the walkthrough user or teach the UI that anyone may ask. The server
+   * answers 404 for a caller who may not, which the client already handles.
+   */
+  http.post(url('/tickets/:ticketId/ask-status'), async ({ params, request }) => {
     const db = getDb();
     const t = findTicket(String(params.ticketId), db);
     if (!t) return notFound('Ticket');
-    const thread = db.chatThreads.find((x) => x.ticketId === t.ticketId);
-    if (thread) {
-      db.chatMessages.push({
-        id: nextId(db, 'message'), threadId: thread.id,
-        body: 'Status update requested on this ticket.',
-        authorId: db.currentUserId, kind: 'STATUS_REQUEST',
-        isEdited: false, isDeleted: false, readBy: [], createdAt: new Date().toISOString(),
-      });
+    if (t.assigneeId == null) {
+      return unprocessable('This ticket has no assignee yet, so there is nobody to ask.');
     }
-    return new Response(null, { status: 202 });
+    if (t.assigneeId === db.currentUserId) {
+      return unprocessable('You are the assignee on this ticket.');
+    }
+
+    const open = db.statusRequests.find(
+      (r) => r.ticketId === t.ticketId && r.requestedById === db.currentUserId && r.answeredAt === null,
+    );
+    if (open) return ok(statusRequestDto(open, db), undefined, { status: 202 });
+
+    let thread = db.chatThreads.find((x) => x.ticketId === t.ticketId);
+    if (!thread) {
+      thread = {
+        id: nextId(db, 'thread'), kind: 'TICKET', title: t.ticketId, ticketId: t.ticketId,
+        participantIds: [db.currentUserId, t.assigneeId], lastMessageAt: null,
+      };
+      db.chatThreads.push(thread);
+    }
+    for (const id of [db.currentUserId, t.assigneeId]) {
+      if (!thread.participantIds.includes(id)) thread.participantIds.push(id);
+    }
+
+    const body = ((await request.json().catch(() => null)) as { note?: string } | null)?.note?.trim();
+    const now = new Date().toISOString();
+    const message = {
+      id: nextId(db, 'message'), threadId: thread.id,
+      body: body || 'Please share the current status and expected closure.',
+      authorId: db.currentUserId, kind: 'STATUS_REQUEST' as const,
+      isEdited: false, isDeleted: false, readBy: [db.currentUserId], createdAt: now,
+    };
+    db.chatMessages.push(message);
+    thread.lastMessageAt = now;
+
+    const created = {
+      id: nextId(db, 'statusRequest'), ticketId: t.ticketId, ticketTitle: t.title,
+      threadId: thread.id, requestMessageId: message.id,
+      requestedById: db.currentUserId, askedOfId: t.assigneeId, requestedAt: now,
+      answerMessageId: null, answeredAt: null, responseWorkingMinutes: null,
+    };
+    db.statusRequests.push(created);
+    return ok(statusRequestDto(created, db), undefined, { status: 202 });
+  }),
+
+  /** D-056 · the badge — what is still outstanding on this ticket. */
+  http.get(url('/tickets/:ticketId/status-requests'), ({ params }) => {
+    const db = getDb();
+    const t = findTicket(String(params.ticketId), db);
+    if (!t) return notFound('Ticket');
+    return ok(
+      db.statusRequests
+        .filter((r) => r.ticketId === t.ticketId && r.answeredAt === null)
+        .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt))
+        .map((r) => statusRequestDto(r, db)),
+    );
   }),
 ];
 
 // ── shared mappers ──────────────────────────────────────────────────────────
 export const round = (n: number) => Math.round(n * 10) / 10;
+
+/**
+ * D-055 / D-056 · one status request on the wire.
+ *
+ * `note` is read from the request message and withheld once it is deleted, the
+ * same as the server does — a mock that kept its own copy would keep showing a
+ * note the real API has stopped returning, and §7.6's tombstone would appear to
+ * leak only in production.
+ */
+export function statusRequestDto(
+  r: import('../db').StatusRequest,
+  db: import('../db').Db,
+) {
+  const message = db.chatMessages.find((m) => m.id === r.requestMessageId);
+  return {
+    id: r.id,
+    ticketId: r.ticketId,
+    ticketTitle: r.ticketTitle,
+    threadId: r.threadId,
+    requestMessageId: r.requestMessageId,
+    requestedBy: userRef(r.requestedById, db),
+    askedOf: userRef(r.askedOfId, db),
+    requestedAt: r.requestedAt,
+    note: !message || message.isDeleted ? null : message.body,
+    isAnswered: r.answeredAt !== null,
+    answerMessageId: r.answerMessageId,
+    answeredAt: r.answeredAt,
+    responseWorkingMinutes: r.responseWorkingMinutes,
+  };
+}
 
 export function historyDto(h: import('../db').HistoryEntry) {
   return {

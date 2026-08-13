@@ -190,6 +190,26 @@ export interface ChatMessage {
   kind: 'TEXT' | 'STATUS_REQUEST' | 'SYSTEM'; isEdited: boolean; isDeleted: boolean;
   readBy: number[]; createdAt: string;
 }
+/**
+ * D-055 / D-056 · one "Ask Status" and, once answered, how long it took.
+ *
+ * `note` is not stored: the server reads it from the request message so §7.6's
+ * tombstone reaches it, and a mock that kept its own copy would show a note the
+ * real API withholds. `requestMessageId` is the link, exactly as on the server.
+ *
+ * `responseWorkingMinutes` is **working** minutes. The seeded answered request
+ * spans 09:20 to 09:35 on a working morning, so the two happen to agree — but a
+ * fixture that only ever exercises a window inside working hours is one nobody
+ * can tell apart from wall clock, so the second seeded row deliberately spans a
+ * weekend.
+ */
+export interface StatusRequest {
+  id: number; ticketId: string; ticketTitle: string;
+  threadId: number; requestMessageId: number;
+  requestedById: number; askedOfId: number; requestedAt: string;
+  answerMessageId: number | null; answeredAt: string | null;
+  responseWorkingMinutes: number | null;
+}
 
 // ── the store ───────────────────────────────────────────────────────────────
 export interface Db {
@@ -202,6 +222,7 @@ export interface Db {
   attachments: Attachment[]; notifications: Notification[];
   notificationPreferences: NotificationPreference[];
   emailLog: EmailLogEntry[]; chatThreads: ChatThread[]; chatMessages: ChatMessage[];
+  statusRequests: StatusRequest[];
   currentUserId: number;
   seq: Record<string, number>;
   /**
@@ -427,7 +448,7 @@ export function createDb(): Db {
     pushSubscriptions: [],
     tickets: [], cycles: [], transitions: [], effortLogs: [], history: [],
     comments: [], attachments: [], notifications: [], notificationPreferences: [], emailLog: [],
-    chatThreads: [], chatMessages: [],
+    chatThreads: [], chatMessages: [], statusRequests: [],
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
     seq: {},
     twoFactor: {}, // opt-in, so nobody starts enrolled
@@ -465,12 +486,13 @@ export function createDb(): Db {
  */
 function seedWalkthrough(db: Db) {
   const T = 'CRM-26-00347';
+  const WALKTHROUGH_TITLE = 'Checkout fails with 500 on saved-card payment';
   const [ANITA, MEERA, RAVI, ANIL, KARAN, PRIYA] = [1, 2, 3, 4, 5, 6];
   void ANITA;
 
   db.tickets.push({
     ticketId: T,
-    title: 'Checkout fails with 500 on saved-card payment',
+    title: WALKTHROUGH_TITLE,
     description:
       'Acme report that returning customers paying with a saved card get a 500 at the ' +
       'final step. Reproduced on production with two accounts. Guest checkout is fine.',
@@ -615,9 +637,35 @@ function seedWalkthrough(db: Db) {
     participantIds: [MEERA, RAVI, ANIL], lastMessageAt: iso('2026-08-13T09:35:00'),
   };
   db.chatThreads.push(thread);
+  const askedAndAnswered = nextId(db, 'message');
+  const theAnswer = nextId(db, 'message');
+  const stillWaiting = nextId(db, 'message');
   db.chatMessages.push(
-    { id: nextId(db, 'message'), threadId: thread.id, body: 'Status update requested on this ticket.', authorId: MEERA, kind: 'STATUS_REQUEST', isEdited: false, isDeleted: false, readBy: [RAVI], createdAt: iso('2026-08-13T09:20:00') },
-    { id: nextId(db, 'message'), threadId: thread.id, body: 'Root cause found — token refresh again, different code path. Fix by EOD.', authorId: RAVI, kind: 'TEXT', isEdited: false, isDeleted: false, readBy: [MEERA], createdAt: iso('2026-08-13T09:35:00') },
+    { id: askedAndAnswered, threadId: thread.id, body: 'Please share the current status and expected closure.', authorId: MEERA, kind: 'STATUS_REQUEST', isEdited: false, isDeleted: false, readBy: [RAVI], createdAt: iso('2026-08-13T09:20:00') },
+    { id: theAnswer, threadId: thread.id, body: 'Root cause found — token refresh again, different code path. Fix by EOD.', authorId: RAVI, kind: 'TEXT', isEdited: false, isDeleted: false, readBy: [MEERA], createdAt: iso('2026-08-13T09:35:00') },
+    { id: stillWaiting, threadId: thread.id, body: 'Any movement on the saved-card path? The client is asking.', authorId: MEERA, kind: 'STATUS_REQUEST', isEdited: false, isDeleted: false, readBy: [], createdAt: iso('2026-08-07T17:40:00') },
+  );
+
+  // D-055 / D-056. One answered and one still open, so a client can render both
+  // the badge and a filled-in response time without inventing either.
+  db.statusRequests.push(
+    {
+      id: nextId(db, 'statusRequest'), ticketId: T, ticketTitle: WALKTHROUGH_TITLE,
+      threadId: thread.id, requestMessageId: askedAndAnswered,
+      requestedById: MEERA, askedOfId: RAVI, requestedAt: iso('2026-08-13T09:20:00'),
+      answerMessageId: theAnswer, answeredAt: iso('2026-08-13T09:35:00'),
+      responseWorkingMinutes: 15,
+    },
+    {
+      // Asked at 17:40 on Friday 7 Aug and never answered. Deliberately spans a
+      // weekend: a fixture whose every window sits inside working hours is one
+      // nobody can tell apart from wall clock, and the whole point of the
+      // metric is that the two differ.
+      id: nextId(db, 'statusRequest'), ticketId: T, ticketTitle: WALKTHROUGH_TITLE,
+      threadId: thread.id, requestMessageId: stillWaiting,
+      requestedById: MEERA, askedOfId: RAVI, requestedAt: iso('2026-08-07T17:40:00'),
+      answerMessageId: null, answeredAt: null, responseWorkingMinutes: null,
+    },
   );
 }
 

@@ -47,11 +47,8 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type AskTicketStatusBody = {
-  /**
-   * Defaults to "Please share the current status and expected closure."
+/**
+ * The request message's body as it stands, and `null` once its author has deleted it. Read from the message rather than copied, so §7.6's tombstone reaches it like anything else said on the ticket.
 
-   * @maxLength 1000
-   */
-  note?: string;
-};
+ */
+export type StatusRequestNote = string | null;

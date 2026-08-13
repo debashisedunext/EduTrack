@@ -61,6 +61,7 @@ environment, always.
 | 30 | `V20260811_1420__two_factor_totp.sql` | A | A-029 | schema | `users.totp_secret`/`totp_enabled`/`totp_confirmed_at` + `totp_recovery_codes` — the enrol-then-confirm states and the way back in |
 | 31 | `V20260811_1520__resource_profile_fields.sql` | B | B-011 | schema | `users`: `date_of_joining`, `avatar_url`, `location`, `weekly_off`, `skills` — the five S-08 fields A-003 had no reader for. Plus `ck_project_members_role`, which fixes the vocabulary of `role_in_project` at its first writer |
 | 32 | `V20260811_1600__push_subscriptions.sql` | D | D-045 | schema | `push_subscriptions` — one row per browser that granted permission; unique on the **endpoint alone**, so a second user on a shared machine takes the subscription over rather than inheriting somebody else's alerts |
+| 33 | `V20260813_1030__ticket_status_requests.sql` | D | D-055 | schema | `ticket_status_requests` — one open ask per manager per ticket (a generated column plus a unique key, A-009's `pcd_open` idiom), and the answered row carries the wait in **working** minutes, stamped once so a holiday added later cannot restate it |
 
 <!-- load-order:end -->
 

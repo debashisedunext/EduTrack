@@ -144,6 +144,8 @@ product already enforces:
 | `/tickets/{id}/attachments` | Capped at 20 per ticket |
 | `/notifications/pending` | Capped, and drained by acknowledging rather than paged |
 | `/me/notification-preferences` | One row per `NotificationEvent` — 25, bounded by the enum |
+| `/tickets/{id}/status-requests` | At most one open ask per manager entitled to make one |
+| `/me/awaiting-response` | Your own unanswered asks, capped server-side |
 
 These return `data` with no `meta`. That is the signal that the list is complete.
 
@@ -152,6 +154,12 @@ It is a **queue**: the client acknowledges what it showed, and the next call
 returns whatever is still unacknowledged. A cursor would point past rows that
 have since left the result set entirely, which is a worse answer than no cursor.
 It carries `hasMore` instead, so a capped page still says so.
+
+`/me/awaiting-response` (D-056) is capped rather than paged for a different
+reason: it is ordered **longest wait first** so the most-ignored question is at
+the top, and a cursor over that order would page a manager *away* from the rows
+the list exists to surface. A manager with more outstanding than the cap has a
+problem no page control fixes.
 
 ---
 

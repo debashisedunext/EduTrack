@@ -49,6 +49,8 @@ NO_PAGINATION = {
     "/tickets/{ticketId}/attachments":   "capped at 20 per ticket",
     "/notifications/pending":            "a queue drained by acknowledging, not paged; a cursor would outlive the rows it points past",
     "/me/notification-preferences":      "one row per NotificationEvent — 25, and bounded by the enum",
+    "/tickets/{ticketId}/status-requests": "open requests on one ticket, and at most one per manager who can ask about it",
+    "/me/awaiting-response":             "your own unanswered asks; bounded server-side and ordered longest-wait-first, which a cursor would fight",
 }
 
 # §8 — GET only. No mutation verb, ever.

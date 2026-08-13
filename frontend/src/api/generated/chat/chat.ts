@@ -77,10 +77,115 @@ import type {
   NotFoundResponse,
   PostChatMessageBody,
   SearchChatMessagesParams,
+  StatusRequestListResponse,
   UnauthorizedResponse
 } from '.././model';
 
 import { http } from '../../http';
+
+
+
+
+/**
+ * D-056's "Awaiting response" list — every status request *you* asked that
+nobody has answered yet, **longest wait first**. The opposite order to
+every other list in chat, and deliberately: this list exists to be
+cleared, and the thing most in need of clearing is the question that has
+been ignored longest.
+
+Under `/me` rather than `/users/{id}/…` for the reason
+`/me/notification-preferences` is: a path taking a user id is one an
+Admin would reasonably expect to work, and "who is ignoring whom" is not
+a report to hand out as a side effect of a URL shape nobody decided to
+build.
+
+ * @summary Status requests you are still waiting on (S-25)
+ */
+export const listAwaitingResponse = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<StatusRequestListResponse>(
+      {url: `/me/awaiting-response`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListAwaitingResponseQueryKey = () => {
+    return [
+    `/me/awaiting-response`
+    ] as const;
+    }
+
+    
+export const getListAwaitingResponseQueryOptions = <TData = Awaited<ReturnType<typeof listAwaitingResponse>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAwaitingResponse>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAwaitingResponseQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAwaitingResponse>>> = ({ signal }) => listAwaitingResponse(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAwaitingResponse>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAwaitingResponseQueryResult = NonNullable<Awaited<ReturnType<typeof listAwaitingResponse>>>
+export type ListAwaitingResponseQueryError = UnauthorizedResponse
+
+
+export function useListAwaitingResponse<TData = Awaited<ReturnType<typeof listAwaitingResponse>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAwaitingResponse>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAwaitingResponse>>,
+          TError,
+          Awaited<ReturnType<typeof listAwaitingResponse>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAwaitingResponse<TData = Awaited<ReturnType<typeof listAwaitingResponse>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAwaitingResponse>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAwaitingResponse>>,
+          TError,
+          Awaited<ReturnType<typeof listAwaitingResponse>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAwaitingResponse<TData = Awaited<ReturnType<typeof listAwaitingResponse>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAwaitingResponse>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Status requests you are still waiting on (S-25)
+ */
+
+export function useListAwaitingResponse<TData = Awaited<ReturnType<typeof listAwaitingResponse>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAwaitingResponse>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListAwaitingResponseQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
 
 
 

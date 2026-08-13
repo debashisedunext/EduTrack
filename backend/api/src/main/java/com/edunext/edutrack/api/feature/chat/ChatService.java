@@ -42,11 +42,16 @@ public class ChatService {
     private final ChatRepository repository;
     private final RealtimePublisher realtime;
     private final MentionNotifier mentionNotifier;
+    private final StatusRequestAnswerer statusRequests;
 
-    ChatService(ChatRepository repository, RealtimePublisher realtime, MentionNotifier mentionNotifier) {
+    ChatService(ChatRepository repository,
+                RealtimePublisher realtime,
+                MentionNotifier mentionNotifier,
+                StatusRequestAnswerer statusRequests) {
         this.repository = repository;
         this.realtime = realtime;
         this.mentionNotifier = mentionNotifier;
+        this.statusRequests = statusRequests;
     }
 
     // --------------------------------------------------------------- threads
@@ -131,6 +136,21 @@ public class ChatService {
      */
     @Transactional
     public Optional<ChatDtos.ChatMessage> post(long threadId, long senderId, String body) {
+        return post(threadId, senderId, body, MessageKind.TEXT);
+    }
+
+    /**
+     * @param kind {@link MessageKind#TEXT} for anything a person typed into the
+     *             composer. D-055 posts its card as
+     *             {@link MessageKind#STATUS_REQUEST} through this same path
+     *             rather than writing its own row, so a status request threads,
+     *             broadcasts, resolves its mentions, is searchable and falls
+     *             under §7.6's edit window exactly like everything else said on
+     *             the ticket. The kind changes how a client draws it and
+     *             nothing else.
+     */
+    @Transactional
+    Optional<ChatDtos.ChatMessage> post(long threadId, long senderId, String body, MessageKind kind) {
         Optional<ChatRepository.ThreadAnchor> anchor = repository.threadForParticipant(threadId, senderId);
         if (anchor.isEmpty()) {
             return Optional.empty();
@@ -142,7 +162,7 @@ public class ChatService {
         List<ChatRepository.MentionedUser> mentions = resolveMentions(threadId, body);
 
         long messageId = repository.insertMessage(
-                threadId, senderId, body, MessageKind.TEXT, idsOf(mentions));
+                threadId, senderId, body, kind, idsOf(mentions));
 
         // The author has self-evidently read their own message. Without this
         // the sender's own post counts as unread to them.
@@ -159,6 +179,19 @@ public class ChatService {
         broadcast(anchor.get(), message, "chat.message");
         mentionNotifier.mentioned(anchor.get(), messageId, senderId,
                 message.author() == null ? null : message.author().displayName(), mentions);
+
+        // D-056. Every message is a candidate answer to somebody's outstanding
+        // status request, so the hook lives here rather than on one endpoint —
+        // a resource who simply replies in the thread has answered, and
+        // requiring them to press a particular button to be recorded as having
+        // done so would make the metric measure button-pressing.
+        //
+        // Runs in this transaction: a request must not be recorded as answered
+        // by a message that then rolls back. It cannot close the poster's own
+        // request, which is what stops a manager's follow-up from answering the
+        // question it was chasing.
+        statusRequests.messagePosted(threadId, senderId, messageId,
+                message.author() == null ? null : message.author().displayName());
         return Optional.of(message);
     }
 
