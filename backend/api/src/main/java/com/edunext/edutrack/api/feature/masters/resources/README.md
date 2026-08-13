@@ -348,9 +348,16 @@ controller's Javadoc and enforced when it lands:
 | `PATCH /users/{id}/status` | Admin only. |
 | `POST /users/bulk-status` | Admin only. |
 
-Until A-034's `ScopeResolver` and A-033's `@PreAuthorize` land this runs under
-`dev-noauth`. **No filtering is hand-rolled here as a stand-in** — CLAUDE.md is
-explicit that a local workaround becomes the permanent hole.
+**A-033 has landed and the table above is now enforced**, unchanged in
+substance. The writes assert `hasAuthority('resource.manage')` rather than
+`hasRole('ADMIN')` — the §2 cell is a capability, and checking the capability
+keeps working when S-09 grants it to a seventh role where a hard-coded role
+check would quietly keep refusing. Only Admin holds it today, so the effect is
+identical and the failure mode later is not.
+
+Row scope is still A-034's, and the reads are deliberately unscoped.
+**No filtering is hand-rolled here as a stand-in** — CLAUDE.md is explicit that
+a local workaround becomes the permanent hole.
 
 ## Tests
 

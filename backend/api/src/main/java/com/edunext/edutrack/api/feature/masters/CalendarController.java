@@ -7,6 +7,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -32,6 +33,32 @@ import java.util.List;
  * {@code If-Match} back on the write: two admins editing the working week from
  * different tabs is exactly the lost update CONVENTIONS.md §5 exists for, and
  * here a silently discarded change alters every SLA figure computed afterwards.
+ *
+ * <h2>Permissions (A-033)</h2>
+ *
+ * <p><b>Reads are open to all six roles; writes require {@code master.write},
+ * which only Admin holds.</b> Blueprint §2 puts "Master data (task types, SLA,
+ * workflow, holidays)" in the Admin column and nowhere else. The asymmetry is
+ * the point: every role's tickets are dated by this calendar — a Friday-18:00
+ * ticket with a 4-hour SLA must not breach on Saturday morning — so a Developer
+ * who cannot read the holiday list cannot be shown why their planned close date
+ * is Monday. Reading the org's non-working days is not a capability worth
+ * withholding; changing them moves every SLA figure in the system.
+ *
+ * <p><b>{@code PATCH /leaves} is an open question, resolved conservatively.</b>
+ * Its summary says "Edit or approve a leave record", and approval reads like
+ * something a reporting manager does — but §2 has no leave row and there is no
+ * {@code leave.approve} code in the {@code permissions} table, so there is
+ * nothing narrower to assert. Leave is treated as the per-person half of the
+ * working-calendar master and gated on {@code master.write}, which makes leave
+ * approval Admin-only. <b>If a PM is meant to approve their reportees' leave,
+ * that is a new §2 row, a new permission code and a migration — not a widened
+ * check here.</b> Widening it locally is how a permission model stops matching
+ * the matrix it claims to implement. Raised with Stream B rather than decided
+ * quietly.
+ *
+ * <p>Row scope stays A-034's: {@code GET /leaves} takes a {@code userId} filter
+ * and does not yet restrict whose leave a caller may read.
  *
  * <p><b>The {@code /api/v1} prefix was missing until B-010.</b> Nothing declares
  * it globally — there is no context path and no {@code configurePathMatch}
@@ -59,6 +86,7 @@ class CalendarController {
     // ------------------------------------------------------------------
 
     @GetMapping(path = "/holidays", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("isAuthenticated()")
     @Operation(operationId = "getWorkingCalendar",
             summary = "Working calendar — org holidays and weekly-off pattern")
     CalendarDtos.CalendarResponse holidays(
@@ -70,6 +98,7 @@ class CalendarController {
     @PostMapping(path = "/holidays",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
     @Operation(operationId = "createHoliday", summary = "Add an org or project holiday (S-14)")
     ResponseEntity<CalendarDtos.HolidayResponse> createHoliday(
             @Valid @RequestBody CalendarDtos.HolidayWrite write) {
@@ -80,6 +109,7 @@ class CalendarController {
     @PatchMapping(path = "/holidays/{holidayId}",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
     @Operation(operationId = "updateHoliday", summary = "Edit a holiday")
     CalendarDtos.HolidayResponse updateHoliday(@PathVariable long holidayId,
                                                @Valid @RequestBody CalendarDtos.HolidayPatch patch) {
@@ -89,6 +119,7 @@ class CalendarController {
     }
 
     @DeleteMapping("/holidays/{holidayId}")
+    @PreAuthorize("hasAuthority('master.write')")
     @Operation(operationId = "deleteHoliday", summary = "Remove a holiday")
     ResponseEntity<Void> deleteHoliday(@PathVariable long holidayId) {
         if (!calendar.deleteHoliday(holidayId)) {
@@ -102,6 +133,7 @@ class CalendarController {
     // ------------------------------------------------------------------
 
     @GetMapping(path = "/working-calendar", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("isAuthenticated()")
     @Operation(operationId = "getWorkingWeek",
             summary = "The org working week — weekly-off pattern and working-day bounds")
     ResponseEntity<CalendarDtos.WorkingWeekResponse> workingWeek() {
@@ -121,6 +153,9 @@ class CalendarController {
     @PutMapping(path = "/working-calendar",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
+    // The single highest-leverage master write in the system: this is the
+    // denominator of every SLA and duration figure EduTrack computes.
+    @PreAuthorize("hasAuthority('master.write')")
     @Operation(operationId = "updateWorkingWeek", summary = "Replace the org working week")
     ResponseEntity<CalendarDtos.WorkingWeekResponse> updateWorkingWeek(
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
@@ -146,6 +181,9 @@ class CalendarController {
     // ------------------------------------------------------------------
 
     @GetMapping(path = "/leaves", produces = MediaType.APPLICATION_JSON_VALUE)
+    // Read is open: the assignee picker and the planned-close-date preview both
+    // depend on knowing who is away. Whose leave you may read is A-034's.
+    @PreAuthorize("isAuthenticated()")
     @Operation(operationId = "listResourceLeaves",
             summary = "Resource leave, the per-person half of the working calendar")
     CalendarDtos.ResourceLeaveListResponse leaves(
@@ -170,6 +208,8 @@ class CalendarController {
     @PostMapping(path = "/leaves",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
+    // master.write, conservatively — see the class javadoc's open question.
+    @PreAuthorize("hasAuthority('master.write')")
     @Operation(operationId = "createResourceLeave", summary = "Record leave for a resource")
     ResponseEntity<CalendarDtos.ResourceLeaveResponse> createLeave(
             @Valid @RequestBody CalendarDtos.ResourceLeaveWrite write) {
@@ -180,6 +220,9 @@ class CalendarController {
     @PatchMapping(path = "/leaves/{leaveId}",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
+    // The "or approve" in this summary is the open question. master.write until
+    // §2 grows a leave row — see the class javadoc.
+    @PreAuthorize("hasAuthority('master.write')")
     @Operation(operationId = "updateResourceLeave", summary = "Edit or approve a leave record")
     CalendarDtos.ResourceLeaveResponse updateLeave(@PathVariable long leaveId,
                                                    @Valid @RequestBody CalendarDtos.ResourceLeavePatch patch) {
@@ -189,6 +232,7 @@ class CalendarController {
     }
 
     @DeleteMapping("/leaves/{leaveId}")
+    @PreAuthorize("hasAuthority('master.write')")
     @Operation(operationId = "deleteResourceLeave", summary = "Remove a leave record")
     ResponseEntity<Void> deleteLeave(@PathVariable long leaveId) {
         if (!calendar.deleteLeave(leaveId)) {

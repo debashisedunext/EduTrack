@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +26,17 @@ import java.util.Map;
  */
 @RestController
 @Tag(name = "notifications")
+/*
+ * A-033 · authenticated, no permission, on all three.
+ *
+ * The two subscription routes are /me paths scoped to the caller. The VAPID
+ * public key is genuinely public information — it is handed to every browser
+ * that subscribes, and it is the *public* half of a key pair — but it is left
+ * behind authentication rather than added to SecurityConfig.PUBLIC_API_PATHS:
+ * its only caller is the already-signed-in client about to subscribe, so
+ * opening it would widen the unauthenticated surface for no one's benefit.
+ */
+@PreAuthorize("isAuthenticated()")
 class PushController {
 
     private final PushSubscriptionService push;

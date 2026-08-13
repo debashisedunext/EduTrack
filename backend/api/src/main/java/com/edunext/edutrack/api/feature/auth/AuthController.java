@@ -15,6 +15,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -76,6 +77,12 @@ class AuthController {
 
     @PostMapping(path = "/login", consumes = MediaType.APPLICATION_JSON_VALUE)
     @SecurityRequirements
+    // A-033. Redundant against SecurityConfig.PUBLIC_API_PATHS, and written
+    // anyway: RouteAuthorizationTest requires every handler to state a decision,
+    // so that a route arriving without one is a build failure rather than a route
+    // that silently inherits "any authenticated caller". @SecurityRequirements
+    // says the same thing to the OpenAPI generator and nothing to the server.
+    @PreAuthorize("permitAll()")
     @Operation(
             operationId = "login",
             summary = "Exchange credentials for a session",
@@ -231,6 +238,9 @@ class AuthController {
      */
     @PostMapping(path = "/refresh")
     @SecurityRequirements
+    // The refresh cookie is the credential; an access token is exactly what the
+    // caller does not have.
+    @PreAuthorize("permitAll()")
     @Operation(
             operationId = "refreshSession",
             summary = "Rotate the refresh token and issue a new access token",
@@ -331,6 +341,12 @@ class AuthController {
      * token here would be an endpoint for logging <i>other people</i> out.
      */
     @PostMapping(path = "/logout")
+    // No permission: ending your own session is not a capability the §2 matrix
+    // grants or withholds, and a role that could not log out would be a trap.
+    // Authentication is required because the token being revoked is the caller's
+    // own — see the javadoc above on why accepting an unverified one would be an
+    // endpoint for logging other people out.
+    @PreAuthorize("isAuthenticated()")
     @Operation(
             operationId = "logout",
             summary = "End the session",
@@ -424,6 +440,8 @@ class AuthController {
      */
     @PostMapping(path = "/forgot-password", consumes = MediaType.APPLICATION_JSON_VALUE)
     @SecurityRequirements
+    // A user who has forgotten their password has nothing to authenticate with.
+    @PreAuthorize("permitAll()")
     @Operation(
             operationId = "forgotPassword",
             summary = "Request a password-reset link",
@@ -491,6 +509,8 @@ class AuthController {
      */
     @PostMapping(path = "/reset-password", consumes = MediaType.APPLICATION_JSON_VALUE)
     @SecurityRequirements
+    // The single-use token in the body is the credential.
+    @PreAuthorize("permitAll()")
     @Operation(
             operationId = "resetPassword",
             summary = "Complete a password reset",

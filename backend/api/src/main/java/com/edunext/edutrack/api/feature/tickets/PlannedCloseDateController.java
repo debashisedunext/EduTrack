@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -63,7 +64,22 @@ class PlannedCloseDateController {
      *                   and a preview measured from the wrong start is worse
      *                   than no preview
      */
+    /*
+     * A-033 · ticket.create, which all six roles hold.
+     *
+     * The permission names what this endpoint is for rather than what it does:
+     * it is the create form's inline preview, so the caller who may see it is
+     * the caller who may raise the ticket. isAuthenticated() would have been
+     * looser for no gain, and a read permission would be the wrong shape — there
+     * is no ticket yet to have read access to.
+     *
+     * It answers a date and nothing else. The leave and holiday data behind it
+     * never crosses the wire, which is the point the class javadoc makes about
+     * why this is a round trip: the browser cannot see leave for a resource the
+     * user has no permission to read, and after this it still cannot.
+     */
     @GetMapping(path = "/planned-close-date", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('ticket.create')")
     @Operation(operationId = "previewPlannedCloseDate",
             summary = "Resolve the SLA policy and preview the planned close date")
     PlannedCloseDateDtos.PlannedCloseDateResponse preview(

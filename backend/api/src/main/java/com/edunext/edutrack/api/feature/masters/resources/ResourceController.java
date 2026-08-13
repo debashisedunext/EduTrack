@@ -8,6 +8,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -70,10 +71,16 @@ import java.util.Set;
  *       before any id in the body is read.</li>
  * </ul>
  *
- * <p>Until A-034's {@code ScopeResolver} and A-033's {@code @PreAuthorize} land
- * this runs under {@code dev-noauth}. <b>No filtering is hand-rolled here as a
- * stand-in</b>, per CLAUDE.md — a local workaround becomes the permanent
- * security hole.
+ * <p><b>A-033 has landed and the two bullets above are now the annotations
+ * below, unchanged in substance.</b> The writes assert {@code resource.manage}
+ * rather than {@code hasRole('ADMIN')}: the §2 matrix's cell is a capability, and
+ * checking the capability keeps working when S-09 grants it to a seventh role,
+ * where a hard-coded role check would quietly keep refusing. Only Admin holds it
+ * today, so the effect is identical and the failure mode later is not.
+ *
+ * <p>Row scope is still A-034's, and the reads are deliberately unscoped —
+ * a directory scoped to your own row is not a directory. <b>No filtering is
+ * hand-rolled here as a stand-in</b>, per CLAUDE.md.
  */
 @RestController
 @RequestMapping("/api/v1/users")
@@ -108,6 +115,9 @@ class ResourceController {
 
     /** A page of the grid. */
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
+    // All six roles — the assignee picker, @mention resolution and the reportee
+    // tree read this same list. See the class javadoc.
+    @PreAuthorize("isAuthenticated()")
     @Operation(operationId = "listUsers", summary = "List resources (S-07)")
     ResourceDtos.ResourceListResponse list(@RequestParam(required = false) String cursor,
                                            @RequestParam(required = false) Integer limit,
@@ -142,6 +152,9 @@ class ResourceController {
      * every matching row, not the page you happen to be on.
      */
     @GetMapping("/export")
+    // The same rows as the list, in a file. A stricter rule here than on the
+    // grid would be theatre: the caller can already read every row on screen.
+    @PreAuthorize("isAuthenticated()")
     @Operation(operationId = "exportUsers", summary = "Download the filtered resource list (S-07)")
     void export(@RequestParam(name = "format") String format,
                 @RequestParam(required = false) String q,
@@ -159,6 +172,9 @@ class ResourceController {
     @PostMapping(path = "/bulk-status",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
+    // Refused before any id in the body is read — which is the reason a bulk
+    // write needs the check at least as much as a singular one does.
+    @PreAuthorize("hasAuthority('resource.manage')")
     @Operation(operationId = "setUserStatusBulk", summary = "Activate or deactivate a selection (S-07)")
     ResourceDtos.BulkStatusResponse setStatusBulk(@Valid @RequestBody ResourceDtos.BulkStatusRequest request) {
         return new ResourceDtos.BulkStatusResponse(resources.setStatus(request));
@@ -189,6 +205,7 @@ class ResourceController {
      * the third shape of a resource in one controller.
      */
     @PatchMapping(path = "/{userId}/status", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('resource.manage')")
     @Operation(operationId = "setUserStatus", summary = "Activate or deactivate")
     ResponseEntity<Void> setStatus(@PathVariable long userId,
                                    @Valid @RequestBody ResourceDtos.StatusRequest request) {
@@ -212,6 +229,10 @@ class ResourceController {
      * {@code /clients/{id}} both have theirs.
      */
     @GetMapping(path = "/{userId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    // All six roles, per the class javadoc: the projection names its columns and
+    // password_hash, failed_attempts, locked_until and password_changed_at are
+    // not among them, so there is no credential here to withhold.
+    @PreAuthorize("isAuthenticated()")
     @Operation(operationId = "getUser", summary = "One resource, in full (S-08)")
     ResponseEntity<ResourceDtos.ResourceDetailResponse> get(@PathVariable long userId) {
         ResourceDtos.ResourceDetail resource = writes.detail(userId);
@@ -233,6 +254,9 @@ class ResourceController {
      */
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
+    // Creating an account is the most consequential write in this controller —
+    // it answers 201 with a one-time password.
+    @PreAuthorize("hasAuthority('resource.manage')")
     @Operation(operationId = "createUser", summary = "Create a resource (S-08)")
     ResponseEntity<ResourceDtos.ResourceCreatedResponse> create(
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
@@ -262,6 +286,9 @@ class ResourceController {
     @PatchMapping(path = "/{userId}",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
+    // Covers the reporting-manager edit, which is a §2 "Create/edit resources,
+    // roles, reporting manager" cell and Admin-only there too.
+    @PreAuthorize("hasAuthority('resource.manage')")
     @Operation(operationId = "updateUser", summary = "Update a resource (S-08)")
     ResponseEntity<ResourceDtos.ResourceDetailResponse> update(
             @PathVariable long userId,

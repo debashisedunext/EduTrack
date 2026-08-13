@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -66,7 +67,24 @@ public class BounceWebhookController {
         this.objectMapper = objectMapper;
     }
 
+    /*
+     * A-033 · permitAll, and it means "do not check the wrong credential"
+     * rather than "do not check".
+     *
+     * The caller is a mail provider with no EduTrack account and no token to
+     * present, so there is no principal for a permission to attach to. What
+     * authenticates it is the HMAC over the raw bytes, verified on the first
+     * line of the method by WebhookSignatureVerifier — which fails closed when
+     * no secret is configured, so an unconfigured deployment rejects every
+     * request rather than accepting every request.
+     *
+     * Written explicitly for the same reason as login's: RouteAuthorizationTest
+     * requires a decision on every handler, and "public" is a decision. The
+     * alternative — leaving it off and letting SecurityConfig's path list carry
+     * it alone — is exactly how a route ends up public because nobody looked.
+     */
     @PostMapping("/bounce")
+    @PreAuthorize("permitAll()")
     public ResponseEntity<Void> bounce(
             @RequestBody byte[] rawBody,
             @RequestHeader(name = "X-Webhook-Signature", required = false) String signature) {

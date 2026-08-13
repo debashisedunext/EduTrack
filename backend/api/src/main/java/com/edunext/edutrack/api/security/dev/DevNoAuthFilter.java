@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.security.dev;
 
+import com.edunext.edutrack.api.security.permission.RolePermissions;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,6 +16,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -56,10 +58,25 @@ public class DevNoAuthFilter extends OncePerRequestFilter {
                 properties.projectIds(),
                 properties.reporteeIds());
 
-        // Same authority convention the real chain will use (A-032/A-033):
-        // hasRole("ADMIN") == authority "ROLE_ADMIN".
-        List<GrantedAuthority> authorities =
-                List.of(new SimpleGrantedAuthority("ROLE_" + principal.role().toUpperCase(Locale.ROOT)));
+        // Same authority convention the real chain uses (A-032/A-033):
+        // hasRole("ADMIN") == authority "ROLE_ADMIN", and the dotted capability
+        // codes verbatim.
+        //
+        // A-033 added the permissions, and they are not a nicety. Until then this
+        // granted the role authority alone, which cost nothing because nothing
+        // asserted a permission — the first @PreAuthorize would have turned every
+        // dev-noauth request into a 403 for Streams B, C and D, on a profile whose
+        // entire purpose is to unblock them. The role is a property, not a user
+        // row, so there is usually nothing in role_permissions to read for it;
+        // RolePermissions is the static mirror, pinned to the seed migration by
+        // RolePermissionsTest so this profile cannot quietly grant more than
+        // production does.
+        List<GrantedAuthority> authorities = new ArrayList<>();
+        authorities.add(new SimpleGrantedAuthority(
+                RolePermissions.ROLE_AUTHORITY_PREFIX + principal.role().toUpperCase(Locale.ROOT)));
+        RolePermissions.of(principal.role()).stream()
+                .map(SimpleGrantedAuthority::new)
+                .forEach(authorities::add);
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(
