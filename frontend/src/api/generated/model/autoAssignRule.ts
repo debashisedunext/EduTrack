@@ -46,8 +46,20 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { Project } from './project';
 
-export interface ProjectResponse {
-  data: Project;
-}
+/**
+ * Who a new ticket goes to when nobody is named. **The Settings tab that
+edits this is B-019**; B-016 stores and returns it so that the field is
+answered honestly in the meantime — the alternative was returning a
+constant no client could tell from a stored value.
+
+ */
+export type AutoAssignRule = typeof AutoAssignRule[keyof typeof AutoAssignRule];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const AutoAssignRule = {
+  ROUND_ROBIN: 'ROUND_ROBIN',
+  LEAST_LOADED: 'LEAST_LOADED',
+  MANUAL: 'MANUAL',
+} as const;

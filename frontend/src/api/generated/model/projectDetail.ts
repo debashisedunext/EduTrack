@@ -46,13 +46,7 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { Project } from './project';
+import type { ProjectDetailAllOf } from './projectDetailAllOf';
 
-export type ProjectAutoAssignRule = typeof ProjectAutoAssignRule[keyof typeof ProjectAutoAssignRule];
-
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const ProjectAutoAssignRule = {
-  ROUND_ROBIN: 'ROUND_ROBIN',
-  LEAST_LOADED: 'LEAST_LOADED',
-  MANUAL: 'MANUAL',
-} as const;
+export type ProjectDetail = Project & ProjectDetailAllOf;

@@ -48,6 +48,7 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { CursorParameter } from './cursorParameter';
 import type { LimitParameter } from './limitParameter';
+import type { ProjectStatus } from './projectStatus';
 
 export type ListProjectsParams = {
 /**
@@ -59,5 +60,18 @@ cursor?: CursorParameter;
  * @maximum 200
  */
 limit?: LimitParameter;
+/**
+ * `true` is every project except `CLOSED`.
+ */
 isActive?: boolean;
+status?: ProjectStatus;
+/**
+ * Projects this resource manages.
+ */
+managerId?: number;
+/**
+ * Case-insensitive substring of the code or the name.
+ * @maxLength 100
+ */
+q?: string;
 };

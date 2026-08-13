@@ -46,7 +46,8 @@ class MasterRoutesTest {
     private static final List<String> CONTROLLERS = List.of(
             "com.edunext.edutrack.api.feature.masters.CalendarController",
             "com.edunext.edutrack.api.feature.masters.resources.ResourceController",
-            "com.edunext.edutrack.api.feature.masters.roles.RoleController");
+            "com.edunext.edutrack.api.feature.masters.roles.RoleController",
+            "com.edunext.edutrack.api.feature.masters.projects.ProjectController");
 
     @Test
     @DisplayName("every masters controller is mapped under /api/v1")
@@ -79,6 +80,24 @@ class MasterRoutesTest {
         assertThat(paths(load("com.edunext.edutrack.api.feature.masters.roles.RoleController")
                 .getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/masters");
+    }
+
+    /**
+     * B-016 · and it is <b>not</b> under {@code /masters}.
+     *
+     * <p>The contract has served projects at the top level since D-001 and five
+     * screens already call them there — the project switcher, the ticket list,
+     * the create-ticket form and both resource screens. Moving the controller to
+     * sit tidily beside the other master screens would break all five to make a
+     * URL prettier, so this asserts the path the clients use rather than the one
+     * the package name suggests.
+     */
+    @Test
+    @DisplayName("the project master is at /api/v1/projects, not under /masters")
+    void projectMasterIsMountedWhereTheContractPutsIt() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.projects.ProjectController")
+                .getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/projects");
     }
 
     /** {@code value} and {@code path} are aliases; either may carry the mapping. */

@@ -47,4 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * Target end date. Rejected with `400` if it precedes `startDate`.
+ */
 export type ProjectWriteRequestEndDate = string | null;

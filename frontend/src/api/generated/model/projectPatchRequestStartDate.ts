@@ -47,12 +47,4 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type ProjectWriteRequestAutoAssignRule = typeof ProjectWriteRequestAutoAssignRule[keyof typeof ProjectWriteRequestAutoAssignRule];
-
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const ProjectWriteRequestAutoAssignRule = {
-  ROUND_ROBIN: 'ROUND_ROBIN',
-  LEAST_LOADED: 'LEAST_LOADED',
-  MANUAL: 'MANUAL',
-} as const;
+export type ProjectPatchRequestStartDate = string | null;

@@ -40,6 +40,10 @@ public class Project {
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
+    /** S-10 free text. Added by B-016's {@code V20260813_1420}. */
+    @Column(name = "description", length = 1000)
+    private String description;
+
     @Column(name = "client_name", length = 150)
     private String clientName;
 
@@ -53,13 +57,35 @@ public class Project {
     @Column(name = "target_end_date")
     private LocalDate targetEndDate;
 
-    /** ACTIVE | ON_HOLD | COMPLETED | ARCHIVED. */
+    /**
+     * {@code ACTIVE | ON_HOLD | CLOSED} — blueprint S-10, and the whole
+     * vocabulary since B-016's {@code ck_projects_status}.
+     *
+     * <p>This javadoc previously named two further values, {@code COMPLETED} and
+     * {@code ARCHIVED}, which the blueprint does not contain and which nothing
+     * has ever written. Two vocabularies for one column with nothing mapping
+     * between them is what B-030 found on {@code import_batches.status}; the
+     * constraint was added at the first writer rather than after.
+     *
+     * <p>There is no delete on this table. A project that has issued ticket IDs
+     * cannot be removed without orphaning every one of them, so {@code CLOSED}
+     * is the retirement path.
+     */
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
 
     /** #RRGGBB, from the blueprint §12.1 token set. */
     @Column(name = "colour_tag", length = 7)
     private String colourTag;
+
+    /**
+     * {@code ROUND_ROBIN | LEAST_LOADED | MANUAL} — who an unassigned new ticket
+     * goes to. <b>B-019's Settings tab edits this</b>; B-016 stores it so the
+     * contract's long-standing {@code autoAssignRule} field stops being answered
+     * with a constant.
+     */
+    @Column(name = "auto_assign_rule", nullable = false, length = 20)
+    private String autoAssignRule = "MANUAL";
 
     /**
      * Per-project ticket counter. <b>Mapped for reading only.</b> Allocating a
@@ -120,6 +146,14 @@ public class Project {
         this.name = name;
     }
 
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
     public String getClientName() {
         return clientName;
     }
@@ -166,6 +200,14 @@ public class Project {
 
     public void setColourTag(String colourTag) {
         this.colourTag = colourTag;
+    }
+
+    public String getAutoAssignRule() {
+        return autoAssignRule;
+    }
+
+    public void setAutoAssignRule(String autoAssignRule) {
+        this.autoAssignRule = autoAssignRule;
     }
 
     public Long getTicketSeq() {

@@ -87,7 +87,7 @@ export const listTicketsQueryParams = zod.object({
 
 export const listTicketsResponseDataItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const listTicketsResponseDataItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const listTicketsResponseDataItemScreenNameMax = 120;
+export const listTicketsResponseDataItemProjectAutoAssignRuleDefault = "MANUAL";export const listTicketsResponseDataItemScreenNameMax = 120;
 
 export const listTicketsResponseDataItemFeatureMax = 120;
 
@@ -107,8 +107,9 @@ export const listTicketsResponse = zod.object({
   "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once any ticket exists.'),
+  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
   "name": zod.string(),
+  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
   "projectManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -116,11 +117,12 @@ export const listTicketsResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "colourTag": zod.string().regex(listTicketsResponseDataItemProjectColourTagRegExp).optional(),
+  "colourTag": zod.string().regex(listTicketsResponseDataItemProjectColourTagRegExp).nullish(),
   "startDate": zod.string().date().nullish(),
   "endDate": zod.string().date().nullish(),
-  "isActive": zod.boolean().optional(),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).optional()
+  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
+  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(listTicketsResponseDataItemProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
 }).optional(),
   "client": zod.object({
   "id": zod.number().optional(),
@@ -367,7 +369,7 @@ export const updateTicketBody = zod.object({
 
 export const updateTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const updateTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const updateTicketResponseDataScreenNameMax = 120;
+export const updateTicketResponseDataProjectAutoAssignRuleDefault = "MANUAL";export const updateTicketResponseDataScreenNameMax = 120;
 
 export const updateTicketResponseDataFeatureMax = 120;
 
@@ -387,8 +389,9 @@ export const updateTicketResponse = zod.object({
   "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once any ticket exists.'),
+  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
   "name": zod.string(),
+  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
   "projectManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -396,11 +399,12 @@ export const updateTicketResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "colourTag": zod.string().regex(updateTicketResponseDataProjectColourTagRegExp).optional(),
+  "colourTag": zod.string().regex(updateTicketResponseDataProjectColourTagRegExp).nullish(),
   "startDate": zod.string().date().nullish(),
   "endDate": zod.string().date().nullish(),
-  "isActive": zod.boolean().optional(),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).optional()
+  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
+  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(updateTicketResponseDataProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
 }).optional(),
   "client": zod.object({
   "id": zod.number().optional(),
@@ -475,7 +479,7 @@ export const getTicketDetailHeader = zod.object({
 
 export const getTicketDetailResponseDataTicketTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const getTicketDetailResponseDataTicketProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const getTicketDetailResponseDataTicketScreenNameMax = 120;
+export const getTicketDetailResponseDataTicketProjectAutoAssignRuleDefault = "MANUAL";export const getTicketDetailResponseDataTicketScreenNameMax = 120;
 
 export const getTicketDetailResponseDataTicketFeatureMax = 120;
 
@@ -496,8 +500,9 @@ export const getTicketDetailResponse = zod.object({
   "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once any ticket exists.'),
+  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
   "name": zod.string(),
+  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
   "projectManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -505,11 +510,12 @@ export const getTicketDetailResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "colourTag": zod.string().regex(getTicketDetailResponseDataTicketProjectColourTagRegExp).optional(),
+  "colourTag": zod.string().regex(getTicketDetailResponseDataTicketProjectColourTagRegExp).nullish(),
   "startDate": zod.string().date().nullish(),
   "endDate": zod.string().date().nullish(),
-  "isActive": zod.boolean().optional(),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).optional()
+  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
+  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(getTicketDetailResponseDataTicketProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
 }).optional(),
   "client": zod.object({
   "id": zod.number().optional(),
@@ -741,7 +747,7 @@ export const assignTicketBody = zod.object({
 
 export const assignTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const assignTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const assignTicketResponseDataScreenNameMax = 120;
+export const assignTicketResponseDataProjectAutoAssignRuleDefault = "MANUAL";export const assignTicketResponseDataScreenNameMax = 120;
 
 export const assignTicketResponseDataFeatureMax = 120;
 
@@ -761,8 +767,9 @@ export const assignTicketResponse = zod.object({
   "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once any ticket exists.'),
+  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
   "name": zod.string(),
+  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
   "projectManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -770,11 +777,12 @@ export const assignTicketResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "colourTag": zod.string().regex(assignTicketResponseDataProjectColourTagRegExp).optional(),
+  "colourTag": zod.string().regex(assignTicketResponseDataProjectColourTagRegExp).nullish(),
   "startDate": zod.string().date().nullish(),
   "endDate": zod.string().date().nullish(),
-  "isActive": zod.boolean().optional(),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).optional()
+  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
+  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(assignTicketResponseDataProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
 }).optional(),
   "client": zod.object({
   "id": zod.number().optional(),
@@ -849,7 +857,7 @@ export const changeTicketPriorityBody = zod.object({
 
 export const changeTicketPriorityResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const changeTicketPriorityResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const changeTicketPriorityResponseDataScreenNameMax = 120;
+export const changeTicketPriorityResponseDataProjectAutoAssignRuleDefault = "MANUAL";export const changeTicketPriorityResponseDataScreenNameMax = 120;
 
 export const changeTicketPriorityResponseDataFeatureMax = 120;
 
@@ -869,8 +877,9 @@ export const changeTicketPriorityResponse = zod.object({
   "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once any ticket exists.'),
+  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
   "name": zod.string(),
+  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
   "projectManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -878,11 +887,12 @@ export const changeTicketPriorityResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "colourTag": zod.string().regex(changeTicketPriorityResponseDataProjectColourTagRegExp).optional(),
+  "colourTag": zod.string().regex(changeTicketPriorityResponseDataProjectColourTagRegExp).nullish(),
   "startDate": zod.string().date().nullish(),
   "endDate": zod.string().date().nullish(),
-  "isActive": zod.boolean().optional(),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).optional()
+  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
+  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(changeTicketPriorityResponseDataProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
 }).optional(),
   "client": zod.object({
   "id": zod.number().optional(),
@@ -972,7 +982,7 @@ export const quickUpdateTicketBody = zod.object({
 
 export const quickUpdateTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const quickUpdateTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const quickUpdateTicketResponseDataScreenNameMax = 120;
+export const quickUpdateTicketResponseDataProjectAutoAssignRuleDefault = "MANUAL";export const quickUpdateTicketResponseDataScreenNameMax = 120;
 
 export const quickUpdateTicketResponseDataFeatureMax = 120;
 
@@ -992,8 +1002,9 @@ export const quickUpdateTicketResponse = zod.object({
   "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once any ticket exists.'),
+  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
   "name": zod.string(),
+  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
   "projectManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -1001,11 +1012,12 @@ export const quickUpdateTicketResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "colourTag": zod.string().regex(quickUpdateTicketResponseDataProjectColourTagRegExp).optional(),
+  "colourTag": zod.string().regex(quickUpdateTicketResponseDataProjectColourTagRegExp).nullish(),
   "startDate": zod.string().date().nullish(),
   "endDate": zod.string().date().nullish(),
-  "isActive": zod.boolean().optional(),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).optional()
+  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
+  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(quickUpdateTicketResponseDataProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
 }).optional(),
   "client": zod.object({
   "id": zod.number().optional(),
@@ -1237,7 +1249,7 @@ export const resolveTicketBody = zod.object({
 
 export const resolveTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const resolveTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const resolveTicketResponseDataScreenNameMax = 120;
+export const resolveTicketResponseDataProjectAutoAssignRuleDefault = "MANUAL";export const resolveTicketResponseDataScreenNameMax = 120;
 
 export const resolveTicketResponseDataFeatureMax = 120;
 
@@ -1257,8 +1269,9 @@ export const resolveTicketResponse = zod.object({
   "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once any ticket exists.'),
+  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
   "name": zod.string(),
+  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
   "projectManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -1266,11 +1279,12 @@ export const resolveTicketResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "colourTag": zod.string().regex(resolveTicketResponseDataProjectColourTagRegExp).optional(),
+  "colourTag": zod.string().regex(resolveTicketResponseDataProjectColourTagRegExp).nullish(),
   "startDate": zod.string().date().nullish(),
   "endDate": zod.string().date().nullish(),
-  "isActive": zod.boolean().optional(),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).optional()
+  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
+  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(resolveTicketResponseDataProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
 }).optional(),
   "client": zod.object({
   "id": zod.number().optional(),
@@ -1345,7 +1359,7 @@ export const closeTicketBody = zod.object({
 
 export const closeTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const closeTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const closeTicketResponseDataScreenNameMax = 120;
+export const closeTicketResponseDataProjectAutoAssignRuleDefault = "MANUAL";export const closeTicketResponseDataScreenNameMax = 120;
 
 export const closeTicketResponseDataFeatureMax = 120;
 
@@ -1365,8 +1379,9 @@ export const closeTicketResponse = zod.object({
   "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once any ticket exists.'),
+  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
   "name": zod.string(),
+  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
   "projectManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -1374,11 +1389,12 @@ export const closeTicketResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "colourTag": zod.string().regex(closeTicketResponseDataProjectColourTagRegExp).optional(),
+  "colourTag": zod.string().regex(closeTicketResponseDataProjectColourTagRegExp).nullish(),
   "startDate": zod.string().date().nullish(),
   "endDate": zod.string().date().nullish(),
-  "isActive": zod.boolean().optional(),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).optional()
+  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
+  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(closeTicketResponseDataProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
 }).optional(),
   "client": zod.object({
   "id": zod.number().optional(),
@@ -1463,7 +1479,7 @@ export const reopenTicketBody = zod.object({
 
 export const reopenTicketResponseDataTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const reopenTicketResponseDataProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const reopenTicketResponseDataScreenNameMax = 120;
+export const reopenTicketResponseDataProjectAutoAssignRuleDefault = "MANUAL";export const reopenTicketResponseDataScreenNameMax = 120;
 
 export const reopenTicketResponseDataFeatureMax = 120;
 
@@ -1483,8 +1499,9 @@ export const reopenTicketResponse = zod.object({
   "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once any ticket exists.'),
+  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
   "name": zod.string(),
+  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
   "projectManager": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -1492,11 +1509,12 @@ export const reopenTicketResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "colourTag": zod.string().regex(reopenTicketResponseDataProjectColourTagRegExp).optional(),
+  "colourTag": zod.string().regex(reopenTicketResponseDataProjectColourTagRegExp).nullish(),
   "startDate": zod.string().date().nullish(),
   "endDate": zod.string().date().nullish(),
-  "isActive": zod.boolean().optional(),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).optional()
+  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
+  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(reopenTicketResponseDataProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
 }).optional(),
   "client": zod.object({
   "id": zod.number().optional(),

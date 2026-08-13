@@ -46,34 +46,44 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ProjectClientName } from './projectClientName';
-import type { UserRef } from './userRef';
-import type { ProjectColourTag } from './projectColourTag';
-import type { ProjectStartDate } from './projectStartDate';
-import type { ProjectEndDate } from './projectEndDate';
+import type { ProjectPatchRequestClientName } from './projectPatchRequestClientName';
+import type { ProjectPatchRequestDescription } from './projectPatchRequestDescription';
+import type { ProjectPatchRequestColourTag } from './projectPatchRequestColourTag';
+import type { ProjectPatchRequestStartDate } from './projectPatchRequestStartDate';
+import type { ProjectPatchRequestEndDate } from './projectPatchRequestEndDate';
 import type { ProjectStatus } from './projectStatus';
 import type { AutoAssignRule } from './autoAssignRule';
 
-export interface Project {
-  id: number;
-  /** Ticket-ID prefix. Immutable once the project has issued one. */
-  projectCode: string;
-  name: string;
-  /** The denormalised label from blueprint §8.2 — free text, and the
-fallback for a project with no row in `clients`. The real client link
-arrives with B-026; this column is not it.
+/**
+ * Every field optional; an omitted one keeps its stored value, an explicit
+`null` clears a nullable one.
+
+**`projectCode` is here and `RolePatchRequest`'s `code` is not**, which
+is not an inconsistency: a role code is immutable from creation, while a
+project code is editable right up until the project issues its first
+ticket ID. So it has to be sendable — and once the project is live,
+sending a *different* one is the `409` the operation describes while
+sending the *same* one stays a no-op, because S-10 submits the whole form
+on every save.
+
  */
-  clientName?: ProjectClientName;
-  projectManager?: UserRef;
+export interface ProjectPatchRequest {
+  /** @pattern ^[A-Z][A-Z0-9]{1,9}$ */
+  projectCode?: string;
+  /**
+   * @minLength 1
+   * @maxLength 150
+   */
+  name?: string;
+  /** @maxLength 150 */
+  clientName?: ProjectPatchRequestClientName;
+  /** @maxLength 1000 */
+  description?: ProjectPatchRequestDescription;
+  projectManagerId?: number;
   /** @pattern ^#[0-9A-Fa-f]{6}$ */
-  colourTag?: ProjectColourTag;
-  startDate?: ProjectStartDate;
-  endDate?: ProjectEndDate;
+  colourTag?: ProjectPatchRequestColourTag;
+  startDate?: ProjectPatchRequestStartDate;
+  endDate?: ProjectPatchRequestEndDate;
   status?: ProjectStatus;
-  /** `status <> 'CLOSED'`, derived. Kept because five screens have always
-filtered on it; see `listProjects` for why it is not
-`status = 'ACTIVE'`.
- */
-  isActive?: boolean;
   autoAssignRule?: AutoAssignRule;
 }
