@@ -233,6 +233,13 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/chat/threads/{threadId}/messages", CHAT_MESSAGE),
             everyRole("PATCH", "/api/v1/chat/threads/{threadId}/messages/{messageId}", CHAT_MESSAGE),
             everyRole("DELETE", "/api/v1/chat/threads/{threadId}/messages/{messageId}"),
+            // D-054. Scoped per row inside the feature like the rest of chat, and
+            // more strictly than it reads: the codes come from the caller, and
+            // every one of them goes through A-034 — a ticket they may not see is
+            // absent from the answer, indistinguishable from one that was never
+            // issued. A capability here would answer the same for every code,
+            // which is the wrong instrument for the same reason as above.
+            everyRole("GET", "/api/v1/chat/ticket-cards"),
 
             // ── status requests · S-25, and the same reasoning ───────────────
             everyRole("POST", "/api/v1/tickets/{ticketId}/ask-status"),
