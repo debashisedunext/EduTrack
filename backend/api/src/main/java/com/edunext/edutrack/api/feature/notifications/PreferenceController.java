@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -26,6 +27,15 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/me/notification-preferences")
 @Tag(name = "notifications")
+/*
+ * A-033 · authenticated, no permission. The class javadoc above already gives
+ * the reason and it is the strongest form of it: there is no route here that
+ * takes a user id, deliberately, so the only row reachable is the caller's own.
+ * Nobody edits somebody else's idea of what is worth interrupting them for —
+ * including an Admin, who holds every permission in the catalogue and still has
+ * no path to this.
+ */
+@PreAuthorize("isAuthenticated()")
 class PreferenceController {
 
     private final PreferenceService preferences;

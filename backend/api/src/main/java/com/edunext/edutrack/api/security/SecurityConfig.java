@@ -1,9 +1,9 @@
 package com.edunext.edutrack.api.security;
 
+import com.edunext.edutrack.api.security.jwt.JwtAuthoritiesConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
@@ -38,6 +38,16 @@ import org.springframework.security.web.SecurityFilterChain;
  * answers 404 rather than 403 is A-035. Deliberately not anticipated here —
  * a half-built authorisation rule is worse than an absent one, because it reads
  * as covered.
+ *
+ * <p><b>A-033 has since added one line and no route rules.</b> The permission
+ * decision stayed out of this chain — it is per-handler and lives on the
+ * handlers, enabled by {@code MethodSecurityConfig} — but authorities have to
+ * reach it from somewhere, and that is
+ * {@link com.edunext.edutrack.api.security.jwt.JwtAuthoritiesConverter} wired
+ * into {@code oauth2ResourceServer} below. Expressing the same rules a second
+ * time as {@code .requestMatchers(…).hasAuthority(…)} here was declined: two
+ * places to state one route's permission is two places for them to disagree,
+ * and path patterns do not see the method the annotation sits on.
  *
  * <h2>The route rules</h2>
  *
@@ -129,7 +139,9 @@ public class SecurityConfig {
     };
 
     @Bean
-    SecurityFilterChain apiSecurityChain(HttpSecurity http, ProblemErrorResponses problems) throws Exception {
+    SecurityFilterChain apiSecurityChain(HttpSecurity http,
+                                         ProblemErrorResponses problems,
+                                         JwtAuthoritiesConverter authorities) throws Exception {
         return http
                 // See the class javadoc. Disabled on purpose, with the condition
                 // that would reverse the decision written down beside it.
@@ -173,7 +185,14 @@ public class SecurityConfig {
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .authenticationEntryPoint(problems)
                         .accessDeniedHandler(problems)
-                        .jwt(Customizer.withDefaults()))
+                        // A-033. Set explicitly rather than left to the default:
+                        // the stock converter reads `scope`/`scp`, which an
+                        // EduTrack token does not carry, so every principal
+                        // reached the controller with no authorities at all and
+                        // every @PreAuthorize would have denied all six roles.
+                        // See JwtAuthoritiesConverter — the failure is silent in
+                        // the dangerous direction.
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(authorities)))
                 .build();
     }
 }

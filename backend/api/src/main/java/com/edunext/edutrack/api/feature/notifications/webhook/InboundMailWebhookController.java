@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -46,7 +47,15 @@ public class InboundMailWebhookController {
         this.objectMapper = objectMapper;
     }
 
+    // A-033 · permitAll. Same reasoning as the bounce webhook: the provider
+    // holds no token, and the HMAC checked on the next line is the credential.
+    // The class javadoc above already calls that signature "the only thing
+    // standing between this route and anyone on the internet writing comments
+    // into tickets" — which is why the check being on the first line of the
+    // method, and failing closed when unconfigured, is what matters here rather
+    // than anything an annotation could assert.
     @PostMapping("/inbound")
+    @PreAuthorize("permitAll()")
     public ResponseEntity<Void> inbound(
             @RequestBody byte[] rawBody,
             @RequestHeader(name = "X-Webhook-Signature", required = false) String signature) {

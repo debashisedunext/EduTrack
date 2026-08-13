@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +25,17 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/v1/notifications")
 @Tag(name = "notifications")
+/*
+ * A-033 · authenticated, no permission, on all five operations.
+ *
+ * Every one of them is already pinned to CurrentUser.idOf(authentication) —
+ * there is no route here that takes a user id, and markRead answers 404 rather
+ * than 403 for a notification that is not yours, so it cannot be used to probe
+ * which ids exist. Blueprint §2 grants no notification capability because
+ * receiving notifications is not one: a role that could not read its own bell
+ * would be a role that never learns a ticket was assigned to it.
+ */
+@PreAuthorize("isAuthenticated()")
 class NotificationController {
 
     private static final int DEFAULT_LIMIT = 25;

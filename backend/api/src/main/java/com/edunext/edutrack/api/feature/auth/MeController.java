@@ -13,6 +13,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -45,6 +46,18 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping(path = "/api/v1/me", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "auth", description = "Login, tokens, password lifecycle.")
+// A-033 · declared once on the class rather than four times on the methods,
+// because it is a property of the whole resource and not a choice made per
+// operation: everything under /me acts on the caller's own account, so the
+// subject is the principal and there is no capability to hold. None of the four
+// is a §2 matrix row — a role that could not change its own password or enrol an
+// authenticator would be a role nobody could administer.
+//
+// Row scope is not deferred here the way it is elsewhere: the id these operate on
+// is the token's `sub`, never a path variable, so there is no other row to reach.
+// A method-level @PreAuthorize would override this one if some future operation
+// under /me does need a permission.
+@PreAuthorize("isAuthenticated()")
 class MeController {
 
     private final PasswordChangeService passwordChange;

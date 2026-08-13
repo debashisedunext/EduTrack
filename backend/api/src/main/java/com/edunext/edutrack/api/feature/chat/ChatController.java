@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,6 +36,25 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/chat")
 @Tag(name = "chat")
+/*
+ * A-033 · authenticated, and no permission, on all six operations.
+ *
+ * Blueprint §2 has no chat row: there is no capability to hold, because talking
+ * to your colleagues is not a privilege the matrix grants. What actually
+ * protects a conversation here is membership, and every method already resolves
+ * it from CurrentUser.idOf(authentication) and answers 404 — never 403 — when
+ * the caller is not in the thread. That is the correct control for this
+ * resource and a permission check would not improve it: no code in the
+ * catalogue distinguishes "may read this thread" from "may read that one",
+ * which is the only question worth asking here.
+ *
+ * Stated once on the class because it is a property of the resource. Note that
+ * it is not vacuous — /api/** is already authenticated by the filter chain, so
+ * this repeats that decision, but RouteAuthorizationTest requires every handler
+ * to declare one so a future @PostMapping cannot inherit protection by accident
+ * and land unreviewed.
+ */
+@PreAuthorize("isAuthenticated()")
 class ChatController {
 
     /** Matches {@code Limit} in the contract. */
