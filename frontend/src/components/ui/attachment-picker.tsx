@@ -214,10 +214,20 @@ export const AttachmentPicker = React.forwardRef<AttachmentPickerHandle, Attachm
   const accept = React.useCallback(
     (files: readonly File[], source: 'picker' | 'paste' = 'picker') => {
       if (disabled || files.length === 0) return
-      const result = selectAttachments(files, {
+
+      const attached = items.filter((i) => i.status !== 'failed').map((i) => i.name)
+      // Naming happens here and not in the paste listener because it needs
+      // `attached` — the clipboard's own `image.png` has to be disambiguated
+      // against what is already on the ticket, or the second screenshot a user
+      // pastes is refused as a duplicate of the first. Only a clipboard route
+      // is renamed; a drop or a browse keeps its names, where a duplicate is
+      // real feedback rather than an artefact of the clock.
+      const incoming = source === 'paste' ? renameClipboardFiles(files, { taken: attached }) : files
+
+      const result = selectAttachments(incoming, {
         existingBytes: usedBytes,
         existingCount: usedCount,
-        existingNames: items.filter((i) => i.status !== 'failed').map((i) => i.name.toLowerCase()),
+        existingNames: attached.map((name) => name.toLowerCase()),
         limits,
       })
       setRejections(result.rejected)
@@ -238,17 +248,11 @@ export const AttachmentPicker = React.forwardRef<AttachmentPickerHandle, Attachm
   )
 
   // The seam for a rich-text editor's own paste handler — see
-  // `AttachmentPickerHandle`. `renameClipboardFiles` runs here and not only in
-  // `filesFromClipboard` because the editor never produces a `DataTransfer`: it
-  // hands out plain `File[]` carrying the same `image.png` every capture has, so
-  // without this the second screenshot pasted into a description is refused as a
-  // duplicate — the exact defect this task exists to remove, on the surface most
-  // likely to hit it.
-  React.useImperativeHandle(
-    ref,
-    () => ({ addFiles: (files: File[]) => accept(renameClipboardFiles(files), 'paste') }),
-    [accept],
-  )
+  // `AttachmentPickerHandle`. It goes in as a paste, which is what it is: the
+  // editor never produces a `DataTransfer`, it hands out plain `File[]` still
+  // carrying the `image.png` every capture has, and those need the same naming
+  // as any other clipboard route.
+  React.useImperativeHandle(ref, () => ({ addFiles: (files: File[]) => accept(files, 'paste') }), [accept])
 
   useAttachmentPaste({
     enabled: enablePaste && !disabled,

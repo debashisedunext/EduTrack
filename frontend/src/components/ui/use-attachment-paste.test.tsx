@@ -56,7 +56,20 @@ describe('useAttachmentPaste', () => {
     fireEvent.paste(document.body, { clipboardData: clipboardOf([fileOf('image.png', 2048, 'image/png')]) })
 
     expect(onFiles).toHaveBeenCalledTimes(1)
-    expect(onFiles.mock.calls[0][0][0].name).toMatch(/^screenshot-/)
+    // Handed up unnamed. Naming belongs to the picker, which is the only party
+    // that knows what is already attached and therefore what a name must avoid.
+    expect(onFiles.mock.calls[0][0][0].name).toBe('image.png')
+  })
+
+  it('passes every file in a multi-file paste through', () => {
+    const onFiles = vi.fn()
+    render(<Surface label="s" onFiles={onFiles} />)
+
+    fireEvent.paste(document.body, {
+      clipboardData: clipboardOf([fileOf('a.png', 1024, 'image/png'), fileOf('b.png', 1024, 'image/png')]),
+    })
+
+    expect(onFiles.mock.calls[0][0]).toHaveLength(2)
   })
 
   it('does not register at all when it is disabled', () => {

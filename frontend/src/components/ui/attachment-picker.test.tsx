@@ -284,65 +284,52 @@ describe('AttachmentPicker — clipboard paste', () => {
     expect(onAdd.mock.calls[0][0][0].name).toMatch(/^screenshot-\d{4}-\d{2}-\d{2}-\d{6}\.png$/)
   })
 
-  it('accepts two screenshots in a row, which both arrive named image.png', () => {
-    // The defect worth pinning. Every capture reaches the browser under the same
-    // name, so a picker that took the name at face value would refuse the second
-    // as a duplicate — and paste would look broken on the second use, not the
-    // first, which is the hardest kind of failure to report.
+  it('takes several screenshots pasted one after another, inside the same second', () => {
+    // The defect worth pinning, and the reason the naming moved into the picker.
+    // The OS clipboard holds one image, so attaching several screenshots is
+    // necessarily paste, paste, paste — and a user doing that beats a one-second
+    // stamp. Every capture also reaches the browser as `image.png`, so a picker
+    // taking that at face value refused the second as a duplicate: paste looked
+    // like it worked once and then stopped.
     vi.useFakeTimers()
     try {
       vi.setSystemTime(new Date(2026, 7, 12, 14, 30, 5))
-      const { onAdd, rerender } = renderPicker()
-      fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot(1024)]) })
+      const onAdd = vi.fn()
+      const onReject = vi.fn()
+      const landed: AttachmentItem[] = []
 
-      const landed = onAdd.mock.calls[0][0][0] as File
-      rerender(
-        <AttachmentPicker
-          items={[{ id: '1', name: landed.name, sizeBytes: landed.size, contentType: 'image/png', status: 'ready' }]}
-          onAdd={onAdd}
-        />,
-      )
-      // A second later. Within the same second the stamp is identical, and
-      // refusing that as a duplicate is right — it is a double Ctrl+V on one
-      // clipboard, not two captures.
-      vi.setSystemTime(new Date(2026, 7, 12, 14, 30, 6))
-      fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot(2048)]) })
+      const { rerender } = render(<AttachmentPicker items={landed} onAdd={onAdd} onReject={onReject} />)
 
-      expect(onAdd).toHaveBeenCalledTimes(2)
-      expect(onAdd.mock.calls[1][0][0].name).not.toBe(landed.name)
+      for (let n = 0; n < 3; n += 1) {
+        fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot(1024)]) })
+        const file = onAdd.mock.calls[n][0][0] as File
+        landed.push({ id: `${n}`, name: file.name, sizeBytes: 1024, contentType: 'image/png', status: 'ready' })
+        rerender(<AttachmentPicker items={[...landed]} onAdd={onAdd} onReject={onReject} />)
+      }
+
+      expect(onAdd).toHaveBeenCalledTimes(3)
+      expect(onReject).not.toHaveBeenCalled()
+      expect(new Set(landed.map((i) => i.name)).size).toBe(3)
       expect(screen.getByRole('status')).not.toHaveTextContent(/already attached/i)
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('refuses the same clipboard pasted twice in one second — a double Ctrl+V', () => {
-    // The other half of the second-resolution stamp, and the reason it is not a
-    // defect: one clipboard pasted twice *is* the same file, and the duplicate
-    // check is what should stop it.
-    vi.useFakeTimers()
-    try {
-      vi.setSystemTime(new Date(2026, 7, 12, 14, 30, 5))
-      const onAdd = vi.fn()
-      const onReject = vi.fn()
-      const { rerender } = render(<AttachmentPicker items={[]} onAdd={onAdd} onReject={onReject} />)
+  it('takes several images arriving in a single paste', () => {
+    // The one route that genuinely carries more than one image at a time: a
+    // multi-select copied out of a file manager, or a run of spreadsheet cells.
+    const { onAdd, onReject } = renderPicker()
 
-      fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot(1024)]) })
-      const landed = onAdd.mock.calls[0][0][0] as File
-      rerender(
-        <AttachmentPicker
-          items={[{ id: '1', name: landed.name, sizeBytes: landed.size, contentType: 'image/png', status: 'ready' }]}
-          onAdd={onAdd}
-          onReject={onReject}
-        />,
-      )
-      fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot(1024)]) })
+    fireEvent.paste(document.body, {
+      clipboardData: clipboardOf([pastedScreenshot(1024), pastedScreenshot(2048), pastedScreenshot(4096)]),
+    })
 
-      expect(onAdd).toHaveBeenCalledTimes(1)
-      expect(screen.getByRole('status')).toHaveTextContent(/already attached/i)
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(onReject).not.toHaveBeenCalled()
+    const names = (onAdd.mock.calls[0][0] as File[]).map((f) => f.name)
+    expect(names).toHaveLength(3)
+    expect(new Set(names).size).toBe(3)
+    expect(screen.getByRole('status')).toHaveTextContent('Pasted 3 files')
   })
 
   it('runs a paste through the same limits as a drop', () => {

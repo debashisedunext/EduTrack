@@ -71,9 +71,10 @@ export const Default: Story = { render: () => <Stateful /> }
  *
  * Two things to watch, because they are the substance of the task:
  *
- * 1. **Paste twice.** Every browser hands a capture over as `image.png`, so a
- *    picker taking that name at face value refuses the second one as a
- *    duplicate. Each lands here under its own `screenshot-…` name.
+ * 1. **Paste three in a row, quickly.** The OS clipboard holds one image, so
+ *    several screenshots means pasting several times — and every capture reaches
+ *    the browser as `image.png`, faster than the one-second stamp can separate
+ *    them. All three land, under `screenshot-…`, `-2` and `-3`.
  * 2. **Paste text into the field below.** It types normally. A file on the
  *    clipboard is not on its own evidence the user meant to attach anything —
  *    copying an image from a web page brings an `<img>` tag along as

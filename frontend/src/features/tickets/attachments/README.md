@@ -103,10 +103,29 @@ capture a user pastes, and paste appears to work once and then break. Pasted
 files whose names are the browser's invention are renamed
 `screenshot-2026-08-12-143005.png` from the local clock.
 
-One second of resolution, deliberately. Two captures cannot be taken and pasted
-inside the same second, but one clipboard pasted twice lands on the identical
-name and *is* refused as a duplicate — which is the correct outcome for a double
-`Ctrl`+`V`, not a gap in the stamp.
+**A clipboard name must never cause a rejection**, which is why naming lives in
+the picker rather than in the paste listener: only the picker knows what is
+already attached. The OS clipboard holds one image, so "attach several
+screenshots" is necessarily *paste, paste, paste* — and a user doing that moves
+faster than a one-second stamp. Two different captures inside the same second
+collide, and the collision was refused by the duplicate check as though the same
+thing had been pasted twice: the second screenshot vanished behind "already
+attached", which reads as paste working once and then breaking.
+
+So a clipboard name steps around what is taken — `screenshot-…-2.png`, `-3`, and
+so on, case-insensitively, accumulating across a batch as well as against the
+ticket. The cost is that a genuine double `Ctrl`+`V` now attaches the same image
+twice rather than being refused, and that is the right side to err on: a
+duplicate is visible in the list and one click to remove, while a silently
+dropped screenshot is invisible and indistinguishable from a broken feature.
+Files with real names — a drop, a browse, a copy out of a file manager — are
+untouched and still get the duplicate check, where a repeated name means
+something.
+
+Several images in one paste is handled by the same mechanism rather than a
+special case. It is not hypothetical: a multi-select copied out of a file
+manager, or a run of spreadsheet cells, arrives as one event carrying several
+bitmaps, all of them called `image.png`.
 
 The rename allocates a new `File` over the same blob rather than redefining
 `name` on the existing one. `FormData` reads a file's name from an internal slot
