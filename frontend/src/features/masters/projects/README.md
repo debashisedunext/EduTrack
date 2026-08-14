@@ -1,11 +1,108 @@
-# Project Master — B-016 · S-10
+# Project Master — B-016 · S-10 · and the Team tab, B-017
 
 `/masters/projects` · `/masters/projects/new` · `/masters/projects/:projectId/edit`
+· `/masters/projects/:projectId/team`
 
-The list and the create/edit form. S-10 describes four tabs and this is the
-first: **Team is B-017**, **SLA is B-018** and **Settings is B-019**, each with
-its own contract path and its own task. They are not stubbed here — three empty
-tabs would make three unbuilt screens look built.
+The list, the create/edit form (B-016) and the Team tab (B-017). S-10 describes
+four tabs and two exist: **SLA is B-018** and **Settings is B-019**, each with its
+own contract path and its own task. They are not stubbed — a greyed-out tab and a
+broken one look identical to a user, and two unbuilt screens rendered as tabs
+would make the feature look finished.
+
+---
+
+## The Team tab (B-017)
+
+`ProjectTeamPage.tsx` at `/masters/projects/:projectId/team`. Resources,
+per-project role and allocation %, in one grid.
+
+### Every cell saves itself
+
+There is no Save button and no dirty state — each change is one `PATCH` of one
+field. That is what makes the operation's absent `If-Match` safe: two people
+editing different members, or different fields of one member, both land. A
+form-shaped Team tab would have to send the whole roster on every save, and then
+a stale tab really could undo somebody's change.
+
+### Clear and omit are different, and the helpers are where that is decided
+
+The `PATCH` reads an omitted key as "leave it alone" and an explicit null as
+"clear it". `roleChangePatch` and `allocationChangePatch` in `projectTeam.ts` are
+the one place that turns a UI change into one or the other, and they are tested
+directly — **nothing in a rendered page would show the bug if they got it wrong.**
+A patch that dropped the key instead of sending null would make "same as their
+global role" and "not stated" write-once, and the row would go on displaying the
+old value, which looks like a stale cache.
+
+`allocationChangePatch` returns `null` for out-of-range input, which means "do
+not send" — deliberately *not* the same as `{ allocationPct: null }`, which means
+clear.
+
+### An unstated allocation is blank, and it is not 100
+
+Every membership written before this screen has no allocation, because nothing
+had an input for one. `summariseAllocation` counts only the stated ones and
+reports the rest separately; folding them in at 100 would have made almost every
+real project read as wildly over-committed on the day this shipped.
+
+**Zero renders as zero, not as blank.** "No capacity committed" is a decision and
+"not stated" is an absence.
+
+### The total shown is the project's, and it is not a warning
+
+A team summing to 340% is normal — six people at varying commitments. The figure
+that *would* be a warning is a **resource's** total across their projects, and
+this screen has one project's rows; answering it would mean reading every other
+project's team. **Flagged for B-061's capacity report** rather than approximated
+from here.
+
+### The removal refusal is shown before the click
+
+`openTicketCount` is on the roster, so a member holding open work has their remove
+button disabled with the count in its accessible name. B-014's lesson from the
+resource grid: a refusal arriving *after* the action reads as a failure of the
+click rather than as a fact about the organisation. The server's guard stays the
+authority — a count that goes stale while the tab is open comes back as a 409 and
+lands in the banner.
+
+### The picker is not behind a button
+
+An "Add resource" button that revealed a dropdown was two clicks to add one
+person, and the second one only opened a control that is itself a disclosure. It
+offers active resources who are not already on the team: a deactivated one is
+refused server-side by name, and somebody already on it is a 409 — both would be
+offering a choice whose only outcome is an error.
+
+### "Same as global role" is a sentinel, and deliberately not a `ProjectRoleCode`
+
+Radix refuses `value=""` on a `SelectItem`, so the absence needs a name.
+`NO_PROJECT_ROLE` is `INHERIT`, which is not in the enum — so a bug that leaked it
+onto the wire fails the server's `@Pattern` loudly instead of storing a seventh
+role nobody defined. Same sentinel and same reason as
+`ProjectAssignmentsEditor` (B-011), which is this control's mirror image on the
+resource form.
+
+### The tabs are two sibling routes, not a layout route
+
+`ProjectTabs` renders the header for both. Nesting them under a layout route
+would have made Team inherit General's read — which fetches the `ETag` its
+`PATCH` requires and this screen never sends, so the shared fetch would be
+caching a precondition nobody uses. Two routes, one header, one cheap query each,
+and react-query dedupes the overlap.
+
+The create form gets no tab strip: the Team tab writes `project_members` rows,
+which need a project id that does not exist until the form is submitted.
+
+### Invalidation reaches the resource screens
+
+A membership written here is the same `project_members` row S-08's Projects
+section reads and the S-07 grid prints a project column from. `projectTeamQueries`
+invalidates `['/users']` as well as the roster — the two screens edit one table
+from two sides, and the cache has to know that.
+
+---
+
+## The Project Master (B-016)
 
 ## `status` has three values and `isActive` is derived
 
@@ -79,6 +176,10 @@ reload.
 | `ProjectFormPage.tsx` | one page for create and edit, per `ResourceFormPage`'s precedent |
 | `projectForm.ts` | the schema, the two translations, the palette, `isCodeEditable` |
 | `projectQueries.ts` | the data layer; the detail read is hand-written for its `ETag` |
+| `ProjectTabs.tsx` | B-017 · the shared header and the two-tab strip |
+| `ProjectTeamPage.tsx` | B-017 · the Team tab grid, inline edits, add and remove |
+| `projectTeam.ts` | B-017 · clear-versus-omit, the allocation summary, the role vocabulary |
+| `projectTeamQueries.ts` | B-017 · the roster read and the three writes |
 
 `FormField` / `FieldGroup` / `ReadOnlyField` are imported from
 `../resources/FormField` rather than copied a third time. B-011 duplicated them

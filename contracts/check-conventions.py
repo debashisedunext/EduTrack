@@ -36,6 +36,7 @@ NO_IF_MATCH = {
     "/tickets/{ticketId}/comments/{commentId}": "author-only inside a 5-minute window",
     "/chat/threads/{threadId}/messages/{messageId}": "author-only inside a 5-minute window",
     "/me/notification-preferences":        "your own settings only, and partial by field so two tabs cannot overwrite each other's untouched switches",
+    "/projects/{projectId}/members/{userId}": "two fields on one membership row, both last-write-wins by nature; the tag would have to come from a collection read with no ETag of its own, so the precondition would be machinery around a race whose loser typed a number later and meant it",
 }
 
 # §6 — bounded by a constraint the product already enforces.
@@ -54,6 +55,7 @@ NO_PAGINATION = {
     "/tickets/{ticketId}/status-requests": "open requests on one ticket, and at most one per manager who can ask about it",
     "/me/awaiting-response":             "your own unanswered asks; bounded server-side and ordered longest-wait-first, which a cursor would fight",
     "/chat/ticket-cards":                "bounded by the caller's own `codes` list, and capped below that; paging a lookup you supplied the keys for is not a page",
+    "/projects/{projectId}/members":     "one project's team — tens of people, and the S-10 tab totals their allocations, so it needs the whole set on every read anyway",
 }
 
 # §8 — GET only. No mutation verb, ever.

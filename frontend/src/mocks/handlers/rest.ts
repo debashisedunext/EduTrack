@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
-import type { Holiday, Role, User } from '../db';
+import type { Holiday, ProjectRoleCode, Role, User } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
 import { round, statusRequestDto } from './tickets';
 import {
@@ -393,6 +393,12 @@ export const restHandlers = [
       weeklyOff: (body.weeklyOff as number[] | null) ?? null,
       skills: (body.skills as string[]) ?? [],
       projectRoles: {},
+      // B-017 columns. Empty, not filled in: S-08's Projects section has no
+      // allocation input, so a resource created here has memberships with no
+      // stated allocation — exactly like every row written before the Team tab
+      // existed. Seeding 100 would be inventing a figure nobody entered.
+      projectAllocations: {},
+      projectMemberSince: {},
       // S-08's force-change-on-first-login, and never a request field.
       mustChangePassword: true,
     };
@@ -643,8 +649,118 @@ export const restHandlers = [
 
     return ok(projectDetailDto(p), undefined, { headers: { ETag: projectEtag(p) } });
   }),
-  http.post(url('/projects/:projectId/members'), () => new HttpResponse(null, { status: 201 })),
-  http.delete(url('/projects/:projectId/members/:userId'), () => noContent()),
+  /**
+   * B-017 · the S-10 Team tab.
+   *
+   * These four replace two stubs — a bare `201` and a bare `204` that answered
+   * without looking at anything. Two of the four did not exist in the contract
+   * at all until B-017: there was no way to *read* a project's team, and no way
+   * to change an allocation except by removing the member and adding them back,
+   * which would have deactivated and reactivated the row and reset `addedAt`.
+   *
+   * Memberships live on the user in this database (`projectIds` plus the two
+   * per-project maps), which is `project_members` transposed. Same rows, read
+   * from the other side.
+   */
+  http.get(url('/projects/:projectId/members'), ({ params }) => {
+    const db = getDb();
+    const projectId = Number(params.projectId);
+    if (!db.projects.some((p) => p.id === projectId)) return notFound('Project');
+
+    const members = db.users
+      .filter((u) => u.projectIds.includes(projectId))
+      .map((u) => projectMemberDto(u, projectId))
+      // By name, with the id as the tiebreak — two people with one name is a
+      // normal thing for an organisation to contain, and the server orders the
+      // same way for the same reason.
+      .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.userId - b.userId);
+
+    // No `meta`, deliberately. CONVENTIONS.md §6: its absence is how a client
+    // knows an unpaginated list is complete.
+    return ok(members);
+  }),
+  http.post(url('/projects/:projectId/members'), async ({ params, request }) => {
+    const db = getDb();
+    const projectId = Number(params.projectId);
+    if (!db.projects.some((p) => p.id === projectId)) return notFound('Project');
+
+    const body = (await request.json()) as {
+      userId: number; projectRole?: ProjectRoleCode | null; allocationPct?: number | null;
+    };
+    const u = db.users.find((x) => x.id === Number(body.userId));
+    if (!u) return validationFailed({ userId: ['no such resource'] });
+    if (!u.isActive) {
+      // Same refusal and same reason as the project manager: a deactivated
+      // resource is somebody who has left, and putting them on a team means
+      // every capacity figure counts somebody who will never pick the work up.
+      return validationFailed({
+        userId: [`${u.displayName} is deactivated and cannot be added to a project team`],
+      });
+    }
+    if (u.projectIds.includes(projectId)) {
+      return problem(409, 'already-on-team', 'Already on this team', {
+        errors: { userId: ["that resource is already on this project's team"] },
+      });
+    }
+
+    // Re-adding somebody who was removed is an add, not a conflict. This mock
+    // has no deactivated-membership state to reactivate — dropping the id is
+    // how a removal is recorded here — so the two paths look the same from
+    // outside, which is what the contract promises anyway.
+    u.projectIds = [...u.projectIds, projectId];
+    u.projectRoles = { ...u.projectRoles, [projectId]: body.projectRole ?? null };
+    u.projectAllocations = { ...u.projectAllocations, [projectId]: body.allocationPct ?? null };
+    u.projectMemberSince = { ...u.projectMemberSince, [projectId]: new Date().toISOString() };
+
+    return ok(projectMemberDto(u, projectId), undefined, { status: 201 });
+  }),
+  http.patch(url('/projects/:projectId/members/:userId'), async ({ params, request }) => {
+    const db = getDb();
+    const projectId = Number(params.projectId);
+    if (!db.projects.some((p) => p.id === projectId)) return notFound('Project');
+
+    const u = db.users.find((x) => x.id === Number(params.userId));
+    if (!u || !u.projectIds.includes(projectId)) return notFound('Member');
+
+    const body = (await request.json()) as Record<string, unknown>;
+    // `in` rather than `!= null`, and it is the whole point of the operation:
+    // an omitted key keeps the stored value, an explicit null clears it. This
+    // is the only way back to "same as their global role" and to "not stated",
+    // and `body.projectRole != null` would make both states write-once. The
+    // server needed a POJO with `Optional` fields to express the same thing —
+    // a record collapses the two cases.
+    if ('projectRole' in body) {
+      u.projectRoles = { ...u.projectRoles, [projectId]: (body.projectRole as ProjectRoleCode) ?? null };
+    }
+    if ('allocationPct' in body) {
+      u.projectAllocations = {
+        ...u.projectAllocations,
+        [projectId]: body.allocationPct == null ? null : Number(body.allocationPct),
+      };
+    }
+
+    return ok(projectMemberDto(u, projectId));
+  }),
+  http.delete(url('/projects/:projectId/members/:userId'), ({ params }) => {
+    const db = getDb();
+    const projectId = Number(params.projectId);
+    if (!db.projects.some((p) => p.id === projectId)) return notFound('Project');
+
+    const u = db.users.find((x) => x.id === Number(params.userId));
+    // Removing somebody who is not on the team succeeds. It is a setter, and a
+    // client retrying after a dropped response has to converge.
+    if (!u || !u.projectIds.includes(projectId)) return noContent();
+
+    const open = openTicketsOnProject(u.id, projectId);
+    if (open > 0) {
+      return problem(409, 'open-tickets', 'They still hold open tickets here', {
+        openTicketCount: open, reassignUrl: '/api/v1/tickets/bulk-reassign',
+      });
+    }
+
+    u.projectIds = u.projectIds.filter((id) => id !== projectId);
+    return noContent();
+  }),
   /**
    * The matrix S-13 edits, which the contract shapes as an exhaustive
    * `taskType × level` grid — `SlaPolicyWrite.taskTypeId` is required, so the
@@ -1688,6 +1804,47 @@ function projectDto(p: import('../db').Project) {
  */
 function projectDetailDto(p: import('../db').Project) {
   return { ...projectDto(p), description: p.description, ticketsIssued: p.ticketSeq };
+}
+
+/**
+ * B-017 · one roster row.
+ *
+ * Carries both roles, because the tab's job is showing where they differ: a
+ * Developer mapped as QA on this project is the case `role_in_project` exists
+ * for, and a row showing only one of the two cannot express it.
+ *
+ * `isActive` is the **resource's** status, not the membership's. A leaver still
+ * on a team is exactly what the tab has to surface, since that is what B-014's
+ * reassignment flow exists to clear up.
+ */
+function projectMemberDto(u: User, projectId: number) {
+  return {
+    userId: u.id,
+    displayName: u.displayName,
+    email: u.email,
+    role: u.role,
+    projectRole: u.projectRoles[projectId] ?? null,
+    // `?? null`, never `?? 100`. A membership with no stated allocation is not
+    // a fully-committed one, and nothing downstream can tell an invented
+    // default from a real figure.
+    allocationPct: u.projectAllocations[projectId] ?? null,
+    isActive: u.isActive,
+    openTicketCount: openTicketsOnProject(u.id, projectId),
+    addedAt: u.projectMemberSince[projectId] ?? '2026-01-01T09:00:00.000Z',
+  };
+}
+
+/**
+ * Open tickets this person holds **on this project**.
+ *
+ * Scoped to the project because the removal refusal is: work held elsewhere is
+ * not a fact this screen can act on, and refusing a removal because of it would
+ * send an admin to reassign tickets that are none of this project's business.
+ */
+function openTicketsOnProject(userId: number, projectId: number) {
+  return getDb().tickets.filter(
+    (t) => t.assigneeId === userId && t.projectId === projectId && t.status !== 'CLOSED',
+  ).length;
 }
 
 /**

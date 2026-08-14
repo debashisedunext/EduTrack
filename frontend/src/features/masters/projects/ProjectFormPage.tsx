@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 
 import { FieldGroup, FormField, ReadOnlyField } from '../resources/FormField'
 
+import { ProjectTabs } from './ProjectTabs'
 import { useCreateProject, useProject, useUpdateProject } from './projectQueries'
 import {
   AUTO_ASSIGN_RULES,
@@ -184,18 +185,26 @@ export function ProjectFormPage() {
 
   return (
     <form onSubmit={onSubmit} className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
-      <header className="flex flex-col gap-2">
-        <Link
-          to="/masters/projects"
-          className="inline-flex w-fit items-center gap-1 text-sm text-content-muted hover:text-content"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden />
-          Projects
-        </Link>
-        <h1 className="text-2xl font-semibold text-content">
-          {isEdit ? loaded?.project.name : 'New project'}
-        </h1>
-      </header>
+      {/*
+        B-017 · an existing project gets the tab strip; a new one does not, and
+        cannot: the Team tab writes `project_members` rows, which need a
+        project id that does not exist until this form is submitted. Offering
+        the tab on a create would be offering a screen that can only 404.
+      */}
+      {isEdit ? (
+        <ProjectTabs active="General" />
+      ) : (
+        <header className="flex flex-col gap-2">
+          <Link
+            to="/masters/projects"
+            className="inline-flex w-fit items-center gap-1 text-sm text-content-muted hover:text-content"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            Projects
+          </Link>
+          <h1 className="text-2xl font-semibold text-content">New project</h1>
+        </header>
+      )}
 
       {bannerError ? (
         // `border-danger` + `text-danger-text` are the tokens that exist —

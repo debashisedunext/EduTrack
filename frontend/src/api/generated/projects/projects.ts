@@ -66,7 +66,6 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  AddProjectMemberBody,
   ConflictResponse,
   ListProjectsParams,
   NotFoundResponse,
@@ -75,6 +74,10 @@ import type {
   Problem,
   ProjectDetailResponse,
   ProjectListResponse,
+  ProjectMemberListResponse,
+  ProjectMemberPatch,
+  ProjectMemberResponse,
+  ProjectMemberWrite,
   ProjectPatchRequest,
   ProjectWriteRequest,
   SlaPolicyListResponse,
@@ -456,28 +459,143 @@ export const useUpdateProject = <TError = ValidationFailedResponse | NotFoundRes
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * @summary Add a member with a per-project role and allocation
+ * The roster, ordered by name. **Every authenticated role may read it** —
+this is who a ticket on the project can be assigned to, and a Developer
+who cannot see the team cannot pick a handoff target.
+
+Not paged. A project team is tens of people, not thousands; a cursor
+here would be pagination machinery on a list that fits on one screen,
+and the Team tab needs the whole set anyway to total the allocations.
+
+**Deactivated memberships are not returned.** Removing somebody sets
+`is_active = 0` rather than deleting the row, so the record that they
+were once on the project survives — but they are not on the team now,
+and a roster that showed them would be answering a different question.
+
+ * @summary The project team (S-10 Team tab)
  */
-export const addProjectMember = (
+export const listProjectMembers = (
     projectId: number,
-    addProjectMemberBody: AddProjectMemberBody,
  signal?: AbortSignal
 ) => {
       
       
-      return http<void>(
-      {url: `/projects/${projectId}/members`, method: 'POST',
-      headers: {'Content-Type': 'application/json', },
-      data: addProjectMemberBody, signal
+      return http<ProjectMemberListResponse>(
+      {url: `/projects/${projectId}/members`, method: 'GET', signal
     },
       );
     }
   
 
 
-export const getAddProjectMemberMutationOptions = <TError = NotFoundResponse | ConflictResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addProjectMember>>, TError,{projectId: number;data: AddProjectMemberBody}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof addProjectMember>>, TError,{projectId: number;data: AddProjectMemberBody}, TContext> => {
+
+export const getListProjectMembersQueryKey = (projectId?: number,) => {
+    return [
+    `/projects/${projectId}/members`
+    ] as const;
+    }
+
+    
+export const getListProjectMembersQueryOptions = <TData = Awaited<ReturnType<typeof listProjectMembers>>, TError = NotFoundResponse>(projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProjectMembers>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListProjectMembersQueryKey(projectId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listProjectMembers>>> = ({ signal }) => listProjectMembers(projectId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(projectId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listProjectMembers>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListProjectMembersQueryResult = NonNullable<Awaited<ReturnType<typeof listProjectMembers>>>
+export type ListProjectMembersQueryError = NotFoundResponse
+
+
+export function useListProjectMembers<TData = Awaited<ReturnType<typeof listProjectMembers>>, TError = NotFoundResponse>(
+ projectId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProjectMembers>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listProjectMembers>>,
+          TError,
+          Awaited<ReturnType<typeof listProjectMembers>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListProjectMembers<TData = Awaited<ReturnType<typeof listProjectMembers>>, TError = NotFoundResponse>(
+ projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProjectMembers>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listProjectMembers>>,
+          TError,
+          Awaited<ReturnType<typeof listProjectMembers>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListProjectMembers<TData = Awaited<ReturnType<typeof listProjectMembers>>, TError = NotFoundResponse>(
+ projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProjectMembers>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The project team (S-10 Team tab)
+ */
+
+export function useListProjectMembers<TData = Awaited<ReturnType<typeof listProjectMembers>>, TError = NotFoundResponse>(
+ projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProjectMembers>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListProjectMembersQueryOptions(projectId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * **Re-adding somebody who was removed reactivates their row rather than
+conflicting with it.** `uq_project_members (project_id, user_id)` means
+there is only ever one row per pair, and a removal deactivates it; a
+`409` here would make every removal permanent, which reads as a bug in
+the remove button rather than as a rule. `409` is for somebody who is
+*already on the team*, which is a request that has nothing to do.
+
+Requires `project.manage` — blueprint §2's "map resources to a project",
+which B-001 grants to Admin and PM.
+
+ * @summary Add a member with a per-project role and allocation
+ */
+export const addProjectMember = (
+    projectId: number,
+    projectMemberWrite: ProjectMemberWrite,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ProjectMemberResponse>(
+      {url: `/projects/${projectId}/members`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: projectMemberWrite, signal
+    },
+      );
+    }
+  
+
+
+export const getAddProjectMemberMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addProjectMember>>, TError,{projectId: number;data: ProjectMemberWrite}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addProjectMember>>, TError,{projectId: number;data: ProjectMemberWrite}, TContext> => {
 
 const mutationKey = ['addProjectMember'];
 const {mutation: mutationOptions} = options ?
@@ -489,7 +607,7 @@ const {mutation: mutationOptions} = options ?
       
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addProjectMember>>, {projectId: number;data: AddProjectMemberBody}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addProjectMember>>, {projectId: number;data: ProjectMemberWrite}> = (props) => {
           const {projectId,data} = props ?? {};
 
           return  addProjectMember(projectId,data,)
@@ -501,18 +619,18 @@ const {mutation: mutationOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type AddProjectMemberMutationResult = NonNullable<Awaited<ReturnType<typeof addProjectMember>>>
-    export type AddProjectMemberMutationBody = AddProjectMemberBody
-    export type AddProjectMemberMutationError = NotFoundResponse | ConflictResponse
+    export type AddProjectMemberMutationBody = ProjectMemberWrite
+    export type AddProjectMemberMutationError = ValidationFailedResponse | NotFoundResponse | ConflictResponse
 
     /**
  * @summary Add a member with a per-project role and allocation
  */
-export const useAddProjectMember = <TError = NotFoundResponse | ConflictResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addProjectMember>>, TError,{projectId: number;data: AddProjectMemberBody}, TContext>, }
+export const useAddProjectMember = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addProjectMember>>, TError,{projectId: number;data: ProjectMemberWrite}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof addProjectMember>>,
         TError,
-        {projectId: number;data: AddProjectMemberBody},
+        {projectId: number;data: ProjectMemberWrite},
         TContext
       > => {
 
@@ -521,7 +639,96 @@ export const useAddProjectMember = <TError = NotFoundResponse | ConflictResponse
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * The Team tab's inline edit. An omitted field keeps its stored value; an
+explicit `null` clears it, which is the only way to get back to "same as
+their global role" or "allocation not stated".
+
+**Without this, changing an allocation would mean remove-and-re-add** —
+which deactivates and reactivates the membership row and resets
+`addedAt`, turning an edit into a fabricated departure and return.
+
+No `If-Match`. Two people editing one member's allocation is a race
+whose loser typed a number a moment later and meant it; CONVENTIONS.md
+§5 puts the precondition where a lost update is silent and costly, and
+this row has two fields.
+
+ * @summary Change a member's project role or allocation
+ */
+export const updateProjectMember = (
+    projectId: number,
+    userId: number,
+    projectMemberPatch: ProjectMemberPatch,
+ ) => {
+      
+      
+      return http<ProjectMemberResponse>(
+      {url: `/projects/${projectId}/members/${userId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: projectMemberPatch
+    },
+      );
+    }
+  
+
+
+export const getUpdateProjectMemberMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProjectMember>>, TError,{projectId: number;userId: number;data: ProjectMemberPatch}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateProjectMember>>, TError,{projectId: number;userId: number;data: ProjectMemberPatch}, TContext> => {
+
+const mutationKey = ['updateProjectMember'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProjectMember>>, {projectId: number;userId: number;data: ProjectMemberPatch}> = (props) => {
+          const {projectId,userId,data} = props ?? {};
+
+          return  updateProjectMember(projectId,userId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProjectMemberMutationResult = NonNullable<Awaited<ReturnType<typeof updateProjectMember>>>
+    export type UpdateProjectMemberMutationBody = ProjectMemberPatch
+    export type UpdateProjectMemberMutationError = ValidationFailedResponse | NotFoundResponse
+
+    /**
+ * @summary Change a member's project role or allocation
+ */
+export const useUpdateProjectMember = <TError = ValidationFailedResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProjectMember>>, TError,{projectId: number;userId: number;data: ProjectMemberPatch}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateProjectMember>>,
+        TError,
+        {projectId: number;userId: number;data: ProjectMemberPatch},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateProjectMemberMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * Rejected with `409` while that member holds open tickets on the project.
+"Open" is `statuses.is_open`, not a hardcoded status list — the status
+vocabulary is master data an Admin extends (S-13).
+
+The row is **deactivated, not deleted**: it is the record that this
+person was on the project while the tickets assigned to them then were
+being worked, and a `DELETE` would make historical project attribution
+depend on current team composition.
+
+Removing somebody who is not on the team answers `204`. It is a setter,
+and a client retrying after a dropped response has to converge.
+
  * @summary Remove a member
  */
 export const removeProjectMember = (

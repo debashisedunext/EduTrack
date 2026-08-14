@@ -1,0 +1,83 @@
+-- =====================================================================
+-- B-017 · S-10 Team tab — the one field the tab specifies and the
+-- table has no room for.
+--
+-- Table: project_members (created by A-003, V20260805_1024; its
+--        `role_in_project` vocabulary fixed by B-011, V20260811_1520)
+--
+-- Blueprint §7.4 S-10: "Team tab: add resources + project role
+-- (PM / Dev / Support / Viewer) + allocation %". The role has had a
+-- column since the baseline and a CHECK since B-011. The allocation has
+-- had neither, while `contracts/openapi.yaml` has promised
+-- `allocationPct` on `POST /projects/{projectId}/members` since D-001 —
+-- an operation no server ever mounted, which is the only reason the
+-- gap has been survivable. B-017 mounts it.
+--
+-- ---------------------------------------------------------------------
+-- 1. Why NULL is legal, and why the contract's `default: 100` is gone
+--
+-- The contract declared `allocationPct: { minimum: 0, maximum: 100,
+-- default: 100 }`. Landing that as `NOT NULL DEFAULT 100` would write a
+-- claim nobody made onto every row that already exists:
+--
+--   * B-007's fixture corpus assigns 18 resources across 3 projects,
+--     several of them to all three. They would read 300%.
+--   * B-011's resource form has been the only writer of this table
+--     since it shipped, and its Projects section has never had an
+--     allocation input to fill in.
+--
+-- B-061's workload/capacity report is the consumer that would then
+-- surface a data-entry gap as a resourcing crisis, and there is no way
+-- for it to tell a backfilled 100 from a stated one. NULL means "not
+-- stated" — exactly what NULL already means one column to the left, for
+-- exactly the same reason B-011 gave for it there. The Team tab renders
+-- it as an em dash and offers to fill it in; nothing invents it.
+--
+-- The CHECK admits NULL for the same reason `ck_project_members_role`
+-- does.
+--
+-- ---------------------------------------------------------------------
+-- 2. Why SMALLINT and not TINYINT UNSIGNED
+--
+-- 0-100 fits in a TINYINT UNSIGNED with room to spare, and that is the
+-- argument against it: the value that would overflow is 101, which is
+-- an over-allocation somebody may one day have a reason to record
+-- deliberately rather than a corruption. A widening ALTER on a table
+-- A-034 reads on every scoped ticket query is not a cheap thing to
+-- need later. Same call `working_calendar` made for its minutes column
+-- (B-023).
+--
+-- The CHECK is what holds 0-100 today; a rule in a constraint can be
+-- changed by a migration, a rule in a column width cannot.
+--
+-- ---------------------------------------------------------------------
+-- 3. What this does NOT change
+--
+-- `ResourceWriteRepository.UPSERT_MEMBERSHIP` (B-011) writes
+-- `role_in_project` and `is_active` and does not name this column, so a
+-- resource-form save preserves an allocation the Team tab set. That is
+-- deliberate and is the reason the column is added rather than the
+-- upsert widened: the two screens edit the same row from two sides, and
+-- the one with no input for a field must not clear it.
+-- `ProjectTeamIT.aResourceFormSaveDoesNotClearAllocation` is the test
+-- that fails if anybody widens it.
+--
+-- No index. This column is never a predicate — the Team tab reads a
+-- project's rows through `uq_project_members`' leading column and sums
+-- a resource's rows through `ix_project_members_user`, both of which
+-- already exist.
+--
+-- FLAGGED FOR STREAM A. `project_members` is A-003's table and
+-- A-034 resolves the PM/Support row scope from it. This adds a nullable
+-- column and touches neither `is_active` nor the two id columns the
+-- scope query reads, so no scoped query changes shape — but the
+-- identity baseline should not change on a masters branch unremarked,
+-- which is the precedent B-011 set and B-016 followed.
+-- =====================================================================
+
+ALTER TABLE project_members
+  ADD COLUMN allocation_pct SMALLINT NULL
+    COMMENT 'S-10 Team tab. Percent of this resource''s capacity committed to this project. NULL means not stated — never backfilled to 100, see V20260813_1810 header.'
+    AFTER role_in_project,
+  ADD CONSTRAINT ck_project_members_allocation
+    CHECK (allocation_pct IS NULL OR allocation_pct BETWEEN 0 AND 100);

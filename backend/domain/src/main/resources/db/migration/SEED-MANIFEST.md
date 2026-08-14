@@ -63,6 +63,7 @@ environment, always.
 | 32 | `V20260811_1600__push_subscriptions.sql` | D | D-045 | schema | `push_subscriptions` — one row per browser that granted permission; unique on the **endpoint alone**, so a second user on a shared machine takes the subscription over rather than inheriting somebody else's alerts |
 | 33 | `V20260813_1030__ticket_status_requests.sql` | D | D-055 | schema | `ticket_status_requests` — one open ask per manager per ticket (a generated column plus a unique key, A-009's `pcd_open` idiom), and the answered row carries the wait in **working** minutes, stamped once so a holiday added later cannot restate it |
 | 34 | `V20260813_1420__project_master_fields.sql` | B | B-016 | schema | `projects`: `description` and `auto_assign_rule`, the two S-10 fields with no column; `ck_projects_status` fixes the vocabulary at `ACTIVE\|ON_HOLD\|CLOSED` at its first writer, before the javadoc's fourth and fifth values could be written by anything |
+| 35 | `V20260813_1810__project_member_allocation.sql` | B | B-017 | schema | `project_members.allocation_pct` — the S-10 Team tab field the contract has promised since D-001 with no column behind it. **Nullable, and the contract's `default: 100` dropped**: a backfill would read 300% for every fixture resource on three projects, and B-061 could not tell that from a stated figure |
 
 <!-- load-order:end -->
 

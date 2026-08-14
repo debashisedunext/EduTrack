@@ -14,6 +14,7 @@ import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
 import { ProjectListPage } from './features/masters/projects/ProjectListPage'
+import { ProjectTeamPage } from './features/masters/projects/ProjectTeamPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
@@ -131,6 +132,11 @@ export default function App() {
             <Route path="/masters/projects" element={<ProjectListPage />} />
             <Route path="/masters/projects/new" element={<ProjectFormPage />} />
             <Route path="/masters/projects/:projectId/edit" element={<ProjectFormPage />} />
+            {/* B-017 · S-10's Team tab. A sibling route rather than a nested
+                one: the two tabs own their own data, and a layout route would
+                make Team inherit General's read — which fetches the `ETag` its
+                `PATCH` needs and this screen never sends. */}
+            <Route path="/masters/projects/:projectId/team" element={<ProjectTeamPage />} />
             <Route path="/masters/roles" element={<RoleListPage />} />
             <Route path="/masters/roles/:roleId" element={<RolePermissionsPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />

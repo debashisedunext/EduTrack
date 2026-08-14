@@ -58,6 +58,18 @@ export interface User {
   dailyCapacityHrs: number; weeklyOff: number[] | null; skills: string[];
   /** Per-project role, `null` meaning "same as their global role". */
   projectRoles: Record<number, ProjectRoleCode | null>;
+  /**
+   * B-017 · per-project allocation %, keyed the same way `projectRoles` is.
+   *
+   * **A project missing from this map is "not stated", and that is not 100.**
+   * The column is nullable for the same reason: every membership written before
+   * the Team tab existed has no allocation because no screen had an input for
+   * one, and defaulting them would tell the capacity report that somebody on
+   * three projects is committed at 300%.
+   */
+  projectAllocations: Record<number, number | null>;
+  /** B-017 · when each membership started, so the roster can order and show it. */
+  projectMemberSince: Record<number, string>;
   mustChangePassword: boolean;
 }
 
@@ -337,6 +349,21 @@ const iso = (d: string) => new Date(`${d}Z`).toISOString();
  * logged in. A directory where every row is identical proves nothing about the
  * screen that renders it.
  */
+/**
+ * B-017 · stated allocations, and most memberships deliberately have none.
+ *
+ * Ravi is the over-allocated case (70 + 50 = 120%), which the Team tab has to be
+ * able to *show* rather than prevent; Anil is the 0% case, which must not render
+ * as "not stated"; everybody else has nothing, which is what every row written
+ * before this screen looks like. A roster where each member has a tidy number
+ * proves nothing about either edge.
+ */
+const SEEDED_ALLOCATIONS: Record<string, Record<number, number | null>> = {
+  ravi: { 1: 70, 2: 50 },
+  anil: { 1: 0 },
+  meera: { 1: 100 },
+};
+
 const USERS: User[] = [
   ['Anita Rao', 'anita', 'ADMIN', 'EMP-001', null, 'Leadership', 'Head of Delivery', [1, 2, 3], true, '2026-08-11T04:15:00.000Z'],
   ['Meera Iyer', 'meera', 'PM', 'EMP-002', 1, 'Delivery', 'Project Manager', [1, 2, 3], true, '2026-08-10T11:02:00.000Z'],
@@ -373,6 +400,10 @@ const USERS: User[] = [
   weeklyOff: (username as string) === 'priya' ? [7, 1] : null,
   skills: i % 3 === 0 ? [] : ['Java', 'React', 'MySQL'].slice(0, 1 + (i % 3)),
   projectRoles: {},
+  projectAllocations: SEEDED_ALLOCATIONS[username as string] ?? {},
+  projectMemberSince: Object.fromEntries(
+    (projectIds as number[]).map((id) => [id, `2026-0${1 + (i % 6)}-1${(id % 9)}T09:00:00.000Z`]),
+  ),
   // Karan has never logged in, so he is still on the password he was issued.
   mustChangePassword: lastLoginAt == null,
 }));

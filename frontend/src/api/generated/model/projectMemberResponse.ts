@@ -46,14 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { RoleCode } from './roleCode';
+import type { ProjectMember } from './projectMember';
 
-export type AddProjectMemberBody = {
-  userId: number;
-  projectRole: RoleCode;
-  /**
-   * @minimum 0
-   * @maximum 100
-   */
-  allocationPct?: number;
-};
+export interface ProjectMemberResponse {
+  data: ProjectMember;
+}
