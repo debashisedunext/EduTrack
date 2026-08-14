@@ -420,27 +420,47 @@ export const removeProjectMemberParams = zod.object({
 })
 
 /**
+ * The **resolved** grid: one cell per active task type × level, each
+carrying the figures a ticket raised in it would actually be measured
+against and the `source` that produced them.
+
+Cells are resolved, not listed. `sla_policies` is layered — a null
+`project_id` is the org-wide default and a null `task_type_id` means
+"any type" — so returning this project's own rows would show an
+administrator a nearly empty grid for a project whose tickets all have
+perfectly good SLA targets. Reading the ladder here is the only way the
+screen can say *"8 hours, inherited from the org default"*, which is
+the difference between a matrix somebody can reason about and a form.
+
+The ladder is §6's, extended past its three policy rungs to the priority
+and task-type master defaults exactly as `SlaResolution.Source`
+describes — the same answer C-012's planned-close-date preview gives, so
+the number on this screen and the date on the create form cannot
+disagree.
+
+Every role may read it. The grid is what decides every ticket's planned
+close date, and a developer who cannot see why their ticket is due
+Thursday cannot argue with it.
+
  * @summary SLA matrix — task type × level
  */
 export const getSlaPoliciesParams = zod.object({
   "projectId": zod.number()
 })
 
-export const getSlaPoliciesResponseDataItemResponseHrsMin = 0;
-
-export const getSlaPoliciesResponseDataItemResolutionHrsMin = 0;
-
-
-
 export const getSlaPoliciesResponse = zod.object({
   "data": zod.array(zod.object({
   "taskTypeId": zod.number(),
+  "taskTypeCode": zod.string().optional(),
+  "taskTypeName": zod.string(),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "responseHrs": zod.number().min(getSlaPoliciesResponseDataItemResponseHrsMin),
-  "resolutionHrs": zod.number().min(getSlaPoliciesResponseDataItemResolutionHrsMin),
-  "l1EscalationUserId": zod.number().nullish(),
-  "l2EscalationUserId": zod.number().nullish()
-}))
+  "responseHrs": zod.number().nullish(),
+  "resolutionHrs": zod.number().nullish().describe('Null only when `source` is `NONE` — nothing in the product has a figure for this cell.'),
+  "escalateToL1": zod.boolean().optional(),
+  "escalateToL2": zod.boolean().optional(),
+  "source": zod.enum(['PROJECT_TASK_TYPE', 'PROJECT_LEVEL', 'ORG_DEFAULT', 'PRIORITY_DEFAULT', 'TASK_TYPE_DEFAULT', 'NONE']).describe('Which rung of the resolution ladder answered — see\n`previewPlannedCloseDate`. Carried onto the wire so a planned close date\nis explicable: \"16 working hours, this project\'s Production Bug × High\npolicy\" is checkable where a bare date is not, and it is the only way\nsomeone editing the SLA matrix can see which row is being applied.\n'),
+  "isOverride": zod.boolean().describe('`source == PROJECT_TASK_TYPE` — this project has its own row for the\ncell. Derived, and on the wire anyway: it is the one thing every\nclient branches on, and re-deriving an enum comparison in each of\nthem is how a seventh source value later reads as an override in one\nplace and not another.\n')
+}).describe('One cell of the resolved matrix. `GET` returns the full task type ×\nlevel grid — every cell, whether or not this project has a row for it —\nbecause the screen has to show what a ticket would actually get, and a\nresponse carrying only the overrides would render as a mostly empty grid\nthat is indistinguishable from an unconfigured product.\n\n`taskTypeName` rides along so the grid can label its rows. There is no\nmounted `\/masters\/task-types` yet (B-020), and a matrix that renders\n\"task type 7\" is not a screen.\n'))
 })
 
 /**
@@ -448,8 +468,37 @@ export const getSlaPoliciesResponse = zod.object({
 leave a task type × level combination silently unmapped, and the first
 ticket to hit it would get no planned close date at all.
 
+**The body carries this project's overrides, not the resolved grid.** A
+cell absent from it goes back to inheriting; a cell present in it becomes
+a `sla_policies` row for this project and task type. Sending the whole
+grid back — including the cells `GET` resolved from a broader rung —
+would materialise every inherited figure as a project-level override, and
+the project would then silently stop following the org-wide default it
+was shown as following. `isOverride` on each cell is what tells the two
+apart.
+
+Rows this screen has no cell for are left alone: a project-level default
+(`task_type_id IS NULL`, the §6 rung between this project's overrides and
+the org-wide default) survives a replace, because a task type × level
+grid cannot express one and a replace that dropped it would delete
+configuration through a screen that never displayed it.
+
+**Removed overrides are deactivated, never deleted.** `clients.sla_policy_id`
+is a foreign key into this table and `PlannedCloseDatePreview.slaPolicyId`
+puts row ids on the wire; a `DELETE` would break the first and orphan the
+second. `is_active = 0` is also what the resolution ladder already reads,
+so a deactivated override falls through to the next rung rather than
+leaving a hole.
+
 **Changing a policy never retrospectively moves an existing ticket's
 planned close date.** Tickets carry the policy they were created under.
+
+Admin only — `master.write`. Blueprint §2 lists SLA under master data,
+and B-001's own description of the capability names it. This is
+deliberately narrower than the Team tab beside it, which is
+`project.manage` and reaches PM: mapping a resource to a project is
+project management, and setting the response target a client is held to
+is not.
 
  * @summary Replace the SLA matrix
  */
@@ -461,36 +510,34 @@ export const replaceSlaPoliciesHeader = zod.object({
   "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
 })
 
-export const replaceSlaPoliciesBodyResponseHrsMin = 0;
+export const replaceSlaPoliciesBodyResponseHrsMax = 9999.99;
 
-export const replaceSlaPoliciesBodyResolutionHrsMin = 0;
+export const replaceSlaPoliciesBodyResolutionHrsMax = 9999.99;
 
-
+export const replaceSlaPoliciesBodyEscalateToL1Default = true;export const replaceSlaPoliciesBodyEscalateToL2Default = false;
 
 export const replaceSlaPoliciesBodyItem = zod.object({
-  "taskTypeId": zod.number(),
+  "taskTypeId": zod.number().describe('`task_types.id` — an `INT`, not a `BIGINT`.'),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "responseHrs": zod.number().min(replaceSlaPoliciesBodyResponseHrsMin),
-  "resolutionHrs": zod.number().min(replaceSlaPoliciesBodyResolutionHrsMin),
-  "l1EscalationUserId": zod.number().nullish(),
-  "l2EscalationUserId": zod.number().nullish()
-})
+  "responseHrs": zod.number().max(replaceSlaPoliciesBodyResponseHrsMax).nullish().describe('Working hours to first response. Nullable — the column is, and a\npolicy that only targets resolution is a real one. Must not exceed\n`resolutionHrs`.\n'),
+  "resolutionHrs": zod.number().max(replaceSlaPoliciesBodyResolutionHrsMax).describe('Working hours to resolution. \*\*Exclusive minimum\*\*, not `0`:\n`SlaResolution.hasTarget()` treats a non-positive figure as no\ntarget at all, so a stored zero is a policy that reads as configured\non this screen and behaves as absent everywhere else.\n'),
+  "escalateToL1": zod.boolean().default(replaceSlaPoliciesBodyEscalateToL1Default),
+  "escalateToL2": zod.boolean().optional()
+}).describe('One project-level override — a `sla_policies` row with this project\'s id\nand a task type. `PUT` takes an array of these.\n\n\*\*`escalateToL1` \/ `escalateToL2` are flags, not recipients.\*\* An earlier\ndraft of this schema carried `l1EscalationUserId` \/ `l2EscalationUserId`,\nwhich the table cannot store and the escalation scanner does not want:\nthe columns are `escalate_to_l1` \/ `escalate_to_l2`, and who each level\n\*means\* is fixed — L1 the assignee\'s reporting manager, L2 that\nmanager\'s manager (§6\'s 48-hour rule). The matrix only says whether the\nlevel applies to this kind of ticket on this project, so a project can\ndecide a Low change request wakes nobody without also having to decide\nwho that nobody would have been. Naming a recipient here would store the\nreporting chain twice, in two places that can disagree.\n')
 export const replaceSlaPoliciesBody = zod.array(replaceSlaPoliciesBodyItem)
-
-export const replaceSlaPoliciesResponseDataItemResponseHrsMin = 0;
-
-export const replaceSlaPoliciesResponseDataItemResolutionHrsMin = 0;
-
-
 
 export const replaceSlaPoliciesResponse = zod.object({
   "data": zod.array(zod.object({
   "taskTypeId": zod.number(),
+  "taskTypeCode": zod.string().optional(),
+  "taskTypeName": zod.string(),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "responseHrs": zod.number().min(replaceSlaPoliciesResponseDataItemResponseHrsMin),
-  "resolutionHrs": zod.number().min(replaceSlaPoliciesResponseDataItemResolutionHrsMin),
-  "l1EscalationUserId": zod.number().nullish(),
-  "l2EscalationUserId": zod.number().nullish()
-}))
+  "responseHrs": zod.number().nullish(),
+  "resolutionHrs": zod.number().nullish().describe('Null only when `source` is `NONE` — nothing in the product has a figure for this cell.'),
+  "escalateToL1": zod.boolean().optional(),
+  "escalateToL2": zod.boolean().optional(),
+  "source": zod.enum(['PROJECT_TASK_TYPE', 'PROJECT_LEVEL', 'ORG_DEFAULT', 'PRIORITY_DEFAULT', 'TASK_TYPE_DEFAULT', 'NONE']).describe('Which rung of the resolution ladder answered — see\n`previewPlannedCloseDate`. Carried onto the wire so a planned close date\nis explicable: \"16 working hours, this project\'s Production Bug × High\npolicy\" is checkable where a bare date is not, and it is the only way\nsomeone editing the SLA matrix can see which row is being applied.\n'),
+  "isOverride": zod.boolean().describe('`source == PROJECT_TASK_TYPE` — this project has its own row for the\ncell. Derived, and on the wire anyway: it is the one thing every\nclient branches on, and re-deriving an enum comparison in each of\nthem is how a seventh source value later reads as an override in one\nplace and not another.\n')
+}).describe('One cell of the resolved matrix. `GET` returns the full task type ×\nlevel grid — every cell, whether or not this project has a row for it —\nbecause the screen has to show what a ticket would actually get, and a\nresponse carrying only the overrides would render as a mostly empty grid\nthat is indistinguishable from an unconfigured product.\n\n`taskTypeName` rides along so the grid can label its rows. There is no\nmounted `\/masters\/task-types` yet (B-020), and a matrix that renders\n\"task type 7\" is not a screen.\n'))
 })
 

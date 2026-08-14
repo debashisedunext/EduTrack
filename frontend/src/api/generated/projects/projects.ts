@@ -791,6 +791,28 @@ export const useRemoveProjectMember = <TError = NotFoundResponse | OpenTicketsPr
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * The **resolved** grid: one cell per active task type × level, each
+carrying the figures a ticket raised in it would actually be measured
+against and the `source` that produced them.
+
+Cells are resolved, not listed. `sla_policies` is layered — a null
+`project_id` is the org-wide default and a null `task_type_id` means
+"any type" — so returning this project's own rows would show an
+administrator a nearly empty grid for a project whose tickets all have
+perfectly good SLA targets. Reading the ladder here is the only way the
+screen can say *"8 hours, inherited from the org default"*, which is
+the difference between a matrix somebody can reason about and a form.
+
+The ladder is §6's, extended past its three policy rungs to the priority
+and task-type master defaults exactly as `SlaResolution.Source`
+describes — the same answer C-012's planned-close-date preview gives, so
+the number on this screen and the date on the create form cannot
+disagree.
+
+Every role may read it. The grid is what decides every ticket's planned
+close date, and a developer who cannot see why their ticket is due
+Thursday cannot argue with it.
+
  * @summary SLA matrix — task type × level
  */
 export const getSlaPolicies = (
@@ -887,8 +909,37 @@ export function useGetSlaPolicies<TData = Awaited<ReturnType<typeof getSlaPolici
 leave a task type × level combination silently unmapped, and the first
 ticket to hit it would get no planned close date at all.
 
+**The body carries this project's overrides, not the resolved grid.** A
+cell absent from it goes back to inheriting; a cell present in it becomes
+a `sla_policies` row for this project and task type. Sending the whole
+grid back — including the cells `GET` resolved from a broader rung —
+would materialise every inherited figure as a project-level override, and
+the project would then silently stop following the org-wide default it
+was shown as following. `isOverride` on each cell is what tells the two
+apart.
+
+Rows this screen has no cell for are left alone: a project-level default
+(`task_type_id IS NULL`, the §6 rung between this project's overrides and
+the org-wide default) survives a replace, because a task type × level
+grid cannot express one and a replace that dropped it would delete
+configuration through a screen that never displayed it.
+
+**Removed overrides are deactivated, never deleted.** `clients.sla_policy_id`
+is a foreign key into this table and `PlannedCloseDatePreview.slaPolicyId`
+puts row ids on the wire; a `DELETE` would break the first and orphan the
+second. `is_active = 0` is also what the resolution ladder already reads,
+so a deactivated override falls through to the next rung rather than
+leaving a hole.
+
 **Changing a policy never retrospectively moves an existing ticket's
 planned close date.** Tickets carry the policy they were created under.
+
+Admin only — `master.write`. Blueprint §2 lists SLA under master data,
+and B-001's own description of the capability names it. This is
+deliberately narrower than the Team tab beside it, which is
+`project.manage` and reaches PM: mapping a resource to a project is
+project management, and setting the response target a client is held to
+is not.
 
  * @summary Replace the SLA matrix
  */
@@ -908,7 +959,7 @@ export const replaceSlaPolicies = (
   
 
 
-export const getReplaceSlaPoliciesMutationOptions = <TError = ValidationFailedResponse | PreconditionFailedResponse,
+export const getReplaceSlaPoliciesMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | PreconditionFailedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceSlaPolicies>>, TError,{projectId: number;data: SlaPolicyWrite[]}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof replaceSlaPolicies>>, TError,{projectId: number;data: SlaPolicyWrite[]}, TContext> => {
 
@@ -935,12 +986,12 @@ const {mutation: mutationOptions} = options ?
 
     export type ReplaceSlaPoliciesMutationResult = NonNullable<Awaited<ReturnType<typeof replaceSlaPolicies>>>
     export type ReplaceSlaPoliciesMutationBody = SlaPolicyWrite[]
-    export type ReplaceSlaPoliciesMutationError = ValidationFailedResponse | PreconditionFailedResponse
+    export type ReplaceSlaPoliciesMutationError = ValidationFailedResponse | NotFoundResponse | PreconditionFailedResponse
 
     /**
  * @summary Replace the SLA matrix
  */
-export const useReplaceSlaPolicies = <TError = ValidationFailedResponse | PreconditionFailedResponse,
+export const useReplaceSlaPolicies = <TError = ValidationFailedResponse | NotFoundResponse | PreconditionFailedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceSlaPolicies>>, TError,{projectId: number;data: SlaPolicyWrite[]}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof replaceSlaPolicies>>,

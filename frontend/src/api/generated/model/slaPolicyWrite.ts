@@ -47,16 +47,45 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { Level } from './level';
-import type { SlaPolicyWriteL1EscalationUserId } from './slaPolicyWriteL1EscalationUserId';
-import type { SlaPolicyWriteL2EscalationUserId } from './slaPolicyWriteL2EscalationUserId';
+import type { SlaPolicyWriteResponseHrs } from './slaPolicyWriteResponseHrs';
 
+/**
+ * One project-level override — a `sla_policies` row with this project's id
+and a task type. `PUT` takes an array of these.
+
+**`escalateToL1` / `escalateToL2` are flags, not recipients.** An earlier
+draft of this schema carried `l1EscalationUserId` / `l2EscalationUserId`,
+which the table cannot store and the escalation scanner does not want:
+the columns are `escalate_to_l1` / `escalate_to_l2`, and who each level
+*means* is fixed — L1 the assignee's reporting manager, L2 that
+manager's manager (§6's 48-hour rule). The matrix only says whether the
+level applies to this kind of ticket on this project, so a project can
+decide a Low change request wakes nobody without also having to decide
+who that nobody would have been. Naming a recipient here would store the
+reporting chain twice, in two places that can disagree.
+
+ */
 export interface SlaPolicyWrite {
+  /** `task_types.id` — an `INT`, not a `BIGINT`. */
   taskTypeId: number;
   level: Level;
-  /** @minimum 0 */
-  responseHrs: number;
-  /** @minimum 0 */
+  /**
+   * Working hours to first response. Nullable — the column is, and a
+policy that only targets resolution is a real one. Must not exceed
+`resolutionHrs`.
+
+   * @maximum 9999.99
+   */
+  responseHrs?: SlaPolicyWriteResponseHrs;
+  /**
+   * Working hours to resolution. **Exclusive minimum**, not `0`:
+`SlaResolution.hasTarget()` treats a non-positive figure as no
+target at all, so a stored zero is a policy that reads as configured
+on this screen and behaves as absent everywhere else.
+
+   * @maximum 9999.99
+   */
   resolutionHrs: number;
-  l1EscalationUserId?: SlaPolicyWriteL1EscalationUserId;
-  l2EscalationUserId?: SlaPolicyWriteL2EscalationUserId;
+  escalateToL1?: boolean;
+  escalateToL2?: boolean;
 }

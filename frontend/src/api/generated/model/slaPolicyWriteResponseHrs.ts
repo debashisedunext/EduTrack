@@ -47,4 +47,11 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type SlaPolicyWriteL1EscalationUserId = number | null;
+/**
+ * Working hours to first response. Nullable — the column is, and a
+policy that only targets resolution is a real one. Must not exceed
+`resolutionHrs`.
+
+ * @maximum 9999.99
+ */
+export type SlaPolicyWriteResponseHrs = number | null;

@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
-import type { Holiday, ProjectRoleCode, Role, User } from '../db';
+import type { Db, Holiday, Level, ProjectRoleCode, Role, User } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
 import { round, statusRequestDto } from './tickets';
 import {
@@ -167,6 +167,87 @@ function rolePrecondition(role: Role, ifMatch: string | null) {
 const calendarEtag = () =>
   `"${Math.abs([...JSON.stringify(calendarState().week)]
     .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+// ── the SLA matrix · S-10's SLA tab (B-018) ─────────────────────────────────
+
+/** One element of the `PUT` body: a project-level override, never a resolved cell. */
+interface SlaOverride {
+  taskTypeId: number;
+  level: Level;
+  responseHrs: number | null;
+  resolutionHrs: number;
+  escalateToL1?: boolean;
+  escalateToL2?: boolean;
+}
+
+/**
+ * The resolved grid — every task type × every level, with the rung that
+ * answered.
+ *
+ * The escalation flags are **flags and not recipients**, matching the columns:
+ * §6 fixes who each level means (L1 the reporting manager, L2 that manager's
+ * manager), so the matrix only says whether the level applies. The contract
+ * carried `l1EscalationUserId` / `l2EscalationUserId` until B-018 and this mock
+ * answered a hardcoded `2` and `1` for every cell, which nothing read and
+ * nothing could have used.
+ *
+ * `db.slaPolicies` has no per-row flags, so the seeded ones read as A-007's
+ * column defaults — L1 on, L2 off, except Critical, which is the level §6
+ * escalates to. Overrides written through the `PUT` keep what was sent.
+ */
+function slaMatrix(projectId: number, db: Db) {
+  const levels: Level[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+
+  return db.taskTypes.flatMap((tt) =>
+    levels.map((level) => {
+      const sla = resolveSla(projectId, tt.id, level, db);
+      return {
+        taskTypeId: tt.id,
+        taskTypeName: tt.name,
+        level,
+        responseHrs: sla.responseHrs,
+        resolutionHrs: sla.resolutionHrs,
+        escalateToL1: true,
+        escalateToL2: level === 'CRITICAL',
+        source: sla.source,
+        isOverride: sla.source === 'PROJECT_TASK_TYPE',
+      };
+    }),
+  );
+}
+
+/**
+ * Content-derived over the **resolved** grid, like the real controller's.
+ *
+ * Over the resolved grid and not this project's own rows, which is the part
+ * worth stating: a change to the org-wide default moves this project's tag even
+ * though nothing on the project changed. That is correct — the administrator
+ * was shown inherited figures and is deciding which to override, so if those
+ * moved underneath them the decision was made against numbers that are no
+ * longer true.
+ */
+const slaMatrixEtag = (grid: ReturnType<typeof slaMatrix>) =>
+  `"${Math.abs([...JSON.stringify(grid)]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/**
+ * The mock enforces `If-Match` too. A guard the real backend has and the mock
+ * waves through is a guard the frontend never gets to exercise — and this is
+ * the one write in the feature where losing the race erases somebody's whole
+ * matrix rather than one field of it.
+ */
+function slaPrecondition(projectId: number, ifMatch: string | null, db: Db) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the SLA matrix first and send back its ETag.');
+  }
+  const current = slaMatrixEtag(slaMatrix(projectId, db));
+  if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== current.replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'This matrix changed since you read it. Reload and reapply your edit.');
+  }
+  return null;
+}
 
 // ── two-factor · S-04 (A-029) ───────────────────────────────────────────────
 /** Enrolment for whoever is signed in, or undefined if they never started. */
@@ -765,35 +846,123 @@ export const restHandlers = [
     return noContent();
   }),
   /**
-   * The matrix S-13 edits, which the contract shapes as an exhaustive
-   * `taskType × level` grid — `SlaPolicyWrite.taskTypeId` is required, so the
-   * layered `(project, null, level)` and org-wide rows the table actually
-   * stores cannot be expressed in this response at all.
+   * The matrix S-10's SLA tab edits, resolved cell by cell.
    *
-   * So each cell is **resolved** rather than derived from the task type's
-   * default: whatever `resolveSla` would apply is what the grid shows. Deriving
-   * it (`resolutionHrs: tt.defaultSlaHrs` for every level, as this did until
-   * C-012) made the matrix disagree with both the preview and the create path,
-   * and gave every level identical hours.
+   * Each cell is **resolved** through `resolveSla` rather than derived from the
+   * task type's default. Deriving it (`resolutionHrs: tt.defaultSlaHrs` for
+   * every level, as this did until C-012) made the matrix disagree with both
+   * the preview and the create path, and gave every level identical hours.
+   *
+   * B-018 adds `source` and `isOverride`, and they are what makes it a screen:
+   * without them an inherited figure and a figure this project set are
+   * indistinguishable, and the `PUT` below cannot be called correctly, because
+   * it takes the overrides and not the grid.
+   *
+   * Every cell the mock produces resolves to something, because `resolveSla`'s
+   * rung 4 has a figure for all four levels. `NONE` is unreachable here and is
+   * still handled — the real backend reaches it whenever an Admin clears a
+   * priority's `default_sla_hours`.
    */
   http.get(url('/projects/:projectId/sla-policies'), ({ params }) => {
     const db = getDb();
     const projectId = Number(params.projectId);
     if (!db.projects.some((p) => p.id === projectId)) return notFound('Project');
-    return ok(db.taskTypes.flatMap((tt) =>
-      (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const).map((level) => {
-        const sla = resolveSla(projectId, tt.id, level, db);
-        return {
-          taskTypeId: tt.id, level,
-          responseHrs: sla.responseHrs, resolutionHrs: sla.resolutionHrs,
-          l1EscalationUserId: 2, l2EscalationUserId: 1,
-        };
-      }),
-    ));
+
+    const grid = slaMatrix(projectId, db);
+    return ok(grid, undefined, { headers: { ETag: slaMatrixEtag(grid) } });
   }),
-  http.put(url('/projects/:projectId/sla-policies'), async ({ request }) =>
-    ok(await request.json()),
-  ),
+
+  /**
+   * B-018 · replace this project's overrides.
+   *
+   * Until now this echoed the request body back and wrote nothing, which is the
+   * shape of mock that makes a save look like it worked. It writes real rows
+   * into `db.slaPolicies` now, and that matters beyond this screen: the create
+   * form's planned-close-date preview reads the same store through the same
+   * `resolveSla`, so tightening the Production Bug policy here really does move
+   * the date the ticket form quotes.
+   *
+   * The two rules that are easy to get wrong are enforced here rather than
+   * assumed, because the mock is what the frontend's own tests run against:
+   *
+   * - **only rung-1 rows are replaced.** A project-level default
+   *   (`taskTypeId: null`) has no cell in the grid, so dropping it would delete
+   *   configuration through a screen that never displayed it. The seed puts one
+   *   on PAY, so this is exercised rather than hypothetical.
+   * - **cleared rows are deactivated, not spliced out.** `clients.slaPolicyId`
+   *   is a foreign key onto them in the real schema, and `isActive: false` is
+   *   what `resolveSla` already reads, so a cleared cell falls through to the
+   *   next rung instead of leaving a hole.
+   */
+  http.put(url('/projects/:projectId/sla-policies'), async ({ params, request }) => {
+    const db = getDb();
+    const projectId = Number(params.projectId);
+    if (!db.projects.some((p) => p.id === projectId)) return notFound('Project');
+
+    const stale = slaPrecondition(projectId, request.headers.get('If-Match'), db);
+    if (stale) return stale;
+
+    const overrides = (await request.json()) as SlaOverride[];
+
+    const seen = new Set<string>();
+    for (const o of overrides) {
+      const key = `${o.taskTypeId}/${o.level}`;
+      if (seen.has(key)) {
+        return validationFailed({
+          taskTypeId: [`task type ${o.taskTypeId} is listed twice at ${o.level}`],
+        });
+      }
+      seen.add(key);
+
+      if (!db.taskTypes.some((t) => t.id === o.taskTypeId)) {
+        return validationFailed({ taskTypeId: [`no such task type: ${o.taskTypeId}`] });
+      }
+      if (!(o.resolutionHrs > 0)) {
+        return validationFailed({ resolutionHrs: ['resolutionHrs must be greater than zero'] });
+      }
+      if (o.responseHrs != null && o.responseHrs > o.resolutionHrs) {
+        return validationFailed({
+          responseHrs: [
+            `response target (${o.responseHrs}h) cannot be longer than the resolution target (${o.resolutionHrs}h)`,
+          ],
+        });
+      }
+    }
+
+    for (const p of db.slaPolicies) {
+      if (p.projectId === projectId && p.taskTypeId != null) p.isActive = false;
+    }
+    for (const o of overrides) {
+      const existing = db.slaPolicies.find(
+        (p) => p.projectId === projectId && p.taskTypeId === o.taskTypeId && p.level === o.level,
+      );
+      if (existing) {
+        existing.responseHrs = o.responseHrs ?? null;
+        existing.resolutionHrs = o.resolutionHrs;
+        existing.isActive = true;
+      } else {
+        db.slaPolicies.push({
+          // Off the highest id in the store, not `nextId`. `db.seq` starts
+          // empty, so `nextId` would answer 1 — colliding with the seeded
+          // org-wide LOW policy — and `PlannedCloseDatePreview.slaPolicyId`
+          // puts these ids on the wire, so two rows sharing one would make the
+          // preview's explanation point at the wrong policy. The contacts
+          // handler dodges the same collision with `+ 100`; this is the version
+          // that stays right as the store grows.
+          id: Math.max(0, ...db.slaPolicies.map((p) => p.id)) + 1,
+          projectId,
+          taskTypeId: o.taskTypeId,
+          level: o.level,
+          responseHrs: o.responseHrs ?? null,
+          resolutionHrs: o.resolutionHrs,
+          isActive: true,
+        });
+      }
+    }
+
+    const grid = slaMatrix(projectId, db);
+    return ok(grid, undefined, { headers: { ETag: slaMatrixEtag(grid) } });
+  }),
 
   // ── clients ───────────────────────────────────────────────────────────────
   http.get(url('/clients'), ({ request }) => {

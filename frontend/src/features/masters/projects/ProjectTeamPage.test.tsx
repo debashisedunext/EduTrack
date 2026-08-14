@@ -115,14 +115,17 @@ describe('the project team tab', () => {
     expect(labels).not.toContain('Sunil Menon')
   })
 
-  it('renders the tab strip with Team current, and no stubs for the unbuilt tabs', async () => {
+  it('renders the tab strip with Team current, and no stub for the unbuilt tab', async () => {
     renderPage()
 
     expect(await screen.findByRole('link', { name: 'Team' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('link', { name: 'General' })).toBeInTheDocument()
-    // S-10 describes four tabs and two exist. A greyed-out tab and a broken one
-    // look identical to a user; B-016 refused to stub them and so does this.
-    expect(screen.queryByText('SLA')).not.toBeInTheDocument()
+    // SLA arrived with B-018 — a tab appears when the screen behind it exists,
+    // which is the rule this test was written to hold rather than the count it
+    // happened to assert.
+    expect(screen.getByRole('link', { name: 'SLA' })).toBeInTheDocument()
+    // Settings is B-019 and is still not stubbed. A greyed-out tab and a broken
+    // one look identical to a user; B-016 refused to stub them and so does this.
     expect(screen.queryByText('Settings')).not.toBeInTheDocument()
   })
 

@@ -15,6 +15,7 @@ import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendar
 import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
 import { ProjectListPage } from './features/masters/projects/ProjectListPage'
 import { ProjectTeamPage } from './features/masters/projects/ProjectTeamPage'
+import { SlaMatrixPage } from './features/masters/projects/SlaMatrixPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
@@ -137,6 +138,11 @@ export default function App() {
                 make Team inherit General's read — which fetches the `ETag` its
                 `PATCH` needs and this screen never sends. */}
             <Route path="/masters/projects/:projectId/team" element={<ProjectTeamPage />} />
+            {/* B-018 · S-10's SLA tab, a sibling for the same reason — and a
+                sharper one: it needs its own `ETag`, over the matrix rather
+                than over the project, so no shared parent read could serve
+                both tabs anyway. */}
+            <Route path="/masters/projects/:projectId/sla" element={<SlaMatrixPage />} />
             <Route path="/masters/roles" element={<RoleListPage />} />
             <Route path="/masters/roles/:roleId" element={<RolePermissionsPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />

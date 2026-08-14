@@ -207,6 +207,26 @@ final class PermissionMatrix {
     private static final String PROJECT_MEMBER = """
             {"userId":1,"projectRole":"DEVELOPER","allocationPct":50}""";
 
+    /**
+     * {@code List<SlaPolicyWrite>}: a bare array, and every element is
+     * validated.
+     *
+     * <p>One valid override is enough. It has to be <em>valid</em> so that
+     * argument resolution passes the request on to the guard —
+     * {@code resolutionHrs} is {@code @Positive}, so the obvious empty-ish
+     * fixture would 400 before {@code @PreAuthorize} ran and the row would
+     * assert nothing at all. {@code SlaPolicyBodyValidationTest} is what proves
+     * element validation reaches this far; without it this fixture's validity
+     * would be an assumption.
+     *
+     * <p>Task type 2 is {@code PRODUCTION_BUG} in the migration seed. The
+     * request never gets far enough to look it up — these suites run without a
+     * database — but a fixture naming a plausible row is one fewer thing to
+     * reason about if it ever does.
+     */
+    private static final String SLA_MATRIX = """
+            [{"taskTypeId":2,"level":"HIGH","responseHrs":2,"resolutionHrs":8}]""";
+
     /** {@code StatusRequest}: isActive is boxed so omitting it is a 400. */
     private static final String USER_STATUS = """
             {"isActive":false}""";
@@ -384,6 +404,34 @@ final class PermissionMatrix {
             adminAndPm("POST", "/api/v1/projects/{projectId}/members", PROJECT_MEMBER),
             adminAndPm("PATCH", "/api/v1/projects/{projectId}/members/{userId}", EMPTY_PATCH),
             adminAndPm("DELETE", "/api/v1/projects/{projectId}/members/{userId}"),
+
+            // ── the SLA matrix · S-10's SLA tab (B-018) ──────────────────────
+            // ⚠ The write is Admin ALONE, and it sits one tab away from three
+            // rows that are Admin and PM. That is not an inconsistency to be
+            // tidied up, and it is the reason this comment is long.
+            //
+            // §2 has two separate rows here. Row 2 — "Create/edit projects, map
+            // resources to project" — is ✅ for PM, and that is the General and
+            // Team tabs above. Row 5 — "Master data (task types, **SLA**,
+            // workflow, holidays)" — is ✅ for Admin and ❌ for all five others,
+            // and that is this one. B-001's own description of master.write
+            // names SLA in it, and B-023 already annotates the working calendar,
+            // the other master under this feature, exactly this way.
+            //
+            // The distinction is real: staffing your own project is project
+            // management; setting the response target a client is contractually
+            // held to, and deciding whose manager's manager gets woken on a
+            // breach, is master data. The obvious "consistency" fix is to widen
+            // this row to Admin and PM, and it would be widening the wrong one.
+            //
+            // The read is every role, and this one is not a convenience either.
+            // This grid is what gives every ticket its planned close date; the
+            // same figures already reach all six roles one at a time through
+            // C-012's planned-close-date preview on the create form, and a
+            // Developer who cannot see the matrix cannot find out why their
+            // ticket is due Thursday.
+            everyRole("GET", "/api/v1/projects/{projectId}/sla-policies"),
+            adminOnly("PUT", "/api/v1/projects/{projectId}/sla-policies", SLA_MATRIX),
 
             // ── resources · S-07 and S-08 ───────────────────────────────────
             // The directory is the assignee picker and the @mention source, so

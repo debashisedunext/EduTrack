@@ -46,8 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { SlaPolicyCell } from './slaPolicyCell';
 
-export interface SlaPolicyListResponse {
-  data: SlaPolicyCell[];
-}
+/**
+ * Null only when `source` is `NONE` — nothing in the product has a figure for this cell.
+ */
+export type SlaPolicyCellResolutionHrs = number | null;
