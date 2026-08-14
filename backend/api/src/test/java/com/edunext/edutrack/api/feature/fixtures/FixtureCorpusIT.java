@@ -11,6 +11,8 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -214,22 +216,51 @@ class FixtureCorpusIT {
 
     // ── the hash-chain decision ─────────────────────────────────────────────
 
+    /**
+     * <b>Inverted by A-042, which is what this test was written to wait for.</b>
+     * It used to assert the hash columns were left NULL, saying that if it ever
+     * failed, "either a real hashing implementation landed and this fixture
+     * should adopt it, or something started writing hashes without one
+     * existing". The first happened, and the fixture now goes through
+     * {@code TicketJournal} like every other writer.
+     *
+     * <p>The assertion is {@code row_hash IS NULL} counted at zero rather than a
+     * spot check, because the whole point is that the corpus contains no
+     * unverifiable row. A-044 is then free to treat a NULL {@code row_hash} as a
+     * finding outright — if seed data were allowed to carry them, the verifier
+     * would have to skip NULLs, and skipping NULLs means unhashing a row hides
+     * whatever was done to it.
+     */
     @Test
-    void hashChainColumnsAreLeftNullOnEveryAppendOnlyRow() {
-        // The documented decision (README.md, TicketFixtureGenerator javadoc):
-        // A-040/A-044's algorithm does not exist yet, so nothing here invents
-        // one. If this test ever fails, either a real hashing implementation
-        // landed and this fixture should adopt it, or something started writing
-        // hashes without one existing — worth knowing either way.
+    void everyAppendOnlyRowIsHashedIntoItsTicketsChain() {
         assertThat(jdbc.queryForObject(
-                "SELECT COUNT(*) FROM ticket_history WHERE row_hash IS NOT NULL OR prev_hash IS NOT NULL",
+                "SELECT COUNT(*) FROM ticket_history WHERE row_hash IS NULL",
                 Integer.class)).isZero();
         assertThat(jdbc.queryForObject(
-                "SELECT COUNT(*) FROM ticket_effort_logs WHERE row_hash IS NOT NULL OR prev_hash IS NOT NULL",
+                "SELECT COUNT(*) FROM ticket_effort_logs WHERE row_hash IS NULL",
                 Integer.class)).isZero();
         assertThat(jdbc.queryForObject(
-                "SELECT COUNT(*) FROM ticket_stage_transitions WHERE row_hash IS NOT NULL OR prev_hash IS NOT NULL",
+                "SELECT COUNT(*) FROM ticket_stage_transitions WHERE row_hash IS NULL",
                 Integer.class)).isZero();
+    }
+
+    /**
+     * Exactly one genesis row per ticket per table. More than one is a fork —
+     * two chains for the same ticket, each internally consistent, with whatever
+     * sits before the second one unreachable. It is the failure mode that
+     * survives a chain walk, so it is worth asserting over the whole corpus
+     * rather than trusting the append path that produced it.
+     */
+    @Test
+    void noTicketHasTwoChainHeadsInOneTable() {
+        for (String table : List.of("ticket_history", "ticket_effort_logs", "ticket_stage_transitions")) {
+            assertThat(jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM (SELECT ticket_id FROM " + table
+                            + " WHERE prev_hash IS NULL GROUP BY ticket_id HAVING COUNT(*) > 1) forks",
+                    Integer.class))
+                    .as("%s has a ticket with more than one row carrying no prev_hash", table)
+                    .isZero();
+        }
     }
 
     // ── referential integrity ───────────────────────────────────────────────

@@ -17,6 +17,12 @@ mvnw text eol=lf
 # with a diff nobody wrote. Opted out explicitly rather than relying on that.
 backend/common/src/test/resources/canonical/*.json -text
 
+# ---- A-042 golden files: the hashed column set, same rule ----
+# A-041's files pin the serialiser; these pin which columns a row contributes.
+# Both are bytes the chain is computed over, so neither may be rewritten by a
+# filter — see ChainPayloadsGoldenFileTest.
+backend/domain/src/test/resources/journal/*.json -text
+
 # ---- Generated: never merge by hand, always regenerate ----
 frontend/src/api/generated/** merge=ours linguist-generated=true
 

@@ -1,7 +1,7 @@
 package com.edunext.edutrack.api.feature.fixtures;
 
 import com.edunext.edutrack.api.security.scope.UnscopedAccess;
-import com.edunext.edutrack.domain.journal.DirectAppend;
+import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.masters.Priority;
 import com.edunext.edutrack.domain.masters.TaskType;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
@@ -9,12 +9,9 @@ import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketCycle;
 import com.edunext.edutrack.domain.tickets.TicketCycleRepository;
 import com.edunext.edutrack.domain.tickets.TicketEffortLog;
-import com.edunext.edutrack.domain.tickets.TicketEffortLogRepository;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
-import com.edunext.edutrack.domain.tickets.TicketHistoryRepository;
 import com.edunext.edutrack.domain.tickets.TicketRepository;
 import com.edunext.edutrack.domain.workflow.TicketStageTransition;
-import com.edunext.edutrack.domain.workflow.TicketStageTransitionRepository;
 import com.edunext.edutrack.domain.workflow.WorkflowStage;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -50,8 +47,17 @@ import java.util.Set;
  * collapsed back into a single self-invoking class.
  *
  * <p>See {@link TicketFixtureGenerator}'s javadoc for what "varied" means
- * across the 200 tickets this is called for, and the hash-chain-columns-are-
- * NULL decision that applies to every append this class makes.
+ * across the 200 tickets this is called for.
+ *
+ * <p><b>Every append goes through {@link TicketJournal} (A-042).</b> It used to
+ * hold the three append-only repositories directly, declared with
+ * {@code @DirectAppend} on the grounds that a single-threaded loader has no
+ * concurrent append to race against. That was true and is no longer the point:
+ * once the journal computes the hash chain, a direct insert leaves
+ * {@code row_hash} NULL, and 200 unchained seed tickets would force A-044's
+ * verifier to tolerate NULL — at which point NULLing a hash becomes a way to
+ * launder a tampered row. Seed data is the last place worth opening that hole,
+ * so the annotation is gone and with it the last bypass of the journal.
  */
 @Component
 @Profile("fixtures")
@@ -59,21 +65,7 @@ import java.util.Set;
         Seed data has no caller. This runs under the `fixtures` profile only and \
         writes the rows the scope guard later filters, so it is upstream of §10.2 \
         rather than exempt from it — going through ScopedTickets would mean asking \
-        which tickets a nonexistent user may see. It is also the one legitimate \
-        holder of the three append-only repositories outside A-040: it only ever \
-        calls insert().""")
-@DirectAppend("""
-        Seed data, under the `fixtures` profile only, written single-threaded by a \
-        loader that has held this ticket since it created it — so there is no \
-        concurrent append to fork the chain and nothing for the per-ticket lock to \
-        serialise against. createTicket takes it anyway, for whoever copies this next.
-
-        A-040 flagged this rather than migrating it, because the move is not \
-        mechanical: appendHistory passes actor_type = 'USER' with an actor_id that \
-        resolveOwner can return null for, and TicketJournal refuses that pair as an \
-        unattributable audit row. Worth doing before A-042 lands — from then on a \
-        direct insert leaves row_hash NULL, and 200 unchained fixture tickets are 200 \
-        findings for A-044's nightly verifier. Ayush's call; B-007 owns this file.""")
+        which tickets a nonexistent user may see.""")
 class SingleTicketFixture {
 
     private static final List<String> TITLES = List.of(
@@ -109,21 +101,16 @@ class SingleTicketFixture {
 
     private final TicketRepository tickets;
     private final TicketCycleRepository cycles;
-    private final TicketStageTransitionRepository transitions;
-    private final TicketHistoryRepository history;
-    private final TicketEffortLogRepository effortLogs;
+    private final TicketJournal journal;
     private final TicketCodeAllocator codeAllocator;
     private final WorkingHoursService workingHours;
 
     SingleTicketFixture(TicketRepository tickets, TicketCycleRepository cycles,
-                       TicketStageTransitionRepository transitions, TicketHistoryRepository history,
-                       TicketEffortLogRepository effortLogs, TicketCodeAllocator codeAllocator,
+                       TicketJournal journal, TicketCodeAllocator codeAllocator,
                        WorkingHoursService workingHours) {
         this.tickets = tickets;
         this.cycles = cycles;
-        this.transitions = transitions;
-        this.history = history;
-        this.effortLogs = effortLogs;
+        this.journal = journal;
         this.codeAllocator = codeAllocator;
         this.workingHours = workingHours;
     }
@@ -226,7 +213,7 @@ class SingleTicketFixture {
                 String escalatedLevel = escalateOneLevel(level);
                 if (!escalatedLevel.equals(level)) {
                     appendHistory(ticketId, (short) 1, "LEVEL_CHANGED", "level", level, escalatedLevel, null,
-                            "SYSTEM", "Fixture-seeded breach (B-007) — the real SLA scanner is D-020, "
+                            "Fixture-seeded breach (B-007) — the real SLA scanner is D-020, "
                                     + "not yet implemented; this row exists so it and the dashboard have a "
                                     + "pre-made breach case to render.");
                     ticket.setLevel(escalatedLevel);
@@ -234,12 +221,14 @@ class SingleTicketFixture {
             }
         }
 
+        BigDecimal totalEffort = cycle1Result.effortHrs();
         boolean reopen = closedInCycle1 && random.nextInt(100) < 15;
         if (reopen) {
-            reopenIntoCycle2(ticket, cycle1, cycle1Result, stages, stageByCode, project.id(), members, random, ctx);
+            totalEffort = totalEffort.add(reopenIntoCycle2(ticket, cycle1, cycle1Result, stages, stageByCode,
+                    project.id(), members, random, ctx));
         }
 
-        ticket.setTotalEffortHrs(sumEffort(ticketId));
+        ticket.setTotalEffortHrs(totalEffort);
         tickets.save(ticket);
     }
 
@@ -253,7 +242,7 @@ class SingleTicketFixture {
 
     /** What the walk left behind — needed to finish the ticket/cycle rows and to reopen later. */
     private record WalkResult(Instant lastEnteredAt, Long lastToUser, short lastIteration, boolean reworked,
-                               Long lastTransitionId) {
+                               Long lastTransitionId, BigDecimal effortHrs) {
     }
 
     private WalkResult walkStages(Long ticketId, short cycleNo, List<WorkflowStage> stages,
@@ -305,6 +294,12 @@ class SingleTicketFixture {
         Long lastToUser = null;
         short lastIteration = 1;
         Long lastTransitionId = null;
+        // Accumulated as it is written rather than summed back out of
+        // ticket_effort_logs afterwards. Reading them back would mean holding
+        // TicketEffortLogRepository, which A-037's journal-door rule does not
+        // allow outside domain.journal — and the fixture generates these numbers
+        // in the first place, so the read was always the long way round.
+        BigDecimal effortHrs = BigDecimal.ZERO;
 
         for (int i = 0; i < plan.size(); i++) {
             HopPlan hop = plan.get(i);
@@ -324,24 +319,28 @@ class SingleTicketFixture {
             t.setActionCode(hop.actionCode());
             t.setReason(hop.reason());
             t.setEnteredAt(currentTime);
-            t = transitions.insert(t);
+            t = journal.append(t);
 
             appendHistory(ticketId, cycleNo, hop.fromStage() == null ? "CREATED" : "STAGE_ADVANCED", "current_stage",
-                    hop.fromStage(), hop.toStage(), toUser, "USER", null);
+                    hop.fromStage(), hop.toStage(), toUser, null);
 
             if (!isLastHop) {
                 BigDecimal hours = stageHours(targetDef, random);
                 Instant exitedAt = workingHours.addWorkingHours(currentTime, hours, projectId, toUser);
                 int durationMins = hours.multiply(BigDecimal.valueOf(60)).setScale(0, RoundingMode.HALF_UP).intValue();
-                transitions.seal(t.getId(), exitedAt, durationMins);
-                logEffort(ticketId, cycleNo, hop.toStage(), hop.iterationNo(), toUser, currentTime, hours, random);
+                journal.seal(t.getId(), exitedAt, durationMins);
+                effortHrs = effortHrs.add(
+                        logEffort(ticketId, cycleNo, hop.toStage(), hop.iterationNo(), toUser, currentTime,
+                                hours, random));
                 currentTime = exitedAt;
             } else {
                 // The current stage: no seal, no exit — the ticket is here now.
                 // Still log some partial effort so the segment is not empty.
                 BigDecimal partial = BigDecimal.valueOf(0.5 + random.nextDouble() * 3.5)
                         .setScale(2, RoundingMode.HALF_UP);
-                logEffort(ticketId, cycleNo, hop.toStage(), hop.iterationNo(), toUser, currentTime, partial, random);
+                effortHrs = effortHrs.add(
+                        logEffort(ticketId, cycleNo, hop.toStage(), hop.iterationNo(), toUser, currentTime,
+                                partial, random));
                 lastEnteredAt = currentTime;
                 lastToUser = toUser;
                 lastIteration = hop.iterationNo();
@@ -349,10 +348,12 @@ class SingleTicketFixture {
             }
             fromUser = toUser;
         }
-        return new WalkResult(lastEnteredAt, lastToUser, lastIteration, reworked, lastTransitionId);
+        return new WalkResult(lastEnteredAt, lastToUser, lastIteration, reworked, lastTransitionId,
+                effortHrs.setScale(2, RoundingMode.HALF_UP));
     }
 
-    private void reopenIntoCycle2(Ticket ticket, TicketCycle cycle1, WalkResult cycle1Result,
+    /** @return cycle 2's effort, so the caller can total the ticket without reading the table back */
+    private BigDecimal reopenIntoCycle2(Ticket ticket, TicketCycle cycle1, WalkResult cycle1Result,
                                    List<WorkflowStage> stages, Map<String, WorkflowStage> stageByCode,
                                    Long projectId, List<Long> members, Random random, FixtureContext ctx) {
         Long ticketId = ticket.getId();
@@ -371,7 +372,7 @@ class SingleTicketFixture {
         BigDecimal closedDwellHours = workingHours.workingHoursBetween(closedAt, reopenedAt, projectId, null);
         int closedDwellMins = closedDwellHours.multiply(BigDecimal.valueOf(60)).setScale(0, RoundingMode.HALF_UP)
                 .intValue();
-        transitions.seal(cycle1Result.lastTransitionId(), reopenedAt, closedDwellMins);
+        journal.seal(cycle1Result.lastTransitionId(), reopenedAt, closedDwellMins);
 
         // The ticket is open again: clear the cycle-1 close date so pcd_open
         // (IF(actual_close_date IS NULL, planned_close_date, NULL)) picks it
@@ -387,7 +388,7 @@ class SingleTicketFixture {
         cycle2 = cycles.save(cycle2);
 
         appendHistory(ticketId, (short) 2, "REOPENED", "status", "CLOSED", "REOPENED", ticket.getReportedBy(),
-                "USER", reason);
+                reason);
 
         // Resume at the second stage (TRIAGE) rather than INTAKE — a reopen does
         // not repeat intake triage. A single-stage-template edge case (there is
@@ -439,8 +440,9 @@ class SingleTicketFixture {
         } else {
             ticket.setStatus("IN_PROGRESS");
         }
-        cycle2.setEffortHrs(sumEffort(ticketId, (short) 2));
+        cycle2.setEffortHrs(cycle2Result.effortHrs());
         cycles.save(cycle2);
+        return cycle2Result.effortHrs();
     }
 
     // ------------------------------------------------------------------
@@ -462,7 +464,7 @@ class SingleTicketFixture {
 
     private void applyWalkResultToCycle(TicketCycle cycle, WalkResult result, boolean closed) {
         cycle.setAssignedTo(result.lastToUser());
-        cycle.setEffortHrs(sumEffort(cycle.getTicketId(), (short) 1));
+        cycle.setEffortHrs(result.effortHrs());
         if (closed) {
             cycle.setActualCloseDate(result.lastEnteredAt());
             cycle.setResolutionSummary("Fixed, verified and closed.");
@@ -572,10 +574,11 @@ class SingleTicketFixture {
         return BigDecimal.valueOf(Math.max(0.5, hours)).setScale(2, RoundingMode.HALF_UP);
     }
 
-    private void logEffort(Long ticketId, short cycleNo, String stageCode, short iterationNo, Long userId,
-                           Instant stageStart, BigDecimal elapsedHours, Random random) {
+    /** @return the hours actually logged, so the caller can total them without reading the table back */
+    private BigDecimal logEffort(Long ticketId, short cycleNo, String stageCode, short iterationNo, Long userId,
+                                 Instant stageStart, BigDecimal elapsedHours, Random random) {
         if (userId == null) {
-            return;
+            return BigDecimal.ZERO;
         }
         // Idle vs active: logged effort is a fraction of the elapsed working
         // time, never all of it — a stage sitting open longer than it was
@@ -593,26 +596,30 @@ class SingleTicketFixture {
         log.setUserId(userId);
         log.setWorkDate(LocalDate.ofInstant(stageStart, ZoneOffset.UTC));
         log.setHours(logged);
-        effortLogs.insert(log);
+        journal.append(log);
+        return logged;
     }
 
-    private BigDecimal sumEffort(Long ticketId) {
-        return effortLogs.findByTicketIdOrderByIdAsc(ticketId).stream()
-                .map(TicketEffortLog::getHours)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal sumEffort(Long ticketId, short cycleNo) {
-        return effortLogs.findByTicketIdOrderByIdAsc(ticketId).stream()
-                .filter(e -> e.getCycleNo() == cycleNo)
-                .map(TicketEffortLog::getHours)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-    }
-
+    /**
+     * <b>{@code actor_type} is derived from {@code actorId}, not passed in.</b>
+     * The schema's contract is that {@code actor_id NULL} means SYSTEM, and
+     * {@code TicketJournal} refuses a row that says {@code USER} while naming
+     * nobody — an audit entry that is in the log with no way to find out who
+     * made it.
+     *
+     * <p>This used to take both, and the two could disagree. The reopen call
+     * below passes {@code ticket.getReportedBy()}, and {@code reported_by} is
+     * {@code BIGINT NULL}: a client-raised ticket on a project with no SUPPORT
+     * member falls back to {@code ctx.projectManager().get(...)}, a map lookup
+     * that returns null. That produced a {@code USER} row with no actor. With
+     * one input there is nothing left to disagree.
+     *
+     * <p>(A-040's note attributed this to {@code resolveOwner}. That method
+     * cannot return null — every branch returns an element or throws on an empty
+     * member list — so anyone auditing it would have found nothing wrong.)
+     */
     private void appendHistory(Long ticketId, short cycleNo, String eventType, String fieldName, String oldValue,
-                               String newValue, Long actorId, String actorType, String remarks) {
+                               String newValue, Long actorId, String remarks) {
         TicketHistory h = new TicketHistory();
         h.setTicketId(ticketId);
         h.setCycleNo(cycleNo);
@@ -621,9 +628,9 @@ class SingleTicketFixture {
         h.setOldValue(oldValue);
         h.setNewValue(newValue);
         h.setActorId(actorId);
-        h.setActorType(actorType);
+        h.setActorType(actorId == null ? "SYSTEM" : "USER");
         h.setRemarks(remarks);
-        history.insert(h);
+        journal.append(h);
     }
 
     private String pickLevel(String defaultLevel, Random random) {
