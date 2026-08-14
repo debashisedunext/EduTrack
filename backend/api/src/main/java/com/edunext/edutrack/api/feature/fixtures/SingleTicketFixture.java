@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.fixtures;
 
 import com.edunext.edutrack.api.security.scope.UnscopedAccess;
+import com.edunext.edutrack.domain.journal.DirectAppend;
 import com.edunext.edutrack.domain.masters.Priority;
 import com.edunext.edutrack.domain.masters.TaskType;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
@@ -61,6 +62,18 @@ import java.util.Set;
         which tickets a nonexistent user may see. It is also the one legitimate \
         holder of the three append-only repositories outside A-040: it only ever \
         calls insert().""")
+@DirectAppend("""
+        Seed data, under the `fixtures` profile only, written single-threaded by a \
+        loader that has held this ticket since it created it — so there is no \
+        concurrent append to fork the chain and nothing for the per-ticket lock to \
+        serialise against. createTicket takes it anyway, for whoever copies this next.
+
+        A-040 flagged this rather than migrating it, because the move is not \
+        mechanical: appendHistory passes actor_type = 'USER' with an actor_id that \
+        resolveOwner can return null for, and TicketJournal refuses that pair as an \
+        unattributable audit row. Worth doing before A-042 lands — from then on a \
+        direct insert leaves row_hash NULL, and 200 unchained fixture tickets are 200 \
+        findings for A-044's nightly verifier. Ayush's call; B-007 owns this file.""")
 class SingleTicketFixture {
 
     private static final List<String> TITLES = List.of(

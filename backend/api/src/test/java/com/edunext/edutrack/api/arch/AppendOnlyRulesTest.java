@@ -1,6 +1,8 @@
 package com.edunext.edutrack.api.arch;
 
 import com.edunext.edutrack.domain.appendonly.AppendOnly;
+import com.edunext.edutrack.domain.journal.DirectAppend;
+import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaMethod;
@@ -28,6 +30,7 @@ import java.util.regex.Pattern;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * A-037 · the append-only rule, enforced against callers rather than against
@@ -76,6 +79,9 @@ class AppendOnlyRulesTest {
             "^(update|delete|remove|modify|edit|purge|truncate|overwrite|rewrite|amend"
                     + "|save|merge|drop|clear|reset|revise|patch)([A-Z].*)?$";
 
+    /** A-040's write path. The only package allowed to hold one of the three repositories. */
+    private static final String JOURNAL_PACKAGE = "com.edunext.edutrack.domain.journal..";
+
     /** The three protected tables as they appear in a URL. */
     private static final Pattern PROTECTED_RESOURCE =
             Pattern.compile("(?i).*/(history|effort-logs?|stage-transitions?)(/.*)?");
@@ -122,6 +128,85 @@ class AppendOnlyRulesTest {
                         underneath.""");
 
         rule.check(ProductionClasses.get());
+    }
+
+    /**
+     * A-040 · the door rule. Nothing outside {@code domain.journal} may hold one
+     * of the three append-only repositories.
+     *
+     * <p>{@link TicketJournal} is A-040's single write path, and A-034's
+     * sentence about {@code ScopedTickets} applies to it word for word: the
+     * journal can be perfect and the chain still forks the first time somebody
+     * types {@code historyRepository.insert(entry)} in a service, because
+     * nothing about that line looks wrong. It does not look wrong in review
+     * either — it is one method call on a repository that publishes nothing
+     * else, and the rule it skips (take {@code SELECT … FOR UPDATE} on the
+     * parent ticket first, PLAN.md §3.7) is invisible at the call site. The
+     * damage is invisible too: a forked chain is silently correct until A-044's
+     * nightly verifier reports our own race as tampering, on a ticket nobody has
+     * touched for months.
+     *
+     * <p>The two rules above constrain what an append-only <em>holder</em> may
+     * be called and what a repository may inherit. Neither says who may hold
+     * one, which is the half that decides whether the journal is a door or a
+     * suggestion.
+     *
+     * <h2>The two exclusions</h2>
+     *
+     * <p>{@code areNotAssignableTo(AppendOnly.class)} keeps the three
+     * repositories and {@code AppendOnlyImpl} out of their own rule — extending
+     * an interface is a dependency on it, so without this the rule's first
+     * failure would be {@code TicketHistoryRepository} declaring itself.
+     *
+     * <p>{@link DirectAppend} is the declared bypass, on A-037's precedent for
+     * {@code @UnscopedAccess}: at the site, with a mandatory reason, rather than
+     * a name in a test file that only ever grows.
+     */
+    @Test
+    void theProtectedTablesAreWrittenOnlyThroughTheJournal() {
+        ArchRule rule = noClasses()
+                .that().resideOutsideOfPackage(JOURNAL_PACKAGE)
+                .and().areNotAssignableTo(AppendOnly.class)
+                .and().areNotAnnotatedWith(DirectAppend.class)
+                .should().dependOnClassesThat().areAssignableTo(AppendOnly.class)
+                .because("""
+                        every append to ticket_history, ticket_effort_logs or \
+                        ticket_stage_transitions has to hold the per-ticket lock first, or two \
+                        concurrent writes read the same chain tail and fork it (PLAN.md §3.7). \
+                        TicketJournal takes that lock; a repository call does not, and nothing \
+                        about the call site shows the difference. Inject TicketJournal — or, if \
+                        this class really has no chain to extend, say so with @DirectAppend and \
+                        the reason.""");
+
+        rule.check(ProductionClasses.get());
+    }
+
+    /**
+     * The reason is the only part of {@link DirectAppend} that does any work,
+     * and {@code @DirectAppend("")} is an exemption list with extra steps.
+     *
+     * <p>Asserted non-empty for the same reason {@code ScopeGuardRulesTest}
+     * does: an annotation nothing declares any more is an unused door left
+     * standing in {@code domain.journal}, and the right response to that is to
+     * delete it rather than to keep a rule guarding nothing.
+     */
+    @Test
+    void everyDirectAppendStatesItsReason() {
+        List<JavaClass> bypasses = ProductionClasses.get().stream()
+                .filter(c -> c.isAnnotatedWith(DirectAppend.class))
+                .toList();
+
+        assertThat(bypasses)
+                .as("if nothing bypasses the journal any more, delete @DirectAppend rather than "
+                        + "leaving an unused door in domain.journal")
+                .isNotEmpty();
+
+        for (JavaClass bypass : bypasses) {
+            assertThat(bypass.getAnnotationOfType(DirectAppend.class).value())
+                    .as("%s writes an append-only table without the journal and does not say why",
+                            bypass.getSimpleName())
+                    .isNotBlank();
+        }
     }
 
     /**
