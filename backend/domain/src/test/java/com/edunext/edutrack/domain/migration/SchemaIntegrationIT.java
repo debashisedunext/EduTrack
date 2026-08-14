@@ -191,7 +191,9 @@ class SchemaIntegrationIT {
                                 // D-045
                                 "push_subscriptions",
                                 // A-044
-                                "chain_anchors");
+                                "chain_anchors",
+                                // A-050
+                                "daily_ticket_stats", "resource_daily_stats");
             }
             // Named, not counted — taking the same correction A-029 already
             // applied to the table assertion above. "expected: 8 but was: 10"
