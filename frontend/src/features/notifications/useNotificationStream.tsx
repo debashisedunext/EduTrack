@@ -178,6 +178,35 @@ export function useNotificationStream(): void {
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [raise, refreshBadge])
+
+  /**
+   * D-045 · somebody clicked a browser notification.
+   *
+   * The service worker focuses the existing tab and posts here rather than
+   * navigating it itself: `client.navigate` would reload the SPA and throw away
+   * whatever the user was typing. So the worker says where to go and the app,
+   * which owns the router, goes there.
+   *
+   * Guarded on `serviceWorker` because jsdom has none, and because a browser
+   * without it never registered the worker in the first place.
+   */
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; link?: string } | null
+      if (data?.type !== 'edutrack:notification-click') return
+      // Only ever a same-origin path. The link came from our own payload, but
+      // it arrives here through postMessage, and navigating to whatever a
+      // message says would be an open redirect if that ever stopped being true.
+      const link = typeof data.link === 'string' && data.link.startsWith('/') ? data.link : '/'
+      navigate(link)
+      refreshBadge()
+    }
+
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [navigate, refreshBadge])
 }
 
 /**

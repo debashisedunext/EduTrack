@@ -53,4 +53,6 @@ export interface NotificationPreferenceUpdate {
   inApp?: boolean;
   /** Omit to leave this channel unchanged. */
   email?: boolean;
+  /** Omit to leave this channel unchanged. */
+  push?: boolean;
 }

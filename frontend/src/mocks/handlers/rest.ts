@@ -57,6 +57,9 @@ function preferenceMatrix(db: ReturnType<typeof getDb>) {
       inApp: row?.inApp ?? true,
       email: locked || (row?.email ?? true),
       emailLocked: locked,
+      // D-045. Never locked: §7.7 gives the guarantee to mail, and push depends
+      // on a permission the user can revoke in their browser without telling us.
+      push: row?.push ?? true,
     };
   });
 }
@@ -1368,7 +1371,7 @@ export const restHandlers = [
   http.put(url('/me/notification-preferences'), async ({ request }) => {
     const db = getDb();
     const { preferences } = (await request.json()) as {
-      preferences: { eventKey: string; inApp?: boolean; email?: boolean }[];
+      preferences: { eventKey: string; inApp?: boolean; email?: boolean; push?: boolean }[];
     };
     for (const update of preferences) {
       const event = NOTIFICATION_EVENTS.find((e) => e.eventKey === update.eventKey);
@@ -1386,10 +1389,15 @@ export const restHandlers = [
       const stored = (db.notificationPreferences ??= []);
       const row = stored.find(
         (p) => p.userId === db.currentUserId && p.eventKey === update.eventKey,
-      ) ?? { userId: db.currentUserId, eventKey: update.eventKey, inApp: true, email: true };
+      ) ?? {
+        userId: db.currentUserId, eventKey: update.eventKey,
+        inApp: true, email: true, push: true,
+      };
       if (update.inApp !== undefined) row.inApp = update.inApp;
       // Discarded rather than rejected when locked — as on the server.
       if (update.email !== undefined && !isMandatoryMail(event.category)) row.email = update.email;
+      // No lock to check: there is no mandatory push.
+      if (update.push !== undefined) row.push = update.push;
       if (!stored.includes(row)) stored.push(row);
     }
     return HttpResponse.json({ data: preferenceMatrix(db) });

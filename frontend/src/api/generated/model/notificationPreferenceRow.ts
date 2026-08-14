@@ -59,4 +59,19 @@ export interface NotificationPreferenceRow {
   /** D-036. This mail cannot be switched off. Sent rather than inferred from the category so the rule has one home.
  */
   emailLocked: boolean;
+  /** D-045. Whether a browser notification fires for this event, on every
+device the user has granted permission on.
+
+There is deliberately **no `pushLocked`**. §7.7 gives the guarantee
+to mail; a push only reaches a browser that is still subscribed, on a
+device that is switched on, for a permission the user can revoke in
+their own browser settings without telling us. Locking a channel we
+cannot promise would be a guarantee in name only — an escalation
+whose push is off still sends its mail, which is the promise that was
+actually made.
+
+A user with no subscription simply receives nothing on this channel;
+the switch is about intent, not about whether a browser exists.
+ */
+  push?: boolean;
 }

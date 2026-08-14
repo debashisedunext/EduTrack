@@ -36,6 +36,7 @@ public class PreferenceService {
     public PreferenceDtos.PreferenceMatrix matrixFor(long userId) {
         Map<String, Boolean> inApp = new HashMap<>();
         Map<String, Boolean> email = new HashMap<>();
+        Map<String, Boolean> push = new HashMap<>();
 
         for (NotificationPreferences.ChannelPreference override : preferences.overridesFor(userId)) {
             // A row naming a channel this build has dropped matches neither and
@@ -44,6 +45,8 @@ public class PreferenceService {
                 inApp.put(override.eventCode(), override.enabled());
             } else if (NotificationChannel.EMAIL.name().equals(override.channel())) {
                 email.put(override.eventCode(), override.enabled());
+            } else if (NotificationChannel.PUSH.name().equals(override.channel())) {
+                push.put(override.eventCode(), override.enabled());
             }
         }
 
@@ -57,7 +60,14 @@ public class PreferenceService {
                                 // stale row says. The screen must never show a
                                 // switch as off that the send path ignores.
                                 event.isMandatoryMail() || email.getOrDefault(event.name(), true),
-                                event.isMandatoryMail()))
+                                event.isMandatoryMail(),
+                                // D-045. Never locked: §7.7 gives the guarantee
+                                // to mail, and a push only reaches a browser
+                                // still subscribed on a device switched on, for
+                                // a permission the user can revoke without
+                                // telling us. Absence still means enabled, so a
+                                // newly declared event pushes immediately.
+                                push.getOrDefault(event.name(), true)))
                         .toList());
     }
 
@@ -96,6 +106,10 @@ public class PreferenceService {
             }
             if (update.email() != null && !event.isMandatoryMail()) {
                 repository.upsert(userId, event.name(), NotificationChannel.EMAIL, update.email());
+            }
+            if (update.push() != null) {
+                // No mandatory guard, because there is no mandatory push.
+                repository.upsert(userId, event.name(), NotificationChannel.PUSH, update.push());
             }
         }
         return SaveOutcome.SAVED;

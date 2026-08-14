@@ -1,5 +1,6 @@
 package com.edunext.edutrack.domain.notifications;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -44,9 +45,11 @@ public class NotificationWriter {
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final ApplicationEventPublisher events;
 
-    public NotificationWriter(NamedParameterJdbcTemplate jdbc) {
+    public NotificationWriter(NamedParameterJdbcTemplate jdbc, ApplicationEventPublisher events) {
         this.jdbc = jdbc;
+        this.events = events;
     }
 
     /**
@@ -71,6 +74,23 @@ public class NotificationWriter {
             throw new IllegalStateException(
                     "notifications: no generated key for " + notification.event());
         }
+
+        // D-045. Announced here rather than by each producer, because this is
+        // the one place every bell entry passes through — and a design where
+        // ~24 producers each remember to push is one where the ones written
+        // last silently do not. Listeners run after commit; nothing about
+        // delivering to a browser belongs inside a business transaction.
+        //
+        // Publishing cannot fail the write: a listener throwing after commit
+        // is not this method's problem, and one that throws before commit
+        // would roll back a notification because a browser was unreachable.
+        events.publishEvent(new NotificationRaised(
+                id.longValue(),
+                notification.userId(),
+                notification.event(),
+                notification.title(),
+                notification.body(),
+                notification.linkUrl()));
         return id.longValue();
     }
 

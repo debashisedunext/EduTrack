@@ -11,7 +11,6 @@
     "",
     "Valid status values: todo | in-progress | in-review | done | blocked"
   ],
-
   "A-001": {
     "status": "done",
     "reason": "Maven multi-module skeleton (common/domain/api/worker) builds green; landed before the task-ID commit convention"
@@ -43,11 +42,6 @@
   "A-013": {
     "status": "done",
     "reason": "Shivendra, commit 0518564 — SchemaIntegrationIT covers update/delete rejection on ticket_history and ticket_effort_logs, delete and non-seal update rejection on ticket_stage_transitions, and seal-succeeds-exactly-once, on Testcontainers. Supersedes the earlier hand-verification; commit subject said 'A011' without the hyphen"
-  },
-  "D-045": {
-    "status": "in-progress",
-    "pct": 60,
-    "reason": "Debashis — git reads this as done because commit da414db's subject carries the ID, but that commit is the opt-in half only and STREAM-D-ENGINES.md has always split the task in three. The crypto and wire (RFC 8291 encryption, RFC 8292 VAPID, WebPushSender, 25 tests) are written but sit unmerged on feat/engines/d-045-web-push-sender. Still to do: the service worker, the permission prompt, and deleting a subscription on 404/410 — without which the table fills with browsers that no longer exist"
   },
   "D-053": {
     "status": "blocked",
