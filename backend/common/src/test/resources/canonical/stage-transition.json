@@ -1,0 +1,1 @@
+{"action_code":"HANDOFF","cycle_no":2,"duration_mins":null,"entered_at":"2026-08-14T09:30:00.000000Z","exited_at":null,"from_stage":"DEV","from_user_id":88,"handoff_note":"Build 2.14 on staging","is_current":true,"iteration_no":1,"reason":null,"seq_no":7,"ticket_id":4711,"to_stage":"QA","to_user_id":91}

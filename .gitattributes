@@ -10,6 +10,13 @@ mvnw.cmd text eol=crlf
 *.sh text eol=lf
 mvnw text eol=lf
 
+# ---- A-041 golden files: byte-exact, no filter may touch them ----
+# These are the bytes the hash chain is computed over. `* text=auto eol=lf`
+# above would not currently change them (they contain no newline at all), but a
+# filter that ever did would break the digests in CanonicalJsonGoldenFileTest
+# with a diff nobody wrote. Opted out explicitly rather than relying on that.
+backend/common/src/test/resources/canonical/*.json -text
+
 # ---- Generated: never merge by hand, always regenerate ----
 frontend/src/api/generated/** merge=ours linguist-generated=true
 
