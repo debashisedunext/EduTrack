@@ -1,12 +1,207 @@
-# Project Master — B-016 · S-10 · and the Team tab, B-017
+# Project Master — B-016 · S-10 · the Team tab B-017 · the SLA tab B-018
 
 `GET /api/v1/projects` · `POST` · `GET /{projectId}` · `PATCH /{projectId}`
 `GET /{projectId}/members` · `POST` · `PATCH /{projectId}/members/{userId}` · `DELETE`
+`GET /{projectId}/sla-policies` · `PUT`
 
-The list, the create/edit form and the four rules S-10 states (B-016); plus the
-**Team tab** — resources, per-project role and allocation % (B-017). The **SLA
-tab** is B-018 (`/projects/{id}/sla-policies`) and the **Settings tab** is B-019;
-both have their own contract paths and neither is here.
+The list, the create/edit form and the four rules S-10 states (B-016); the **Team
+tab** — resources, per-project role and allocation % (B-017); and the **SLA tab**
+— the task type × level matrix (B-018). The **Settings tab** is B-019: it has its
+own contract path and is not here.
+
+---
+
+# Part three — the SLA tab (B-018)
+
+Blueprint §7.4 S-10: "per task type × level → response hrs, resolution hrs, L1/L2
+escalation targets".
+
+## Both operations existed on paper, and one of them was wrong
+
+`getSlaPolicies` and `replaceSlaPolicies` have been in `openapi.yaml` and in the
+generated TypeScript client **since D-001, with no server behind either**.
+Nothing failed, because nothing called them. That is the third instance of the
+gap — B-023's nine calendar operations, B-014's `PATCH /users/{userId}/status`,
+and this — and `MasterRoutesTest` now asserts this mount point too.
+
+The declaration was also wrong. `SlaPolicyWrite` carried
+`l1EscalationUserId` and `l2EscalationUserId`, and:
+
+- **there is no column for either.** A-007's table has `escalate_to_l1` and
+  `escalate_to_l2`, both `TINYINT(1)`;
+- **Stream D's shipped scanner does not want them.**
+  `worker.sla.EscalationPolicies` documents at length that §6 *fixes* who each
+  level means — L1 the assignee's reporting manager, L2 that manager's manager,
+  the 48-hour rule — and `SlaEscalation` derives the recipients from the
+  reporting chain. The matrix only says whether the level *applies* to this kind
+  of ticket on this project, which is what lets a project decide that a
+  Low-priority change request wakes nobody's manager without also having to
+  decide who that manager is.
+
+So the contract is corrected to flags. Storing a recipient here would put the
+reporting chain in two places that can disagree; correcting the schema the other
+way would have broken D-024 from a masters branch. Same shape as B-017's
+`projectRole: RoleCode`, one screen over. The mock had been answering a
+hardcoded `2` and `1` for every cell, which nothing read.
+
+## The read is resolved and the write is only the overrides
+
+`sla_policies` is layered — null `project_id` is org-wide, null `task_type_id`
+is "any type" — so §6 resolves most-specific-first. A task type × level grid has
+exactly one kind of cell, so **this screen writes rung 1 and nothing else**.
+Rungs 2 and 3 are read, rendered, and left alone.
+
+That makes the two halves deliberately asymmetric:
+
+- **`GET` returns every cell resolved**, with the `source` that answered.
+  Returning only this project's rows would render as a nearly empty grid for a
+  project whose tickets all get perfectly good planned close dates — an
+  administrator would read "nothing configured" and configure it, and the act of
+  doing so is the defect below.
+- **`PUT` takes only the cells that are overrides.** If the screen sent the
+  resolved grid back — the obvious implementation, since the grid is what it
+  holds — every inherited figure would become a project-level row and the
+  project would **silently stop following the org-wide default it was displayed
+  as following**. Nothing looks wrong until somebody changes that default six
+  months later and this project does not move.
+
+`isOverride` is on every cell so the two can be told apart, and
+`slaMatrix.ts:buildOverrides` is the single place the body is decided.
+
+## A project-level default survives a replace
+
+`DEACTIVATE_OVERRIDES` is scoped `AND task_type_id IS NOT NULL`. The rung-2 row —
+one policy covering every task type at a level — has no cell in the grid, so a
+replace that dropped it would delete configuration through a screen that never
+displayed it. B-007's corpus puts one on PAY, which makes it a live case rather
+than a hypothetical; both `SlaMatrixIT` and the frontend mock exercise it.
+
+## Cleared overrides are deactivated, never deleted
+
+`clients.sla_policy_id` is a foreign key into this table **with no cascade**, and
+`PlannedCloseDatePreview.slaPolicyId` puts row ids on the wire. A `DELETE` fails
+on a constraint naming a MySQL index — or, if somebody "fixes" that with a
+cascade, silently unsets a client's SLA policy from a project screen. `is_active
+= 0` is also what the resolution ladder already reads, so a cleared cell falls
+through to the next rung instead of leaving a hole, and `uq_sla_policies` makes
+the write an upsert so restoring a cleared cell reuses its row rather than
+colliding forever.
+
+## The §6 ladder is written down twice, with a test between them
+
+C-012's `PlannedCloseDateService.resolve` walks the same five rungs one cell at a
+time through `SlaPolicyRepository`. Calling it per cell here is up to five
+statements × eleven task types × four levels — **two hundred and twenty round
+trips for one page load** — so `SlaMatrixService.Ladder` indexes three bounded
+reads and walks the rungs in memory.
+
+Nothing about either implementation can be *read* to establish that they agree,
+and if they drift the SLA tab and the create form quote different numbers at the
+same client while each screen looks correct on its own. Two tests are the seam:
+
+| Test | Claim |
+|---|---|
+| `SlaMatrixIT.theGridAgreesWithThePlannedCloseDate` | every cell of a real grid, figures **and** source name, equals C-012's answer — with all five rungs seeded |
+| `SlaMatrixIT.theSourceVocabulariesAreTheSame` | `SlaPolicyDtos.Source` and `SlaResolution.Source` have identical members, so the name comparison above means something |
+
+`Source` is **copied rather than imported** to keep a masters DTO off a tickets
+type. That copy is the cost; those two tests are what make it affordable.
+
+## Four refusals, none enforced by the schema
+
+| Refusal | Status | Why the database cannot catch it |
+|---|---|---|
+| the same cell twice in one body | 400 | both rows have one `uq_sla_policies` key, so `ON DUPLICATE KEY UPDATE` keeps the last **quietly** and the caller is told the save worked |
+| an unknown task type | 400 | the FK would catch it, as a constraint violation naming an index |
+| an unknown level | 400 | `level` is a `VARCHAR`, not an FK — S-12 lets an Admin add one without a release |
+| response target longer than resolution | 400 | nothing downstream rejects it; the scanner would warn about a first response overdue after the ticket was already due to close |
+
+All four run before anything is written. The body is one transaction, so a row
+refused halfway through would roll back the rows before it and the caller would
+be told about the twelfth cell of a save that also silently did not apply the
+first eleven.
+
+`resolutionHrs` is `@Positive`, not `@PositiveOrZero`:
+`SlaResolution.hasTarget()` treats a non-positive figure as no target at all, so
+a stored zero reads as configured here and behaves as absent everywhere else —
+the ticket drops out of the breach sweep, the pre-breach warning and the delayed
+KPI with nothing saying so.
+
+## `@Valid` on a `List` body needs its own test
+
+Every other write in this feature takes a single DTO, where `@Valid @RequestBody
+Foo` is unambiguous. This one takes a bare array, and `@Valid` on a `List`
+validates *the list* — which has no constraints. The element cascade comes from
+method validation, a different mechanism with different triggers.
+
+It does engage. The risk was never that validation would be wrong but that it
+would **silently not run**, with the annotation sitting right there on the
+record. `SlaPolicyBodyValidationTest` pins it, including that the *second*
+element is validated and not only the first.
+
+## The `ETag` is on the read because the write needs one
+
+The contract required `If-Match` on the `PUT` and declared an `ETag` nowhere, so
+the operation was uncallable — the gap B-016 closed by adding `GET
+/projects/{projectId}`. `check-conventions.py` does not catch this class: its §5
+detail-read rule fires on paths ending in a path variable and this one ends in a
+collection segment, and widening it would fire on a dozen paginated lists that
+legitimately have no tag. Recorded in `CONVENTIONS.md` §5 as a rule for humans
+instead.
+
+The tag is taken over the **resolved** grid, not over this project's own rows. A
+change to the org-wide default therefore moves this project's tag even though
+nothing on the project changed — correct, because the administrator was shown
+inherited figures and is deciding which to override.
+
+## Permissions — and why they differ from the Team tab
+
+| Operation | Who |
+|---|---|
+| `getSlaPolicies` | all six roles |
+| `replaceSlaPolicies` | `master.write`, which B-001 grants to **Admin alone** |
+
+⚠ **This is one tab away from three rows that are Admin and PM, and that is not
+an inconsistency to tidy up.** §2 has two separate rows: "Create/edit projects,
+map resources to project" is ✅ for PM and is the General and Team tabs; "Master
+data (task types, **SLA**, workflow, holidays)" is Admin and nobody else.
+B-001's own description of `master.write` names SLA in it, and B-023 annotates
+the working calendar — the other master in this feature — exactly this way.
+
+Staffing your own project is project management. Setting the response target a
+client is contractually held to, and deciding whose manager's manager gets woken
+on a breach, is master data. The obvious "consistency" fix is to widen this row,
+and it would be widening the wrong one.
+
+The read is every role because this grid is what gives every ticket its planned
+close date — the same figures already reach all six roles one at a time through
+C-012's preview on the create form, and a Developer who cannot see the matrix
+cannot find out why their ticket is due Thursday.
+
+## What is deliberately not a rule
+
+**The grid does not have to be complete.** No cell need be overridden and a
+project need have no overrides at all — the ladder is exactly what makes an
+unconfigured project work, and every project B-016 creates starts that way.
+
+**An override is not checked against the rung it replaces.** A project may set a
+Critical resolution target *longer* than the org-wide default; that is a
+negotiated contract, not a mistake, and a server that refused it would mean the
+true figure could not be written down anywhere. Same call B-017 made about
+allocations summing past 100.
+
+## Files
+
+| File | What |
+|---|---|
+| `SlaPolicyController.java` | the two operations, the `If-Match` precondition, the content-derived `ETag` |
+| `SlaMatrixService.java` | the ladder, the four refusals, the replace transaction |
+| `SlaMatrixRepository.java` | `JdbcClient` — three bounded reads, the scoped deactivate, the upsert |
+| `SlaPolicyDtos.java` | wire types; Bean Validation is the source of truth for field rules |
+| `SlaPolicyExceptionHandler.java` | RFC 9457 problems, scoped to this controller |
+
+**No migration.** A-007 created `sla_policies` and the columns are the ones
+blueprint §6 names.
 
 ---
 

@@ -47,4 +47,4 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type SlaPolicyWriteL2EscalationUserId = number | null;
+export type SlaPolicyCellResponseHrs = number | null;

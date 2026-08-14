@@ -8,32 +8,35 @@ import { useProject } from './projectQueries'
 /**
  * B-017 · the header and tab strip a project's screens share.
  *
- * <h2>Two tabs, not four</h2>
+ * <h2>Three tabs, not four</h2>
  *
- * S-10 describes four — General, Team, SLA, Settings — and two of them are
- * B-018 and B-019. **They are not rendered as disabled stubs.** B-016 refused to
- * stub them for the reason that still applies: a greyed-out tab and a broken one
- * look identical to a user, and three unbuilt screens rendered as tabs make the
- * feature look finished. They arrive as entries in {@link TABS} when the screens
- * behind them exist.
+ * S-10 describes four — General, Team, SLA, Settings — and Settings is B-019.
+ * **It is not rendered as a disabled stub.** B-016 refused to stub them for the
+ * reason that still applies: a greyed-out tab and a broken one look identical to
+ * a user, and unbuilt screens rendered as tabs make the feature look finished.
+ * They arrive as entries in {@link TABS} when the screens behind them exist —
+ * SLA did, with B-018.
  *
  * <h2>Why the tab strip is not a router `Outlet`</h2>
  *
- * The two tabs are two routes and each owns its own data. Nesting them under a
- * layout route would put this component in the tree above both, which is right,
+ * The tabs are separate routes and each owns its own data. Nesting them under a
+ * layout route would put this component in the tree above them, which is right,
  * and would also make the project read a shared parent fetch — which is wrong:
  * the General tab reads the project *with its `ETag`* because its `PATCH`
  * requires one, and a shared read handed to a tab that never writes would be
- * caching a precondition nobody uses. Two routes, one header, one cheap query
- * each, and react-query dedupes the overlap.
+ * caching a precondition nobody uses. **The SLA tab makes that sharper rather
+ * than weaker**: it also needs an `ETag`, and a different one, over a different
+ * resource. One parent fetch could not have served both. Separate routes, one
+ * header, one cheap query each, and react-query dedupes the overlap.
  */
 
 const TABS = [
   { to: (id: number) => `/masters/projects/${id}/edit`, label: 'General' },
   { to: (id: number) => `/masters/projects/${id}/team`, label: 'Team' },
+  { to: (id: number) => `/masters/projects/${id}/sla`, label: 'SLA' },
 ] as const
 
-export function ProjectTabs({ active }: { active: 'General' | 'Team' }) {
+export function ProjectTabs({ active }: { active: 'General' | 'Team' | 'SLA' }) {
   const params = useParams<{ projectId?: string }>()
   const projectId = params.projectId ? Number(params.projectId) : null
 

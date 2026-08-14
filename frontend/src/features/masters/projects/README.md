@@ -1,13 +1,96 @@
-# Project Master — B-016 · S-10 · and the Team tab, B-017
+# Project Master — B-016 · S-10 · Team tab B-017 · SLA tab B-018
 
 `/masters/projects` · `/masters/projects/new` · `/masters/projects/:projectId/edit`
-· `/masters/projects/:projectId/team`
+· `/masters/projects/:projectId/team` · `/masters/projects/:projectId/sla`
 
-The list, the create/edit form (B-016) and the Team tab (B-017). S-10 describes
-four tabs and two exist: **SLA is B-018** and **Settings is B-019**, each with its
-own contract path and its own task. They are not stubbed — a greyed-out tab and a
-broken one look identical to a user, and two unbuilt screens rendered as tabs
-would make the feature look finished.
+The list, the create/edit form (B-016), the Team tab (B-017) and the SLA tab
+(B-018). S-10 describes four tabs and three exist: **Settings is B-019**, with its
+own contract path and its own task. It is not stubbed — a greyed-out tab and a
+broken one look identical to a user, and an unbuilt screen rendered as a tab
+makes the feature look finished.
+
+Each tab is a **sibling route, not a nested one**. A layout route would put a
+shared parent fetch above them, and they do not want one: the General tab reads
+the project *with its `ETag`* because its `PATCH` requires it, and the SLA tab
+needs its own `ETag` over a different resource entirely. One parent read could
+not have served both.
+
+---
+
+## The SLA tab (B-018)
+
+`SlaMatrixPage.tsx` at `/masters/projects/:projectId/sla`. Task type × level,
+which is forty-four editable cells behind one wholesale `PUT`.
+
+### Inherited figures are shown, and saying where they came from is the screen
+
+`sla_policies` is layered, so every cell has a figure a ticket would really be
+measured against — from this project, from a project-level default, from the
+org-wide one, or from a master. A grid showing only this project's rows would be
+almost entirely blank for a project that works perfectly well.
+
+So each row shows what it resolves to **and where that came from**: an `override`
+chip when this project set it, plain text otherwise. Only the override and
+`NONE` are chipped — four coloured chips for four rungs would turn the one
+distinction this screen exists to make into a palette, and `NONE` earns one
+because it is not an inheritance at all: nothing in the product has a figure, so
+tickets raised there get no planned close date and drop out of the breach sweep.
+
+### `buildOverrides` is the function the feature turns on
+
+The `PUT` body is this project's **overrides**, never the resolved grid. A cell
+sent becomes a row for this project; a cell left out goes back to inheriting.
+Sending the grid back — the obvious implementation, since the grid is what the
+screen holds — would materialise every inherited figure as a project row and the
+project would silently stop following the default it was displayed as following.
+Nothing would look wrong until somebody changed that default months later and
+this project did not move.
+
+So a cell goes on the wire when it is **already an override** or when the user
+has **changed it**, and never merely because it has a figure in it. Dirtiness is
+compared as parsed numbers, so a cell somebody clicked into and out of — `16`
+against `16.0` — is not a change.
+
+### A Save button, where the Team tab has none
+
+B-017 is right to save on change: each edit there is one `PATCH` of one field.
+This operation is a **replace**, so save-on-change would mean forty-four
+wholesale replaces racing each other while somebody types. One button, one
+`If-Match`, one transaction.
+
+The consequence is a dirty state, and what has to be right with it is what a
+*cleared* box means: emptying a resolution target removes the override and the
+cell inherits again. There is deliberately **no separate delete control** —
+"no target here" and "inherit" are the same request as far as the row is
+concerned, and two controls for one outcome is how they end up disagreeing.
+
+### The form remounts on the `ETag`
+
+`key={data.etag}` on `MatrixForm`. After a save — or after another tab's edit
+invalidates the query — the drafts would otherwise keep the values the user was
+editing while being compared against fresh `isOverride` flags, which is how a
+cell somebody cleared reappears as an override. It is also what makes the 412
+banner's "reload and reapply" true rather than advice.
+
+### Validation is on the row, and the server is still the authority
+
+The same four checks the service makes, run client-side, so a typo is answered
+on the row that caused it rather than as a banner naming one cell out of
+forty-four after a round trip. A `400` still lands in the banner: this exists to
+save a round trip, not to replace the guard.
+
+### What is deliberately not here
+
+- **Editing the project-level default** (§6's rung 2, one row covering every
+  task type at a level). A task type × level grid has no cell for "any task
+  type"; it is rendered as the *source* of the cells it answers and left alone.
+- **A read-only mode for non-Admins.** The write is `master.write`, which only
+  Admin holds, and the frontend has no capability gate to hang this on —
+  `/me` carries `permissions[]` and nothing reads it for gating. A PM sees the
+  inputs and meets a `403` in the banner. **Flagged for Stream A**: this is the
+  first masters screen whose read and write have different roles, so it is the
+  first place the gap is visible rather than theoretical. Hardcoding a role
+  check here is what B-015 removed from `ResourceController` and is not the fix.
 
 ---
 
@@ -176,10 +259,13 @@ reload.
 | `ProjectFormPage.tsx` | one page for create and edit, per `ResourceFormPage`'s precedent |
 | `projectForm.ts` | the schema, the two translations, the palette, `isCodeEditable` |
 | `projectQueries.ts` | the data layer; the detail read is hand-written for its `ETag` |
-| `ProjectTabs.tsx` | B-017 · the shared header and the two-tab strip |
+| `ProjectTabs.tsx` | B-017 · the shared header and the tab strip; three tabs since B-018 |
 | `ProjectTeamPage.tsx` | B-017 · the Team tab grid, inline edits, add and remove |
 | `projectTeam.ts` | B-017 · clear-versus-omit, the allocation summary, the role vocabulary |
 | `projectTeamQueries.ts` | B-017 · the roster read and the three writes |
+| `SlaMatrixPage.tsx` | B-018 · the SLA tab, grouped by task type, one Save for the whole grid |
+| `slaMatrix.ts` | B-018 · `buildOverrides` and the drafts — which cells go on the wire, and why the rest must not |
+| `slaMatrixQueries.ts` | B-018 · the matrix read with its `ETag`, and the `If-Match` replace |
 
 `FormField` / `FieldGroup` / `ReadOnlyField` are imported from
 `../resources/FormField` rather than copied a third time. B-011 duplicated them

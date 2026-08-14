@@ -46,8 +46,39 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { SlaPolicyCell } from './slaPolicyCell';
+import type { Level } from './level';
+import type { SlaPolicyCellResponseHrs } from './slaPolicyCellResponseHrs';
+import type { SlaPolicyCellResolutionHrs } from './slaPolicyCellResolutionHrs';
+import type { SlaSource } from './slaSource';
 
-export interface SlaPolicyListResponse {
-  data: SlaPolicyCell[];
+/**
+ * One cell of the resolved matrix. `GET` returns the full task type ×
+level grid — every cell, whether or not this project has a row for it —
+because the screen has to show what a ticket would actually get, and a
+response carrying only the overrides would render as a mostly empty grid
+that is indistinguishable from an unconfigured product.
+
+`taskTypeName` rides along so the grid can label its rows. There is no
+mounted `/masters/task-types` yet (B-020), and a matrix that renders
+"task type 7" is not a screen.
+
+ */
+export interface SlaPolicyCell {
+  taskTypeId: number;
+  taskTypeCode?: string;
+  taskTypeName: string;
+  level: Level;
+  responseHrs?: SlaPolicyCellResponseHrs;
+  /** Null only when `source` is `NONE` — nothing in the product has a figure for this cell. */
+  resolutionHrs?: SlaPolicyCellResolutionHrs;
+  escalateToL1?: boolean;
+  escalateToL2?: boolean;
+  source: SlaSource;
+  /** `source == PROJECT_TASK_TYPE` — this project has its own row for the
+cell. Derived, and on the wire anyway: it is the one thing every
+client branches on, and re-deriving an enum comparison in each of
+them is how a seventh source value later reads as an override in one
+place and not another.
+ */
+  isOverride: boolean;
 }

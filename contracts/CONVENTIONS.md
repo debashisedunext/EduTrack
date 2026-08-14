@@ -120,6 +120,16 @@ each other:**
 poll gets `304` for free) and `/reports/{key}` (expensive to compute, and re-run
 constantly as people toggle filters back and forth).
 
+**And on one collection read: `GET /projects/{id}/sla-policies`.** It is the
+only source of the tag its own `PUT` requires, so without it that operation is
+uncallable — the gap B-016 closed by adding `GET /projects/{projectId}`, found
+again on a route that had been in the spec since D-001 with no server behind it.
+`check-conventions.py` does not catch this class: its rule fires on paths ending
+in a path variable, and widening it to every collection read would fire on a
+dozen paginated lists that legitimately have no tag. **Pair the tag with the
+precondition by hand — a `PUT` or `PATCH` whose `If-Match` has no read to come
+from is not a strict endpoint, it is a broken one.**
+
 ## 6 · Cursor pagination, never offset
 
 `?cursor=&limit=`, with `meta.nextCursor` and `meta.hasMore`. Default limit 50,

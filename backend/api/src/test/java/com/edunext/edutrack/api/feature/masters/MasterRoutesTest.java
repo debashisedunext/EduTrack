@@ -48,7 +48,8 @@ class MasterRoutesTest {
             "com.edunext.edutrack.api.feature.masters.resources.ResourceController",
             "com.edunext.edutrack.api.feature.masters.roles.RoleController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectController",
-            "com.edunext.edutrack.api.feature.masters.projects.ProjectMemberController");
+            "com.edunext.edutrack.api.feature.masters.projects.ProjectMemberController",
+            "com.edunext.edutrack.api.feature.masters.projects.SlaPolicyController");
 
     @Test
     @DisplayName("every masters controller is mapped under /api/v1")
@@ -118,6 +119,25 @@ class MasterRoutesTest {
         assertThat(paths(load("com.edunext.edutrack.api.feature.masters.projects.ProjectMemberController")
                 .getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/projects/{projectId}/members");
+    }
+
+    /**
+     * B-018 · and this one is the case the whole file exists for.
+     *
+     * <p>{@code getSlaPolicies} and {@code replaceSlaPolicies} have been in the
+     * contract, in the mock and in the generated TypeScript client since D-001,
+     * <b>with no server behind either of them</b>. Nothing failed, because
+     * nothing called them. That is the third instance of the same gap — B-023's
+     * nine calendar operations, B-014's {@code PATCH /users/{userId}/status},
+     * and now this — and it is the reason a route's mount point is asserted
+     * rather than assumed to follow from the class being written.
+     */
+    @Test
+    @DisplayName("the SLA tab is nested under the project it belongs to")
+    void slaPoliciesAreMountedWhereTheContractPutsThem() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.projects.SlaPolicyController")
+                .getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/projects/{projectId}/sla-policies");
     }
 
     /** {@code value} and {@code path} are aliases; either may carry the mapping. */
