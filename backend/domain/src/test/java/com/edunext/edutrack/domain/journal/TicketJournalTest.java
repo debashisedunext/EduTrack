@@ -307,17 +307,246 @@ class TicketJournalTest {
             verifyNoInteractions(history);
         }
 
+        /**
+         * A-043 tightened this: a reversal now has to name a row that exists and
+         * that it actually cancels, so the original has to be stubbed. Before,
+         * {@code correctsEntryId = 11L} pointed at nothing and was accepted.
+         */
         @Test
         void acceptsAWellFormedReversal() {
             ticketExists();
+            TicketEffortLog original = effortLog();
+            original.setId(11L);
+            when(effortLogs.findById(11L)).thenReturn(Optional.of(original));
+
             TicketEffortLog reversal = effortLog();
-            reversal.setHours(BigDecimal.valueOf(-3));
+            reversal.setHours(original.getHours().negate());
             reversal.setCorrection(true);
             reversal.setCorrectsEntryId(11L);
 
             journal.append(reversal);
 
             verify(effortLogs).insert(reversal);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // A-043 · the compensating-entry API
+    // ------------------------------------------------------------------
+
+    /**
+     * A-043 · what {@code reverse} computes, and what it refuses to accept from
+     * a caller who builds a correction by hand instead.
+     *
+     * <p>Double reversal is not here: {@code uq_effort_corrects} holds it, and
+     * a mock cannot enforce a unique index. {@code TicketJournalIT} proves it
+     * against the real schema.
+     */
+    @Nested
+    @DisplayName("compensating entries (A-043)")
+    class CompensatingEntries {
+
+        /**
+         * {@code insert} returns the managed instance in production; a bare mock
+         * returns null. Stubbed only in the tests that read the returned row —
+         * doing it in a shared {@code @BeforeEach} would itself count as an
+         * interaction and break the {@code verifyNoInteractions} assertions.
+         */
+        private void echoEffortInsert() {
+            when(effortLogs.insert(any())).thenAnswer(call -> call.getArgument(0));
+        }
+
+        private void echoHistoryInsert() {
+            when(history.insert(any())).thenAnswer(call -> call.getArgument(0));
+        }
+
+        private TicketEffortLog storedEffort(long id, BigDecimal hours) {
+            TicketEffortLog original = effortLog();
+            original.setId(id);
+            original.setHours(hours);
+            original.setStageCode("DEV");
+            original.setIterationNo((short) 2);
+            when(effortLogs.findById(id)).thenReturn(Optional.of(original));
+            return original;
+        }
+
+        @Test
+        @DisplayName("the reversal copies the bucket and negates the hours")
+        void reverseEffortComputesTheCompensatingRow() {
+            ticketExists();
+            echoEffortInsert();
+            TicketEffortLog original = storedEffort(11L, new BigDecimal("3.50"));
+
+            TicketEffortLog reversal = journal.reverseEffort(11L, "logged against the wrong ticket");
+
+            assertThat(reversal.getHours()).isEqualByComparingTo("-3.50");
+            assertThat(reversal.getTicketId()).isEqualTo(original.getTicketId());
+            assertThat(reversal.getCycleNo()).isEqualTo(original.getCycleNo());
+            assertThat(reversal.getStageCode()).isEqualTo(original.getStageCode());
+            assertThat(reversal.getIterationNo()).isEqualTo(original.getIterationNo());
+            assertThat(reversal.getUserId()).isEqualTo(original.getUserId());
+            assertThat(reversal.getWorkDate())
+                    .as("the negative belongs on the day the work was claimed, or the daily report "
+                            + "removes hours from a day nobody logged any")
+                    .isEqualTo(original.getWorkDate());
+            assertThat(reversal.isCorrection()).isTrue();
+            assertThat(reversal.getCorrectsEntryId()).isEqualTo(11L);
+            verify(effortLogs).insert(reversal);
+        }
+
+        @Test
+        @DisplayName("a reversal is chained like any other append")
+        void theReversalIsHashed() {
+            ticketExists();
+            echoEffortInsert();
+            storedEffort(11L, new BigDecimal("3.50"));
+
+            TicketEffortLog reversal = journal.reverseEffort(11L, "wrong ticket");
+
+            assertThat(reversal.getRowHash()).hasSize(ChainDigest.HASH_LENGTH);
+        }
+
+        @Test
+        void refusesToReverseAnEntryThatDoesNotExist() {
+            when(effortLogs.findById(11L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> journal.reverseEffort(11L, "why"))
+                    .isInstanceOf(AppendRejectedException.class)
+                    .hasMessageContaining("no effort log 11 to reverse");
+            verify(effortLogs, never()).insert(any());
+        }
+
+        /**
+         * The failure this guard exists for: both tickets' grids are wrong and
+         * both still add up, so nothing anybody would check looks off.
+         */
+        @Test
+        @DisplayName("a hand-built correction cannot reverse another ticket's entry")
+        void refusesACrossTicketReversal() {
+            ticketExists();
+            TicketEffortLog otherTicket = storedEffort(11L, new BigDecimal("3.00"));
+            otherTicket.setTicketId(99L);
+
+            TicketEffortLog reversal = effortLog();
+            reversal.setHours(new BigDecimal("-3.00"));
+            reversal.setCorrection(true);
+            reversal.setCorrectsEntryId(11L);
+
+            assertThatThrownBy(() -> journal.append(reversal))
+                    .isInstanceOf(AppendRejectedException.class)
+                    .hasMessageContaining("belongs to the same ticket");
+            verify(effortLogs, never()).insert(any());
+        }
+
+        @Test
+        @DisplayName("a hand-built correction cannot land in a different stage or iteration")
+        void refusesAReversalInTheWrongCell() {
+            ticketExists();
+            storedEffort(11L, new BigDecimal("3.00"));   // DEV, iteration 2
+
+            TicketEffortLog reversal = effortLog();
+            reversal.setStageCode("QA");
+            reversal.setIterationNo((short) 2);
+            reversal.setHours(new BigDecimal("-3.00"));
+            reversal.setCorrection(true);
+            reversal.setCorrectsEntryId(11L);
+
+            assertThatThrownBy(() -> journal.append(reversal))
+                    .isInstanceOf(AppendRejectedException.class)
+                    .hasMessageContaining("does not land where the entry it reverses did");
+            verify(effortLogs, never()).insert(any());
+        }
+
+        @Test
+        @DisplayName("a partial reversal is refused — it leaves a residue that reads as real work")
+        void refusesAPartialReversal() {
+            ticketExists();
+            storedEffort(11L, new BigDecimal("8.00"));
+
+            TicketEffortLog reversal = effortLog();
+            reversal.setStageCode("DEV");
+            reversal.setIterationNo((short) 2);
+            reversal.setHours(new BigDecimal("-5.00"));
+            reversal.setCorrection(true);
+            reversal.setCorrectsEntryId(11L);
+
+            assertThatThrownBy(() -> journal.append(reversal))
+                    .isInstanceOf(AppendRejectedException.class)
+                    .hasMessageContaining("must be exactly -8.00");
+            verify(effortLogs, never()).insert(any());
+        }
+
+        @Test
+        @DisplayName("a history retraction copies the entry and names its own actor")
+        void reverseHistoryAnnotates() {
+            ticketExists();
+            echoHistoryInsert();
+            TicketHistory original = historyEntry();
+            original.setId(11L);
+            original.setFieldName("status");
+            original.setOldValue("NEW");
+            original.setNewValue("IN_QA");
+            when(history.findById(11L)).thenReturn(Optional.of(original));
+
+            TicketHistory correction = journal.reverseHistory(11L, 99L, "recorded on the wrong cycle");
+
+            assertThat(correction.getEventType()).isEqualTo(original.getEventType());
+            assertThat(correction.getFieldName()).isEqualTo("status");
+            assertThat(correction.getOldValue()).isEqualTo("NEW");
+            assertThat(correction.getNewValue()).isEqualTo("IN_QA");
+            assertThat(correction.getActorId())
+                    .as("whoever is retracting, not whoever made the entry")
+                    .isEqualTo(99L);
+            assertThat(correction.getRemarks()).isEqualTo("recorded on the wrong cycle");
+            assertThat(correction.isCorrection()).isTrue();
+            assertThat(correction.getCorrectsEntryId()).isEqualTo(11L);
+            verify(history).insert(correction);
+        }
+
+        @Test
+        @DisplayName("a SYSTEM retraction carries no actor_id, and the pair still agrees")
+        void reverseHistoryBySystem() {
+            ticketExists();
+            echoHistoryInsert();
+            TicketHistory original = historyEntry();
+            original.setId(11L);
+            when(history.findById(11L)).thenReturn(Optional.of(original));
+
+            TicketHistory correction = journal.reverseHistory(11L, null, "superseded by the scanner");
+
+            assertThat(correction.getActorId()).isNull();
+            assertThat(correction.getActorType()).isEqualTo("SYSTEM");
+        }
+
+        /**
+         * The remark is the whole content of the row — the original is not
+         * removed and its values are copied across, so without one the
+         * retraction says only that somebody disagreed.
+         */
+        @Test
+        void refusesAHistoryRetractionWithNoReason() {
+            assertThatThrownBy(() -> journal.reverseHistory(11L, 7L, "  "))
+                    .isInstanceOf(AppendRejectedException.class)
+                    .hasMessageContaining("needs a reason");
+            verifyNoInteractions(history);
+        }
+
+        @Test
+        void refusesACrossTicketHistoryRetraction() {
+            ticketExists();
+            TicketHistory otherTicket = historyEntry();
+            otherTicket.setId(11L);
+            otherTicket.setTicketId(99L);
+            when(history.findById(11L)).thenReturn(Optional.of(otherTicket));
+
+            TicketHistory correction = historyEntry();
+            correction.setCorrection(true);
+            correction.setCorrectsEntryId(11L);
+
+            assertThatThrownBy(() -> journal.append(correction))
+                    .isInstanceOf(AppendRejectedException.class)
+                    .hasMessageContaining("same timeline");
+            verify(history, never()).insert(any());
         }
     }
 

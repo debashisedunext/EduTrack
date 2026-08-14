@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -510,6 +511,166 @@ class TicketJournalIT {
                     .isEqualTo(chain.get(i - 1).getRowHash());
         }
         assertThat(chain).extracting(TicketHistory::getRowHash).doesNotHaveDuplicates();
+    }
+
+    // ------------------------------------------------------------------
+    // A-043 · compensating entries
+    // ------------------------------------------------------------------
+
+    /**
+     * <b>The claim A-043 exists to make</b>, and the only test that can make it:
+     * a reversal has to cancel in the query that actually renders the §4A.4
+     * grid, not merely in the rows.
+     *
+     * <p>Asserting that two rows exist with opposite signs would pass against a
+     * reversal filed in the wrong stage or iteration — the arithmetic the grid
+     * does is a join, so the join is what has to be exercised. This runs
+     * PLAN.md §3.4's roll-up verbatim.
+     */
+    @Test
+    void aReversalNetsTheCellToZeroInTheRollUp() {
+        long ticketId = seedTicket();
+        long userId = seedUser();
+        journal.append(openHop(ticketId, 1, "DEV"));
+
+        TicketEffortLog logged = new TicketEffortLog();
+        logged.setTicketId(ticketId);
+        logged.setCycleNo((short) 1);
+        logged.setStageCode("DEV");
+        logged.setIterationNo((short) 1);
+        logged.setUserId(userId);
+        logged.setWorkDate(LocalDate.of(2026, 8, 14));
+        logged.setHours(new BigDecimal("3.50"));
+        journal.append(logged);
+
+        assertThat(rolledUpEffort(ticketId))
+                .as("the cell before the correction")
+                .isEqualByComparingTo("3.50");
+
+        journal.reverseEffort(logged.getId(), "logged against the wrong ticket");
+
+        assertThat(rolledUpEffort(ticketId))
+                .as("the §4A.4 join must net to zero — the reversal has to land in the same "
+                        + "(ticket, cycle, stage, iteration) cell or the original stays counted")
+                .isEqualByComparingTo("0.00");
+    }
+
+    /** PLAN.md §3.4's roll-up, reduced to the one figure this test is about. */
+    private BigDecimal rolledUpEffort(long ticketId) {
+        return db.sql("""
+                        SELECT COALESCE(SUM(e.hours), 0)
+                        FROM ticket_stage_transitions t
+                        LEFT JOIN ticket_effort_logs e
+                               ON e.ticket_id    = t.ticket_id
+                              AND e.stage_code   = t.to_stage
+                              AND e.iteration_no = t.iteration_no
+                        WHERE t.ticket_id = ? AND t.cycle_no = 1
+                        GROUP BY t.id
+                        """)
+                .param(ticketId)
+                .query(BigDecimal.class)
+                .single();
+    }
+
+    /**
+     * {@code uq_effort_corrects} — the A-043 migration. Two reversals of one
+     * entry net to {@code -hours}, so the grid reports a negative figure for a
+     * stage somebody genuinely worked. There is no reading of that which is not
+     * a mistake: a double-submitted form, a retry after a lost response, or two
+     * people correcting the same row minutes apart.
+     *
+     * <p>Enforced by the database rather than the journal, per A-040's boundary
+     * — which is why it needs a real schema to prove.
+     */
+    @Test
+    void anEntryCannotBeReversedTwice() {
+        long ticketId = seedTicket();
+        long userId = seedUser();
+
+        TicketEffortLog logged = new TicketEffortLog();
+        logged.setTicketId(ticketId);
+        logged.setCycleNo((short) 1);
+        logged.setStageCode("DEV");
+        logged.setIterationNo((short) 1);
+        logged.setUserId(userId);
+        logged.setWorkDate(LocalDate.of(2026, 8, 14));
+        logged.setHours(new BigDecimal("3.50"));
+        journal.append(logged);
+
+        journal.reverseEffort(logged.getId(), "first reversal");
+
+        assertThatThrownBy(() -> journal.reverseEffort(logged.getId(), "the same form, submitted twice"))
+                .as("uq_effort_corrects has to bite — the journal deliberately does not restate it")
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /**
+     * Chains are legal (D2) and cycles are structurally impossible: a correction
+     * can only name a row that already existed, and these rows are immutable, so
+     * the graph can only ever point backwards.
+     */
+    @Test
+    void aReversalMayItselfBeReversed() {
+        long ticketId = seedTicket();
+        long userId = seedUser();
+
+        TicketEffortLog logged = new TicketEffortLog();
+        logged.setTicketId(ticketId);
+        logged.setCycleNo((short) 1);
+        logged.setStageCode("DEV");
+        logged.setIterationNo((short) 1);
+        logged.setUserId(userId);
+        logged.setWorkDate(LocalDate.of(2026, 8, 14));
+        logged.setHours(new BigDecimal("8.00"));
+        journal.append(logged);
+
+        TicketEffortLog reversal = journal.reverseEffort(logged.getId(), "reversed in error");
+        TicketEffortLog undo = journal.reverseEffort(reversal.getId(), "the reversal was the mistake");
+
+        assertThat(undo.getHours()).isEqualByComparingTo("8.00");
+        assertThat(db.sql("SELECT COALESCE(SUM(hours), 0) FROM ticket_effort_logs WHERE ticket_id = ?")
+                .param(ticketId)
+                .query(BigDecimal.class)
+                .single())
+                .as("+8, -8, +8 — back where it started, with all three rows intact")
+                .isEqualByComparingTo("8.00");
+    }
+
+    /**
+     * A history retraction never removes anything. Asserted against the table
+     * rather than a reader, because the rule is that no reader may be given the
+     * option — see {@code TicketJournal#reverseHistory}.
+     */
+    @Test
+    void aHistoryRetractionLeavesTheOriginalReadable() {
+        long ticketId = seedTicket();
+        long userId = seedUser();
+
+        TicketHistory original = new TicketHistory();
+        original.setTicketId(ticketId);
+        original.setCycleNo((short) 1);
+        original.setEventType("STATUS_CHANGED");
+        original.setFieldName("status");
+        original.setNewValue("IN_QA");
+        original.setActorId(userId);
+        original.setActorType("USER");
+        journal.append(original);
+
+        journal.reverseHistory(original.getId(), userId, "recorded against the wrong cycle");
+
+        entityManager.flush();
+        entityManager.clear();
+
+        var rows = history.findByTicketIdOrderByIdAsc(ticketId);
+        assertThat(rows)
+                .as("both rows render; is_correction decides how, never whether")
+                .hasSize(2);
+        assertThat(rows.getFirst().isCorrection()).isFalse();
+        assertThat(rows.getLast().isCorrection()).isTrue();
+        assertThat(rows.getLast().getCorrectsEntryId()).isEqualTo(original.getId());
+        assertThat(rows.getLast().getRowHash())
+                .as("a correction is chained like any other append")
+                .hasSize(ChainDigest.HASH_LENGTH);
     }
 
     /**
