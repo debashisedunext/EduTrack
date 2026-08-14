@@ -85,6 +85,19 @@ BEGIN
       SET v_sql = CONCAT('GRANT SELECT, INSERT, UPDATE ON edutrack.`', v_table,
                          '` TO ''edutrack_app''@''%''');
 
+    ELSEIF v_table = 'chain_anchors' THEN
+      -- A-044's truncation anchor. SELECT, INSERT and UPDATE, because a run
+      -- writes an anchor and later moves it forward — but never DELETE. The
+      -- default branch below would grant it along with the rest of DML, and
+      -- an anchor that can be deleted is not an anchor: the next run would
+      -- write a fresh one from whatever rows remain and the truncation
+      -- becomes the new baseline. UPDATE is likewise constrained one layer
+      -- down, by trg_chain_anchor_monotonic, which refuses a count that
+      -- decreases. Same split as ticket_stage_transitions: the grant permits
+      -- the statement, the trigger constrains it.
+      SET v_sql = CONCAT('GRANT SELECT, INSERT, UPDATE ON edutrack.`', v_table,
+                         '` TO ''edutrack_app''@''%''');
+
     ELSEIF v_table = 'flyway_schema_history' THEN
       -- Readable for diagnostics; never written by the application.
       SET v_sql = CONCAT('GRANT SELECT ON edutrack.`', v_table,
