@@ -29,6 +29,22 @@ public interface TicketStageTransitionRepository
     /** The ribbon, in order. Served by {@code ix_stage_ticket_id}. */
     List<TicketStageTransition> findByTicketIdOrderBySeqNoAsc(Long ticketId);
 
+    /**
+     * The chain, in order — <b>by id, never by {@code seq_no}</b> (A-044).
+     *
+     * <p>The two differ and the difference is a trap. {@code seq_no} is unique
+     * per <em>cycle</em> ({@code uq_stage_transitions} is
+     * {@code (ticket_id, cycle_no, seq_no)}), so a reopened ticket restarts it
+     * at 1 and ordering by it interleaves cycle 2's hops among cycle 1's. The
+     * hash chain is insertion order and nothing else, which is what
+     * {@code ix_stage_ticket_id (ticket_id, id)} — commented "chain walk" —
+     * exists to serve.
+     *
+     * <p>Walking a reopened ticket by {@code seq_no} would report a perfectly
+     * sound chain as broken, on precisely the tickets with the most history.
+     */
+    List<TicketStageTransition> findByTicketIdOrderByIdAsc(Long ticketId);
+
     /** One cycle's journey — cycle 2 renders without cycle 1's hops. */
     List<TicketStageTransition> findByTicketIdAndCycleNoOrderBySeqNoAsc(Long ticketId, short cycleNo);
 

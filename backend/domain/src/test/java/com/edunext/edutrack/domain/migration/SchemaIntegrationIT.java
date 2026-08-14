@@ -13,6 +13,8 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -187,14 +189,32 @@ class SchemaIntegrationIT {
                                 // A-027, A-028, A-029
                                 "password_reset_tokens", "password_history", "totp_recovery_codes",
                                 // D-045
-                                "push_subscriptions");
+                                "push_subscriptions",
+                                // A-044
+                                "chain_anchors");
             }
+            // Named, not counted — taking the same correction A-029 already
+            // applied to the table assertion above. "expected: 8 but was: 10"
+            // names neither the trigger that appeared nor the one that went
+            // missing, and a dropped immutability trigger is the single most
+            // important thing this file can notice. Names catch a deletion and
+            // an addition separately; a count only ever says the total moved.
             try (ResultSet rs = s.executeQuery(
-                    "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()")) {
-                rs.next();
-                // A-008: 2 on ticket_history, 2 on ticket_effort_logs,
-                // 2 on ticket_stage_transitions (seal + no-delete)
-                assertThat(rs.getInt(1)).isEqualTo(8);
+                    "SELECT trigger_name FROM information_schema.triggers "
+                            + "WHERE trigger_schema = DATABASE() ORDER BY trigger_name")) {
+                List<String> triggers = new ArrayList<>();
+                while (rs.next()) {
+                    triggers.add(rs.getString(1));
+                }
+                assertThat(triggers).containsExactlyInAnyOrder(
+                        // A-008 · the immutability core
+                        "trg_hist_no_update", "trg_hist_no_delete",
+                        "trg_effort_no_update", "trg_effort_no_delete",
+                        "trg_stage_seal_only", "trg_stage_no_delete",
+                        // B-011 · a resource cannot be their own reporting manager
+                        "trg_users_no_self_manager_ins", "trg_users_no_self_manager_upd",
+                        // A-044 · the truncation anchor moves forward or not at all
+                        "trg_chain_anchor_monotonic", "trg_chain_anchor_no_delete");
             }
         }
     }
