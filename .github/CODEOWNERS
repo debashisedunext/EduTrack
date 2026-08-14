@@ -3,8 +3,6 @@
 # GitHub requests the right reviewer automatically from this file.
 # Derived from docs/TEAM-PLAN.md §6 — keep the two in sync.
 #
-# Replace the @placeholders with real GitHub usernames before this takes effect.
-#
 #   Stream A — Platform & Security   Shivendra  shivendra.edunext@gmail.com       @shivendraedunext-18
 #   Stream B — Masters & Clients     Ayush      ayush.edunext123@gmail.com        @Ayushedunext
 #   Stream C — Tickets & Ribbon      Divyansh   divyansh.edunext@gmail.com        @Divyanshedunext
@@ -15,34 +13,79 @@
 # before relying on "require Code Owner review".
 #
 # Later rules override earlier ones, so the catch-all sits at the top.
+#
+# ---------------------------------------------------------------------
+# THE PATHS ARE UNANCHORED, AND THAT IS THE FIX
+#
+# Until 14 Aug 2026 every backend rule here was written the way TEAM-PLAN.md
+# §6 draws the map — `/backend/api/feature/auth/` — and 17 of the 20 matched
+# nothing at all. The real directory is
+#
+#     backend/api/src/main/java/com/edunext/edutrack/api/feature/auth/
+#
+# and CODEOWNERS matches paths, not packages. Only /backend/common/,
+# /backend/worker/ and the frontend rules ever resolved; everything else fell
+# through to the catch-all, so GitHub requested the lead on every pull request
+# and no stream ever saw a change to its own code unless somebody wrote a note
+# asking. That is not a theoretical gap — A-037 touched Stream B's
+# ResourceController and flagged it for sign-off from a name that is on no
+# stream, and nothing caught it because nothing was ever going to.
+#
+# The patterns below therefore carry no leading slash, so they match at any
+# depth. `api/feature/auth/` matches both the main and the test tree, which is
+# what you want: a permission test for someone else's feature is their business
+# too. The cost is that a pattern could match somewhere unintended, so keep the
+# segments long enough to be unambiguous — `feature/auth/` alone would be too
+# short, `api/feature/auth/` is not.
+#
+# To check this file after editing it, confirm each pattern resolves:
+#     git ls-files | grep -E 'api/feature/auth/'
+# An empty result is a dead rule, and a dead rule is indistinguishable from an
+# absent one.
+#
+# Five frontend rules are deliberately empty today — features/dashboard and
+# features/reports (A-054, A-063), features/clients (B-029), features/chat and
+# components/ribbon (Stream C and D, unstarted). Those are right paths for
+# unwritten work and start protecting it on the commit that creates the
+# directory. They are not the same defect as a wrong path, and should not be
+# "fixed" by deleting them.
+# ---------------------------------------------------------------------
 
 # ---- Default: the lead sees anything not claimed below ----
 *                                       @debashisedunext
 
 # ---- Stream A · Platform & Security ----
 /backend/common/                        @shivendraedunext-18
-/backend/domain/db/migration/           @shivendraedunext-18
-/backend/api/security/                  @shivendraedunext-18
-/backend/api/feature/auth/              @shivendraedunext-18
-/backend/api/feature/dashboard/         @shivendraedunext-18
-/backend/api/feature/reports/           @shivendraedunext-18
+db/migration/                           @shivendraedunext-18
+api/security/                           @shivendraedunext-18
+api/feature/auth/                       @shivendraedunext-18
+api/feature/dashboard/                  @shivendraedunext-18
+api/feature/reports/                    @shivendraedunext-18
+api/arch/                               @shivendraedunext-18
 /frontend/src/features/auth/            @shivendraedunext-18
 /frontend/src/features/dashboard/       @shivendraedunext-18
 /frontend/src/features/reports/         @shivendraedunext-18
 /docker-compose.yml                     @shivendraedunext-18
+/Makefile                               @shivendraedunext-18
+/tools/                                 @shivendraedunext-18
 /.github/                               @shivendraedunext-18
 
 # ---- Stream B · Masters & Clients ----
-/backend/api/feature/masters/           @Ayushedunext
-/backend/api/feature/clients/           @Ayushedunext
-/backend/api/feature/imports/           @Ayushedunext
-/backend/api/feature/workflow/          @Ayushedunext
+api/feature/masters/                    @Ayushedunext
+api/feature/clients/                    @Ayushedunext
+api/feature/imports/                    @Ayushedunext
+api/feature/workflow/                   @Ayushedunext
+# B-007's fixture corpus. Absent from TEAM-PLAN.md §6 and from this file until
+# A-040, so it belonged to the catch-all — which is why "who signs off on
+# SingleTicketFixture" had no answer. DEPENDENCIES.md row 7 assigns B-007 to
+# Ayush; this records that rather than deciding it.
+api/feature/fixtures/                   @Ayushedunext
 /frontend/src/features/masters/         @Ayushedunext
 /frontend/src/features/clients/         @Ayushedunext
 
 # ---- Stream C · Tickets & Ribbon ----
-/backend/api/feature/tickets/           @Divyanshedunext
-/backend/api/feature/transitions/       @Divyanshedunext
+api/feature/tickets/                    @Divyanshedunext
+api/feature/transitions/                @Divyanshedunext
 /frontend/src/features/tickets/         @Divyanshedunext
 /frontend/src/components/ui/            @Divyanshedunext
 /frontend/src/components/ribbon/        @Divyanshedunext
@@ -50,17 +93,28 @@
 
 # ---- Stream D · Engines & Realtime ----
 /backend/worker/                        @debashisedunext
-/backend/api/feature/notifications/     @debashisedunext
-/backend/api/feature/chat/              @debashisedunext
-/backend/api/realtime/                  @debashisedunext
+api/feature/notifications/              @debashisedunext
+api/feature/chat/                       @debashisedunext
+api/realtime/                           @debashisedunext
 /frontend/src/features/chat/            @debashisedunext
 /frontend/src/features/notifications/   @debashisedunext
 
 # ---- Cross-cutting: the three append-only tables and the immutability core
 # always need Stream A's eyes, whoever is touching them.
-/backend/domain/**/history/             @shivendraedunext-18
-/backend/domain/**/effort/              @shivendraedunext-18
-/backend/domain/**/immutable/           @shivendraedunext-18
+#
+# The previous version of this block globbed domain/**/history/, /effort/ and
+# /immutable/ — three directories that have never existed. The append-only
+# types live in domain/tickets/ and domain/workflow/ beside their mutable
+# siblings, so they are named individually; a directory rule here would claim
+# Stream B's entities as well.
+domain/journal/                                 @shivendraedunext-18
+domain/appendonly/                              @shivendraedunext-18
+domain/tickets/TicketHistory.java               @shivendraedunext-18
+domain/tickets/TicketHistoryRepository.java     @shivendraedunext-18
+domain/tickets/TicketEffortLog.java             @shivendraedunext-18
+domain/tickets/TicketEffortLogRepository.java   @shivendraedunext-18
+domain/workflow/TicketStageTransition.java      @shivendraedunext-18
+domain/workflow/TicketStageTransitionRepository.java @shivendraedunext-18
 
 # ---- Generated: nobody owns it, nobody hand-edits it ----
 /frontend/src/api/generated/

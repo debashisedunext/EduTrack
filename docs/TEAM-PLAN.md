@@ -111,6 +111,7 @@ backend/
   common/                      → A    shared DTOs, exceptions, hashing, OpenAPI config
   domain/db/migration/         → A    Flyway (schema arbiter — see §7.1)
   api/security/                → A    filter chain, scope resolver, guards
+  api/arch/            (test)  → A    ArchUnit rules — layering, scope, append-only
   api/feature/auth/            → A
   api/feature/dashboard/       → A
   api/feature/reports/         → A
@@ -118,6 +119,7 @@ backend/
   api/feature/clients/         → B
   api/feature/imports/         → B    Apache POI wizard (shared engine, two schemas)
   api/feature/workflow/        → B    templates, stages  (C consumes, B owns)
+  api/feature/fixtures/        → B    B-007 seed corpus  (unowned until A-040)
   api/feature/tickets/         → C    CRUD, detail, cycles, comments, attachments
   api/feature/transitions/     → C    handoff, rework, skip, ribbon, journey
   api/feature/notifications/   → D
@@ -137,6 +139,8 @@ frontend/src/
 ```
 
 This map is committed as `.github/CODEOWNERS`, so GitHub requests the right reviewer automatically on every pull request. Keep the two in sync — the file is the enforceable version of this table.
+
+> ⚠️ **The table above is a package map; CODEOWNERS matches paths.** `api/feature/auth/` here means `backend/api/src/main/java/com/edunext/edutrack/api/feature/auth/` on disk, and until 14 Aug 2026 CODEOWNERS was written the short way — so 17 of its 20 backend rules matched nothing, every pull request requested only the lead, and no stream was ever auto-notified of a change to its own code. Fixed in A-040 by dropping the leading slash so the patterns match at any depth. **If you add a row here, add the path form to CODEOWNERS and prove it resolves** with `git ls-files | grep -E '<pattern>'` — an empty result is a rule that does nothing and looks exactly like one that works.
 
 ---
 
