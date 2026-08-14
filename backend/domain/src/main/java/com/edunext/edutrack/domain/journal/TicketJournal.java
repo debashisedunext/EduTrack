@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -154,10 +155,64 @@ public class TicketJournal {
                         + entry.getActorType() + ", actor_id=" + entry.getActorId() + ")");
 
         lockTicketFor(entry.getTicketId(), "history");
+        requireCorrectsTheSameTicket(entry);
         chain(entry, previousRowHash(
                 history.findFirstByTicketIdOrderByIdDesc(entry.getTicketId()),
                 TicketHistory::getRowHash, entry.getTicketId(), "ticket_history"));
         return history.insert(entry);
+    }
+
+    /**
+     * A-043 · retract one history entry.
+     *
+     * <p><b>A history correction annotates; it never hides.</b> Effort nets
+     * because the §4A.4 grid sums it, and a negative row cancels arithmetically.
+     * There is nothing to sum here, so the equivalent move would be for readers
+     * to filter the corrected entry out — and that is exactly the capability
+     * this table exists to withhold. Four layers stop a row being deleted; a
+     * filter in every reader would hand the same effect back at the presentation
+     * layer, below the triggers, the grants and the hash chain alike.
+     *
+     * <p>So both rows always render, and {@code is_correction} decides how the
+     * retraction is <em>drawn</em>, never whether the original is returned. That
+     * is a rule for Stream C's timeline and A-071's audit viewer, and it is
+     * stated here because it is the opposite of the effort answer four lines up.
+     *
+     * <p>The descriptive columns are copied from the original so the row
+     * explains itself in a query that has not joined back to the target. The
+     * actor is <em>not</em> copied: {@code actorId} is whoever is retracting,
+     * which is very often not whoever made the entry.
+     *
+     * @param historyEntryId the entry to retract
+     * @param actorId        who is retracting it; {@code null} means SYSTEM
+     * @param remarks        why — the whole value of the row
+     * @throws AppendRejectedException if the entry does not exist, or has
+     *         already been corrected
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public TicketHistory reverseHistory(Long historyEntryId, Long actorId, String remarks) {
+        require(historyEntryId != null, "a history entry id is required to correct one");
+        require(isNotBlank(remarks),
+                "a history correction needs a reason — it is the entire content of the row. "
+                        + "The original is not removed and its values are copied here, so without "
+                        + "a remark the correction says only that somebody disagreed.");
+        TicketHistory original = history.findById(historyEntryId)
+                .orElseThrow(() -> new AppendRejectedException(
+                        "no history entry " + historyEntryId + " to correct"));
+
+        TicketHistory correction = new TicketHistory();
+        correction.setTicketId(original.getTicketId());
+        correction.setCycleNo(original.getCycleNo());
+        correction.setEventType(original.getEventType());
+        correction.setFieldName(original.getFieldName());
+        correction.setOldValue(original.getOldValue());
+        correction.setNewValue(original.getNewValue());
+        correction.setActorId(actorId);
+        correction.setActorType(actorId == null ? SYSTEM_ACTOR : "USER");
+        correction.setRemarks(remarks);
+        correction.setCorrection(true);
+        correction.setCorrectsEntryId(original.getId());
+        return append(correction);
     }
 
     /**
@@ -182,10 +237,61 @@ public class TicketJournal {
         requireCorrectionPair(entry.isCorrection(), entry.getCorrectsEntryId(), "effort log");
 
         lockTicketFor(entry.getTicketId(), "effort log");
+        requireReversesItsOwnBucket(entry);
         chain(entry, previousRowHash(
                 effortLogs.findFirstByTicketIdOrderByIdDesc(entry.getTicketId()),
                 TicketEffortLog::getRowHash, entry.getTicketId(), "ticket_effort_logs"));
         return effortLogs.insert(entry);
+    }
+
+    /**
+     * A-043 · reverse one effort log — the compensating entry, computed rather
+     * than described.
+     *
+     * <p>The hours are <b>not</b> a parameter, and that is the point. A caller
+     * able to write {@code reverse(9001, -5)} against an eight-hour entry
+     * produces a row that satisfies every other rule here and still leaves three
+     * hours standing in a cell nobody worked. The original is in hand under the
+     * lock, so the only correct value is derivable and the wrong one is
+     * unwriteable.
+     *
+     * <p>Everything that decides <em>where</em> the reversal lands is copied
+     * from the original for the same reason — see
+     * {@link #requireReversesItsOwnBucket}. {@code workDate} included: the
+     * negative belongs on the day the work was claimed, or the daily effort
+     * report shows hours removed from a day nobody logged any.
+     *
+     * <p><b>Restating the right value is a separate, ordinary append.</b> There
+     * is deliberately no {@code correct(id, newHours)} that writes both rows: it
+     * reads like {@code UPDATE hours = 6}, which is the mental model this whole
+     * table is built to refuse, and the two rows it writes are not related by
+     * anything the schema can express anyway.
+     *
+     * @param effortLogId the entry to reverse
+     * @param note        why — carried on the compensating row, not the original
+     * @return the compensating entry, its generated id populated
+     * @throws AppendRejectedException if the entry does not exist, or has
+     *         already been reversed
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public TicketEffortLog reverseEffort(Long effortLogId, String note) {
+        require(effortLogId != null, "an effort log id is required to reverse one");
+        TicketEffortLog original = effortLogs.findById(effortLogId)
+                .orElseThrow(() -> new AppendRejectedException(
+                        "no effort log " + effortLogId + " to reverse"));
+
+        TicketEffortLog reversal = new TicketEffortLog();
+        reversal.setTicketId(original.getTicketId());
+        reversal.setCycleNo(original.getCycleNo());
+        reversal.setStageCode(original.getStageCode());
+        reversal.setIterationNo(original.getIterationNo());
+        reversal.setUserId(original.getUserId());
+        reversal.setWorkDate(original.getWorkDate());
+        reversal.setHours(original.getHours().negate());
+        reversal.setNote(note);
+        reversal.setCorrection(true);
+        reversal.setCorrectsEntryId(original.getId());
+        return append(reversal);
     }
 
     /**
@@ -439,6 +545,93 @@ public class TicketJournal {
      * twice. A-043 builds the ergonomic API over this; the pair itself is a
      * storage invariant and holds from the first append.
      */
+    /**
+     * A-043 · a compensating effort entry has to land in the cell it cancels.
+     *
+     * <p>The §4A.4 roll-up joins effort to transitions on {@code ticket_id},
+     * {@code stage_code} and {@code iteration_no}, filtered by {@code cycle_no}
+     * (PLAN.md §3.4). A reversal that differs on any of those does not cancel
+     * anything — the original stays counted where it was and the negative lands
+     * somewhere else. <b>The grand total still reconciles</b>, which is what
+     * makes this worth a guard: one cell over-reports, another under-reports,
+     * and the number anybody would sanity-check is right.
+     *
+     * <p>{@code user_id} is in the set because the grid also rolls up per
+     * resource. The hours were that person's, so the reversal has to reduce
+     * <em>their</em> figure; an admin correcting somebody's entry under their
+     * own id would leave the developer's hours untouched and award the admin a
+     * negative eight. Effort logs carry no "who filed this" column — only whose
+     * effort it is — so who performed a correction is a {@code ticket_history}
+     * fact, which is why {@link #reverseHistory} takes an actor and this does
+     * not.
+     *
+     * <p>The hours must be the exact negation for the same reason
+     * {@link #reverseEffort} computes them: any other value leaves a residue in
+     * a cell that reads as real work. Checked here rather than only there,
+     * because a caller can build a correction by hand and pass it to
+     * {@link #append(TicketEffortLog)} — the convenience method is where the
+     * value is easy to get right, this is where it is impossible to get wrong.
+     *
+     * <p>Not checked here: that the target has not already been reversed. That
+     * is {@code uq_effort_corrects}, and A-040's boundary holds — the database
+     * can express it, so restating it would give two rules to keep in step.
+     */
+    private void requireReversesItsOwnBucket(TicketEffortLog entry) {
+        if (entry.getCorrectsEntryId() == null) {
+            return;
+        }
+        TicketEffortLog original = effortLogs.findById(entry.getCorrectsEntryId())
+                .orElseThrow(() -> new AppendRejectedException(
+                        "this correction reverses effort log " + entry.getCorrectsEntryId()
+                                + ", which does not exist"));
+
+        require(original.getTicketId().equals(entry.getTicketId()),
+                "this correction is on ticket " + entry.getTicketId() + " but reverses an effort log "
+                        + "on ticket " + original.getTicketId() + ". A reversal belongs to the same "
+                        + "ticket as the entry it cancels — otherwise both tickets' roll-ups are "
+                        + "wrong and both still add up.");
+        require(original.getCycleNo() == entry.getCycleNo()
+                        && Objects.equals(original.getStageCode(), entry.getStageCode())
+                        && original.getIterationNo() == entry.getIterationNo()
+                        && original.getUserId().equals(entry.getUserId()),
+                "this correction does not land where the entry it reverses did — original was "
+                        + "cycle " + original.getCycleNo() + " / " + original.getStageCode() + " / "
+                        + "iteration " + original.getIterationNo() + " / user " + original.getUserId()
+                        + ", correction is cycle " + entry.getCycleNo() + " / " + entry.getStageCode()
+                        + " / iteration " + entry.getIterationNo() + " / user " + entry.getUserId()
+                        + ". The §4A.4 grid joins on exactly those, so the original would stay "
+                        + "counted and the negative would appear in a different cell.");
+        require(original.getHours().add(entry.getHours()).signum() == 0,
+                "a reversal of " + original.getHours() + " hours must be exactly "
+                        + original.getHours().negate() + ", not " + entry.getHours()
+                        + ". A partial reversal leaves a residue that reads as real work; to record "
+                        + "a different figure, reverse in full and append the correct entry.");
+    }
+
+    /**
+     * A-043 · a history correction points at an entry on its own ticket.
+     *
+     * <p>{@code fk_history_corrects} proves the target row exists and nothing
+     * more — it references {@code ticket_history(id)}, so any row on any ticket
+     * satisfies it. A cross-ticket retraction would put a note on one ticket's
+     * timeline claiming an entry on another was wrong, and the entry it names
+     * would render, unretracted, somewhere the reader is not looking.
+     */
+    private void requireCorrectsTheSameTicket(TicketHistory entry) {
+        if (entry.getCorrectsEntryId() == null) {
+            return;
+        }
+        TicketHistory original = history.findById(entry.getCorrectsEntryId())
+                .orElseThrow(() -> new AppendRejectedException(
+                        "this correction points at history entry " + entry.getCorrectsEntryId()
+                                + ", which does not exist"));
+        require(original.getTicketId().equals(entry.getTicketId()),
+                "this correction is on ticket " + entry.getTicketId() + " but points at a history "
+                        + "entry on ticket " + original.getTicketId() + ". A retraction belongs on "
+                        + "the same timeline as the entry it retracts, or the entry stays "
+                        + "unqualified where anybody would actually read it.");
+    }
+
     private void requireCorrectionPair(boolean isCorrection, Long correctsEntryId, String what) {
         require(isCorrection == (correctsEntryId != null),
                 "a corrected " + what + " sets both is_correction and corrects_entry_id or neither "
