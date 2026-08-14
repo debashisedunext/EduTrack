@@ -287,7 +287,7 @@ class SingleTicketFixture {
     private WalkResult appendPlannedHops(Long ticketId, short cycleNo, List<HopPlan> plan,
                                           Map<String, WorkflowStage> stageByCode, Long projectId, Instant startAt,
                                           Random random, FixtureContext ctx, List<Long> members, boolean reworked) {
-        Instant currentTime = startAt;
+        Instant currentTime = micros(startAt);
         Long fromUser = null;
         int seqNo = 1;
         Instant lastEnteredAt = startAt;
@@ -326,7 +326,7 @@ class SingleTicketFixture {
 
             if (!isLastHop) {
                 BigDecimal hours = stageHours(targetDef, random);
-                Instant exitedAt = workingHours.addWorkingHours(currentTime, hours, projectId, toUser);
+                Instant exitedAt = micros(workingHours.addWorkingHours(currentTime, hours, projectId, toUser));
                 int durationMins = hours.multiply(BigDecimal.valueOf(60)).setScale(0, RoundingMode.HALF_UP).intValue();
                 journal.seal(t.getId(), exitedAt, durationMins);
                 effortHrs = effortHrs.add(
@@ -358,8 +358,8 @@ class SingleTicketFixture {
                                    Long projectId, List<Long> members, Random random, FixtureContext ctx) {
         Long ticketId = ticket.getId();
         Instant closedAt = cycle1.getActualCloseDate();
-        Instant reopenedAt = workingHours.addWorkingHours(closedAt, BigDecimal.valueOf(4 + random.nextInt(40)),
-                projectId, null);
+        Instant reopenedAt = micros(workingHours.addWorkingHours(closedAt, BigDecimal.valueOf(4 + random.nextInt(40)),
+                projectId, null));
         String reason = REOPEN_REASONS.get(random.nextInt(REOPEN_REASONS.size()));
 
         // Close out cycle 1's CLOSED transition — it was left open (is_current=1)
@@ -572,6 +572,29 @@ class SingleTicketFixture {
         double factor = 0.3 + random.nextDouble() * 1.5; // 0.3x-1.8x the stage's own SLA target
         double hours = base.doubleValue() * factor;
         return BigDecimal.valueOf(Math.max(0.5, hours)).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Every timestamp that reaches an append-only row, truncated to what
+     * {@code DATETIME(6)} can hold.
+     *
+     * <p>{@code WorkingHoursService.addWorkingHours} returns nanosecond
+     * precision — it computes from {@code Instant.now()} and adds fractional
+     * hours — and {@code CanonicalJson} refuses such a value rather than
+     * truncating it, deliberately. Truncating at the serialiser would not work:
+     * MySQL <i>rounds</i> to six digits on insert, so a hop hashed over
+     * {@code .028658400} would be stored as {@code .028658} and A-044 would
+     * recompute a different hash for ever. The value that goes into the hash and
+     * the value that goes into the {@code INSERT} have to be the same one,
+     * truncated once, here — before either.
+     *
+     * <p>This is not a fixture quirk. Any caller feeding an
+     * {@code addWorkingHours} result into a transition hits it, which is Stream
+     * C's handoff path too — worth doing in the service itself, but that is
+     * {@code domain/masters/} and B-024's.
+     */
+    private static Instant micros(Instant instant) {
+        return instant.truncatedTo(ChronoUnit.MICROS);
     }
 
     /** @return the hours actually logged, so the caller can total them without reading the table back */
