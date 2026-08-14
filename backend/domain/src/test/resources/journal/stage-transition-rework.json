@@ -1,0 +1,1 @@
+{"_v":1,"action_code":"REWORK","cycle_no":2,"entered_at":"2026-08-14T14:05:33.250000Z","from_stage":"QA","from_user_id":91,"handoff_note":null,"iteration_no":2,"reason":"Discount code path still 500s on the second attempt","seq_no":8,"ticket_id":4711,"to_stage":"DEV","to_user_id":88}

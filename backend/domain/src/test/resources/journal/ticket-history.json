@@ -1,0 +1,1 @@
+{"_v":1,"actor_id":88,"actor_type":"USER","corrects_entry_id":null,"cycle_no":2,"event_type":"STATUS_CHANGED","field_name":"status","is_correction":false,"new_value":"IN_QA","old_value":"IN_PROGRESS","remarks":"Handed off to QA — \"ready\"\nsee note","ticket_id":4711}

@@ -22,6 +22,9 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+
 import javax.sql.DataSource;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -115,6 +118,15 @@ class TicketJournalIT {
 
     @Autowired
     TicketStageTransitionRepository transitions;
+
+    /**
+     * A-042's round-trip tests need the row to come back from MySQL rather than
+     * from the persistence context — an entity still in the first-level cache is
+     * the same object that was hashed, so it would prove nothing about what was
+     * actually stored.
+     */
+    @PersistenceContext
+    EntityManager entityManager;
 
     JdbcClient db;
 
@@ -222,9 +234,11 @@ class TicketJournalIT {
                 .satisfies(h -> {
                     assertThat(h.getId()).isNotNull();
                     assertThat(h.getEventType()).isEqualTo("CREATED");
-                    // A-042 fills these. Until then the column is honestly empty
-                    // rather than carrying something a caller invented.
-                    assertThat(h.getRowHash()).isNull();
+                    // A-042 fills these. The first row of a chain has no
+                    // predecessor, so prev_hash is null and row_hash is not —
+                    // an unchained row is the one with both null.
+                    assertThat(h.getPrevHash()).isNull();
+                    assertThat(h.getRowHash()).hasSize(ChainDigest.HASH_LENGTH);
                 });
         assertThat(effortLogs.findByTicketIdOrderByIdAsc(ticketId)).hasSize(1);
         assertThat(transitions.findByTicketIdOrderBySeqNoAsc(ticketId)).hasSize(1);
@@ -396,6 +410,139 @@ class TicketJournalIT {
                 .query(Integer.class)
                 .single())
                 .as("the hop is still open — the guard ran before the update, not after it")
+                .isEqualTo(1);
+    }
+
+    // ------------------------------------------------------------------
+    // A-042 · the chain, against a real database
+    // ------------------------------------------------------------------
+
+    /**
+     * <b>The claim A-044 depends on, and the only test that can make it.</b>
+     *
+     * <p>Every unit test hashes an object that is still in memory. What the
+     * nightly verifier does instead is read a row back out of MySQL and
+     * recompute — and MySQL does not hand back what was handed to it.
+     * {@code DECIMAL(5,2)} returns {@code 3.50} for a value written as
+     * {@code 3.5}; {@code DATETIME(6)} returns an {@code Instant} rebuilt from
+     * six stored digits. If either round trip moved the payload, every row in
+     * the corpus would fail verification on the first night and read as
+     * tampering.
+     *
+     * <p>So this writes deliberately trap-shaped values, evicts them from the
+     * persistence context, reads them back and recomputes with the same two
+     * classes A-044 will use.
+     */
+    @Test
+    void aRowReadBackFromMySqlStillReproducesItsOwnHash() {
+        long ticketId = seedTicket();
+        long userId = seedUser();
+
+        TicketEffortLog log = new TicketEffortLog();
+        log.setTicketId(ticketId);
+        log.setCycleNo((short) 1);
+        log.setStageCode("DEV");
+        log.setIterationNo((short) 1);
+        log.setUserId(userId);
+        log.setWorkDate(LocalDate.of(2026, 8, 14));
+        // Written with one decimal place, stored as DECIMAL(5,2), read back as
+        // "3.50". stripTrailingZeros is the whole reason these are one value.
+        log.setHours(new BigDecimal("3.5"));
+        log.setNote("Chased the discount-code 500 — reproduced on staging");
+        journal.append(log);
+
+        // A whole second and a fractional one: the trimming-formatter trap in
+        // both directions, through DATETIME(6) rather than through a formatter.
+        TicketStageTransition hop = openHop(ticketId, 1, "DEV");
+        hop.setEnteredAt(Instant.parse("2026-08-14T09:30:00.250000Z"));
+        journal.append(hop);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        TicketEffortLog stored = effortLogs.findByTicketIdOrderByIdAsc(ticketId).getFirst();
+        assertThat(ChainDigest.rowHash(stored.getPrevHash(), ChainPayloads.of(stored)))
+                .as("an effort log recomputed from what MySQL returned must equal what was stored "
+                        + "— this is exactly what A-044's verifier does, and a mismatch here is the "
+                        + "false tamper alert the whole canonical-form exercise exists to prevent")
+                .isEqualTo(stored.getRowHash());
+
+        TicketStageTransition storedHop = transitions.findByTicketIdOrderBySeqNoAsc(ticketId).getFirst();
+        assertThat(ChainDigest.rowHash(storedHop.getPrevHash(), ChainPayloads.of(storedHop)))
+                .as("and a hop, whose entered_at made the round trip through DATETIME(6)")
+                .isEqualTo(storedHop.getRowHash());
+    }
+
+    /**
+     * The chain is per-ticket and per-table (D1). Three appends to one table
+     * produce three links; the tail of one table is never the tail of another.
+     */
+    @Test
+    void appendsToOneTableFormOneUnbrokenChain() {
+        long ticketId = seedTicket();
+        long userId = seedUser();
+
+        for (int i = 0; i < 3; i++) {
+            TicketHistory entry = new TicketHistory();
+            entry.setTicketId(ticketId);
+            entry.setCycleNo((short) 1);
+            entry.setEventType("STATUS_CHANGED");
+            entry.setFieldName("status");
+            entry.setNewValue("STEP_" + i);
+            entry.setActorId(userId);
+            entry.setActorType("USER");
+            journal.append(entry);
+        }
+
+        entityManager.flush();
+        entityManager.clear();
+
+        var chain = history.findByTicketIdOrderByIdAsc(ticketId);
+        assertThat(chain).hasSize(3);
+        assertThat(chain.getFirst().getPrevHash())
+                .as("the genesis row begins the chain")
+                .isNull();
+        for (int i = 1; i < chain.size(); i++) {
+            assertThat(chain.get(i).getPrevHash())
+                    .as("row %d must point at row %d — a null here is a second genesis row, which "
+                            + "is a fork that verifies perfectly and hides everything before it",
+                            i, i - 1)
+                    .isEqualTo(chain.get(i - 1).getRowHash());
+        }
+        assertThat(chain).extracting(TicketHistory::getRowHash).doesNotHaveDuplicates();
+    }
+
+    /**
+     * The refusal that keeps a legacy or {@code @DirectAppend} row from silently
+     * starting a second chain. Written straight through {@code JdbcClient},
+     * because the journal is precisely what cannot produce such a row.
+     */
+    @Test
+    void refusesToChainOntoARowThatWasWrittenWithoutOne() {
+        long ticketId = seedTicket();
+        long userId = seedUser();
+
+        db.sql("INSERT INTO ticket_history (ticket_id, cycle_no, event_type, actor_id, actor_type) "
+                        + "VALUES (?, 1, 'CREATED', ?, 'USER')")
+                .params(ticketId, userId)
+                .update();
+
+        TicketHistory entry = new TicketHistory();
+        entry.setTicketId(ticketId);
+        entry.setCycleNo((short) 1);
+        entry.setEventType("STATUS_CHANGED");
+        entry.setActorId(userId);
+        entry.setActorType("USER");
+
+        assertThatThrownBy(() -> journal.append(entry))
+                .isInstanceOf(AppendRejectedException.class)
+                .hasMessageContaining("carries no row_hash");
+
+        assertThat(db.sql("SELECT COUNT(*) FROM ticket_history WHERE ticket_id = ?")
+                .param(ticketId)
+                .query(Integer.class)
+                .single())
+                .as("the refused append left nothing behind")
                 .isEqualTo(1);
     }
 }

@@ -16,4 +16,15 @@ public class AppendRejectedException extends IllegalArgumentException {
     public AppendRejectedException(String message) {
         super(message);
     }
+
+    /**
+     * For a rejection whose real explanation was raised further down — in
+     * practice a {@code CanonicalJsonException} from A-042's chain computation,
+     * whose message names the fix precisely. The cause is kept rather than
+     * flattened into a string so that whoever reads the stack trace sees which
+     * value in the payload had no canonical form.
+     */
+    public AppendRejectedException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }

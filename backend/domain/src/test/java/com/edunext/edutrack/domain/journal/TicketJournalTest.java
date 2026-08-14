@@ -1,5 +1,6 @@
 package com.edunext.edutrack.domain.journal;
 
+import com.edunext.edutrack.common.canonical.CanonicalJsonException;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketEffortLog;
 import com.edunext.edutrack.domain.tickets.TicketEffortLogRepository;
@@ -516,6 +517,192 @@ class TicketJournalTest {
             when(transitions.seal(5L, exited, null)).thenReturn(1);
 
             assertThat(journal.seal(5L, exited, null)).isTrue();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // The chain
+    // ------------------------------------------------------------------
+
+    /**
+     * A-042 · the link itself. What mocks can prove is the <i>shape</i> — that
+     * the tail is read after the lock, that the first row is a genesis row, that
+     * the second points at the first, and that an unchained tail is refused.
+     * That the lock actually serialises two concurrent appends is A-045's, and
+     * needs a real database.
+     */
+    @Nested
+    @DisplayName("the hash chain (A-042)")
+    class TheChain {
+
+        private static final String SOME_HASH =
+                "4f3c2b1a09e8d7c6b5a4938271605f4e3d2c1b0a9f8e7d6c5b4a39281706f5e4";
+
+        @Test
+        @DisplayName("the first row of a chain carries no prev_hash and is still hashed")
+        void theGenesisRow() {
+            ticketExists();
+            when(history.findFirstByTicketIdOrderByIdDesc(TICKET)).thenReturn(Optional.empty());
+
+            TicketHistory entry = historyEntry();
+            journal.append(entry);
+
+            assertThat(entry.getPrevHash())
+                    .as("nothing precedes it, and NULL says so — see ChainDigest on why not a sentinel")
+                    .isNull();
+            assertThat(entry.getRowHash())
+                    .as("a genesis row is still a link; only an unchained row has both columns null")
+                    .hasSize(ChainDigest.HASH_LENGTH)
+                    .matches("[0-9a-f]+");
+            verify(history).insert(entry);
+        }
+
+        @Test
+        @DisplayName("the next row points at the tail's row_hash")
+        void linksToThePredecessor() {
+            ticketExists();
+            TicketHistory tail = historyEntry();
+            tail.setRowHash(SOME_HASH);
+            when(history.findFirstByTicketIdOrderByIdDesc(TICKET)).thenReturn(Optional.of(tail));
+
+            TicketHistory entry = historyEntry();
+            journal.append(entry);
+
+            assertThat(entry.getPrevHash()).isEqualTo(SOME_HASH);
+            assertThat(entry.getRowHash()).isNotEqualTo(SOME_HASH);
+        }
+
+        /**
+         * The load-bearing ordering of §3.7. Reading the tail before the lock is
+         * what lets two appends see the same predecessor and fork the chain —
+         * and the resulting fork is reported by A-044 as tampering, months after
+         * the code that caused it shipped.
+         */
+        @Test
+        @DisplayName("the tail is read after the lock, never before it")
+        void readsTheTailUnderTheLock() {
+            ticketExists();
+
+            journal.append(historyEntry());
+
+            InOrder order = inOrder(tickets, history);
+            order.verify(tickets).findByIdForUpdate(TICKET);
+            order.verify(history).findFirstByTicketIdOrderByIdDesc(TICKET);
+            order.verify(history).insert(any());
+        }
+
+        /**
+         * The one case that would otherwise pass silently. A tail with no
+         * {@code row_hash} is a legacy or {@code @DirectAppend} row; treating it
+         * as absent would make this append a <em>second</em> genesis row for the
+         * same ticket, which is a fork that verifies perfectly from that point
+         * forward and hides everything before it.
+         */
+        @Test
+        @DisplayName("an unchained predecessor is refused, not treated as no predecessor")
+        void refusesToChainOntoAnUnhashedTail() {
+            ticketExists();
+            TicketHistory unchained = historyEntry();     // row_hash left null
+            when(history.findFirstByTicketIdOrderByIdDesc(TICKET))
+                    .thenReturn(Optional.of(unchained));
+
+            assertThatThrownBy(() -> journal.append(historyEntry()))
+                    .isInstanceOf(AppendRejectedException.class)
+                    .hasMessageContaining("carries no row_hash")
+                    .hasMessageContaining("fork");
+
+            verify(history, never()).insert(any());
+        }
+
+        @Test
+        @DisplayName("each table is its own chain, so one table's tail is not another's")
+        void thereAreThreeChainsPerTicket() {
+            ticketExists();
+            when(transitions.findByCurrentTicketId(TICKET)).thenReturn(Optional.empty());
+            TicketHistory tail = historyEntry();
+            tail.setRowHash(SOME_HASH);
+            when(history.findFirstByTicketIdOrderByIdDesc(TICKET)).thenReturn(Optional.of(tail));
+
+            TicketEffortLog log = effortLog();
+            TicketStageTransition hop = hop();
+            journal.append(log);
+            journal.append(hop);
+
+            assertThat(log.getPrevHash())
+                    .as("ticket_effort_logs has its own tail; ticket_history's is not it")
+                    .isNull();
+            assertThat(hop.getPrevHash()).isNull();
+            verify(effortLogs).findFirstByTicketIdOrderByIdDesc(TICKET);
+            verify(transitions).findFirstByTicketIdOrderByIdDesc(TICKET);
+        }
+
+        /**
+         * Two rows differing in one column must not hash alike — otherwise the
+         * chain would carry the row's position and nothing about its contents.
+         */
+        @Test
+        @DisplayName("the hash covers the row, not just its place in the chain")
+        void thePayloadReachesTheDigest() {
+            ticketExists();
+
+            TicketHistory one = historyEntry();
+            TicketHistory two = historyEntry();
+            two.setNewValue("IN_QA");
+            journal.append(one);
+            journal.append(two);
+
+            assertThat(one.getRowHash()).isNotEqualTo(two.getRowHash());
+        }
+
+        /**
+         * A-041 refuses sub-microsecond precision rather than truncating it,
+         * because MySQL rounds to {@code DATETIME(6)} and the stored value would
+         * then differ from the hashed one for ever. The journal must surface that
+         * as a rejected append, keeping the message that names the fix, rather
+         * than letting a {@code CanonicalJsonException} escape from an insert.
+         */
+        @Test
+        @DisplayName("a timestamp DATETIME(6) cannot store is rejected, with the fix named")
+        void refusesAPayloadWithNoCanonicalForm() {
+            ticketExists();
+            when(transitions.findByCurrentTicketId(TICKET)).thenReturn(Optional.empty());
+
+            TicketStageTransition hop = hop();
+            hop.setEnteredAt(Instant.parse("2026-08-14T09:00:00.1234565Z"));
+
+            assertThatThrownBy(() -> journal.append(hop))
+                    .isInstanceOf(AppendRejectedException.class)
+                    .hasMessageContaining("truncatedTo")
+                    .hasCauseInstanceOf(CanonicalJsonException.class);
+
+            verify(transitions, never()).insert(any());
+        }
+
+        /**
+         * The seal changes three columns the payload deliberately excludes, so
+         * the hop's stored {@code row_hash} stays correct. Asserted here as well
+         * as in {@code ChainPayloadsGoldenFileTest} because this is where the
+         * two halves meet — a future author adding {@code duration_mins} to the
+         * payload would break the ribbon rather than a golden file.
+         */
+        @Test
+        @DisplayName("sealing does not invalidate the hop's hash")
+        void sealingLeavesTheLinkIntact() {
+            ticketExists();
+            when(transitions.findByCurrentTicketId(TICKET)).thenReturn(Optional.empty());
+
+            TicketStageTransition hop = hop();
+            journal.append(hop);
+            String hashedWhenAppended = hop.getRowHash();
+
+            when(transitions.findById(5L)).thenReturn(Optional.of(hop));
+            when(transitions.seal(anyLong(), any(), any())).thenReturn(1);
+            journal.seal(5L, ENTERED.plus(4, ChronoUnit.HOURS), 240);
+
+            assertThat(ChainDigest.rowHash(hop.getPrevHash(), ChainPayloads.of(hop)))
+                    .as("recomputing a sealed hop must give back what was stored, or every sealed "
+                            + "row in the ribbon fails the first night A-044 runs")
+                    .isEqualTo(hashedWhenAppended);
         }
     }
 }

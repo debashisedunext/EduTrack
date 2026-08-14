@@ -1,7 +1,6 @@
 package com.edunext.edutrack.api.arch;
 
 import com.edunext.edutrack.domain.appendonly.AppendOnly;
-import com.edunext.edutrack.domain.journal.DirectAppend;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
@@ -30,7 +29,6 @@ import java.util.regex.Pattern;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
-import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * A-037 · the append-only rule, enforced against callers rather than against
@@ -151,62 +149,48 @@ class AppendOnlyRulesTest {
      * one, which is the half that decides whether the journal is a door or a
      * suggestion.
      *
-     * <h2>The two exclusions</h2>
+     * <h2>The one exclusion</h2>
      *
      * <p>{@code areNotAssignableTo(AppendOnly.class)} keeps the three
      * repositories and {@code AppendOnlyImpl} out of their own rule — extending
      * an interface is a dependency on it, so without this the rule's first
      * failure would be {@code TicketHistoryRepository} declaring itself.
      *
-     * <p>{@link DirectAppend} is the declared bypass, on A-037's precedent for
-     * {@code @UnscopedAccess}: at the site, with a mandatory reason, rather than
-     * a name in a test file that only ever grows.
+     * <h2>There is no declared bypass any more (A-042)</h2>
+     *
+     * <p>A-040 shipped this with a second exclusion, {@code @DirectAppend}, on
+     * A-037's precedent for {@code @UnscopedAccess} — declared at the site with
+     * a mandatory reason rather than as a name in a test file. Exactly one class
+     * ever used it, {@code SingleTicketFixture}, whose argument was sound while
+     * it lasted: a single-threaded seed loader has no concurrent append to fork
+     * the chain against.
+     *
+     * <p>A-042 removed the argument rather than the annotation's discipline.
+     * Once the journal computes the chain, the cost of not going through it is
+     * no longer a race — it is a row with a NULL {@code row_hash}, and 200 of
+     * those in the seeded corpus would force A-044's verifier to treat NULL as
+     * acceptable. A verifier that skips unhashed rows can be defeated by
+     * unhashing a row. So the exemption went, and the journal is now a door with
+     * no declared way around it. If a future class genuinely has no chain to
+     * extend, the answer is a new annotation with a fresh argument, not this one
+     * revived.
      */
     @Test
     void theProtectedTablesAreWrittenOnlyThroughTheJournal() {
         ArchRule rule = noClasses()
                 .that().resideOutsideOfPackage(JOURNAL_PACKAGE)
                 .and().areNotAssignableTo(AppendOnly.class)
-                .and().areNotAnnotatedWith(DirectAppend.class)
                 .should().dependOnClassesThat().areAssignableTo(AppendOnly.class)
                 .because("""
                         every append to ticket_history, ticket_effort_logs or \
                         ticket_stage_transitions has to hold the per-ticket lock first, or two \
-                        concurrent writes read the same chain tail and fork it (PLAN.md §3.7). \
-                        TicketJournal takes that lock; a repository call does not, and nothing \
-                        about the call site shows the difference. Inject TicketJournal — or, if \
-                        this class really has no chain to extend, say so with @DirectAppend and \
-                        the reason.""");
+                        concurrent writes read the same chain tail and fork it (PLAN.md §3.7) — \
+                        and since A-042 it also has to be hashed into that ticket's chain, or \
+                        the row lands with a NULL row_hash that A-044 cannot verify. \
+                        TicketJournal does both; a repository call does neither, and nothing \
+                        about the call site shows the difference. Inject TicketJournal.""");
 
         rule.check(ProductionClasses.get());
-    }
-
-    /**
-     * The reason is the only part of {@link DirectAppend} that does any work,
-     * and {@code @DirectAppend("")} is an exemption list with extra steps.
-     *
-     * <p>Asserted non-empty for the same reason {@code ScopeGuardRulesTest}
-     * does: an annotation nothing declares any more is an unused door left
-     * standing in {@code domain.journal}, and the right response to that is to
-     * delete it rather than to keep a rule guarding nothing.
-     */
-    @Test
-    void everyDirectAppendStatesItsReason() {
-        List<JavaClass> bypasses = ProductionClasses.get().stream()
-                .filter(c -> c.isAnnotatedWith(DirectAppend.class))
-                .toList();
-
-        assertThat(bypasses)
-                .as("if nothing bypasses the journal any more, delete @DirectAppend rather than "
-                        + "leaving an unused door in domain.journal")
-                .isNotEmpty();
-
-        for (JavaClass bypass : bypasses) {
-            assertThat(bypass.getAnnotationOfType(DirectAppend.class).value())
-                    .as("%s writes an append-only table without the journal and does not say why",
-                            bypass.getSimpleName())
-                    .isNotBlank();
-        }
     }
 
     /**

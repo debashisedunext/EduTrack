@@ -1,5 +1,6 @@
 package com.edunext.edutrack.domain.journal;
 
+import com.edunext.edutrack.common.canonical.CanonicalJsonException;
 import com.edunext.edutrack.domain.tickets.TicketEffortLog;
 import com.edunext.edutrack.domain.tickets.TicketEffortLogRepository;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
@@ -13,7 +14,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * A-040 · the only door to {@code ticket_history}, {@code ticket_effort_logs}
@@ -150,6 +154,9 @@ public class TicketJournal {
                         + entry.getActorType() + ", actor_id=" + entry.getActorId() + ")");
 
         lockTicketFor(entry.getTicketId(), "history");
+        chain(entry, previousRowHash(
+                history.findFirstByTicketIdOrderByIdDesc(entry.getTicketId()),
+                TicketHistory::getRowHash, entry.getTicketId(), "ticket_history"));
         return history.insert(entry);
     }
 
@@ -175,6 +182,9 @@ public class TicketJournal {
         requireCorrectionPair(entry.isCorrection(), entry.getCorrectsEntryId(), "effort log");
 
         lockTicketFor(entry.getTicketId(), "effort log");
+        chain(entry, previousRowHash(
+                effortLogs.findFirstByTicketIdOrderByIdDesc(entry.getTicketId()),
+                TicketEffortLog::getRowHash, entry.getTicketId(), "ticket_effort_logs"));
         return effortLogs.insert(entry);
     }
 
@@ -234,6 +244,9 @@ public class TicketJournal {
                             + "and current_ticket_id assumes it.");
         });
 
+        chain(hop, previousRowHash(
+                transitions.findFirstByTicketIdOrderByIdDesc(hop.getTicketId()),
+                TicketStageTransition::getRowHash, hop.getTicketId(), "ticket_stage_transitions"));
         return transitions.insert(hop);
     }
 
@@ -318,6 +331,77 @@ public class TicketJournal {
         if (tickets.findByIdForUpdate(ticketId).isEmpty()) {
             throw new AppendRejectedException(
                     "no ticket " + ticketId + " to append a " + what + " to");
+        }
+    }
+
+    /**
+     * The tail of this ticket's chain in one table, read <b>after</b> the lock
+     * and never before it.
+     *
+     * <p>That ordering is the whole of PLAN.md §3.7. Two appends that both read
+     * the tail before either inserts produce two rows carrying the same
+     * {@code prev_hash} — a fork, which A-044 reports as tampering months later,
+     * when it was our own race. Every caller here reads it between
+     * {@link #lockTicketFor} and {@code insert}, inside a transaction
+     * {@code MANDATORY} guarantees is the caller's own.
+     *
+     * @return the predecessor's {@code row_hash}, or {@code null} if this row
+     *         begins the chain
+     */
+    private <T> String previousRowHash(Optional<T> tail, Function<T, String> rowHash,
+                                       Long ticketId, String table) {
+        if (tail.isEmpty()) {
+            return null;   // genesis — see ChainDigest
+        }
+        String previous = rowHash.apply(tail.get());
+        if (previous == null) {
+            throw new AppendRejectedException(
+                    "the last " + table + " row for ticket " + ticketId + " carries no row_hash, so "
+                            + "this append has nothing to chain onto. Appending anyway would write a "
+                            + "second genesis row and silently fork the ticket's chain in two — the "
+                            + "one outcome §3.7 exists to prevent — so it is refused here instead. "
+                            + "The row predates A-042 or was written through @DirectAppend; rebuild "
+                            + "the database volume and re-seed, which is what makes every row "
+                            + "chained from the first.");
+        }
+        return previous;
+    }
+
+    /**
+     * Stamp the link. Called under the lock, immediately before the insert, so
+     * that the tail this hashes onto cannot have moved.
+     *
+     * <p>The {@code CanonicalJsonException} translation matters more than it
+     * looks: it is raised for a payload with no canonical form, and in practice
+     * that means an {@code Instant} carrying sub-microsecond precision.
+     * {@code DATETIME(6)} cannot store one and MySQL <i>rounds</i> rather than
+     * truncating, so a row hashed over {@code .1234565} would be stored as
+     * {@code .123457} and fail verification for ever. A-041 refuses it rather
+     * than truncating, precisely so the caller fixes it at the source; this only
+     * re-labels the refusal as the append rejection it is, keeping the original
+     * message, which names the fix.
+     */
+    private void chain(TicketHistory entry, String prevHash) {
+        entry.setPrevHash(prevHash);
+        entry.setRowHash(digest(prevHash, ChainPayloads.of(entry), "history entry"));
+    }
+
+    private void chain(TicketEffortLog entry, String prevHash) {
+        entry.setPrevHash(prevHash);
+        entry.setRowHash(digest(prevHash, ChainPayloads.of(entry), "effort log"));
+    }
+
+    private void chain(TicketStageTransition hop, String prevHash) {
+        hop.setPrevHash(prevHash);
+        hop.setRowHash(digest(prevHash, ChainPayloads.of(hop), "stage transition"));
+    }
+
+    private static String digest(String prevHash, Map<String, Object> payload, String what) {
+        try {
+            return ChainDigest.rowHash(prevHash, payload);
+        } catch (CanonicalJsonException e) {
+            throw new AppendRejectedException(
+                    "this " + what + " cannot be hashed: " + e.getMessage(), e);
         }
     }
 
