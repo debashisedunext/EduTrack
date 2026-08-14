@@ -64,6 +64,7 @@ environment, always.
 | 33 | `V20260813_1030__ticket_status_requests.sql` | D | D-055 | schema | `ticket_status_requests` — one open ask per manager per ticket (a generated column plus a unique key, A-009's `pcd_open` idiom), and the answered row carries the wait in **working** minutes, stamped once so a holiday added later cannot restate it |
 | 34 | `V20260813_1420__project_master_fields.sql` | B | B-016 | schema | `projects`: `description` and `auto_assign_rule`, the two S-10 fields with no column; `ck_projects_status` fixes the vocabulary at `ACTIVE\|ON_HOLD\|CLOSED` at its first writer, before the javadoc's fourth and fifth values could be written by anything |
 | 35 | `V20260813_1810__project_member_allocation.sql` | B | B-017 | schema | `project_members.allocation_pct` — the S-10 Team tab field the contract has promised since D-001 with no column behind it. **Nullable, and the contract's `default: 100` dropped**: a backfill would read 300% for every fixture resource on three projects, and B-061 could not tell that from a stated figure |
+| 36 | `V20260814_1530__one_correction_per_entry.sql` | A | A-043 | schema | `UNIQUE` on `corrects_entry_id` for `ticket_history` and `ticket_effort_logs`, replacing the plain index. MySQL allows any number of NULLs in a unique index, so this constrains exactly the correction rows: a second reversal of one entry collides, while every ordinary append is untouched. Two reversals of a `+8` net to `-8` and the §4A.4 grid reports negative hours for a stage somebody worked |
 
 <!-- load-order:end -->
 
