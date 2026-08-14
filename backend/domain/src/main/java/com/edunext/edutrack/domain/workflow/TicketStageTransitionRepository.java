@@ -1,6 +1,8 @@
 package com.edunext.edutrack.domain.workflow;
 
 import com.edunext.edutrack.domain.appendonly.AppendOnly;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
@@ -43,6 +45,7 @@ public interface TicketStageTransitionRepository
      * must already hold {@code SELECT … FOR UPDATE} on the parent ticket row,
      * or two concurrent appends read the same tail and fork the chain.
      */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<TicketStageTransition> findFirstByTicketIdOrderByIdDesc(Long ticketId);
 
     /**
