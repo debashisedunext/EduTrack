@@ -52,10 +52,5 @@
   "A-030": {
     "status": "done",
     "reason": "Shivendra, PR #87 merged 2026-08-11 — features/auth/ with LoginPage, ForgotPassword, ResetPassword, ChangePassword, authStore, RequireAuth and the strength meter, verified against the real stack (MySQL, Redis, packaged jar, Vite proxy with VITE_USE_MOCKS=false), and checked off in STREAM-A-PLATFORM.md. Commit subject carried no task ID and the merge subject only had the lowercase branch slug 'a-030', which the [A-D]-\\d{3} pattern does not match"
-  },
-  "A-044": {
-    "status": "todo",
-    "pct": 0,
-    "reason": "Not started — no verifier exists in worker/, and the backlog entry is unchecked. Git reads it as done because PR #123 (2026-08-14) merged a docs commit whose subject read 'record the A-042 decisions and the two gaps A-044 inherits'. The subject was describing what the verifier will inherit, not finishing it, but the parser cannot tell those apart — the fifth time this has happened after A-010, A-013, D-045 and D-053. A reworded subject naming only A-042 was pushed and lost the race with the merge by minutes"
   }
 }
