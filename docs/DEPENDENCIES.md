@@ -51,6 +51,7 @@ Every edge where one developer waits on another. **These are the only dependenci
 | 18 | **D-060** triage fields in the contract & mocks | Debashis | C-065…C-070 all build against it | Divyansh | **Before C-065** |
 | 19 | **B-064** module master endpoint | Ayush | C-068's dropdown **against the real backend** — the screen itself builds on D-060's mock (§6) | Divyansh | Before M4 demo |
 | 20 | **C-065** `tickets` ALTER for the triage fields | Divyansh | Needs **A's review**, not A's work (TEAM-PLAN §7.1) | Shivendra reviews | Week 3 |
+| 21 | **B-019** project settings endpoint ✅ | Ayush | **Nothing enforces them yet.** The create form must filter its task-type picker on `restrictsTaskTypes` + `taskTypes[].isAllowed` and require the fields in `mandatoryFields` — `api/feature/tickets` and `CreateTicketPage`, both C's | Divyansh | **Needs a C task** |
 
 ### The four that decide whether this works
 

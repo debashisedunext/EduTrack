@@ -35,11 +35,29 @@ export const PROJECT_STATUSES: readonly { value: ProjectStatus; label: string; h
   },
 ] as const
 
-export const AUTO_ASSIGN_RULES = [
-  { value: 'MANUAL', label: 'Manual' },
-  { value: 'ROUND_ROBIN', label: 'Round robin' },
-  { value: 'LEAST_LOADED', label: 'Least loaded' },
-] as const
+/*
+ * B-019 · `autoAssignRule` is gone from this form, and its absence is
+ * load-bearing.
+ *
+ * S-10 puts the field on the **Settings** tab and B-016 rendered it here
+ * because that tab did not exist yet. Now it does, and leaving the control on
+ * both screens would be worse than a duplicate: `toPatchRequest` sends the
+ * whole form on every save (see its note), so a General-tab save would carry
+ * this form's value for the field and **silently overwrite whatever the
+ * Settings tab had set** — the shape of the `project_members` hazard B-011 and
+ * B-017 had to pin apart with two named regression tests.
+ *
+ * So the field is removed from the schema, from the defaults, from
+ * `toFormValues` and from both request builders. The server still accepts it on
+ * `POST` and `PATCH` — removing it from the contract would be a breaking change
+ * for no gain — and a project created without one gets `MANUAL`, which is the
+ * column default and the right one: round-robin and least-loaded both assign
+ * live work to somebody without a human deciding.
+ *
+ * The rules themselves moved with the control, to `AUTO_ASSIGN_RULES` in
+ * `projectSettings.ts`, where they gained the per-option hint this form had
+ * nowhere to put.
+ */
 
 /**
  * The blueprint §12.1 palette, and the whole of the colour picker.
@@ -95,7 +113,6 @@ export const projectFieldSchema = z
     startDate: z.string(),
     endDate: z.string(),
     status: z.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']),
-    autoAssignRule: z.enum(['MANUAL', 'ROUND_ROBIN', 'LEAST_LOADED']),
   })
 
 // Two fields, so it cannot be a per-field rule — and the server checks the same
@@ -121,7 +138,6 @@ export const emptyProjectForm: ProjectFormValues = {
   startDate: '',
   endDate: '',
   status: 'ACTIVE',
-  autoAssignRule: 'MANUAL',
 }
 
 /** The edit form's load. Every null becomes `''`; see the note at the top. */
@@ -136,7 +152,6 @@ export function toFormValues(project: ProjectDetail): ProjectFormValues {
     startDate: project.startDate ?? '',
     endDate: project.endDate ?? '',
     status: project.status ?? 'ACTIVE',
-    autoAssignRule: project.autoAssignRule ?? 'MANUAL',
   }
 }
 
@@ -151,7 +166,6 @@ export function toWriteRequest(values: ProjectFormValues): ProjectWriteRequest {
     startDate: blankToNull(values.startDate),
     endDate: blankToNull(values.endDate),
     status: values.status,
-    autoAssignRule: values.autoAssignRule,
   }
 }
 

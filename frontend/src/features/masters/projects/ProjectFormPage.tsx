@@ -20,7 +20,6 @@ import { FieldGroup, FormField, ReadOnlyField } from '../resources/FormField'
 import { ProjectTabs } from './ProjectTabs'
 import { useCreateProject, useProject, useUpdateProject } from './projectQueries'
 import {
-  AUTO_ASSIGN_RULES,
   COLOUR_TAGS,
   emptyProjectForm,
   isCodeEditable,
@@ -386,32 +385,11 @@ export function ProjectFormPage() {
           )}
         />
 
-        <Controller
-          control={form.control}
-          name="autoAssignRule"
-          render={({ field }) => (
-            <FormField
-              id="autoAssignRule"
-              label="Auto-assign rule"
-              hint="Who an unassigned new ticket goes to. The full Settings tab is B-019."
-            >
-              {(aria) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger {...aria}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AUTO_ASSIGN_RULES.map((r) => (
-                      <SelectItem key={r.value} value={r.value}>
-                        {r.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </FormField>
-          )}
-        />
+        {/* B-019 · the auto-assign rule moved to the Settings tab, where S-10
+            puts it. It is not merely duplicated-and-removed: this form patches
+            every field on every save, so a control here would have overwritten
+            whatever Settings had set, every time somebody renamed the project.
+            `projectForm.ts` carries the full note. */}
 
         {isEdit ? (
           <ReadOnlyField

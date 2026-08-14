@@ -115,18 +115,21 @@ describe('the project team tab', () => {
     expect(labels).not.toContain('Sunil Menon')
   })
 
-  it('renders the tab strip with Team current, and no stub for the unbuilt tab', async () => {
+  it('renders the tab strip with Team current, and all four of S-10’s tabs', async () => {
     renderPage()
 
     expect(await screen.findByRole('link', { name: 'Team' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('link', { name: 'General' })).toBeInTheDocument()
-    // SLA arrived with B-018 — a tab appears when the screen behind it exists,
-    // which is the rule this test was written to hold rather than the count it
-    // happened to assert.
+    // SLA arrived with B-018 and Settings with B-019. The rule this test was
+    // written to hold is that **a tab appears when the screen behind it
+    // exists** — never as a disabled stub, since a greyed-out tab and a broken
+    // one look identical to a user. It has now been asserted in both
+    // directions: it failed when Settings was added, which is exactly what it
+    // was for.
     expect(screen.getByRole('link', { name: 'SLA' })).toBeInTheDocument()
-    // Settings is B-019 and is still not stubbed. A greyed-out tab and a broken
-    // one look identical to a user; B-016 refused to stub them and so does this.
-    expect(screen.queryByText('Settings')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href', '/masters/projects/1/settings',
+    )
   })
 
   it('refuses an out-of-range allocation without sending it', async () => {

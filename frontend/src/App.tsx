@@ -14,6 +14,7 @@ import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
 import { ProjectListPage } from './features/masters/projects/ProjectListPage'
+import { ProjectSettingsPage } from './features/masters/projects/ProjectSettingsPage'
 import { ProjectTeamPage } from './features/masters/projects/ProjectTeamPage'
 import { SlaMatrixPage } from './features/masters/projects/SlaMatrixPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
@@ -143,6 +144,14 @@ export default function App() {
                 than over the project, so no shared parent read could serve
                 both tabs anyway. */}
             <Route path="/masters/projects/:projectId/sla" element={<SlaMatrixPage />} />
+            {/* B-019 · S-10's Settings tab, and the fourth sibling. Same
+                reasoning again, and it has its own `ETag` too — over a document
+                spanning `projects` and `project_task_types`, which no read of
+                the project alone could tag. Note it is `/masters/projects/:id/settings`
+                and not the app-wide `/settings` two lines below; they are
+                different screens and the path prefix is what keeps them
+                apart. */}
+            <Route path="/masters/projects/:projectId/settings" element={<ProjectSettingsPage />} />
             <Route path="/masters/roles" element={<RoleListPage />} />
             <Route path="/masters/roles/:roleId" element={<RolePermissionsPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />

@@ -1033,6 +1033,99 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
 
+  /projects/{projectId}/settings:
+    parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    get:
+      tags: [projects]
+      operationId: getProjectSettings
+      summary: Project settings — allowed task types, mandatory fields, auto-assign
+      description: |
+        S-10's fourth tab, as one document: which task types may be raised on
+        this project, which otherwise-optional ticket fields it requires, and
+        who an unassigned new ticket goes to.
+
+        **`taskTypes` is the resolved list, not the stored one.** It carries
+        every *active* task type with an `isAllowed` flag, not just the ids this
+        project has rows for — the screen is a checkbox list and a response
+        holding only the ticked ones cannot render the unticked ones. Same call
+        `getSlaPolicies` makes about its grid, and `name` rides along for the
+        same reason: `/masters/task-types` is not mounted yet (B-020), and a
+        list that renders "task type 7" is not a screen.
+
+        **`restrictsTaskTypes: false` means every active type is allowed**, and
+        it is not the same statement as "none are". A project with no
+        `project_task_types` rows is unrestricted, which is what every project
+        that predates this screen is; if an empty set meant "nothing may be
+        raised here", running the migration would have stopped ticket creation
+        everywhere. The flag is on the wire so a client never has to infer that
+        from an array of eleven `isAllowed: true` values it cannot tell from
+        eleven explicit ones.
+
+        Every role may read it. All six can raise a ticket, and the create form
+        cannot mark a field mandatory or filter its task-type picker without
+        this.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectSettingsResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [projects]
+      operationId: replaceProjectSettings
+      summary: Replace project settings
+      description: |
+        Replaces all three settings in one transaction. A `PATCH` of one field
+        would need an `ETag` per field to be safe against a second tab, and the
+        tab has one Save button — the whole document is what the screen holds.
+
+        **An empty `allowedTaskTypeIds` clears the restriction rather than
+        forbidding everything.** It is the request that returns the project to
+        the unrestricted state it was created in, and there is deliberately no
+        separate "remove restriction" control: two controls for one outcome is
+        how they end up disagreeing (the same call `replaceSlaPolicies` makes
+        about a cleared cell). The screen states the consequence in words, which
+        is the part that stops it reading as "nothing may be raised".
+
+        **`mandatoryFields` names only fields `TicketCreateRequest` leaves
+        optional.** `projectId`, `title`, `taskTypeId` and `level` are already
+        required of every ticket, so offering them here would be a control that
+        cannot change anything.
+
+        `project.manage` — Admin and PM, like the Team tab and unlike the SLA
+        tab. Choosing which task types a project accepts is project
+        configuration; setting the response target a client is contractually
+        held to is master data. `autoAssignRule` is also already PM-writable
+        through `PATCH /projects/{projectId}`, so narrowing this to Admin would
+        take away a capability PMs hold today.
+
+        **Nothing enforces these settings yet.** Ticket creation is Stream C's
+        (`api/feature/tickets`, `CreateTicketPage`); B-019 stores and serves the
+        configuration and C consumes it. Said here rather than left to be
+        discovered, because a settings screen whose settings do nothing is a
+        screen that looks finished.
+      parameters:
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectSettingsWrite' }
+      responses:
+        '200':
+          description: Replaced. Returns the stored settings, resolved.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectSettingsResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
   # ────────────────────────────────────────────────────────── tickets ────────
   /tickets:
     get:
@@ -4424,6 +4517,126 @@ components:
       required: [data]
       properties:
         data: { type: array, items: { $ref: '#/components/schemas/SlaPolicyCell' } }
+
+    TicketFieldCode:
+      type: string
+      enum:
+        - DESCRIPTION
+        - MODULE
+        - SCREEN_NAME
+        - FEATURE
+        - STEPS_TO_GENERATE
+        - CLIENT
+        - CLIENT_CONTACT
+        - ASSIGNEE
+        - ESTIMATED_HRS
+        - PLANNED_CLOSE_DATE
+      description: |
+        A ticket field a project may require, and **the list is exactly the
+        fields `TicketCreateRequest` leaves optional**. `projectId`, `title`,
+        `taskTypeId` and `level` are required of every ticket regardless, so
+        they are absent here — a checkbox that cannot change the outcome is a
+        control that lies about what it does.
+
+        `MODULE` is worth naming: §7.5 already calls it "mandatory on the form
+        for bug-type task types", so a project that requires it for *every* task
+        type is tightening a rule that already exists rather than inventing one.
+
+        The vocabulary is enforced by the server and by this enum, not by a
+        database `CHECK`. `projects.mandatory_fields` constrains shape — a
+        unique array of uppercase codes — deliberately: the list tracks Stream
+        C's create form, and pinning the values in the schema would mean C
+        cannot add a form field without a masters migration.
+    ProjectSettingsTaskType:
+      type: object
+      required: [taskTypeId, name, isAllowed, isActive]
+      description: |
+        One row of the allow-list, as the checkbox grid renders it.
+
+        **Every active task type, plus any inactive one this project still
+        allows.** The second half is not tidiness: the `PUT` is a wholesale
+        replace assembled from these rows, so a retired task type that was
+        allowed and is not rendered would be dropped by the next save through a
+        screen that never showed it. That is the failure
+        `replaceSlaPolicies` guards against for project-level defaults, one
+        master over. An inactive row carries `isActive: false` so the screen can
+        label it rather than silently offering a type no new ticket can use.
+      properties:
+        taskTypeId: { type: integer, format: int32 }
+        code: { type: string }
+        name: { type: string }
+        isAllowed:
+          type: boolean
+          description: |
+            True for every row when `restrictsTaskTypes` is false. That is not
+            padding — an unrestricted project really does allow all of them, and
+            a client rendering checkboxes needs the same answer either way.
+        isActive:
+          type: boolean
+          description: |
+            `task_types.is_active`. False only on a retired type this project
+            still has a row for; an unrestricted project never shows one,
+            because "all active types" is what it means.
+    ProjectSettings:
+      type: object
+      required: [projectId, autoAssignRule, mandatoryFields, restrictsTaskTypes, taskTypes]
+      description: S-10's Settings tab as one document — see `getProjectSettings`.
+      properties:
+        projectId: { type: integer, format: int64 }
+        autoAssignRule: { $ref: '#/components/schemas/AutoAssignRule' }
+        mandatoryFields:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/TicketFieldCode' }
+        restrictsTaskTypes:
+          type: boolean
+          description: |
+            Whether this project has an allow-list at all. False means every
+            active task type may be raised, which is the state every project
+            created before this screen is in — **not** "no task type may be
+            raised". Derived from `project_task_types` being empty, and on the
+            wire because a client cannot tell an unrestricted project from one
+            that ticked every box otherwise, and the two differ the moment an
+            Admin adds a twelfth task type.
+        taskTypes:
+          type: array
+          items: { $ref: '#/components/schemas/ProjectSettingsTaskType' }
+    ProjectSettingsResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ProjectSettings' } }
+    ProjectSettingsWrite:
+      type: object
+      required: [autoAssignRule, mandatoryFields, allowedTaskTypeIds]
+      description: |
+        All three settings, always. Every field is required even though the
+        screen may have changed one of them: this is a wholesale replace behind
+        one `If-Match`, and an optional field on a replace is ambiguous between
+        "leave it alone" and "clear it" in exactly the way that loses somebody's
+        setting quietly.
+      properties:
+        autoAssignRule: { $ref: '#/components/schemas/AutoAssignRule' }
+        mandatoryFields:
+          type: array
+          uniqueItems: true
+          maxItems: 20
+          items: { $ref: '#/components/schemas/TicketFieldCode' }
+          description: 'Empty is normal — a project requiring nothing beyond the always-required fields.'
+        allowedTaskTypeIds:
+          type: array
+          uniqueItems: true
+          maxItems: 200
+          items: { type: integer, format: int32 }
+          description: |
+            **Empty means unrestricted, not empty.** See the `PUT` description:
+            a project that allowed no task type could raise no ticket, so the
+            state does not exist and the request that would express it is the
+            one that removes the restriction instead.
+
+            Ids are checked for existence, not for activity. A deactivated task
+            type already on the list stays sendable — refusing it would make the
+            row uneditable through the only screen that can see it, which is the
+            call `replaceSlaPolicies` makes about the same master.
 
     # ── tickets ───────────────────────────────────────────────────────────
     Ticket:

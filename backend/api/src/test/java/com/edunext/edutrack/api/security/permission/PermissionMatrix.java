@@ -227,6 +227,20 @@ final class PermissionMatrix {
     private static final String SLA_MATRIX = """
             [{"taskTypeId":2,"level":"HIGH","responseHrs":2,"resolutionHrs":8}]""";
 
+    /**
+     * {@code ProjectSettingsWrite}: all three fields are {@code @NotNull},
+     * including the two lists.
+     *
+     * <p>Both arrays are non-empty so the fixture exercises a real request
+     * rather than the degenerate one. An empty {@code allowedTaskTypeIds} would
+     * also be valid — it is the request that removes the restriction — but a
+     * fixture that is valid for the reason "this list may be empty" proves less
+     * than one that is valid with something in it.
+     */
+    private static final String PROJECT_SETTINGS = """
+            {"autoAssignRule":"ROUND_ROBIN","mandatoryFields":["MODULE"],\
+            "allowedTaskTypeIds":[1,2]}""";
+
     /** {@code StatusRequest}: isActive is boxed so omitting it is a 400. */
     private static final String USER_STATUS = """
             {"isActive":false}""";
@@ -451,6 +465,33 @@ final class PermissionMatrix {
             // ticket is due Thursday.
             everyRole("GET", "/api/v1/projects/{projectId}/sla-policies"),
             adminOnly("PUT", "/api/v1/projects/{projectId}/sla-policies", SLA_MATRIX),
+
+            // ── the Settings tab · S-10's fourth tab (B-019) ─────────────────
+            // ⚠ The write is Admin AND PM — the opposite call from the two rows
+            // directly above, on the tab directly beside it. Read the SLA
+            // comment first; this one only makes sense against it.
+            //
+            // §2's row 2, "Create/edit projects, map resources to project", is
+            // ✅ for PM and covers the General, Team and Settings tabs. Row 5,
+            // "Master data (task types, SLA, workflow, holidays)", is Admin's
+            // alone and covers the SLA tab. Choosing which task types a project
+            // accepts and which fields its create form requires is configuring
+            // one project; setting the response target a client is
+            // contractually held to is master data.
+            //
+            // The decisive half is that narrowing this to Admin would take a
+            // capability away from PMs rather than withhold a new one:
+            // `auto_assign_rule` is one of the three settings here and has been
+            // PM-writable through PATCH /projects/{projectId} since B-016. A
+            // read-only Settings tab for the role that can already change one
+            // of its three fields on another screen would be a regression
+            // wearing a consistency argument.
+            //
+            // The read is every role, and not as a convenience: all six can
+            // raise a ticket, and the create form cannot mark a field mandatory
+            // or filter its task-type picker without this.
+            everyRole("GET", "/api/v1/projects/{projectId}/settings"),
+            adminAndPm("PUT", "/api/v1/projects/{projectId}/settings", PROJECT_SETTINGS),
 
             // ── resources · S-07 and S-08 ───────────────────────────────────
             // The directory is the assignee picker and the @mention source, so

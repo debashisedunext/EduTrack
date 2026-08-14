@@ -1,19 +1,98 @@
-# Project Master — B-016 · S-10 · Team tab B-017 · SLA tab B-018
+# Project Master — S-10, all four tabs
 
 `/masters/projects` · `/masters/projects/new` · `/masters/projects/:projectId/edit`
 · `/masters/projects/:projectId/team` · `/masters/projects/:projectId/sla`
+· `/masters/projects/:projectId/settings`
 
-The list, the create/edit form (B-016), the Team tab (B-017) and the SLA tab
-(B-018). S-10 describes four tabs and three exist: **Settings is B-019**, with its
-own contract path and its own task. It is not stubbed — a greyed-out tab and a
-broken one look identical to a user, and an unbuilt screen rendered as a tab
-makes the feature look finished.
+The list, the create/edit form (B-016), the Team tab (B-017), the SLA tab (B-018)
+and the Settings tab (B-019). S-10 describes four tabs and all four exist. **None
+was ever stubbed** — a greyed-out tab and a broken one look identical to a user,
+and an unbuilt screen rendered as a tab makes a feature look finished. Each
+arrived in `ProjectTabs` on the day the screen behind it did.
 
 Each tab is a **sibling route, not a nested one**. A layout route would put a
 shared parent fetch above them, and they do not want one: the General tab reads
-the project *with its `ETag`* because its `PATCH` requires it, and the SLA tab
-needs its own `ETag` over a different resource entirely. One parent read could
-not have served both.
+the project *with its `ETag`* because its `PATCH` requires it, and the SLA and
+Settings tabs each need their own `ETag` over a different resource entirely. One
+parent read could not have served any two of them.
+
+---
+
+## The Settings tab (B-019)
+
+`ProjectSettingsPage.tsx` at `/masters/projects/:projectId/settings`. Allowed task
+types, mandatory fields, auto-assign rule — three settings behind one wholesale
+`PUT`.
+
+### Eleven unticked boxes mean the opposite of what they look like
+
+**An empty allow-list is not a restriction that permits nothing. It is no
+restriction at all**, so every active task type may be raised. That is the state
+every project is in — the table behind it did not exist before this task — and it
+is the state a project returns to when the last box is unticked.
+
+No arrangement of checkboxes says that on its own, so the screen says it in a
+sentence and keeps saying it while the list is empty. The phrasing to avoid is
+`0 of 11 selected`: accurate, and it reads as exactly the restriction it is not.
+`allowListSummary` is where that is decided and `projectSettings.test.ts` pins it.
+
+There is deliberately no separate "remove the restriction" control. A project
+permitting no task type could raise no ticket, so the state does not exist, and
+two controls for one outcome is how they end up disagreeing — the same call the
+SLA tab makes about a cleared cell.
+
+### `draftFor` is the function the feature turns on
+
+The server answers `isAllowed: true` for **every** row when `restrictsTaskTypes`
+is false, because that is what unrestricted means. Seeding the draft from those
+flags is the obvious implementation and it is the defect: the first save would
+then post an allow-list naming every task type that happened to exist that day,
+and the twelfth an Admin adds next month would be silently barred here. Nothing
+would look wrong until somebody asked why.
+
+So the draft reads `restrictsTaskTypes` and starts empty when it is false. The
+mirror is what makes it visible in the UI: an untouched screen must report **no**
+pending changes, which is what `isDirty` and the disabled Save button assert.
+
+### Retired task types are rendered, and labelled
+
+A type this project allows and the Task Type Master has since retired still
+appears, in its own group, chipped `retired`. It cannot be raised on a new ticket
+whatever this screen says — but the `PUT` is assembled from the rows on screen, so
+one that was allowed and not rendered would be dropped by the next save through a
+screen that never displayed it.
+
+### A Save button, like the SLA tab and unlike the Team tab
+
+B-017 saves on change because each edit there is one `PATCH` of one field. This is
+a replace of a whole document, so save-on-change would mean a replace per
+checkbox click, each racing the last. One button, one `If-Match`, one transaction
+— and the form remounts on the new `ETag`, so a draft cannot outlive the document
+it was derived from.
+
+### The auto-assign rule moved here, and left nothing behind
+
+S-10 puts the field on this tab; B-016 rendered it on the General form because
+this tab did not exist. It is now **removed** from that form rather than
+duplicated — `toPatchRequest` sends every field on every save, so a control there
+would have reset whatever this tab set each time somebody renamed the project.
+`projectForm.ts` carries the note and `projectForm.test.ts` has two named
+regression tests for it.
+
+### What is deliberately not here
+
+- **Any enforcement.** This screen stores configuration; the create form is what
+  has to obey it, and `CreateTicketPage` is **Stream C's**. Until they consume it,
+  these settings are recorded and not applied. Said out loud rather than left to
+  be discovered — a settings screen whose settings do nothing looks finished.
+- **A read-only mode for non-Admins.** The write is `project.manage`, held by
+  Admin and PM, and the frontend still has no capability gate — `/me` carries
+  `permissions[]` and nothing reads it. A Developer sees the controls and meets a
+  `403` in the banner. **Flagged for Stream A**, as B-018 flagged it first.
+- **Driving the rule picker in a test.** It is a Radix listbox, driven by pointer
+  events jsdom does not dispatch; a test that clicked through it would be testing
+  Radix. The rule's *request* shape is covered in `projectSettings.test.ts` and
+  its survival through a save is asserted in the page test.
 
 ---
 

@@ -100,6 +100,7 @@ each other:**
 | `PATCH /users/{id}` | Field updates |
 | `PATCH /projects/{id}` | Field updates |
 | `PUT /projects/{id}/sla-policies` | Wholesale replace — the worst case for a lost update |
+| `PUT /projects/{id}/settings` | Wholesale replace of three settings behind one Save button |
 | `PATCH /clients/{id}` | Field updates |
 | `PATCH /tickets/{id}` | Field updates |
 
@@ -120,13 +121,17 @@ each other:**
 poll gets `304` for free) and `/reports/{key}` (expensive to compute, and re-run
 constantly as people toggle filters back and forth).
 
-**And on one collection read: `GET /projects/{id}/sla-policies`.** It is the
-only source of the tag its own `PUT` requires, so without it that operation is
+**And on two non-detail reads: `GET /projects/{id}/sla-policies` and
+`GET /projects/{id}/settings`.** Each is the only source of the tag its own
+`PUT` requires, so without it that operation is
 uncallable — the gap B-016 closed by adding `GET /projects/{projectId}`, found
 again on a route that had been in the spec since D-001 with no server behind it.
 `check-conventions.py` does not catch this class: its rule fires on paths ending
 in a path variable, and widening it to every collection read would fire on a
-dozen paginated lists that legitimately have no tag. **Pair the tag with the
+dozen paginated lists that legitimately have no tag — and `/settings` slips the
+rule from the other side, since its `data` is an object rather than an array and
+its path ends in a literal segment, so neither the detail-read rule nor the
+collection rule has anything to say about it. **Pair the tag with the
 precondition by hand — a `PUT` or `PATCH` whose `If-Match` has no read to come
 from is not a strict endpoint, it is a broken one.**
 

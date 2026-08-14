@@ -49,7 +49,8 @@ class MasterRoutesTest {
             "com.edunext.edutrack.api.feature.masters.roles.RoleController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectMemberController",
-            "com.edunext.edutrack.api.feature.masters.projects.SlaPolicyController");
+            "com.edunext.edutrack.api.feature.masters.projects.SlaPolicyController",
+            "com.edunext.edutrack.api.feature.masters.projects.ProjectSettingsController");
 
     @Test
     @DisplayName("every masters controller is mapped under /api/v1")
@@ -138,6 +139,24 @@ class MasterRoutesTest {
         assertThat(paths(load("com.edunext.edutrack.api.feature.masters.projects.SlaPolicyController")
                 .getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/projects/{projectId}/sla-policies");
+    }
+
+    /**
+     * B-019 · the fourth tab, asserted on the same day it was written.
+     *
+     * <p>Nothing had declared these two operations before this task, so this is
+     * not the "declared, mocked, never mounted" case the three assertions above
+     * document — which is exactly why it is here. The gap those found was never
+     * that somebody wrote a controller and misplaced it; it was that the mount
+     * point was the one part of an operation nothing checked. A route added
+     * with its assertion cannot become the fifth instance.
+     */
+    @Test
+    @DisplayName("the settings tab is nested under the project it belongs to")
+    void projectSettingsAreMountedWhereTheContractPutsThem() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.projects.ProjectSettingsController")
+                .getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/projects/{projectId}/settings");
     }
 
     /** {@code value} and {@code path} are aliases; either may carry the mapping. */

@@ -84,6 +84,17 @@ export type ProjectRoleCode = 'PM' | 'DEVELOPER' | 'SUPPORT' | 'QA' | 'DEPLOYMEN
 export type ProjectStatus = 'ACTIVE' | 'ON_HOLD' | 'CLOSED';
 export type AutoAssignRule = 'ROUND_ROBIN' | 'LEAST_LOADED' | 'MANUAL';
 /**
+ * B-019 · exactly the optional fields of `TicketCreateRequest`, and the
+ * contract's `TicketFieldCode`.
+ *
+ * The always-required ones — project, title, task type, level — are absent
+ * deliberately: a project cannot make them "more required", so a code for one
+ * would be a value nothing could act on.
+ */
+export type TicketFieldCode =
+  | 'DESCRIPTION' | 'MODULE' | 'SCREEN_NAME' | 'FEATURE' | 'STEPS_TO_GENERATE'
+  | 'CLIENT' | 'CLIENT_CONTACT' | 'ASSIGNEE' | 'ESTIMATED_HRS' | 'PLANNED_CLOSE_DATE';
+/**
  * B-016 · `status` replaced the stored `isActive`.
  *
  * Blueprint S-10 gives projects three states and a boolean cannot hold On Hold.
@@ -97,6 +108,26 @@ export interface Project {
   colourTag: string; status: ProjectStatus;
   startDate: string | null; endDate: string | null;
   autoAssignRule: AutoAssignRule; ticketSeq: number;
+  /**
+   * B-019 · S-10 Settings tab. `null` and `[]` both mean "nothing beyond the
+   * fields every ticket already requires" — the real column is nullable and
+   * the screen writes `[]`, so the two states exist and the handler collapses
+   * them exactly as the repository does.
+   */
+  mandatoryFields: TicketFieldCode[] | null;
+}
+
+/**
+ * B-019 · one row of a project's task-type allow-list.
+ *
+ * **No rows for a project means every active task type is allowed, not none.**
+ * That is the rule the whole Settings tab turns on, and the mock has to hold it
+ * as literally as the database does — a seed that gave every project a full set
+ * of rows would make the unrestricted state untestable, and it is the state
+ * every project in the real system is in.
+ */
+export interface ProjectTaskType {
+  projectId: number; taskTypeId: number;
 }
 export interface Client {
   id: number; clientCode: string; name: string; domain: string;
@@ -269,6 +300,7 @@ export interface Db {
   /** B-015 · S-09. `roleGrants` is keyed by role id — the matrix, one row per role. */
   permissions: Permission[]; roles: Role[]; roleGrants: Record<number, string[]>;
   slaPolicies: SlaPolicy[];
+  projectTaskTypes: ProjectTaskType[];
   pushSubscriptions: PushSubscription[];
   tickets: Ticket[]; cycles: Cycle[]; transitions: Transition[];
   effortLogs: EffortLog[]; history: HistoryEntry[]; comments: Comment[];
@@ -419,10 +451,10 @@ const USERS: User[] = [
  * five pickers send.
  */
 const PROJECTS: Project[] = [
-  { id: 1, projectCode: 'CRM', name: 'Client CRM Platform', description: 'The client-facing CRM, and the busiest project on the desk.', clientName: 'Acme Retail Ltd', projectManagerId: 2, colourTag: '#4F46E5', status: 'ACTIVE', startDate: '2026-01-05', endDate: '2026-12-18', autoAssignRule: 'LEAST_LOADED', ticketSeq: 347 },
-  { id: 2, projectCode: 'PAY', name: 'Payments Gateway', description: null, clientName: 'Northwind Logistics', projectManagerId: 2, colourTag: '#F59E0B', status: 'ACTIVE', startDate: '2026-02-02', endDate: null, autoAssignRule: 'MANUAL', ticketSeq: 128 },
-  { id: 3, projectCode: 'WEB', name: 'Marketing Website', description: null, clientName: null, projectManagerId: 2, colourTag: '#06B6D4', status: 'ON_HOLD', startDate: null, endDate: null, autoAssignRule: 'MANUAL', ticketSeq: 64 },
-  { id: 4, projectCode: 'ARCH', name: 'Archived Pilot', description: 'Retired. Kept because its tickets are still readable.', clientName: 'Oldco Industries', projectManagerId: 1, colourTag: '#8B5CF6', status: 'CLOSED', startDate: '2025-04-01', endDate: '2025-11-30', autoAssignRule: 'MANUAL', ticketSeq: 0 },
+  { id: 1, projectCode: 'CRM', name: 'Client CRM Platform', description: 'The client-facing CRM, and the busiest project on the desk.', clientName: 'Acme Retail Ltd', projectManagerId: 2, colourTag: '#4F46E5', status: 'ACTIVE', startDate: '2026-01-05', endDate: '2026-12-18', autoAssignRule: 'LEAST_LOADED', ticketSeq: 347, mandatoryFields: ['MODULE', 'ESTIMATED_HRS'] },
+  { id: 2, projectCode: 'PAY', name: 'Payments Gateway', description: null, clientName: 'Northwind Logistics', projectManagerId: 2, colourTag: '#F59E0B', status: 'ACTIVE', startDate: '2026-02-02', endDate: null, autoAssignRule: 'MANUAL', ticketSeq: 128, mandatoryFields: null },
+  { id: 3, projectCode: 'WEB', name: 'Marketing Website', description: null, clientName: null, projectManagerId: 2, colourTag: '#06B6D4', status: 'ON_HOLD', startDate: null, endDate: null, autoAssignRule: 'MANUAL', ticketSeq: 64, mandatoryFields: [] },
+  { id: 4, projectCode: 'ARCH', name: 'Archived Pilot', description: 'Retired. Kept because its tickets are still readable.', clientName: 'Oldco Industries', projectManagerId: 1, colourTag: '#8B5CF6', status: 'CLOSED', startDate: '2025-04-01', endDate: '2025-11-30', autoAssignRule: 'MANUAL', ticketSeq: 0, mandatoryFields: null },
 ];
 
 const CLIENTS: Client[] = [
@@ -460,6 +492,31 @@ const TASK_TYPES: TaskType[] = [
   defaultSlaHrs: defaultSlaHrs as number,
   isActive: true,
 }));
+
+/**
+ * B-019 · the allow-list, and it covers one project out of four.
+ *
+ * **The three projects with no rows are the point.** No rows means every active
+ * task type is allowed, not none — the state every project in the real system is
+ * in, because the table did not exist before this task. A seed that gave all
+ * four a full set would make that state untestable and would quietly encode the
+ * opposite reading.
+ *
+ * PAY (id 2) is the restricted one. It allows two of the eleven, which is enough
+ * to render a restricted project and few enough that "restricted" is obvious at
+ * a glance.
+ *
+ * **No task type is seeded inactive**, though a retired-but-allowed type is this
+ * screen's hardest case. Retiring one here would change `CreateTicketPage`'s
+ * picker — it filters on `isActive` — and that is Stream C's screen; a masters
+ * task should not move another stream's fixture to make its own case easier to
+ * reach. `ProjectSettingsPage.test.tsx` deactivates one in the test that needs
+ * it, which is where the cost belongs.
+ */
+const PROJECT_TASK_TYPES: ProjectTaskType[] = [
+  { projectId: 2, taskTypeId: 2 },
+  { projectId: 2, taskTypeId: 5 },
+];
 
 /**
  * §7.5's eight modules, plus one that has been retired.
@@ -605,6 +662,7 @@ export function createDb(): Db {
     ),
     stages: structuredClone(STAGES),
     slaPolicies: structuredClone(SLA_POLICIES),
+    projectTaskTypes: structuredClone(PROJECT_TASK_TYPES),
     pushSubscriptions: [],
     tickets: [], cycles: [], transitions: [], effortLogs: [], history: [],
     comments: [], attachments: [], notifications: [], notificationPreferences: [], emailLog: [],
