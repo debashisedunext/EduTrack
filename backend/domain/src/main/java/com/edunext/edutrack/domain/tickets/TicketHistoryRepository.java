@@ -1,6 +1,8 @@
 package com.edunext.edutrack.domain.tickets;
 
 import com.edunext.edutrack.domain.appendonly.AppendOnly;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.Repository;
 
 import java.util.List;
@@ -30,7 +32,24 @@ public interface TicketHistoryRepository
      * append. The caller must already hold
      * {@link TicketRepository#findByIdForUpdate}, or two concurrent appends
      * read the same tail and fork the chain (PLAN.md §3.7).
+     *
+     * <p>🔴 <b>{@code PESSIMISTIC_WRITE} is load-bearing, and the ticket lock
+     * alone is not enough.</b> A-045 found this: MySQL's default REPEATABLE READ
+     * serves plain {@code SELECT}s from the snapshot taken at the transaction's
+     * <em>first consistent read</em>. A caller that reads anything at all before
+     * appending — the ticket, the ribbon, a workflow stage — pins that snapshot
+     * before the lock is taken, so the tail read afterwards still sees the table
+     * as it was, and every concurrent writer believes it is the first. Eight
+     * parallel appends produced eight rows with a NULL {@code prev_hash} rather
+     * than one chain: not a fork, a shattering.
+     *
+     * <p>A locking read is exempt from that. {@code SELECT … FOR UPDATE} reads
+     * the latest committed version, so the writer that waited on the ticket lock
+     * sees what the writer ahead of it just committed. This is what makes the
+     * lock mean anything across transactions; without it the lock serialises
+     * writes correctly and each one is still blind.
      */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<TicketHistory> findFirstByTicketIdOrderByIdDesc(Long ticketId);
 
     /** Every correction pointing at one entry — the reversal trail for A-043. */

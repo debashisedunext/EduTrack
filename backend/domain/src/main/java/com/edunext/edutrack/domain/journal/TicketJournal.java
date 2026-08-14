@@ -538,14 +538,6 @@ public class TicketJournal {
     }
 
     /**
-     * The compensating-entry pattern is a pair, in both directions. A row
-     * flagged as a correction that names no target cannot be reconciled against
-     * anything; a row naming a target without the flag is invisible to every
-     * query that filters on {@code is_correction}, so the same entry is counted
-     * twice. A-043 builds the ergonomic API over this; the pair itself is a
-     * storage invariant and holds from the first append.
-     */
-    /**
      * A-043 · a compensating effort entry has to land in the cell it cancels.
      *
      * <p>The §4A.4 roll-up joins effort to transitions on {@code ticket_id},
@@ -632,6 +624,14 @@ public class TicketJournal {
                         + "unqualified where anybody would actually read it.");
     }
 
+    /**
+     * The compensating-entry pattern is a pair, in both directions. A row
+     * flagged as a correction that names no target cannot be reconciled against
+     * anything; a row naming a target without the flag is invisible to every
+     * query that filters on {@code is_correction}, so the same entry is counted
+     * twice. A-043 built the ergonomic API over this; the pair itself is a
+     * storage invariant and holds from the first append.
+     */
     private void requireCorrectionPair(boolean isCorrection, Long correctsEntryId, String what) {
         require(isCorrection == (correctsEntryId != null),
                 "a corrected " + what + " sets both is_correction and corrects_entry_id or neither "

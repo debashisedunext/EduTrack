@@ -1,6 +1,8 @@
 package com.edunext.edutrack.domain.tickets;
 
 import com.edunext.edutrack.domain.appendonly.AppendOnly;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.Repository;
 
 import java.time.LocalDate;
@@ -40,6 +42,7 @@ public interface TicketEffortLogRepository
      * The tail of this ticket's chain. The caller must already hold
      * {@link TicketRepository#findByIdForUpdate} (PLAN.md §3.7).
      */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<TicketEffortLog> findFirstByTicketIdOrderByIdDesc(Long ticketId);
 
     List<TicketEffortLog> findByCorrectsEntryId(Long correctsEntryId);
