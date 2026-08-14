@@ -13,6 +13,7 @@ Ticket CRUD, detail, cycles, reopen, comments, attachments, effort. Screens S-17
 | `PlannedCloseDateController`, `PlannedCloseDateDtos` | C-012 | `GET /api/v1/tickets/planned-close-date` |
 | `TicketExceptionHandler` | C-012 | RFC 9457 problems for the ticket routes |
 | `UnknownProjectException`, `UnknownLevelException` | C-011, C-012 | The two failures those routes can produce |
+| [`attachments/`](attachments/README.md) | C-025 | Attachment security — sniffing, EXIF stripping, AV scan, signed URLs. Its own README |
 
 There is still **no ticket write service**. `POST /tickets` does not exist on the
 server; the create form runs against D-004's mock. C-013's note records what the

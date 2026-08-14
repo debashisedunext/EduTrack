@@ -303,6 +303,25 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/tickets/{ticketId}/status-requests"),
             everyRole("GET", "/api/v1/me/awaiting-response"),
 
+            // ── attachments · C-025, §4B.4 ──────────────────────────────────
+            // Both open to all six, and the argument is §2's rather than
+            // convenience. §4B.4 lists the handoff dialog and the quick update
+            // panel among the upload surfaces, and "Hand off to next stage" and
+            // "Update status / log effort" are ✅ for all six — so a Developer,
+            // QA or Deployment resource who could not attach a screenshot could
+            // not complete a move §2 explicitly grants them. Upload asserts
+            // ticket.update_progress; a seventh role without that grant would be
+            // denied here.
+            //
+            // *Which* tickets is a different question and is not this file's:
+            // ScopedTickets applies the caller's row scope inside the service,
+            // so a ticket the caller may not see is 404 (A-035) whatever their
+            // capability. The upload row carries no body fixture because the
+            // handler takes a multipart part rather than a @RequestBody, so
+            // argument resolution does not pre-empt the guard.
+            everyRole("POST", "/api/v1/tickets/{ticketId}/attachments"),
+            everyRole("GET", "/api/v1/tickets/{ticketId}/attachments"),
+
             // ── planned close date · every role holds ticket.create ──────────
             // Allowed for all six because all six may raise a ticket (§2), not
             // because the route is unguarded — it asserts ticket.create, and a
