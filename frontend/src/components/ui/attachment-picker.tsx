@@ -10,8 +10,10 @@ import {
   filesFromDataTransfer,
   formatFileSize,
   isPreviewableImage,
+  renameClipboardFiles,
   selectAttachments,
 } from './attachments'
+import { useAttachmentPaste } from './use-attachment-paste'
 
 /**
  * The shared attachment picker — C-023, blueprint §4B.4.
@@ -44,9 +46,22 @@ import {
  * user who drags a folder expects the six valid files to land and to be told
  * about the seventh.
  *
- * Clipboard paste is **C-024** and is deliberately not here. `onAdd` is the seam
- * it will use — `RichTextEditor.onPasteFiles` already routes image pastes out as
- * `File[]`, which is the exact shape this takes.
+ * ## Clipboard paste — C-024
+ *
+ * On by default, because §4B.4 is right that paste is what decides whether
+ * support agents attach anything at all: a Snipping Tool capture exists only on
+ * the clipboard, with no file to drag and nothing to browse to.
+ *
+ * The listener is on `document` and only one picker on the page claims it —
+ * `useAttachmentPaste` carries that argument, including why an ordinary text
+ * paste and a rich-text editor are both left alone. A paste runs through exactly
+ * the same `accept` as a drop, so no route reaches `onAdd` having skipped the
+ * caps, and it is **announced**, because unlike a drop or a browse a paste has
+ * no visible action to have produced it.
+ *
+ * A surface that owns a rich-text editor wires `RichTextEditor.onPasteFiles` to
+ * this component's `addFiles` handle: the editor swallows image pastes itself,
+ * and the handle is how they reach the same validation.
  */
 
 export type AttachmentItemStatus =
@@ -96,11 +111,31 @@ export interface AttachmentPickerProps {
    */
   compact?: boolean
   disabled?: boolean
+  /**
+   * Clipboard paste — C-024. On unless a surface has a reason to opt out.
+   *
+   * Only one picker on the page claims a paste at a time, so a second one
+   * mounting over the first (quick update over ticket detail) does not need this
+   * turned off. Pass `false` where a paste would be genuinely ambiguous.
+   */
+  enablePaste?: boolean
   className?: string
   id?: string
   'aria-labelledby'?: string
   'aria-describedby'?: string
   'aria-label'?: string
+}
+
+export interface AttachmentPickerHandle {
+  /**
+   * Push files in from somewhere else on the screen and validate them here.
+   *
+   * The seam for `RichTextEditor.onPasteFiles`: the editor intercepts image
+   * pastes itself (C-066) and its files must land in the same running totals as
+   * every other route, not in `onAdd` unchecked. C-029's comment box takes the
+   * identical pair.
+   */
+  addFiles: (files: File[]) => void
 }
 
 function statusIcon(item: AttachmentItem) {
@@ -130,23 +165,35 @@ function statusLabel(item: AttachmentItem): string {
   }
 }
 
-export function AttachmentPicker({
-  items,
-  onAdd,
-  onRemove,
-  onReject,
-  limits = ATTACHMENT_DEFAULT_LIMITS,
-  compact = false,
-  disabled = false,
-  className,
-  id,
-  'aria-labelledby': ariaLabelledBy,
-  'aria-describedby': ariaDescribedBy,
-  'aria-label': ariaLabel,
-}: AttachmentPickerProps) {
+export const AttachmentPicker = React.forwardRef<AttachmentPickerHandle, AttachmentPickerProps>(function AttachmentPicker(
+  {
+    items,
+    onAdd,
+    onRemove,
+    onReject,
+    limits = ATTACHMENT_DEFAULT_LIMITS,
+    compact = false,
+    disabled = false,
+    enablePaste = true,
+    className,
+    id,
+    'aria-labelledby': ariaLabelledBy,
+    'aria-describedby': ariaDescribedBy,
+    'aria-label': ariaLabel,
+  },
+  ref,
+) {
   const inputRef = React.useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = React.useState(false)
   const [rejections, setRejections] = React.useState<{ file: File; rejection: AttachmentRejection }[]>([])
+  /**
+   * What a paste just did, for the live region.
+   *
+   * Drop and browse both have a visible action behind them — the user let go of
+   * a file, or came back from a dialog. A paste has nothing: the screen simply
+   * has to say that something happened, or `Ctrl+V` reads as ignored.
+   */
+  const [pasteNotice, setPasteNotice] = React.useState<string | null>(null)
 
   // A drag over a child element fires `dragleave` on the parent. Counting
   // enter/leave pairs is the only way to keep the highlight from flickering off
@@ -165,7 +212,7 @@ export function AttachmentPicker({
   const showCapacity = items.length > 0 && !disabled
 
   const accept = React.useCallback(
-    (files: readonly File[]) => {
+    (files: readonly File[], source: 'picker' | 'paste' = 'picker') => {
       if (disabled || files.length === 0) return
       const result = selectAttachments(files, {
         existingBytes: usedBytes,
@@ -174,11 +221,39 @@ export function AttachmentPicker({
         limits,
       })
       setRejections(result.rejected)
+      // Only a paste announces what it took. A rejection speaks for itself on
+      // every route, and it is the one thing a paste must not drown out — so the
+      // notice is dropped the moment there is something to refuse.
+      setPasteNotice(
+        source === 'paste' && result.accepted.length > 0 && result.rejected.length === 0
+          ? result.accepted.length === 1
+            ? `Pasted ${result.accepted[0].name}`
+            : `Pasted ${result.accepted.length} files`
+          : null,
+      )
       if (result.rejected.length > 0) onReject?.(result.rejected)
       if (result.accepted.length > 0) onAdd(result.accepted)
     },
     [disabled, items, limits, onAdd, onReject, usedBytes, usedCount],
   )
+
+  // The seam for a rich-text editor's own paste handler — see
+  // `AttachmentPickerHandle`. `renameClipboardFiles` runs here and not only in
+  // `filesFromClipboard` because the editor never produces a `DataTransfer`: it
+  // hands out plain `File[]` carrying the same `image.png` every capture has, so
+  // without this the second screenshot pasted into a description is refused as a
+  // duplicate — the exact defect this task exists to remove, on the surface most
+  // likely to hit it.
+  React.useImperativeHandle(
+    ref,
+    () => ({ addFiles: (files: File[]) => accept(renameClipboardFiles(files), 'paste') }),
+    [accept],
+  )
+
+  useAttachmentPaste({
+    enabled: enablePaste && !disabled,
+    onFiles: React.useCallback((files: File[]) => accept(files, 'paste'), [accept]),
+  })
 
   const onDrop = (event: React.DragEvent) => {
     event.preventDefault()
@@ -263,7 +338,7 @@ export function AttachmentPicker({
         >
           <Upload className={cn('h-5 w-5', dragging ? 'text-primary' : 'text-content-muted')} aria-hidden />
           <p className="text-sm text-content">
-            Drag files here, or{' '}
+            Drag files here, paste a screenshot, or{' '}
             <Button
               type="button"
               variant="ghost"
@@ -349,8 +424,16 @@ export function AttachmentPicker({
         when nothing can be: on a sealed cycle the detail page renders this
         disabled, and "1 of 20 files · 50 MB" there describes a budget the reader
         cannot spend. Rejections still speak, since a rejection is always news.
+
+        The region itself is rendered whenever the control is live, even with
+        nothing in it. A live region that *appears* carrying its first message is
+        unreliably announced — several screen readers only watch regions that
+        were already in the tree — and the first message here is usually a paste,
+        which has no other evidence that it worked. It stays absent while
+        disabled, so a sealed cycle does not land a second `role="status"` beside
+        the banner already telling the reader the cycle is read-only.
       */}
-      {(rejections.length > 0 || showCapacity) && (
+      {!disabled && (
         <div id={statusId} role="status" aria-live="polite" className="flex flex-col gap-0.5">
           {rejections.length > 0 && (
             <ul className="flex flex-col gap-0.5">
@@ -363,6 +446,7 @@ export function AttachmentPicker({
               ))}
             </ul>
           )}
+          {pasteNotice && <p className="text-caption text-content-muted">{pasteNotice}</p>}
           {showCapacity && (
             <p className="text-caption text-content-muted">
               {usedCount} of {limits.maxFiles} files · {formatFileSize(usedBytes)} of{' '}
@@ -373,4 +457,4 @@ export function AttachmentPicker({
       )}
     </div>
   )
-}
+})

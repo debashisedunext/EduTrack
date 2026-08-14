@@ -519,3 +519,67 @@ describe('S-19 actions — C-013', () => {
     expect(second).not.toBe(first)
   })
 })
+
+/* ── Clipboard paste — C-024 ────────────────────────────────────────────── */
+
+describe('CreateTicketPage — pasting a screenshot', () => {
+  /** jsdom has no clipboard; testing-library copies a plain object onto the event. */
+  function clipboardOf(files: File[], text: Partial<Record<string, string>> = {}) {
+    return {
+      types: [...Object.keys(text), ...(files.length > 0 ? ['Files'] : [])],
+      items: [
+        ...Object.keys(text).map(() => ({ kind: 'string', getAsFile: () => null })),
+        ...files.map((file) => ({ kind: 'file', getAsFile: () => file })),
+      ],
+      files,
+      getData: (type: string) => text[type] ?? '',
+    }
+  }
+
+  /** What every browser hands over for a Snipping Tool capture. */
+  const capture = () => new File(['x'], 'image.png', { type: 'image/png' })
+
+  const attachedFiles = () => screen.findByRole('list', { name: 'Attached files' })
+
+  it('stages a screenshot pasted with nothing focused', async () => {
+    // The end of the wiring the unit tests only cover in halves: the document
+    // listener, the picker's validation and deferred-mode staging, on the real
+    // screen. Nothing focuses the drop zone, which is the whole reason the
+    // listener is not on the control.
+    renderPage()
+    await formReady()
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([capture()]) })
+
+    expect(within(await attachedFiles()).getByText(/^screenshot-/)).toBeInTheDocument()
+  })
+
+  it('stages a screenshot pasted into the description exactly once', async () => {
+    // Two handlers see this paste: `RichTextEditor` swallows image files itself
+    // and hands them to `onPasteFiles`, and the event then bubbles to the
+    // document listener. Acting in both places attaches every pasted screenshot
+    // twice — the listener stands down for a contentEditable so it does not.
+    renderPage()
+    await formReady()
+
+    fireEvent.paste(document.querySelector('[contenteditable="true"]')!, {
+      clipboardData: clipboardOf([capture()]),
+    })
+
+    expect(within(await attachedFiles()).getAllByText(/^screenshot-/)).toHaveLength(1)
+  })
+
+  it('leaves an ordinary text paste in the title alone', async () => {
+    // A file on the clipboard is not evidence the user meant to attach it —
+    // copying an image from a web page brings an `<img>` tag along as
+    // `text/html`. In a text field the text wins.
+    renderPage()
+    await formReady()
+
+    fireEvent.paste(screen.getByLabelText(/Title \/ summary/), {
+      clipboardData: clipboardOf([capture()], { 'text/html': '<img src="x">' }),
+    })
+
+    expect(screen.queryByRole('list', { name: 'Attached files' })).toBeNull()
+  })
+})

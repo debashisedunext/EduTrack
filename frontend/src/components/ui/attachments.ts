@@ -5,8 +5,12 @@
  * Split out of `attachment-picker.tsx` for the same reason `rich-text.ts` is
  * split out of the editor: the rules are the deliverable and the control is a
  * surface on top of them. A caller that needs to validate without rendering a
- * picker — a paste handler (C-024), a drop target somewhere else — imports from
+ * picker — a drop target somewhere else, Stream D's chat share — imports from
  * here rather than reaching into a component.
+ *
+ * The clipboard rules at the foot of this file are C-024's; the listener that
+ * uses them is `use-attachment-paste.ts`, because it needs an effect and this
+ * file is deliberately free of React.
  *
  * ## What this file is *not*
  *
@@ -250,6 +254,154 @@ export function selectAttachments(files: readonly File[], context: AttachmentVal
   }
 
   return { accepted, rejected }
+}
+
+/**
+ * Names a browser invents for a bitmap that came off the clipboard rather than
+ * off a disk. C-024.
+ *
+ * Chrome, Edge and Firefox all hand a Snipping Tool capture over as
+ * `image.png`; Safari has used `Image (1).png`; some paths supply no name at
+ * all. **Every screenshot a user pastes therefore arrives under the same name as
+ * the last one**, and `validateAttachmentFile`'s duplicate check would refuse
+ * the second — which reads as "paste is broken" on the single most common
+ * attachment action §4B.4 has.
+ *
+ * A file genuinely called `image.png`, copied out of a file manager, is renamed
+ * too. That is the intended trade: the original name carries no information the
+ * generated one does not, and keeping it would reintroduce the collision.
+ */
+const GENERIC_CLIPBOARD_NAME = /^(image|photo|screenshot|blob|unknown|untitled)(\s*\(\d+\))?(\.[a-z0-9]+)?$/i
+
+export function isGenericClipboardName(fileName: string): boolean {
+  const trimmed = fileName.trim()
+  return trimmed === '' || GENERIC_CLIPBOARD_NAME.test(trimmed)
+}
+
+/**
+ * Extension for a clipboard file, from its MIME type.
+ *
+ * Derived rather than defaulted. Guessing `png` for a type we do not recognise
+ * would name a file something it is not, and C-025's server-side sniffing would
+ * then reject a file this side had just told the user was fine — the two must
+ * not disagree. An unrecognised type keeps its own subtype (`image/tiff` →
+ * `tiff`), falls off the allow-list, and is refused with an honest reason.
+ */
+function clipboardExtension(contentType: string): string {
+  const subtype = contentType.split('/')[1]?.split(';')[0]?.trim().toLowerCase() ?? ''
+  if (!subtype) return ''
+  if (subtype === 'jpeg') return 'jpg'
+  // `svg+xml` must stay recognisable as `svg` so it is rejected as one — it is a
+  // scriptable document and is deliberately off §4B.4's list.
+  if (subtype === 'svg+xml') return 'svg'
+  return subtype.replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * Local time, to the second, in a name a person can read and a list can sort.
+ *
+ * Local and not UTC on purpose: storage is UTC everywhere, but a file name is
+ * presentation, and "the screenshot I took at 14:30" is the only handle the
+ * person who pasted it has.
+ *
+ * One second of resolution is deliberate. Two different screenshots cannot be
+ * captured and pasted inside the same second, but the *same* clipboard pasted
+ * twice — a double `Ctrl+V` — lands on the identical name and is refused as a
+ * duplicate, which is the correct outcome rather than a bug in the stamp.
+ */
+function clipboardStamp(now: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
+    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  )
+}
+
+/**
+ * What a pasted file should be called.
+ *
+ * A real name is kept untouched — pasting a copied `error-log.txt` out of a file
+ * manager must not lose the one thing that says what it is. `index` separates
+ * several images pasted in a single event, which Chrome produces when a run of
+ * cells is copied out of a spreadsheet.
+ */
+export function clipboardAttachmentName(file: File, now: Date = new Date(), index = 0): string {
+  if (!isGenericClipboardName(file.name)) return file.name
+
+  const prefix = file.type.startsWith('image/') ? 'screenshot' : 'pasted-file'
+  const suffix = index > 0 ? `-${index + 1}` : ''
+  const ext = clipboardExtension(file.type)
+  const stem = `${prefix}-${clipboardStamp(now)}${suffix}`
+  // No type at all means no honest extension to give it. Left bare, so the
+  // allow-list refuses it and says why, rather than being handed a guess.
+  return ext ? `${stem}.${ext}` : stem
+}
+
+/**
+ * Give a batch of pasted files usable names — C-024.
+ *
+ * Separate from `filesFromClipboard` because not every paste arrives as a
+ * `DataTransfer`: `RichTextEditor` intercepts image pastes itself and hands out
+ * plain `File[]`, and those files carry exactly the same `image.png` collision.
+ * Anything already named is returned untouched and by identity.
+ *
+ * A rename allocates a new `File` over the same underlying blob rather than
+ * shadowing `name` on the existing one. That is not fussiness: Chrome's
+ * `FormData` reads a file's name from an internal slot and not from the JS
+ * property, so a shadowed name would upload under the old one — the rename would
+ * appear to work everywhere except the one place it has to.
+ */
+export function renameClipboardFiles(files: readonly File[], { now = new Date() }: { now?: Date } = {}): File[] {
+  return files.map((file, index) => {
+    const name = clipboardAttachmentName(file, now, index)
+    if (name === file.name) return file
+    return new File([file], name, { type: file.type, lastModified: file.lastModified })
+  })
+}
+
+/**
+ * Files out of a clipboard paste — C-024, blueprint §4B.4.
+ *
+ * `items` over `files` for the same reason `filesFromDataTransfer` prefers it:
+ * a paste carrying both text and an image populates `items` with a `string`
+ * entry beside the file, and only `kind` tells them apart. A text-only paste
+ * yields no files at all, which is what lets a caller ignore it cheaply.
+ */
+export function filesFromClipboard(
+  data: DataTransfer | null | undefined,
+  options: { now?: Date } = {},
+): File[] {
+  if (!data) return []
+
+  const items = data.items ? Array.from(data.items) : []
+  const raw: File[] =
+    items.length > 0
+      ? items.flatMap((item) => {
+          if (item.kind !== 'file') return []
+          const file = item.getAsFile()
+          return file ? [file] : []
+        })
+      : data.files
+        ? Array.from(data.files)
+        : []
+
+  return renameClipboardFiles(raw, options)
+}
+
+/**
+ * Whether the clipboard carries text a text field would actually receive.
+ *
+ * The guard for "do not hijack an ordinary paste". Copying an image out of a web
+ * page puts an `<img>` tag on the clipboard as `text/html` **beside** the file,
+ * so the presence of a file is not on its own evidence that the user meant to
+ * attach something. Whitespace-only `text/plain` does not count — Chrome ships a
+ * single newline with some image copies.
+ */
+export function clipboardHasText(data: DataTransfer | null | undefined): boolean {
+  if (!data || typeof data.getData !== 'function') return false
+  const types = Array.from(data.types ?? [])
+  if (types.includes('text/plain') && data.getData('text/plain').trim() !== '') return true
+  return types.includes('text/html') && data.getData('text/html').trim() !== ''
 }
 
 /**

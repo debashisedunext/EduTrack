@@ -1,6 +1,6 @@
 # Attachments — §4B.4
 
-**C-023 · Upload surfaces.** The upload lifecycle every surface shares. The
+**C-023 · Upload surfaces** and **C-024 · Clipboard paste.** The upload lifecycle every surface shares. The
 control itself is `components/ui/attachment-picker.tsx`, because three other
 streams consume that directory; this folder is the half that talks to the API.
 
@@ -13,8 +13,9 @@ Shared, in `components/ui/`:
 
 | File | What it is |
 |---|---|
-| `attachments.ts` | §4B.4's allow-list, limits, validation and formatting. Pure. |
-| `attachment-picker.tsx` | Drop zone + file picker + file list. Presentational; no API knowledge. |
+| `attachments.ts` | §4B.4's allow-list, limits, validation, formatting and the clipboard rules. Pure. |
+| `attachment-picker.tsx` | Drop zone + file picker + paste + file list. Presentational; no API knowledge. |
+| `use-attachment-paste.ts` | The `document` paste listener and its arbitration. C-024. |
 
 ---
 
@@ -92,6 +93,66 @@ extension on most platforms and is empty for `.log` on all of them, and a `.doc`
 is an OLE container that proves nothing. Real sniffing, the AV scan and EXIF
 stripping are **C-025**, server-side. Everything here exists to fail fast and say
 why.
+
+### Clipboard paste — C-024
+
+**Every pasted screenshot arrives named `image.png`.** Chrome, Edge and Firefox
+all do it; Safari has used `Image (1).png`; some paths supply no name at all. So
+the duplicate check — which is right about everything else — refuses the *second*
+capture a user pastes, and paste appears to work once and then break. Pasted
+files whose names are the browser's invention are renamed
+`screenshot-2026-08-12-143005.png` from the local clock.
+
+One second of resolution, deliberately. Two captures cannot be taken and pasted
+inside the same second, but one clipboard pasted twice lands on the identical
+name and *is* refused as a duplicate — which is the correct outcome for a double
+`Ctrl`+`V`, not a gap in the stamp.
+
+The rename allocates a new `File` over the same blob rather than redefining
+`name` on the existing one. `FormData` reads a file's name from an internal slot
+in Chrome, not from the JS property, so a shadowed `name` would upload under the
+old one — the rename would appear to work everywhere except where it matters.
+The cost of that is a trap in tests: a fixture with a redefined `size` does not
+survive reconstruction, because jsdom computes size from content. Both
+`attachment-picker.test.tsx` and this note exist so the next person does not lose
+an hour to a size cap that silently measures one byte.
+
+**The listener is on `document`.** A paste fires at whatever has focus, and
+nothing ever focuses a drop zone — the agent is typing in the description or has
+clicked nowhere at all. A listener on the picker's own subtree would catch almost
+no real paste.
+
+That makes it global, and `use-attachment-paste.ts` answers the two questions
+global listeners raise:
+
+- **Which picker gets it.** Registrations are a stack and only the top handles
+  the event. Ticket detail mounts a picker and quick update mounts a second over
+  it; both listening means one paste uploads the file twice, against two
+  different requests. Most-recently-mounted is the one in front for a slide-over,
+  a modal or a dialog over a page.
+- **When to keep its hands off.** A rich-text editor is skipped entirely —
+  `RichTextEditor` intercepts paste itself and routes image files through
+  `onPasteFiles` (C-066), and the event bubbles to `document` afterwards, so
+  handling it in both places attaches every screenshot twice. An ordinary text
+  paste into an `input` or `textarea` is skipped too: copying an image out of a
+  web page puts the `<img>` tag on the clipboard as `text/html` beside the file,
+  so a file being present is not evidence the user meant to attach it. An
+  image-only clipboard **is** taken even from a text field, because pasting a
+  screenshot into a plain input otherwise does nothing at all.
+
+A paste is validated by the same `accept` as a drop, so no route reaches `onAdd`
+having skipped the caps. The editor's files get there through the picker's
+`addFiles` ref handle for exactly that reason — `useTicketAttachments.add`
+uploads whatever it is handed, and validation lives in the picker. C-029's
+comment box takes the same pair.
+
+And it is **announced**: `Pasted screenshot-….png` in the live region. A drop and
+a browse both have a visible action behind them; `Ctrl`+`V` has none, so silence
+reads as "the paste was ignored". The region is now mounted whenever the control
+is live rather than appearing with its first message — several screen readers
+only watch regions that were already in the tree. It stays absent while
+disabled, so a sealed cycle still does not land a second `role="status"` beside
+its banner.
 
 ---
 
@@ -191,8 +252,6 @@ to say so first.**
 
 ## Not in this task
 
-- **Clipboard paste — C-024.** `onAdd` is the seam; `RichTextEditor.onPasteFiles`
-  already routes image pastes out as `File[]`, which is the exact shape it takes.
 - **MIME sniffing, AV, EXIF, S3 keys, signed URLs — C-025.** Server-side.
 - **Thumbnails, gallery, lightbox — C-026.** The picker shows a 28px preview only
   once the scan has passed.
