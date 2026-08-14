@@ -39,6 +39,25 @@ public enum NotificationEvent {
     ITERATION_LIMIT_REACHED(Category.ESCALATION),
     DEPLOYMENT_FAILED(Category.ESCALATION),
 
+    /**
+     * A-044 · the nightly verifier found a hash chain that does not verify.
+     *
+     * <p><b>Added by Stream A, and it needs Debashis's sign-off</b> — this file
+     * is Stream D's. The alternative was to raise chain breaks under
+     * {@code MAIL_DELIVERY_FAILED}, which is what was reachable and would have
+     * filed a possible tampering alert as an email problem, in the wrong
+     * category, under the wrong preference.
+     *
+     * <p>{@code ESCALATION} rather than {@code OTHER} because that is what it
+     * is: PLAN.md §3.5 names the chain as the backstop for the case where the
+     * immutability triggers have been defeated. <b>One thing to decide
+     * together:</b> D-042's notification preferences let a user mute a
+     * category, and this is an alarm that arguably nobody should be able to
+     * mute. Left as an ordinary escalation for now rather than inventing an
+     * unmutable class unilaterally.
+     */
+    CHAIN_VERIFICATION_FAILED(Category.ESCALATION),
+
     // ── status requests (D-055/D-056) ──────────────────────────────────────
     STATUS_REQUESTED(Category.STATUS_REQUEST),
     STATUS_REQUEST_ANSWERED(Category.STATUS_REQUEST),
