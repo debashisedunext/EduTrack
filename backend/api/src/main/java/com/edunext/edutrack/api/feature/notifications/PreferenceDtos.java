@@ -28,13 +28,20 @@ public final class PreferenceDtos {
      * @param emailLocked D-036: this mail cannot be switched off. Sent rather
      *                   than inferred from the category, so the rule has one
      *                   home and the UI cannot disagree with the send path.
+     * @param push       D-045: whether a browser notification fires. There is
+     *                   deliberately no {@code pushLocked} — §7.7 gives the
+     *                   guarantee to mail, and a channel that depends on a
+     *                   permission the user can revoke in their own browser
+     *                   settings cannot be promised, so locking it would be a
+     *                   guarantee in name only.
      */
     public record PreferenceRow(
             String eventKey,
             String category,
             boolean inApp,
             boolean email,
-            boolean emailLocked) {
+            boolean emailLocked,
+            boolean push) {
     }
 
     public record PreferenceMatrix(List<PreferenceRow> data) {
@@ -47,7 +54,7 @@ public final class PreferenceDtos {
      * have to restate every other switch, and a client that omits a field
      * should not silently turn it off.
      */
-    public record PreferenceUpdate(String eventKey, Boolean inApp, Boolean email) {
+    public record PreferenceUpdate(String eventKey, Boolean inApp, Boolean email, Boolean push) {
     }
 
     public record PreferenceUpdateRequest(List<PreferenceUpdate> preferences) {

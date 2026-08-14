@@ -1,9 +1,8 @@
 package com.edunext.edutrack.api.feature.notifications;
 
+import com.edunext.edutrack.domain.notifications.push.PushKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -112,8 +111,4 @@ class PushSubscriptionService {
         return userAgent.length() <= 255 ? userAgent : userAgent.substring(0, 255);
     }
 
-    @Configuration
-    @EnableConfigurationProperties(PushKeys.class)
-    static class PushConfig {
-    }
 }

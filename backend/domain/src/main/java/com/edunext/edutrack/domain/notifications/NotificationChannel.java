@@ -11,14 +11,16 @@ import java.util.Optional;
  *   <li><b>The bell badge</b> is not a channel. It counts what was written, and
  *       a preference that emptied it would be hiding the record rather than
  *       quieting a notification — S-26 is where you go to find what you missed.
- *   <li><b>Browser push</b> arrives with D-045, which needs a subscription
- *       before it can need a preference. Declaring it here now would put a
- *       switch in the matrix that does nothing.
+ *   <li><b>Browser push</b> arrived with D-045's sending half, and is declared
+ *       here now that a switch does something. It was deliberately absent
+ *       until then: a preference the system cannot act on is worse than a
+ *       missing one, because the user believes they have set it.
  *   <li><b>Teams / Slack / WhatsApp</b> are marked optional and have no owner.
  * </ul>
  *
- * <p>So the matrix is in-app popup versus email, and what a preference turns
- * off is the <em>delivery</em>, never the notification row itself.
+ * <p>So the matrix is in-app popup, email and browser push, and what a
+ * preference turns off is the <em>delivery</em>, never the notification row
+ * itself.
  */
 public enum NotificationChannel {
 
@@ -26,7 +28,21 @@ public enum NotificationChannel {
     IN_APP,
 
     /** The §4B.6 mail engine. Subject to D-036 — see {@code isMandatoryMail}. */
-    EMAIL;
+    EMAIL,
+
+    /**
+     * D-045 · the browsers a user has granted permission on.
+     *
+     * <p><strong>Never mandatory, and D-036's lock deliberately does not reach
+     * it.</strong> §7.7 gives the guarantee to mail — "the guaranteed channel"
+     * — because a push only reaches a browser that is still subscribed, on a
+     * device that is switched on, for a permission the user can revoke in
+     * their own settings without telling us. Locking a channel we cannot
+     * promise would be a guarantee in name only. An escalation whose push is
+     * switched off still sends its mail, which is the promise that was
+     * actually made.
+     */
+    PUSH;
 
     /**
      * @return empty for a channel this build does not know, so a preference row

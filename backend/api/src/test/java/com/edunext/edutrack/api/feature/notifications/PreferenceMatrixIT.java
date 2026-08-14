@@ -230,8 +230,8 @@ class PreferenceMatrixIT {
     @DisplayName("a batch containing one bad key writes none of it")
     void aRejectedBatchIsNotPartiallyApplied() {
         service.save(ravi, new PreferenceDtos.PreferenceUpdateRequest(List.of(
-                new PreferenceDtos.PreferenceUpdate("COMMENT_ADDED", null, false),
-                new PreferenceDtos.PreferenceUpdate("NOT_AN_EVENT", null, false))));
+                new PreferenceDtos.PreferenceUpdate("COMMENT_ADDED", null, false, null),
+                new PreferenceDtos.PreferenceUpdate("NOT_AN_EVENT", null, false, null))));
 
         // Validated up front for exactly this: half a save is worse than none,
         // because the user cannot tell which half.
@@ -246,12 +246,74 @@ class PreferenceMatrixIT {
         assertThat(preferences.allows(meera, "COMMENT_ADDED", NotificationChannel.EMAIL)).isTrue();
     }
 
+    // ------------------------------------------------- D-045 · the push channel
+
+    @Test
+    @DisplayName("push defaults to on, like every other channel — the table holds deviations")
+    void pushDefaultsToOn() {
+        assertThat(rowFor("TICKET_ASSIGNED").push()).isTrue();
+        assertThat(preferences.allows(ravi, "TICKET_ASSIGNED", NotificationChannel.PUSH)).isTrue();
+    }
+
+    @Test
+    @DisplayName("switching push off is honoured on the send path")
+    void pushCanBeSwitchedOff() {
+        service.save(ravi, request("TICKET_ASSIGNED", null, null, false));
+
+        assertThat(rowFor("TICKET_ASSIGNED").push()).isFalse();
+        assertThat(preferences.allows(ravi, "TICKET_ASSIGNED", NotificationChannel.PUSH)).isFalse();
+    }
+
+    @Test
+    @DisplayName("no push is mandatory, not even an escalation's")
+    void noPushIsLocked() {
+        // D-036 locks mail for assignments and escalations. It deliberately does
+        // not reach here: §7.7 gives the guarantee to mail because push depends
+        // on a permission the user can revoke in their own browser settings
+        // without telling us, and a channel we cannot promise must not be
+        // presented as one they cannot switch off.
+        service.save(ravi, request("SLA_BREACHED", null, null, false));
+
+        assertThat(rowFor("SLA_BREACHED").push()).isFalse();
+        assertThat(preferences.allows(ravi, "SLA_BREACHED", NotificationChannel.PUSH)).isFalse();
+        assertThat(rowFor("SLA_BREACHED").email())
+                .as("the mail it cannot switch off is still on — that is the actual promise")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("the three channels are independent")
+    void channelsDoNotDragEachOtherAround() {
+        service.save(ravi, request("COMMENT_ADDED", false, null, null));
+
+        // Somebody who silenced the toast has not asked to lose push as well.
+        assertThat(rowFor("COMMENT_ADDED").inApp()).isFalse();
+        assertThat(rowFor("COMMENT_ADDED").push()).isTrue();
+        assertThat(rowFor("COMMENT_ADDED").email()).isTrue();
+    }
+
+    @Test
+    @DisplayName("an omitted push field leaves the stored value alone")
+    void omittingPushChangesNothing() {
+        service.save(ravi, request("COMMENT_ADDED", null, null, false));
+        service.save(ravi, request("COMMENT_ADDED", true, null));
+
+        assertThat(rowFor("COMMENT_ADDED").push())
+                .as("a screen saving one switch must not silently reset the others")
+                .isFalse();
+    }
+
     // ------------------------------------------------------------- helpers
 
     private static PreferenceDtos.PreferenceUpdateRequest request(
             String eventKey, Boolean inApp, Boolean email) {
+        return request(eventKey, inApp, email, null);
+    }
+
+    private static PreferenceDtos.PreferenceUpdateRequest request(
+            String eventKey, Boolean inApp, Boolean email, Boolean push) {
         return new PreferenceDtos.PreferenceUpdateRequest(
-                List.of(new PreferenceDtos.PreferenceUpdate(eventKey, inApp, email)));
+                List.of(new PreferenceDtos.PreferenceUpdate(eventKey, inApp, email, push)));
     }
 
     private PreferenceDtos.PreferenceRow rowFor(String eventKey) {

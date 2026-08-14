@@ -96,7 +96,8 @@ export const getNotificationPreferencesResponse = zod.object({
   "category": zod.enum(['MENTION', 'ASSIGNMENT', 'ESCALATION', 'STATUS_REQUEST', 'OTHER']).describe('S-26\'s grouping, so the grid can be sectioned without a second mapping.'),
   "inApp": zod.boolean().describe('Whether the D-043 toast fires. Turning it off never suppresses the bell entry — S-26 is where you go to find what you missed.\n'),
   "email": zod.boolean(),
-  "emailLocked": zod.boolean().describe('D-036. This mail cannot be switched off. Sent rather than inferred from the category so the rule has one home.\n')
+  "emailLocked": zod.boolean().describe('D-036. This mail cannot be switched off. Sent rather than inferred from the category so the rule has one home.\n'),
+  "push": zod.boolean().optional().describe('D-045. Whether a browser notification fires for this event, on every\ndevice the user has granted permission on.\n\nThere is deliberately \*\*no `pushLocked`\*\*. §7.7 gives the guarantee\nto mail; a push only reaches a browser that is still subscribed, on a\ndevice that is switched on, for a permission the user can revoke in\ntheir own browser settings without telling us. Locking a channel we\ncannot promise would be a guarantee in name only — an escalation\nwhose push is off still sends its mail, which is the promise that was\nactually made.\n\nA user with no subscription simply receives nothing on this channel;\nthe switch is about intent, not about whether a browser exists.\n')
 }))
 })
 
@@ -111,7 +112,8 @@ export const updateNotificationPreferencesBody = zod.object({
   "preferences": zod.array(zod.object({
   "eventKey": zod.string(),
   "inApp": zod.boolean().optional().describe('Omit to leave this channel unchanged.'),
-  "email": zod.boolean().optional().describe('Omit to leave this channel unchanged.')
+  "email": zod.boolean().optional().describe('Omit to leave this channel unchanged.'),
+  "push": zod.boolean().optional().describe('Omit to leave this channel unchanged.')
 }))
 })
 
@@ -121,7 +123,8 @@ export const updateNotificationPreferencesResponse = zod.object({
   "category": zod.enum(['MENTION', 'ASSIGNMENT', 'ESCALATION', 'STATUS_REQUEST', 'OTHER']).describe('S-26\'s grouping, so the grid can be sectioned without a second mapping.'),
   "inApp": zod.boolean().describe('Whether the D-043 toast fires. Turning it off never suppresses the bell entry — S-26 is where you go to find what you missed.\n'),
   "email": zod.boolean(),
-  "emailLocked": zod.boolean().describe('D-036. This mail cannot be switched off. Sent rather than inferred from the category so the rule has one home.\n')
+  "emailLocked": zod.boolean().describe('D-036. This mail cannot be switched off. Sent rather than inferred from the category so the rule has one home.\n'),
+  "push": zod.boolean().optional().describe('D-045. Whether a browser notification fires for this event, on every\ndevice the user has granted permission on.\n\nThere is deliberately \*\*no `pushLocked`\*\*. §7.7 gives the guarantee\nto mail; a push only reaches a browser that is still subscribed, on a\ndevice that is switched on, for a permission the user can revoke in\ntheir own browser settings without telling us. Locking a channel we\ncannot promise would be a guarantee in name only — an escalation\nwhose push is off still sends its mail, which is the promise that was\nactually made.\n\nA user with no subscription simply receives nothing on this channel;\nthe switch is about intent, not about whether a browser exists.\n')
 }))
 })
 

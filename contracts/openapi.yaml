@@ -92,7 +92,7 @@ tags:
   - name: reports
     description: Eighteen reports through one parameterised runner, with xlsx/csv/pdf export. S-27.
   - name: notifications
-    description: Twenty-four events across in-app, bell and email, with a per-user preference matrix. §11.
+    description: Twenty-four events across in-app, bell, email and browser push, with a per-user preference matrix. §11.
   - name: chat
     description: Ticket thread, direct message and project channel — three surfaces, one engine. S-25.
   - name: webhooks
@@ -5499,6 +5499,22 @@ components:
           description: >
             D-036. This mail cannot be switched off. Sent rather than inferred
             from the category so the rule has one home.
+        push:
+          type: boolean
+          description: |
+            D-045. Whether a browser notification fires for this event, on every
+            device the user has granted permission on.
+
+            There is deliberately **no `pushLocked`**. §7.7 gives the guarantee
+            to mail; a push only reaches a browser that is still subscribed, on a
+            device that is switched on, for a permission the user can revoke in
+            their own browser settings without telling us. Locking a channel we
+            cannot promise would be a guarantee in name only — an escalation
+            whose push is off still sends its mail, which is the promise that was
+            actually made.
+
+            A user with no subscription simply receives nothing on this channel;
+            the switch is about intent, not about whether a browser exists.
     NotificationPreferenceUpdateRequest:
       type: object
       required: [preferences]
@@ -5513,6 +5529,7 @@ components:
         eventKey: { type: string }
         inApp: { type: boolean, description: Omit to leave this channel unchanged. }
         email: { type: boolean, description: Omit to leave this channel unchanged. }
+        push: { type: boolean, description: Omit to leave this channel unchanged. }
     PendingNotificationsResponse:
       type: object
       required: [data, hasMore]

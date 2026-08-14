@@ -224,6 +224,8 @@ export interface Notification {
 /** D-042. Sparse overrides, as on the server — absence means enabled. */
 export interface NotificationPreference {
   userId: number; eventKey: string; inApp: boolean; email: boolean;
+  /** D-045. Absence means enabled, like the other two — the table stores deviations. */
+  push: boolean;
 }
 export interface EmailLogEntry {
   id: number; ticketId: string; toAddress: string; subject: string; eventKey: string;

@@ -1,4 +1,4 @@
-package com.edunext.edutrack.api.feature.notifications;
+package com.edunext.edutrack.domain.notifications.push;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
