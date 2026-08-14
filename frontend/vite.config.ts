@@ -12,6 +12,14 @@ export default defineConfig({
   define: { global: 'globalThis' },
   server: {
     port: 5173,
+    // Build outputs are not sources, and watching them is how `npm run dev`
+    // dies. A `build-storybook` running alongside the dev server rewrites
+    // `storybook-static/` continuously; Windows locks each file as it is
+    // written, and chokidar's watcher throws `EBUSY` and takes the whole dev
+    // server process down with it — not a reload, a crash. Same for `dist/`
+    // and `coverage/` under a concurrent `build` or `test --coverage`. All
+    // three are gitignored artefacts.
+    watch: { ignored: ['**/storybook-static/**', '**/dist/**', '**/coverage/**'] },
     proxy: {
       '/api': { target: 'http://localhost:8080', changeOrigin: true },
       // The STOMP handshake. `ws: true` is what lets the upgrade through;

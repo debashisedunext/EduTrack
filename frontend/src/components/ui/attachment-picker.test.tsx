@@ -1,8 +1,8 @@
 import * as React from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AttachmentPicker, type AttachmentItem } from './attachment-picker'
+import { AttachmentPicker, type AttachmentItem, type AttachmentPickerHandle } from './attachment-picker'
 
 /**
  * jsdom has no `DataTransfer` constructor and no real file dialog, so a drop is
@@ -250,5 +250,207 @@ describe('AttachmentPicker — limits and disabled state', () => {
     renderPicker({ 'aria-labelledby': 'my-label', 'aria-describedby': 'my-hint' })
     expect(fileInput()).toHaveAttribute('aria-labelledby', 'my-label')
     expect(fileInput().getAttribute('aria-describedby')).toContain('my-hint')
+  })
+})
+
+/* ── Clipboard paste — C-024 ────────────────────────────────────────────── */
+
+function clipboardOf(files: File[], text: Partial<Record<string, string>> = {}) {
+  return {
+    types: [...Object.keys(text), ...(files.length > 0 ? ['Files'] : [])],
+    items: [
+      ...Object.keys(text).map(() => ({ kind: 'string', getAsFile: () => null })),
+      ...files.map((file) => ({ kind: 'file', getAsFile: () => file })),
+    ],
+    files,
+    getData: (type: string) => text[type] ?? '',
+  }
+}
+
+/** What a browser actually hands over for a Snipping Tool capture. */
+function pastedScreenshot(size = 92_160): File {
+  return fileOf('image.png', size, 'image/png')
+}
+
+describe('AttachmentPicker — clipboard paste', () => {
+  it('attaches a screenshot pasted with nothing focused', () => {
+    // §4B.4's point: the most common attachment on the product exists only on
+    // the clipboard. There is no file to drag and nothing to browse to.
+    const { onAdd } = renderPicker()
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot()]) })
+
+    expect(onAdd).toHaveBeenCalledTimes(1)
+    expect(onAdd.mock.calls[0][0][0].name).toMatch(/^screenshot-\d{4}-\d{2}-\d{2}-\d{6}\.png$/)
+  })
+
+  it('takes several screenshots pasted one after another, inside the same second', () => {
+    // The defect worth pinning, and the reason the naming moved into the picker.
+    // The OS clipboard holds one image, so attaching several screenshots is
+    // necessarily paste, paste, paste — and a user doing that beats a one-second
+    // stamp. Every capture also reaches the browser as `image.png`, so a picker
+    // taking that at face value refused the second as a duplicate: paste looked
+    // like it worked once and then stopped.
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date(2026, 7, 12, 14, 30, 5))
+      const onAdd = vi.fn()
+      const onReject = vi.fn()
+      const landed: AttachmentItem[] = []
+
+      const { rerender } = render(<AttachmentPicker items={landed} onAdd={onAdd} onReject={onReject} />)
+
+      for (let n = 0; n < 3; n += 1) {
+        fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot(1024)]) })
+        const file = onAdd.mock.calls[n][0][0] as File
+        landed.push({ id: `${n}`, name: file.name, sizeBytes: 1024, contentType: 'image/png', status: 'ready' })
+        rerender(<AttachmentPicker items={[...landed]} onAdd={onAdd} onReject={onReject} />)
+      }
+
+      expect(onAdd).toHaveBeenCalledTimes(3)
+      expect(onReject).not.toHaveBeenCalled()
+      expect(new Set(landed.map((i) => i.name)).size).toBe(3)
+      expect(screen.getByRole('status')).not.toHaveTextContent(/already attached/i)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('takes several images arriving in a single paste', () => {
+    // The one route that genuinely carries more than one image at a time: a
+    // multi-select copied out of a file manager, or a run of spreadsheet cells.
+    const { onAdd, onReject } = renderPicker()
+
+    fireEvent.paste(document.body, {
+      clipboardData: clipboardOf([pastedScreenshot(1024), pastedScreenshot(2048), pastedScreenshot(4096)]),
+    })
+
+    expect(onReject).not.toHaveBeenCalled()
+    const names = (onAdd.mock.calls[0][0] as File[]).map((f) => f.name)
+    expect(names).toHaveLength(3)
+    expect(new Set(names).size).toBe(3)
+    expect(screen.getByRole('status')).toHaveTextContent('Pasted 3 files')
+  })
+
+  it('runs a paste through the same limits as a drop', () => {
+    // The route must not be a way around the caps: a picker that handed pasted
+    // files straight to `onAdd` would accept what browse refuses.
+    const limits = { maxFileBytes: 10 * MB, maxTotalBytes: 50 * MB, maxFiles: 1 }
+    const { onAdd, onReject } = renderPicker({
+      limits,
+      items: [{ id: '1', name: 'one.png', sizeBytes: 1024, contentType: 'image/png', status: 'ready' }],
+    })
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot()]) })
+
+    expect(onAdd).not.toHaveBeenCalled()
+    expect(onReject).toHaveBeenCalled()
+    expect(screen.getByRole('status')).toHaveTextContent(/may hold 1 attachment/i)
+  })
+
+  it('applies the size cap to a pasted file too', () => {
+    // A named file, because the rename allocates a new `File` over the same
+    // blob and jsdom computes size from content — a fixture's redefined `size`
+    // does not survive it. Nothing is lost in a browser, where the blob really
+    // is that long, but a test that pastes an oversized *screenshot* silently
+    // measures a 1-byte file and passes for the wrong reason.
+    const { onAdd } = renderPicker()
+
+    fireEvent.paste(document.body, {
+      clipboardData: clipboardOf([fileOf('capture.mp4', 12 * MB, 'video/mp4')]),
+    })
+
+    expect(onAdd).not.toHaveBeenCalled()
+    expect(screen.getByRole('status')).toHaveTextContent(/10 MB/)
+  })
+
+  it('says what it took, because a paste has no visible action behind it', () => {
+    // A drop and a browse both have evidence the user produced them. Ctrl+V has
+    // none, so silence reads as "the paste was ignored".
+    renderPicker()
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot()]) })
+
+    expect(screen.getByRole('status')).toHaveTextContent(/^Pasted screenshot-/)
+  })
+
+  it('lets a rejection speak instead of the notice', () => {
+    renderPicker()
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([fileOf('payload.exe', 1024)]) })
+
+    expect(screen.getByRole('status')).toHaveTextContent(/\.exe files are not allowed/i)
+    expect(screen.getByRole('status')).not.toHaveTextContent(/^Pasted/)
+  })
+
+  it('keeps the live region mounted before there is anything to announce', () => {
+    // A region that appears carrying its first message is unreliably announced,
+    // and for paste that first message is the only evidence anything happened.
+    renderPicker()
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
+  })
+
+  it('takes no paste while disabled, and adds no second status region', () => {
+    const { onAdd } = renderPicker({ disabled: true })
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot()]) })
+
+    expect(onAdd).not.toHaveBeenCalled()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('can be opted out of', () => {
+    const { onAdd } = renderPicker({ enablePaste: false })
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([pastedScreenshot()]) })
+
+    expect(onAdd).not.toHaveBeenCalled()
+  })
+})
+
+describe('AttachmentPicker — the addFiles handle', () => {
+  it('validates files pushed in from a rich-text editor', () => {
+    // `RichTextEditor` swallows image pastes itself, so its files reach the
+    // picker through the handle rather than through the document listener.
+    // Going straight to `onAdd` would skip every cap.
+    const onAdd = vi.fn()
+    const onReject = vi.fn()
+    const ref = React.createRef<AttachmentPickerHandle>()
+    render(<AttachmentPicker ref={ref} items={[]} onAdd={onAdd} onReject={onReject} />)
+
+    // Named, not `image.png` — a renamed fixture loses its redefined size under
+    // jsdom, and the cap would then be measured against one byte. See the note
+    // on the size-cap paste test above.
+    act(() => ref.current!.addFiles([fileOf('capture.mp4', 12 * MB, 'video/mp4')]))
+    expect(onAdd).not.toHaveBeenCalled()
+    expect(onReject).toHaveBeenCalled()
+
+    act(() => ref.current!.addFiles([fileOf('gateway-500.png', 1024, 'image/png')]))
+    expect(onAdd).toHaveBeenCalledWith([expect.objectContaining({ name: 'gateway-500.png' })])
+  })
+
+  it('renames the browser bitmap the editor hands over', () => {
+    // The editor never produces a `DataTransfer` — it filters
+    // `clipboardData.files` itself and passes plain `File[]`, still carrying the
+    // `image.png` every capture has. Without the rename here the second
+    // screenshot pasted into a description is refused as a duplicate, which is
+    // this whole task's defect arriving on the surface most likely to hit it.
+    const onAdd = vi.fn()
+    const ref = React.createRef<AttachmentPickerHandle>()
+    render(<AttachmentPicker ref={ref} items={[]} onAdd={onAdd} />)
+
+    act(() => ref.current!.addFiles([fileOf('image.png', 2048, 'image/png')]))
+
+    expect(onAdd.mock.calls[0][0][0].name).toMatch(/^screenshot-\d{4}-\d{2}-\d{2}-\d{6}\.png$/)
+  })
+
+  it('announces what the handle took, the same as a paste', () => {
+    const ref = React.createRef<AttachmentPickerHandle>()
+    render(<AttachmentPicker ref={ref} items={[]} onAdd={vi.fn()} />)
+
+    act(() => ref.current!.addFiles([fileOf('gateway-500.png', 1024, 'image/png')]))
+
+    expect(screen.getByRole('status')).toHaveTextContent('Pasted gateway-500.png')
   })
 })

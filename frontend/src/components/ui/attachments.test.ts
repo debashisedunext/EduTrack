@@ -3,10 +3,15 @@ import {
   ATTACHMENT_ACCEPT,
   ATTACHMENT_DEFAULT_LIMITS,
   attachmentExtension,
+  clipboardAttachmentName,
+  clipboardHasText,
+  filesFromClipboard,
   filesFromDataTransfer,
   formatFileSize,
   isAllowedAttachmentExtension,
+  isGenericClipboardName,
   isPreviewableImage,
+  renameClipboardFiles,
   selectAttachments,
   validateAttachmentFile,
 } from './attachments'
@@ -231,5 +236,218 @@ describe('filesFromDataTransfer', () => {
   it('is empty rather than throwing when there is no transfer at all', () => {
     expect(filesFromDataTransfer(null)).toEqual([])
     expect(filesFromDataTransfer(undefined)).toEqual([])
+  })
+})
+
+/* ── Clipboard — C-024 ──────────────────────────────────────────────────── */
+
+describe('isGenericClipboardName', () => {
+  it('recognises what a browser calls a bitmap it invented', () => {
+    // Chrome, Edge and Firefox all hand a Snipping Tool capture over as
+    // `image.png`. Safari has used `Image (1).png`. Some paths supply nothing.
+    expect(isGenericClipboardName('image.png')).toBe(true)
+    expect(isGenericClipboardName('Image (1).png')).toBe(true)
+    expect(isGenericClipboardName('')).toBe(true)
+    expect(isGenericClipboardName('   ')).toBe(true)
+  })
+
+  it('leaves a name that says something alone', () => {
+    expect(isGenericClipboardName('error-log.txt')).toBe(false)
+    expect(isGenericClipboardName('gateway-500.png')).toBe(false)
+    // A prefix match is not enough — this file is not the browser's invention.
+    expect(isGenericClipboardName('image-of-the-crash.png')).toBe(false)
+  })
+})
+
+describe('clipboardAttachmentName', () => {
+  const at = new Date(2026, 7, 12, 14, 30, 5)
+
+  it('names a pasted screenshot from the clock, so two in a row do not collide', () => {
+    // The defect this exists for: every capture arrives as `image.png`, so the
+    // duplicate check refuses the second one and paste looks broken on the
+    // single most common attachment action §4B.4 has.
+    expect(clipboardAttachmentName(fileOf('image.png', 2048, 'image/png'), at)).toBe('screenshot-2026-08-12-143005.png')
+  })
+
+  it('keeps a real name, because it carries what the file is', () => {
+    expect(clipboardAttachmentName(fileOf('error-log.txt', 2048, 'text/plain'), at)).toBe('error-log.txt')
+  })
+
+  it('steps around a name already attached, so a second paste is never a duplicate', () => {
+    // The bug this replaced: the OS clipboard holds one image, so "attach
+    // several screenshots" is paste, paste, paste — and a user doing that beats
+    // a one-second stamp. Two different captures inside the same second used to
+    // collide, and the collision was refused as a duplicate, so the second
+    // screenshot vanished and paste looked like it only worked once.
+    expect(clipboardAttachmentName(fileOf('image.png', 1024, 'image/png'), at, ['screenshot-2026-08-12-143005.png'])).toBe(
+      'screenshot-2026-08-12-143005-2.png',
+    )
+  })
+
+  it('keeps stepping for a third and a fourth in the same second', () => {
+    const taken = ['screenshot-2026-08-12-143005.png', 'screenshot-2026-08-12-143005-2.png']
+    expect(clipboardAttachmentName(fileOf('image.png', 1024, 'image/png'), at, taken)).toBe(
+      'screenshot-2026-08-12-143005-3.png',
+    )
+  })
+
+  it('compares case-insensitively, like the duplicate check it has to stay ahead of', () => {
+    expect(clipboardAttachmentName(fileOf('image.png', 1024, 'image/png'), at, ['SCREENSHOT-2026-08-12-143005.PNG'])).toBe(
+      'screenshot-2026-08-12-143005-2.png',
+    )
+  })
+
+  it('normalises jpeg to the extension the allow-list carries', () => {
+    expect(clipboardAttachmentName(fileOf('image.jpeg', 1024, 'image/jpeg'), at)).toBe('screenshot-2026-08-12-143005.jpg')
+  })
+
+  it('does not invent an extension for a type it does not know', () => {
+    // Guessing `png` would name a file something it is not, and C-025's
+    // server-side sniffing would refuse what this side had just accepted.
+    // `tiff` falls off the allow-list honestly instead.
+    const named = clipboardAttachmentName(fileOf('image', 1024, 'image/tiff'), at)
+    expect(named).toBe('screenshot-2026-08-12-143005.tiff')
+    expect(isAllowedAttachmentExtension(named)).toBe(false)
+  })
+
+  it('keeps svg recognisable as svg so it is refused as one', () => {
+    // A scriptable document, deliberately off §4B.4's list — C-066 narrowed
+    // §3.9's `data:image/*` the same way and for the same reason.
+    const named = clipboardAttachmentName(fileOf('image', 1024, 'image/svg+xml'), at)
+    expect(named).toBe('screenshot-2026-08-12-143005.svg')
+    expect(isAllowedAttachmentExtension(named)).toBe(false)
+  })
+
+  it('leaves a typeless file bare rather than guessing', () => {
+    const named = clipboardAttachmentName(fileOf('', 1024, ''), at)
+    expect(named).toBe('pasted-file-2026-08-12-143005')
+    expect(isAllowedAttachmentExtension(named)).toBe(false)
+  })
+})
+
+describe('filesFromClipboard', () => {
+  /** Minimal stand-in — jsdom has no `DataTransfer` constructor. */
+  function clipboardOf(
+    items: { kind: string; file?: File }[],
+    text: Partial<Record<'text/plain' | 'text/html', string>> = {},
+  ): DataTransfer {
+    const types = [...Object.keys(text), ...(items.some((i) => i.kind === 'file') ? ['Files'] : [])]
+    return {
+      types,
+      items: items.map((item) => ({ kind: item.kind, getAsFile: () => item.file ?? null })),
+      files: items.map((i) => i.file).filter(Boolean),
+      getData: (type: string) => text[type as 'text/plain'] ?? '',
+    } as unknown as DataTransfer
+  }
+
+  it('extracts the file and leaves naming to the picker', () => {
+    // Extraction only — the picker renames, because only it knows what is
+    // already attached and therefore what a new name must avoid.
+    const png = fileOf('image.png', 2048, 'image/png')
+    expect(filesFromClipboard(clipboardOf([{ kind: 'file', file: png }]))).toEqual([png])
+  })
+
+  it('takes every file in a multi-select, not just the first', () => {
+    // A multi-select copied out of a file manager arrives exactly this way, and
+    // it is the one route that genuinely carries several images at once.
+    const files = [
+      fileOf('one.png', 1024, 'image/png'),
+      fileOf('two.png', 1024, 'image/png'),
+      fileOf('three.png', 1024, 'image/png'),
+    ]
+    expect(filesFromClipboard(clipboardOf(files.map((file) => ({ kind: 'file', file }))))).toEqual(files)
+  })
+
+  it('ignores the text entry a copied web image brings with it', () => {
+    // Copying an image out of a page puts the `<img>` tag on the clipboard as
+    // `text/html` beside the file; only `kind` separates them.
+    const png = fileOf('image.png', 1024, 'image/png')
+    expect(filesFromClipboard(clipboardOf([{ kind: 'string' }, { kind: 'file', file: png }]))).toEqual([png])
+  })
+
+  it('yields nothing for a text-only paste', () => {
+    expect(filesFromClipboard(clipboardOf([{ kind: 'string' }], { 'text/plain': 'hello' }))).toEqual([])
+  })
+
+  it('is empty rather than throwing when there is no clipboard at all', () => {
+    expect(filesFromClipboard(null)).toEqual([])
+    expect(filesFromClipboard(undefined)).toEqual([])
+  })
+})
+
+describe('renameClipboardFiles', () => {
+  const at = new Date(2026, 7, 12, 14, 30, 5)
+
+  it('renames the browser bitmap and keeps the blob behind it', () => {
+    const [renamed] = renameClipboardFiles([fileOf('image.png', 2048, 'image/png')], { now: at })
+    expect(renamed.name).toBe('screenshot-2026-08-12-143005.png')
+    expect(renamed.type).toBe('image/png')
+  })
+
+  it('gives three images in one paste three distinct names', () => {
+    // Copying a run of spreadsheet cells, or several files at once, arrives as
+    // one event carrying several bitmaps — all of them called `image.png`.
+    const names = renameClipboardFiles(
+      [
+        fileOf('image.png', 1024, 'image/png'),
+        fileOf('image.png', 1024, 'image/png'),
+        fileOf('image.png', 1024, 'image/png'),
+      ],
+      { now: at },
+    ).map((f) => f.name)
+
+    expect(names).toEqual([
+      'screenshot-2026-08-12-143005.png',
+      'screenshot-2026-08-12-143005-2.png',
+      'screenshot-2026-08-12-143005-3.png',
+    ])
+    expect(new Set(names).size).toBe(3)
+  })
+
+  it('steps around what is already attached', () => {
+    const [renamed] = renameClipboardFiles([fileOf('image.png', 1024, 'image/png')], {
+      now: at,
+      taken: ['screenshot-2026-08-12-143005.png'],
+    })
+    expect(renamed.name).toBe('screenshot-2026-08-12-143005-2.png')
+  })
+
+  it('does not hand a generic file the name a real one in the same batch just took', () => {
+    const names = renameClipboardFiles(
+      [fileOf('screenshot-2026-08-12-143005.png', 1024, 'image/png'), fileOf('image.png', 1024, 'image/png')],
+      { now: at },
+    ).map((f) => f.name)
+    expect(names).toEqual(['screenshot-2026-08-12-143005.png', 'screenshot-2026-08-12-143005-2.png'])
+  })
+
+  it('leaves a copied file from a file manager under its own name, by identity', () => {
+    const log = fileOf('payment-trace.log', 4096, '')
+    expect(renameClipboardFiles([log], { now: at })[0]).toBe(log)
+  })
+})
+
+describe('clipboardHasText', () => {
+  function clipboardOf(text: Partial<Record<string, string>>): DataTransfer {
+    return {
+      types: Object.keys(text),
+      getData: (type: string) => text[type] ?? '',
+    } as unknown as DataTransfer
+  }
+
+  it('is true for text a field would actually receive', () => {
+    expect(clipboardHasText(clipboardOf({ 'text/plain': 'CRM-26-00347' }))).toBe(true)
+    expect(clipboardHasText(clipboardOf({ 'text/html': '<b>hi</b>' }))).toBe(true)
+  })
+
+  it('is false for the whitespace Chrome ships beside some image copies', () => {
+    // The guard for "do not hijack an ordinary paste" hangs on this: a newline
+    // is not text the user meant to paste, and treating it as such would let a
+    // screenshot fall on the floor.
+    expect(clipboardHasText(clipboardOf({ 'text/plain': '\n' }))).toBe(false)
+  })
+
+  it('is false with no clipboard, and for a files-only paste', () => {
+    expect(clipboardHasText(null)).toBe(false)
+    expect(clipboardHasText(clipboardOf({}))).toBe(false)
   })
 })

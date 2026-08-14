@@ -519,3 +519,96 @@ describe('S-19 actions — C-013', () => {
     expect(second).not.toBe(first)
   })
 })
+
+/* ── Clipboard paste — C-024 ────────────────────────────────────────────── */
+
+describe('CreateTicketPage — pasting a screenshot', () => {
+  /** jsdom has no clipboard; testing-library copies a plain object onto the event. */
+  function clipboardOf(files: File[], text: Partial<Record<string, string>> = {}) {
+    return {
+      types: [...Object.keys(text), ...(files.length > 0 ? ['Files'] : [])],
+      items: [
+        ...Object.keys(text).map(() => ({ kind: 'string', getAsFile: () => null })),
+        ...files.map((file) => ({ kind: 'file', getAsFile: () => file })),
+      ],
+      files,
+      getData: (type: string) => text[type] ?? '',
+    }
+  }
+
+  /** What every browser hands over for a Snipping Tool capture. */
+  const capture = () => new File(['x'], 'image.png', { type: 'image/png' })
+
+  const attachedFiles = () => screen.findByRole('list', { name: 'Attached files' })
+
+  it('stages a screenshot pasted with nothing focused', async () => {
+    // The end of the wiring the unit tests only cover in halves: the document
+    // listener, the picker's validation and deferred-mode staging, on the real
+    // screen. Nothing focuses the drop zone, which is the whole reason the
+    // listener is not on the control.
+    renderPage()
+    await formReady()
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([capture()]) })
+
+    expect(within(await attachedFiles()).getByText(/^screenshot-/)).toBeInTheDocument()
+  })
+
+  it('stages three screenshots pasted one after another', async () => {
+    // What a support agent actually does. The OS clipboard holds one image, so
+    // several screenshots means paste, paste, paste — and every one of them
+    // reaches the browser named `image.png`, faster than a one-second stamp can
+    // separate them. Before the picker disambiguated the name, the second and
+    // third were refused as duplicates of the first and simply never appeared.
+    renderPage()
+    await formReady()
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([capture()]) })
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([capture()]) })
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([capture()]) })
+
+    const rows = within(await attachedFiles()).getAllByText(/^screenshot-/)
+    expect(rows).toHaveLength(3)
+    expect(new Set(rows.map((r) => r.textContent)).size).toBe(3)
+  })
+
+  it('stages every image of a multi-file paste', async () => {
+    // A multi-select copied out of a file manager — the one route that carries
+    // several images in a single event.
+    renderPage()
+    await formReady()
+
+    fireEvent.paste(document.body, { clipboardData: clipboardOf([capture(), capture(), capture()]) })
+
+    expect(within(await attachedFiles()).getAllByText(/^screenshot-/)).toHaveLength(3)
+  })
+
+  it('stages a screenshot pasted into the description exactly once', async () => {
+    // Two handlers see this paste: `RichTextEditor` swallows image files itself
+    // and hands them to `onPasteFiles`, and the event then bubbles to the
+    // document listener. Acting in both places attaches every pasted screenshot
+    // twice — the listener stands down for a contentEditable so it does not.
+    renderPage()
+    await formReady()
+
+    fireEvent.paste(document.querySelector('[contenteditable="true"]')!, {
+      clipboardData: clipboardOf([capture()]),
+    })
+
+    expect(within(await attachedFiles()).getAllByText(/^screenshot-/)).toHaveLength(1)
+  })
+
+  it('leaves an ordinary text paste in the title alone', async () => {
+    // A file on the clipboard is not evidence the user meant to attach it —
+    // copying an image from a web page brings an `<img>` tag along as
+    // `text/html`. In a text field the text wins.
+    renderPage()
+    await formReady()
+
+    fireEvent.paste(screen.getByLabelText(/Title \/ summary/), {
+      clipboardData: clipboardOf([capture()], { 'text/html': '<img src="x">' }),
+    })
+
+    expect(screen.queryByRole('list', { name: 'Attached files' })).toBeNull()
+  })
+})

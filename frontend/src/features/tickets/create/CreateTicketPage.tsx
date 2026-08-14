@@ -23,7 +23,7 @@ import { SearchableDropdown } from '@/components/ui/searchable-dropdown'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
-import { AttachmentPicker } from '@/components/ui/attachment-picker'
+import { AttachmentPicker, type AttachmentPickerHandle } from '@/components/ui/attachment-picker'
 import { toast } from '@/components/ui/use-toast'
 import { createTicketBodyDescriptionMax } from '@/api/generated/zod/tickets/tickets.zod'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
@@ -163,6 +163,15 @@ export function CreateTicketPage() {
   // `ticketId: null` — deferred mode. Nothing uploads until `flush` is handed
   // the ID the 201 returns; see the picker in the Extra group below.
   const attachments = useTicketAttachments({ ticketId: null })
+
+  // C-024. `RichTextEditor` intercepts an image paste itself and hands the files
+  // out through `onPasteFiles`; without a handler it drops them, which is the
+  // right default for the component and the wrong outcome on this screen — the
+  // description's own hint invites the user to paste from a client's email.
+  // Routing them through the picker's handle rather than straight to
+  // `attachments.add` is what keeps them inside the same running totals as a
+  // drop: `add` uploads whatever it is given, and validation lives in the picker.
+  const pickerRef = React.useRef<AttachmentPickerHandle>(null)
 
   // Which action is in flight, rather than a single `isSubmitting`: with four
   // buttons the user needs to see which one they pressed, and all four have to
@@ -519,6 +528,7 @@ export function CreateTicketPage() {
                     showCount
                     maxLength={createTicketBodyDescriptionMax}
                     placeholder="What happened, what was expected, and how to reproduce it."
+                    onPasteFiles={(files) => pickerRef.current?.addFiles(files)}
                   />
                 )}
               />
@@ -709,11 +719,12 @@ export function CreateTicketPage() {
             id="ticket-attachments"
             label="Attachments"
             className="sm:col-span-2"
-            hint="Uploaded once the ticket is created. Images, documents, zip and mp4 — scanned before anyone can open them."
+            hint="Paste a screenshot anywhere on this form, drag files in, or browse. Uploaded once the ticket is created; scanned before anyone can open them."
           >
             {(aria) => (
               <AttachmentPicker
                 {...aria}
+                ref={pickerRef}
                 items={attachments.items}
                 onAdd={attachments.add}
                 onRemove={attachments.remove}
@@ -724,7 +735,6 @@ export function CreateTicketPage() {
 
           <div className="sm:col-span-2 flex flex-wrap items-center gap-2 rounded-control bg-subtle px-3 py-2.5">
             <span className="text-caption text-content-muted">Arriving in their own tasks:</span>
-            <Chip>Clipboard paste · C-024</Chip>
             <Chip>First comment · C-029</Chip>
           </div>
         </FieldGroup>

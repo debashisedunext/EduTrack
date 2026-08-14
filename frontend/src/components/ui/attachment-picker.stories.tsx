@@ -22,7 +22,7 @@ const meta: Meta<typeof AttachmentPicker> = {
     docs: {
       description: {
         component:
-          'Drag-and-drop plus file picker over §4B.4’s allow-list and limits. Clipboard paste is C-024 and plugs into the same `onAdd`.',
+          'Drag-and-drop, file picker and clipboard paste over §4B.4’s allow-list and limits. All three routes run through the same validation before anything reaches `onAdd`.',
       },
     },
   },
@@ -59,6 +59,41 @@ function Stateful({ initial = [], ...props }: { initial?: AttachmentItem[] } & P
 
 /** Empty, with the full drop zone. What the create form and ticket detail show. */
 export const Default: Story = { render: () => <Stateful /> }
+
+/**
+ * Clipboard paste — C-024.
+ *
+ * The one story that needs a real browser to mean anything, and Storybook is
+ * one: take a screenshot with Snipping Tool (or `Win`+`Shift`+`S`), click
+ * anywhere on this page, and press `Ctrl`+`V`. The listener is on `document`,
+ * not on the control — nothing ever focuses a drop zone, so the whole screen has
+ * to be the target.
+ *
+ * Two things to watch, because they are the substance of the task:
+ *
+ * 1. **Paste three in a row, quickly.** The OS clipboard holds one image, so
+ *    several screenshots means pasting several times — and every capture reaches
+ *    the browser as `image.png`, faster than the one-second stamp can separate
+ *    them. All three land, under `screenshot-…`, `-2` and `-3`.
+ * 2. **Paste text into the field below.** It types normally. A file on the
+ *    clipboard is not on its own evidence the user meant to attach anything —
+ *    copying an image from a web page brings an `<img>` tag along as
+ *    `text/html`, and in a text field the text wins.
+ */
+export const ClipboardPaste: Story = {
+  render: () => (
+    <div className="flex max-w-xl flex-col gap-3">
+      <label className="flex flex-col gap-1 text-caption text-content-muted">
+        Paste text here — it is left alone
+        <input
+          className="rounded-control border border-border bg-surface px-3 py-2 text-sm text-content"
+          placeholder="Ctrl+V some text"
+        />
+      </label>
+      <Stateful />
+    </div>
+  ),
+}
 
 /**
  * Every status at once.
