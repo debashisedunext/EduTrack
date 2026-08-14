@@ -229,6 +229,45 @@ edutrack:
     bucket: ${S3_BUCKET:edutrack}
     access-key: ${S3_ACCESS_KEY:minioadmin}
     secret-key: ${S3_SECRET_KEY:minioadmin}
+    # MinIO ignores the region and the AWS SDK insists on one; a signature is
+    # computed over it either way. Path style is required for MinIO, where the
+    # bucket is not a DNS name, and is harmless against real S3.
+    region: ${S3_REGION:us-east-1}
+    path-style: ${S3_PATH_STYLE:true}
+
+  # C-025 · attachment security. Blueprint §4B.4.
+  attachments:
+    # How long a download URL is good for. "Short-lived" in §4B.4; five minutes
+    # is long enough to click a link and open the file, short enough that the
+    # copy left in a browser history or a proxy log is worthless by the time
+    # anyone reads it.
+    signed-url-ttl: ${ATTACHMENT_SIGNED_URL_TTL:PT5M}
+
+    # §4B.4's caps. max-file-bytes MUST track spring.servlet.multipart's
+    # max-file-size above — the container refuses the body first, and if the two
+    # disagree the caller gets a different error on either side of the gap.
+    # Making these settings-backed rather than properties is C-027.
+    max-file-bytes: ${ATTACHMENT_MAX_FILE_BYTES:10485760}      # 10 MB
+    max-ticket-bytes: ${ATTACHMENT_MAX_TICKET_BYTES:52428800}  # 50 MB
+    max-files: ${ATTACHMENT_MAX_FILES:20}
+
+    scan:
+      # clamd, spoken to over INSTREAM. Off by default, and off does NOT mean
+      # "treat everything as clean": with no scanner every upload is stored,
+      # stays PENDING and is never downloadable. That is the correct failure —
+      # §4B.4 is "scan BEFORE the file becomes visible", and a file nobody
+      # scanned has not satisfied it.
+      enabled: ${CLAMAV_ENABLED:false}
+      host: ${CLAMAV_HOST:localhost}
+      port: ${CLAMAV_PORT:3310}
+      timeout: ${CLAMAV_TIMEOUT:PT30S}
+
+      # Serve a file whose scan did NOT complete. AttachmentScanConfig REFUSES
+      # TO START with this true outside `local` — the same guard RefreshTokenConfig
+      # puts on secure-cookie and TotpConfig on the placeholder key, and for the
+      # same reason: an outage would otherwise serve every upload unscanned and
+      # nothing about the running product would look different.
+      fail-open: false
 
   webhooks:
     email:
@@ -267,6 +306,16 @@ spring:
 logging:
   level:
     com.edunext.edutrack: DEBUG
+
+edutrack:
+  attachments:
+    scan:
+      # C-025. Local development has no clamd, and without this every attachment
+      # would be stored and then be permanently undownloadable — which is the
+      # correct production behaviour and makes the feature untestable on a laptop.
+      # Set ONLY here: AttachmentScanConfig refuses to start with it anywhere
+      # else, so it cannot reach an environment that matters.
+      fail-open: true
 
 ---
 # ---------------------------------------------------------------------------
