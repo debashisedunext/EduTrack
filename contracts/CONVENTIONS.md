@@ -103,6 +103,7 @@ each other:**
 | `PUT /projects/{id}/settings` | Wholesale replace of three settings behind one Save button |
 | `PATCH /clients/{id}` | Field updates |
 | `PATCH /tickets/{id}` | Field updates |
+| `PATCH /masters/priorities/{id}` | Field updates, and two of them are org-wide switches: retiring drops the level's column out of every project's SLA matrix, and the escalation flag is a single-writer pointer §6 needs to resolve to exactly one row |
 
 **It deliberately does not apply here**, and these are not oversights:
 

@@ -8,6 +8,7 @@ Resource, role, project, task type, priority, calendar, notification templates. 
 
 | Task | Files | Screen |
 |---|---|---|
+| **B-021** Priority / level master | `priorities/` — [README](priorities/README.md) | S-12 |
 | **B-023** Working calendar | `Calendar*` | S-14 |
 | **B-024** Working-hours service | `domain.masters.WorkingHoursService` | — |
 

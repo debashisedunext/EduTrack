@@ -47,59 +47,34 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { Level } from './level';
-import type { PriorityDefaultSlaHrs } from './priorityDefaultSlaHrs';
+import type { PriorityPatchRequestDefaultSlaHrs } from './priorityPatchRequestDefaultSlaHrs';
+import type { PriorityPatchRequestAutoEscalates } from './priorityPatchRequestAutoEscalates';
+import type { PriorityPatchRequestSeq } from './priorityPatchRequestSeq';
+import type { PriorityPatchRequestIsActive } from './priorityPatchRequestIsActive';
 
 /**
- * S-12. `level` is the stable identifier — it is the `code` column, and it
-is the value `tickets.level` stores. `name` is display text an Admin may
-change; **key behaviour off `level`.**
-
-The property is called `level` rather than `code` because that is what
-it has been called since D-001 and what Stream C's `CreateTicketPage`
-and `TicketListPage` already read. Renaming it to match the column would
-break both for no gain.
-
-Every property is populated on every response and none is `required` —
-B-016's call on `Project.status`, repeated by B-020 on `TaskType`: a
-required property is an obligation on every consumer that constructs
-one, and the ticket-form fixtures construct these.
+ * Every field optional; an omitted one keeps its stored value.
+`isActive: false` is how a level is retired — there is no delete.
 
  */
-export interface Priority {
-  id?: number;
-  /** The `code` column. Immutable once created. */
+export interface PriorityPatchRequest {
+  /** Here **only so that a changed one can be refused with `409`.**
+Omitting it from the schema would let Jackson discard it silently
+and report a rename that did not happen. `tickets.level` stores this
+value and is not a foreign key, so a rename orphans history rather
+than cascading. Resending the stored value is a no-op.
+ */
   level?: Level;
-  /** Display text: Low, Medium, High, Critical. */
+  /**
+   * @minLength 1
+   * @maxLength 40
+   */
   name?: string;
   /** @pattern ^#[0-9A-Fa-f]{6}$ */
   colour?: string;
-  /** Working hours. Rung 4 of the §6 SLA ladder (`PRIORITY_DEFAULT`) —
-the last rung that still varies with the level, which is why it is
-tried before the task type's. Null means this level contributes no
-default and resolution falls through to the task type.
- */
-  defaultSlaHrs?: PriorityDefaultSlaHrs;
-  /** The level the SLA engine escalates *to* on breach (§6) — the
-`is_escalation_trigger` column. **Exactly one active level carries
-it**, enforced by `PriorityService`: setting it here clears it
-elsewhere, and clearing the last one is refused.
- */
-  autoEscalates?: boolean;
-  /** Severity rank and display order — never the id. Also the column
-order of every project's SLA matrix.
- */
-  seq?: number;
-  isActive?: boolean;
-  /** Tickets currently at this level. Never blocks a retire; informs it. */
-  ticketCount?: number;
-  /** Task types whose `defaultLevel` is this level. **This one does block
-a retire** — `TaskTypeService` refuses a retired level as a default,
-so retiring would leave those types unsaveable on their own screen.
- */
-  taskTypeCount?: number;
-  /** `sla_policies` rows written at this level, across all projects.
-Retiring drops the level's whole column from every SLA matrix and
-these rows stop resolving. Never blocks a retire; informs it.
- */
-  slaPolicyCount?: number;
+  /** @minimum 0 */
+  defaultSlaHrs?: PriorityPatchRequestDefaultSlaHrs;
+  autoEscalates?: PriorityPatchRequestAutoEscalates;
+  seq?: PriorityPatchRequestSeq;
+  isActive?: PriorityPatchRequestIsActive;
 }

@@ -47,4 +47,11 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * Working hours. Rung 4 of the §6 SLA ladder (`PRIORITY_DEFAULT`) —
+the last rung that still varies with the level, which is why it is
+tried before the task type's. Null means this level contributes no
+default and resolution falls through to the task type.
+
+ */
 export type PriorityDefaultSlaHrs = number | null;

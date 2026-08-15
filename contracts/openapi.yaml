@@ -2361,14 +2361,187 @@ paths:
     get:
       tags: [masters]
       operationId: listPriorities
-      summary: Priority levels
+      summary: Priority levels (S-12)
+      description: |
+        The Priority / Level Master, and the level picker on the create-ticket
+        form (§4B.1). Four rows seeded by B-002 — Low, Medium, High, Critical.
+
+        Returned in `seq` order. **`seq` is the severity rank, never the id**:
+        the SLA tab's column axis is built from this list in this order
+        (`SlaMatrixService.activeLevels`), so reordering here reorders every
+        project's SLA matrix.
+
+        **Active rows only, unless `includeInactive` is set — and this is a
+        deliberate departure from `listTaskTypes` and `listModules`**, which
+        return retired rows to every caller. Those two are safe to widen because
+        their consumers already filter: `CreateTicketPage` drops
+        `isActive === false` task types before building its picker. Nothing
+        filters this list, because until B-021 it could not contain a retired
+        row — so returning one by default would put a retired level straight
+        into the create form's `LevelPicker` and the ticket list's level filter,
+        both of them Stream C's. The default is what those two screens already
+        assume; the master grid asks for the rest.
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: |
+            `true` returns retired levels as well, carrying `isActive: false`.
+            The S-12 grid sets it; a picker should not.
       responses:
         '200':
-          description: OK.
+          description: OK. A bounded list — no `meta`, the set is complete.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PriorityListResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [masters]
+      operationId: createPriority
+      summary: Create a priority level (S-12)
+      description: |
+        Admin only — `master.write`, blueprint §2's "Master data (task types,
+        SLA, workflow, holidays)".
+
+        **S-12 says "Admin can add further levels without a release", and this
+        operation cannot yet deliver it.** `Level` is a closed four-value enum,
+        and it types `Ticket.level`, `Ticket.originalLevel`,
+        `TaskType.defaultLevel`, `SlaPolicyWrite.level`, `SlaPolicyCell.level`,
+        `ChangeTicketPriorityBody.level` and two query parameters. A fifth code
+        stored here would serialise into a response the generated TypeScript
+        client's own zod schema rejects, and Stream C's `LevelPicker` and
+        `columns.tsx` key their chip variants off `Record<Level, …>` maps that
+        a fifth key would leave `undefined`.
+
+        So a code outside the four is refused with `400` and a message naming
+        exactly what has to change and who owns it, rather than accepted and
+        discovered later as a rendering failure — the same refusal
+        `TaskTypeService.normaliseLevel` already makes for `defaultLevel`, and
+        for the same reason. **Opening the enum is a coordinated change across
+        Streams A, C and D, not a change this screen can make alone.**
+
+        What this operation *is* for meanwhile: re-creating a level that was
+        retired is done through `PATCH` (`isActive: true`), not here.
+
+        `code` is upper-cased and must be unique; `name` must be unique
+        case-insensitively. Neither is what `tickets.level` stores by
+        accident — the column holds `code`, deliberately not a foreign key, so
+        that retiring a level leaves history intact.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PriorityWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PriorityResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /masters/priorities/{priorityId}:
+    parameters: [{ $ref: '#/components/parameters/PriorityId' }]
+    get:
+      tags: [masters]
+      operationId: getPriority
+      summary: One priority level (S-12)
+      description: |
+        **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+        CONVENTIONS.md §5 — the same gap B-011, B-016 and B-020 closed for
+        users, projects and task types. A write whose precondition has no read
+        to come from is not a strict endpoint, it is an uncallable one.
+
+        The tag is taken over the content, the three usage counts included. A
+        ticket raised at this level while the edit dialog is open therefore
+        costs a reload, which is correct: those counts are what the retire
+        decision was made against.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PriorityResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [masters]
+      operationId: updatePriority
+      summary: Edit a priority level, or retire it (S-12)
+      description: |
+        Admin only. A partial update — an omitted field keeps its stored value.
+
+        **`code` is in the body only so that sending a different one can be
+        refused with `409`**, exactly as on `PATCH /masters/task-types/{id}`.
+        `tickets.level` stores the code and is not a foreign key, so a rename
+        here would not cascade — it would orphan every ticket ever raised at
+        this level. Resending the stored value is a no-op; this screen submits
+        the whole form on every save.
+
+        **`isActive: false` retires the level, and there is no delete.** A
+        retire is not local, and the grid states its three consequences before
+        the click:
+
+        - the level leaves the create form's picker and the ticket list filter;
+        - **a whole column leaves every project's SLA matrix** —
+          `SlaMatrixService` builds its column axis from the active levels — so
+          any `sla_policies` row at this level stops resolving;
+        - `defaultSlaHrs` stops answering rung 4 (`PRIORITY_DEFAULT`) of the §6
+          ladder for tickets at this level.
+
+        Tickets and SLA rows never block a retire; the counts inform it.
+        **Task types do block it**, with `409`: `TaskTypeService` refuses a
+        retired level as a `defaultLevel`, so retiring a level three task types
+        default to would leave those types unsaveable on their own screen.
+        Repoint them first.
+
+        **The escalation flag is single-writer and cannot be left unset.**
+        Setting `autoEscalates: true` on one level clears it from the others,
+        and clearing the last one is refused with `409` — §6 auto-promotes a
+        ticket crossing its Planned Close Date *to* the flagged level, so zero
+        flags silently switches that engine off and two make its target
+        ambiguous. The column is a bare `TINYINT DEFAULT 0` with no constraint;
+        this is where the invariant lives.
+
+        `If-Match` is required, not optional; a write without one is refused
+        with `428`. Read the current tag from
+        `GET /masters/priorities/{priorityId}`.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PriorityPatchRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PriorityResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: '`If-Match` absent. The precondition is required, not opt-in.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /masters/permissions:
     get:
@@ -3586,6 +3759,16 @@ components:
         `roles.id` is an `INT`, not a `BIGINT` like every other identifier here:
         blueprint §8.2 declares `users.role_id INT` and A-003 kept it, so the key
         type follows the column rather than the house convention.
+    PriorityId:
+      name: priorityId
+      in: path
+      required: true
+      schema: { type: integer, format: int32 }
+      description: |
+        `priorities.id` is an `INT`, for the same reason `RoleId` is: A-007
+        declared the column that way. Note that nothing points at it —
+        `tickets.level` stores the *code*, deliberately not this key, which is
+        what lets a level be retired without orphaning history.
     HolidayId:
       name: holidayId
       in: path
@@ -5462,16 +5645,122 @@ components:
       properties: { data: { type: array, items: { $ref: '#/components/schemas/Module' } } }
     Priority:
       type: object
+      description: |
+        S-12. `level` is the stable identifier — it is the `code` column, and it
+        is the value `tickets.level` stores. `name` is display text an Admin may
+        change; **key behaviour off `level`.**
+
+        The property is called `level` rather than `code` because that is what
+        it has been called since D-001 and what Stream C's `CreateTicketPage`
+        and `TicketListPage` already read. Renaming it to match the column would
+        break both for no gain.
+
+        Every property is populated on every response and none is `required` —
+        B-016's call on `Project.status`, repeated by B-020 on `TaskType`: a
+        required property is an obligation on every consumer that constructs
+        one, and the ticket-form fixtures construct these.
       properties:
-        id: { type: integer, format: int64 }
-        level: { $ref: '#/components/schemas/Level' }
+        id: { type: integer, format: int32 }
+        level:
+          $ref: '#/components/schemas/Level'
+          description: The `code` column. Immutable once created.
+        name: { type: string, description: 'Display text: Low, Medium, High, Critical.' }
         colour: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
-        defaultSlaHrs: { type: [number, 'null'], format: double }
-        autoEscalates: { type: boolean }
+        defaultSlaHrs:
+          type: [number, 'null']
+          format: double
+          description: |
+            Working hours. Rung 4 of the §6 SLA ladder (`PRIORITY_DEFAULT`) —
+            the last rung that still varies with the level, which is why it is
+            tried before the task type's. Null means this level contributes no
+            default and resolution falls through to the task type.
+        autoEscalates:
+          type: boolean
+          description: |
+            The level the SLA engine escalates *to* on breach (§6) — the
+            `is_escalation_trigger` column. **Exactly one active level carries
+            it**, enforced by `PriorityService`: setting it here clears it
+            elsewhere, and clearing the last one is refused.
+        seq:
+          type: integer
+          format: int32
+          description: |
+            Severity rank and display order — never the id. Also the column
+            order of every project's SLA matrix.
+        isActive: { type: boolean }
+        ticketCount:
+          type: integer
+          format: int64
+          description: Tickets currently at this level. Never blocks a retire; informs it.
+        taskTypeCount:
+          type: integer
+          format: int32
+          description: |
+            Task types whose `defaultLevel` is this level. **This one does block
+            a retire** — `TaskTypeService` refuses a retired level as a default,
+            so retiring would leave those types unsaveable on their own screen.
+        slaPolicyCount:
+          type: integer
+          format: int32
+          description: |
+            `sla_policies` rows written at this level, across all projects.
+            Retiring drops the level's whole column from every SLA matrix and
+            these rows stop resolving. Never blocks a retire; informs it.
     PriorityListResponse:
       type: object
       required: [data]
       properties: { data: { type: array, items: { $ref: '#/components/schemas/Priority' } } }
+    PriorityResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/Priority' } }
+    PriorityWriteRequest:
+      type: object
+      required: [level, name, colour]
+      properties:
+        level:
+          $ref: '#/components/schemas/Level'
+          description: |
+            The `code`. Upper-cased on save, unique, permanent. Typed as the
+            closed `Level` enum rather than a free string, which is what makes
+            S-12's "Admin can add further levels" not yet reachable — see the
+            operation description for what opening it costs.
+        name: { type: string, minLength: 1, maxLength: 40 }
+        colour:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          description: |
+            A blueprint §12.1 "Level chips" token. Required on create even
+            though the column is nullable: a level with no colour is a hole in
+            the picker, the ticket grid and the Priority Split chart at once.
+        defaultSlaHrs: { type: [number, 'null'], format: double, minimum: 0 }
+        autoEscalates:
+          type: [boolean, 'null']
+          description: |
+            `true` clears the flag from every other level — it is single-writer.
+            Omitted means `false`.
+        seq: { type: [integer, 'null'], format: int32 }
+        isActive: { type: [boolean, 'null'] }
+    PriorityPatchRequest:
+      type: object
+      description: |
+        Every field optional; an omitted one keeps its stored value.
+        `isActive: false` is how a level is retired — there is no delete.
+      properties:
+        level:
+          $ref: '#/components/schemas/Level'
+          description: |
+            Here **only so that a changed one can be refused with `409`.**
+            Omitting it from the schema would let Jackson discard it silently
+            and report a rename that did not happen. `tickets.level` stores this
+            value and is not a foreign key, so a rename orphans history rather
+            than cascading. Resending the stored value is a no-op.
+        name: { type: string, minLength: 1, maxLength: 40 }
+        colour: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        defaultSlaHrs: { type: [number, 'null'], format: double, minimum: 0 }
+        autoEscalates: { type: [boolean, 'null'] }
+        seq: { type: [integer, 'null'], format: int32 }
+        isActive: { type: [boolean, 'null'] }
     Holiday:
       type: object
       required: [id, date, name, isRecurring, isActive]

@@ -158,6 +158,23 @@ export interface Module {
 }
 
 /**
+ * B-021 · S-12. One priority level, as `GET /masters/priorities` returns it.
+ *
+ * Rows in the store rather than a literal in the handler, which is what they
+ * were until B-021: the master screen creates and edits them, and a handler
+ * returning a frozen array has nothing for a `PATCH` to write to.
+ *
+ * `level` is the wire name for the `code` column — see the contract's `Priority`
+ * schema for why the two differ and why renaming it would break two of Stream
+ * C's screens.
+ */
+export interface Priority {
+  id: number; level: Level; name: string; colour: string;
+  defaultSlaHrs: number | null; autoEscalates: boolean;
+  seq: number; isActive: boolean;
+}
+
+/**
  * B-015 · S-09. One capability, as `GET /masters/permissions` returns it.
  *
  * `category` is the **application** area the Role Master groups by — not
@@ -296,7 +313,7 @@ export interface StatusRequest {
 // ── the store ───────────────────────────────────────────────────────────────
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
-  taskTypes: TaskType[]; modules: Module[]; stages: Stage[];
+  taskTypes: TaskType[]; modules: Module[]; priorities: Priority[]; stages: Stage[];
   /** B-015 · S-09. `roleGrants` is keyed by role id — the matrix, one row per role. */
   permissions: Permission[]; roles: Role[]; roleGrants: Record<number, string[]>;
   slaPolicies: SlaPolicy[];
@@ -540,6 +557,47 @@ const MODULES: Module[] = [
 MODULES.push({ id: 9, code: 'TRANSPORT', name: 'Transport', seq: 90, isActive: false });
 
 /**
+ * B-021 · S-12's four levels, matching what B-002 seeds into `priorities`.
+ *
+ * **The colours are corrected here.** The handler that this replaces returned
+ * `#84CC16 / #F59E0B / #9A3412 / #BE185D`, which are not the blueprint's. §12.1
+ * states the level chips exactly — Low `#10B981`, Medium `#3B82F6`, High
+ * `#F59E0B`, Critical `#EF4444` — and that is what the migration seeds. The mock
+ * has disagreed with the server on the one colour mapping the blueprint gives
+ * rather than leaves to be designed, since D-001. Nothing caught it because
+ * nothing had ever served this table: `LevelPicker` renders the frozen
+ * `level-*` design tokens rather than the hex, so the wrong values reached a
+ * screen and were never displayed.
+ *
+ * **`defaultSlaHrs` is deliberately *not* aligned to the seed's 72/24/8/4.**
+ * Those figures are fixture values, not specification — and `SLA_POLICIES`
+ * below states that its org-wide rows match this list, because on a real server
+ * rung 3 and rung 4 have to agree wherever both exist. Changing them here
+ * without changing those would break a stated invariant of the fixture to chase
+ * a number the blueprint never gives.
+ *
+ * **`autoEscalates` was true on two rows and is now true on one.** The handler
+ * this replaces flagged High *and* Critical. §6 auto-promotes a ticket crossing
+ * its Planned Close Date *to* the flagged level, so two of them is not a
+ * stronger signal — it is an ambiguous pointer, and which one won would have
+ * been whatever order Stream D's scanner happened to read. The seed has only
+ * ever flagged Critical; `PriorityService` now refuses to let the count be
+ * anything but one, and the fixture has to be able to satisfy the rule it is
+ * used to exercise.
+ *
+ * Every row is active. A retired level is created by the S-12 screen at runtime
+ * rather than seeded, because `CreateTicketPage` and `TicketListPage` consume
+ * the *default* list — which excludes retired rows — and a seeded retired level
+ * would make those two screens look like they were filtering when they are not.
+ */
+const PRIORITIES: Priority[] = [
+  { id: 1, level: 'LOW', name: 'Low', colour: '#10B981', defaultSlaHrs: 120, autoEscalates: false, seq: 10, isActive: true },
+  { id: 2, level: 'MEDIUM', name: 'Medium', colour: '#3B82F6', defaultSlaHrs: 48, autoEscalates: false, seq: 20, isActive: true },
+  { id: 3, level: 'HIGH', name: 'High', colour: '#F59E0B', defaultSlaHrs: 16, autoEscalates: false, seq: 30, isActive: true },
+  { id: 4, level: 'CRITICAL', name: 'Critical', colour: '#EF4444', defaultSlaHrs: 4, autoEscalates: true, seq: 40, isActive: true },
+];
+
+/**
  * B-001's eighteen capabilities, transcribed from the same §2 matrix the
  * migration seeds — so the mock world and a real database render S-09
  * identically.
@@ -655,6 +713,7 @@ export function createDb(): Db {
     contacts: structuredClone(CONTACTS),
     taskTypes: structuredClone(TASK_TYPES),
     modules: structuredClone(MODULES),
+    priorities: structuredClone(PRIORITIES),
     permissions: structuredClone(PERMISSIONS),
     roles: structuredClone(ROLES),
     roleGrants: Object.fromEntries(

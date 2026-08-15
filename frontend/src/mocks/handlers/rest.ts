@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
-import type { Db, Holiday, Level, ProjectRoleCode, Role, User } from '../db';
+import type { Db, Holiday, Level, Priority, ProjectRoleCode, Role, User } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
 import { round, statusRequestDto } from './tickets';
 import {
@@ -158,6 +158,71 @@ function rolePrecondition(role: Role, ifMatch: string | null) {
   }
   return null;
 }
+
+// ── priorities · S-12 (B-021) ───────────────────────────────────────────────
+
+/** The four the contract's `Level` can carry — mirrors `PriorityService`. */
+const CONTRACT_LEVELS: Level[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+
+/**
+ * The three usage counts, derived rather than stored.
+ *
+ * Each one keys on the level **code** against another collection, exactly as
+ * the server's SQL keys on a `VARCHAR` rather than joining `priorities.id` —
+ * a fixture that joined on the id would make the screen look right against
+ * data that cannot exist.
+ *
+ * `taskTypeCount` counts only **active** types, because a retired one cannot
+ * fail its own validation and so cannot block a retire.
+ */
+const priorityDto = (priority: Priority) => {
+  const db = getDb();
+  return {
+    ...priority,
+    ticketCount: db.tickets.filter((t) => t.level === priority.level).length,
+    taskTypeCount: db.taskTypes.filter(
+      (t) => t.isActive && t.defaultLevel === priority.level).length,
+    slaPolicyCount: db.slaPolicies.filter((p) => p.level === priority.level).length,
+  };
+};
+
+/**
+ * Content-derived, and it covers the usage counts — so a ticket raised at this
+ * level while the dialog is open costs a reload, which is correct: those counts
+ * are what the retire decision was made against.
+ */
+const priorityEtag = (priority: Priority) =>
+  `"${Math.abs([...JSON.stringify(priorityDto(priority))]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/**
+ * The mock enforces `If-Match` too. A guard the real backend has and the mock
+ * waves through is a guard the frontend never gets to exercise.
+ */
+function priorityPrecondition(priority: Priority, ifMatch: string | null) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the level first and send back its ETag.');
+  }
+  if (ifMatch !== '*'
+      && ifMatch.replace(/W\/|"/g, '') !== priorityEtag(priority).replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'This level changed since you read it. Reload and reapply your edit.');
+  }
+  return null;
+}
+
+/**
+ * §6's pointer is missing, ambiguous or retired.
+ *
+ * Its own problem `type`, not folded into `in-use`: the remedy is a single
+ * sentence the screen can act on — move the flag, then retry — where `in-use`
+ * would send the admin looking for references that do not exist.
+ */
+const escalationTargetProblem = (detail: string, field: 'isActive' | 'autoEscalates') =>
+  problem(409, 'escalation-target-required',
+    'The SLA engine needs exactly one escalation target',
+    { detail, errors: { [field]: [detail] } });
 
 /**
  * Content-derived, like the real controller's. A timestamp would change on a
@@ -1307,14 +1372,159 @@ export const restHandlers = [
   http.get(url('/masters/modules'), () =>
     ok([...getDb().modules].sort((a, b) => a.seq - b.seq)),
   ),
-  http.get(url('/masters/priorities'), () =>
-    ok([
-      { id: 1, level: 'LOW', colour: '#84CC16', defaultSlaHrs: 120, autoEscalates: false },
-      { id: 2, level: 'MEDIUM', colour: '#F59E0B', defaultSlaHrs: 48, autoEscalates: false },
-      { id: 3, level: 'HIGH', colour: '#9A3412', defaultSlaHrs: 16, autoEscalates: true },
-      { id: 4, level: 'CRITICAL', colour: '#BE185D', defaultSlaHrs: 4, autoEscalates: true },
-    ]),
-  ),
+  // ── priorities · S-12 (B-021) ─────────────────────────────────────────────
+  // Rows from the store, not a literal. Until B-021 this was four frozen
+  // objects with colours that matched neither §12.1 nor the migration, and two
+  // of them flagged as the escalation target.
+  //
+  // **Active-only by default, unlike task types and modules above.**
+  // `CreateTicketPage` and `TicketListPage` map this response straight into
+  // their pickers without filtering, because until this task it could not
+  // contain a retired row. The grid passes `includeInactive`.
+  http.get(url('/masters/priorities'), ({ request }) => {
+    const includeInactive =
+      new URL(request.url).searchParams.get('includeInactive') === 'true';
+    return ok(
+      getDb().priorities
+        .filter((p) => includeInactive || p.isActive)
+        .sort((a, b) => a.seq - b.seq || a.id - b.id)
+        .map(priorityDto),
+    );
+  }),
+
+  http.get(url('/masters/priorities/:priorityId'), ({ params }) => {
+    const priority = getDb().priorities.find((p) => p.id === Number(params.priorityId));
+    if (!priority) return notFound('Priority');
+    return ok(priorityDto(priority), undefined, { headers: { ETag: priorityEtag(priority) } });
+  }),
+
+  http.post(url('/masters/priorities'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as Partial<Priority>;
+    const level = String(body.level ?? '').trim().toUpperCase() as Level;
+
+    // The headline refusal, mirrored from `PriorityService` so the screen can
+    // be built against it. A mock that accepted a fifth level would let the
+    // S-12 form ship with no handling for the one error it will actually see.
+    if (!CONTRACT_LEVELS.includes(level)) {
+      return validationFailed({
+        level: [`'${level}' cannot be carried by the API's Level type, which is a closed `
+          + 'four-value enum (LOW, MEDIUM, HIGH, CRITICAL). Opening it is a coordinated '
+          + 'change across three streams.'],
+      });
+    }
+    if (db.priorities.some((p) => p.level === level)) {
+      return problem(409, 'duplicate', 'Duplicate priority level', {
+        detail: `A level with code '${level}' already exists.`,
+        errors: { level: [`A level with code '${level}' already exists.`] },
+      });
+    }
+    const name = String(body.name ?? '').trim();
+    const clash = db.priorities.find((p) => p.name.toLowerCase() === name.toLowerCase());
+    if (clash) {
+      return problem(409, 'duplicate', 'Duplicate priority level', {
+        detail: `'${clash.name}' already exists.`,
+        errors: { name: [`'${clash.name}' already exists.`] },
+      });
+    }
+
+    const created: Priority = {
+      id: nextId(db, 'priority'),
+      level,
+      name,
+      colour: String(body.colour),
+      defaultSlaHrs: body.defaultSlaHrs ?? null,
+      autoEscalates: false,
+      seq: body.seq ?? Math.max(0, ...db.priorities.map((p) => p.seq)) + 10,
+      isActive: body.isActive ?? true,
+    };
+    db.priorities.push(created);
+    if (body.autoEscalates) {
+      db.priorities.forEach((p) => { p.autoEscalates = p.id === created.id; });
+    }
+    return ok(priorityDto(created), undefined,
+      { status: 201, headers: { ETag: priorityEtag(created) } });
+  }),
+
+  http.patch(url('/masters/priorities/:priorityId'), async ({ params, request }) => {
+    const db = getDb();
+    const priority = db.priorities.find((p) => p.id === Number(params.priorityId));
+    if (!priority) return notFound('Priority');
+
+    const stale = priorityPrecondition(priority, request.headers.get('If-Match'));
+    if (stale) return stale;
+
+    const body = (await request.json()) as Partial<Priority>;
+
+    if (body.level != null && String(body.level).toUpperCase() !== priority.level) {
+      const detail = 'A level code cannot be changed once created — nothing would cascade '
+        + 'the rename, so it would orphan every row holding the old value.';
+      return problem(409, 'immutable-field', 'Priority code cannot be changed',
+        { detail, errors: { level: [detail] } });
+    }
+
+    // The end state, computed before anything is written — the same ordering
+    // bug `PriorityService.update` guards against. A body carrying both fields
+    // would otherwise pass each check by being read before the other applied.
+    const willBeActive = body.isActive ?? priority.isActive;
+
+    if (priority.isActive && !willBeActive) {
+      if (priority.autoEscalates) {
+        return escalationTargetProblem(
+          `'${priority.level}' is the level the SLA engine escalates to on breach (§6). `
+          + 'Retiring it would leave auto-escalation with no target. Move the escalation '
+          + 'flag to another level first.', 'isActive');
+      }
+      const blockers = db.taskTypes.filter(
+        (t) => t.isActive && t.defaultLevel === priority.level);
+      if (blockers.length > 0) {
+        const detail = `${blockers.length} active task type${blockers.length === 1 ? '' : 's'} `
+          + `default to '${priority.level}' (${blockers.slice(0, 5).map((t) => t.name).join(', ')}). `
+          + 'Repoint them on the task type master first.';
+        return problem(409, 'in-use', 'Priority level is in use', {
+          detail,
+          taskTypeCount: blockers.length,
+          taskTypeNames: blockers.slice(0, 5).map((t) => t.name),
+          errors: { isActive: [detail] },
+        });
+      }
+    }
+
+    if (body.autoEscalates != null) {
+      if (!body.autoEscalates) {
+        if (priority.autoEscalates) {
+          return escalationTargetProblem(
+            `'${priority.level}' is the level the SLA engine escalates to on breach (§6). `
+            + 'Clearing it would leave auto-escalation with no target. Set the flag on '
+            + 'another level instead — doing so clears this one.', 'autoEscalates');
+        }
+      } else if (!willBeActive) {
+        return escalationTargetProblem(
+          'A retired level cannot be the escalation target.', 'autoEscalates');
+      } else {
+        db.priorities.forEach((p) => { p.autoEscalates = p.id === priority.id; });
+      }
+    }
+
+    if (body.name != null) {
+      const name = body.name.trim();
+      const clash = db.priorities.find(
+        (p) => p.id !== priority.id && p.name.toLowerCase() === name.toLowerCase());
+      if (clash) {
+        return problem(409, 'duplicate', 'Duplicate priority level', {
+          detail: `'${clash.name}' already exists.`,
+          errors: { name: [`'${clash.name}' already exists.`] },
+        });
+      }
+      priority.name = name;
+    }
+    if (body.colour != null) priority.colour = body.colour;
+    if (body.defaultSlaHrs !== undefined) priority.defaultSlaHrs = body.defaultSlaHrs;
+    if (body.seq != null) priority.seq = body.seq;
+    if (body.isActive != null) priority.isActive = body.isActive;
+
+    return ok(priorityDto(priority), undefined, { headers: { ETag: priorityEtag(priority) } });
+  }),
   // ── roles & permissions · S-09 (B-015) ────────────────────────────────────
   // Reference data. No create, edit or delete: a capability exists because code
   // checks for it, so a row an admin could add would grant nothing.
