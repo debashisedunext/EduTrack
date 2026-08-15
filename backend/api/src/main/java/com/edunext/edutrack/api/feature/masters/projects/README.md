@@ -1,13 +1,165 @@
-# Project Master — B-016 · S-10 · the Team tab B-017 · the SLA tab B-018
+# Project Master — S-10, all four tabs
 
 `GET /api/v1/projects` · `POST` · `GET /{projectId}` · `PATCH /{projectId}`
 `GET /{projectId}/members` · `POST` · `PATCH /{projectId}/members/{userId}` · `DELETE`
 `GET /{projectId}/sla-policies` · `PUT`
+`GET /{projectId}/settings` · `PUT`
 
 The list, the create/edit form and the four rules S-10 states (B-016); the **Team
-tab** — resources, per-project role and allocation % (B-017); and the **SLA tab**
-— the task type × level matrix (B-018). The **Settings tab** is B-019: it has its
-own contract path and is not here.
+tab** — resources, per-project role and allocation % (B-017); the **SLA tab** —
+the task type × level matrix (B-018); and the **Settings tab** — allowed task
+types, mandatory fields and the auto-assign rule (B-019). S-10 is complete.
+
+---
+
+# Part four — the Settings tab (B-019)
+
+Blueprint §7.5 S-10: "allowed task types, mandatory fields, auto-assign rule
+(round-robin / least-loaded / manual)".
+
+## An empty allow-list means unrestricted, and that is the whole feature
+
+**No `project_task_types` rows for a project means every active task type may be
+raised on it. It does not mean none may.**
+
+Every project in the system is in that state, because the table did not exist
+until this task's migration ran. Had the absence meant "nothing is permitted",
+applying the migration would have stopped ticket creation everywhere at once.
+
+A backfill could not have rescued the other reading either. Writing a row per
+task type per project to preserve today's behaviour turns "this project has never
+been configured" into "this project was configured, on 14 Aug 2026, to allow
+exactly these eleven" — and the twelfth task type an Admin adds next month is
+then silently barred on every project in the organisation, by a decision nobody
+made.
+
+What an administrator meets is that clearing every checkbox removes the
+restriction rather than forbidding everything. The screen says so in words,
+because eleven empty boxes say the opposite on their own. There is deliberately
+**no separate "remove the restriction" control**: a project permitting no task
+type could raise no ticket, so the state does not exist, and two controls for one
+outcome is how they end up disagreeing — the call `SlaMatrixService` makes about
+a cleared cell.
+
+`restrictsTaskTypes` is on the wire rather than derived per client, because
+"unrestricted" and "restricted, with every box ticked" are indistinguishable in
+the flags alone and differ the moment a twelfth task type exists.
+
+## The read returns retired task types this project allows
+
+Every **active** task type, plus any **inactive** one with a membership row. The
+second half is not tidiness. The `PUT` is a wholesale replace assembled from the
+rows the screen was given, so a retired type that is allowed and not rendered
+would be deleted by the next save through a screen that never displayed it — the
+deletion-by-omission `SlaMatrixRepository.DEACTIVATE_OVERRIDES` guards against for
+project-level SLA defaults, one master over.
+
+Rows carry `isActive` so the screen can label them: they cannot be raised on a new
+ticket whatever this tab says, and an unlabelled one would look like an option.
+
+## Mandatory fields are JSON; allowed task types are a join table
+
+Both are sets on a project, and they are stored differently on purpose.
+
+Task type ids are **foreign keys into a master an Admin edits**, and referential
+integrity is the whole argument for normalising. Field codes are a vocabulary in
+the application with nothing to point at, nothing queries them *across* projects
+("which projects require a module" is not a question the product asks), and a
+`project_mandatory_fields` table would be a second join and a second read to
+serve a checkbox list of ten values. `users.skills` made the same call for the
+same reason.
+
+`NULL` and `[]` both mean "requires nothing extra". The column is nullable, every
+row predating this feature holds `NULL`, and the screen writes `[]` when the last
+box is unticked; the repository collapses them so nothing downstream can tell, and
+writes `NULL` so a save does not rewrite every row to record a decision nobody
+made.
+
+## The CHECK constrains shape, not vocabulary
+
+`ck_projects_mandatory_fields` accepts a unique array of uppercase codes and stops
+there. `ck_projects_status` (B-016) pins its three values because blueprint S-10
+fixes them; this list is **exactly the optional fields of `TicketCreateRequest`**,
+so pinning it would mean Stream C cannot add a form field without a migration in
+Stream B's directory.
+
+The consequence is that a code this build has never heard of is storable — after a
+rollback, say. `ProjectSettingsService` refuses one on the way in and **drops** one
+on the way out rather than throwing, because a settings read that threw would put
+the only screen that could repair it behind the failure.
+
+## The vocabulary excludes every always-required field
+
+`projectId`, `title`, `taskTypeId` and `level` are required of every ticket
+already, so a checkbox for one could not change any outcome. A control that cannot
+do what it appears to do is worse than a missing one — somebody ticks it and
+believes something happened.
+
+## `auto_assign_rule` now has one editor
+
+The column is B-016's and the General tab held its control, because this tab did
+not exist. It does now, and the control moved: S-10 puts the field here, and
+leaving it on both screens would have been worse than a duplicate. `toPatchRequest`
+sends the whole form on every save, so a General-tab save would have carried that
+form's value and **silently overwritten whatever this tab set** — the
+`project_members` hazard B-011 and B-017 had to pin apart with two named
+regression tests, avoided rather than documented.
+
+`POST /projects` and `PATCH /projects/{projectId}` still *accept* the field:
+removing it would be a breaking contract change for no gain, and a project may
+reasonably be created with a rule. Nothing sends it twice.
+
+`ProjectService` also stopped keeping its own `Set<String>` of the three values and
+now derives them from `ProjectSettingsDtos.AutoAssignRule` — one vocabulary for one
+column, checked against the database's `CHECK` by `ProjectSettingsIT`.
+
+## Nothing enforces these settings yet
+
+**This is the one part of B-019 that lands incomplete, by design.** The tab stores
+and serves configuration; the thing that has to obey it is ticket creation —
+`api/feature/tickets` and `CreateTicketPage`, which are **Stream C's**. Writing the
+enforcement here would be reaching across a stream boundary; leaving it unsaid
+would ship a screen whose settings quietly do nothing.
+
+So it is said here, in the contract's `PUT` description, in the screen's own
+javadoc and in the backlog. What C needs is on `GET /projects/{projectId}/settings`
+already: `restrictsTaskTypes` + `taskTypes[].isAllowed` filters the task-type
+picker, and `mandatoryFields` marks the rest.
+
+## Permissions — and why they are wider than the SLA tab
+
+| Operation | Who |
+|---|---|
+| `getProjectSettings` | all six roles |
+| `replaceProjectSettings` | `project.manage`, which B-001 grants to **Admin and PM** |
+
+The SLA tab one route over is `master.write` — Admin alone — and the difference is
+deliberate. §2 has two rows: row 2, "Create/edit projects, map resources to
+project", is ✅ for PM and covers General, Team and Settings; row 5, "Master data
+(task types, **SLA**, workflow, holidays)", is Admin's alone and covers the SLA
+tab. Choosing which task types a project accepts is configuring one project;
+setting the response target a client is contractually held to is master data.
+
+The decisive half is that narrowing this to Admin would **take a capability away
+from PMs**: `auto_assign_rule` is one of the three settings here and has been
+PM-writable through `PATCH /projects/{projectId}` since B-016.
+
+The read is every role because all six can raise a ticket, and the create form
+cannot filter its picker or mark a field mandatory without it.
+
+## Files
+
+| File | What |
+|---|---|
+| `ProjectSettingsController.java` | the two operations and the `If-Match` precondition |
+| `ProjectSettingsService.java` | the empty-allow-list rule, the vocabularies, the four refusals |
+| `ProjectSettingsRepository.java` | `JdbcClient` — the `LEFT JOIN` that keeps retired memberships visible, and the JSON column |
+| `ProjectSettingsDtos.java` | wire types; `TicketField` is the vocabulary |
+| `ProjectSettingsExceptionHandler.java` | RFC 9457 problems, scoped to this controller |
+
+Schema: `V20260814_1120__project_settings.sql` creates `project_task_types` and
+adds `projects.mandatory_fields`. **`projects` is Stream A's table** — flagged in
+the migration header rather than slipped in.
 
 ---
 

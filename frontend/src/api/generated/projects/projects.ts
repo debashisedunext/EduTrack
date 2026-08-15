@@ -79,6 +79,8 @@ import type {
   ProjectMemberResponse,
   ProjectMemberWrite,
   ProjectPatchRequest,
+  ProjectSettingsResponse,
+  ProjectSettingsWrite,
   ProjectWriteRequest,
   SlaPolicyListResponse,
   SlaPolicyWrite,
@@ -1001,6 +1003,217 @@ export const useReplaceSlaPolicies = <TError = ValidationFailedResponse | NotFou
       > => {
 
       const mutationOptions = getReplaceSlaPoliciesMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * S-10's fourth tab, as one document: which task types may be raised on
+this project, which otherwise-optional ticket fields it requires, and
+who an unassigned new ticket goes to.
+
+**`taskTypes` is the resolved list, not the stored one.** It carries
+every *active* task type with an `isAllowed` flag, not just the ids this
+project has rows for — the screen is a checkbox list and a response
+holding only the ticked ones cannot render the unticked ones. Same call
+`getSlaPolicies` makes about its grid, and `name` rides along for the
+same reason: `/masters/task-types` is not mounted yet (B-020), and a
+list that renders "task type 7" is not a screen.
+
+**`restrictsTaskTypes: false` means every active type is allowed**, and
+it is not the same statement as "none are". A project with no
+`project_task_types` rows is unrestricted, which is what every project
+that predates this screen is; if an empty set meant "nothing may be
+raised here", running the migration would have stopped ticket creation
+everywhere. The flag is on the wire so a client never has to infer that
+from an array of eleven `isAllowed: true` values it cannot tell from
+eleven explicit ones.
+
+Every role may read it. All six can raise a ticket, and the create form
+cannot mark a field mandatory or filter its task-type picker without
+this.
+
+ * @summary Project settings — allowed task types, mandatory fields, auto-assign
+ */
+export const getProjectSettings = (
+    projectId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ProjectSettingsResponse>(
+      {url: `/projects/${projectId}/settings`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetProjectSettingsQueryKey = (projectId?: number,) => {
+    return [
+    `/projects/${projectId}/settings`
+    ] as const;
+    }
+
+    
+export const getGetProjectSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getProjectSettings>>, TError = NotFoundResponse>(projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProjectSettings>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectSettingsQueryKey(projectId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectSettings>>> = ({ signal }) => getProjectSettings(projectId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(projectId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectSettings>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetProjectSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectSettings>>>
+export type GetProjectSettingsQueryError = NotFoundResponse
+
+
+export function useGetProjectSettings<TData = Awaited<ReturnType<typeof getProjectSettings>>, TError = NotFoundResponse>(
+ projectId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProjectSettings>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getProjectSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getProjectSettings>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetProjectSettings<TData = Awaited<ReturnType<typeof getProjectSettings>>, TError = NotFoundResponse>(
+ projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProjectSettings>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getProjectSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getProjectSettings>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetProjectSettings<TData = Awaited<ReturnType<typeof getProjectSettings>>, TError = NotFoundResponse>(
+ projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProjectSettings>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Project settings — allowed task types, mandatory fields, auto-assign
+ */
+
+export function useGetProjectSettings<TData = Awaited<ReturnType<typeof getProjectSettings>>, TError = NotFoundResponse>(
+ projectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProjectSettings>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetProjectSettingsQueryOptions(projectId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Replaces all three settings in one transaction. A `PATCH` of one field
+would need an `ETag` per field to be safe against a second tab, and the
+tab has one Save button — the whole document is what the screen holds.
+
+**An empty `allowedTaskTypeIds` clears the restriction rather than
+forbidding everything.** It is the request that returns the project to
+the unrestricted state it was created in, and there is deliberately no
+separate "remove restriction" control: two controls for one outcome is
+how they end up disagreeing (the same call `replaceSlaPolicies` makes
+about a cleared cell). The screen states the consequence in words, which
+is the part that stops it reading as "nothing may be raised".
+
+**`mandatoryFields` names only fields `TicketCreateRequest` leaves
+optional.** `projectId`, `title`, `taskTypeId` and `level` are already
+required of every ticket, so offering them here would be a control that
+cannot change anything.
+
+`project.manage` — Admin and PM, like the Team tab and unlike the SLA
+tab. Choosing which task types a project accepts is project
+configuration; setting the response target a client is contractually
+held to is master data. `autoAssignRule` is also already PM-writable
+through `PATCH /projects/{projectId}`, so narrowing this to Admin would
+take away a capability PMs hold today.
+
+**Nothing enforces these settings yet.** Ticket creation is Stream C's
+(`api/feature/tickets`, `CreateTicketPage`); B-019 stores and serves the
+configuration and C consumes it. Said here rather than left to be
+discovered, because a settings screen whose settings do nothing is a
+screen that looks finished.
+
+ * @summary Replace project settings
+ */
+export const replaceProjectSettings = (
+    projectId: number,
+    projectSettingsWrite: ProjectSettingsWrite,
+ ) => {
+      
+      
+      return http<ProjectSettingsResponse>(
+      {url: `/projects/${projectId}/settings`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: projectSettingsWrite
+    },
+      );
+    }
+  
+
+
+export const getReplaceProjectSettingsMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceProjectSettings>>, TError,{projectId: number;data: ProjectSettingsWrite}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof replaceProjectSettings>>, TError,{projectId: number;data: ProjectSettingsWrite}, TContext> => {
+
+const mutationKey = ['replaceProjectSettings'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceProjectSettings>>, {projectId: number;data: ProjectSettingsWrite}> = (props) => {
+          const {projectId,data} = props ?? {};
+
+          return  replaceProjectSettings(projectId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplaceProjectSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof replaceProjectSettings>>>
+    export type ReplaceProjectSettingsMutationBody = ProjectSettingsWrite
+    export type ReplaceProjectSettingsMutationError = ValidationFailedResponse | NotFoundResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Replace project settings
+ */
+export const useReplaceProjectSettings = <TError = ValidationFailedResponse | NotFoundResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceProjectSettings>>, TError,{projectId: number;data: ProjectSettingsWrite}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof replaceProjectSettings>>,
+        TError,
+        {projectId: number;data: ProjectSettingsWrite},
+        TContext
+      > => {
+
+      const mutationOptions = getReplaceProjectSettingsMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

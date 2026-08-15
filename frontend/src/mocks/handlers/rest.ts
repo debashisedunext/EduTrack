@@ -231,6 +231,60 @@ const slaMatrixEtag = (grid: ReturnType<typeof slaMatrix>) =>
     .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
 
 /**
+ * B-019 · the contract's `TicketFieldCode` — exactly the optional fields of
+ * `TicketCreateRequest`.
+ */
+const TICKET_FIELD_CODES: string[] = [
+  'DESCRIPTION', 'MODULE', 'SCREEN_NAME', 'FEATURE', 'STEPS_TO_GENERATE',
+  'CLIENT', 'CLIENT_CONTACT', 'ASSIGNEE', 'ESTIMATED_HRS', 'PLANNED_CLOSE_DATE',
+];
+
+/**
+ * B-019 · one project's Settings tab, resolved.
+ *
+ * **`restricts` is derived from whether any row exists, and everything else
+ * follows from it.** An unrestricted project answers `isAllowed: true` for
+ * every active type, because that is what unrestricted means — not because the
+ * rows are there.
+ *
+ * The list is every active task type **plus any inactive one this project still
+ * allows**. The second half is the case a read filtering on `isActive` gets
+ * wrong: the `PUT` is assembled from these rows, so an allowed-but-unrendered
+ * type would be dropped by the next save through a screen that never showed it.
+ *
+ * `code` is omitted, like `slaMatrix`'s `taskTypeCode` — `db.taskTypes` has no
+ * code column, and the contract makes the field optional. Inventing one by
+ * upper-casing the name would put a value on the wire that matches nothing in
+ * the real master.
+ */
+function projectSettings(project: import('../db').Project, db: Db) {
+  const allowedIds = new Set(
+    db.projectTaskTypes.filter((r) => r.projectId === project.id).map((r) => r.taskTypeId),
+  );
+  const restricts = allowedIds.size > 0;
+
+  return {
+    projectId: project.id,
+    autoAssignRule: project.autoAssignRule,
+    mandatoryFields: project.mandatoryFields ?? [],
+    restrictsTaskTypes: restricts,
+    taskTypes: db.taskTypes
+      .filter((t) => t.isActive || allowedIds.has(t.id))
+      .map((t) => ({
+        taskTypeId: t.id,
+        name: t.name,
+        isAllowed: !restricts || allowedIds.has(t.id),
+        isActive: t.isActive,
+      })),
+  };
+}
+
+/** Content-derived over the resolved document, like the real controller's. */
+const projectSettingsEtag = (settings: ReturnType<typeof projectSettings>) =>
+  `"${Math.abs([...JSON.stringify(settings)]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/**
  * The mock enforces `If-Match` too. A guard the real backend has and the mock
  * waves through is a guard the frontend never gets to exercise — and this is
  * the one write in the feature where losing the race erases somebody's whole
@@ -660,6 +714,11 @@ export const restHandlers = [
       endDate: body.endDate ?? null,
       autoAssignRule: (body.autoAssignRule as import('../db').AutoAssignRule) ?? 'MANUAL',
       ticketSeq: 0,
+      // B-019 · a new project requires nothing beyond the fields every ticket
+      // requires, and restricts no task type — it has no `project_task_types`
+      // rows either. Both are the unconfigured state the Settings tab starts
+      // from, and neither is something a project should acquire at creation.
+      mandatoryFields: null,
     };
     db.projects.push(p);
     return ok(projectDetailDto(p), undefined,
@@ -962,6 +1021,106 @@ export const restHandlers = [
 
     const grid = slaMatrix(projectId, db);
     return ok(grid, undefined, { headers: { ETag: slaMatrixEtag(grid) } });
+  }),
+
+  /**
+   * B-019 · S-10's Settings tab.
+   *
+   * The mock holds the rule the whole screen turns on as literally as the
+   * database does: **no `projectTaskTypes` rows for a project means every
+   * active task type is allowed, not none.** `restrictsTaskTypes` is what
+   * distinguishes the two, and a mock that answered `isAllowed: false`
+   * everywhere for an unconfigured project would make the frontend's own tests
+   * agree with a reading that would have stopped ticket creation everywhere.
+   */
+  http.get(url('/projects/:projectId/settings'), ({ params }) => {
+    const db = getDb();
+    const projectId = Number(params.projectId);
+    const project = db.projects.find((p) => p.id === projectId);
+    if (!project) return notFound('Project');
+
+    const settings = projectSettings(project, db);
+    return ok(settings, undefined, { headers: { ETag: projectSettingsEtag(settings) } });
+  }),
+
+  /**
+   * B-019 · replace all three settings.
+   *
+   * Writes real rows rather than echoing the body — the shape of mock that
+   * makes a save look like it worked. The two rules that are easy to get wrong
+   * are enforced here rather than assumed, because this mock is what the
+   * frontend's own tests run against:
+   *
+   * - **an empty `allowedTaskTypeIds` clears the rows**, returning the project
+   *   to unrestricted. It is not refused as a probable mistake; it is the only
+   *   way to remove a restriction.
+   * - **an empty `mandatoryFields` is stored as `null`**, like the repository,
+   *   so the two representations of "requires nothing extra" cannot drift
+   *   apart in the fixture the way they could in the column.
+   */
+  http.put(url('/projects/:projectId/settings'), async ({ params, request }) => {
+    const db = getDb();
+    const projectId = Number(params.projectId);
+    const project = db.projects.find((p) => p.id === projectId);
+    if (!project) return notFound('Project');
+
+    // The mock enforces If-Match too. A guard the real backend has and the mock
+    // waves through is a guard the frontend never gets to exercise.
+    const ifMatch = request.headers.get('If-Match');
+    const current = projectSettingsEtag(projectSettings(project, db));
+    if (!ifMatch?.trim()) {
+      return problem(428, 'precondition-required', 'If-Match is required',
+        { detail: 'GET the settings first and send back its ETag.' });
+    }
+    if (ifMatch.trim() !== '*' && ifMatch.trim() !== current) {
+      return problem(412, 'precondition-failed', 'These settings changed since you read them',
+        { detail: 'Reload and reapply your edit.' });
+    }
+
+    const body = (await request.json()) as {
+      autoAssignRule?: string;
+      mandatoryFields?: string[];
+      allowedTaskTypeIds?: number[];
+    };
+
+    const rules = ['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL'];
+    const rule = (body.autoAssignRule ?? 'MANUAL').toUpperCase();
+    if (!rules.includes(rule)) {
+      return validationFailed({ autoAssignRule: [`autoAssignRule must be one of ${rules}`] });
+    }
+
+    const fields = body.mandatoryFields ?? [];
+    for (const code of fields) {
+      if (!TICKET_FIELD_CODES.includes(code)) {
+        return validationFailed({ mandatoryFields: [`no such ticket field: ${code}`] });
+      }
+      if (fields.filter((f) => f === code).length > 1) {
+        return validationFailed({ mandatoryFields: [`${code} is listed twice`] });
+      }
+    }
+
+    const allowed = body.allowedTaskTypeIds ?? [];
+    for (const id of allowed) {
+      if (!db.taskTypes.some((t) => t.id === id)) {
+        return validationFailed({ allowedTaskTypeIds: [`no such task type: ${id}`] });
+      }
+      if (allowed.filter((x) => x === id).length > 1) {
+        return validationFailed({ allowedTaskTypeIds: [`task type ${id} is listed twice`] });
+      }
+    }
+
+    project.autoAssignRule = rule as import('../db').AutoAssignRule;
+    project.mandatoryFields = fields.length === 0
+      ? null
+      : (fields as import('../db').TicketFieldCode[]);
+
+    db.projectTaskTypes = db.projectTaskTypes.filter((r) => r.projectId !== projectId);
+    for (const id of allowed) {
+      db.projectTaskTypes.push({ projectId, taskTypeId: id });
+    }
+
+    const settings = projectSettings(project, db);
+    return ok(settings, undefined, { headers: { ETag: projectSettingsEtag(settings) } });
   }),
 
   // ── clients ───────────────────────────────────────────────────────────────

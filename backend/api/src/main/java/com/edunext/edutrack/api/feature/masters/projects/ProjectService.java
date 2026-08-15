@@ -57,9 +57,25 @@ class ProjectService {
      */
     private static final Set<String> STATUSES = Set.of(ACTIVE, ON_HOLD, CLOSED);
 
-    static final String MANUAL = "MANUAL";
+    static final String MANUAL = ProjectSettingsDtos.AutoAssignRule.MANUAL.name();
 
-    private static final Set<String> AUTO_ASSIGN_RULES = Set.of("ROUND_ROBIN", "LEAST_LOADED", MANUAL);
+    /**
+     * B-019 · derived from {@link ProjectSettingsDtos.AutoAssignRule} rather
+     * than restated.
+     *
+     * <p>This was a {@code Set.of("ROUND_ROBIN", "LEAST_LOADED", MANUAL)} until
+     * the Settings tab landed, at which point one column had two screens
+     * validating it against two hand-written lists. Two vocabularies for one
+     * column is what {@code ck_projects_status} exists to prevent at the schema
+     * level and what B-018 spent an agreement test avoiding on the SLA ladder;
+     * here it costs nothing to have one.
+     *
+     * <p>The enum stays out of the <em>DTOs</em> on both screens for the reason
+     * {@link #STATUSES} gives — a {@code valueOf} failure on the
+     * deserialisation path is a 500 where the caller deserves a 400 naming the
+     * field.
+     */
+    private static final Set<String> AUTO_ASSIGN_RULES = Set.copyOf(ProjectSettingsService.RULE_NAMES);
 
     private final ProjectMasterRepository repository;
 

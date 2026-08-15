@@ -101,16 +101,33 @@ describe('toWriteRequest', () => {
     expect(request.clientName).toBe('Acme')
   })
 
-  it('defaults to the conservative status and rule', () => {
-    // MANUAL because round-robin and least-loaded both hand live work to
-    // somebody without a human deciding.
+  it('defaults to the conservative status', () => {
     const request = toWriteRequest({
       ...emptyProjectForm, projectCode: 'NEW', name: 'Greenfield', projectManagerId: 2,
     })
 
     expect(request.status).toBe('ACTIVE')
-    expect(request.autoAssignRule).toBe('MANUAL')
     expect(request.colourTag).toBe(COLOUR_TAGS[0].value)
+  })
+
+  it('B-019 · sends no autoAssignRule at all, so the Settings tab owns the column', () => {
+    // Not "sends MANUAL". This form patches every field it sends on every
+    // save, so a MANUAL here would reset whatever the Settings tab had set,
+    // every time somebody renamed the project. Omitting it leaves the server's
+    // default on a create and the stored value on a patch.
+    const request = toWriteRequest({
+      ...emptyProjectForm, projectCode: 'NEW', name: 'Greenfield', projectManagerId: 2,
+    })
+
+    expect(request).not.toHaveProperty('autoAssignRule')
+  })
+
+  it('B-019 · a whole-form patch cannot clobber the rule the Settings tab set', () => {
+    // The regression this guards is silent: the save succeeds, the field the
+    // user edited is stored, and a field on another tab quietly reverts.
+    const request = toPatchRequest(toFormValues(detail({ autoAssignRule: 'ROUND_ROBIN' })))
+
+    expect(request).not.toHaveProperty('autoAssignRule')
   })
 })
 
@@ -128,7 +145,6 @@ describe('toFormValues', () => {
       startDate: '2026-01-05',
       endDate: '2026-12-18',
       status: 'ACTIVE',
-      autoAssignRule: 'LEAST_LOADED',
     })
   })
 

@@ -8,14 +8,14 @@ import { useProject } from './projectQueries'
 /**
  * B-017 · the header and tab strip a project's screens share.
  *
- * <h2>Three tabs, not four</h2>
+ * <h2>Four tabs, and S-10 is complete</h2>
  *
- * S-10 describes four — General, Team, SLA, Settings — and Settings is B-019.
- * **It is not rendered as a disabled stub.** B-016 refused to stub them for the
- * reason that still applies: a greyed-out tab and a broken one look identical to
- * a user, and unbuilt screens rendered as tabs make the feature look finished.
- * They arrive as entries in {@link TABS} when the screens behind them exist —
- * SLA did, with B-018.
+ * S-10 describes four — General, Team, SLA, Settings — and each arrived as an
+ * entry in {@link TABS} on the day the screen behind it existed: Team with
+ * B-017, SLA with B-018, Settings with B-019. **None was ever rendered as a
+ * disabled stub**, which was B-016's call and held for three tasks: a greyed-out
+ * tab and a broken one look identical to a user, and unbuilt screens rendered as
+ * tabs make a feature look finished.
  *
  * <h2>Why the tab strip is not a router `Outlet`</h2>
  *
@@ -34,9 +34,10 @@ const TABS = [
   { to: (id: number) => `/masters/projects/${id}/edit`, label: 'General' },
   { to: (id: number) => `/masters/projects/${id}/team`, label: 'Team' },
   { to: (id: number) => `/masters/projects/${id}/sla`, label: 'SLA' },
+  { to: (id: number) => `/masters/projects/${id}/settings`, label: 'Settings' },
 ] as const
 
-export function ProjectTabs({ active }: { active: 'General' | 'Team' | 'SLA' }) {
+export function ProjectTabs({ active }: { active: 'General' | 'Team' | 'SLA' | 'Settings' }) {
   const params = useParams<{ projectId?: string }>()
   const projectId = params.projectId ? Number(params.projectId) : null
 

@@ -541,3 +541,124 @@ export const replaceSlaPoliciesResponse = zod.object({
 }).describe('One cell of the resolved matrix. `GET` returns the full task type ×\nlevel grid — every cell, whether or not this project has a row for it —\nbecause the screen has to show what a ticket would actually get, and a\nresponse carrying only the overrides would render as a mostly empty grid\nthat is indistinguishable from an unconfigured product.\n\n`taskTypeName` rides along so the grid can label its rows. There is no\nmounted `\/masters\/task-types` yet (B-020), and a matrix that renders\n\"task type 7\" is not a screen.\n'))
 })
 
+/**
+ * S-10's fourth tab, as one document: which task types may be raised on
+this project, which otherwise-optional ticket fields it requires, and
+who an unassigned new ticket goes to.
+
+**`taskTypes` is the resolved list, not the stored one.** It carries
+every *active* task type with an `isAllowed` flag, not just the ids this
+project has rows for — the screen is a checkbox list and a response
+holding only the ticked ones cannot render the unticked ones. Same call
+`getSlaPolicies` makes about its grid, and `name` rides along for the
+same reason: `/masters/task-types` is not mounted yet (B-020), and a
+list that renders "task type 7" is not a screen.
+
+**`restrictsTaskTypes: false` means every active type is allowed**, and
+it is not the same statement as "none are". A project with no
+`project_task_types` rows is unrestricted, which is what every project
+that predates this screen is; if an empty set meant "nothing may be
+raised here", running the migration would have stopped ticket creation
+everywhere. The flag is on the wire so a client never has to infer that
+from an array of eleven `isAllowed: true` values it cannot tell from
+eleven explicit ones.
+
+Every role may read it. All six can raise a ticket, and the create form
+cannot mark a field mandatory or filter its task-type picker without
+this.
+
+ * @summary Project settings — allowed task types, mandatory fields, auto-assign
+ */
+export const getProjectSettingsParams = zod.object({
+  "projectId": zod.number()
+})
+
+export const getProjectSettingsResponseDataAutoAssignRuleDefault = "MANUAL";
+
+export const getProjectSettingsResponse = zod.object({
+  "data": zod.object({
+  "projectId": zod.number(),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n'),
+  "mandatoryFields": zod.array(zod.enum(['DESCRIPTION', 'MODULE', 'SCREEN_NAME', 'FEATURE', 'STEPS_TO_GENERATE', 'CLIENT', 'CLIENT_CONTACT', 'ASSIGNEE', 'ESTIMATED_HRS', 'PLANNED_CLOSE_DATE']).describe('A ticket field a project may require, and \*\*the list is exactly the\nfields `TicketCreateRequest` leaves optional\*\*. `projectId`, `title`,\n`taskTypeId` and `level` are required of every ticket regardless, so\nthey are absent here — a checkbox that cannot change the outcome is a\ncontrol that lies about what it does.\n\n`MODULE` is worth naming: §7.5 already calls it \"mandatory on the form\nfor bug-type task types\", so a project that requires it for \*every\* task\ntype is tightening a rule that already exists rather than inventing one.\n\nThe vocabulary is enforced by the server and by this enum, not by a\ndatabase `CHECK`. `projects.mandatory_fields` constrains shape — a\nunique array of uppercase codes — deliberately: the list tracks Stream\nC\'s create form, and pinning the values in the schema would mean C\ncannot add a form field without a masters migration.\n')),
+  "restrictsTaskTypes": zod.boolean().describe('Whether this project has an allow-list at all. False means every\nactive task type may be raised, which is the state every project\ncreated before this screen is in — \*\*not\*\* \"no task type may be\nraised\". Derived from `project_task_types` being empty, and on the\nwire because a client cannot tell an unrestricted project from one\nthat ticked every box otherwise, and the two differ the moment an\nAdmin adds a twelfth task type.\n'),
+  "taskTypes": zod.array(zod.object({
+  "taskTypeId": zod.number(),
+  "code": zod.string().optional(),
+  "name": zod.string(),
+  "isAllowed": zod.boolean().describe('True for every row when `restrictsTaskTypes` is false. That is not\npadding — an unrestricted project really does allow all of them, and\na client rendering checkboxes needs the same answer either way.\n'),
+  "isActive": zod.boolean().describe('`task_types.is_active`. False only on a retired type this project\nstill has a row for; an unrestricted project never shows one,\nbecause \"all active types\" is what it means.\n')
+}).describe('One row of the allow-list, as the checkbox grid renders it.\n\n\*\*Every active task type, plus any inactive one this project still\nallows.\*\* The second half is not tidiness: the `PUT` is a wholesale\nreplace assembled from these rows, so a retired task type that was\nallowed and is not rendered would be dropped by the next save through a\nscreen that never showed it. That is the failure\n`replaceSlaPolicies` guards against for project-level defaults, one\nmaster over. An inactive row carries `isActive: false` so the screen can\nlabel it rather than silently offering a type no new ticket can use.\n'))
+}).describe('S-10\'s Settings tab as one document — see `getProjectSettings`.')
+})
+
+/**
+ * Replaces all three settings in one transaction. A `PATCH` of one field
+would need an `ETag` per field to be safe against a second tab, and the
+tab has one Save button — the whole document is what the screen holds.
+
+**An empty `allowedTaskTypeIds` clears the restriction rather than
+forbidding everything.** It is the request that returns the project to
+the unrestricted state it was created in, and there is deliberately no
+separate "remove restriction" control: two controls for one outcome is
+how they end up disagreeing (the same call `replaceSlaPolicies` makes
+about a cleared cell). The screen states the consequence in words, which
+is the part that stops it reading as "nothing may be raised".
+
+**`mandatoryFields` names only fields `TicketCreateRequest` leaves
+optional.** `projectId`, `title`, `taskTypeId` and `level` are already
+required of every ticket, so offering them here would be a control that
+cannot change anything.
+
+`project.manage` — Admin and PM, like the Team tab and unlike the SLA
+tab. Choosing which task types a project accepts is project
+configuration; setting the response target a client is contractually
+held to is master data. `autoAssignRule` is also already PM-writable
+through `PATCH /projects/{projectId}`, so narrowing this to Admin would
+take away a capability PMs hold today.
+
+**Nothing enforces these settings yet.** Ticket creation is Stream C's
+(`api/feature/tickets`, `CreateTicketPage`); B-019 stores and serves the
+configuration and C consumes it. Said here rather than left to be
+discovered, because a settings screen whose settings do nothing is a
+screen that looks finished.
+
+ * @summary Replace project settings
+ */
+export const replaceProjectSettingsParams = zod.object({
+  "projectId": zod.number()
+})
+
+export const replaceProjectSettingsHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const replaceProjectSettingsBodyAutoAssignRuleDefault = "MANUAL";export const replaceProjectSettingsBodyMandatoryFieldsMax = 20;
+
+export const replaceProjectSettingsBodyAllowedTaskTypeIdsMax = 200;
+
+
+
+export const replaceProjectSettingsBody = zod.object({
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n'),
+  "mandatoryFields": zod.array(zod.enum(['DESCRIPTION', 'MODULE', 'SCREEN_NAME', 'FEATURE', 'STEPS_TO_GENERATE', 'CLIENT', 'CLIENT_CONTACT', 'ASSIGNEE', 'ESTIMATED_HRS', 'PLANNED_CLOSE_DATE']).describe('A ticket field a project may require, and \*\*the list is exactly the\nfields `TicketCreateRequest` leaves optional\*\*. `projectId`, `title`,\n`taskTypeId` and `level` are required of every ticket regardless, so\nthey are absent here — a checkbox that cannot change the outcome is a\ncontrol that lies about what it does.\n\n`MODULE` is worth naming: §7.5 already calls it \"mandatory on the form\nfor bug-type task types\", so a project that requires it for \*every\* task\ntype is tightening a rule that already exists rather than inventing one.\n\nThe vocabulary is enforced by the server and by this enum, not by a\ndatabase `CHECK`. `projects.mandatory_fields` constrains shape — a\nunique array of uppercase codes — deliberately: the list tracks Stream\nC\'s create form, and pinning the values in the schema would mean C\ncannot add a form field without a masters migration.\n')).max(replaceProjectSettingsBodyMandatoryFieldsMax).describe('Empty is normal — a project requiring nothing beyond the always-required fields.'),
+  "allowedTaskTypeIds": zod.array(zod.number()).max(replaceProjectSettingsBodyAllowedTaskTypeIdsMax).describe('\*\*Empty means unrestricted, not empty.\*\* See the `PUT` description:\na project that allowed no task type could raise no ticket, so the\nstate does not exist and the request that would express it is the\none that removes the restriction instead.\n\nIds are checked for existence, not for activity. A deactivated task\ntype already on the list stays sendable — refusing it would make the\nrow uneditable through the only screen that can see it, which is the\ncall `replaceSlaPolicies` makes about the same master.\n')
+}).describe('All three settings, always. Every field is required even though the\nscreen may have changed one of them: this is a wholesale replace behind\none `If-Match`, and an optional field on a replace is ambiguous between\n\"leave it alone\" and \"clear it\" in exactly the way that loses somebody\'s\nsetting quietly.\n')
+
+export const replaceProjectSettingsResponseDataAutoAssignRuleDefault = "MANUAL";
+
+export const replaceProjectSettingsResponse = zod.object({
+  "data": zod.object({
+  "projectId": zod.number(),
+  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n'),
+  "mandatoryFields": zod.array(zod.enum(['DESCRIPTION', 'MODULE', 'SCREEN_NAME', 'FEATURE', 'STEPS_TO_GENERATE', 'CLIENT', 'CLIENT_CONTACT', 'ASSIGNEE', 'ESTIMATED_HRS', 'PLANNED_CLOSE_DATE']).describe('A ticket field a project may require, and \*\*the list is exactly the\nfields `TicketCreateRequest` leaves optional\*\*. `projectId`, `title`,\n`taskTypeId` and `level` are required of every ticket regardless, so\nthey are absent here — a checkbox that cannot change the outcome is a\ncontrol that lies about what it does.\n\n`MODULE` is worth naming: §7.5 already calls it \"mandatory on the form\nfor bug-type task types\", so a project that requires it for \*every\* task\ntype is tightening a rule that already exists rather than inventing one.\n\nThe vocabulary is enforced by the server and by this enum, not by a\ndatabase `CHECK`. `projects.mandatory_fields` constrains shape — a\nunique array of uppercase codes — deliberately: the list tracks Stream\nC\'s create form, and pinning the values in the schema would mean C\ncannot add a form field without a masters migration.\n')),
+  "restrictsTaskTypes": zod.boolean().describe('Whether this project has an allow-list at all. False means every\nactive task type may be raised, which is the state every project\ncreated before this screen is in — \*\*not\*\* \"no task type may be\nraised\". Derived from `project_task_types` being empty, and on the\nwire because a client cannot tell an unrestricted project from one\nthat ticked every box otherwise, and the two differ the moment an\nAdmin adds a twelfth task type.\n'),
+  "taskTypes": zod.array(zod.object({
+  "taskTypeId": zod.number(),
+  "code": zod.string().optional(),
+  "name": zod.string(),
+  "isAllowed": zod.boolean().describe('True for every row when `restrictsTaskTypes` is false. That is not\npadding — an unrestricted project really does allow all of them, and\na client rendering checkboxes needs the same answer either way.\n'),
+  "isActive": zod.boolean().describe('`task_types.is_active`. False only on a retired type this project\nstill has a row for; an unrestricted project never shows one,\nbecause \"all active types\" is what it means.\n')
+}).describe('One row of the allow-list, as the checkbox grid renders it.\n\n\*\*Every active task type, plus any inactive one this project still\nallows.\*\* The second half is not tidiness: the `PUT` is a wholesale\nreplace assembled from these rows, so a retired task type that was\nallowed and is not rendered would be dropped by the next save through a\nscreen that never showed it. That is the failure\n`replaceSlaPolicies` guards against for project-level defaults, one\nmaster over. An inactive row carries `isActive: false` so the screen can\nlabel it rather than silently offering a type no new ticket can use.\n'))
+}).describe('S-10\'s Settings tab as one document — see `getProjectSettings`.')
+})
+
