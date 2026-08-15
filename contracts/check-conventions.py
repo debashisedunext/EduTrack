@@ -79,6 +79,7 @@ ROWLESS_403 = {
     "/masters/notification-templates":     "Admin-only screen, reads included — master data, not row-scoped, so there is no row whose existence a 404 could protect",
     "/masters/notification-templates/vocabulary": "same: a catalogue of enum values, Admin-only because the screen it feeds is",
     "/masters/notification-templates/{templateId}": "same: not row-scoped. Every read here is Admin-only, so a 403 tells a non-Admin only what the 401 already did",
+    "/attachments/limits":                 "org-wide settings, not a row — `master.write` is a capability the caller either holds or does not, and the resource has no existence a 404 could conceal (every role already reads it)",
 }
 
 

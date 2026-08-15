@@ -25,11 +25,12 @@ import java.net.URI;
  * out-of-scope response is decided, which is exactly the drift that class's
  * javadoc exists to prevent.
  */
-@RestControllerAdvice(assignableTypes = AttachmentController.class)
+@RestControllerAdvice(assignableTypes = {AttachmentController.class, AttachmentSettingsController.class})
 class AttachmentExceptionHandler {
 
     private static final URI UNSUPPORTED_TYPE = URI.create("https://edutrack/errors/unsupported-attachment-type");
     private static final URI TOO_LARGE = URI.create("https://edutrack/errors/attachment-too-large");
+    private static final URI INVALID_LIMITS = URI.create("https://edutrack/errors/invalid-attachment-limits");
 
     /**
      * 415, per the contract: "Extension or sniffed MIME type not allowed."
@@ -67,6 +68,25 @@ class AttachmentExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     ResponseEntity<ProblemDetail> handleContainerLimit(MaxUploadSizeExceededException e) {
         return payloadTooLarge("That file is larger than this server accepts for one attachment.");
+    }
+
+    /**
+     * C-027 · 422. A settings write the product cannot honour.
+     *
+     * <p>422 and not 400 for {@code CONVENTIONS.md} §3's reason: the body
+     * parsed, each field is the right type and within its own declared range,
+     * and the refusal is about what the three numbers mean together or against
+     * this server's multipart configuration. Bean Validation's 400 already
+     * covers the per-field half — see {@code AttachmentSettingsController
+     * .LimitsWrite}.
+     */
+    @ExceptionHandler(InvalidAttachmentLimitsException.class)
+    ResponseEntity<ProblemDetail> handleInvalidLimits(InvalidAttachmentLimitsException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(INVALID_LIMITS);
+        problem.setTitle("Those limits cannot be applied");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(problem);
     }
 
     private ResponseEntity<ProblemDetail> payloadTooLarge(String detail) {

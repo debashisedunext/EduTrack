@@ -49,19 +49,15 @@ class AttachmentLimitExceededException extends RuntimeException {
      * §4B.5 ({@code qa-signoff-report.pdf (412 KB)}). The client's rejection
      * message and the server's must read the same, or a user who hits the cap on
      * one side and not the other has two different numbers for one rule.
+     *
+     * <p><b>C-027 · delegated rather than duplicated.</b> This class and
+     * {@link AttachmentLimits.Bytes} carried the same fifteen lines and the same
+     * claim about agreeing with the client, and they had drifted from it
+     * identically — a 2 MB cap rendered {@code "2.0 MB"} where the client
+     * renders {@code "2 MB"}. Two copies of a rule about staying in step is the
+     * shape that guarantees they will not.
      */
     private static String megabytes(long bytes) {
-        if (bytes < 1024) {
-            return bytes + " B";
-        }
-        double value = bytes / 1024.0;
-        String[] units = {"KB", "MB", "GB"};
-        int unit = 0;
-        while (value >= 1024 && unit < units.length - 1) {
-            value /= 1024;
-            unit++;
-        }
-        return (value >= 10 ? String.valueOf(Math.round(value)) : String.valueOf(Math.round(value * 10) / 10.0))
-                + " " + units[unit];
+        return AttachmentLimits.Bytes.human(bytes);
     }
 }

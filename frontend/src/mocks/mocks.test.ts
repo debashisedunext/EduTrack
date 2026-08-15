@@ -896,3 +896,84 @@ describe('mock file storage', () => {
     expect([...first.bytes]).not.toEqual([...other.bytes]);
   });
 });
+
+/**
+ * C-027 · §4B.4's attachment caps, now a resource rather than three constants.
+ *
+ * The upload handler enforces all three of them, and **that half cannot be
+ * exercised here**: `POST …/attachments` reads `request.formData()`, and under
+ * vitest no genuine multipart body reaches a handler — jsdom's `FormData` and
+ * Node's `fetch` are different realms, so the body arrives as the literal
+ * `[object FormData]`. `useTicketAttachments.test.tsx` documents the whole
+ * problem and why it belongs in `test/setup.ts`. What is pinned here is the
+ * source those caps are read from, which is the part that changed.
+ */
+describe('attachment limits', () => {
+  /**
+   * `If-Match: *` rather than a real tag, per RFC 9110.
+   *
+   * The mutator returns the parsed body and not the response, so a test cannot
+   * read the `ETag` the `GET` emits — and the precondition is not what these
+   * tests are about. That it is *required* is asserted directly below, which is
+   * the half a screen can get wrong.
+   */
+  const put = <T,>(url: string, data: unknown) =>
+    http<T>({ url, method: 'PUT', data, headers: { 'If-Match': '*' } });
+
+  interface Limits { maxFileBytes: number; maxTicketBytes: number; maxFiles: number; ceilingBytes: number }
+
+  it('starts at the blueprint’s own numbers, which is what the migration seeds', async () => {
+    const limits = await get<Envelope<Limits>>('/attachments/limits');
+
+    expect(limits.data).toMatchObject({
+      maxFileBytes: 10 * 1024 * 1024,
+      maxTicketBytes: 50 * 1024 * 1024,
+      maxFiles: 20,
+    });
+  });
+
+  it('requires If-Match, so a screen cannot silently erase another admin’s save', async () => {
+    // One row, org-wide, replaced wholesale: two administrators editing the
+    // limits are editing the same row by definition. A guard the real backend
+    // has and the mock waves through is a guard the frontend never exercises.
+    await expect(http({
+      url: '/attachments/limits', method: 'PUT',
+      data: { maxFileBytes: 1024, maxTicketBytes: 4096, maxFiles: 3 },
+    })).rejects.toMatchObject({ status: 428 });
+  });
+
+  it('a saved change is what the next read returns', async () => {
+    await put('/attachments/limits', { maxFileBytes: 1024, maxTicketBytes: 4096, maxFiles: 3 });
+
+    expect((await get<Envelope<Limits>>('/attachments/limits')).data.maxFiles).toBe(3);
+  });
+
+  it('refuses a per-ticket total below the per-file cap', async () => {
+    // Not tidiness. It would make the per-file cap unreachable: every file large
+    // enough to test it is refused by the ticket total first, telling the user
+    // to remove an attachment from a ticket that may have none.
+    await expect(put('/attachments/limits', { maxFileBytes: 4096, maxTicketBytes: 1024, maxFiles: 3 }))
+      .rejects.toMatchObject({ status: 422 });
+  });
+
+  it('refuses a per-file cap above what the server can accept', async () => {
+    // The container refuses an oversized body during parsing, so a cap above
+    // `ceilingBytes` would save successfully and change nothing.
+    await expect(put('/attachments/limits', {
+      maxFileBytes: 40 * 1024 * 1024, maxTicketBytes: 80 * 1024 * 1024, maxFiles: 3,
+    })).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('refuses zero, which is not “unlimited”', async () => {
+    await expect(put('/attachments/limits', { maxFileBytes: 1024, maxTicketBytes: 4096, maxFiles: 0 }))
+      .rejects.toMatchObject({ status: 400 });
+  });
+
+  it('does not let a client raise the ceiling it does not control', async () => {
+    await put('/attachments/limits', {
+      maxFileBytes: 1024, maxTicketBytes: 4096, maxFiles: 3, ceilingBytes: 999 * 1024 * 1024,
+    });
+
+    expect((await get<Envelope<Limits>>('/attachments/limits')).data.ceilingBytes).toBe(10 * 1024 * 1024);
+  });
+});

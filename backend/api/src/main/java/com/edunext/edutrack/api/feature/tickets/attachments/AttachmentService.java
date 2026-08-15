@@ -62,6 +62,7 @@ class AttachmentService {
     private final AttachmentStorage storage;
     private final AttachmentScanTask scans;
     private final AttachmentProperties properties;
+    private final AttachmentSettingsService limits;
 
     AttachmentService(ScopedTickets tickets,
                       TicketAttachmentRepository attachments,
@@ -69,7 +70,8 @@ class AttachmentService {
                       ImageMetadataStripper stripper,
                       AttachmentStorage storage,
                       AttachmentScanTask scans,
-                      AttachmentProperties properties) {
+                      AttachmentProperties properties,
+                      AttachmentSettingsService limits) {
         this.tickets = tickets;
         this.attachments = attachments;
         this.types = types;
@@ -77,6 +79,7 @@ class AttachmentService {
         this.storage = storage;
         this.scans = scans;
         this.properties = properties;
+        this.limits = limits;
     }
 
     /**
@@ -238,20 +241,32 @@ class AttachmentService {
      * <p>Deleted rows do not count. A tombstone records that something was
      * attached and removed; charging the ticket for storage it no longer uses
      * would make the 15-minute delete window pointless.
+     *
+     * <p><b>C-027 · the caps come from {@link AttachmentSettingsService} and not
+     * from {@link AttachmentProperties}.</b> §4B.4 wants them configurable in
+     * system settings rather than only at deploy, and this is the method that
+     * has to see the change — the {@code GET} the client validates against and
+     * this guard read the same {@code effective()}, so a file the picker accepts
+     * is one this method accepts. Resolved per upload rather than held in a
+     * field: a setting an administrator changes must apply to the next upload,
+     * not to the next restart, which is the entire difference the task is
+     * about.</p>
      */
     private void enforceLimits(long ticketId, long sizeBytes) {
-        if (sizeBytes > properties.maxFileBytes()) {
-            throw AttachmentLimitExceededException.fileTooLarge(sizeBytes, properties.maxFileBytes());
+        AttachmentLimits caps = limits.effective();
+
+        if (sizeBytes > caps.maxFileBytes()) {
+            throw AttachmentLimitExceededException.fileTooLarge(sizeBytes, caps.maxFileBytes());
         }
 
         List<TicketAttachment> existing = attachments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(ticketId);
-        if (existing.size() + 1 > properties.maxFiles()) {
-            throw AttachmentLimitExceededException.tooManyFiles(properties.maxFiles());
+        if (existing.size() + 1 > caps.maxFiles()) {
+            throw AttachmentLimitExceededException.tooManyFiles(caps.maxFiles());
         }
 
         long used = existing.stream().mapToLong(TicketAttachment::getSizeBytes).sum();
-        if (used + sizeBytes > properties.maxTicketBytes()) {
-            throw AttachmentLimitExceededException.ticketFull(used, sizeBytes, properties.maxTicketBytes());
+        if (used + sizeBytes > caps.maxTicketBytes()) {
+            throw AttachmentLimitExceededException.ticketFull(used, sizeBytes, caps.maxTicketBytes());
         }
     }
 

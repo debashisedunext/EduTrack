@@ -22,12 +22,22 @@ import java.time.Duration;
  *                     checks the signature when the request starts, not
  *                     throughout, so a 40-second expiry would not cut a large
  *                     download short but would defeat a user who queued three.
- * @param maxFileBytes 10 MB, §4B.4. Mirrored by {@code spring.servlet.multipart.max-file-size}
- *                     so the container refuses an oversized body before it is
- *                     buffered; this is the check that produces the contract's
- *                     413 with a message, and the two must move together.
- * @param maxTicketBytes 50 MB per ticket, §4B.4.
- * @param maxFiles 20 files per ticket, §4B.4.
+ * @param maxFileBytes 10 MB, §4B.4. <b>C-027 moved the authority for this and
+ *                     the two below into {@code attachment_settings}</b>, so
+ *                     they are the fallback used when that row is absent rather
+ *                     than the value normally enforced — see
+ *                     {@link AttachmentSettingsService}, which is the only
+ *                     caller. Kept rather than deleted because a deployment
+ *                     whose settings row has been removed by hand should lose
+ *                     its customisation and not its upload path.
+ *                     {@code spring.servlet.multipart.max-file-size} still
+ *                     bounds every one of them: the container refuses an
+ *                     oversized body before it is buffered, so a configured cap
+ *                     above it cannot take effect, which is why
+ *                     {@code AttachmentSettingsService} refuses such a write and
+ *                     clamps such a read.
+ * @param maxTicketBytes 50 MB per ticket, §4B.4. Fallback, as above.
+ * @param maxFiles 20 files per ticket, §4B.4. Fallback, as above.
  * @param scan the AV scanner
  * @param thumbnail C-026's reductions
  */

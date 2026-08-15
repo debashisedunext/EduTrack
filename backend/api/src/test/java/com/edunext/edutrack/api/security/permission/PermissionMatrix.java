@@ -274,6 +274,18 @@ final class PermissionMatrix {
             {"autoAssignRule":"ROUND_ROBIN","mandatoryFields":["MODULE"],\
             "allowedTaskTypeIds":[1,2]}""";
 
+    /**
+     * {@code AttachmentSettingsController.LimitsWrite}: all three boxed and
+     * {@code @NotNull}, so omitting any of them is a 400 that would pre-empt the
+     * guard this file is asserting.
+     *
+     * <p>§4B.4's own numbers, which are also what the migration seeds — a body
+     * that changed the limits would leave whichever role ran last having
+     * reconfigured the fixture for every test after it.
+     */
+    private static final String ATTACHMENT_LIMITS = """
+            {"maxFileBytes":10485760,"maxTicketBytes":52428800,"maxFiles":20}""";
+
     /** {@code StatusRequest}: isActive is boxed so omitting it is a 400. */
     private static final String USER_STATUS = """
             {"isActive":false}""";
@@ -368,6 +380,23 @@ final class PermissionMatrix {
             // argument resolution does not pre-empt the guard.
             everyRole("POST", "/api/v1/tickets/{ticketId}/attachments"),
             everyRole("GET", "/api/v1/tickets/{ticketId}/attachments"),
+
+            // ── attachment limits · C-027, §4B.4 ────────────────────────────
+            // Read open to all six, write to master.write.
+            //
+            // The GET returns the three caps the upload form has always printed
+            // on screen ("10 MB per file · 20 per ticket"), and every role has an
+            // upload surface — a role that could not read them would be left
+            // validating against a guess, which is the one outcome §4B.4's
+            // published limits exist to prevent. Nothing about the org, its
+            // projects or its tickets is reachable through it.
+            //
+            // The write is Admin's alone, because master.write is granted to
+            // Admin alone (B-001's §2 grant matrix). The org-wide shape is why
+            // it is master.write rather than project.manage: there is nothing
+            // here scoped to a project for a project grant to bound.
+            everyRole("GET", "/api/v1/attachments/limits"),
+            adminOnly("PUT", "/api/v1/attachments/limits", ATTACHMENT_LIMITS),
 
             // ── planned close date · every role holds ticket.create ──────────
             // Allowed for all six because all six may raise a ticket (§2), not

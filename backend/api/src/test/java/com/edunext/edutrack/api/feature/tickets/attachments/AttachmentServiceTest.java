@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -57,8 +58,21 @@ class AttachmentServiceTest {
             new AttachmentProperties.Scan(false, "localhost", 3310, Duration.ofSeconds(30), false),
             new AttachmentProperties.Thumbnail(true, 320, 50_000_000L));
 
+    /**
+     * C-027 · the caps now come from here rather than from the properties.
+     *
+     * <p>Stubbed with §4B.4's own numbers, so every limit assertion below reads
+     * exactly as it did when they were properties. The point of the seam is
+     * proved in {@code AttachmentSettingsServiceTest} — that this method is
+     * consulted <em>per upload</em> rather than once, which is the difference
+     * between a setting that takes effect on the next attachment and one that
+     * takes effect on the next restart, is pinned by
+     * {@code readsTheLimitsOnEveryUpload} at the foot of this file.
+     */
+    private final AttachmentSettingsService limits = mock(AttachmentSettingsService.class);
+
     private final AttachmentService service =
-            new AttachmentService(tickets, attachments, types, stripper, storage, scans, properties);
+            new AttachmentService(tickets, attachments, types, stripper, storage, scans, properties, limits);
 
     private final Authentication caller = new TestingAuthenticationToken("ravi", "n/a");
 
@@ -66,6 +80,9 @@ class AttachmentServiceTest {
 
     @BeforeEach
     void ticketExistsAndIsInScope() {
+        when(limits.effective()).thenReturn(
+                AttachmentLimits.of(10L * 1024 * 1024, 50L * 1024 * 1024, 20));
+
         Ticket ticket = new Ticket();
         ticket.setId(TICKET);
         when(tickets.require(any(), eq(TICKET))).thenReturn(ticket);
@@ -175,6 +192,29 @@ class AttachmentServiceTest {
 
             assertThatThrownBy(() -> service.upload(caller, TICKET, upload("report.pdf", twoMegabytes)))
                     .isInstanceOf(AttachmentLimitExceededException.class);
+        }
+
+        /**
+         * C-027 · the caps are resolved per upload, not held in a field.
+         *
+         * <p>This is the whole difference the task is about. A version that read
+         * {@code effective()} once in the constructor would pass every other
+         * assertion in this class and would mean an administrator's change took
+         * effect on the next <em>restart</em> — which is exactly the behaviour
+         * the properties already had, and exactly what §4B.4's "configurable in
+         * system settings" is asking to be rid of.
+         */
+        @Test
+        void theCapsAreReadOnEveryUploadSoAChangeAppliesToTheNextOne() {
+            service.upload(caller, TICKET, upload("first.png", AttachmentFixtures.pngWithExif()));
+
+            // An administrator drops the ticket cap below what is already stored.
+            existing.add(stored(1024, "CLEAN"));
+            when(limits.effective()).thenReturn(AttachmentLimits.of(512, 512, 20));
+
+            assertThatThrownBy(() -> service.upload(caller, TICKET, upload("second.png", AttachmentFixtures.pngWithExif())))
+                    .isInstanceOf(AttachmentLimitExceededException.class);
+            verify(limits, times(2)).effective();
         }
     }
 

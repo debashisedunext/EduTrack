@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils'
 import { AttachmentPicker } from '@/components/ui/attachment-picker'
 
 import { FormField } from '../create/FormField'
+import { useAttachmentLimits } from '../attachments/attachmentLimits'
 import { useTicketAttachments } from '../attachments/useTicketAttachments'
 import { STATUS_LABEL } from '../list/columns'
 import { titleCase } from '../stageDisplay'
@@ -97,6 +98,9 @@ function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => voi
   // this panel holds a `Ticket`, and attachments only ride on the aggregated
   // `/full` payload the detail page fetches. §4B.4's flag defaults internal.
   const attachments = useTicketAttachments({ ticketId: ticket.ticketId })
+  // C-027 · §4B.4's caps as configured, not as hard-coded. Shares one cached
+  // fetch with the detail page behind this slide-over.
+  const attachmentLimits = useAttachmentLimits()
 
   async function onSubmit(values: QuickUpdateFormValues) {
     try {
@@ -190,6 +194,7 @@ function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => voi
               items={attachments.items}
               onAdd={attachments.add}
               onRemove={attachments.remove}
+              limits={attachmentLimits}
               disabled={quickUpdate.isPending}
             />
           )}

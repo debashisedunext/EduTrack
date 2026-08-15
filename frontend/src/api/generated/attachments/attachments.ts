@@ -66,12 +66,18 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AttachmentLimitsResponse,
+  AttachmentLimitsWrite,
   AttachmentListResponse,
   AttachmentResponse,
+  ForbiddenResponse,
   ListAttachmentsParams,
   NotFoundResponse,
+  PreconditionFailedResponse,
   Problem,
-  UploadAttachmentBody
+  UnauthorizedResponse,
+  UploadAttachmentBody,
+  ValidationFailedResponse
 } from '.././model';
 
 import { http } from '../../http';
@@ -326,6 +332,190 @@ export const useDeleteAttachment = <TError = NotFoundResponse,
       > => {
 
       const mutationOptions = getDeleteAttachmentMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * §4B.4's three caps, **as configured** rather than as originally
+specified — they are editable at runtime (C-027), so a client that
+hard-codes 10 MB will refuse files this server would accept the moment
+an administrator raises it.
+
+Every upload surface validates against this. Open to all six roles, and
+deliberately: each of them has an upload surface, and the numbers are
+the ones the picker has always printed on screen. Nothing about the
+org, its projects or its tickets is reachable through it.
+
+Org-wide and identical for every ticket, which is why it is not under
+`/tickets/{ticketId}/attachments` — that shape would raise the question
+of per-ticket limits, whose answer is no.
+
+ * @summary Attachment limits in force
+ */
+export const getAttachmentLimits = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<AttachmentLimitsResponse>(
+      {url: `/attachments/limits`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetAttachmentLimitsQueryKey = () => {
+    return [
+    `/attachments/limits`
+    ] as const;
+    }
+
+    
+export const getGetAttachmentLimitsQueryOptions = <TData = Awaited<ReturnType<typeof getAttachmentLimits>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAttachmentLimits>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAttachmentLimitsQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAttachmentLimits>>> = ({ signal }) => getAttachmentLimits(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAttachmentLimits>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAttachmentLimitsQueryResult = NonNullable<Awaited<ReturnType<typeof getAttachmentLimits>>>
+export type GetAttachmentLimitsQueryError = UnauthorizedResponse
+
+
+export function useGetAttachmentLimits<TData = Awaited<ReturnType<typeof getAttachmentLimits>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAttachmentLimits>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAttachmentLimits>>,
+          TError,
+          Awaited<ReturnType<typeof getAttachmentLimits>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAttachmentLimits<TData = Awaited<ReturnType<typeof getAttachmentLimits>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAttachmentLimits>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAttachmentLimits>>,
+          TError,
+          Awaited<ReturnType<typeof getAttachmentLimits>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAttachmentLimits<TData = Awaited<ReturnType<typeof getAttachmentLimits>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAttachmentLimits>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Attachment limits in force
+ */
+
+export function useGetAttachmentLimits<TData = Awaited<ReturnType<typeof getAttachmentLimits>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAttachmentLimits>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetAttachmentLimitsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * All three at once. They are only meaningful together — a per-ticket
+total below the per-file cap makes the per-file cap unreachable, since
+every file large enough to test it is refused by the ticket total first
+— so there is no per-field write that could pass through that state.
+
+`master.write`, which is Admin's alone. The org-wide shape is why it is
+not `project.manage`: nothing here is scoped to a project.
+
+**`If-Match` is required, not optional.** There is exactly one row and
+it is org-wide, which makes a lost update *more* plausible here than on
+a per-project resource, not less — two administrators editing the
+attachment limits are editing the same row by definition, and a `PUT`
+is a wholesale replace, so the loser of the race is erased having seen
+a success. A missing header is `428`.
+
+ * @summary Set the attachment limits
+ */
+export const replaceAttachmentLimits = (
+    attachmentLimitsWrite: AttachmentLimitsWrite,
+ ) => {
+      
+      
+      return http<AttachmentLimitsResponse>(
+      {url: `/attachments/limits`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: attachmentLimitsWrite
+    },
+      );
+    }
+  
+
+
+export const getReplaceAttachmentLimitsMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceAttachmentLimits>>, TError,{data: AttachmentLimitsWrite}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof replaceAttachmentLimits>>, TError,{data: AttachmentLimitsWrite}, TContext> => {
+
+const mutationKey = ['replaceAttachmentLimits'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceAttachmentLimits>>, {data: AttachmentLimitsWrite}> = (props) => {
+          const {data} = props ?? {};
+
+          return  replaceAttachmentLimits(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplaceAttachmentLimitsMutationResult = NonNullable<Awaited<ReturnType<typeof replaceAttachmentLimits>>>
+    export type ReplaceAttachmentLimitsMutationBody = AttachmentLimitsWrite
+    export type ReplaceAttachmentLimitsMutationError = ValidationFailedResponse | ForbiddenResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Set the attachment limits
+ */
+export const useReplaceAttachmentLimits = <TError = ValidationFailedResponse | ForbiddenResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceAttachmentLimits>>, TError,{data: AttachmentLimitsWrite}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof replaceAttachmentLimits>>,
+        TError,
+        {data: AttachmentLimitsWrite},
+        TContext
+      > => {
+
+      const mutationOptions = getReplaceAttachmentLimitsMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

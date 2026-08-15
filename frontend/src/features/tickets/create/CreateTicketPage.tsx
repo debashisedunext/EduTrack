@@ -28,6 +28,7 @@ import { toast } from '@/components/ui/use-toast'
 import { createTicketBodyDescriptionMax } from '@/api/generated/zod/tickets/tickets.zod'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
 
+import { useAttachmentLimits } from '../attachments/attachmentLimits'
 import { useTicketAttachments } from '../attachments/useTicketAttachments'
 import { SlaPreview } from '../sla/SlaPreview'
 import { usePlannedCloseDate } from '../sla/usePlannedCloseDate'
@@ -163,6 +164,11 @@ export function CreateTicketPage() {
   // `ticketId: null` — deferred mode. Nothing uploads until `flush` is handed
   // the ID the 201 returns; see the picker in the Extra group below.
   const attachments = useTicketAttachments({ ticketId: null })
+  // C-027. This form stages files locally and uploads them after the 201, so its
+  // gate is the *only* one a file passes before the ticket exists — the numbers
+  // it enforces have to be the server's, or a staged file is refused here and
+  // never gets the chance to be accepted there.
+  const attachmentLimits = useAttachmentLimits()
 
   // C-024. `RichTextEditor` intercepts an image paste itself and hands the files
   // out through `onPasteFiles`; without a handler it drops them, which is the
@@ -728,6 +734,7 @@ export function CreateTicketPage() {
                 items={attachments.items}
                 onAdd={attachments.add}
                 onRemove={attachments.remove}
+                limits={attachmentLimits}
                 disabled={isSaving}
               />
             )}
