@@ -1,6 +1,7 @@
 import type { Attachment } from '@/api/generated/model'
 import { AttachmentPicker } from '@/components/ui/attachment-picker'
 import { AttachmentGallery } from '../attachments/AttachmentGallery'
+import { useAttachmentLimits } from '../attachments/attachmentLimits'
 import { useTicketAttachments } from '../attachments/useTicketAttachments'
 
 /**
@@ -50,6 +51,10 @@ export function TicketAttachmentsSection({
     existing: attachments,
     onUploaded: onChanged,
   })
+  // C-027. Server-authored, so this strip refuses exactly what the server would
+  // refuse — the picker's gate runs before any request, so a hard-coded cap here
+  // would override a raised setting rather than merely disagree with it.
+  const limits = useAttachmentLimits()
 
   return (
     <section
@@ -83,6 +88,7 @@ export function TicketAttachmentsSection({
           <AttachmentPicker
             items={items}
             onAdd={add}
+            limits={limits}
             showItems={false}
             aria-label="Attachments"
           />

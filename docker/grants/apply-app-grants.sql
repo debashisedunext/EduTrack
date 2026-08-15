@@ -98,6 +98,22 @@ BEGIN
       SET v_sql = CONCAT('GRANT SELECT, INSERT, UPDATE ON edutrack.`', v_table,
                          '` TO ''edutrack_app''@''%''');
 
+    ELSEIF v_table = 'attachment_settings' THEN
+      -- C-027's §4B.4 caps. SELECT, INSERT and UPDATE — never DELETE, and the
+      -- default branch below would grant it along with the rest of DML.
+      --
+      -- The table holds exactly one row, seeded by V20260815_1140, and the
+      -- application has no code path that removes it: the repository exposes
+      -- load() and an upsert and nothing else. DELETE would therefore only
+      -- ever be reachable by accident or by an injected statement, and the
+      -- state it produces is the one AttachmentSettingsService has to log a
+      -- warning about and fall back from — a system quietly enforcing the
+      -- properties while a settings screen shows whatever it last read.
+      -- INSERT is granted because the write is an upsert; it is what restores
+      -- the row if it is ever lost, rather than what loses it.
+      SET v_sql = CONCAT('GRANT SELECT, INSERT, UPDATE ON edutrack.`', v_table,
+                         '` TO ''edutrack_app''@''%''');
+
     ELSEIF v_table = 'flyway_schema_history' THEN
       -- Readable for diagnostics; never written by the application.
       SET v_sql = CONCAT('GRANT SELECT ON edutrack.`', v_table,

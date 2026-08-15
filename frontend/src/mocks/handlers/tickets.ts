@@ -605,9 +605,39 @@ export const ticketHandlers = [
     const form = await request.formData();
     const file = form.get('file') as File | null;
     if (!file) return validationFailed({ file: ['must not be null'] });
-    if (file.size > 10 * 1024 * 1024) {
-      return problem(413, 'file-too-large', 'File exceeds the 10 MB limit');
+
+    /*
+     * C-027 · all three of §4B.4's caps, read from `db.attachmentLimits`.
+     *
+     * Until this task the mock enforced the per-file cap and nothing else, with
+     * the number written inline — so the 50 MB and 20-file rules existed only on
+     * the server and only in the picker, and nothing under `npm run dev` or in a
+     * test could ever exercise the two 413s the client has messages for. C-023's
+     * note flagged it at the time.
+     *
+     * The order matches `AttachmentService.enforceLimits` and it is not
+     * arbitrary: per-file first, so an oversized file is reported as oversized
+     * rather than as "would exceed the ticket budget", which would send the user
+     * off to delete other attachments to make room for a file that was never
+     * going to fit on its own.
+     */
+    const limits = db.attachmentLimits;
+    if (file.size > limits.maxFileBytes) {
+      return problem(413, 'attachment-too-large',
+        `${mockBytes(file.size)} exceeds the ${mockBytes(limits.maxFileBytes)} limit for one file.`);
     }
+    const live = db.attachments.filter((x) => x.ticketId === t.ticketId && !x.isDeleted);
+    if (live.length + 1 > limits.maxFiles) {
+      return problem(413, 'attachment-too-large',
+        `A ticket may hold ${limits.maxFiles} attachments. Remove one before adding another.`);
+    }
+    const used = live.reduce((sum, x) => sum + x.sizeBytes, 0);
+    if (used + file.size > limits.maxTicketBytes) {
+      return problem(413, 'attachment-too-large',
+        `This ticket holds ${mockBytes(used)} of attachments and this file is ${mockBytes(file.size)}, `
+        + `which would take it past its ${mockBytes(limits.maxTicketBytes)} total. Remove an attachment first.`);
+    }
+
     const a = {
       id: nextId(db, 'attachment'), ticketId: t.ticketId, fileName: file.name,
       contentType: file.type || 'application/octet-stream', sizeBytes: file.size,
@@ -621,6 +651,65 @@ export const ticketHandlers = [
     // The scan completing a moment later, so the UI's PENDING state is real.
     setTimeout(() => { a.scanStatus = 'CLEAN'; }, 1500);
     return ok(attachmentDto(a), undefined, { status: 201 });
+  }),
+
+  /*
+   * C-027 · §4B.4's caps, read by every upload surface.
+   *
+   * Outside `/tickets` because the limits are org-wide and identical for every
+   * ticket — see the contract. Kept in this file anyway, next to the routes that
+   * enforce them, so the read and the enforcement cannot drift apart unnoticed.
+   */
+  http.get(url('/attachments/limits'), () => {
+    const db = getDb();
+    return ok(db.attachmentLimits, undefined, { headers: { ETag: limitsEtag(db) } });
+  }),
+
+  http.put(url('/attachments/limits'), async ({ request }) => {
+    const db = getDb();
+
+    // The mock enforces `If-Match` too. A guard the real backend has and the
+    // mock waves through is a guard the frontend never gets to exercise — and
+    // here the loser of a lost update is erased rather than merged, because a
+    // PUT replaces all three caps at once.
+    const ifMatch = request.headers.get('If-Match');
+    if (!ifMatch) {
+      return problem(428, 'precondition-required',
+        'If-Match is required. GET the limits first and send back their ETag.');
+    }
+    if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== limitsEtag(db).replace(/"/g, '')) {
+      return problem(412, 'precondition-failed',
+        'The limits changed since you read them. Reload and reapply your edit.');
+    }
+
+    const body = (await request.json()) as Partial<typeof db.attachmentLimits>;
+    const { maxFileBytes, maxTicketBytes, maxFiles } = body;
+
+    if (![maxFileBytes, maxTicketBytes, maxFiles].every((v) => typeof v === 'number' && v > 0)) {
+      return validationFailed({
+        maxFileBytes: ['must be a positive number'],
+        maxTicketBytes: ['must be a positive number'],
+        maxFiles: ['must be a positive number'],
+      });
+    }
+    // The two 422s the server has, mirrored — a mock that accepted a
+    // combination the server refuses would let the settings form be built
+    // against a validation rule that does not exist.
+    if (maxFileBytes! > db.attachmentLimits.ceilingBytes) {
+      return problem(422, 'invalid-attachment-limits', 'Those limits cannot be applied', {
+        detail: `This server accepts at most ${mockBytes(db.attachmentLimits.ceilingBytes)} in one upload, `
+          + `so a per-file limit of ${mockBytes(maxFileBytes!)} could not take effect.`,
+      });
+    }
+    if (maxTicketBytes! < maxFileBytes!) {
+      return problem(422, 'invalid-attachment-limits', 'Those limits cannot be applied', {
+        detail: `maxTicketBytes (${mockBytes(maxTicketBytes!)}) must be at least maxFileBytes `
+          + `(${mockBytes(maxFileBytes!)}), or no file that size could ever be attached.`,
+      });
+    }
+
+    db.attachmentLimits = { ...db.attachmentLimits, maxFileBytes: maxFileBytes!, maxTicketBytes: maxTicketBytes!, maxFiles: maxFiles! };
+    return ok(db.attachmentLimits, undefined, { headers: { ETag: limitsEtag(db) } });
   }),
 
   http.delete(url('/tickets/:ticketId/attachments/:attachmentId'), ({ params }) => {
@@ -780,6 +869,38 @@ export function commentDto(c: import('../db').Comment) {
     mentions: c.mentionIds.map((id) => userRef(id, db)),
     attachments: [], createdAt: c.createdAt,
   };
+}
+
+/**
+ * C-027 · content-derived, like the real controller's, and over the three caps
+ * only.
+ *
+ * `ceilingBytes` is deliberately excluded: it is the server's own multipart
+ * configuration rather than part of the resource, so including it would make
+ * two differently-configured nodes hand out tags that disagree and fail a
+ * precondition nobody violated.
+ */
+const limitsEtag = (db: import('../db').Db) => {
+  const { maxFileBytes, maxTicketBytes, maxFiles } = db.attachmentLimits;
+  return `"${Math.abs([...JSON.stringify({ maxFileBytes, maxTicketBytes, maxFiles })]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+};
+
+/**
+ * C-027 · binary units with decimal labels — the one spelling this product uses.
+ *
+ * Deliberately duplicated from `formatFileSize` in `components/ui/attachments.ts`
+ * rather than imported: `mocks/` stands in for the server, and importing the
+ * client's formatter would make the mock's messages agree with the client's by
+ * construction instead of by both matching the real `AttachmentLimits.Bytes`.
+ */
+function mockBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10} ${units[unit]}`;
 }
 
 export function attachmentDto(a: import('../db').Attachment) {

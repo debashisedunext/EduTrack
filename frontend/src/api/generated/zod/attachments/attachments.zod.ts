@@ -144,3 +144,73 @@ export const deleteAttachmentParams = zod.object({
   "attachmentId": zod.number()
 })
 
+/**
+ * §4B.4's three caps, **as configured** rather than as originally
+specified — they are editable at runtime (C-027), so a client that
+hard-codes 10 MB will refuse files this server would accept the moment
+an administrator raises it.
+
+Every upload surface validates against this. Open to all six roles, and
+deliberately: each of them has an upload surface, and the numbers are
+the ones the picker has always printed on screen. Nothing about the
+org, its projects or its tickets is reachable through it.
+
+Org-wide and identical for every ticket, which is why it is not under
+`/tickets/{ticketId}/attachments` — that shape would raise the question
+of per-ticket limits, whose answer is no.
+
+ * @summary Attachment limits in force
+ */
+export const getAttachmentLimitsResponse = zod.object({
+  "data": zod.object({
+  "maxFileBytes": zod.number(),
+  "maxTicketBytes": zod.number(),
+  "maxFiles": zod.number(),
+  "ceilingBytes": zod.number().describe('Read-only. The most this server accepts in one upload whatever\n`maxFileBytes` says — the servlet container\'s multipart limit,\nwhich refuses a body before any application code runs. Reported so\na settings form can show the bound rather than discover it through\na 422, and so a client can say \"up to X\" without a second request.\n')
+})
+})
+
+/**
+ * All three at once. They are only meaningful together — a per-ticket
+total below the per-file cap makes the per-file cap unreachable, since
+every file large enough to test it is refused by the ticket total first
+— so there is no per-field write that could pass through that state.
+
+`master.write`, which is Admin's alone. The org-wide shape is why it is
+not `project.manage`: nothing here is scoped to a project.
+
+**`If-Match` is required, not optional.** There is exactly one row and
+it is org-wide, which makes a lost update *more* plausible here than on
+a per-project resource, not less — two administrators editing the
+attachment limits are editing the same row by definition, and a `PUT`
+is a wholesale replace, so the loser of the race is erased having seen
+a success. A missing header is `428`.
+
+ * @summary Set the attachment limits
+ */
+export const replaceAttachmentLimitsHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const replaceAttachmentLimitsBodyMaxFileBytesMax = 104857600;
+
+
+export const replaceAttachmentLimitsBodyMaxFilesMax = 200;
+
+
+
+export const replaceAttachmentLimitsBody = zod.object({
+  "maxFileBytes": zod.number().min(1).max(replaceAttachmentLimitsBodyMaxFileBytesMax),
+  "maxTicketBytes": zod.number().min(1),
+  "maxFiles": zod.number().min(1).max(replaceAttachmentLimitsBodyMaxFilesMax)
+}).describe('`ceilingBytes` is deliberately absent — it is the server\'s own\nconfiguration reported back, and accepting it would let a client appear\nto raise a bound it does not control.\n')
+
+export const replaceAttachmentLimitsResponse = zod.object({
+  "data": zod.object({
+  "maxFileBytes": zod.number(),
+  "maxTicketBytes": zod.number(),
+  "maxFiles": zod.number(),
+  "ceilingBytes": zod.number().describe('Read-only. The most this server accepts in one upload whatever\n`maxFileBytes` says — the servlet container\'s multipart limit,\nwhich refuses a body before any application code runs. Reported so\na settings form can show the bound rather than discover it through\na 422, and so a client can say \"up to X\" without a second request.\n')
+})
+})
+

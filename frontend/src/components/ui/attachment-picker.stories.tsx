@@ -168,6 +168,32 @@ export const AtFileLimit: Story = {
 }
 
 /**
+ * Limits an administrator raised — C-027.
+ *
+ * §4B.4's numbers are the *default*, not the rule: they live in
+ * `attachment_settings` and are editable at runtime, so every caption this
+ * control prints is data. `useAttachmentLimits` in
+ * `features/tickets/attachments/` is what supplies them on a real screen; the
+ * control itself stays presentational and never fetches, because nothing in
+ * `components/ui/` may import from `@/api`.
+ *
+ * Worth looking at rather than assuming: the per-file caption, the drop-zone
+ * hint and the running-total line are three separate renderings of the same
+ * three numbers, and a limit wired into two of them is the sort of thing that
+ * reads fine in a diff.
+ */
+export const RaisedLimits: Story = {
+  render: () => (
+    <Stateful
+      limits={{ maxFileBytes: 25 * 1024 * 1024, maxTotalBytes: 200 * 1024 * 1024, maxFiles: 50 }}
+      initial={[
+        { id: '1', name: 'crash-dump.log', sizeBytes: 18_000_000, contentType: 'text/plain', status: 'ready' },
+      ]}
+    />
+  ),
+}
+
+/**
  * Clicking a thumbnail opens it full-screen — C-026.
  *
  * The surface this exists for is the **create form**, where the file has not

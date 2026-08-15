@@ -243,10 +243,21 @@ edutrack:
     # anyone reads it.
     signed-url-ttl: ${ATTACHMENT_SIGNED_URL_TTL:PT5M}
 
-    # §4B.4's caps. max-file-bytes MUST track spring.servlet.multipart's
-    # max-file-size above — the container refuses the body first, and if the two
-    # disagree the caller gets a different error on either side of the gap.
-    # Making these settings-backed rather than properties is C-027.
+    # §4B.4's caps — the FALLBACK ONLY since C-027.
+    #
+    # The values actually enforced live in `attachment_settings` (one row,
+    # seeded by V20260815_1140 with these same numbers) and are editable at
+    # runtime through PUT /api/v1/attachments/limits, which is what §4B.4's
+    # "all configurable in system settings" asks for. These three are used
+    # only when that row is absent — a state the migration makes unreachable
+    # short of somebody deleting it — so that losing the row costs the
+    # customisation and not the ability to attach anything at all.
+    #
+    # spring.servlet.multipart's max-file-size above still bounds max-file-bytes
+    # however it is set. The container refuses an oversized body during parsing,
+    # before any of this feature's code runs, so a cap above it would be a
+    # setting that saves and does nothing: AttachmentSettingsService refuses
+    # such a write with a 422 naming the ceiling, and clamps such a read.
     max-file-bytes: ${ATTACHMENT_MAX_FILE_BYTES:10485760}      # 10 MB
     max-ticket-bytes: ${ATTACHMENT_MAX_TICKET_BYTES:52428800}  # 50 MB
     max-files: ${ATTACHMENT_MAX_FILES:20}

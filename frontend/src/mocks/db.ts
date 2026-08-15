@@ -387,6 +387,17 @@ export interface Db {
    * a flow the backend does not have — one where showing the QR is enrolment.
    */
   twoFactor: Record<number, { secret: string; enabled: boolean }>;
+  /**
+   * C-027 · §4B.4's three attachment caps, as the server would have them
+   * configured. Held here for the calendar's reason — `resetDb()` has to clear
+   * them, or a test that raises the limits leaves them raised for the next one.
+   *
+   * `ceilingBytes` mirrors the real server's `spring.servlet.multipart
+   * .max-file-size`: it bounds `maxFileBytes` however the setting is written,
+   * and the `PUT` refuses rather than clamps so the mock rejects the same
+   * request the server would.
+   */
+  attachmentLimits: { maxFileBytes: number; maxTicketBytes: number; maxFiles: number; ceilingBytes: number };
 }
 
 export interface Holiday {
@@ -946,6 +957,14 @@ export function createDb(): Db {
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
     seq: {},
     twoFactor: {}, // opt-in, so nobody starts enrolled
+    // C-027 · §4B.4's published defaults, which is also what the migration
+    // seeds — 10 MB per file, 50 MB and 20 files per ticket.
+    attachmentLimits: {
+      maxFileBytes: 10 * 1024 * 1024,
+      maxTicketBytes: 50 * 1024 * 1024,
+      maxFiles: 20,
+      ceilingBytes: 10 * 1024 * 1024,
+    },
     calendar: {
       week: {
         weeklyOff: [6, 7],

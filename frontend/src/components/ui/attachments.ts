@@ -70,10 +70,24 @@ export const ATTACHMENT_ACCEPT = ATTACHMENT_ALLOWED_EXTENSIONS.map((ext) => `.${
 /**
  * §4B.4's limits, "all configurable in system settings".
  *
- * There is no settings endpoint yet and no generated constant to import — unlike
- * the length bounds, which come from the contract's schema — so these are the
- * defaults, exported so the surfaces cannot each invent their own. When settings
- * land, the picker takes them as props and these become the fallback.
+ * **These are the fallback, not the authority — C-027.** The values enforced are
+ * whatever `GET /attachments/limits` returns, and both sides read it: the picker
+ * validates against them through its `limits` prop, and the server's
+ * `AttachmentService.enforceLimits` validates against the same resolved value.
+ *
+ * They stay here, and stay exported, for the two cases where there is no answer
+ * to read: before the request lands, and after it fails. Both must render a
+ * working picker rather than a disabled one, and the blueprint's own published
+ * numbers are the right thing to fall back to — they are also exactly what an
+ * unconfigured deployment enforces.
+ *
+ * A surface that renders a picker without passing `limits` gets these, which is
+ * correct for Storybook and for a component test and wrong for a real screen.
+ * `useAttachmentLimits` in `features/tickets/attachments/` is the half that
+ * fetches; it lives there and not here because nothing in `components/ui/` may
+ * import from `@/api` — a shared control that knew how to fetch would pull the
+ * generated client into Stream A's and Stream B's bundles the first time either
+ * of them used it.
  */
 export const ATTACHMENT_MAX_FILE_BYTES = 10 * 1024 * 1024
 export const ATTACHMENT_MAX_TICKET_BYTES = 50 * 1024 * 1024

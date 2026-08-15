@@ -249,6 +249,60 @@ would open its own connection and the save would autocommit — right up to the
 first time two writes needed to land together. The boundary is a
 `TransactionTemplate` instead, where no call site can bypass it.
 
+## C-027 · the caps, made configurable
+
+§4B.4 words the limits row as *"10 MB per file by default, 50 MB per ticket, 20
+files per ticket — all configurable in system settings"*. C-025 enforced all
+three correctly, from `edutrack.attachments.*`. **A property is configurable by
+whoever can restart the process; "system settings" means an administrator, at
+runtime, on a running system** — and that difference is the whole task.
+
+| Piece | What it does |
+|---|---|
+| `attachment_settings` | One row, `id = 1` enforced by a `CHECK`, seeded with §4B.4's own numbers. |
+| `AttachmentLimits` | The three caps as one value, with the only constructor that can build them. |
+| `AttachmentSettingsRepository` | `JdbcClient` load/upsert. Named for the feature, not the table. |
+| `AttachmentSettingsService` | `effective()` — the single answer to "what is the limit". |
+| `AttachmentSettingsController` | `GET`/`PUT /api/v1/attachments/limits`, `master.write` on the write. |
+
+### Three decisions worth knowing
+
+**The caps are resolved per upload, not held in a field.** A version that read
+`effective()` once at construction would pass every limit test in the suite and
+would mean an administrator's change took effect on the next *restart* — which
+is exactly what the properties already did. `AttachmentServiceTest
+.theCapsAreReadOnEveryUploadSoAChangeAppliesToTheNextOne` is what stops that
+regression being invisible.
+
+**The servlet container's multipart limit is the real ceiling, and it is checked
+in two directions.** `spring.servlet.multipart.max-file-size` refuses an
+oversized body during parsing, before any of this feature's code runs, so a
+configured `maxFileBytes` above it is a limit that *saves successfully and does
+nothing* — files between the two are refused with a generic 413 instead of
+§4B.4's worded one. So the **write refuses** with a 422 naming the ceiling (a
+person stated an intent; silently storing a smaller number is how a settings
+screen loses their trust) and the **read clamps** (a read that threw would take
+the upload path down over a configuration problem, and clamping down is the safe
+direction). `max-request-size` counts too: the request carries the part plus its
+headers, and raising only `max-file-size` is the likelier of the two mistakes.
+
+**An absent settings row falls back to the properties rather than refusing every
+upload.** The migration seeds it, so absence means somebody deleted it. Refusing
+would turn a stray `DELETE` into a product outage on a surface all six roles
+reach, and the failure would name a table nobody was thinking about. Falling back
+costs the customisation, which is one `PUT` to restore, and it is logged at WARN.
+Nothing downstream branches on which source answered — `effective()` is total.
+
+### Still open, and deliberately
+
+**There is no settings screen.** The blueprint's sidebar (§11) has a Settings
+entry and no S-number specifies it, so this task ships the configurability §4B.4
+asks for as an API and stops there rather than inventing an admin screen nobody
+has specified. An Admin can set the limits today; they cannot set them from a
+page. Flagged in `STREAM-C-TICKETS.md` and in `DEPENDENCIES.md`.
+
+---
+
 ## What is still *not* done here
 
 - **Delete (C-028).** No `DELETE` route. It needs a 15-minute window, an uploader
@@ -256,9 +310,6 @@ first time two writes needed to land together. The boundary is a
   When it lands it must delete **both** objects — `AttachmentStorageKey.thumbnail()`
   derives the second from the column it already reads, so this is one extra line
   and not a schema question.
-- **Configurable limits (C-027).** §4B.4's three caps are enforced — a pipeline
-  that stores an unbounded upload before asking how big it is has already lost —
-  but from `edutrack.attachments.*`. C-027 is a settings source, not a rewrite.
 - **The `ATTACHMENT_ADDED` history row (§4B.4 traceability).** There is no ticket
   history write service yet; it belongs with C-034's timeline, not here.
 - **The PENDING sweeper.** If the process dies between the insert and the verdict

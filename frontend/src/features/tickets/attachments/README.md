@@ -11,6 +11,7 @@ talks to the API.
 | `useTicketAttachments.ts` | Upload/delete lifecycle, in two modes. The only thing a surface needs. |
 | `uploadTicketAttachment.ts` | `POST …/attachments` by hand. ⚠ Exists because of a defect — see below. |
 | `AttachmentGallery.tsx` | **C-026.** S-20's strip: image tiles, document chips, overflow, and the click that opens the viewer. |
+| `attachmentLimits.ts` | **C-027.** Reads §4B.4's caps from the server, so the picker refuses exactly what the server refuses. Falls back to the published defaults. |
 
 Shared, in `components/ui/`:
 
@@ -348,16 +349,29 @@ problem waiting for it.
    round trips and is not atomic — a ticket can exist with its evidence missing.
    `QuickUpdateRequest`, `HandoffRequest` and `CommentWriteRequest` all carry the
    field; the create request is the odd one out.
-2. **No settings endpoint for the limits.** §4B.4 calls 10 MB / 50 MB / 20 files
-   *"all configurable in system settings"*. There is no contract constant to
-   import the way length bounds are imported, so the defaults live in
-   `components/ui/attachments.ts` and the picker takes overrides as a prop.
+2. ~~**No settings endpoint for the limits.**~~ **Closed by C-027** —
+   `GET /attachments/limits` is in the contract and `attachmentLimits.ts` reads
+   it. The constants in `components/ui/attachments.ts` are now the fallback for
+   the two cases where there is no answer to read (before the request lands,
+   and after it fails), not the rule.
+
+   Worth stating why it mattered, because "the client hard-codes the same
+   numbers" sounds harmless: **the picker refuses a file before any request is
+   made**, so a hard-coded 10 MB does not disagree with a raised server cap — it
+   *overrides* it. An administrator lifting the per-file limit to 25 MB would
+   watch the setting save, reload the ticket page and still be refused at 10 MB,
+   with nothing in the network tab and nothing in any log. The setting would look
+   broken, and it would look broken in a different codebase from the one they
+   were reading.
 
 ### ⚠ Stream D — the mock is looser than the contract
 
-`mocks/handlers/tickets.ts` enforces the 10 MB per-file cap and nothing else: no
-415 path, no per-ticket 50 MB or 20-file cap, and `commentId` is accepted and
-ignored. `commentDto` also hard-codes `attachments: []`, so a comment's files
+`mocks/handlers/tickets.ts` enforced the 10 MB per-file cap and nothing else: no
+415 path, no per-ticket 50 MB or 20-file cap, and `commentId` accepted and
+ignored. **C-027 closed the two caps** — the upload handler now reads all three
+from `db.attachmentLimits`, in the same order `AttachmentService.enforceLimits`
+checks them, so the two 413s the client already has messages for are finally
+reachable under `npm run dev`. The 415 path and `commentId` are still open. `commentDto` also hard-codes `attachments: []`, so a comment's files
 will not round-trip when C-029 arrives. The client enforces all of it, so the
 gap is invisible under `npm run dev` — until a real server enforces something the
 UI has never seen a rejection for.
