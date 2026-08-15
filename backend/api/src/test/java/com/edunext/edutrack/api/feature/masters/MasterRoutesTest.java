@@ -47,6 +47,7 @@ class MasterRoutesTest {
             "com.edunext.edutrack.api.feature.masters.CalendarController",
             "com.edunext.edutrack.api.feature.masters.resources.ResourceController",
             "com.edunext.edutrack.api.feature.masters.roles.RoleController",
+            "com.edunext.edutrack.api.feature.masters.priorities.PriorityController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectMemberController",
             "com.edunext.edutrack.api.feature.masters.projects.SlaPolicyController",
@@ -81,6 +82,28 @@ class MasterRoutesTest {
     @DisplayName("the role master is where the contract says it is")
     void roleMasterIsMountedWhereTheContractPutsIt() {
         assertThat(paths(load("com.edunext.edutrack.api.feature.masters.roles.RoleController")
+                .getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/masters");
+    }
+
+    /**
+     * B-021 · and this is the <b>fifth</b> instance of the gap this file exists
+     * for — the second in a row where shipped screens already call the route.
+     *
+     * <p>{@code listPriorities} has been in the contract, in the MSW mock and in
+     * the generated TypeScript client since D-001 with <b>no controller anywhere
+     * in the backend</b> — after B-023's nine calendar operations, B-014's
+     * {@code PATCH /users/{userId}/status}, B-018's two SLA operations and
+     * B-020's {@code listTaskTypes}. Nothing failed, because the two screens
+     * that call it have only ever run against the mock:
+     * {@code CreateTicketPage} builds its {@code LevelPicker} from this route
+     * and {@code TicketListPage} builds its level filter from it. Both would
+     * have 404'd on first contact with a real backend.
+     */
+    @Test
+    @DisplayName("the priority master is where the contract says it is")
+    void priorityMasterIsMountedWhereTheContractPutsIt() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.priorities.PriorityController")
                 .getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/masters");
     }

@@ -71,6 +71,8 @@ ROWLESS_403 = {
     "/masters/roles":                     "Admin-only screen; there is no row yet on a create",
     "/masters/roles/{roleId}":            "master data, not row-scoped — every role is already public through listRoles, so a 403 leaks nothing a 404 would hide",
     "/masters/roles/{roleId}/permissions": "same: the role's existence is public, only the write is Admin-only",
+    "/masters/priorities":                 "master data, not row-scoped — every active level is already public through listPriorities, and there is no row yet on a create",
+    "/masters/priorities/{priorityId}":    "same: the level's existence is public, only the write is Admin-only",
 }
 
 

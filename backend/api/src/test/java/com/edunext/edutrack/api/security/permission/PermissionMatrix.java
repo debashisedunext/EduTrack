@@ -181,6 +181,17 @@ final class PermissionMatrix {
             {"permissionCodes":[]}""";
 
     /**
+     * {@code PriorityWrite}: level, name and colour are all required, the colour
+     * must be a {@code #RRGGBB} token, and <b>the level must be one of the
+     * contract's four</b> — a fifth is refused by {@code PriorityService}. It
+     * does not matter that {@code HIGH} already exists: an allowed row is
+     * entitled to reach the handler and get its 409, and a denied row never gets
+     * that far, which is the only distinction this matrix measures.
+     */
+    private static final String PRIORITY = """
+            {"level":"HIGH","name":"Matrix Fixture","colour":"#F59E0B"}""";
+
+    /**
      * {@code ProjectDtos.ProjectWrite}: {@code projectCode} matches
      * {@code ^[A-Za-z][A-Za-z0-9]{1,9}$}, {@code name} is {@code @NotBlank} and
      * {@code projectManagerId} is {@code @NotNull}. The manager id need not
@@ -382,6 +393,32 @@ final class PermissionMatrix {
             adminOnly("PATCH", "/api/v1/masters/roles/{roleId}", EMPTY_PATCH),
             adminOnly("DELETE", "/api/v1/masters/roles/{roleId}"),
             adminOnly("PUT", "/api/v1/masters/roles/{roleId}/permissions", ROLE_PERMISSIONS),
+
+            // ── priorities · S-12 (B-021) ───────────────────────────────────
+            // Both reads open to all six, on §2's argument rather than
+            // convenience: every role may raise a ticket (§2 row 3), a ticket
+            // must carry a level, and the create form's LevelPicker is this
+            // route. A role that could not list levels could not raise a ticket
+            // at all. The detail read carries nothing the list does not; it
+            // exists to emit the ETag the PATCH requires.
+            everyRole("GET", "/api/v1/masters/priorities"),
+            everyRole("GET", "/api/v1/masters/priorities/{priorityId}"),
+            // The writes are master.write — Admin alone — and unlike the task
+            // type master one row over, §2 does not name priorities in its
+            // parenthetical ("task types, SLA, workflow, holidays"). The list
+            // is illustrative: S-11 and S-12 are consecutive screens in the same
+            // Masters section of §7, a level's defaultSlaHrs is rung 4 of the
+            // same §6 ladder that row's "SLA" refers to, and the alternative
+            // B-018 weighed and discarded — project.manage — is about a project
+            // rather than the organisation's vocabulary.
+            //
+            // There is no DELETE row because there is no DELETE route, and here
+            // the absence matters more than it does for task types: nothing has
+            // a foreign key to `priorities`, so a delete would *succeed* and
+            // leave every historical ticket rendering a level nothing resolves.
+            // Retiring is the PATCH.
+            adminOnly("POST", "/api/v1/masters/priorities", PRIORITY),
+            adminOnly("PATCH", "/api/v1/masters/priorities/{priorityId}", EMPTY_PATCH),
 
             // ── projects · S-10 ─────────────────────────────────────────────
             // Reads open to all six. §2 has no "view projects" row, so this is

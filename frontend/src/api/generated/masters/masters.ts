@@ -73,6 +73,7 @@ import type {
   HolidayPatchRequest,
   HolidayResponse,
   HolidayWriteRequest,
+  ListPrioritiesParams,
   ListResourceLeavesParams,
   ListRolesParams,
   ListWorkflowTemplatesParams,
@@ -81,6 +82,9 @@ import type {
   PermissionListResponse,
   PreconditionFailedResponse,
   PriorityListResponse,
+  PriorityPatchRequest,
+  PriorityResponse,
+  PriorityWriteRequest,
   Problem,
   ResourceLeaveListResponse,
   ResourceLeavePatchRequest,
@@ -302,16 +306,36 @@ export function useListModules<TData = Awaited<ReturnType<typeof listModules>>, 
 
 
 /**
- * @summary Priority levels
+ * The Priority / Level Master, and the level picker on the create-ticket
+form (§4B.1). Four rows seeded by B-002 — Low, Medium, High, Critical.
+
+Returned in `seq` order. **`seq` is the severity rank, never the id**:
+the SLA tab's column axis is built from this list in this order
+(`SlaMatrixService.activeLevels`), so reordering here reorders every
+project's SLA matrix.
+
+**Active rows only, unless `includeInactive` is set — and this is a
+deliberate departure from `listTaskTypes` and `listModules`**, which
+return retired rows to every caller. Those two are safe to widen because
+their consumers already filter: `CreateTicketPage` drops
+`isActive === false` task types before building its picker. Nothing
+filters this list, because until B-021 it could not contain a retired
+row — so returning one by default would put a retired level straight
+into the create form's `LevelPicker` and the ticket list's level filter,
+both of them Stream C's. The default is what those two screens already
+assume; the master grid asks for the rest.
+
+ * @summary Priority levels (S-12)
  */
 export const listPriorities = (
-    
+    params?: ListPrioritiesParams,
  signal?: AbortSignal
 ) => {
       
       
       return http<PriorityListResponse>(
-      {url: `/masters/priorities`, method: 'GET', signal
+      {url: `/masters/priorities`, method: 'GET',
+        params, signal
     },
       );
     }
@@ -319,23 +343,23 @@ export const listPriorities = (
 
 
 
-export const getListPrioritiesQueryKey = () => {
+export const getListPrioritiesQueryKey = (params?: ListPrioritiesParams,) => {
     return [
-    `/masters/priorities`
+    `/masters/priorities`, ...(params ? [params]: [])
     ] as const;
     }
 
     
-export const getListPrioritiesQueryOptions = <TData = Awaited<ReturnType<typeof listPriorities>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>>, }
+export const getListPrioritiesQueryOptions = <TData = Awaited<ReturnType<typeof listPriorities>>, TError = UnauthorizedResponse>(params?: ListPrioritiesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListPrioritiesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListPrioritiesQueryKey(params);
 
   
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPriorities>>> = ({ signal }) => listPriorities(signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPriorities>>> = ({ signal }) => listPriorities(params, signal);
 
       
 
@@ -349,7 +373,7 @@ export type ListPrioritiesQueryError = UnauthorizedResponse
 
 
 export function useListPriorities<TData = Awaited<ReturnType<typeof listPriorities>>, TError = UnauthorizedResponse>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>> & Pick<
+ params: undefined |  ListPrioritiesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPriorities>>,
           TError,
@@ -359,7 +383,7 @@ export function useListPriorities<TData = Awaited<ReturnType<typeof listPrioriti
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListPriorities<TData = Awaited<ReturnType<typeof listPriorities>>, TError = UnauthorizedResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>> & Pick<
+ params?: ListPrioritiesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPriorities>>,
           TError,
@@ -369,19 +393,19 @@ export function useListPriorities<TData = Awaited<ReturnType<typeof listPrioriti
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListPriorities<TData = Awaited<ReturnType<typeof listPriorities>>, TError = UnauthorizedResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>>, }
+ params?: ListPrioritiesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Priority levels
+ * @summary Priority levels (S-12)
  */
 
 export function useListPriorities<TData = Awaited<ReturnType<typeof listPriorities>>, TError = UnauthorizedResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>>, }
+ params?: ListPrioritiesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriorities>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListPrioritiesQueryOptions(options)
+  const queryOptions = getListPrioritiesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -394,6 +418,302 @@ export function useListPriorities<TData = Awaited<ReturnType<typeof listPrioriti
 
 
 /**
+ * Admin only — `master.write`, blueprint §2's "Master data (task types,
+SLA, workflow, holidays)".
+
+**S-12 says "Admin can add further levels without a release", and this
+operation cannot yet deliver it.** `Level` is a closed four-value enum,
+and it types `Ticket.level`, `Ticket.originalLevel`,
+`TaskType.defaultLevel`, `SlaPolicyWrite.level`, `SlaPolicyCell.level`,
+`ChangeTicketPriorityBody.level` and two query parameters. A fifth code
+stored here would serialise into a response the generated TypeScript
+client's own zod schema rejects, and Stream C's `LevelPicker` and
+`columns.tsx` key their chip variants off `Record<Level, …>` maps that
+a fifth key would leave `undefined`.
+
+So a code outside the four is refused with `400` and a message naming
+exactly what has to change and who owns it, rather than accepted and
+discovered later as a rendering failure — the same refusal
+`TaskTypeService.normaliseLevel` already makes for `defaultLevel`, and
+for the same reason. **Opening the enum is a coordinated change across
+Streams A, C and D, not a change this screen can make alone.**
+
+What this operation *is* for meanwhile: re-creating a level that was
+retired is done through `PATCH` (`isActive: true`), not here.
+
+`code` is upper-cased and must be unique; `name` must be unique
+case-insensitively. Neither is what `tickets.level` stores by
+accident — the column holds `code`, deliberately not a foreign key, so
+that retiring a level leaves history intact.
+
+ * @summary Create a priority level (S-12)
+ */
+export const createPriority = (
+    priorityWriteRequest: PriorityWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PriorityResponse>(
+      {url: `/masters/priorities`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: priorityWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreatePriorityMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPriority>>, TError,{data: PriorityWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createPriority>>, TError,{data: PriorityWriteRequest}, TContext> => {
+
+const mutationKey = ['createPriority'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPriority>>, {data: PriorityWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPriority(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePriorityMutationResult = NonNullable<Awaited<ReturnType<typeof createPriority>>>
+    export type CreatePriorityMutationBody = PriorityWriteRequest
+    export type CreatePriorityMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse
+
+    /**
+ * @summary Create a priority level (S-12)
+ */
+export const useCreatePriority = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPriority>>, TError,{data: PriorityWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPriority>>,
+        TError,
+        {data: PriorityWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreatePriorityMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+CONVENTIONS.md §5 — the same gap B-011, B-016 and B-020 closed for
+users, projects and task types. A write whose precondition has no read
+to come from is not a strict endpoint, it is an uncallable one.
+
+The tag is taken over the content, the three usage counts included. A
+ticket raised at this level while the edit dialog is open therefore
+costs a reload, which is correct: those counts are what the retire
+decision was made against.
+
+ * @summary One priority level (S-12)
+ */
+export const getPriority = (
+    priorityId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PriorityResponse>(
+      {url: `/masters/priorities/${priorityId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetPriorityQueryKey = (priorityId?: number,) => {
+    return [
+    `/masters/priorities/${priorityId}`
+    ] as const;
+    }
+
+    
+export const getGetPriorityQueryOptions = <TData = Awaited<ReturnType<typeof getPriority>>, TError = UnauthorizedResponse | NotFoundResponse>(priorityId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPriority>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPriorityQueryKey(priorityId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPriority>>> = ({ signal }) => getPriority(priorityId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(priorityId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPriority>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPriorityQueryResult = NonNullable<Awaited<ReturnType<typeof getPriority>>>
+export type GetPriorityQueryError = UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetPriority<TData = Awaited<ReturnType<typeof getPriority>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ priorityId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPriority>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPriority>>,
+          TError,
+          Awaited<ReturnType<typeof getPriority>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPriority<TData = Awaited<ReturnType<typeof getPriority>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ priorityId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPriority>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPriority>>,
+          TError,
+          Awaited<ReturnType<typeof getPriority>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPriority<TData = Awaited<ReturnType<typeof getPriority>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ priorityId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPriority>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One priority level (S-12)
+ */
+
+export function useGetPriority<TData = Awaited<ReturnType<typeof getPriority>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ priorityId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPriority>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPriorityQueryOptions(priorityId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`code` is in the body only so that sending a different one can be
+refused with `409`**, exactly as on `PATCH /masters/task-types/{id}`.
+`tickets.level` stores the code and is not a foreign key, so a rename
+here would not cascade — it would orphan every ticket ever raised at
+this level. Resending the stored value is a no-op; this screen submits
+the whole form on every save.
+
+**`isActive: false` retires the level, and there is no delete.** A
+retire is not local, and the grid states its three consequences before
+the click:
+
+- the level leaves the create form's picker and the ticket list filter;
+- **a whole column leaves every project's SLA matrix** —
+  `SlaMatrixService` builds its column axis from the active levels — so
+  any `sla_policies` row at this level stops resolving;
+- `defaultSlaHrs` stops answering rung 4 (`PRIORITY_DEFAULT`) of the §6
+  ladder for tickets at this level.
+
+Tickets and SLA rows never block a retire; the counts inform it.
+**Task types do block it**, with `409`: `TaskTypeService` refuses a
+retired level as a `defaultLevel`, so retiring a level three task types
+default to would leave those types unsaveable on their own screen.
+Repoint them first.
+
+**The escalation flag is single-writer and cannot be left unset.**
+Setting `autoEscalates: true` on one level clears it from the others,
+and clearing the last one is refused with `409` — §6 auto-promotes a
+ticket crossing its Planned Close Date *to* the flagged level, so zero
+flags silently switches that engine off and two make its target
+ambiguous. The column is a bare `TINYINT DEFAULT 0` with no constraint;
+this is where the invariant lives.
+
+`If-Match` is required, not optional; a write without one is refused
+with `428`. Read the current tag from
+`GET /masters/priorities/{priorityId}`.
+
+ * @summary Edit a priority level, or retire it (S-12)
+ */
+export const updatePriority = (
+    priorityId: number,
+    priorityPatchRequest: PriorityPatchRequest,
+ ) => {
+      
+      
+      return http<PriorityResponse>(
+      {url: `/masters/priorities/${priorityId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: priorityPatchRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdatePriorityMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePriority>>, TError,{priorityId: number;data: PriorityPatchRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updatePriority>>, TError,{priorityId: number;data: PriorityPatchRequest}, TContext> => {
+
+const mutationKey = ['updatePriority'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePriority>>, {priorityId: number;data: PriorityPatchRequest}> = (props) => {
+          const {priorityId,data} = props ?? {};
+
+          return  updatePriority(priorityId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePriorityMutationResult = NonNullable<Awaited<ReturnType<typeof updatePriority>>>
+    export type UpdatePriorityMutationBody = PriorityPatchRequest
+    export type UpdatePriorityMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Edit a priority level, or retire it (S-12)
+ */
+export const useUpdatePriority = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePriority>>, TError,{priorityId: number;data: PriorityPatchRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updatePriority>>,
+        TError,
+        {priorityId: number;data: PriorityPatchRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdatePriorityMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * Every capability the system knows about — the row axis of the Role &
 Permission Master's matrix. Eighteen rows seeded from blueprint §2,
 grouped by `category`, returned in `(category, code)` order so the

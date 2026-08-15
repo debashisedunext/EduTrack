@@ -17,6 +17,7 @@ import { ProjectListPage } from './features/masters/projects/ProjectListPage'
 import { ProjectSettingsPage } from './features/masters/projects/ProjectSettingsPage'
 import { ProjectTeamPage } from './features/masters/projects/ProjectTeamPage'
 import { SlaMatrixPage } from './features/masters/projects/SlaMatrixPage'
+import { PriorityListPage } from './features/masters/priorities/PriorityListPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
@@ -111,6 +112,9 @@ export default function App() {
                         <Link to="/masters/projects">Projects</Link>
                       </Button>
                       <Button asChild variant="secondary">
+                        <Link to="/masters/priorities">Priority levels</Link>
+                      </Button>
+                      <Button asChild variant="secondary">
                         <Link to="/masters/calendar">Working calendar</Link>
                       </Button>
                     </div>
@@ -154,6 +158,11 @@ export default function App() {
             <Route path="/masters/projects/:projectId/settings" element={<ProjectSettingsPage />} />
             <Route path="/masters/roles" element={<RoleListPage />} />
             <Route path="/masters/roles/:roleId" element={<RolePermissionsPage />} />
+            {/* B-021 · S-12. One route, not two: a level is six fields, so the
+                create and edit forms are dialogs on the grid rather than a page
+                each — the shape B-020 gave S-11. There is no `/:id` route to
+                collide with. */}
+            <Route path="/masters/priorities" element={<PriorityListPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />

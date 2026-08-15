@@ -97,8 +97,33 @@ export const listModulesResponse = zod.object({
 })
 
 /**
- * @summary Priority levels
+ * The Priority / Level Master, and the level picker on the create-ticket
+form (§4B.1). Four rows seeded by B-002 — Low, Medium, High, Critical.
+
+Returned in `seq` order. **`seq` is the severity rank, never the id**:
+the SLA tab's column axis is built from this list in this order
+(`SlaMatrixService.activeLevels`), so reordering here reorders every
+project's SLA matrix.
+
+**Active rows only, unless `includeInactive` is set — and this is a
+deliberate departure from `listTaskTypes` and `listModules`**, which
+return retired rows to every caller. Those two are safe to widen because
+their consumers already filter: `CreateTicketPage` drops
+`isActive === false` task types before building its picker. Nothing
+filters this list, because until B-021 it could not contain a retired
+row — so returning one by default would put a retired level straight
+into the create form's `LevelPicker` and the ticket list's level filter,
+both of them Stream C's. The default is what those two screens already
+assume; the master grid asks for the rest.
+
+ * @summary Priority levels (S-12)
  */
+export const listPrioritiesQueryIncludeInactiveDefault = false;
+
+export const listPrioritiesQueryParams = zod.object({
+  "includeInactive": zod.boolean().optional().describe('`true` returns retired levels as well, carrying `isActive: false`.\nThe S-12 grid sets it; a picker should not.\n')
+})
+
 export const listPrioritiesResponseDataItemColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
 
@@ -106,10 +131,189 @@ export const listPrioritiesResponse = zod.object({
   "data": zod.array(zod.object({
   "id": zod.number().optional(),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "name": zod.string().optional().describe('Display text: Low, Medium, High, Critical.'),
   "colour": zod.string().regex(listPrioritiesResponseDataItemColourRegExp).optional(),
-  "defaultSlaHrs": zod.number().nullish(),
-  "autoEscalates": zod.boolean().optional()
-}))
+  "defaultSlaHrs": zod.number().nullish().describe('Working hours. Rung 4 of the §6 SLA ladder (`PRIORITY_DEFAULT`) —\nthe last rung that still varies with the level, which is why it is\ntried before the task type\'s. Null means this level contributes no\ndefault and resolution falls through to the task type.\n'),
+  "autoEscalates": zod.boolean().optional().describe('The level the SLA engine escalates \*to\* on breach (§6) — the\n`is_escalation_trigger` column. \*\*Exactly one active level carries\nit\*\*, enforced by `PriorityService`: setting it here clears it\nelsewhere, and clearing the last one is refused.\n'),
+  "seq": zod.number().optional().describe('Severity rank and display order — never the id. Also the column\norder of every project\'s SLA matrix.\n'),
+  "isActive": zod.boolean().optional(),
+  "ticketCount": zod.number().optional().describe('Tickets currently at this level. Never blocks a retire; informs it.'),
+  "taskTypeCount": zod.number().optional().describe('Task types whose `defaultLevel` is this level. \*\*This one does block\na retire\*\* — `TaskTypeService` refuses a retired level as a default,\nso retiring would leave those types unsaveable on their own screen.\n'),
+  "slaPolicyCount": zod.number().optional().describe('`sla_policies` rows written at this level, across all projects.\nRetiring drops the level\'s whole column from every SLA matrix and\nthese rows stop resolving. Never blocks a retire; informs it.\n')
+}).describe('S-12. `level` is the stable identifier — it is the `code` column, and it\nis the value `tickets.level` stores. `name` is display text an Admin may\nchange; \*\*key behaviour off `level`.\*\*\n\nThe property is called `level` rather than `code` because that is what\nit has been called since D-001 and what Stream C\'s `CreateTicketPage`\nand `TicketListPage` already read. Renaming it to match the column would\nbreak both for no gain.\n\nEvery property is populated on every response and none is `required` —\nB-016\'s call on `Project.status`, repeated by B-020 on `TaskType`: a\nrequired property is an obligation on every consumer that constructs\none, and the ticket-form fixtures construct these.\n'))
+})
+
+/**
+ * Admin only — `master.write`, blueprint §2's "Master data (task types,
+SLA, workflow, holidays)".
+
+**S-12 says "Admin can add further levels without a release", and this
+operation cannot yet deliver it.** `Level` is a closed four-value enum,
+and it types `Ticket.level`, `Ticket.originalLevel`,
+`TaskType.defaultLevel`, `SlaPolicyWrite.level`, `SlaPolicyCell.level`,
+`ChangeTicketPriorityBody.level` and two query parameters. A fifth code
+stored here would serialise into a response the generated TypeScript
+client's own zod schema rejects, and Stream C's `LevelPicker` and
+`columns.tsx` key their chip variants off `Record<Level, …>` maps that
+a fifth key would leave `undefined`.
+
+So a code outside the four is refused with `400` and a message naming
+exactly what has to change and who owns it, rather than accepted and
+discovered later as a rendering failure — the same refusal
+`TaskTypeService.normaliseLevel` already makes for `defaultLevel`, and
+for the same reason. **Opening the enum is a coordinated change across
+Streams A, C and D, not a change this screen can make alone.**
+
+What this operation *is* for meanwhile: re-creating a level that was
+retired is done through `PATCH` (`isActive: true`), not here.
+
+`code` is upper-cased and must be unique; `name` must be unique
+case-insensitively. Neither is what `tickets.level` stores by
+accident — the column holds `code`, deliberately not a foreign key, so
+that retiring a level leaves history intact.
+
+ * @summary Create a priority level (S-12)
+ */
+export const createPriorityHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createPriorityBodyNameMax = 40;
+
+export const createPriorityBodyColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const createPriorityBodyDefaultSlaHrsMin = 0;
+
+
+
+export const createPriorityBody = zod.object({
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "name": zod.string().min(1).max(createPriorityBodyNameMax),
+  "colour": zod.string().regex(createPriorityBodyColourRegExp).describe('A blueprint §12.1 \"Level chips\" token. Required on create even\nthough the column is nullable: a level with no colour is a hole in\nthe picker, the ticket grid and the Priority Split chart at once.\n'),
+  "defaultSlaHrs": zod.number().min(createPriorityBodyDefaultSlaHrsMin).nullish(),
+  "autoEscalates": zod.boolean().nullish().describe('`true` clears the flag from every other level — it is single-writer.\nOmitted means `false`.\n'),
+  "seq": zod.number().nullish(),
+  "isActive": zod.boolean().nullish()
+})
+
+/**
+ * **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+CONVENTIONS.md §5 — the same gap B-011, B-016 and B-020 closed for
+users, projects and task types. A write whose precondition has no read
+to come from is not a strict endpoint, it is an uncallable one.
+
+The tag is taken over the content, the three usage counts included. A
+ticket raised at this level while the edit dialog is open therefore
+costs a reload, which is correct: those counts are what the retire
+decision was made against.
+
+ * @summary One priority level (S-12)
+ */
+export const getPriorityParams = zod.object({
+  "priorityId": zod.number().describe('`priorities.id` is an `INT`, for the same reason `RoleId` is: A-007\ndeclared the column that way. Note that nothing points at it —\n`tickets.level` stores the \*code\*, deliberately not this key, which is\nwhat lets a level be retired without orphaning history.\n')
+})
+
+export const getPriorityResponseDataColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
+export const getPriorityResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "name": zod.string().optional().describe('Display text: Low, Medium, High, Critical.'),
+  "colour": zod.string().regex(getPriorityResponseDataColourRegExp).optional(),
+  "defaultSlaHrs": zod.number().nullish().describe('Working hours. Rung 4 of the §6 SLA ladder (`PRIORITY_DEFAULT`) —\nthe last rung that still varies with the level, which is why it is\ntried before the task type\'s. Null means this level contributes no\ndefault and resolution falls through to the task type.\n'),
+  "autoEscalates": zod.boolean().optional().describe('The level the SLA engine escalates \*to\* on breach (§6) — the\n`is_escalation_trigger` column. \*\*Exactly one active level carries\nit\*\*, enforced by `PriorityService`: setting it here clears it\nelsewhere, and clearing the last one is refused.\n'),
+  "seq": zod.number().optional().describe('Severity rank and display order — never the id. Also the column\norder of every project\'s SLA matrix.\n'),
+  "isActive": zod.boolean().optional(),
+  "ticketCount": zod.number().optional().describe('Tickets currently at this level. Never blocks a retire; informs it.'),
+  "taskTypeCount": zod.number().optional().describe('Task types whose `defaultLevel` is this level. \*\*This one does block\na retire\*\* — `TaskTypeService` refuses a retired level as a default,\nso retiring would leave those types unsaveable on their own screen.\n'),
+  "slaPolicyCount": zod.number().optional().describe('`sla_policies` rows written at this level, across all projects.\nRetiring drops the level\'s whole column from every SLA matrix and\nthese rows stop resolving. Never blocks a retire; informs it.\n')
+}).describe('S-12. `level` is the stable identifier — it is the `code` column, and it\nis the value `tickets.level` stores. `name` is display text an Admin may\nchange; \*\*key behaviour off `level`.\*\*\n\nThe property is called `level` rather than `code` because that is what\nit has been called since D-001 and what Stream C\'s `CreateTicketPage`\nand `TicketListPage` already read. Renaming it to match the column would\nbreak both for no gain.\n\nEvery property is populated on every response and none is `required` —\nB-016\'s call on `Project.status`, repeated by B-020 on `TaskType`: a\nrequired property is an obligation on every consumer that constructs\none, and the ticket-form fixtures construct these.\n')
+})
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`code` is in the body only so that sending a different one can be
+refused with `409`**, exactly as on `PATCH /masters/task-types/{id}`.
+`tickets.level` stores the code and is not a foreign key, so a rename
+here would not cascade — it would orphan every ticket ever raised at
+this level. Resending the stored value is a no-op; this screen submits
+the whole form on every save.
+
+**`isActive: false` retires the level, and there is no delete.** A
+retire is not local, and the grid states its three consequences before
+the click:
+
+- the level leaves the create form's picker and the ticket list filter;
+- **a whole column leaves every project's SLA matrix** —
+  `SlaMatrixService` builds its column axis from the active levels — so
+  any `sla_policies` row at this level stops resolving;
+- `defaultSlaHrs` stops answering rung 4 (`PRIORITY_DEFAULT`) of the §6
+  ladder for tickets at this level.
+
+Tickets and SLA rows never block a retire; the counts inform it.
+**Task types do block it**, with `409`: `TaskTypeService` refuses a
+retired level as a `defaultLevel`, so retiring a level three task types
+default to would leave those types unsaveable on their own screen.
+Repoint them first.
+
+**The escalation flag is single-writer and cannot be left unset.**
+Setting `autoEscalates: true` on one level clears it from the others,
+and clearing the last one is refused with `409` — §6 auto-promotes a
+ticket crossing its Planned Close Date *to* the flagged level, so zero
+flags silently switches that engine off and two make its target
+ambiguous. The column is a bare `TINYINT DEFAULT 0` with no constraint;
+this is where the invariant lives.
+
+`If-Match` is required, not optional; a write without one is refused
+with `428`. Read the current tag from
+`GET /masters/priorities/{priorityId}`.
+
+ * @summary Edit a priority level, or retire it (S-12)
+ */
+export const updatePriorityParams = zod.object({
+  "priorityId": zod.number().describe('`priorities.id` is an `INT`, for the same reason `RoleId` is: A-007\ndeclared the column that way. Note that nothing points at it —\n`tickets.level` stores the \*code\*, deliberately not this key, which is\nwhat lets a level be retired without orphaning history.\n')
+})
+
+export const updatePriorityHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updatePriorityBodyNameMax = 40;
+
+export const updatePriorityBodyColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const updatePriorityBodyDefaultSlaHrsMin = 0;
+
+
+
+export const updatePriorityBody = zod.object({
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "name": zod.string().min(1).max(updatePriorityBodyNameMax).optional(),
+  "colour": zod.string().regex(updatePriorityBodyColourRegExp).optional(),
+  "defaultSlaHrs": zod.number().min(updatePriorityBodyDefaultSlaHrsMin).nullish(),
+  "autoEscalates": zod.boolean().nullish(),
+  "seq": zod.number().nullish(),
+  "isActive": zod.boolean().nullish()
+}).describe('Every field optional; an omitted one keeps its stored value.\n`isActive: false` is how a level is retired — there is no delete.\n')
+
+export const updatePriorityResponseDataColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
+export const updatePriorityResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "name": zod.string().optional().describe('Display text: Low, Medium, High, Critical.'),
+  "colour": zod.string().regex(updatePriorityResponseDataColourRegExp).optional(),
+  "defaultSlaHrs": zod.number().nullish().describe('Working hours. Rung 4 of the §6 SLA ladder (`PRIORITY_DEFAULT`) —\nthe last rung that still varies with the level, which is why it is\ntried before the task type\'s. Null means this level contributes no\ndefault and resolution falls through to the task type.\n'),
+  "autoEscalates": zod.boolean().optional().describe('The level the SLA engine escalates \*to\* on breach (§6) — the\n`is_escalation_trigger` column. \*\*Exactly one active level carries\nit\*\*, enforced by `PriorityService`: setting it here clears it\nelsewhere, and clearing the last one is refused.\n'),
+  "seq": zod.number().optional().describe('Severity rank and display order — never the id. Also the column\norder of every project\'s SLA matrix.\n'),
+  "isActive": zod.boolean().optional(),
+  "ticketCount": zod.number().optional().describe('Tickets currently at this level. Never blocks a retire; informs it.'),
+  "taskTypeCount": zod.number().optional().describe('Task types whose `defaultLevel` is this level. \*\*This one does block\na retire\*\* — `TaskTypeService` refuses a retired level as a default,\nso retiring would leave those types unsaveable on their own screen.\n'),
+  "slaPolicyCount": zod.number().optional().describe('`sla_policies` rows written at this level, across all projects.\nRetiring drops the level\'s whole column from every SLA matrix and\nthese rows stop resolving. Never blocks a retire; informs it.\n')
+}).describe('S-12. `level` is the stable identifier — it is the `code` column, and it\nis the value `tickets.level` stores. `name` is display text an Admin may\nchange; \*\*key behaviour off `level`.\*\*\n\nThe property is called `level` rather than `code` because that is what\nit has been called since D-001 and what Stream C\'s `CreateTicketPage`\nand `TicketListPage` already read. Renaming it to match the column would\nbreak both for no gain.\n\nEvery property is populated on every response and none is `required` —\nB-016\'s call on `Project.status`, repeated by B-020 on `TaskType`: a\nrequired property is an obligation on every consumer that constructs\none, and the ticket-form fixtures construct these.\n')
 })
 
 /**
