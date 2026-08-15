@@ -199,6 +199,21 @@ final class PermissionMatrix {
             {"code":"MATRIX_FIXTURE","name":"Matrix Fixture","colour":"#4F46E5","defaultLevel":"LOW"}""";
 
     /**
+     * {@code NotificationTemplateDtos.TemplateWrite}: four required fields, and
+     * the event and channel both have to be in their enums or the handler
+     * answers 400.
+     *
+     * <p>The pair deliberately names an event that <b>already has an</b>
+     * {@code EMAIL} <b>template</b>, so an allowed row earns a 409. Same reason
+     * {@code PRIORITY} reuses {@code HIGH}: an allowed row is entitled to reach
+     * the handler and be refused on the merits, and a denied row never gets that
+     * far, which is the only distinction this matrix measures.
+     */
+    private static final String NOTIFICATION_TEMPLATE = """
+            {"eventCode":"TICKET_ASSIGNED","channel":"EMAIL","recipients":["ASSIGNEE"],\
+            "subjectTemplate":"Matrix fixture","bodyTemplate":"<p>Matrix fixture</p>"}""";
+
+    /**
      * {@code ProjectDtos.ProjectWrite}: {@code projectCode} matches
      * {@code ^[A-Za-z][A-Za-z0-9]{1,9}$}, {@code name} is {@code @NotBlank} and
      * {@code projectManagerId} is {@code @NotNull}. The manager id need not
@@ -449,6 +464,31 @@ final class PermissionMatrix {
             // reason they can stay that way. Retiring a type is the PATCH.
             adminOnly("POST", "/api/v1/masters/task-types", TASK_TYPE),
             adminOnly("PATCH", "/api/v1/masters/task-types/{taskTypeId}", EMPTY_PATCH),
+            // ── notification templates · S-15 (B-022) ────────────────────────
+            // **Admin on the reads too, and this is the only master where that
+            // is true.** Task types, levels, roles and the calendar open their
+            // reads to all six on an argument from §2 row 3: every role may
+            // raise a ticket, a ticket must carry a level and a type, so a role
+            // that could not read those masters could not raise a ticket at
+            // all. Nothing on a screen a non-Admin sees is built from this one.
+            //
+            // And the content is not neutral. The seeded rows include the mail
+            // that goes to a **client contact**, the escalation naming the
+            // Reporting Manager, and A-044's chain-verification alarm. §2 gives
+            // the audit log to Admin alone on that reasoning; a catalogue of who
+            // gets told what, when something goes wrong, belongs on the same
+            // side of the line. Reasoned rather than read off §2, the way B-018
+            // and B-021 flagged theirs.
+            adminOnly("GET", "/api/v1/masters/notification-templates"),
+            adminOnly("GET", "/api/v1/masters/notification-templates/vocabulary"),
+            adminOnly("GET", "/api/v1/masters/notification-templates/{templateId}"),
+            adminOnly("POST", "/api/v1/masters/notification-templates", NOTIFICATION_TEMPLATE),
+            adminOnly("PATCH", "/api/v1/masters/notification-templates/{templateId}",
+                    EMPTY_PATCH),
+            // There is no DELETE row because there is no DELETE route. Deleting
+            // a template does not orphan a reference the way deleting a level
+            // would — it removes the *wording* for an event that goes on firing,
+            // and the failure shows up as a mail that never arrives.
 
             // ── projects · S-10 ─────────────────────────────────────────────
             // Reads open to all six. §2 has no "view projects" row, so this is

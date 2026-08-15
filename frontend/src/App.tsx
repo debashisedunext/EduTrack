@@ -17,6 +17,7 @@ import { ProjectListPage } from './features/masters/projects/ProjectListPage'
 import { ProjectSettingsPage } from './features/masters/projects/ProjectSettingsPage'
 import { ProjectTeamPage } from './features/masters/projects/ProjectTeamPage'
 import { SlaMatrixPage } from './features/masters/projects/SlaMatrixPage'
+import { NotificationTemplateListPage } from './features/masters/notificationTemplates/NotificationTemplateListPage'
 import { PriorityListPage } from './features/masters/priorities/PriorityListPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
@@ -121,6 +122,9 @@ export default function App() {
                       <Button asChild variant="secondary">
                         <Link to="/masters/calendar">Working calendar</Link>
                       </Button>
+                      <Button asChild variant="secondary">
+                        <Link to="/masters/notification-templates">Notification templates</Link>
+                      </Button>
                     </div>
                   }
                 />
@@ -172,6 +176,13 @@ export default function App() {
                 than a page each. There is no `/:id` route to collide with. */}
             <Route path="/masters/task-types" element={<TaskTypeListPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
+            {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
+                fields, so create and edit are dialogs on the grid rather than a
+                page each. There is no `/:id` route to collide with. */}
+            <Route
+              path="/masters/notification-templates"
+              element={<NotificationTemplateListPage />}
+            />
             <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />
           </Route>

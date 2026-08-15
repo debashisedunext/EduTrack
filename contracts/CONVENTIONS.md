@@ -105,6 +105,7 @@ each other:**
 | `PATCH /tickets/{id}` | Field updates |
 | `PATCH /masters/priorities/{id}` | Field updates, and two of them are org-wide switches: retiring drops the level's column out of every project's SLA matrix, and the escalation flag is a single-writer pointer §6 needs to resolve to exactly one row |
 | `PATCH /masters/task-types/{id}` | Field updates, and one of them retires the type from every picker and every project's SLA matrix at once |
+| `PATCH /masters/notification-templates/{id}` | Field updates, and the field most likely to be edited is a long body two admins can plausibly be rewording at once. A lost update here is silent and outward-facing: the losing edit vanishes, and what goes to a client contact is wording nobody chose |
 
 **It deliberately does not apply here**, and these are not oversights:
 

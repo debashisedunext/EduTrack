@@ -79,6 +79,11 @@ import type {
   ListWorkflowTemplatesParams,
   ModuleListResponse,
   NotFoundResponse,
+  NotificationTemplateListResponse,
+  NotificationTemplatePatchRequest,
+  NotificationTemplateResponse,
+  NotificationTemplateVocabularyResponse,
+  NotificationTemplateWriteRequest,
   PermissionListResponse,
   PreconditionFailedResponse,
   PriorityListResponse,
@@ -1004,6 +1009,534 @@ export const useUpdatePriority = <TError = ValidationFailedResponse | Unauthoriz
       > => {
 
       const mutationOptions = getUpdatePriorityMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The Notification Template Master — the wording of every notification
+this system sends, one row per (event, channel) pair.
+
+**Admin only, reads included, and that is where this master differs from
+the four beside it.** Task types, levels, roles and the calendar are open
+to all six roles by an argument from §2 row 3: every role may raise a
+ticket, a ticket must carry a level and a type, so a role that could not
+read those could not raise a ticket at all. Nothing on any screen a
+non-Admin sees is built from this route. And the content is not neutral —
+the seeded rows include the mail sent to a **client contact**, the
+escalation naming the Reporting Manager, and A-044's chain-verification
+alarm. §2 gives the audit log to Admin alone on that reasoning; a
+catalogue of who gets told what, when something goes wrong, belongs on
+the same side of the line.
+
+Ordered by `eventCode` then `channel`, so the screen renders its event
+groups without sorting and an event's channels are always adjacent.
+
+**Switched-off templates are returned too**, and there is no
+`includeInactive` parameter — unlike `listPriorities`, which has one.
+That route needed a narrow default because two shipped Stream C screens
+read it unfiltered into a picker. Nothing outside S-15 reads this one,
+and the renderer will look up a single pair rather than the list.
+
+`channel` is `IN_APP | EMAIL | PUSH` — **not** the `POPUP | BELL | EMAIL`
+A-007's column comment predicted. Everything that runs keys on
+`NotificationChannel`, and the bell is not a channel: it renders the same
+wording as the toast, from the `IN_APP` template. `V20260815_1100`
+carries the full argument.
+
+ * @summary Notification templates (S-15)
+ */
+export const listNotificationTemplates = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<NotificationTemplateListResponse>(
+      {url: `/masters/notification-templates`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListNotificationTemplatesQueryKey = () => {
+    return [
+    `/masters/notification-templates`
+    ] as const;
+    }
+
+    
+export const getListNotificationTemplatesQueryOptions = <TData = Awaited<ReturnType<typeof listNotificationTemplates>>, TError = UnauthorizedResponse | ForbiddenResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotificationTemplates>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListNotificationTemplatesQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listNotificationTemplates>>> = ({ signal }) => listNotificationTemplates(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listNotificationTemplates>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListNotificationTemplatesQueryResult = NonNullable<Awaited<ReturnType<typeof listNotificationTemplates>>>
+export type ListNotificationTemplatesQueryError = UnauthorizedResponse | ForbiddenResponse
+
+
+export function useListNotificationTemplates<TData = Awaited<ReturnType<typeof listNotificationTemplates>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotificationTemplates>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listNotificationTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listNotificationTemplates>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListNotificationTemplates<TData = Awaited<ReturnType<typeof listNotificationTemplates>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotificationTemplates>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listNotificationTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listNotificationTemplates>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListNotificationTemplates<TData = Awaited<ReturnType<typeof listNotificationTemplates>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotificationTemplates>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Notification templates (S-15)
+ */
+
+export function useListNotificationTemplates<TData = Awaited<ReturnType<typeof listNotificationTemplates>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotificationTemplates>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListNotificationTemplatesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only — `master.write`.
+
+`V20260815_1100` seeds one template per (event, channel) pair blueprint
+§11 ticks, so in practice this operation adds a `PUSH` template: §11 has
+no push column and the migration seeded none, on the grounds that D-045
+sends a push from the notification it has already written rather than
+from separate wording.
+
+A second template for a pair that already has one is refused with `409` —
+`uq_notification_templates` is over the pair, and the renderer resolves
+by it. Edit the existing one, or switch it back on.
+
+`subjectTemplate` is required when `channel` is `EMAIL` and optional
+otherwise. A mail with no subject line is unsendable; an in-app entry has
+a title rather than a subject, which is why the column is nullable. It is
+**permitted** on the other two channels rather than refused — a browser
+push genuinely has a title, and refusing the field would make this master
+unable to express something the channel has.
+
+Every `{{tag}}` in the subject and body is checked against the catalogue
+at `GET /masters/notification-templates/vocabulary`, and an unknown one
+is `400`. Without that check `{{ticketId}}` for `{{ticket_id}}` saves
+cleanly and prints literal braces in a client-facing mail, and the first
+person who could notice is the client.
+
+ * @summary Add a template for an event and channel that has none (S-15)
+ */
+export const createNotificationTemplate = (
+    notificationTemplateWriteRequest: NotificationTemplateWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<NotificationTemplateResponse>(
+      {url: `/masters/notification-templates`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: notificationTemplateWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateNotificationTemplateMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNotificationTemplate>>, TError,{data: NotificationTemplateWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createNotificationTemplate>>, TError,{data: NotificationTemplateWriteRequest}, TContext> => {
+
+const mutationKey = ['createNotificationTemplate'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createNotificationTemplate>>, {data: NotificationTemplateWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createNotificationTemplate(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateNotificationTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof createNotificationTemplate>>>
+    export type CreateNotificationTemplateMutationBody = NotificationTemplateWriteRequest
+    export type CreateNotificationTemplateMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse
+
+    /**
+ * @summary Add a template for an event and channel that has none (S-15)
+ */
+export const useCreateNotificationTemplate = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNotificationTemplate>>, TError,{data: NotificationTemplateWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createNotificationTemplate>>,
+        TError,
+        {data: NotificationTemplateWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateNotificationTemplateMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The four closed vocabularies a template is composed from, read off the
+enums rather than restated.
+
+**Reference data, not master data** — the same footing as
+`GET /masters/permissions`, and for the same reason: there is no create,
+edit or delete because every value exists only because code resolves it.
+A merge tag an Admin could add would substitute nothing, and a recipient
+they could delete would silently stop a mail reaching somebody.
+
+Serving it beats letting the screen hold its own copy. The copy is what
+drifts, and it drifts in the direction where S-15 offers a merge tag the
+renderer does not substitute.
+
+Declared before `/{templateId}` for readability; the literal segment
+outranks the path variable regardless of order, so `vocabulary` cannot be
+read as an id.
+
+**`recipients` are positions relative to a ticket, not roles.** §4B.6
+asks for a "per-role recipient list" and taking that literally produces
+the wrong table: of the ten things §11's "To" column names, two look like
+role codes and eight — assignee, stage owner, previous assignee,
+reporter, watchers, mentioned user, client contact, support desk — are
+resolved per send from the ticket. Even the two that share a spelling
+with a role are joins: `PROJECT_MANAGER` means the PM *of this ticket's
+project*, not everybody holding the PM role.
+
+ * @summary Events, channels, recipients and merge tags (S-15)
+ */
+export const getNotificationTemplateVocabulary = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<NotificationTemplateVocabularyResponse>(
+      {url: `/masters/notification-templates/vocabulary`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetNotificationTemplateVocabularyQueryKey = () => {
+    return [
+    `/masters/notification-templates/vocabulary`
+    ] as const;
+    }
+
+    
+export const getGetNotificationTemplateVocabularyQueryOptions = <TData = Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | ForbiddenResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNotificationTemplateVocabularyQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>> = ({ signal }) => getNotificationTemplateVocabulary(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetNotificationTemplateVocabularyQueryResult = NonNullable<Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>>
+export type GetNotificationTemplateVocabularyQueryError = UnauthorizedResponse | ForbiddenResponse
+
+
+export function useGetNotificationTemplateVocabulary<TData = Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>,
+          TError,
+          Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNotificationTemplateVocabulary<TData = Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>,
+          TError,
+          Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNotificationTemplateVocabulary<TData = Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Events, channels, recipients and merge tags (S-15)
+ */
+
+export function useGetNotificationTemplateVocabulary<TData = Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplateVocabulary>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetNotificationTemplateVocabularyQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+CONVENTIONS.md §5 — the same gap B-011, B-016, B-020 and B-021 closed for
+users, projects, task types and levels. A write whose precondition has no
+read to come from is not a strict endpoint, it is an uncallable one.
+
+ * @summary One notification template (S-15)
+ */
+export const getNotificationTemplate = (
+    templateId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<NotificationTemplateResponse>(
+      {url: `/masters/notification-templates/${templateId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetNotificationTemplateQueryKey = (templateId?: number,) => {
+    return [
+    `/masters/notification-templates/${templateId}`
+    ] as const;
+    }
+
+    
+export const getGetNotificationTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getNotificationTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplate>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNotificationTemplateQueryKey(templateId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNotificationTemplate>>> = ({ signal }) => getNotificationTemplate(templateId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(templateId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetNotificationTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getNotificationTemplate>>>
+export type GetNotificationTemplateQueryError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse
+
+
+export function useGetNotificationTemplate<TData = Awaited<ReturnType<typeof getNotificationTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(
+ templateId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplate>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNotificationTemplate>>,
+          TError,
+          Awaited<ReturnType<typeof getNotificationTemplate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNotificationTemplate<TData = Awaited<ReturnType<typeof getNotificationTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(
+ templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplate>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNotificationTemplate>>,
+          TError,
+          Awaited<ReturnType<typeof getNotificationTemplate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNotificationTemplate<TData = Awaited<ReturnType<typeof getNotificationTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(
+ templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplate>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One notification template (S-15)
+ */
+
+export function useGetNotificationTemplate<TData = Awaited<ReturnType<typeof getNotificationTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(
+ templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationTemplate>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetNotificationTemplateQueryOptions(templateId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`eventCode` and `channel` are in the body only so that sending a
+different one can be refused with `409`.** Together they are the row's
+identity: the unique key is over the pair, the renderer resolves by it,
+and `email_log.template_id` rows already sent point at this id — so
+re-pointing a template at another event would change what those
+historical records claim to have been rendered from, undetectably.
+Resending the stored values is a no-op; this screen submits the whole
+form on every save.
+
+**`isActive: false` switches the template off, and there is no delete.**
+Deleting would not orphan a reference the way deleting a level does — it
+would remove the *wording* for an event that goes on firing, and the
+failure appears as a mail that never arrives rather than as an error
+anybody sees.
+
+**A mandatory mail cannot be switched off at all, and this is refused
+with `409`.** Blueprint §4B.6 marks assignment, handoff, escalation and
+status-request mail **❌ never** optional, and D-036 already stops an
+individual user muting it — so an `EMAIL` template whose event has
+`mandatoryMail: true` is permanent. Switching it off here would silence
+it for everybody at once, by a route nobody would think to check. The
+`IN_APP` template for the same event *can* be switched off: §7.7 gives
+the guarantee to mail, not to a toast that only reaches somebody who is
+already logged in.
+
+**What is deliberately not guarded is the recipient list.** Removing
+`ASSIGNEE` from a mandatory mail would silence it as effectively as the
+toggle, and is still permitted — §11's "To" column is a sensible default
+rather than a law, and an organisation routing assignment mail through a
+shared desk address is doing something legitimate. The list must be
+non-empty; what it contains is the Admin's call.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the current tag from
+`GET /masters/notification-templates/{templateId}`.
+
+ * @summary Reword a template, re-target it, or switch it off (S-15)
+ */
+export const updateNotificationTemplate = (
+    templateId: number,
+    notificationTemplatePatchRequest: NotificationTemplatePatchRequest,
+ ) => {
+      
+      
+      return http<NotificationTemplateResponse>(
+      {url: `/masters/notification-templates/${templateId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: notificationTemplatePatchRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateNotificationTemplateMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNotificationTemplate>>, TError,{templateId: number;data: NotificationTemplatePatchRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateNotificationTemplate>>, TError,{templateId: number;data: NotificationTemplatePatchRequest}, TContext> => {
+
+const mutationKey = ['updateNotificationTemplate'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateNotificationTemplate>>, {templateId: number;data: NotificationTemplatePatchRequest}> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  updateNotificationTemplate(templateId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateNotificationTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof updateNotificationTemplate>>>
+    export type UpdateNotificationTemplateMutationBody = NotificationTemplatePatchRequest
+    export type UpdateNotificationTemplateMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Reword a template, re-target it, or switch it off (S-15)
+ */
+export const useUpdateNotificationTemplate = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNotificationTemplate>>, TError,{templateId: number;data: NotificationTemplatePatchRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateNotificationTemplate>>,
+        TError,
+        {templateId: number;data: NotificationTemplatePatchRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateNotificationTemplateMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
