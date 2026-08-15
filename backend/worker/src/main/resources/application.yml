@@ -103,6 +103,28 @@ edutrack:
     # matter, but a manager hearing about it the same morning does.
     l2-scan-interval: ${L2_SCAN_INTERVAL:PT30M}
 
+  # A-051 · the summary tables A-050 declared. CLAUDE.md forbids a live
+  # COUNT(*) behind a dashboard, so these rows are the dashboard's only source
+  # and staleness here is what a user actually sees.
+  stats:
+    # Five minutes is the blueprint's figure for dashboard freshness. It is a
+    # recompute, not an accumulation, so a missed pass costs latency and never
+    # correctness — which is why this can be shortened or lengthened freely.
+    refresh-interval: ${STATS_REFRESH_INTERVAL:PT5M}
+
+    # How many trailing days each pass recomputes. A past day can still change:
+    # effort is attributed to work_date (§4A.4), so a timesheet filled in on
+    # Friday for Monday's work rewrites Monday. Seven covers a working week of
+    # late entry; anything older is repaired by the backfill sweep rather than
+    # by every pass paying for a month.
+    window-days: ${STATS_WINDOW_DAYS:7}
+
+    # Ceiling on how much history one pass fills in. A database that has never
+    # run this has every historical day missing, and an uncapped first run would
+    # hold the scheduler lock well past its PT4M bound. Backfill advances one
+    # contiguous chunk per pass instead and catches up over several.
+    backfill-per-pass: ${STATS_BACKFILL_PER_PASS:30}
+
   outbox:
     enabled: true
     poll-interval: PT5S
