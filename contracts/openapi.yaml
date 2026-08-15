@@ -2684,6 +2684,229 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /masters/notification-templates:
+    get:
+      tags: [masters]
+      operationId: listNotificationTemplates
+      summary: Notification templates (S-15)
+      description: |
+        The Notification Template Master — the wording of every notification
+        this system sends, one row per (event, channel) pair.
+
+        **Admin only, reads included, and that is where this master differs from
+        the four beside it.** Task types, levels, roles and the calendar are open
+        to all six roles by an argument from §2 row 3: every role may raise a
+        ticket, a ticket must carry a level and a type, so a role that could not
+        read those could not raise a ticket at all. Nothing on any screen a
+        non-Admin sees is built from this route. And the content is not neutral —
+        the seeded rows include the mail sent to a **client contact**, the
+        escalation naming the Reporting Manager, and A-044's chain-verification
+        alarm. §2 gives the audit log to Admin alone on that reasoning; a
+        catalogue of who gets told what, when something goes wrong, belongs on
+        the same side of the line.
+
+        Ordered by `eventCode` then `channel`, so the screen renders its event
+        groups without sorting and an event's channels are always adjacent.
+
+        **Switched-off templates are returned too**, and there is no
+        `includeInactive` parameter — unlike `listPriorities`, which has one.
+        That route needed a narrow default because two shipped Stream C screens
+        read it unfiltered into a picker. Nothing outside S-15 reads this one,
+        and the renderer will look up a single pair rather than the list.
+
+        `channel` is `IN_APP | EMAIL | PUSH` — **not** the `POPUP | BELL | EMAIL`
+        A-007's column comment predicted. Everything that runs keys on
+        `NotificationChannel`, and the bell is not a channel: it renders the same
+        wording as the toast, from the `IN_APP` template. `V20260815_1100`
+        carries the full argument.
+      responses:
+        '200':
+          description: OK. A bounded list — no `meta`, the set is complete.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationTemplateListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [masters]
+      operationId: createNotificationTemplate
+      summary: Add a template for an event and channel that has none (S-15)
+      description: |
+        Admin only — `master.write`.
+
+        `V20260815_1100` seeds one template per (event, channel) pair blueprint
+        §11 ticks, so in practice this operation adds a `PUSH` template: §11 has
+        no push column and the migration seeded none, on the grounds that D-045
+        sends a push from the notification it has already written rather than
+        from separate wording.
+
+        A second template for a pair that already has one is refused with `409` —
+        `uq_notification_templates` is over the pair, and the renderer resolves
+        by it. Edit the existing one, or switch it back on.
+
+        `subjectTemplate` is required when `channel` is `EMAIL` and optional
+        otherwise. A mail with no subject line is unsendable; an in-app entry has
+        a title rather than a subject, which is why the column is nullable. It is
+        **permitted** on the other two channels rather than refused — a browser
+        push genuinely has a title, and refusing the field would make this master
+        unable to express something the channel has.
+
+        Every `{{tag}}` in the subject and body is checked against the catalogue
+        at `GET /masters/notification-templates/vocabulary`, and an unknown one
+        is `400`. Without that check `{{ticketId}}` for `{{ticket_id}}` saves
+        cleanly and prints literal braces in a client-facing mail, and the first
+        person who could notice is the client.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationTemplateWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationTemplateResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /masters/notification-templates/vocabulary:
+    get:
+      tags: [masters]
+      operationId: getNotificationTemplateVocabulary
+      summary: Events, channels, recipients and merge tags (S-15)
+      description: |
+        The four closed vocabularies a template is composed from, read off the
+        enums rather than restated.
+
+        **Reference data, not master data** — the same footing as
+        `GET /masters/permissions`, and for the same reason: there is no create,
+        edit or delete because every value exists only because code resolves it.
+        A merge tag an Admin could add would substitute nothing, and a recipient
+        they could delete would silently stop a mail reaching somebody.
+
+        Serving it beats letting the screen hold its own copy. The copy is what
+        drifts, and it drifts in the direction where S-15 offers a merge tag the
+        renderer does not substitute.
+
+        Declared before `/{templateId}` for readability; the literal segment
+        outranks the path variable regardless of order, so `vocabulary` cannot be
+        read as an id.
+
+        **`recipients` are positions relative to a ticket, not roles.** §4B.6
+        asks for a "per-role recipient list" and taking that literally produces
+        the wrong table: of the ten things §11's "To" column names, two look like
+        role codes and eight — assignee, stage owner, previous assignee,
+        reporter, watchers, mentioned user, client contact, support desk — are
+        resolved per send from the ticket. Even the two that share a spelling
+        with a role are joins: `PROJECT_MANAGER` means the PM *of this ticket's
+        project*, not everybody holding the PM role.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationTemplateVocabularyResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /masters/notification-templates/{templateId}:
+    parameters: [{ $ref: '#/components/parameters/TemplateId' }]
+    get:
+      tags: [masters]
+      operationId: getNotificationTemplate
+      summary: One notification template (S-15)
+      description: |
+        **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+        CONVENTIONS.md §5 — the same gap B-011, B-016, B-020 and B-021 closed for
+        users, projects, task types and levels. A write whose precondition has no
+        read to come from is not a strict endpoint, it is an uncallable one.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationTemplateResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [masters]
+      operationId: updateNotificationTemplate
+      summary: Reword a template, re-target it, or switch it off (S-15)
+      description: |
+        Admin only. A partial update — an omitted field keeps its stored value.
+
+        **`eventCode` and `channel` are in the body only so that sending a
+        different one can be refused with `409`.** Together they are the row's
+        identity: the unique key is over the pair, the renderer resolves by it,
+        and `email_log.template_id` rows already sent point at this id — so
+        re-pointing a template at another event would change what those
+        historical records claim to have been rendered from, undetectably.
+        Resending the stored values is a no-op; this screen submits the whole
+        form on every save.
+
+        **`isActive: false` switches the template off, and there is no delete.**
+        Deleting would not orphan a reference the way deleting a level does — it
+        would remove the *wording* for an event that goes on firing, and the
+        failure appears as a mail that never arrives rather than as an error
+        anybody sees.
+
+        **A mandatory mail cannot be switched off at all, and this is refused
+        with `409`.** Blueprint §4B.6 marks assignment, handoff, escalation and
+        status-request mail **❌ never** optional, and D-036 already stops an
+        individual user muting it — so an `EMAIL` template whose event has
+        `mandatoryMail: true` is permanent. Switching it off here would silence
+        it for everybody at once, by a route nobody would think to check. The
+        `IN_APP` template for the same event *can* be switched off: §7.7 gives
+        the guarantee to mail, not to a toast that only reaches somebody who is
+        already logged in.
+
+        **What is deliberately not guarded is the recipient list.** Removing
+        `ASSIGNEE` from a mandatory mail would silence it as effectively as the
+        toggle, and is still permitted — §11's "To" column is a sensible default
+        rather than a law, and an organisation routing assignment mail through a
+        shared desk address is doing something legitimate. The list must be
+        non-empty; what it contains is the Admin's call.
+
+        `If-Match` is required, not optional; a write without one is refused with
+        `428`. Read the current tag from
+        `GET /masters/notification-templates/{templateId}`.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationTemplatePatchRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationTemplateResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: '`If-Match` absent. The precondition is required, not opt-in.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /masters/permissions:
     get:
       tags: [masters]
@@ -3920,6 +4143,16 @@ components:
         declared the column that way and `tickets.task_type_id` follows it.
         `SlaPolicyCell.taskTypeId` has always said `int32`; `TaskType.id` said
         `int64` until B-020 and was the odd one out.
+    TemplateId:
+      name: templateId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        `notification_templates.id` — a `BIGINT`, unlike `PriorityId` and
+        `RoleId`, because A-007 declared this one that way. `email_log.template_id`
+        is the foreign key that points at it, which is why the value is stable and
+        the (event, channel) pair behind it is immutable.
     HolidayId:
       name: holidayId
       in: path
@@ -5982,6 +6215,213 @@ components:
         defaultSlaHrs: { type: [number, 'null'], format: double, minimum: 0 }
         autoEscalates: { type: [boolean, 'null'] }
         seq: { type: [integer, 'null'], format: int32 }
+        isActive: { type: [boolean, 'null'] }
+    NotificationChannel:
+      type: string
+      enum: [IN_APP, EMAIL, PUSH]
+      description: |
+        How a notification reaches somebody — D-042's three, and the values
+        `notification_templates.channel` holds.
+
+        **The bell is not one of them.** It counts what was written, and it
+        renders the same title and body the in-app toast does, from the `IN_APP`
+        template. So blueprint §11's "popup" and "bell" columns are one template
+        rather than two, and an event ticked bell-only in §11 still has an
+        `IN_APP` template — what makes it bell-only is D-043's popup rule, not
+        the absence of wording.
+
+        A-007's column comment predicted `POPUP | BELL | EMAIL` and is
+        superseded; it was written before D-042 existed. §7.7's Teams, Slack and
+        WhatsApp are marked optional with no owner and are not here.
+    NotificationRecipient:
+      type: string
+      enum:
+        [ASSIGNEE, STAGE_OWNER, PREVIOUS_ASSIGNEE, REPORTER, PROJECT_MANAGER,
+         REPORTING_MANAGER, SUPPORT_DESK, WATCHERS, MENTIONED_USER, CLIENT_CONTACT,
+         REQUESTER, ALL_USERS, ADMIN]
+      description: |
+        Who a notification goes to — blueprint §11's "To" column.
+
+        **These are positions relative to one ticket, not roles**, which is why
+        this is a closed vocabulary rather than a list of role ids. `ASSIGNEE` is
+        a column on `tickets`, `WATCHERS` a join table, `MENTIONED_USER` comes
+        out of the comment that fired the event, and `CLIENT_CONTACT` is not a
+        platform user at all — which is why `email_log.to_user_id` is nullable.
+
+        `PROJECT_MANAGER` and `REPORTING_MANAGER` share a spelling with a role
+        code and are still not role lookups: they mean the PM *of this ticket's
+        project* and the reporting manager *of this ticket's assignee*. `ADMIN`
+        is the one that is a role lookup, and it is here rather than as a foreign
+        key because it is one member of a vocabulary whose other twelve are not.
+
+        Every value resolves to nobody under some conditions — an unassigned
+        ticket has no assignee, an internal one no client contact — and that is a
+        normal send of nothing rather than an error.
+    NotificationTemplate:
+      type: object
+      description: |
+        S-15. The wording of one notification, for one channel.
+
+        The `(eventCode, channel)` pair is the row's identity and is immutable —
+        the unique key is over it, the renderer resolves by it, and sent
+        `email_log` rows point at this `id`.
+
+        Every property is populated on every response and none is `required` —
+        B-016's call on `Project.status`, repeated by B-020 and B-021.
+      properties:
+        id: { type: integer, format: int64 }
+        eventCode:
+          type: string
+          description: |
+            A `NotificationEvent` — the §11 matrix as a closed vocabulary, plus
+            the four codes Stream D and A-044 added that §11 does not list.
+            Served by `getNotificationTemplateVocabulary`; not an enum here
+            because Stream D owns the list and it grows with their producers.
+        category:
+          type: string
+          enum: [MENTION, ASSIGNMENT, ESCALATION, STATUS_REQUEST, OTHER]
+          description: |
+            What kind of thing happened — S-26's tabs group on it, and D-036's
+            mandatory-mail rule is stated over it. The S-15 grid uses it to
+            group, and to explain *why* a template is locked.
+        channel: { $ref: '#/components/schemas/NotificationChannel' }
+        recipients:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/NotificationRecipient' }
+          description: |
+            Never empty. A template with no recipients is a row that looks
+            configured and sends nothing; switching it off says so instead.
+        subjectTemplate:
+          type: [string, 'null']
+          maxLength: 255
+          description: |
+            Null on every seeded in-app template — a bell entry has a title, not
+            a subject. Required for `EMAIL`.
+
+            Written **without** the `[CRM-26-00347]` prefix: `OutboxEnqueuer`
+            prepends the ticket code itself (D-031) so no event can ship without
+            it, and repeating it here would double it on every mail.
+        bodyTemplate:
+          type: string
+          description: |
+            HTML for `EMAIL`, plain text for the other two. May contain any
+            `{{merge_tag}}` from the vocabulary and is refused if it contains one
+            that is not.
+        isActive:
+          type: boolean
+          description: |
+            Switching a template off silences that event on that channel,
+            org-wide. See `isMandatory` for the ones that cannot be.
+        isMandatory:
+          type: boolean
+          description: |
+            **Derived, never stored** — `channel == EMAIL` and the event's
+            category is `ASSIGNMENT`, `ESCALATION` or `STATUS_REQUEST`, which is
+            exactly D-036's `isMandatoryMail`. True means `isActive` cannot be
+            set false and the screen should render the toggle as a locked
+            statement rather than a control whose only outcome is a `409`.
+
+            A stored column would be a second copy of a rule that is deliberately
+            stated over the category, so that an escalation event added next
+            month is covered the moment it is declared.
+    NotificationTemplateListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/NotificationTemplate' } }
+    NotificationTemplateResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/NotificationTemplate' } }
+    NotificationEventOption:
+      type: object
+      required: [code, category, mandatoryMail]
+      properties:
+        code: { type: string }
+        category:
+          type: string
+          enum: [MENTION, ASSIGNMENT, ESCALATION, STATUS_REQUEST, OTHER]
+        mandatoryMail:
+          type: boolean
+          description: |
+            The `EMAIL` template for this event cannot be switched off. Lets the
+            screen lock the toggle before the click rather than after the `409`.
+    NotificationTemplateVocabulary:
+      type: object
+      required: [events, channels, recipients, mergeTags]
+      properties:
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationEventOption' }
+        channels:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationChannel' }
+        recipients:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationRecipient' }
+        mergeTags:
+          type: array
+          items: { type: string }
+          description: |
+            The placeholder names, without braces — `ticket_id`, not
+            `{{ticket_id}}`. Blueprint §4B.6's five are in here spelled exactly
+            as it spells them; the rest are the fields it says a mail body
+            carries, plus what its subject table interpolates.
+    NotificationTemplateVocabularyResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/NotificationTemplateVocabulary' } }
+    NotificationTemplateWriteRequest:
+      type: object
+      required: [eventCode, channel, recipients, bodyTemplate]
+      properties:
+        eventCode: { type: string, minLength: 1, maxLength: 60 }
+        channel: { $ref: '#/components/schemas/NotificationChannel' }
+        recipients:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/NotificationRecipient' }
+        subjectTemplate:
+          type: [string, 'null']
+          maxLength: 255
+          description: Required when `channel` is `EMAIL`; optional otherwise.
+        bodyTemplate: { type: string, minLength: 1 }
+        isActive:
+          type: [boolean, 'null']
+          description: |
+            Omitted means `true`. Creating a mandatory `EMAIL` template already
+            switched off is refused with `409`, the same as switching one off
+            later.
+    NotificationTemplatePatchRequest:
+      type: object
+      description: |
+        Every field optional; an omitted one keeps its stored value.
+        `isActive: false` switches the template off — there is no delete.
+      properties:
+        eventCode:
+          type: string
+          description: |
+            Here **only so that a changed one can be refused with `409`.**
+            Omitting it from the schema would let Jackson discard it silently and
+            report a re-pointing that did not happen.
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+          description: Same — present to be refused if changed, a no-op if resent.
+        recipients:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/NotificationRecipient' }
+        subjectTemplate:
+          type: [string, 'null']
+          maxLength: 255
+          description: |
+            Explicitly `null` clears it; omitted keeps it. The two mean different
+            things here, which is why the server binds this field through a POJO
+            rather than a record — a record would collapse both into "clear it"
+            and strip the subject off a mail on a patch that only touched
+            `isActive`.
+        bodyTemplate: { type: string, minLength: 1 }
         isActive: { type: [boolean, 'null'] }
     Holiday:
       type: object

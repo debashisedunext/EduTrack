@@ -181,6 +181,28 @@ export interface Priority {
 }
 
 /**
+ * B-022 · S-15. One notification template, as
+ * `GET /masters/notification-templates` returns it.
+ *
+ * `isMandatory` is **not** here, deliberately. The server derives it from the
+ * event's category and the channel, so storing it in the fixture would let the
+ * mock and the server disagree about which templates are locked — and the mock
+ * would be the one the screen's tests believed. `templateDto` in the handlers
+ * computes it the same way the service does.
+ */
+export interface NotificationTemplateRow {
+  id: number; eventCode: string; category: NotificationCategory;
+  channel: NotificationChannelCode; recipients: string[];
+  subjectTemplate: string | null; bodyTemplate: string; isActive: boolean;
+}
+
+export type NotificationCategory =
+  | 'MENTION' | 'ASSIGNMENT' | 'ESCALATION' | 'STATUS_REQUEST' | 'OTHER';
+
+/** D-042's three. The bell is not one — it renders the `IN_APP` wording. */
+export type NotificationChannelCode = 'IN_APP' | 'EMAIL' | 'PUSH';
+
+/**
  * B-015 · S-09. One capability, as `GET /masters/permissions` returns it.
  *
  * `category` is the **application** area the Role Master groups by — not
@@ -322,6 +344,8 @@ export interface Db {
   taskTypes: TaskType[]; modules: Module[]; priorities: Priority[]; stages: Stage[];
   /** B-015 · S-09. `roleGrants` is keyed by role id — the matrix, one row per role. */
   permissions: Permission[]; roles: Role[]; roleGrants: Record<number, string[]>;
+  /** B-022 · S-15. One row per (event, channel) — the wording of everything sent. */
+  notificationTemplates: NotificationTemplateRow[];
   slaPolicies: SlaPolicy[];
   projectTaskTypes: ProjectTaskType[];
   pushSubscriptions: PushSubscription[];
@@ -610,6 +634,178 @@ MODULES.push({ id: 9, code: 'TRANSPORT', name: 'Transport', seq: 90, isActive: f
  * the *default* list — which excludes retired rows — and a seeded retired level
  * would make those two screens look like they were filtering when they are not.
  */
+/**
+ * B-022 · S-15's templates, matching what `V20260815_1100` seeds.
+ *
+ * Written as a compact matrix and expanded below rather than as fifty literal
+ * rows, because fifty literals is where a fixture stops being checkable against
+ * the thing it mirrors. The shape is blueprint §11's table: an event, its
+ * category, who it goes to, its in-app wording, and its subject and body when
+ * the event has an email at all.
+ *
+ * **§11's popup and bell columns collapse into one `IN_APP` row**, per D-042 —
+ * the bell renders the same title and body the toast does. An event ticked
+ * bell-only in §11 (a reassignment away, an 80%-elapsed warning) still has an
+ * `IN_APP` template here; what makes it bell-only is D-043's popup rule.
+ *
+ * **The bodies are shorter than the server's.** These exist to make the S-15
+ * editor's behaviour visible — merge tags present, a long body scrolling, a
+ * locked toggle — not to be the wording anything sends. The subjects *are* the
+ * server's, because the grid renders them.
+ *
+ * `MAIL_DELIVERY_FAILED` has no email row, matching the migration: mailing
+ * somebody about a mail that would not send is a loop whose best case is that it
+ * also fails. No event has a `PUSH` row — §11 has no push column, and creating
+ * one is what the S-15 create dialog is for.
+ */
+const TEMPLATE_MATRIX: Array<{
+  event: string;
+  category: NotificationCategory;
+  to: string[];
+  inApp: string | null;
+  email: { subject: string; body: string } | null;
+}> = [
+  { event: 'TICKET_ASSIGNED', category: 'ASSIGNMENT', to: ['ASSIGNEE'],
+    inApp: '{{ticket_id}} assigned to you — {{level}}. {{ticket_title}}. Due {{planned_close}}.',
+    email: { subject: 'New ticket assigned to you — {{level}}',
+      body: '<p>{{actor}} assigned <strong>{{ticket_id}}</strong> to you.</p><p>{{ticket_title}}</p><p>Level {{level}} · {{project}} · {{client}} · stage {{stage}} · planned close {{planned_close}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'HANDOFF_RECEIVED', category: 'ASSIGNMENT', to: ['STAGE_OWNER'],
+    inApp: '{{ticket_id}} handed to you at {{stage}} by {{actor}}. {{ticket_title}}.',
+    email: { subject: 'Handed to you at {{stage}} by {{actor}}',
+      body: '<p>{{actor}} moved <strong>{{ticket_id}}</strong> to <strong>{{stage}}</strong>, and you own that stage.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'QA_FAILED_REWORK', category: 'ASSIGNMENT', to: ['ASSIGNEE', 'PROJECT_MANAGER'],
+    inApp: '{{ticket_id}} failed QA and is back with you — iteration {{iteration}}.',
+    email: { subject: 'QA failed — returned for rework',
+      body: '<p>{{actor}} sent <strong>{{ticket_id}}</strong> back from QA. This is iteration {{iteration}}.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'DEPLOYMENT_DONE_VERIFY', category: 'ASSIGNMENT', to: ['ASSIGNEE'],
+    inApp: '{{ticket_id}} deployed to production by {{actor}} — please verify.',
+    email: { subject: 'Deployed to production — please verify',
+      body: '<p>{{actor}} deployed <strong>{{ticket_id}}</strong>.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'TICKET_REASSIGNED_AWAY', category: 'ASSIGNMENT', to: ['PREVIOUS_ASSIGNEE'],
+    inApp: '{{ticket_id}} is no longer yours — {{actor}} reassigned it to {{assignee}}.',
+    email: null },
+  { event: 'TICKET_REOPENED', category: 'ASSIGNMENT', to: ['ASSIGNEE', 'PROJECT_MANAGER'],
+    inApp: '{{ticket_id}} reopened — cycle {{cycle}}. {{ticket_title}}.',
+    email: { subject: 'Reopened — cycle {{cycle}}',
+      body: '<p>{{actor}} reopened <strong>{{ticket_id}}</strong>. It is now on cycle {{cycle}} and assigned to {{assignee}}.</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'NEW_UNASSIGNED_TICKET', category: 'ASSIGNMENT', to: ['PROJECT_MANAGER', 'SUPPORT_DESK'],
+    inApp: '{{ticket_id}} raised on {{project}} with nobody assigned — {{level}}.',
+    email: { subject: 'Raised with nobody assigned — {{level}}',
+      body: '<p><strong>{{ticket_id}}</strong> was raised by {{actor}} on {{project}} and has no assignee.</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+
+  { event: 'SLA_BREACHED', category: 'ESCALATION',
+    to: ['REPORTING_MANAGER', 'PROJECT_MANAGER', 'ASSIGNEE'],
+    inApp: '{{ticket_id}} is overdue by {{overdue_by}} — assigned to {{assignee}}.',
+    email: { subject: 'Overdue by {{overdue_by}}',
+      body: '<p><strong>{{ticket_id}}</strong> passed its planned close date of {{planned_close}} and is overdue by {{overdue_by}}.</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'SLA_80_PERCENT_ELAPSED', category: 'ESCALATION', to: ['ASSIGNEE'],
+    inApp: '{{ticket_id}} has used 80% of its SLA — due {{sla_due}}.',
+    email: { subject: 'Due {{sla_due}} — 80% of the SLA has elapsed',
+      body: '<p><strong>{{ticket_id}}</strong> has used 80% of its allowed time. It is due {{sla_due}}.</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'STAGE_SLA_BREACHED', category: 'ESCALATION',
+    to: ['STAGE_OWNER', 'PROJECT_MANAGER', 'REPORTING_MANAGER'],
+    inApp: '{{ticket_id}} is stuck in {{stage}} past its stage SLA — {{overdue_by}}.',
+    email: { subject: 'Stuck in {{stage}} past SLA',
+      body: '<p><strong>{{ticket_id}}</strong> has been in <strong>{{stage}}</strong> for {{overdue_by}} longer than that stage allows.</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'LEVEL_RAISED_CRITICAL', category: 'ESCALATION',
+    to: ['ASSIGNEE', 'REPORTING_MANAGER', 'PROJECT_MANAGER'],
+    inApp: '{{ticket_id}} escalated to CRITICAL by {{actor}}.',
+    email: { subject: 'Escalated to CRITICAL',
+      body: '<p>{{actor}} raised <strong>{{ticket_id}}</strong> to <strong>Critical</strong>.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'ITERATION_LIMIT_REACHED', category: 'ESCALATION',
+    to: ['PROJECT_MANAGER', 'REPORTING_MANAGER'],
+    inApp: '{{ticket_id}} has reached iteration {{iteration}} — it keeps coming back.',
+    email: { subject: 'Iteration {{iteration}} — repeated rework',
+      body: '<p><strong>{{ticket_id}}</strong> has been through {{iteration}} iterations of the same stage.</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'DEPLOYMENT_FAILED', category: 'ESCALATION',
+    to: ['ASSIGNEE', 'PROJECT_MANAGER', 'REPORTING_MANAGER'],
+    inApp: '{{ticket_id}} failed to deploy — {{actor}} reported it.',
+    email: { subject: 'Deployment failed',
+      body: '<p>{{actor}} reported a failed deployment on <strong>{{ticket_id}}</strong>.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'CHAIN_VERIFICATION_FAILED', category: 'ESCALATION', to: ['ADMIN'],
+    inApp: 'The nightly hash-chain verification failed. {{comment}}',
+    email: { subject: 'Hash chain verification failed on {{org}}',
+      body: '<p>The nightly verifier could not reproduce the hash chain over the append-only history.</p><p>{{comment}}</p>' } },
+
+  { event: 'STATUS_REQUESTED', category: 'STATUS_REQUEST', to: ['ASSIGNEE'],
+    inApp: '{{actor}} asked for a status update on {{ticket_id}}.',
+    email: { subject: 'Status requested by {{actor}}',
+      body: '<p>{{actor}} asked for a status update on <strong>{{ticket_id}}</strong>.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Reply on the ticket</a></p>' } },
+  { event: 'STATUS_REQUEST_ANSWERED', category: 'STATUS_REQUEST', to: ['REQUESTER'],
+    inApp: '{{actor}} answered your status request on {{ticket_id}}. {{comment}}',
+    email: null },
+
+  { event: 'MENTIONED', category: 'MENTION', to: ['MENTIONED_USER'],
+    inApp: '{{actor}} mentioned you on {{ticket_id}}. {{comment}}',
+    email: { subject: 'You were mentioned by {{actor}}',
+      body: '<p>{{actor}} mentioned you on <strong>{{ticket_id}}</strong>.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+
+  { event: 'TICKET_CLOSED', category: 'OTHER', to: ['REPORTER', 'WATCHERS'],
+    inApp: '{{ticket_id}} was resolved and closed by {{actor}}.',
+    email: { subject: 'Resolved and closed',
+      body: '<p>{{actor}} closed <strong>{{ticket_id}}</strong>.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p><p>Replying to this mail adds a comment to the ticket.</p>' } },
+  { event: 'COMMENT_ADDED', category: 'OTHER', to: ['ASSIGNEE', 'WATCHERS'],
+    inApp: '{{actor}} commented on {{ticket_id}}. {{comment}}',
+    email: { subject: 'New comment from {{actor}}',
+      body: '<p>{{actor}} commented on <strong>{{ticket_id}}</strong>.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'COMMENT_MARKED_CLIENT_VISIBLE', category: 'OTHER', to: ['CLIENT_CONTACT'],
+    inApp: 'An update was published on {{ticket_id}}. {{comment}}',
+    email: { subject: 'An update on your ticket',
+      body: '<p>There is a new update on <strong>{{ticket_id}}</strong>.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'ATTACHMENT_ADDED', category: 'OTHER', to: ['ASSIGNEE', 'WATCHERS'],
+    inApp: '{{actor}} attached a file to {{ticket_id}}.',
+    email: { subject: 'New attachment from {{actor}}',
+      body: '<p>{{actor}} added an attachment to <strong>{{ticket_id}}</strong>.</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'PRIORITY_CHANGED', category: 'OTHER', to: ['ASSIGNEE', 'PROJECT_MANAGER'],
+    inApp: '{{ticket_id}} is now {{level}} — changed by {{actor}}.',
+    email: { subject: 'Level changed to {{level}}',
+      body: '<p>{{actor}} changed the level on <strong>{{ticket_id}}</strong> to <strong>{{level}}</strong>.</p><p>{{comment}}</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'STALE_TICKET_NUDGE', category: 'OTHER', to: ['ASSIGNEE'],
+    inApp: 'Nobody has touched {{ticket_id}} in a while. It is still yours.',
+    email: { subject: 'No activity on this ticket for a while',
+      body: '<p><strong>{{ticket_id}}</strong> has had no activity recently and is still assigned to you.</p><p><a href="{{ticket_url}}">Open ticket</a></p>' } },
+  { event: 'MAIL_DELIVERY_FAILED', category: 'OTHER', to: ['ASSIGNEE'],
+    inApp: 'A notification mail about {{ticket_id}} could not be delivered. {{comment}}',
+    email: null },
+  { event: 'EMAIL_ADDRESS_SUPPRESSED', category: 'OTHER', to: ['ADMIN'],
+    inApp: 'An email address was suppressed by the provider. {{comment}}',
+    email: { subject: 'An email address has been suppressed',
+      body: '<p>The mail provider told us to stop writing to an address, so it has been suppressed.</p><p>{{comment}}</p>' } },
+  { event: 'DAILY_DIGEST', category: 'OTHER', to: ['ALL_USERS'], inApp: null,
+    email: { subject: 'Your open tickets',
+      body: '<p>Good morning {{recipient}}.</p><p>Here is where your open tickets stand this morning.</p><p>{{comment}}</p>' } },
+  { event: 'WEEKLY_MANAGER_SUMMARY', category: 'OTHER',
+    to: ['REPORTING_MANAGER', 'PROJECT_MANAGER'], inApp: null,
+    email: { subject: 'Team summary',
+      body: '<p>Good morning {{recipient}}.</p><p>Here is how your team&rsquo;s week looks across {{org}}.</p><p>{{comment}}</p>' } },
+];
+
+/** The matrix flattened into rows, in the `(eventCode, channel)` order the
+ *  server returns them. `EMAIL` sorts before `IN_APP` alphabetically, which is
+ *  what the real `ORDER BY` produces and what the grid's tests assert. */
+const NOTIFICATION_TEMPLATES: NotificationTemplateRow[] = TEMPLATE_MATRIX
+  .flatMap((entry) => {
+    const rows: Array<Omit<NotificationTemplateRow, 'id'>> = [];
+    if (entry.email) {
+      rows.push({
+        eventCode: entry.event, category: entry.category, channel: 'EMAIL',
+        recipients: [...entry.to], subjectTemplate: entry.email.subject,
+        bodyTemplate: entry.email.body, isActive: true,
+      });
+    }
+    if (entry.inApp) {
+      rows.push({
+        eventCode: entry.event, category: entry.category, channel: 'IN_APP',
+        recipients: [...entry.to], subjectTemplate: null,
+        bodyTemplate: entry.inApp, isActive: true,
+      });
+    }
+    return rows;
+  })
+  .sort((a, b) => a.eventCode.localeCompare(b.eventCode)
+    || a.channel.localeCompare(b.channel))
+  .map((row, index) => ({ id: index + 1, ...row }));
+
 const PRIORITIES: Priority[] = [
   { id: 1, level: 'LOW', name: 'Low', colour: '#10B981', defaultSlaHrs: 120, autoEscalates: false, seq: 10, isActive: true },
   { id: 2, level: 'MEDIUM', name: 'Medium', colour: '#3B82F6', defaultSlaHrs: 48, autoEscalates: false, seq: 20, isActive: true },
@@ -736,6 +932,7 @@ export function createDb(): Db {
     priorities: structuredClone(PRIORITIES),
     permissions: structuredClone(PERMISSIONS),
     roles: structuredClone(ROLES),
+    notificationTemplates: structuredClone(NOTIFICATION_TEMPLATES),
     roleGrants: Object.fromEntries(
       ROLES.map((role) => [role.id, [...(ROLE_GRANTS[role.code] ?? [])]]),
     ),

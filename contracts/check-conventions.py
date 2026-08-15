@@ -56,6 +56,7 @@ NO_PAGINATION = {
     "/me/awaiting-response":             "your own unanswered asks; bounded server-side and ordered longest-wait-first, which a cursor would fight",
     "/chat/ticket-cards":                "bounded by the caller's own `codes` list, and capped below that; paging a lookup you supplied the keys for is not a page",
     "/projects/{projectId}/members":     "one project's team — tens of people, and the S-10 tab totals their allocations, so it needs the whole set on every read anyway",
+    "/masters/notification-templates":   "at most one row per NotificationEvent per channel — 27 x 3, so bounded by two enums the way /me/notification-preferences is bounded by one; the S-15 grid groups by event and needs every channel of a group together, which a cursor cutting mid-event would break",
 }
 
 # §8 — GET only. No mutation verb, ever.
@@ -75,6 +76,9 @@ ROWLESS_403 = {
     "/masters/priorities/{priorityId}":    "same: the level's existence is public, only the write is Admin-only",
     "/masters/task-types":                 "master data, not row-scoped — every task type is already public through listTaskTypes, and there is no row yet on a create",
     "/masters/task-types/{taskTypeId}":    "same: the type's existence is public, only the write is Admin-only",
+    "/masters/notification-templates":     "Admin-only screen, reads included — master data, not row-scoped, so there is no row whose existence a 404 could protect",
+    "/masters/notification-templates/vocabulary": "same: a catalogue of enum values, Admin-only because the screen it feeds is",
+    "/masters/notification-templates/{templateId}": "same: not row-scoped. Every read here is Admin-only, so a 403 tells a non-Admin only what the 401 already did",
 }
 
 

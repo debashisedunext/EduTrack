@@ -497,6 +497,263 @@ export const updatePriorityResponse = zod.object({
 })
 
 /**
+ * The Notification Template Master — the wording of every notification
+this system sends, one row per (event, channel) pair.
+
+**Admin only, reads included, and that is where this master differs from
+the four beside it.** Task types, levels, roles and the calendar are open
+to all six roles by an argument from §2 row 3: every role may raise a
+ticket, a ticket must carry a level and a type, so a role that could not
+read those could not raise a ticket at all. Nothing on any screen a
+non-Admin sees is built from this route. And the content is not neutral —
+the seeded rows include the mail sent to a **client contact**, the
+escalation naming the Reporting Manager, and A-044's chain-verification
+alarm. §2 gives the audit log to Admin alone on that reasoning; a
+catalogue of who gets told what, when something goes wrong, belongs on
+the same side of the line.
+
+Ordered by `eventCode` then `channel`, so the screen renders its event
+groups without sorting and an event's channels are always adjacent.
+
+**Switched-off templates are returned too**, and there is no
+`includeInactive` parameter — unlike `listPriorities`, which has one.
+That route needed a narrow default because two shipped Stream C screens
+read it unfiltered into a picker. Nothing outside S-15 reads this one,
+and the renderer will look up a single pair rather than the list.
+
+`channel` is `IN_APP | EMAIL | PUSH` — **not** the `POPUP | BELL | EMAIL`
+A-007's column comment predicted. Everything that runs keys on
+`NotificationChannel`, and the bell is not a channel: it renders the same
+wording as the toast, from the `IN_APP` template. `V20260815_1100`
+carries the full argument.
+
+ * @summary Notification templates (S-15)
+ */
+
+export const listNotificationTemplatesResponseDataItemSubjectTemplateMax = 255;
+
+
+
+export const listNotificationTemplatesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "eventCode": zod.string().optional().describe('A `NotificationEvent` — the §11 matrix as a closed vocabulary, plus\nthe four codes Stream D and A-044 added that §11 does not list.\nServed by `getNotificationTemplateVocabulary`; not an enum here\nbecause Stream D owns the list and it grows with their producers.\n'),
+  "category": zod.enum(['MENTION', 'ASSIGNMENT', 'ESCALATION', 'STATUS_REQUEST', 'OTHER']).optional().describe('What kind of thing happened — S-26\'s tabs group on it, and D-036\'s\nmandatory-mail rule is stated over it. The S-15 grid uses it to\ngroup, and to explain \*why\* a template is locked.\n'),
+  "channel": zod.enum(['IN_APP', 'EMAIL', 'PUSH']).optional().describe('How a notification reaches somebody — D-042\'s three, and the values\n`notification_templates.channel` holds.\n\n\*\*The bell is not one of them.\*\* It counts what was written, and it\nrenders the same title and body the in-app toast does, from the `IN_APP`\ntemplate. So blueprint §11\'s \"popup\" and \"bell\" columns are one template\nrather than two, and an event ticked bell-only in §11 still has an\n`IN_APP` template — what makes it bell-only is D-043\'s popup rule, not\nthe absence of wording.\n\nA-007\'s column comment predicted `POPUP | BELL | EMAIL` and is\nsuperseded; it was written before D-042 existed. §7.7\'s Teams, Slack and\nWhatsApp are marked optional with no owner and are not here.\n'),
+  "recipients": zod.array(zod.enum(['ASSIGNEE', 'STAGE_OWNER', 'PREVIOUS_ASSIGNEE', 'REPORTER', 'PROJECT_MANAGER', 'REPORTING_MANAGER', 'SUPPORT_DESK', 'WATCHERS', 'MENTIONED_USER', 'CLIENT_CONTACT', 'REQUESTER', 'ALL_USERS', 'ADMIN']).describe('Who a notification goes to — blueprint §11\'s \"To\" column.\n\n\*\*These are positions relative to one ticket, not roles\*\*, which is why\nthis is a closed vocabulary rather than a list of role ids. `ASSIGNEE` is\na column on `tickets`, `WATCHERS` a join table, `MENTIONED_USER` comes\nout of the comment that fired the event, and `CLIENT_CONTACT` is not a\nplatform user at all — which is why `email_log.to_user_id` is nullable.\n\n`PROJECT_MANAGER` and `REPORTING_MANAGER` share a spelling with a role\ncode and are still not role lookups: they mean the PM \*of this ticket\'s\nproject\* and the reporting manager \*of this ticket\'s assignee\*. `ADMIN`\nis the one that is a role lookup, and it is here rather than as a foreign\nkey because it is one member of a vocabulary whose other twelve are not.\n\nEvery value resolves to nobody under some conditions — an unassigned\nticket has no assignee, an internal one no client contact — and that is a\nnormal send of nothing rather than an error.\n')).min(1).optional().describe('Never empty. A template with no recipients is a row that looks\nconfigured and sends nothing; switching it off says so instead.\n'),
+  "subjectTemplate": zod.string().max(listNotificationTemplatesResponseDataItemSubjectTemplateMax).nullish().describe('Null on every seeded in-app template — a bell entry has a title, not\na subject. Required for `EMAIL`.\n\nWritten \*\*without\*\* the `[CRM-26-00347]` prefix: `OutboxEnqueuer`\nprepends the ticket code itself (D-031) so no event can ship without\nit, and repeating it here would double it on every mail.\n'),
+  "bodyTemplate": zod.string().optional().describe('HTML for `EMAIL`, plain text for the other two. May contain any\n`{{merge_tag}}` from the vocabulary and is refused if it contains one\nthat is not.\n'),
+  "isActive": zod.boolean().optional().describe('Switching a template off silences that event on that channel,\norg-wide. See `isMandatory` for the ones that cannot be.\n'),
+  "isMandatory": zod.boolean().optional().describe('\*\*Derived, never stored\*\* — `channel == EMAIL` and the event\'s\ncategory is `ASSIGNMENT`, `ESCALATION` or `STATUS_REQUEST`, which is\nexactly D-036\'s `isMandatoryMail`. True means `isActive` cannot be\nset false and the screen should render the toggle as a locked\nstatement rather than a control whose only outcome is a `409`.\n\nA stored column would be a second copy of a rule that is deliberately\nstated over the category, so that an escalation event added next\nmonth is covered the moment it is declared.\n')
+}).describe('S-15. The wording of one notification, for one channel.\n\nThe `(eventCode, channel)` pair is the row\'s identity and is immutable —\nthe unique key is over it, the renderer resolves by it, and sent\n`email_log` rows point at this `id`.\n\nEvery property is populated on every response and none is `required` —\nB-016\'s call on `Project.status`, repeated by B-020 and B-021.\n'))
+})
+
+/**
+ * Admin only — `master.write`.
+
+`V20260815_1100` seeds one template per (event, channel) pair blueprint
+§11 ticks, so in practice this operation adds a `PUSH` template: §11 has
+no push column and the migration seeded none, on the grounds that D-045
+sends a push from the notification it has already written rather than
+from separate wording.
+
+A second template for a pair that already has one is refused with `409` —
+`uq_notification_templates` is over the pair, and the renderer resolves
+by it. Edit the existing one, or switch it back on.
+
+`subjectTemplate` is required when `channel` is `EMAIL` and optional
+otherwise. A mail with no subject line is unsendable; an in-app entry has
+a title rather than a subject, which is why the column is nullable. It is
+**permitted** on the other two channels rather than refused — a browser
+push genuinely has a title, and refusing the field would make this master
+unable to express something the channel has.
+
+Every `{{tag}}` in the subject and body is checked against the catalogue
+at `GET /masters/notification-templates/vocabulary`, and an unknown one
+is `400`. Without that check `{{ticketId}}` for `{{ticket_id}}` saves
+cleanly and prints literal braces in a client-facing mail, and the first
+person who could notice is the client.
+
+ * @summary Add a template for an event and channel that has none (S-15)
+ */
+export const createNotificationTemplateHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createNotificationTemplateBodyEventCodeMax = 60;
+
+
+export const createNotificationTemplateBodySubjectTemplateMax = 255;
+
+
+
+
+export const createNotificationTemplateBody = zod.object({
+  "eventCode": zod.string().min(1).max(createNotificationTemplateBodyEventCodeMax),
+  "channel": zod.enum(['IN_APP', 'EMAIL', 'PUSH']).describe('How a notification reaches somebody — D-042\'s three, and the values\n`notification_templates.channel` holds.\n\n\*\*The bell is not one of them.\*\* It counts what was written, and it\nrenders the same title and body the in-app toast does, from the `IN_APP`\ntemplate. So blueprint §11\'s \"popup\" and \"bell\" columns are one template\nrather than two, and an event ticked bell-only in §11 still has an\n`IN_APP` template — what makes it bell-only is D-043\'s popup rule, not\nthe absence of wording.\n\nA-007\'s column comment predicted `POPUP | BELL | EMAIL` and is\nsuperseded; it was written before D-042 existed. §7.7\'s Teams, Slack and\nWhatsApp are marked optional with no owner and are not here.\n'),
+  "recipients": zod.array(zod.enum(['ASSIGNEE', 'STAGE_OWNER', 'PREVIOUS_ASSIGNEE', 'REPORTER', 'PROJECT_MANAGER', 'REPORTING_MANAGER', 'SUPPORT_DESK', 'WATCHERS', 'MENTIONED_USER', 'CLIENT_CONTACT', 'REQUESTER', 'ALL_USERS', 'ADMIN']).describe('Who a notification goes to — blueprint §11\'s \"To\" column.\n\n\*\*These are positions relative to one ticket, not roles\*\*, which is why\nthis is a closed vocabulary rather than a list of role ids. `ASSIGNEE` is\na column on `tickets`, `WATCHERS` a join table, `MENTIONED_USER` comes\nout of the comment that fired the event, and `CLIENT_CONTACT` is not a\nplatform user at all — which is why `email_log.to_user_id` is nullable.\n\n`PROJECT_MANAGER` and `REPORTING_MANAGER` share a spelling with a role\ncode and are still not role lookups: they mean the PM \*of this ticket\'s\nproject\* and the reporting manager \*of this ticket\'s assignee\*. `ADMIN`\nis the one that is a role lookup, and it is here rather than as a foreign\nkey because it is one member of a vocabulary whose other twelve are not.\n\nEvery value resolves to nobody under some conditions — an unassigned\nticket has no assignee, an internal one no client contact — and that is a\nnormal send of nothing rather than an error.\n')).min(1),
+  "subjectTemplate": zod.string().max(createNotificationTemplateBodySubjectTemplateMax).nullish().describe('Required when `channel` is `EMAIL`; optional otherwise.'),
+  "bodyTemplate": zod.string().min(1),
+  "isActive": zod.boolean().nullish().describe('Omitted means `true`. Creating a mandatory `EMAIL` template already\nswitched off is refused with `409`, the same as switching one off\nlater.\n')
+})
+
+/**
+ * The four closed vocabularies a template is composed from, read off the
+enums rather than restated.
+
+**Reference data, not master data** — the same footing as
+`GET /masters/permissions`, and for the same reason: there is no create,
+edit or delete because every value exists only because code resolves it.
+A merge tag an Admin could add would substitute nothing, and a recipient
+they could delete would silently stop a mail reaching somebody.
+
+Serving it beats letting the screen hold its own copy. The copy is what
+drifts, and it drifts in the direction where S-15 offers a merge tag the
+renderer does not substitute.
+
+Declared before `/{templateId}` for readability; the literal segment
+outranks the path variable regardless of order, so `vocabulary` cannot be
+read as an id.
+
+**`recipients` are positions relative to a ticket, not roles.** §4B.6
+asks for a "per-role recipient list" and taking that literally produces
+the wrong table: of the ten things §11's "To" column names, two look like
+role codes and eight — assignee, stage owner, previous assignee,
+reporter, watchers, mentioned user, client contact, support desk — are
+resolved per send from the ticket. Even the two that share a spelling
+with a role are joins: `PROJECT_MANAGER` means the PM *of this ticket's
+project*, not everybody holding the PM role.
+
+ * @summary Events, channels, recipients and merge tags (S-15)
+ */
+export const getNotificationTemplateVocabularyResponse = zod.object({
+  "data": zod.object({
+  "events": zod.array(zod.object({
+  "code": zod.string(),
+  "category": zod.enum(['MENTION', 'ASSIGNMENT', 'ESCALATION', 'STATUS_REQUEST', 'OTHER']),
+  "mandatoryMail": zod.boolean().describe('The `EMAIL` template for this event cannot be switched off. Lets the\nscreen lock the toggle before the click rather than after the `409`.\n')
+})),
+  "channels": zod.array(zod.enum(['IN_APP', 'EMAIL', 'PUSH']).describe('How a notification reaches somebody — D-042\'s three, and the values\n`notification_templates.channel` holds.\n\n\*\*The bell is not one of them.\*\* It counts what was written, and it\nrenders the same title and body the in-app toast does, from the `IN_APP`\ntemplate. So blueprint §11\'s \"popup\" and \"bell\" columns are one template\nrather than two, and an event ticked bell-only in §11 still has an\n`IN_APP` template — what makes it bell-only is D-043\'s popup rule, not\nthe absence of wording.\n\nA-007\'s column comment predicted `POPUP | BELL | EMAIL` and is\nsuperseded; it was written before D-042 existed. §7.7\'s Teams, Slack and\nWhatsApp are marked optional with no owner and are not here.\n')),
+  "recipients": zod.array(zod.enum(['ASSIGNEE', 'STAGE_OWNER', 'PREVIOUS_ASSIGNEE', 'REPORTER', 'PROJECT_MANAGER', 'REPORTING_MANAGER', 'SUPPORT_DESK', 'WATCHERS', 'MENTIONED_USER', 'CLIENT_CONTACT', 'REQUESTER', 'ALL_USERS', 'ADMIN']).describe('Who a notification goes to — blueprint §11\'s \"To\" column.\n\n\*\*These are positions relative to one ticket, not roles\*\*, which is why\nthis is a closed vocabulary rather than a list of role ids. `ASSIGNEE` is\na column on `tickets`, `WATCHERS` a join table, `MENTIONED_USER` comes\nout of the comment that fired the event, and `CLIENT_CONTACT` is not a\nplatform user at all — which is why `email_log.to_user_id` is nullable.\n\n`PROJECT_MANAGER` and `REPORTING_MANAGER` share a spelling with a role\ncode and are still not role lookups: they mean the PM \*of this ticket\'s\nproject\* and the reporting manager \*of this ticket\'s assignee\*. `ADMIN`\nis the one that is a role lookup, and it is here rather than as a foreign\nkey because it is one member of a vocabulary whose other twelve are not.\n\nEvery value resolves to nobody under some conditions — an unassigned\nticket has no assignee, an internal one no client contact — and that is a\nnormal send of nothing rather than an error.\n')),
+  "mergeTags": zod.array(zod.string()).describe('The placeholder names, without braces — `ticket_id`, not\n`{{ticket_id}}`. Blueprint §4B.6\'s five are in here spelled exactly\nas it spells them; the rest are the fields it says a mail body\ncarries, plus what its subject table interpolates.\n')
+})
+})
+
+/**
+ * **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+CONVENTIONS.md §5 — the same gap B-011, B-016, B-020 and B-021 closed for
+users, projects, task types and levels. A write whose precondition has no
+read to come from is not a strict endpoint, it is an uncallable one.
+
+ * @summary One notification template (S-15)
+ */
+export const getNotificationTemplateParams = zod.object({
+  "templateId": zod.number().describe('`notification_templates.id` — a `BIGINT`, unlike `PriorityId` and\n`RoleId`, because A-007 declared this one that way. `email_log.template_id`\nis the foreign key that points at it, which is why the value is stable and\nthe (event, channel) pair behind it is immutable.\n')
+})
+
+
+export const getNotificationTemplateResponseDataSubjectTemplateMax = 255;
+
+
+
+export const getNotificationTemplateResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "eventCode": zod.string().optional().describe('A `NotificationEvent` — the §11 matrix as a closed vocabulary, plus\nthe four codes Stream D and A-044 added that §11 does not list.\nServed by `getNotificationTemplateVocabulary`; not an enum here\nbecause Stream D owns the list and it grows with their producers.\n'),
+  "category": zod.enum(['MENTION', 'ASSIGNMENT', 'ESCALATION', 'STATUS_REQUEST', 'OTHER']).optional().describe('What kind of thing happened — S-26\'s tabs group on it, and D-036\'s\nmandatory-mail rule is stated over it. The S-15 grid uses it to\ngroup, and to explain \*why\* a template is locked.\n'),
+  "channel": zod.enum(['IN_APP', 'EMAIL', 'PUSH']).optional().describe('How a notification reaches somebody — D-042\'s three, and the values\n`notification_templates.channel` holds.\n\n\*\*The bell is not one of them.\*\* It counts what was written, and it\nrenders the same title and body the in-app toast does, from the `IN_APP`\ntemplate. So blueprint §11\'s \"popup\" and \"bell\" columns are one template\nrather than two, and an event ticked bell-only in §11 still has an\n`IN_APP` template — what makes it bell-only is D-043\'s popup rule, not\nthe absence of wording.\n\nA-007\'s column comment predicted `POPUP | BELL | EMAIL` and is\nsuperseded; it was written before D-042 existed. §7.7\'s Teams, Slack and\nWhatsApp are marked optional with no owner and are not here.\n'),
+  "recipients": zod.array(zod.enum(['ASSIGNEE', 'STAGE_OWNER', 'PREVIOUS_ASSIGNEE', 'REPORTER', 'PROJECT_MANAGER', 'REPORTING_MANAGER', 'SUPPORT_DESK', 'WATCHERS', 'MENTIONED_USER', 'CLIENT_CONTACT', 'REQUESTER', 'ALL_USERS', 'ADMIN']).describe('Who a notification goes to — blueprint §11\'s \"To\" column.\n\n\*\*These are positions relative to one ticket, not roles\*\*, which is why\nthis is a closed vocabulary rather than a list of role ids. `ASSIGNEE` is\na column on `tickets`, `WATCHERS` a join table, `MENTIONED_USER` comes\nout of the comment that fired the event, and `CLIENT_CONTACT` is not a\nplatform user at all — which is why `email_log.to_user_id` is nullable.\n\n`PROJECT_MANAGER` and `REPORTING_MANAGER` share a spelling with a role\ncode and are still not role lookups: they mean the PM \*of this ticket\'s\nproject\* and the reporting manager \*of this ticket\'s assignee\*. `ADMIN`\nis the one that is a role lookup, and it is here rather than as a foreign\nkey because it is one member of a vocabulary whose other twelve are not.\n\nEvery value resolves to nobody under some conditions — an unassigned\nticket has no assignee, an internal one no client contact — and that is a\nnormal send of nothing rather than an error.\n')).min(1).optional().describe('Never empty. A template with no recipients is a row that looks\nconfigured and sends nothing; switching it off says so instead.\n'),
+  "subjectTemplate": zod.string().max(getNotificationTemplateResponseDataSubjectTemplateMax).nullish().describe('Null on every seeded in-app template — a bell entry has a title, not\na subject. Required for `EMAIL`.\n\nWritten \*\*without\*\* the `[CRM-26-00347]` prefix: `OutboxEnqueuer`\nprepends the ticket code itself (D-031) so no event can ship without\nit, and repeating it here would double it on every mail.\n'),
+  "bodyTemplate": zod.string().optional().describe('HTML for `EMAIL`, plain text for the other two. May contain any\n`{{merge_tag}}` from the vocabulary and is refused if it contains one\nthat is not.\n'),
+  "isActive": zod.boolean().optional().describe('Switching a template off silences that event on that channel,\norg-wide. See `isMandatory` for the ones that cannot be.\n'),
+  "isMandatory": zod.boolean().optional().describe('\*\*Derived, never stored\*\* — `channel == EMAIL` and the event\'s\ncategory is `ASSIGNMENT`, `ESCALATION` or `STATUS_REQUEST`, which is\nexactly D-036\'s `isMandatoryMail`. True means `isActive` cannot be\nset false and the screen should render the toggle as a locked\nstatement rather than a control whose only outcome is a `409`.\n\nA stored column would be a second copy of a rule that is deliberately\nstated over the category, so that an escalation event added next\nmonth is covered the moment it is declared.\n')
+}).describe('S-15. The wording of one notification, for one channel.\n\nThe `(eventCode, channel)` pair is the row\'s identity and is immutable —\nthe unique key is over it, the renderer resolves by it, and sent\n`email_log` rows point at this `id`.\n\nEvery property is populated on every response and none is `required` —\nB-016\'s call on `Project.status`, repeated by B-020 and B-021.\n')
+})
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`eventCode` and `channel` are in the body only so that sending a
+different one can be refused with `409`.** Together they are the row's
+identity: the unique key is over the pair, the renderer resolves by it,
+and `email_log.template_id` rows already sent point at this id — so
+re-pointing a template at another event would change what those
+historical records claim to have been rendered from, undetectably.
+Resending the stored values is a no-op; this screen submits the whole
+form on every save.
+
+**`isActive: false` switches the template off, and there is no delete.**
+Deleting would not orphan a reference the way deleting a level does — it
+would remove the *wording* for an event that goes on firing, and the
+failure appears as a mail that never arrives rather than as an error
+anybody sees.
+
+**A mandatory mail cannot be switched off at all, and this is refused
+with `409`.** Blueprint §4B.6 marks assignment, handoff, escalation and
+status-request mail **❌ never** optional, and D-036 already stops an
+individual user muting it — so an `EMAIL` template whose event has
+`mandatoryMail: true` is permanent. Switching it off here would silence
+it for everybody at once, by a route nobody would think to check. The
+`IN_APP` template for the same event *can* be switched off: §7.7 gives
+the guarantee to mail, not to a toast that only reaches somebody who is
+already logged in.
+
+**What is deliberately not guarded is the recipient list.** Removing
+`ASSIGNEE` from a mandatory mail would silence it as effectively as the
+toggle, and is still permitted — §11's "To" column is a sensible default
+rather than a law, and an organisation routing assignment mail through a
+shared desk address is doing something legitimate. The list must be
+non-empty; what it contains is the Admin's call.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the current tag from
+`GET /masters/notification-templates/{templateId}`.
+
+ * @summary Reword a template, re-target it, or switch it off (S-15)
+ */
+export const updateNotificationTemplateParams = zod.object({
+  "templateId": zod.number().describe('`notification_templates.id` — a `BIGINT`, unlike `PriorityId` and\n`RoleId`, because A-007 declared this one that way. `email_log.template_id`\nis the foreign key that points at it, which is why the value is stable and\nthe (event, channel) pair behind it is immutable.\n')
+})
+
+export const updateNotificationTemplateHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+
+export const updateNotificationTemplateBodySubjectTemplateMax = 255;
+
+
+
+
+export const updateNotificationTemplateBody = zod.object({
+  "eventCode": zod.string().optional().describe('Here \*\*only so that a changed one can be refused with `409`.\*\*\nOmitting it from the schema would let Jackson discard it silently and\nreport a re-pointing that did not happen.\n'),
+  "channel": zod.enum(['IN_APP', 'EMAIL', 'PUSH']).optional().describe('How a notification reaches somebody — D-042\'s three, and the values\n`notification_templates.channel` holds.\n\n\*\*The bell is not one of them.\*\* It counts what was written, and it\nrenders the same title and body the in-app toast does, from the `IN_APP`\ntemplate. So blueprint §11\'s \"popup\" and \"bell\" columns are one template\nrather than two, and an event ticked bell-only in §11 still has an\n`IN_APP` template — what makes it bell-only is D-043\'s popup rule, not\nthe absence of wording.\n\nA-007\'s column comment predicted `POPUP | BELL | EMAIL` and is\nsuperseded; it was written before D-042 existed. §7.7\'s Teams, Slack and\nWhatsApp are marked optional with no owner and are not here.\n'),
+  "recipients": zod.array(zod.enum(['ASSIGNEE', 'STAGE_OWNER', 'PREVIOUS_ASSIGNEE', 'REPORTER', 'PROJECT_MANAGER', 'REPORTING_MANAGER', 'SUPPORT_DESK', 'WATCHERS', 'MENTIONED_USER', 'CLIENT_CONTACT', 'REQUESTER', 'ALL_USERS', 'ADMIN']).describe('Who a notification goes to — blueprint §11\'s \"To\" column.\n\n\*\*These are positions relative to one ticket, not roles\*\*, which is why\nthis is a closed vocabulary rather than a list of role ids. `ASSIGNEE` is\na column on `tickets`, `WATCHERS` a join table, `MENTIONED_USER` comes\nout of the comment that fired the event, and `CLIENT_CONTACT` is not a\nplatform user at all — which is why `email_log.to_user_id` is nullable.\n\n`PROJECT_MANAGER` and `REPORTING_MANAGER` share a spelling with a role\ncode and are still not role lookups: they mean the PM \*of this ticket\'s\nproject\* and the reporting manager \*of this ticket\'s assignee\*. `ADMIN`\nis the one that is a role lookup, and it is here rather than as a foreign\nkey because it is one member of a vocabulary whose other twelve are not.\n\nEvery value resolves to nobody under some conditions — an unassigned\nticket has no assignee, an internal one no client contact — and that is a\nnormal send of nothing rather than an error.\n')).min(1).optional(),
+  "subjectTemplate": zod.string().max(updateNotificationTemplateBodySubjectTemplateMax).nullish().describe('Explicitly `null` clears it; omitted keeps it. The two mean different\nthings here, which is why the server binds this field through a POJO\nrather than a record — a record would collapse both into \"clear it\"\nand strip the subject off a mail on a patch that only touched\n`isActive`.\n'),
+  "bodyTemplate": zod.string().min(1).optional(),
+  "isActive": zod.boolean().nullish()
+}).describe('Every field optional; an omitted one keeps its stored value.\n`isActive: false` switches the template off — there is no delete.\n')
+
+
+export const updateNotificationTemplateResponseDataSubjectTemplateMax = 255;
+
+
+
+export const updateNotificationTemplateResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "eventCode": zod.string().optional().describe('A `NotificationEvent` — the §11 matrix as a closed vocabulary, plus\nthe four codes Stream D and A-044 added that §11 does not list.\nServed by `getNotificationTemplateVocabulary`; not an enum here\nbecause Stream D owns the list and it grows with their producers.\n'),
+  "category": zod.enum(['MENTION', 'ASSIGNMENT', 'ESCALATION', 'STATUS_REQUEST', 'OTHER']).optional().describe('What kind of thing happened — S-26\'s tabs group on it, and D-036\'s\nmandatory-mail rule is stated over it. The S-15 grid uses it to\ngroup, and to explain \*why\* a template is locked.\n'),
+  "channel": zod.enum(['IN_APP', 'EMAIL', 'PUSH']).optional().describe('How a notification reaches somebody — D-042\'s three, and the values\n`notification_templates.channel` holds.\n\n\*\*The bell is not one of them.\*\* It counts what was written, and it\nrenders the same title and body the in-app toast does, from the `IN_APP`\ntemplate. So blueprint §11\'s \"popup\" and \"bell\" columns are one template\nrather than two, and an event ticked bell-only in §11 still has an\n`IN_APP` template — what makes it bell-only is D-043\'s popup rule, not\nthe absence of wording.\n\nA-007\'s column comment predicted `POPUP | BELL | EMAIL` and is\nsuperseded; it was written before D-042 existed. §7.7\'s Teams, Slack and\nWhatsApp are marked optional with no owner and are not here.\n'),
+  "recipients": zod.array(zod.enum(['ASSIGNEE', 'STAGE_OWNER', 'PREVIOUS_ASSIGNEE', 'REPORTER', 'PROJECT_MANAGER', 'REPORTING_MANAGER', 'SUPPORT_DESK', 'WATCHERS', 'MENTIONED_USER', 'CLIENT_CONTACT', 'REQUESTER', 'ALL_USERS', 'ADMIN']).describe('Who a notification goes to — blueprint §11\'s \"To\" column.\n\n\*\*These are positions relative to one ticket, not roles\*\*, which is why\nthis is a closed vocabulary rather than a list of role ids. `ASSIGNEE` is\na column on `tickets`, `WATCHERS` a join table, `MENTIONED_USER` comes\nout of the comment that fired the event, and `CLIENT_CONTACT` is not a\nplatform user at all — which is why `email_log.to_user_id` is nullable.\n\n`PROJECT_MANAGER` and `REPORTING_MANAGER` share a spelling with a role\ncode and are still not role lookups: they mean the PM \*of this ticket\'s\nproject\* and the reporting manager \*of this ticket\'s assignee\*. `ADMIN`\nis the one that is a role lookup, and it is here rather than as a foreign\nkey because it is one member of a vocabulary whose other twelve are not.\n\nEvery value resolves to nobody under some conditions — an unassigned\nticket has no assignee, an internal one no client contact — and that is a\nnormal send of nothing rather than an error.\n')).min(1).optional().describe('Never empty. A template with no recipients is a row that looks\nconfigured and sends nothing; switching it off says so instead.\n'),
+  "subjectTemplate": zod.string().max(updateNotificationTemplateResponseDataSubjectTemplateMax).nullish().describe('Null on every seeded in-app template — a bell entry has a title, not\na subject. Required for `EMAIL`.\n\nWritten \*\*without\*\* the `[CRM-26-00347]` prefix: `OutboxEnqueuer`\nprepends the ticket code itself (D-031) so no event can ship without\nit, and repeating it here would double it on every mail.\n'),
+  "bodyTemplate": zod.string().optional().describe('HTML for `EMAIL`, plain text for the other two. May contain any\n`{{merge_tag}}` from the vocabulary and is refused if it contains one\nthat is not.\n'),
+  "isActive": zod.boolean().optional().describe('Switching a template off silences that event on that channel,\norg-wide. See `isMandatory` for the ones that cannot be.\n'),
+  "isMandatory": zod.boolean().optional().describe('\*\*Derived, never stored\*\* — `channel == EMAIL` and the event\'s\ncategory is `ASSIGNMENT`, `ESCALATION` or `STATUS_REQUEST`, which is\nexactly D-036\'s `isMandatoryMail`. True means `isActive` cannot be\nset false and the screen should render the toggle as a locked\nstatement rather than a control whose only outcome is a `409`.\n\nA stored column would be a second copy of a rule that is deliberately\nstated over the category, so that an escalation event added next\nmonth is covered the moment it is declared.\n')
+}).describe('S-15. The wording of one notification, for one channel.\n\nThe `(eventCode, channel)` pair is the row\'s identity and is immutable —\nthe unique key is over it, the renderer resolves by it, and sent\n`email_log` rows point at this `id`.\n\nEvery property is populated on every response and none is `required` —\nB-016\'s call on `Project.status`, repeated by B-020 and B-021.\n')
+})
+
+/**
  * Every capability the system knows about — the row axis of the Role &
 Permission Master's matrix. Eighteen rows seeded from blueprint §2,
 grouped by `category`, returned in `(category, code)` order so the

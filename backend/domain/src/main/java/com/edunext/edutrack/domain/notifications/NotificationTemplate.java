@@ -22,6 +22,21 @@ import java.time.Instant;
  *
  * <p>{@code subjectTemplate} is null for the non-email channels: a bell entry
  * has a title, not a subject.
+ *
+ * <p><b>B-022 mounted the screen and added {@code recipients}.</b> Until then
+ * this entity had no caller anywhere outside its own package and the table held
+ * no rows — {@code email_log.template_id} has pointed at it since
+ * {@code V20260805_1530} and has never been non-null. {@code V20260815_1100}
+ * seeds one row per (event, channel) pair blueprint §11 ticks.
+ *
+ * <p><b>{@code channel} carries {@link NotificationChannel}'s three values, not
+ * the {@code POPUP|BELL|EMAIL} A-007's column comment predicted.</b> That
+ * comment was written before D-042 existed; everything that runs today —
+ * notification preferences, the mandatory-mail check, push subscriptions — keys
+ * on {@code IN_APP}, {@code EMAIL} and {@code PUSH}, so a template stored under
+ * {@code POPUP} would never be found by the renderer that looks it up. The
+ * migration's section 2 carries the full argument, including why the bell is not
+ * a channel of its own.
  */
 @Entity
 @Table(name = "notification_templates")
@@ -35,9 +50,25 @@ public class NotificationTemplate {
     @Column(name = "event_code", nullable = false, length = 60)
     private String eventCode;
 
-    /** POPUP | BELL | EMAIL. Unique with {@code eventCode}. */
+    /** IN_APP | EMAIL | PUSH. Unique with {@code eventCode}. */
     @Column(name = "channel", nullable = false, length = 20)
     private String channel;
+
+    /**
+     * B-022 · §11's "To" column, comma-delimited — {@code ASSIGNEE,PROJECT_MANAGER}.
+     *
+     * <p>A {@link NotificationRecipient} vocabulary rather than a join onto
+     * {@code roles}, because eight of the ten things §11 names are positions
+     * relative to a ticket rather than roles; that enum's javadoc carries the
+     * argument. Read it with {@link NotificationRecipient#parse}, which skips a
+     * token this build does not know rather than failing the whole send.
+     *
+     * <p>Never empty in practice: the write side refuses an empty list, since a
+     * template with no recipients is a row that looks configured and sends
+     * nothing.
+     */
+    @Column(name = "recipients", nullable = false, length = 255)
+    private String recipients = "";
 
     @Column(name = "subject_template", length = 255)
     private String subjectTemplate;
@@ -78,6 +109,14 @@ public class NotificationTemplate {
 
     public void setChannel(String channel) {
         this.channel = channel;
+    }
+
+    public String getRecipients() {
+        return recipients;
+    }
+
+    public void setRecipients(String recipients) {
+        this.recipients = recipients;
     }
 
     public String getSubjectTemplate() {

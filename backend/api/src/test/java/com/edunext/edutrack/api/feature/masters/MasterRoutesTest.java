@@ -49,6 +49,8 @@ class MasterRoutesTest {
             "com.edunext.edutrack.api.feature.masters.roles.RoleController",
             "com.edunext.edutrack.api.feature.masters.priorities.PriorityController",
             "com.edunext.edutrack.api.feature.masters.tasktypes.TaskTypeController",
+            "com.edunext.edutrack.api.feature.masters.notificationtemplates"
+                    + ".NotificationTemplateController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectMemberController",
             "com.edunext.edutrack.api.feature.masters.projects.SlaPolicyController",
@@ -132,6 +134,26 @@ class MasterRoutesTest {
     void taskTypeMasterIsMountedWhereTheContractPutsIt() {
         assertThat(paths(load("com.edunext.edutrack.api.feature.masters.tasktypes.TaskTypeController")
                 .getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/masters");
+    }
+
+    /**
+     * B-022 · the sixth the note above says nothing systematically looks for —
+     * and the one where nothing had even been declared.
+     *
+     * <p>{@code notification_templates} has existed since A-007, the entity and
+     * repository since B-005, and {@code email_log.template_id} has pointed at it
+     * since {@code V20260805_1530} — with <b>no controller, no contract operation
+     * and no caller anywhere in the codebase</b>. That is a different shape from
+     * the five above: those were declared and mocked and never mounted, this was
+     * modelled and never reached. The outcome was the same, and it is why the
+     * assertion goes in on the day the route does.
+     */
+    @Test
+    @DisplayName("the notification template master is where the contract says it is")
+    void notificationTemplateMasterIsMountedWhereTheContractPutsIt() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.notificationtemplates"
+                + ".NotificationTemplateController").getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/masters");
     }
 

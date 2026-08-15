@@ -1,7 +1,8 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
 import type {
-  Db, Holiday, Level, Priority, ProjectRoleCode, Role, TaskType, User,
+  Db, Holiday, Level, NotificationChannelCode, NotificationTemplateRow, Priority,
+  ProjectRoleCode, Role, TaskType, User,
 } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
 import { round, statusRequestDto } from './tickets';
@@ -42,9 +43,21 @@ const NOTIFICATION_EVENTS = [
   { eventKey: 'DAILY_DIGEST', category: 'OTHER' },
 ] as const;
 
-/** D-036 — the same rule as `NotificationEvent.isMandatoryMail()`. */
+/**
+ * D-036 — the same rule as `NotificationEvent.isMandatoryMail()`.
+ *
+ * **`STATUS_REQUEST` was missing here and the server has always included it.**
+ * D-055 found the gap on the Java side: §4B.6's prose sentence lists four kinds
+ * of mandatory mail, and its table — the precise version — also marks "Status
+ * requested by manager" as ❌ never optional. `NotificationEvent.isMandatoryMail`
+ * covers all three categories; this helper covered two, so the mock rendered the
+ * status-request email preference as unlocked while the server locks it.
+ * Nothing failed, because no test asserted that row. **Flagged for Stream D** —
+ * one line in their file, corrected here because B-022's template handlers need
+ * the same rule and two versions of it in one file is how the next one drifts.
+ */
 const isMandatoryMail = (category: string) =>
-  category === 'ASSIGNMENT' || category === 'ESCALATION';
+  category === 'ASSIGNMENT' || category === 'ESCALATION' || category === 'STATUS_REQUEST';
 
 function preferenceMatrix(db: ReturnType<typeof getDb>) {
   const stored = db.notificationPreferences ?? [];
@@ -230,6 +243,131 @@ function rolePrecondition(role: Role, ifMatch: string | null) {
       'This role changed since you read it. Reload and reapply your edit.');
   }
   return null;
+}
+
+// ── notification templates · S-15 (B-022) ───────────────────────────────────
+
+/** D-042's three, mirroring `NotificationChannel`. */
+const NOTIFICATION_CHANNELS: NotificationChannelCode[] = ['IN_APP', 'EMAIL', 'PUSH'];
+
+/**
+ * §11's "To" column, mirroring `NotificationRecipient`.
+ *
+ * Copied here in full rather than sliced the way `NOTIFICATION_EVENTS` is,
+ * because this list is what the S-15 form's multi-select renders — a slice
+ * would make the mock refuse a recipient the server accepts, and the screen
+ * would be built around the refusal.
+ */
+const NOTIFICATION_RECIPIENTS = [
+  'ASSIGNEE', 'STAGE_OWNER', 'PREVIOUS_ASSIGNEE', 'REPORTER', 'PROJECT_MANAGER',
+  'REPORTING_MANAGER', 'SUPPORT_DESK', 'WATCHERS', 'MENTIONED_USER', 'CLIENT_CONTACT',
+  'REQUESTER', 'ALL_USERS', 'ADMIN',
+];
+
+/** Mirrors `MergeTag`. Blueprint §4B.6's five are the first five. */
+const MERGE_TAGS = [
+  'ticket_id', 'assignee', 'stage', 'client', 'planned_close',
+  'ticket_title', 'ticket_url', 'project', 'level', 'status',
+  'actor', 'recipient', 'comment', 'iteration', 'cycle',
+  'overdue_by', 'sla_due', 'org',
+];
+
+/** `{{ name }}` — braces doubled, inner whitespace tolerated, name captured.
+ *  The same pattern `MergeTag.PLACEHOLDER` compiles, for the same reason: a
+ *  paste from a document produces `{{ ticket_id }}` and refusing it would be a
+ *  refusal about spacing rather than about spelling. */
+const PLACEHOLDER = /\{\{\s*([A-Za-z0-9_]+)\s*}}/g;
+
+/**
+ * `isMandatory` is computed here, exactly as the server derives it, rather
+ * than stored on the fixture row — otherwise the mock and the server could
+ * disagree about which templates are locked, and the mock is the one the
+ * screen's tests would believe.
+ */
+const templateDto = (template: NotificationTemplateRow) => ({
+  ...template,
+  isMandatory: template.channel === 'EMAIL' && isMandatoryMail(template.category),
+});
+
+const templateEtag = (template: NotificationTemplateRow) =>
+  `"${Math.abs([...JSON.stringify(templateDto(template))]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/** The mock enforces `If-Match` too — a guard the real backend has and the mock
+ *  waves through is a guard the frontend never gets to exercise. */
+function templatePrecondition(template: NotificationTemplateRow, ifMatch: string | null) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the template first and send back its ETag.');
+  }
+  if (ifMatch !== '*'
+      && ifMatch.replace(/W\/|"/g, '') !== templateEtag(template).replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'This template changed since you read it. Reload and reapply your edit.');
+  }
+  return null;
+}
+
+/**
+ * §4B.6's never-optional mail, being switched off.
+ *
+ * Mirrored from `NotificationTemplateService.guardMandatory` so the S-15 form
+ * can be built against it. A mock that let the toggle through would let the
+ * screen ship with no handling for the one refusal it will actually meet — and
+ * the refusal is the whole point of the rule.
+ */
+function mandatoryProblem(category: string, channel: NotificationChannelCode) {
+  if (channel !== 'EMAIL' || !isMandatoryMail(category)) return null;
+  const detail = 'This mail cannot be switched off. Blueprint §4B.6 marks assignment, handoff, '
+    + 'escalation and status-request mail as never optional, and D-036 already stops an '
+    + 'individual user muting it — switching the template off here would silence it for '
+    + 'everybody at once. The in-app template for this event can be switched off.';
+  return problem(409, 'mandatory-notification', 'This mail cannot be switched off',
+    { detail, errors: { isActive: [detail] } });
+}
+
+/** A placeholder that resolves to nothing would print literal braces in a
+ *  client-facing mail, and the admin who typed it would never find out. */
+function mergeTagProblem(subject: string | null, body: string) {
+  const unknown = [...new Set(
+    [...`${subject ?? ''}\n${body}`.matchAll(PLACEHOLDER)]
+      .map((match) => match[1])
+      .filter((tag) => !MERGE_TAGS.includes(tag)),
+  )];
+  if (unknown.length === 0) return null;
+  const detail = unknown.length === 1
+    ? `{{${unknown[0]}}} is not a merge tag, so it would be printed literally — braces `
+      + 'included — in every notification this template renders.'
+    : 'These are not merge tags and would be printed literally, braces included, in every '
+      + `notification this template renders: ${unknown.map((t) => `{{${t}}}`).join(', ')}`;
+  return problem(400, 'unknown-merge-tag', 'Unknown merge tag',
+    { detail, unknownTags: unknown, knownTags: MERGE_TAGS, errors: { bodyTemplate: [detail] } });
+}
+
+/** A mail with no subject line is unsendable. The other two channels do not
+ *  require one and are not refused one — a push has a title as well as a body. */
+function subjectProblem(channel: NotificationChannelCode, subject: string | null) {
+  if (channel !== 'EMAIL' || (subject && subject.trim())) return null;
+  return validationFailed({
+    subjectTemplate: ['An email template needs a subject line. The ticket code is prefixed by '
+      + 'the sender, so write what happened rather than the code itself.'],
+  });
+}
+
+function recipientProblem(recipients: string[]) {
+  if (recipients.length === 0) {
+    return validationFailed({
+      recipients: ['Name at least one recipient. A template with none is a row that looks '
+        + 'configured and sends nothing — switch it off instead, which says so.'],
+    });
+  }
+  const unknown = recipients.filter((r) => !NOTIFICATION_RECIPIENTS.includes(r));
+  if (unknown.length === 0) return null;
+  return validationFailed({
+    recipients: [`Not a recipient this system can resolve: ${unknown.join(', ')}. These are `
+      + "positions relative to a ticket rather than roles — 'PROJECT_MANAGER' means the PM of "
+      + "this ticket's project, not everybody holding the PM role."],
+  });
 }
 
 // ── priorities · S-12 (B-021) ───────────────────────────────────────────────
@@ -1728,6 +1866,170 @@ export const restHandlers = [
 
     return ok(priorityDto(priority), undefined, { headers: { ETag: priorityEtag(priority) } });
   }),
+  // ── notification templates · S-15 (B-022) ─────────────────────────────────
+  // Every row, switched-off ones included, and no `includeInactive` parameter —
+  // nothing outside S-15 reads this route, so the grid's need to show a
+  // switched-off template is the only requirement there is.
+  http.get(url('/masters/notification-templates'), () => ok(
+    [...getDb().notificationTemplates]
+      .sort((a, b) => a.eventCode.localeCompare(b.eventCode)
+        || a.channel.localeCompare(b.channel))
+      .map(templateDto),
+  )),
+
+  // Declared before `/:templateId` so MSW matches the literal first — unlike
+  // Spring, which ranks a literal segment above a path variable regardless of
+  // order, MSW takes the first registered match.
+  http.get(url('/masters/notification-templates/vocabulary'), () => ok({
+    // Derived from the seeded templates rather than restated, so the mock has
+    // one vocabulary rather than two that drift. Every event has at least one
+    // template, which is what makes the derivation total.
+    events: [...new Map(getDb().notificationTemplates.map(
+      (t) => [t.eventCode, {
+        code: t.eventCode,
+        category: t.category,
+        mandatoryMail: isMandatoryMail(t.category),
+      }])).values()].sort((a, b) => a.code.localeCompare(b.code)),
+    channels: NOTIFICATION_CHANNELS,
+    recipients: NOTIFICATION_RECIPIENTS,
+    mergeTags: MERGE_TAGS,
+  })),
+
+  http.get(url('/masters/notification-templates/:templateId'), ({ params }) => {
+    const template = getDb().notificationTemplates
+      .find((t) => t.id === Number(params.templateId));
+    if (!template) return notFound('Notification template');
+    return ok(templateDto(template), undefined,
+      { headers: { ETag: templateEtag(template) } });
+  }),
+
+  http.post(url('/masters/notification-templates'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as Partial<NotificationTemplateRow>;
+    const eventCode = String(body.eventCode ?? '').trim().toUpperCase();
+    const channel = String(body.channel ?? '').trim().toUpperCase() as NotificationChannelCode;
+
+    const known = db.notificationTemplates.find((t) => t.eventCode === eventCode);
+    if (!known) {
+      return validationFailed({
+        eventCode: [`'${eventCode}' is not an event this system raises. A template for an `
+          + 'event nothing fires is wording that can never be read.'],
+      });
+    }
+    if (!NOTIFICATION_CHANNELS.includes(channel)) {
+      return validationFailed({
+        channel: [`'${channel}' is not a delivery channel. The three are IN_APP, EMAIL and `
+          + 'PUSH — the bell is not one, it renders the IN_APP template.'],
+      });
+    }
+    if (db.notificationTemplates.some(
+      (t) => t.eventCode === eventCode && t.channel === channel)) {
+      const detail = `A ${channel} template for ${eventCode} already exists. An event has one `
+        + 'template per channel — edit that one, or bring it back if it is switched off.';
+      return problem(409, 'duplicate', 'That event already has a template on this channel',
+        { detail, errors: { eventCode: [detail] } });
+    }
+
+    const recipients = body.recipients ?? [];
+    const badRecipients = recipientProblem(recipients);
+    if (badRecipients) return badRecipients;
+
+    const subject = (body.subjectTemplate ?? '').trim() || null;
+    const bodyTemplate = String(body.bodyTemplate ?? '');
+    const badSubject = subjectProblem(channel, subject);
+    if (badSubject) return badSubject;
+    const badTags = mergeTagProblem(subject, bodyTemplate);
+    if (badTags) return badTags;
+
+    const isActive = body.isActive ?? true;
+    if (!isActive) {
+      const locked = mandatoryProblem(known.category, channel);
+      if (locked) return locked;
+    }
+
+    const created: NotificationTemplateRow = {
+      id: Math.max(0, ...db.notificationTemplates.map((t) => t.id)) + 1,
+      eventCode,
+      category: known.category,
+      channel,
+      recipients: [...recipients],
+      subjectTemplate: subject,
+      bodyTemplate: bodyTemplate.trim(),
+      isActive,
+    };
+    db.notificationTemplates.push(created);
+    return ok(templateDto(created), undefined,
+      { status: 201, headers: { ETag: templateEtag(created) } });
+  }),
+
+  http.patch(url('/masters/notification-templates/:templateId'), async ({ params, request }) => {
+    const db = getDb();
+    const template = db.notificationTemplates.find((t) => t.id === Number(params.templateId));
+    if (!template) return notFound('Notification template');
+
+    const stale = templatePrecondition(template, request.headers.get('If-Match'));
+    if (stale) return stale;
+
+    const body = (await request.json()) as Partial<NotificationTemplateRow>;
+
+    // The pair is the row's identity. Refused rather than applied, and resending
+    // the stored values is a no-op — S-15 submits the whole form on every save.
+    for (const [field, stored] of [
+      ['eventCode', template.eventCode], ['channel', template.channel],
+    ] as const) {
+      const sent = body[field];
+      if (sent != null && String(sent).toUpperCase() !== stored) {
+        const detail = "A template's event and channel are its identity and cannot be changed. "
+          + `This one is the ${template.channel} template for ${template.eventCode}. Sent mail `
+          + 'points at this row by id, so re-pointing it would change what those records claim '
+          + 'to have been rendered from.';
+        return problem(409, 'immutable-field',
+          "A template's event and channel cannot be changed",
+          { detail, errors: { [field]: [detail] } });
+      }
+    }
+
+    // The end state, computed before anything is written — the same ordering
+    // bug `PriorityService.update` guards against, and needed here because the
+    // subject rule and the mandatory rule each read a field the other may move.
+    const willBeSubject = body.subjectTemplate !== undefined
+      ? (body.subjectTemplate ?? '').trim() || null
+      : template.subjectTemplate;
+    const willBeBody = body.bodyTemplate !== undefined
+      ? String(body.bodyTemplate).trim()
+      : template.bodyTemplate;
+    const willBeActive = body.isActive ?? template.isActive;
+
+    const badSubject = subjectProblem(template.channel, willBeSubject);
+    if (badSubject) return badSubject;
+    const badTags = mergeTagProblem(willBeSubject, willBeBody);
+    if (badTags) return badTags;
+    if (!willBeActive) {
+      const locked = mandatoryProblem(template.category, template.channel);
+      if (locked) return locked;
+    }
+
+    if (body.recipients !== undefined) {
+      const badRecipients = recipientProblem(body.recipients ?? []);
+      if (badRecipients) return badRecipients;
+      template.recipients = [...(body.recipients ?? [])];
+    }
+    if (body.bodyTemplate !== undefined) {
+      if (!willBeBody) {
+        return validationFailed({
+          bodyTemplate: ['bodyTemplate cannot be blank. A template with no body renders an '
+            + 'empty notification, which is worse than none.'],
+        });
+      }
+      template.bodyTemplate = willBeBody;
+    }
+    if (body.subjectTemplate !== undefined) template.subjectTemplate = willBeSubject;
+    if (body.isActive != null) template.isActive = body.isActive;
+
+    return ok(templateDto(template), undefined,
+      { headers: { ETag: templateEtag(template) } });
+  }),
+
   // ── roles & permissions · S-09 (B-015) ────────────────────────────────────
   // Reference data. No create, edit or delete: a capability exists because code
   // checks for it, so a row an admin could add would grant nothing.
