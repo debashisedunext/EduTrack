@@ -46,40 +46,36 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { TaskTypeIcon } from './taskTypeIcon';
+import type { TaskTypePatchRequestIcon } from './taskTypePatchRequestIcon';
 import type { Level } from './level';
-import type { TaskTypeDefaultSlaHrs } from './taskTypeDefaultSlaHrs';
+import type { TaskTypePatchRequestDefaultSlaHrs } from './taskTypePatchRequestDefaultSlaHrs';
+import type { TaskTypePatchRequestSeq } from './taskTypePatchRequestSeq';
+import type { TaskTypePatchRequestIsActive } from './taskTypePatchRequestIsActive';
 
 /**
- * S-11. `code` is the stable identifier and `name` is display text an
-Admin may change — **key behaviour off `code`.** The create form's
-client-mandatory rule (§4B.2) currently matches on `name`, which this
-screen is the reason it should not.
-
-Every property here is populated on every response and none of them is
-in `required`, which is B-016's call on `Project.status` applied again:
-a required property is an obligation on every consumer that constructs
-one, and the ticket-form fixtures construct these. Optional-but-always-
-present costs a `?` in the generated type and breaks nothing.
+ * Every field optional; an omitted one keeps its stored value. `isActive:
+false` is how a type is retired — there is no delete.
 
  */
-export interface TaskType {
-  id?: number;
-  /** Immutable once created. Unique, upper-case. */
+export interface TaskTypePatchRequest {
+  /** Here **only so that a changed one can be refused with `409`.**
+Omitting it from the schema would let Jackson discard it silently
+and report a rename that did not happen. Resending the stored value
+is a no-op.
+ */
   code?: string;
+  /**
+   * @minLength 1
+   * @maxLength 80
+   */
   name?: string;
-  /** A `lucide-react` icon name — the frontend's icon library. No enum. */
-  icon?: TaskTypeIcon;
+  /** @maxLength 30 */
+  icon?: TaskTypePatchRequestIcon;
   /** @pattern ^#[0-9A-Fa-f]{6}$ */
   colour?: string;
   defaultLevel?: Level;
-  defaultSlaHrs?: TaskTypeDefaultSlaHrs;
-  /** Display order in the picker. */
-  seq?: number;
-  isActive?: boolean;
-  /** Tickets currently carrying this type. Shown on the grid so that
-retiring a type is an informed decision rather than one whose size
-is discovered afterwards.
- */
-  ticketCount?: number;
+  /** @minimum 0 */
+  defaultSlaHrs?: TaskTypePatchRequestDefaultSlaHrs;
+  seq?: TaskTypePatchRequestSeq;
+  isActive?: TaskTypePatchRequestIsActive;
 }

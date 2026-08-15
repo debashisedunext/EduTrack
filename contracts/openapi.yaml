@@ -2325,14 +2325,155 @@ paths:
     get:
       tags: [masters]
       operationId: listTaskTypes
-      summary: Task types
+      summary: Task types (S-11)
+      description: |
+        The Task Type Master grid, and the type picker on the create-ticket
+        form. Eleven rows seeded by B-002; an Admin may add more.
+
+        **Deactivated rows are returned too**, carrying `isActive: false`, the
+        same way modules and roles are. A ticket raised last year against a type
+        since retired still has to render its name; filtering them out here
+        would leave that cell blank. Offer only the active ones in a picker.
+
+        Returned in `seq` order — the order the master defines — so no client
+        sorts it a twelfth way.
+
+        `ticketCount` is how many tickets currently carry the type. It is on the
+        row rather than only in a confirmation, because deactivating is the
+        consequential act on this screen: a retired type drops out of every
+        project's SLA matrix (which is built from the active types) and out of
+        the create form, and an admin should see the size of that before
+        clicking rather than after.
       responses:
         '200':
-          description: OK.
+          description: OK. A bounded list — no `meta`, the set is complete.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TaskTypeListResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [masters]
+      operationId: createTaskType
+      summary: Create a task type (S-11)
+      description: |
+        Admin only — `master.write`, which blueprint §2 states as "Master data
+        (task types, SLA, workflow, holidays)".
+
+        `code` is upper-cased and must be unique. It is the stable identifier:
+        `TaskTypeRepository.findByCode` is what the Excel import matches on, and
+        it is what any client should key behaviour off rather than `name` —
+        which this very screen makes editable. It **cannot be changed
+        afterwards**; see `PATCH /masters/task-types/{taskTypeId}`.
+
+        `name` must also be unique, case-insensitively, and that is a service
+        rule rather than an index. Two types rendering the same label are
+        indistinguishable in every picker in the product.
+
+        `defaultLevel` is checked against the **priority master**, not against a
+        hardcoded list — B-021 exists precisely so an Admin can add a level, and
+        a hardcoded set is what B-015 removed from the resource grid. It must
+        also be one of the four values `Level` can carry; a fifth priority needs
+        that enum opened, which is B-021's call and touches three streams.
+
+        `seq` is the display order in the picker. Omit it and the new type sorts
+        to the end.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskTypeWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskTypeResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /masters/task-types/{taskTypeId}:
+    parameters: [{ $ref: '#/components/parameters/TaskTypeId' }]
+    get:
+      tags: [masters]
+      operationId: getTaskType
+      summary: One task type (S-11)
+      description: |
+        **This exists to carry the `ETag` the `PATCH` requires as `If-Match`**,
+        per CONVENTIONS.md §5 — the gap B-011 closed for `GET /users/{userId}`
+        and B-016 for `GET /projects/{projectId}`. A write whose precondition
+        has no read to come from is not a strict endpoint, it is a broken one.
+
+        The tag is taken over the content, `ticketCount` included. A ticket
+        raised against the type while the edit dialog is open therefore costs a
+        reload — correct, since that count is what the deactivate decision was
+        made against.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskTypeResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [masters]
+      operationId: updateTaskType
+      summary: Edit a task type, or retire it (S-11)
+      description: |
+        Admin only. A partial update — an omitted field keeps its stored value.
+
+        **`code` is present in the body only so that sending a different one can
+        be refused with `409`.** Leaving it off the schema entirely would mean a
+        caller who believed they had renamed the code is told the save
+        succeeded. Resending the *same* code is always a no-op, because this
+        screen submits the whole form on every save.
+
+        **`isActive: false` is how a task type is retired, and there is no
+        delete.** `tickets.task_type_id`, `sla_policies.task_type_id` and
+        B-019's `project_task_types.task_type_id` are all foreign keys without
+        cascades: a delete would fail on a constraint naming a MySQL index, and
+        "fixing" that with a cascade would silently rewrite what historical
+        tickets say they were raised against. Deactivating removes the type from
+        the create form and from every project's SLA matrix while leaving every
+        ticket that carries it able to render its own name.
+
+        `If-Match` is required, not optional; a write without one is refused
+        with `428`. Read the current tag from
+        `GET /masters/task-types/{taskTypeId}`.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskTypePatchRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskTypeResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: '`If-Match` absent. The precondition is required, not opt-in.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /masters/modules:
     get:
@@ -3769,6 +3910,16 @@ components:
         declared the column that way. Note that nothing points at it —
         `tickets.level` stores the *code*, deliberately not this key, which is
         what lets a level be retired without orphaning history.
+    TaskTypeId:
+      name: taskTypeId
+      in: path
+      required: true
+      schema: { type: integer, format: int32 }
+      description: |
+        `task_types.id` is an `INT`, for the same reason `RoleId` is: A-007
+        declared the column that way and `tickets.task_type_id` follows it.
+        `SlaPolicyCell.taskTypeId` has always said `int32`; `TaskType.id` said
+        `int64` until B-020 and was the odd one out.
     HolidayId:
       name: holidayId
       in: path
@@ -5618,18 +5769,89 @@ components:
                 `system-role-undeletable` rather than `role-in-use`.
     TaskType:
       type: object
+      description: |
+        S-11. `code` is the stable identifier and `name` is display text an
+        Admin may change — **key behaviour off `code`.** The create form's
+        client-mandatory rule (§4B.2) currently matches on `name`, which this
+        screen is the reason it should not.
+
+        Every property here is populated on every response and none of them is
+        in `required`, which is B-016's call on `Project.status` applied again:
+        a required property is an obligation on every consumer that constructs
+        one, and the ticket-form fixtures construct these. Optional-but-always-
+        present costs a `?` in the generated type and breaks nothing.
       properties:
-        id: { type: integer, format: int64 }
+        id: { type: integer, format: int32 }
+        code:
+          type: string
+          description: Immutable once created. Unique, upper-case.
         name: { type: string }
-        icon: { type: [string, 'null'] }
+        icon:
+          type: [string, 'null']
+          description: A `lucide-react` icon name — the frontend's icon library. No enum.
         colour: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
         defaultLevel: { $ref: '#/components/schemas/Level' }
         defaultSlaHrs: { type: [number, 'null'], format: double }
+        seq: { type: integer, format: int32, description: Display order in the picker. }
         isActive: { type: boolean }
+        ticketCount:
+          type: integer
+          format: int64
+          description: |
+            Tickets currently carrying this type. Shown on the grid so that
+            retiring a type is an informed decision rather than one whose size
+            is discovered afterwards.
     TaskTypeListResponse:
       type: object
       required: [data]
       properties: { data: { type: array, items: { $ref: '#/components/schemas/TaskType' } } }
+    TaskTypeResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/TaskType' } }
+    TaskTypeWriteRequest:
+      type: object
+      required: [code, name, colour, defaultLevel]
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 40
+          pattern: '^[A-Za-z][A-Za-z0-9_]{1,39}$'
+          description: Upper-cased on save. Permanent.
+        name: { type: string, minLength: 1, maxLength: 80 }
+        icon: { type: [string, 'null'], maxLength: 30 }
+        colour:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          description: |
+            A blueprint §12.1 token. Required on create even though the column
+            is nullable: a type with no colour renders as a hole in the picker,
+            the grid and the Task Type Distribution chart at once.
+        defaultLevel: { $ref: '#/components/schemas/Level' }
+        defaultSlaHrs: { type: [number, 'null'], format: double, minimum: 0 }
+        seq: { type: [integer, 'null'], format: int32 }
+        isActive: { type: [boolean, 'null'] }
+    TaskTypePatchRequest:
+      type: object
+      description: |
+        Every field optional; an omitted one keeps its stored value. `isActive:
+        false` is how a type is retired — there is no delete.
+      properties:
+        code:
+          type: string
+          description: |
+            Here **only so that a changed one can be refused with `409`.**
+            Omitting it from the schema would let Jackson discard it silently
+            and report a rename that did not happen. Resending the stored value
+            is a no-op.
+        name: { type: string, minLength: 1, maxLength: 80 }
+        icon: { type: [string, 'null'], maxLength: 30 }
+        colour: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        defaultLevel: { $ref: '#/components/schemas/Level' }
+        defaultSlaHrs: { type: [number, 'null'], format: double, minimum: 0 }
+        seq: { type: [integer, 'null'], format: int32 }
+        isActive: { type: [boolean, 'null'] }
     Module:
       type: object
       required: [id, code, name, isActive]

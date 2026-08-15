@@ -47,4 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * A `lucide-react` icon name — the frontend's icon library. No enum.
+ */
 export type TaskTypeIcon = string | null;

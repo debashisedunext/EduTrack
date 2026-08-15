@@ -137,9 +137,15 @@ export interface Contact {
   id: number; clientId: number; name: string; email: string; phone: string;
   isPrimary: boolean; notificationOptIn: boolean; portalAccess: boolean;
 }
+/**
+ * S-11's master row. `code` and `seq` arrived with B-020, which is the screen
+ * that edits these — `code` because it is the stable identifier a client should
+ * key off rather than the name an Admin can now change, and `seq` because it is
+ * the picker's display order and this screen sets it.
+ */
 export interface TaskType {
-  id: number; name: string; icon: string; colour: string;
-  defaultLevel: Level; defaultSlaHrs: number; isActive: boolean;
+  id: number; code: string; name: string; icon: string | null; colour: string;
+  defaultLevel: Level; defaultSlaHrs: number | null; seq: number; isActive: boolean;
 }
 /**
  * D-045 — one browser that has granted push permission.
@@ -488,26 +494,40 @@ const CONTACTS: Contact[] = [
   { id: 4, clientId: 3, name: 'Erin Walsh', email: 'erin@bluewave.example', phone: '+1 212 555 0100', isPrimary: true, notificationOptIn: false, portalAccess: false },
 ];
 
+/**
+ * The eleven B-002 seeds, plus one retired row.
+ *
+ * `Fax Request` is deactivated, exactly as `Transport` is in the module
+ * fixture, and for the same reason: `/masters/task-types` deliberately returns
+ * inactive rows, so a fixture in which every row is active cannot tell a screen
+ * that filters correctly from one that never had to.
+ *
+ * The codes are B-002's, so the mock and the seeded database agree on the one
+ * field a client is now told to key off.
+ */
 const TASK_TYPES: TaskType[] = [
-  ['Change Request', 'git-pull-request', '#4F46E5', 'MEDIUM', 72],
-  ['Production Bug', 'flame', '#BE185D', 'HIGH', 8],
-  ['Client Request', 'message-square', '#06B6D4', 'MEDIUM', 48],
-  ['Future Release', 'calendar', '#84CC16', 'LOW', 240],
-  ['Internal Bug', 'bug', '#9A3412', 'MEDIUM', 24],
-  ['Client Bug', 'bug', '#BE185D', 'HIGH', 16],
-  ['Server Issue', 'server', '#9333EA', 'CRITICAL', 4],
-  ['Network Issue', 'wifi', '#0891B2', 'HIGH', 4],
-  ['Browser Issue', 'globe', '#F59E0B', 'LOW', 72],
-  ['Performance Issue', 'gauge', '#9A3412', 'HIGH', 24],
-  ['Other', 'circle-help', '#7C859C', 'LOW', 120],
-].map(([name, icon, colour, defaultLevel, defaultSlaHrs], i) => ({
+  ['CHANGE_REQUEST', 'Change Request', 'git-pull-request', '#4F46E5', 'MEDIUM', 72, true],
+  ['PRODUCTION_BUG', 'Production Bug', 'flame', '#BE185D', 'HIGH', 8, true],
+  ['CLIENT_REQUEST', 'Client Request', 'message-square', '#06B6D4', 'MEDIUM', 48, true],
+  ['FUTURE_RELEASE', 'Future Release', 'calendar', '#84CC16', 'LOW', 240, true],
+  ['INTERNAL_BUG', 'Internal Bug', 'bug', '#9A3412', 'MEDIUM', 24, true],
+  ['CLIENT_BUG', 'Client Bug', 'bug', '#BE185D', 'HIGH', 16, true],
+  ['SERVER_ISSUE', 'Server Issue', 'server', '#9333EA', 'CRITICAL', 4, true],
+  ['NETWORK_ISSUE', 'Network Issue', 'wifi', '#0891B2', 'HIGH', 4, true],
+  ['BROWSER_ISSUE', 'Browser Issue', 'globe', '#F59E0B', 'LOW', 72, true],
+  ['PERFORMANCE_ISSUE', 'Performance Issue', 'gauge', '#9A3412', 'HIGH', 24, true],
+  ['OTHER', 'Other', 'circle-help', '#7C859C', 'LOW', 120, true],
+  ['FAX_REQUEST', 'Fax Request', 'printer', '#7C859C', 'LOW', 240, false],
+].map(([code, name, icon, colour, defaultLevel, defaultSlaHrs, isActive], i) => ({
   id: i + 1,
+  code: code as string,
   name: name as string,
   icon: icon as string,
   colour: colour as string,
   defaultLevel: defaultLevel as Level,
   defaultSlaHrs: defaultSlaHrs as number,
-  isActive: true,
+  seq: (i + 1) * 10,
+  isActive: isActive as boolean,
 }));
 
 /**

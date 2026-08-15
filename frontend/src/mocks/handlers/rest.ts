@@ -1,6 +1,8 @@
 import { http, HttpResponse } from 'msw';
 import { getDb, nextId } from '../db';
-import type { Db, Holiday, Level, Priority, ProjectRoleCode, Role, User } from '../db';
+import type {
+  Db, Holiday, Level, Priority, ProjectRoleCode, Role, TaskType, User,
+} from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
 import { round, statusRequestDto } from './tickets';
 import {
@@ -111,6 +113,77 @@ const workingWeek = () => {
 /** The settings resource, which also carries the zone those bounds are read in. */
 const workingWeekFull = () => ({ ...calendarState().week });
 
+// ── task types · S-11 (B-020) ───────────────────────────────────────────────
+
+/**
+ * `defaultLevel` must be one of the four `CONTRACT_LEVELS` — declared with the
+ * priority handlers below, and shared rather than restated here.
+ *
+ * The real `TaskTypeService` checks the priority master first and the contract
+ * enum second, and says which of the two refused. The mock keeps the second
+ * half: it is a property of the contract rather than of the data, and it is the
+ * half a client can be surprised by.
+ */
+function levelRefusal(level: string) {
+  if (!(CONTRACT_LEVELS as readonly string[]).includes(level)) {
+    return {
+      value: level,
+      refusal: validationFailed({
+        defaultLevel: [`No such level: '${level}'. Levels come from the priority master (S-12).`],
+      }),
+    };
+  }
+  return { value: level, refusal: null };
+}
+
+/**
+ * One pass over the tickets for the whole grid, not one per row.
+ *
+ * The real service does the same thing as a single grouped statement, for the
+ * same reason: twelve task types is exactly the size at which an N+1 is
+ * invisible, which is how one survives to a table that is not twelve rows.
+ */
+const ticketCountsByTaskType = () => {
+  const counts = new Map<number, number>();
+  for (const ticket of getDb().tickets) {
+    if (ticket.taskTypeId != null) {
+      counts.set(ticket.taskTypeId, (counts.get(ticket.taskTypeId) ?? 0) + 1);
+    }
+  }
+  return counts;
+};
+
+/** `ticketCount` is derived, so the mock cannot drift from its own ticket list. */
+const taskTypeDto = (type: TaskType, counts = ticketCountsByTaskType()) => ({
+  ...type,
+  ticketCount: counts.get(type.id) ?? 0,
+});
+
+/**
+ * Content-derived, and it covers `ticketCount` — so a ticket raised while the
+ * edit dialog is open costs a reload, which is correct: that count is what the
+ * deactivate decision was made against.
+ */
+const taskTypeEtag = (type: TaskType) =>
+  `"${Math.abs([...JSON.stringify(taskTypeDto(type))]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/**
+ * The mock enforces `If-Match` too. A guard the real backend has and the mock
+ * waves through is a guard the frontend never gets to exercise.
+ */
+function taskTypePrecondition(type: TaskType, ifMatch: string | null) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the task type first and send back its ETag.');
+  }
+  if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== taskTypeEtag(type).replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'This task type changed since you read it. Reload and reapply your edit.');
+  }
+  return null;
+}
+
 // ── roles & permissions · S-09 (B-015) ──────────────────────────────────────
 
 /**
@@ -161,7 +234,14 @@ function rolePrecondition(role: Role, ifMatch: string | null) {
 
 // ── priorities · S-12 (B-021) ───────────────────────────────────────────────
 
-/** The four the contract's `Level` can carry — mirrors `PriorityService`. */
+/**
+ * The four the contract's `Level` can carry — mirrors `PriorityService`.
+ *
+ * Shared with the task type handlers above, which refuse a `defaultLevel`
+ * outside this set for the same reason. Two copies would be two things to keep
+ * in step on the day `Level` finally opens, and that day needs exactly one edit
+ * here.
+ */
 const CONTRACT_LEVELS: Level[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 /**
@@ -263,7 +343,11 @@ interface SlaOverride {
 function slaMatrix(projectId: number, db: Db) {
   const levels: Level[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
-  return db.taskTypes.flatMap((tt) =>
+  // Active types only, which is what `SlaMatrixService.activeTaskTypes` does —
+  // and is the consequence B-020's Task Type Master has to state out loud,
+  // because retiring a type silently removes a row from every project's SLA
+  // tab. The mock had no retired type to disagree over until B-020 added one.
+  return db.taskTypes.filter((tt) => tt.isActive).flatMap((tt) =>
     levels.map((level) => {
       const sla = resolveSla(projectId, tt.id, level, db);
       return {
@@ -1366,7 +1450,126 @@ export const restHandlers = [
   }),
 
   // ── masters ───────────────────────────────────────────────────────────────
-  http.get(url('/masters/task-types'), () => ok(getDb().taskTypes)),
+  // ── task types · S-11 (B-020) ─────────────────────────────────────────────
+  // Inactive rows included, in `seq` order — a picker filters them out, a grid
+  // still has to name the type an old ticket was raised against.
+  http.get(url('/masters/task-types'), () => {
+    const counts = ticketCountsByTaskType();
+    return ok(
+      [...getDb().taskTypes]
+        .sort((a, b) => a.seq - b.seq || a.id - b.id)
+        .map((type) => taskTypeDto(type, counts)),
+    );
+  }),
+
+  http.post(url('/masters/task-types'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as Record<string, unknown>;
+    const code = String(body.code ?? '').trim().toUpperCase();
+    const name = String(body.name ?? '').trim();
+
+    if (db.taskTypes.some((t) => t.code === code)) {
+      // The message is repeated into `errors` rather than abbreviated there,
+      // because that is what the real handler does — it keys the whole sentence
+      // to the field so the form can render it on the input. A mock that put a
+      // shorter string here would let a screen ship with an error message
+      // nobody had ever actually read.
+      const detail = `A task type with code '${code}' already exists.`;
+      return problem(409, 'duplicate', 'Duplicate task type', {
+        detail,
+        errors: { code: [detail] },
+      });
+    }
+    // There is no uq_task_types_name, so this rule exists only in the service —
+    // and it is the one protecting ticketForm.ts's §4B.2 rule, which matches on
+    // the display name.
+    const clash = db.taskTypes.find((t) => t.name.toLowerCase() === name.toLowerCase());
+    if (clash) {
+      const detail = `'${clash.name}' already exists. Two task types with the same name are indistinguishable in every picker that renders them.`;
+      return problem(409, 'duplicate', 'Duplicate task type', {
+        detail,
+        errors: { name: [detail] },
+      });
+    }
+    const level = levelRefusal(String(body.defaultLevel ?? '').trim().toUpperCase());
+    if (level.refusal) return level.refusal;
+
+    const created: TaskType = {
+      id: Math.max(0, ...db.taskTypes.map((t) => t.id)) + 1,
+      code,
+      name,
+      icon: (body.icon as string | null) || null,
+      colour: String(body.colour ?? ''),
+      defaultLevel: level.value as Level,
+      defaultSlaHrs: body.defaultSlaHrs == null ? null : Number(body.defaultSlaHrs),
+      seq: body.seq == null ? Math.max(0, ...db.taskTypes.map((t) => t.seq)) + 10 : Number(body.seq),
+      isActive: body.isActive == null ? true : Boolean(body.isActive),
+    };
+    db.taskTypes.push(created);
+    return ok(taskTypeDto(created), undefined,
+      { status: 201, headers: { ETag: taskTypeEtag(created) } });
+  }),
+
+  http.get(url('/masters/task-types/:taskTypeId'), ({ params }) => {
+    const type = getDb().taskTypes.find((t) => t.id === Number(params.taskTypeId));
+    if (!type) return notFound('Task type');
+    return HttpResponse.json({ data: taskTypeDto(type) },
+      { headers: { ETag: taskTypeEtag(type) } });
+  }),
+
+  http.patch(url('/masters/task-types/:taskTypeId'), async ({ params, request }) => {
+    const db = getDb();
+    const type = db.taskTypes.find((t) => t.id === Number(params.taskTypeId));
+    if (!type) return notFound('Task type');
+
+    const stale = taskTypePrecondition(type, request.headers.get('If-Match'));
+    if (stale) return stale;
+
+    const body = (await request.json()) as Record<string, unknown>;
+    // Resending the stored code is a no-op: S-11 submits the whole form on
+    // every save, and any other reading makes every edit a 409.
+    if (body.code != null && String(body.code).trim().toUpperCase() !== type.code) {
+      const detail = 'A task type code cannot be changed once created. Deactivate this type and create a replacement.';
+      return problem(409, 'immutable-field', 'Task type code cannot be changed', {
+        detail,
+        errors: { code: [detail] },
+      });
+    }
+    if (body.name != null) {
+      const name = String(body.name).trim();
+      const clash = db.taskTypes.find(
+        (t) => t.id !== type.id && t.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (clash) {
+        const detail = `'${clash.name}' already exists. Two task types with the same name are indistinguishable in every picker that renders them.`;
+        return problem(409, 'duplicate', 'Duplicate task type', {
+          detail,
+          errors: { name: [detail] },
+        });
+      }
+      type.name = name;
+    }
+    if (body.defaultLevel != null) {
+      const level = levelRefusal(String(body.defaultLevel).trim().toUpperCase());
+      if (level.refusal) return level.refusal;
+      type.defaultLevel = level.value as Level;
+    }
+    // `undefined` is absent and `null` is "clear it" — the distinction the real
+    // DTO is a POJO rather than a record in order to keep.
+    if (body.icon !== undefined) type.icon = (body.icon as string | null) || null;
+    if (body.defaultSlaHrs !== undefined) {
+      type.defaultSlaHrs = body.defaultSlaHrs == null ? null : Number(body.defaultSlaHrs);
+    }
+    if (body.colour != null) type.colour = String(body.colour);
+    if (body.seq != null) type.seq = Number(body.seq);
+    // Never refused, whatever the ticket count. Refusing would leave an
+    // organisation unable to retire a type it has stopped using.
+    if (body.isActive != null) type.isActive = Boolean(body.isActive);
+
+    return HttpResponse.json({ data: taskTypeDto(type) },
+      { headers: { ETag: taskTypeEtag(type) } });
+  }),
+
   // Inactive rows included, in `seq` order — a picker filters them out, a grid
   // still has to name the module an old ticket was raised against.
   http.get(url('/masters/modules'), () =>

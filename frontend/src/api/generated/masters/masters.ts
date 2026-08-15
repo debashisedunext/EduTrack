@@ -97,6 +97,9 @@ import type {
   RolePermissionsRequest,
   RoleWriteRequest,
   TaskTypeListResponse,
+  TaskTypePatchRequest,
+  TaskTypeResponse,
+  TaskTypeWriteRequest,
   UnauthorizedResponse,
   ValidationFailedResponse,
   WorkflowTemplateListResponse,
@@ -112,7 +115,25 @@ import { http } from '../../http';
 
 
 /**
- * @summary Task types
+ * The Task Type Master grid, and the type picker on the create-ticket
+form. Eleven rows seeded by B-002; an Admin may add more.
+
+**Deactivated rows are returned too**, carrying `isActive: false`, the
+same way modules and roles are. A ticket raised last year against a type
+since retired still has to render its name; filtering them out here
+would leave that cell blank. Offer only the active ones in a picker.
+
+Returned in `seq` order — the order the master defines — so no client
+sorts it a twelfth way.
+
+`ticketCount` is how many tickets currently carry the type. It is on the
+row rather than only in a confirmation, because deactivating is the
+consequential act on this screen: a retired type drops out of every
+project's SLA matrix (which is built from the active types) and out of
+the create form, and an admin should see the size of that before
+clicking rather than after.
+
+ * @summary Task types (S-11)
  */
 export const listTaskTypes = (
     
@@ -183,7 +204,7 @@ export function useListTaskTypes<TData = Awaited<ReturnType<typeof listTaskTypes
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Task types
+ * @summary Task types (S-11)
  */
 
 export function useListTaskTypes<TData = Awaited<ReturnType<typeof listTaskTypes>>, TError = UnauthorizedResponse>(
@@ -204,6 +225,279 @@ export function useListTaskTypes<TData = Awaited<ReturnType<typeof listTaskTypes
 
 
 /**
+ * Admin only — `master.write`, which blueprint §2 states as "Master data
+(task types, SLA, workflow, holidays)".
+
+`code` is upper-cased and must be unique. It is the stable identifier:
+`TaskTypeRepository.findByCode` is what the Excel import matches on, and
+it is what any client should key behaviour off rather than `name` —
+which this very screen makes editable. It **cannot be changed
+afterwards**; see `PATCH /masters/task-types/{taskTypeId}`.
+
+`name` must also be unique, case-insensitively, and that is a service
+rule rather than an index. Two types rendering the same label are
+indistinguishable in every picker in the product.
+
+`defaultLevel` is checked against the **priority master**, not against a
+hardcoded list — B-021 exists precisely so an Admin can add a level, and
+a hardcoded set is what B-015 removed from the resource grid. It must
+also be one of the four values `Level` can carry; a fifth priority needs
+that enum opened, which is B-021's call and touches three streams.
+
+`seq` is the display order in the picker. Omit it and the new type sorts
+to the end.
+
+ * @summary Create a task type (S-11)
+ */
+export const createTaskType = (
+    taskTypeWriteRequest: TaskTypeWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<TaskTypeResponse>(
+      {url: `/masters/task-types`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: taskTypeWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateTaskTypeMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTaskType>>, TError,{data: TaskTypeWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createTaskType>>, TError,{data: TaskTypeWriteRequest}, TContext> => {
+
+const mutationKey = ['createTaskType'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createTaskType>>, {data: TaskTypeWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createTaskType(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateTaskTypeMutationResult = NonNullable<Awaited<ReturnType<typeof createTaskType>>>
+    export type CreateTaskTypeMutationBody = TaskTypeWriteRequest
+    export type CreateTaskTypeMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse
+
+    /**
+ * @summary Create a task type (S-11)
+ */
+export const useCreateTaskType = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTaskType>>, TError,{data: TaskTypeWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createTaskType>>,
+        TError,
+        {data: TaskTypeWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateTaskTypeMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **This exists to carry the `ETag` the `PATCH` requires as `If-Match`**,
+per CONVENTIONS.md §5 — the gap B-011 closed for `GET /users/{userId}`
+and B-016 for `GET /projects/{projectId}`. A write whose precondition
+has no read to come from is not a strict endpoint, it is a broken one.
+
+The tag is taken over the content, `ticketCount` included. A ticket
+raised against the type while the edit dialog is open therefore costs a
+reload — correct, since that count is what the deactivate decision was
+made against.
+
+ * @summary One task type (S-11)
+ */
+export const getTaskType = (
+    taskTypeId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<TaskTypeResponse>(
+      {url: `/masters/task-types/${taskTypeId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetTaskTypeQueryKey = (taskTypeId?: number,) => {
+    return [
+    `/masters/task-types/${taskTypeId}`
+    ] as const;
+    }
+
+    
+export const getGetTaskTypeQueryOptions = <TData = Awaited<ReturnType<typeof getTaskType>>, TError = UnauthorizedResponse | NotFoundResponse>(taskTypeId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskType>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTaskTypeQueryKey(taskTypeId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTaskType>>> = ({ signal }) => getTaskType(taskTypeId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(taskTypeId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTaskType>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetTaskTypeQueryResult = NonNullable<Awaited<ReturnType<typeof getTaskType>>>
+export type GetTaskTypeQueryError = UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetTaskType<TData = Awaited<ReturnType<typeof getTaskType>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ taskTypeId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskType>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTaskType>>,
+          TError,
+          Awaited<ReturnType<typeof getTaskType>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetTaskType<TData = Awaited<ReturnType<typeof getTaskType>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ taskTypeId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskType>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTaskType>>,
+          TError,
+          Awaited<ReturnType<typeof getTaskType>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetTaskType<TData = Awaited<ReturnType<typeof getTaskType>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ taskTypeId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskType>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One task type (S-11)
+ */
+
+export function useGetTaskType<TData = Awaited<ReturnType<typeof getTaskType>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ taskTypeId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskType>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetTaskTypeQueryOptions(taskTypeId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`code` is present in the body only so that sending a different one can
+be refused with `409`.** Leaving it off the schema entirely would mean a
+caller who believed they had renamed the code is told the save
+succeeded. Resending the *same* code is always a no-op, because this
+screen submits the whole form on every save.
+
+**`isActive: false` is how a task type is retired, and there is no
+delete.** `tickets.task_type_id`, `sla_policies.task_type_id` and
+B-019's `project_task_types.task_type_id` are all foreign keys without
+cascades: a delete would fail on a constraint naming a MySQL index, and
+"fixing" that with a cascade would silently rewrite what historical
+tickets say they were raised against. Deactivating removes the type from
+the create form and from every project's SLA matrix while leaving every
+ticket that carries it able to render its own name.
+
+`If-Match` is required, not optional; a write without one is refused
+with `428`. Read the current tag from
+`GET /masters/task-types/{taskTypeId}`.
+
+ * @summary Edit a task type, or retire it (S-11)
+ */
+export const updateTaskType = (
+    taskTypeId: number,
+    taskTypePatchRequest: TaskTypePatchRequest,
+ ) => {
+      
+      
+      return http<TaskTypeResponse>(
+      {url: `/masters/task-types/${taskTypeId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: taskTypePatchRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateTaskTypeMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTaskType>>, TError,{taskTypeId: number;data: TaskTypePatchRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateTaskType>>, TError,{taskTypeId: number;data: TaskTypePatchRequest}, TContext> => {
+
+const mutationKey = ['updateTaskType'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateTaskType>>, {taskTypeId: number;data: TaskTypePatchRequest}> = (props) => {
+          const {taskTypeId,data} = props ?? {};
+
+          return  updateTaskType(taskTypeId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateTaskTypeMutationResult = NonNullable<Awaited<ReturnType<typeof updateTaskType>>>
+    export type UpdateTaskTypeMutationBody = TaskTypePatchRequest
+    export type UpdateTaskTypeMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Edit a task type, or retire it (S-11)
+ */
+export const useUpdateTaskType = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTaskType>>, TError,{taskTypeId: number;data: TaskTypePatchRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateTaskType>>,
+        TError,
+        {taskTypeId: number;data: TaskTypePatchRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateTaskTypeMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * The Module field on the ticket. Eight seeded rows — Student, Admission,
 Fees, Examination, Attendance, Library, Inventory, Parent App — held as a
 master rather than an enum so that the ninth is a row somebody adds, not
