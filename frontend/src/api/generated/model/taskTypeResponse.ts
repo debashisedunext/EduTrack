@@ -46,40 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { TaskTypeIcon } from './taskTypeIcon';
-import type { Level } from './level';
-import type { TaskTypeDefaultSlaHrs } from './taskTypeDefaultSlaHrs';
+import type { TaskType } from './taskType';
 
-/**
- * S-11. `code` is the stable identifier and `name` is display text an
-Admin may change — **key behaviour off `code`.** The create form's
-client-mandatory rule (§4B.2) currently matches on `name`, which this
-screen is the reason it should not.
-
-Every property here is populated on every response and none of them is
-in `required`, which is B-016's call on `Project.status` applied again:
-a required property is an obligation on every consumer that constructs
-one, and the ticket-form fixtures construct these. Optional-but-always-
-present costs a `?` in the generated type and breaks nothing.
-
- */
-export interface TaskType {
-  id?: number;
-  /** Immutable once created. Unique, upper-case. */
-  code?: string;
-  name?: string;
-  /** A `lucide-react` icon name — the frontend's icon library. No enum. */
-  icon?: TaskTypeIcon;
-  /** @pattern ^#[0-9A-Fa-f]{6}$ */
-  colour?: string;
-  defaultLevel?: Level;
-  defaultSlaHrs?: TaskTypeDefaultSlaHrs;
-  /** Display order in the picker. */
-  seq?: number;
-  isActive?: boolean;
-  /** Tickets currently carrying this type. Shown on the grid so that
-retiring a type is an informed decision rather than one whose size
-is discovered afterwards.
- */
-  ticketCount?: number;
+export interface TaskTypeResponse {
+  data: TaskType;
 }

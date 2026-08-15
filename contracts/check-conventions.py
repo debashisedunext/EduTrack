@@ -73,6 +73,8 @@ ROWLESS_403 = {
     "/masters/roles/{roleId}/permissions": "same: the role's existence is public, only the write is Admin-only",
     "/masters/priorities":                 "master data, not row-scoped — every active level is already public through listPriorities, and there is no row yet on a create",
     "/masters/priorities/{priorityId}":    "same: the level's existence is public, only the write is Admin-only",
+    "/masters/task-types":                 "master data, not row-scoped — every task type is already public through listTaskTypes, and there is no row yet on a create",
+    "/masters/task-types/{taskTypeId}":    "same: the type's existence is public, only the write is Admin-only",
 }
 
 

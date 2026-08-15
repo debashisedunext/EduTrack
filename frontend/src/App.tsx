@@ -21,6 +21,7 @@ import { PriorityListPage } from './features/masters/priorities/PriorityListPage
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
+import { TaskTypeListPage } from './features/masters/taskTypes/TaskTypeListPage'
 import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage'
 import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage'
@@ -115,6 +116,9 @@ export default function App() {
                         <Link to="/masters/priorities">Priority levels</Link>
                       </Button>
                       <Button asChild variant="secondary">
+                        <Link to="/masters/task-types">Task types</Link>
+                      </Button>
+                      <Button asChild variant="secondary">
                         <Link to="/masters/calendar">Working calendar</Link>
                       </Button>
                     </div>
@@ -163,6 +167,10 @@ export default function App() {
                 each — the shape B-020 gave S-11. There is no `/:id` route to
                 collide with. */}
             <Route path="/masters/priorities" element={<PriorityListPage />} />
+            {/* B-020 · S-11. One route, not two: a task type is eight fields,
+                so the create and edit forms are dialogs on the grid rather
+                than a page each. There is no `/:id` route to collide with. */}
+            <Route path="/masters/task-types" element={<TaskTypeListPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />

@@ -192,6 +192,13 @@ final class PermissionMatrix {
             {"level":"HIGH","name":"Matrix Fixture","colour":"#F59E0B"}""";
 
     /**
+     * {@code TaskTypeWrite}: code, name, colour and defaultLevel are all
+     * required, and the colour must be a {@code #RRGGBB} token.
+     */
+    private static final String TASK_TYPE = """
+            {"code":"MATRIX_FIXTURE","name":"Matrix Fixture","colour":"#4F46E5","defaultLevel":"LOW"}""";
+
+    /**
      * {@code ProjectDtos.ProjectWrite}: {@code projectCode} matches
      * {@code ^[A-Za-z][A-Za-z0-9]{1,9}$}, {@code name} is {@code @NotBlank} and
      * {@code projectManagerId} is {@code @NotNull}. The manager id need not
@@ -419,6 +426,29 @@ final class PermissionMatrix {
             // Retiring is the PATCH.
             adminOnly("POST", "/api/v1/masters/priorities", PRIORITY),
             adminOnly("PATCH", "/api/v1/masters/priorities/{priorityId}", EMPTY_PATCH),
+
+            // ── task types · S-11 (B-020) ────────────────────────────────────
+            // Both reads open to all six, and the argument is §2's rather than
+            // convenience: every role may raise a ticket (§2 row 3), a ticket
+            // must name a task type, and the create form's type picker is this
+            // route. A role that could not list task types could not raise a
+            // ticket at all — which would contradict a row §2 does state. The
+            // detail read carries nothing the list does not; it exists to emit
+            // the ETag the PATCH requires.
+            everyRole("GET", "/api/v1/masters/task-types"),
+            everyRole("GET", "/api/v1/masters/task-types/{taskTypeId}"),
+            // The writes are master.write — Admin alone — and unlike B-018's SLA
+            // tab this one needs no argument at all. §2's row reads "Master data
+            // (task types, SLA, workflow, holidays)" and task types are the
+            // first two words of it; B-001's own description of the capability
+            // opens the same way.
+            //
+            // There is no DELETE row because there is no DELETE route, and its
+            // absence is the design: three foreign keys point at `task_types`
+            // without cascades, and B-019's migration named this screen as the
+            // reason they can stay that way. Retiring a type is the PATCH.
+            adminOnly("POST", "/api/v1/masters/task-types", TASK_TYPE),
+            adminOnly("PATCH", "/api/v1/masters/task-types/{taskTypeId}", EMPTY_PATCH),
 
             // ── projects · S-10 ─────────────────────────────────────────────
             // Reads open to all six. §2 has no "view projects" row, so this is

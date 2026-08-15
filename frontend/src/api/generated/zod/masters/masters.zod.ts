@@ -50,7 +50,25 @@ import * as zod from 'zod';
 
 
 /**
- * @summary Task types
+ * The Task Type Master grid, and the type picker on the create-ticket
+form. Eleven rows seeded by B-002; an Admin may add more.
+
+**Deactivated rows are returned too**, carrying `isActive: false`, the
+same way modules and roles are. A ticket raised last year against a type
+since retired still has to render its name; filtering them out here
+would leave that cell blank. Offer only the active ones in a picker.
+
+Returned in `seq` order — the order the master defines — so no client
+sorts it a twelfth way.
+
+`ticketCount` is how many tickets currently carry the type. It is on the
+row rather than only in a confirmation, because deactivating is the
+consequential act on this screen: a retired type drops out of every
+project's SLA matrix (which is built from the active types) and out of
+the create form, and an admin should see the size of that before
+clicking rather than after.
+
+ * @summary Task types (S-11)
  */
 export const listTaskTypesResponseDataItemColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
@@ -58,13 +76,175 @@ export const listTaskTypesResponseDataItemColourRegExp = new RegExp('^#[0-9A-Fa-
 export const listTaskTypesResponse = zod.object({
   "data": zod.array(zod.object({
   "id": zod.number().optional(),
+  "code": zod.string().optional().describe('Immutable once created. Unique, upper-case.'),
   "name": zod.string().optional(),
-  "icon": zod.string().nullish(),
+  "icon": zod.string().nullish().describe('A `lucide-react` icon name — the frontend\'s icon library. No enum.'),
   "colour": zod.string().regex(listTaskTypesResponseDataItemColourRegExp).optional(),
   "defaultLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "defaultSlaHrs": zod.number().nullish(),
-  "isActive": zod.boolean().optional()
-}))
+  "seq": zod.number().optional().describe('Display order in the picker.'),
+  "isActive": zod.boolean().optional(),
+  "ticketCount": zod.number().optional().describe('Tickets currently carrying this type. Shown on the grid so that\nretiring a type is an informed decision rather than one whose size\nis discovered afterwards.\n')
+}).describe('S-11. `code` is the stable identifier and `name` is display text an\nAdmin may change — \*\*key behaviour off `code`.\*\* The create form\'s\nclient-mandatory rule (§4B.2) currently matches on `name`, which this\nscreen is the reason it should not.\n\nEvery property here is populated on every response and none of them is\nin `required`, which is B-016\'s call on `Project.status` applied again:\na required property is an obligation on every consumer that constructs\none, and the ticket-form fixtures construct these. Optional-but-always-\npresent costs a `?` in the generated type and breaks nothing.\n'))
+})
+
+/**
+ * Admin only — `master.write`, which blueprint §2 states as "Master data
+(task types, SLA, workflow, holidays)".
+
+`code` is upper-cased and must be unique. It is the stable identifier:
+`TaskTypeRepository.findByCode` is what the Excel import matches on, and
+it is what any client should key behaviour off rather than `name` —
+which this very screen makes editable. It **cannot be changed
+afterwards**; see `PATCH /masters/task-types/{taskTypeId}`.
+
+`name` must also be unique, case-insensitively, and that is a service
+rule rather than an index. Two types rendering the same label are
+indistinguishable in every picker in the product.
+
+`defaultLevel` is checked against the **priority master**, not against a
+hardcoded list — B-021 exists precisely so an Admin can add a level, and
+a hardcoded set is what B-015 removed from the resource grid. It must
+also be one of the four values `Level` can carry; a fifth priority needs
+that enum opened, which is B-021's call and touches three streams.
+
+`seq` is the display order in the picker. Omit it and the new type sorts
+to the end.
+
+ * @summary Create a task type (S-11)
+ */
+export const createTaskTypeHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createTaskTypeBodyCodeMin = 2;
+export const createTaskTypeBodyCodeMax = 40;
+
+
+export const createTaskTypeBodyCodeRegExp = new RegExp('^[A-Za-z][A-Za-z0-9_]{1,39}$');
+export const createTaskTypeBodyNameMax = 80;
+
+export const createTaskTypeBodyIconMax = 30;
+
+export const createTaskTypeBodyColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const createTaskTypeBodyDefaultSlaHrsMin = 0;
+
+
+
+export const createTaskTypeBody = zod.object({
+  "code": zod.string().min(createTaskTypeBodyCodeMin).max(createTaskTypeBodyCodeMax).regex(createTaskTypeBodyCodeRegExp).describe('Upper-cased on save. Permanent.'),
+  "name": zod.string().min(1).max(createTaskTypeBodyNameMax),
+  "icon": zod.string().max(createTaskTypeBodyIconMax).nullish(),
+  "colour": zod.string().regex(createTaskTypeBodyColourRegExp).describe('A blueprint §12.1 token. Required on create even though the column\nis nullable: a type with no colour renders as a hole in the picker,\nthe grid and the Task Type Distribution chart at once.\n'),
+  "defaultLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "defaultSlaHrs": zod.number().min(createTaskTypeBodyDefaultSlaHrsMin).nullish(),
+  "seq": zod.number().nullish(),
+  "isActive": zod.boolean().nullish()
+})
+
+/**
+ * **This exists to carry the `ETag` the `PATCH` requires as `If-Match`**,
+per CONVENTIONS.md §5 — the gap B-011 closed for `GET /users/{userId}`
+and B-016 for `GET /projects/{projectId}`. A write whose precondition
+has no read to come from is not a strict endpoint, it is a broken one.
+
+The tag is taken over the content, `ticketCount` included. A ticket
+raised against the type while the edit dialog is open therefore costs a
+reload — correct, since that count is what the deactivate decision was
+made against.
+
+ * @summary One task type (S-11)
+ */
+export const getTaskTypeParams = zod.object({
+  "taskTypeId": zod.number().describe('`task_types.id` is an `INT`, for the same reason `RoleId` is: A-007\ndeclared the column that way and `tickets.task_type_id` follows it.\n`SlaPolicyCell.taskTypeId` has always said `int32`; `TaskType.id` said\n`int64` until B-020 and was the odd one out.\n')
+})
+
+export const getTaskTypeResponseDataColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
+export const getTaskTypeResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "code": zod.string().optional().describe('Immutable once created. Unique, upper-case.'),
+  "name": zod.string().optional(),
+  "icon": zod.string().nullish().describe('A `lucide-react` icon name — the frontend\'s icon library. No enum.'),
+  "colour": zod.string().regex(getTaskTypeResponseDataColourRegExp).optional(),
+  "defaultLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "defaultSlaHrs": zod.number().nullish(),
+  "seq": zod.number().optional().describe('Display order in the picker.'),
+  "isActive": zod.boolean().optional(),
+  "ticketCount": zod.number().optional().describe('Tickets currently carrying this type. Shown on the grid so that\nretiring a type is an informed decision rather than one whose size\nis discovered afterwards.\n')
+}).describe('S-11. `code` is the stable identifier and `name` is display text an\nAdmin may change — \*\*key behaviour off `code`.\*\* The create form\'s\nclient-mandatory rule (§4B.2) currently matches on `name`, which this\nscreen is the reason it should not.\n\nEvery property here is populated on every response and none of them is\nin `required`, which is B-016\'s call on `Project.status` applied again:\na required property is an obligation on every consumer that constructs\none, and the ticket-form fixtures construct these. Optional-but-always-\npresent costs a `?` in the generated type and breaks nothing.\n')
+})
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`code` is present in the body only so that sending a different one can
+be refused with `409`.** Leaving it off the schema entirely would mean a
+caller who believed they had renamed the code is told the save
+succeeded. Resending the *same* code is always a no-op, because this
+screen submits the whole form on every save.
+
+**`isActive: false` is how a task type is retired, and there is no
+delete.** `tickets.task_type_id`, `sla_policies.task_type_id` and
+B-019's `project_task_types.task_type_id` are all foreign keys without
+cascades: a delete would fail on a constraint naming a MySQL index, and
+"fixing" that with a cascade would silently rewrite what historical
+tickets say they were raised against. Deactivating removes the type from
+the create form and from every project's SLA matrix while leaving every
+ticket that carries it able to render its own name.
+
+`If-Match` is required, not optional; a write without one is refused
+with `428`. Read the current tag from
+`GET /masters/task-types/{taskTypeId}`.
+
+ * @summary Edit a task type, or retire it (S-11)
+ */
+export const updateTaskTypeParams = zod.object({
+  "taskTypeId": zod.number().describe('`task_types.id` is an `INT`, for the same reason `RoleId` is: A-007\ndeclared the column that way and `tickets.task_type_id` follows it.\n`SlaPolicyCell.taskTypeId` has always said `int32`; `TaskType.id` said\n`int64` until B-020 and was the odd one out.\n')
+})
+
+export const updateTaskTypeHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateTaskTypeBodyNameMax = 80;
+
+export const updateTaskTypeBodyIconMax = 30;
+
+export const updateTaskTypeBodyColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+export const updateTaskTypeBodyDefaultSlaHrsMin = 0;
+
+
+
+export const updateTaskTypeBody = zod.object({
+  "code": zod.string().optional().describe('Here \*\*only so that a changed one can be refused with `409`.\*\*\nOmitting it from the schema would let Jackson discard it silently\nand report a rename that did not happen. Resending the stored value\nis a no-op.\n'),
+  "name": zod.string().min(1).max(updateTaskTypeBodyNameMax).optional(),
+  "icon": zod.string().max(updateTaskTypeBodyIconMax).nullish(),
+  "colour": zod.string().regex(updateTaskTypeBodyColourRegExp).optional(),
+  "defaultLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "defaultSlaHrs": zod.number().min(updateTaskTypeBodyDefaultSlaHrsMin).nullish(),
+  "seq": zod.number().nullish(),
+  "isActive": zod.boolean().nullish()
+}).describe('Every field optional; an omitted one keeps its stored value. `isActive:\nfalse` is how a type is retired — there is no delete.\n')
+
+export const updateTaskTypeResponseDataColourRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
+export const updateTaskTypeResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "code": zod.string().optional().describe('Immutable once created. Unique, upper-case.'),
+  "name": zod.string().optional(),
+  "icon": zod.string().nullish().describe('A `lucide-react` icon name — the frontend\'s icon library. No enum.'),
+  "colour": zod.string().regex(updateTaskTypeResponseDataColourRegExp).optional(),
+  "defaultLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "defaultSlaHrs": zod.number().nullish(),
+  "seq": zod.number().optional().describe('Display order in the picker.'),
+  "isActive": zod.boolean().optional(),
+  "ticketCount": zod.number().optional().describe('Tickets currently carrying this type. Shown on the grid so that\nretiring a type is an informed decision rather than one whose size\nis discovered afterwards.\n')
+}).describe('S-11. `code` is the stable identifier and `name` is display text an\nAdmin may change — \*\*key behaviour off `code`.\*\* The create form\'s\nclient-mandatory rule (§4B.2) currently matches on `name`, which this\nscreen is the reason it should not.\n\nEvery property here is populated on every response and none of them is\nin `required`, which is B-016\'s call on `Project.status` applied again:\na required property is an obligation on every consumer that constructs\none, and the ticket-form fixtures construct these. Optional-but-always-\npresent costs a `?` in the generated type and breaks nothing.\n')
 })
 
 /**

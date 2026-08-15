@@ -48,6 +48,7 @@ class MasterRoutesTest {
             "com.edunext.edutrack.api.feature.masters.resources.ResourceController",
             "com.edunext.edutrack.api.feature.masters.roles.RoleController",
             "com.edunext.edutrack.api.feature.masters.priorities.PriorityController",
+            "com.edunext.edutrack.api.feature.masters.tasktypes.TaskTypeController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectMemberController",
             "com.edunext.edutrack.api.feature.masters.projects.SlaPolicyController",
@@ -104,6 +105,32 @@ class MasterRoutesTest {
     @DisplayName("the priority master is where the contract says it is")
     void priorityMasterIsMountedWhereTheContractPutsIt() {
         assertThat(paths(load("com.edunext.edutrack.api.feature.masters.priorities.PriorityController")
+                .getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/masters");
+    }
+
+    /**
+     * B-020 · and this is the <b>fourth</b> instance of the gap this file exists
+     * for — the one the B-021 note above counts from.
+     *
+     * <p>{@code listTaskTypes} has been in the contract, in the MSW mock and in
+     * the generated TypeScript client since D-001 with no server behind it —
+     * after B-023's nine calendar operations, B-014's
+     * {@code PATCH /users/{userId}/status} and B-018's two SLA operations.
+     * Nothing failed, because the three screens that call it (the ticket list,
+     * the ticket detail page and the create form) have only ever run against the
+     * mock. Every one of them would have 404'd on first contact with a real
+     * backend.
+     *
+     * <p>B-021 landed first and B-020 second, so the ordinals here are discovery
+     * order rather than merge order. That is the useful reading: five operations
+     * in this contract have now been found declared, mocked and unmounted, and
+     * nothing systematically looks for the sixth.
+     */
+    @Test
+    @DisplayName("the task type master is where the contract says it is")
+    void taskTypeMasterIsMountedWhereTheContractPutsIt() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.tasktypes.TaskTypeController")
                 .getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/masters");
     }
