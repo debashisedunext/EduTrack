@@ -54,7 +54,8 @@ class AttachmentServiceTest {
 
     private final AttachmentProperties properties = new AttachmentProperties(
             Duration.ofMinutes(5), 10L * 1024 * 1024, 50L * 1024 * 1024, 20,
-            new AttachmentProperties.Scan(false, "localhost", 3310, Duration.ofSeconds(30), false));
+            new AttachmentProperties.Scan(false, "localhost", 3310, Duration.ofSeconds(30), false),
+            new AttachmentProperties.Thumbnail(true, 320, 50_000_000L));
 
     private final AttachmentService service =
             new AttachmentService(tickets, attachments, types, stripper, storage, scans, properties);
@@ -391,6 +392,121 @@ class AttachmentServiceTest {
             assertThat(service.signedUrlFor(stored(1024, "PENDING")))
                     .isInstanceOf(Optional.class)
                     .isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("C-026 · a thumbnail is signed on exactly the terms the file is")
+    class ThumbnailUrls {
+
+        /**
+         * The port returns a {@code URI} and never null, so the double has to as
+         * well — a bare mock answers null, and {@code Optional.of} on that fails
+         * as an NPE inside the service rather than as anything a reader could act
+         * on.
+         */
+        @BeforeEach
+        void thePresignerAnswersAUrl() {
+            when(storage.signedDownloadUrl(any(), anyString(), anyString(), any()))
+                    .thenReturn(URI.create("https://minio.example/thumb?sig=abc"));
+        }
+
+        private TicketAttachment withThumbnail(String scanStatus) {
+            TicketAttachment row = stored(1024, scanStatus);
+            row.setThumbnailKey(AttachmentStorageKey.parse(row.getStorageKey()).thumbnail().toString());
+            return row;
+        }
+
+        @Test
+        void aCleanRowWithAThumbnailIsSigned() {
+            assertThat(service.thumbnailUrlFor(withThumbnail("CLEAN"))).isPresent();
+        }
+
+        @Test
+        void aRowWithNoThumbnailKeyIsTheOrdinaryCaseAndSignsNothing() {
+            // A PDF, a log, a spreadsheet, a WebP, or an image already small
+            // enough. None of them is an error and none of them is worth a call.
+            assertThat(service.thumbnailUrlFor(stored(1024, "CLEAN"))).isEmpty();
+            verify(storage, never()).signedDownloadUrl(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        void aPendingRowIsRefusedEvenThoughAThumbnailExists() {
+            // The trap this whole nested class exists for. A thumbnail looks like
+            // a preview and *is* the file on screen — §4B.4's "not visible until
+            // the scan passes" covers it exactly as it covers the download.
+            assertThat(service.thumbnailUrlFor(withThumbnail("PENDING"))).isEmpty();
+            verify(storage, never()).signedDownloadUrl(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        void anInfectedRowIsRefused() {
+            assertThat(service.thumbnailUrlFor(withThumbnail("INFECTED"))).isEmpty();
+            verify(storage, never()).signedDownloadUrl(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        void aDeletedRowIsRefused() {
+            TicketAttachment tombstone = withThumbnail("CLEAN");
+            tombstone.setDeleted(true);
+
+            assertThat(service.thumbnailUrlFor(tombstone)).isEmpty();
+            verify(storage, never()).signedDownloadUrl(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        void theContentTypeIsAlwaysPngAndNeverTheRowsMimeType() {
+            // A thumbnail is always a PNG this application encoded, whatever the
+            // original was. Passing mimeType through would let a JPEG row have
+            // its PNG bytes announced as image/jpeg — and, worse, would give the
+            // row a say in what the browser is told it is receiving.
+            TicketAttachment jpeg = withThumbnail("CLEAN");
+            jpeg.setMimeType("image/jpeg");
+            jpeg.setFileName("screenshot.jpg");
+
+            service.thumbnailUrlFor(jpeg);
+
+            verify(storage).signedDownloadUrl(any(), eq("screenshot.png"), eq("image/png"), eq(Duration.ofMinutes(5)));
+        }
+
+        @Test
+        void aThumbnailKeyPointingAtAnotherTicketIsRefusedRatherThanSigned() {
+            // The column came out of the database. A row edited to name another
+            // ticket's object would otherwise have that object signed and served
+            // — a cross-ticket read through a column nobody watches.
+            TicketAttachment tampered = stored(1024, "CLEAN");
+            tampered.setThumbnailKey(AttachmentStorageKey.mint(999).thumbnail().toString());
+
+            assertThat(service.thumbnailUrlFor(tampered)).isEmpty();
+            verify(storage, never()).signedDownloadUrl(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        void aMalformedThumbnailKeyCostsItsThumbnailAndNotTheWholeListing() {
+            // belongsTo answers false rather than throwing, deliberately: one bad
+            // row must not 500 a gallery of nineteen good ones.
+            TicketAttachment tampered = stored(1024, "CLEAN");
+            tampered.setThumbnailKey("../../etc/passwd");
+
+            assertThat(service.thumbnailUrlFor(tampered)).isEmpty();
+            verifyNoInteractions(storage);
+        }
+
+        @Test
+        void theSavedNameCarriesThePngExtensionTheBytesActuallyHave() {
+            TicketAttachment noExtension = withThumbnail("CLEAN");
+            noExtension.setFileName("screenshot");
+
+            service.thumbnailUrlFor(noExtension);
+
+            verify(storage).signedDownloadUrl(any(), eq("screenshot.png"), anyString(), any());
+        }
+
+        @Test
+        void itUsesTheSameShortTtlAsTheDownload() {
+            service.thumbnailUrlFor(withThumbnail("CLEAN"));
+
+            verify(storage).signedDownloadUrl(any(), anyString(), anyString(), eq(Duration.ofMinutes(5)));
         }
     }
 }

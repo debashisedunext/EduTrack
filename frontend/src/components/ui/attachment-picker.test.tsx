@@ -454,3 +454,119 @@ describe('AttachmentPicker — the addFiles handle', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Pasted gateway-500.png')
   })
 })
+
+/**
+ * C-026 · the row thumbnail opens the full-size image.
+ *
+ * The surface this exists for is the **create form**, where a staged file has
+ * not been uploaded — `TicketCreateRequest` carries no `attachmentIds`, so
+ * nothing leaves the browser until the 201 — and a 28px preview is not enough to
+ * tell two captures of the same screen apart. Pasting the wrong one and finding
+ * out after the ticket exists is the failure being closed.
+ */
+describe('AttachmentPicker — image preview (C-026)', () => {
+  const readyImage = (overrides: Partial<AttachmentItem> = {}): AttachmentItem => ({
+    id: '1',
+    name: 'screenshot.png',
+    sizeBytes: 2048,
+    contentType: 'image/png',
+    status: 'ready',
+    thumbnailUrl: 'blob:thumb',
+    downloadUrl: 'blob:full',
+    ...overrides,
+  })
+
+  it('makes the file name the control, not the 28px thumbnail', async () => {
+    // The first cut put the click on the thumbnail alone: no pointer cursor, no
+    // hover state, 28px. Nothing on the row said it could be opened, and it
+    // could not be reached from a keyboard at all. The name is what a user reads
+    // and therefore what they click.
+    const user = userEvent.setup()
+    renderPicker({ items: [readyImage()] })
+
+    await user.click(screen.getByRole('button', { name: 'screenshot.png' }))
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('leaves exactly one focusable control per row for the preview', () => {
+    // The thumbnail stays clickable as a mouse convenience but is aria-hidden
+    // and out of the tab order. Two controls per row would double the tab stops
+    // of a twenty-file list to say the same thing twice.
+    renderPicker({ items: [readyImage()] })
+
+    expect(screen.getAllByRole('button', { name: 'screenshot.png' })).toHaveLength(1)
+  })
+
+  it('opens the full file rather than the reduction', async () => {
+    // On the create form these are the same object URL. On a saved ticket they
+    // are not, and opening a 320px reduction would make zoom useless.
+    const user = userEvent.setup()
+    renderPicker({ items: [readyImage()] })
+
+    await user.click(screen.getByRole('button', { name: 'screenshot.png' }))
+
+    expect(screen.getByRole('dialog').querySelector('img')).toHaveAttribute('src', 'blob:full')
+  })
+
+  it('previews a staged file from its object URL, which is the only copy there is', async () => {
+    // Deferred mode: no server row, so `useTicketAttachments` puts the blob URL
+    // in both fields. If this broke, the create form would lose its preview
+    // entirely while the detail page kept working.
+    const user = userEvent.setup()
+    renderPicker({ items: [readyImage({ thumbnailUrl: 'blob:local', downloadUrl: 'blob:local' })] })
+
+    await user.click(screen.getByRole('button', { name: 'screenshot.png' }))
+
+    expect(screen.getByRole('dialog').querySelector('img')).toHaveAttribute('src', 'blob:local')
+  })
+
+  it('does not offer a preview while the scan is still running', () => {
+    // §4B.4: not visible until the scan passes, and a 28px preview is visible.
+    renderPicker({ items: [readyImage({ status: 'scanning' })] })
+
+    expect(screen.queryByRole('button', { name: 'screenshot.png' })).not.toBeInTheDocument()
+  })
+
+  it('hands a document to the browser as a link rather than to the viewer', () => {
+    // The viewer is for images; a PDF in it would render a broken <img>. A new
+    // tab, because the create form holds unsaved work and navigating away would
+    // discard the ticket the user is halfway through writing.
+    renderPicker({ items: [readyImage({ name: 'notes.pdf', contentType: 'application/pdf' })] })
+
+    const link = screen.getByRole('link', { name: 'notes.pdf' })
+    expect(link).toHaveAttribute('href', 'blob:full')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(screen.queryByRole('button', { name: 'notes.pdf' })).not.toBeInTheDocument()
+  })
+
+  it('gives a document no link until its scan has passed', () => {
+    renderPicker({ items: [readyImage({ name: 'notes.pdf', contentType: 'application/pdf', status: 'scanning', downloadUrl: null })] })
+
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('falls back to the full image when there is no reduction', () => {
+    // A WebP, or anything the server chose not to reduce. Rendering a file icon
+    // here would be the bug — it is plainly an image.
+    renderPicker({ items: [readyImage({ contentType: 'image/webp', thumbnailUrl: null })] })
+
+    expect(screen.getByRole('button', { name: 'screenshot.png' })).toBeInTheDocument()
+    expect(document.querySelector('li img')).toHaveAttribute('src', 'blob:full')
+  })
+
+  it('renders a plain image and no viewer when preview is switched off', () => {
+    renderPicker({ items: [readyImage()], enablePreview: false })
+
+    expect(screen.queryByRole('button', { name: 'screenshot.png' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('mounts no viewer when the caller draws its own list', () => {
+    // The detail page: AttachmentGallery owns the tiles and the viewer. Two
+    // lightboxes on one screen would fight over focus the moment either opened.
+    renderPicker({ items: [readyImage()], showItems: false })
+
+    expect(screen.queryByRole('button', { name: 'screenshot.png' })).not.toBeInTheDocument()
+  })
+})

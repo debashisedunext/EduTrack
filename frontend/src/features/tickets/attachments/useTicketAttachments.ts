@@ -79,6 +79,11 @@ function serverToItem(attachment: Attachment): AttachmentItem {
     status: scanStatusToItemStatus(attachment.scanStatus),
     error: attachment.scanStatus === 'INFECTED' ? 'Failed the virus scan' : undefined,
     thumbnailUrl: attachment.thumbnailUrl,
+    // C-026. Both are null until the scan passes — the server decides that, not
+    // this mapper — and `thumbnailUrl` is additionally null whenever no
+    // reduction was worth storing, which is why the gallery falls back to this
+    // one rather than treating its absence as "not an image".
+    downloadUrl: attachment.downloadUrl,
   }
 }
 
@@ -325,6 +330,11 @@ export function useTicketAttachments({
       status: entry.status === 'staged' ? 'ready' : entry.status,
       error: entry.error,
       thumbnailUrl: entry.objectUrl,
+      // The same blob URL serves as the full-size source: there is no server row
+      // and therefore no reduction, and the local file is the only copy that
+      // exists. It is what makes a staged screenshot openable in the lightbox on
+      // the create form, before the ticket it belongs to has been created.
+      downloadUrl: entry.objectUrl,
     }))
     return [...server, ...pending]
   }, [merged, local])

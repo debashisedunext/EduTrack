@@ -788,8 +788,19 @@ export function attachmentDto(a: import('../db').Attachment) {
     scanStatus: a.scanStatus,
     // Only downloadable once CLEAN, and always via a short-lived signed URL.
     downloadUrl: a.scanStatus === 'CLEAN' ? `/mock-files/${a.id}/${a.fileName}?sig=mock` : null,
-    thumbnailUrl: a.scanStatus === 'CLEAN' && a.contentType.startsWith('image/')
-      ? `/mock-files/${a.id}/thumb.png?sig=mock` : null,
+    // C-026 · a thumbnail is NOT simply "any image that scanned clean".
+    //
+    // The server reduces PNG, JPEG and GIF and nothing else — the JVM ships no
+    // WebP reader — so a CLEAN WebP comes back with `thumbnailUrl: null` and the
+    // client falls back to the full file. That is the single easiest thing for a
+    // UI to get wrong, because reading the null as "not an image" produces a
+    // grey file icon for a perfectly good screenshot with nothing failing
+    // anywhere. It has to be reachable under `npm run dev`, or the fallback path
+    // is only ever exercised by a unit test.
+    thumbnailUrl:
+      a.scanStatus === 'CLEAN' && ['image/png', 'image/jpeg', 'image/gif'].includes(a.contentType)
+        ? `/mock-files/${a.id}/thumb.png?sig=mock`
+        : null,
     isClientVisible: a.isClientVisible, isDeleted: a.isDeleted,
     uploadedBy: userRef(a.uploadedById), stageCode: a.stageCode,
     cycleNo: a.cycleNo, createdAt: a.createdAt,

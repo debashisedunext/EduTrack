@@ -29,6 +29,7 @@ import java.time.Duration;
  * @param maxTicketBytes 50 MB per ticket, §4B.4.
  * @param maxFiles 20 files per ticket, §4B.4.
  * @param scan the AV scanner
+ * @param thumbnail C-026's reductions
  */
 @ConfigurationProperties("edutrack.attachments")
 record AttachmentProperties(
@@ -37,7 +38,8 @@ record AttachmentProperties(
         @DefaultValue("10485760") long maxFileBytes,
         @DefaultValue("52428800") long maxTicketBytes,
         @DefaultValue("20") int maxFiles,
-        @DefaultValue Scan scan) {
+        @DefaultValue Scan scan,
+        @DefaultValue Thumbnail thumbnail) {
 
     /**
      * @param enabled whether a scanner is reachable at all. <b>Off does not mean
@@ -64,5 +66,34 @@ record AttachmentProperties(
             @DefaultValue("3310") int port,
             @DefaultValue("PT30S") Duration timeout,
             @DefaultValue("false") boolean failOpen) {
+    }
+
+    /**
+     * C-026 · the reduced copy shown in the gallery strip — blueprint §4B.4.
+     *
+     * @param enabled off stores no reductions and leaves every {@code thumbnailUrl}
+     *                null, which the client already renders (an image with no
+     *                thumbnail falls back to the full file). It is a switch for an
+     *                operator whose {@code ImageIO} has gone wrong, not a feature
+     *                flag — nothing downstream branches on it
+     * @param maxEdge the longest side of the reduction, in pixels. 320 covers a
+     *                160px gallery tile on a 2× display, which is the largest
+     *                place a thumbnail is drawn. Deliberately not larger: the
+     *                whole reason to store a second object is that it is small
+     *                enough for twenty of them to load at once
+     * @param maxSourcePixels the decompression-bomb ceiling, and the one value
+     *                here with a security job. A 10 MB PNG is allowed to be
+     *                40,000 × 40,000 — 1.6 <em>billion</em> pixels, several
+     *                gigabytes of heap once decoded — and §4B.4's per-file cap
+     *                cannot see it, because the bomb is small until it is opened.
+     *                The dimensions are read from the header and checked before
+     *                any pixel is decoded. 50 MP is roughly a 50-megapixel
+     *                camera's full frame, far above any screenshot and far below
+     *                anything that could hurt
+     */
+    record Thumbnail(
+            @DefaultValue("true") boolean enabled,
+            @DefaultValue("320") int maxEdge,
+            @DefaultValue("50000000") long maxSourcePixels) {
     }
 }

@@ -166,3 +166,39 @@ export const AtFileLimit: Story = {
     />
   ),
 }
+
+/**
+ * Clicking a thumbnail opens it full-screen — C-026.
+ *
+ * The surface this exists for is the **create form**, where the file has not
+ * been uploaded yet and a 28px square is not enough to tell two captures of the
+ * same screen apart. The images below are inline SVG data URIs so the story
+ * works offline and in CI; a real staged file supplies an object URL instead,
+ * and `useTicketAttachments` puts it in both `thumbnailUrl` and `downloadUrl`
+ * because the local blob is the only copy that exists.
+ *
+ * The last row is a document — no preview, because there is nothing to show.
+ */
+const swatch = (label: string, background: string) =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600"><rect width="900" height="600" fill="${background}"/>` +
+      `<text x="50%" y="50%" fill="#fff" font-family="sans-serif" font-size="72" text-anchor="middle" dominant-baseline="middle">${label}</text></svg>`,
+  )}`
+
+export const OpensAPreview: Story = {
+  render: () => (
+    <Stateful
+      initial={[
+        {
+          id: '1', name: 'fees-screen-error.png', sizeBytes: 184_320, contentType: 'image/png',
+          status: 'ready', thumbnailUrl: swatch('1', '#1F6FEB'), downloadUrl: swatch('1', '#1F6FEB'),
+        },
+        {
+          id: '2', name: 'stack-trace.png', sizeBytes: 96_180, contentType: 'image/png',
+          status: 'ready', thumbnailUrl: swatch('2', '#8250DF'), downloadUrl: swatch('2', '#8250DF'),
+        },
+        { id: '3', name: 'error-log.txt', sizeBytes: 12_884, contentType: 'text/plain', status: 'ready' },
+      ]}
+    />
+  ),
+}

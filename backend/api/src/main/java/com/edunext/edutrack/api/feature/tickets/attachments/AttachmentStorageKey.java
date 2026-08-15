@@ -40,16 +40,54 @@ import java.util.regex.Pattern;
  * silently empty the attachment on the other, and the storage key would become a
  * cross-ticket oracle — "does this exact file already exist somewhere I cannot
  * see" answerable by anyone who can upload. A type 4 UUID answers no questions.
+ *
+ * <h2>C-026's thumbnail is the same key with a suffix</h2>
+ *
+ * <p>A thumbnail is a second object, so it needs a second key, and it is
+ * <em>derived</em> from the original's rather than minted independently — one
+ * random component per attachment, not two. That is what makes
+ * {@link #thumbnail()} total: every attachment has a thumbnail key whether or not
+ * an object has been written under it, so nothing has to store a second key to
+ * find the first, and C-028's delete can remove both from the one column it
+ * already reads.
+ *
+ * <p>It does mean that holding the original's key hands you the thumbnail's. That
+ * costs nothing: a caller in possession of the original key can already reach the
+ * larger, unreduced file, and neither key is an address on its own — the bucket is
+ * private and a signature is still required.
  */
-record AttachmentStorageKey(long ticketId, UUID objectId) {
+record AttachmentStorageKey(long ticketId, UUID objectId, Variant variant) {
+
+    /**
+     * Which of the two objects an attachment can have.
+     *
+     * <p>An enum rather than a boolean because the suffix belongs with the name
+     * of the thing it marks, and because a third variant — C-060 has been
+     * mentioned wanting a larger preview — should be a constant here rather than
+     * a second flag threaded through every signature.
+     */
+    enum Variant {
+        ORIGINAL(""),
+        THUMBNAIL("-thumb");
+
+        private final String suffix;
+
+        Variant(String suffix) {
+            this.suffix = suffix;
+        }
+    }
 
     /**
      * The one true shape. Anchored, and lower-case hexadecimal only — the same
      * form {@link UUID#toString()} emits, so a key this pattern rejects is a key
      * this class did not mint.
+     *
+     * <p>The optional {@code -thumb} group is the <em>only</em> thing that may
+     * follow the UUID. Anything else appended is still refused, which is the
+     * property {@code anythingOtherThanTheExactShapeIsRefused} pins.
      */
     private static final Pattern SHAPE = Pattern.compile(
-            "^tickets/(\\d+)/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$");
+            "^tickets/(\\d+)/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(-thumb)?$");
 
     /**
      * Mint a key for a new object.
@@ -62,7 +100,18 @@ record AttachmentStorageKey(long ticketId, UUID objectId) {
         if (ticketId <= 0) {
             throw new IllegalArgumentException("ticketId must be positive, was " + ticketId);
         }
-        return new AttachmentStorageKey(ticketId, UUID.randomUUID());
+        return new AttachmentStorageKey(ticketId, UUID.randomUUID(), Variant.ORIGINAL);
+    }
+
+    /**
+     * This attachment's thumbnail key — C-026.
+     *
+     * <p>Idempotent: the thumbnail of a thumbnail is itself, so a caller that has
+     * already narrowed to the reduced object cannot accidentally build
+     * {@code …-thumb-thumb} and store a third one.
+     */
+    AttachmentStorageKey thumbnail() {
+        return variant == Variant.THUMBNAIL ? this : new AttachmentStorageKey(ticketId, objectId, Variant.THUMBNAIL);
     }
 
     /**
@@ -79,7 +128,10 @@ record AttachmentStorageKey(long ticketId, UUID objectId) {
         if (!matcher.matches()) {
             throw new IllegalArgumentException("not a ticket attachment storage key");
         }
-        return new AttachmentStorageKey(Long.parseLong(matcher.group(1)), UUID.fromString(matcher.group(2)));
+        return new AttachmentStorageKey(
+                Long.parseLong(matcher.group(1)),
+                UUID.fromString(matcher.group(2)),
+                matcher.group(3) == null ? Variant.ORIGINAL : Variant.THUMBNAIL);
     }
 
     /** Whether {@code key} is a well-formed attachment key for {@code ticketId}. */
@@ -93,6 +145,6 @@ record AttachmentStorageKey(long ticketId, UUID objectId) {
 
     @Override
     public String toString() {
-        return "tickets/" + ticketId + "/" + objectId;
+        return "tickets/" + ticketId + "/" + objectId + variant.suffix;
     }
 }

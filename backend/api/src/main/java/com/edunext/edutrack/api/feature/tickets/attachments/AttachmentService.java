@@ -43,11 +43,14 @@ import java.util.Optional;
  *
  * <h2>The scan status is the visibility rule, in one place</h2>
  *
- * <p>{@link #signedUrlFor} is the only method in the application that can turn a
- * stored attachment into something readable, and it returns empty for anything
- * that is not CLEAN and not deleted. Every list, gallery and download therefore
- * inherits the rule without restating it — which is the point, because a second
- * restatement is where "PENDING is probably fine" gets written.
+ * <p>{@link #signedUrlFor} and C-026's {@link #thumbnailUrlFor} are the only two
+ * methods in the application that can turn a stored attachment into something
+ * readable, and <b>both</b> ask {@link #isReadable}, which returns false for
+ * anything that is not CLEAN or has been deleted. Every list, gallery and download
+ * therefore inherits the rule without restating it — which is the point, because a
+ * second restatement is where "PENDING is probably fine" gets written, and a
+ * thumbnail is the most tempting place to write it: it looks like a preview rather
+ * than like the file.
  */
 @Service
 class AttachmentService {
@@ -141,20 +144,86 @@ class AttachmentService {
     /**
      * A short-lived signed URL, or nothing.
      *
-     * <p>The three refusals are the whole of §4B.4's visibility rule and they are
-     * asserted here rather than at the call sites: a deleted row has no object to
-     * point at, an INFECTED one had its object removed by the scanner, and a
-     * PENDING one has not been vouched for. Note that the PENDING case is the
-     * <em>common</em> one during the seconds after an upload — it is not an error
-     * state, and the client is expected to poll or reload.
+     * <p>The refusals are §4B.4's visibility rule and they live in
+     * {@link #isReadable} rather than at the call sites: a deleted row has no
+     * object to point at, an INFECTED one had its object removed by the scanner,
+     * and a PENDING one has not been vouched for. Note that the PENDING case is
+     * the <em>common</em> one during the seconds after an upload — it is not an
+     * error state, and the client is expected to poll or reload.
      */
     Optional<URI> signedUrlFor(TicketAttachment attachment) {
-        if (attachment.isDeleted() || !AttachmentScanTask.CLEAN.equals(attachment.getScanStatus())) {
+        if (!isReadable(attachment)) {
             return Optional.empty();
         }
         AttachmentStorageKey key = AttachmentStorageKey.parse(attachment.getStorageKey());
         return Optional.of(storage.signedDownloadUrl(
                 key, attachment.getFileName(), attachment.getMimeType(), properties.signedUrlTtl()));
+    }
+
+    /**
+     * The same, for C-026's reduced copy — or nothing, which is the ordinary case.
+     *
+     * <p>Most attachments have no thumbnail and never will: a PDF, a log, a
+     * spreadsheet, a WebP the JVM cannot decode, or an image already smaller than
+     * the target box. {@code thumbnail_key} is null for all of them and the client
+     * renders an icon or the full image.
+     *
+     * <p>Three things are worth noting about how narrow this is:
+     *
+     * <ul>
+     *   <li>It goes through the <b>same</b> {@link #isReadable} as the original.
+     *       A thumbnail is the file on screen, so a PENDING or INFECTED row must
+     *       not have one signed any more than it has its original signed — and
+     *       stating the rule twice is how the two would eventually disagree.</li>
+     *   <li>The key is <b>validated against the row's own ticket</b>. It came out
+     *       of the database, and a row whose {@code thumbnail_key} had been edited
+     *       to name another ticket's object would otherwise have that object
+     *       signed and served, which is a cross-ticket read through a column
+     *       nobody watches. {@link AttachmentStorageKey#belongsTo} answers false
+     *       rather than throwing, so a bad row costs its thumbnail and not the
+     *       whole listing.</li>
+     *   <li>The content type is the <b>constant</b> {@link ThumbnailGenerator#MEDIA_TYPE},
+     *       never {@code mimeType}. A thumbnail is always a PNG this application
+     *       encoded, whatever the original was, so the row has no say in what the
+     *       browser is told it is receiving.</li>
+     * </ul>
+     */
+    Optional<URI> thumbnailUrlFor(TicketAttachment attachment) {
+        String thumbnailKey = attachment.getThumbnailKey();
+        if (thumbnailKey == null || !isReadable(attachment)) {
+            return Optional.empty();
+        }
+        if (!AttachmentStorageKey.belongsTo(thumbnailKey, attachment.getTicketId())) {
+            return Optional.empty();
+        }
+        return Optional.of(storage.signedDownloadUrl(
+                AttachmentStorageKey.parse(thumbnailKey),
+                thumbnailFileName(attachment.getFileName()),
+                ThumbnailGenerator.MEDIA_TYPE,
+                properties.signedUrlTtl()));
+    }
+
+    /** §4B.4's "the file becomes visible only after the scan passes", in one place. */
+    private static boolean isReadable(TicketAttachment attachment) {
+        return !attachment.isDeleted() && AttachmentScanTask.CLEAN.equals(attachment.getScanStatus());
+    }
+
+    /**
+     * What a saved thumbnail is called.
+     *
+     * <p>The original's stem with a {@code .png} extension, because the bytes
+     * <em>are</em> a PNG whatever the source was — handing back
+     * {@code screenshot.jpg} for PNG bytes would put a file on someone's disk
+     * that no viewer opens by double-click. The stem is kept so the file is still
+     * recognisable as belonging to the attachment it came from.
+     */
+    private static String thumbnailFileName(String fileName) {
+        String name = fileName == null ? "" : fileName.trim();
+        if (name.isEmpty()) {
+            return "thumbnail.png";
+        }
+        int dot = name.lastIndexOf('.');
+        return (dot <= 0 ? name : name.substring(0, dot)) + ".png";
     }
 
     /**

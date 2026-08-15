@@ -7,12 +7,14 @@ import {
   ATTACHMENT_DEFAULT_LIMITS,
   type AttachmentLimits,
   type AttachmentRejection,
+  attachmentPreviewSource,
   filesFromDataTransfer,
   formatFileSize,
   isPreviewableImage,
   renameClipboardFiles,
   selectAttachments,
 } from './attachments'
+import { ImageLightbox, type LightboxImage } from './image-lightbox'
 import { useAttachmentPaste } from './use-attachment-paste'
 
 /**
@@ -84,12 +86,25 @@ export interface AttachmentItem {
   /** Shown under the row when `status` is `failed`. */
   error?: string
   /**
-   * Signed URL, or an object URL for a file not yet uploaded.
+   * Signed URL for the small reduction, or an object URL for a file not yet
+   * uploaded.
    *
    * Never rendered while `status` is `scanning` — §4B.4 is explicit that a file
    * is not visible until the scan passes, and a thumbnail is visibility.
+   *
+   * **Null does not mean "not an image."** The server stores a reduction only
+   * where one is worth storing — see `attachmentPreviewSource`, which is what a
+   * caller should use rather than reading this field directly.
    */
   thumbnailUrl?: string | null
+  /**
+   * Signed URL for the file itself — C-026.
+   *
+   * Two jobs: it is what the lightbox opens, and it is the preview fallback for
+   * an image the server chose not to reduce. Null until the scan passes, on the
+   * same terms as `thumbnailUrl`, because it is the same rule.
+   */
+  downloadUrl?: string | null
 }
 
 export interface AttachmentPickerProps {
@@ -110,6 +125,38 @@ export interface AttachmentPickerProps {
    * advertising itself as one.
    */
   compact?: boolean
+  /**
+   * Render the attached-files list, or leave it to the caller — C-026.
+   *
+   * `items` must still be passed either way, and that is the point of the prop
+   * existing at all: validation depends on it. The running totals that stop
+   * twelve individually-legal 5 MB files from walking past a 50 MB ticket cap are
+   * computed from `items`, so a caller who wanted its own presentation and
+   * passed `items={[]}` would silently disable every per-ticket limit. This says
+   * "you draw them" rather than "there are none".
+   *
+   * S-20's detail page is the reason: §4B.4 wants one strip of thumbnails there,
+   * not a strip and a list of the same files underneath it. `AttachmentGallery`
+   * draws that strip from the identical `AttachmentItem[]`.
+   */
+  showItems?: boolean
+  /**
+   * Clicking an image opens it full-screen — C-026.
+   *
+   * On by default, because the surface that needs it most is the one with no
+   * other way to check: **the create form**. A file staged there has not been
+   * uploaded — `TicketCreateRequest` carries no `attachmentIds`, so nothing
+   * leaves the browser until the 201 — and a 28px preview is not enough to tell
+   * two screenshots of the same screen apart. Pasting the wrong capture and
+   * finding out after the ticket exists is the failure this closes.
+   *
+   * It works for staged files precisely because `useTicketAttachments` gives a
+   * local blob its object URL as both `thumbnailUrl` and `downloadUrl`: the
+   * viewer opens the local copy, which is the only copy there is.
+   *
+   * Ignored when `showItems` is false — there are no rows to click.
+   */
+  enablePreview?: boolean
   disabled?: boolean
   /**
    * Clipboard paste — C-024. On unless a surface has a reason to opt out.
@@ -151,6 +198,28 @@ function statusIcon(item: AttachmentItem) {
   }
 }
 
+/**
+ * What to draw in the row's 28px square, or nothing — C-026.
+ *
+ * `ready` is checked here rather than at each call site, so the scan rule is
+ * asked once: §4B.4's "the file becomes visible only after the scan passes"
+ * covers a 28px preview exactly as it covers a full-size one.
+ */
+function previewOf(item: AttachmentItem): string | undefined {
+  return item.status === 'ready' ? attachmentPreviewSource(item) : undefined
+}
+
+/**
+ * Whether this row opens in the viewer — C-026.
+ *
+ * An image, scanned, with a full-size source to open. A document is not
+ * openable *here* and is handed to the browser as a link instead; the viewer is
+ * for images, and putting a PDF in it would render a broken `<img>`.
+ */
+function openable(item: AttachmentItem, enablePreview: boolean): boolean {
+  return enablePreview && previewOf(item) !== undefined && item.downloadUrl != null
+}
+
 /** Screen-reader text for the status icon, which is otherwise a decorative glyph. */
 function statusLabel(item: AttachmentItem): string {
   switch (item.status) {
@@ -173,6 +242,8 @@ export const AttachmentPicker = React.forwardRef<AttachmentPickerHandle, Attachm
     onReject,
     limits = ATTACHMENT_DEFAULT_LIMITS,
     compact = false,
+    showItems = true,
+    enablePreview = true,
     disabled = false,
     enablePaste = true,
     className,
@@ -194,6 +265,32 @@ export const AttachmentPicker = React.forwardRef<AttachmentPickerHandle, Attachm
    * has to say that something happened, or `Ctrl+V` reads as ignored.
    */
   const [pasteNotice, setPasteNotice] = React.useState<string | null>(null)
+
+  /** C-026 · which image the viewer is on, or `null` for closed. */
+  const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null)
+
+  /**
+   * The images the viewer can page through.
+   *
+   * `ready` only — a file still uploading or still being scanned has nothing to
+   * show, and §4B.4 is explicit that it must not. Built over `items` rather than
+   * over what is rendered, but the picker renders all of them, so the two agree.
+   */
+  const lightboxImages = React.useMemo<LightboxImage[]>(
+    () =>
+      items
+        .filter((item) => item.status === 'ready' && item.downloadUrl && isPreviewableImage(item.contentType))
+        .map((item) => ({ name: item.name, src: item.downloadUrl as string, downloadUrl: item.downloadUrl })),
+    [items],
+  )
+
+  const openPreview = React.useCallback(
+    (item: AttachmentItem) => {
+      const index = lightboxImages.findIndex((image) => image.src === item.downloadUrl)
+      if (index >= 0) setLightboxIndex(index)
+    },
+    [lightboxImages],
+  )
 
   // A drag over a child element fires `dragleave` on the parent. Counting
   // enter/leave pairs is the only way to keep the highlight from flickering off
@@ -361,7 +458,7 @@ export const AttachmentPicker = React.forwardRef<AttachmentPickerHandle, Attachm
         </div>
       )}
 
-      {items.length > 0 && (
+      {showItems && items.length > 0 && (
         <ul className="flex flex-col gap-1" aria-label="Attached files">
           {items.map((item) => (
             <li
@@ -375,9 +472,30 @@ export const AttachmentPicker = React.forwardRef<AttachmentPickerHandle, Attachm
                 A thumbnail is only rendered once the scan has passed. §4B.4:
                 the file "becomes visible only after the scan passes", and
                 showing the image is precisely making it visible.
+
+                `attachmentPreviewSource` rather than `thumbnailUrl` directly —
+                a null reduction does not mean "not an image", and on the create
+                form there is never a reduction at all, because the file has not
+                been uploaded yet and the object URL is the only copy.
               */}
-              {item.status === 'ready' && item.thumbnailUrl && isPreviewableImage(item.contentType) ? (
-                <img src={item.thumbnailUrl} alt="" className="h-7 w-7 shrink-0 rounded object-cover" />
+              {previewOf(item) ? (
+                /*
+                  C-026 · a redundant click target, not the accessible one.
+
+                  28px is a fine thing to click with a mouse and a poor thing to
+                  find with a keyboard, so the name below carries the real
+                  control and this is `tabIndex={-1}` + `aria-hidden`. Two
+                  focusable controls per row would double the tab stops of a
+                  twenty-file list to say the same thing twice.
+                */
+                <span
+                  role={openable(item, enablePreview) ? 'presentation' : undefined}
+                  onClick={openable(item, enablePreview) ? () => openPreview(item) : undefined}
+                  aria-hidden={openable(item, enablePreview) || undefined}
+                  className={cn('shrink-0', openable(item, enablePreview) && 'cursor-pointer')}
+                >
+                  <img src={previewOf(item)} alt="" className="h-7 w-7 rounded object-cover" />
+                </span>
               ) : (
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-subtle">
                   {isPreviewableImage(item.contentType) ? (
@@ -389,9 +507,45 @@ export const AttachmentPicker = React.forwardRef<AttachmentPickerHandle, Attachm
               )}
 
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-content" title={item.name}>
-                  {item.name}
-                </span>
+                {/*
+                  C-026 · the name is the control, because it is the thing a user
+                  reads and therefore the thing they click. It is underlined on
+                  hover and focusable, which the bare 28px thumbnail was not —
+                  that thumbnail had no pointer cursor and no hover state, so
+                  nothing on the row said it could be opened at all.
+
+                  Two shapes, because the two actions genuinely differ: an image
+                  opens in the viewer, and anything else is handed to the browser.
+                  A document is an <a>, so middle-click and "open in new tab"
+                  behave the way a link is expected to.
+                */}
+                {openable(item, enablePreview) ? (
+                  <button
+                    type="button"
+                    onClick={() => openPreview(item)}
+                    className="block max-w-full truncate rounded text-left text-sm text-content underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    title={`Open ${item.name}`}
+                  >
+                    {item.name}
+                  </button>
+                ) : item.status === 'ready' && item.downloadUrl ? (
+                  <a
+                    href={item.downloadUrl}
+                    // A new tab, not a navigation: the create form holds unsaved
+                    // work and a PDF opening in place would discard the ticket
+                    // the user is halfway through writing.
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block max-w-full truncate rounded text-left text-sm text-content underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    title={`Open ${item.name}`}
+                  >
+                    {item.name}
+                  </a>
+                ) : (
+                  <span className="block truncate text-sm text-content" title={item.name}>
+                    {item.name}
+                  </span>
+                )}
                 <span className="block text-caption text-content-muted">
                   {formatFileSize(item.sizeBytes)}
                   {item.status === 'failed' && item.error ? ` · ${item.error}` : ''}
@@ -417,6 +571,16 @@ export const AttachmentPicker = React.forwardRef<AttachmentPickerHandle, Attachm
             </li>
           ))}
         </ul>
+      )}
+
+      {/*
+        C-026 · mounted only where a row could have opened it. On the detail page
+        the picker runs with `showItems={false}` and `AttachmentGallery` owns
+        both the tiles and the viewer — two lightboxes on one screen would fight
+        over focus the moment either opened.
+      */}
+      {showItems && enablePreview && (
+        <ImageLightbox images={lightboxImages} index={lightboxIndex} onIndexChange={setLightboxIndex} />
       )}
 
       {/*

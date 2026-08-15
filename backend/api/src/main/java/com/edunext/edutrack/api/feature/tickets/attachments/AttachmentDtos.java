@@ -42,7 +42,12 @@ final class AttachmentDtos {
             String scanStatus,
             @Schema(description = "Short-lived signed URL. Never a public bucket path.", nullable = true)
             URI downloadUrl,
-            @Schema(description = "C-026. Absent until thumbnails are generated.", nullable = true)
+            @Schema(description = """
+                    C-026 · a short-lived signed URL for a small PNG reduction, on the same terms as \
+                    `downloadUrl`. Null whenever there is no reduction to serve — a document, a video, \
+                    an image the server cannot decode, or one already small enough that the original \
+                    is the thumbnail. A client must render an image without one from `downloadUrl` \
+                    rather than treat it as missing.""", nullable = true)
             URI thumbnailUrl,
             boolean isClientVisible,
             boolean isDeleted,
@@ -51,7 +56,13 @@ final class AttachmentDtos {
             Integer cycleNo,
             Instant createdAt) {
 
-        static AttachmentDto of(TicketAttachment row, URI downloadUrl) {
+        /**
+         * @param downloadUrl  from {@link AttachmentService#signedUrlFor}, or null
+         * @param thumbnailUrl from {@link AttachmentService#thumbnailUrlFor}, or
+         *                     null — which is the ordinary case for most of what
+         *                     gets attached, not an error
+         */
+        static AttachmentDto of(TicketAttachment row, URI downloadUrl, URI thumbnailUrl) {
             return new AttachmentDto(
                     row.getId(),
                     row.getFileName(),
@@ -59,10 +70,9 @@ final class AttachmentDtos {
                     row.getSizeBytes(),
                     row.getScanStatus(),
                     downloadUrl,
-                    // C-026 generates thumbnails; the column exists and is always
-                    // null today. Rendered as null rather than omitted so the
-                    // field's absence never means "this build has no thumbnails".
-                    null,
+                    // Rendered as null rather than omitted, so the field's absence
+                    // never reads as "this build has no thumbnails".
+                    thumbnailUrl,
                     row.isClientVisible(),
                     row.isDeleted(),
                     row.getUploadedBy(),

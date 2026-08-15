@@ -1,10 +1,11 @@
 # feature/tickets/attachments
 
-**Owner: Stream C · Divyansh** — C-025, blueprint §4B.4.
+**Owner: Stream C · Divyansh** — C-025 and C-026, blueprint §4B.4.
 
 The security half of attachments: extension allow-list **and** MIME sniffing, EXIF
 stripped, AV scan before the file becomes visible, `tickets/{id}/{uuid}` keys,
-short-lived signed URLs, never a public bucket.
+short-lived signed URLs, never a public bucket — plus C-026's thumbnails, which
+are served on exactly those same terms.
 
 ## What is here
 
@@ -14,20 +15,23 @@ short-lived signed URLs, never a public bucket.
 | `AttachmentSniffer` | What the bytes are. Signatures, then ZIP/OLE2 containers opened, then the text residual. **Never sees a file name** |
 | `AttachmentTypePolicy` | Reconciles the two opinions. Disagreement is 415 |
 | `ImageMetadataStripper` | Drops EXIF/XMP/IPTC from JPEG, PNG and WebP at the container level — no re-encode |
-| `AttachmentStorageKey` | `tickets/{ticket_id}/{uuid}`, minted and parsed. The user's filename never enters it |
+| `AttachmentStorageKey` | `tickets/{ticket_id}/{uuid}`, plus C-026's derived `-thumb`. The user's filename never enters it |
 | `AttachmentStorage` / `S3AttachmentStorage` | The narrow port, and MinIO/S3 behind it. No method can produce a public address |
 | `AttachmentScanner` / `ClamAvScanner` | clamd over INSTREAM. Three verdicts, and no failure is ever CLEAN |
 | `AttachmentScanTask` | The scan that runs after the response, on this feature's own bounded pool |
+| `ThumbnailGenerator` | **C-026.** The only image decoder in this feature. Bytes in, a small PNG out — or nothing |
+| `ThumbnailTask` | **C-026.** Stores the reduction, after the CLEAN verdict and in its own transaction |
 | `AttachmentService` | The pipeline, and the one place a signed URL can be issued |
 | `AttachmentController` | `POST` and `GET /api/v1/tickets/{ticketId}/attachments` |
 | `AttachmentProperties`, `AttachmentStorageProperties`, the two `…Config` classes | Knobs, beans, and the startup guard on `fail-open` |
 
-**No contract change and no migration.** `uploadAttachment`, `listAttachments`,
-`Attachment.scanStatus` and the nullable `downloadUrl` were already specified
-exactly as §4B.4 describes, and `ticket_attachments` — `storage_key`,
-`mime_type`, `scan_status` defaulting to `PENDING` — was created by Stream A's
-baseline with C-025 named in its comments. This task is the code those two were
-written for.
+**No contract change and no migration, for either task.** `uploadAttachment`,
+`listAttachments`, `Attachment.scanStatus`, the nullable `downloadUrl` **and the
+nullable `thumbnailUrl`** were all specified exactly as §4B.4 describes, and
+`ticket_attachments` — `storage_key`, `mime_type`, `scan_status` defaulting to
+`PENDING`, **`thumbnail_key`** — was created by Stream A's baseline with C-025
+and C-026 named in its comments. These tasks are the code those two were written
+for.
 
 ## The five decisions worth knowing
 
@@ -126,6 +130,110 @@ a row edited in the database cannot change what the browser is told to do with
 the bytes. That is what makes an uploaded `.txt` full of markup harmless even if
 every check above it had failed.
 
+## C-026 · thumbnails, and the decoder C-025 refused to run
+
+### The refusal was right, and three things had to change before this was allowed
+
+`ImageMetadataStripper` argues at length against `ImageIO.read`, and none of that
+argument is retracted. EXIF stripping runs on the **request** thread over bytes
+that have been sniffed and nothing more, on a surface all six roles reach — so it
+walks a chunk table and copies byte ranges, and a malformed image cannot become
+worse than a rejected upload.
+
+A thumbnail cannot avoid decoding. So rather than arguing the risk away, the
+three things that made a decoder unacceptable there are removed:
+
+1. **Not on a request thread.** It runs on the existing scan pool, after the
+   response has gone. A decoder that hangs costs one of two background threads,
+   not the caller's connection.
+2. **Not before the scan.** `ThumbnailTask` runs only on the CLEAN branch, so
+   anything reaching the decoder has already passed the extension allow-list, the
+   sniffer, the metadata strip *and* clamd.
+3. **The bomb is checked before it is opened.** Dimensions come from the header
+   via `ImageReader#getWidth`, which decodes nothing. A 10 MB PNG may legitimately
+   declare 40,000 × 40,000 — 1.6 **billion** pixels and several gigabytes of heap
+   — and §4B.4's file-size cap cannot see it, because the bomb is small until it
+   is opened. Over `max-source-pixels`, nothing is allocated at all. Under it, the
+   read is **subsampled**, so even a real 50 MP photograph never materialises at
+   full size.
+
+`ThumbnailGeneratorTest` covers all three; the bomb test carries a `@Timeout`
+because a version that decoded first would hang rather than fail an assertion.
+
+> **Not mutation-checked, deliberately.** Every other guard in this feature was
+> verified by breaking it and watching a test go red. The pixel ceiling was not:
+> the mutation *is* the attack, and reproducing a multi-gigabyte allocation on a
+> 4-core laptop to prove it is stopped is not a trade worth making. The timeout
+> is what stands in for it.
+
+### After the verdict, and in its own transaction
+
+The ordering is load-bearing and is pinned by
+`theVerdictIsCommittedBeforeAThumbnailIsEvenAttempted`, which verifies **commit**
+rather than merely `save` — a version that generated inside the scan's
+transaction would still save first and would still pass a weaker assertion.
+
+If the two shared a transaction, a decoder that threw on a truncated GIF would
+roll a CLEAN verdict back to PENDING, and the file would be permanently
+unreadable because its *preview* failed — intermittently, since it would depend
+on the image. Moving the generation inside `resolve` turns exactly those two
+tests red and nothing else; that was checked.
+
+### PNG out, whatever went in
+
+One output type, so nothing has to store what a thumbnail is: the presigner is
+told `image/png` from a constant and there is no second MIME column to drift out
+of step with the bytes. PNG rather than JPEG because §4B.4's driving case — and
+C-024's — is a pasted screenshot, which is a picture of *text*, exactly what
+JPEG's chroma subsampling smears. Alpha is kept only where the source had it,
+since a 24-bit PNG is appreciably smaller than a 32-bit one.
+
+### No thumbnail is an ordinary outcome, not a failure
+
+`thumbnail_key` stays null, `thumbnailUrl` renders null, and the client falls
+back to the full image. Five reasons, none of them an error:
+
+- **not an image at all** — a PDF, a spreadsheet, a log, an mp4;
+- **WebP** — it is on §4B.4's allow-list and the JDK ships no reader for it.
+  Adding one means a native library on the server for a format that arrives
+  rarely, so the client renders the original instead;
+- **already small enough** — storing a reduction that is not a reduction doubles
+  the object count for nothing;
+- **undecodable** — truncated, malformed, or over the pixel ceiling;
+- **switched off** — `edutrack.attachments.thumbnail.enabled`, an operator's
+  escape hatch for a broken `ImageIO` rather than a feature flag.
+
+The client rule that matters is `attachmentPreviewSource` in
+`components/ui/attachments.ts`: **a null `thumbnailUrl` never means "not an
+image"**, and a UI that treated it that way would show a file icon for a
+perfectly good screenshot in four of those five cases.
+
+### The key is derived, not minted
+
+`tickets/{id}/{uuid}-thumb` — the original's key with one suffix, so there is one
+random component per attachment rather than two. That makes `thumbnail()` total:
+every attachment has a thumbnail key whether or not an object sits under it, so
+nothing stores a second key to find the first and C-028's delete removes both
+from the one column it already reads. It is idempotent, so no path can build
+`-thumb-thumb`.
+
+Holding the original's key hands you the thumbnail's, and that costs nothing: a
+caller with the original key can already reach the larger file, and neither key
+is an address on its own.
+
+### Both signers ask the same question
+
+`thumbnailUrlFor` goes through the **same** `isReadable` as `signedUrlFor`. A
+thumbnail is the file on screen — it is the most tempting place in the codebase
+to write "PENDING is probably fine", because it looks like a preview rather than
+like the file. It also re-validates the stored `thumbnail_key` against the row's
+own ticket, since a row edited to name another ticket's object would otherwise
+have that object signed and served.
+
+**No new route.** A `GET …/thumbnail` endpoint would have to re-derive the scope
+check, the scan-status check and the expiry — three chances to get §4B.4 wrong,
+for a redirect.
+
 ## Two traps that cost time here
 
 **The scan must be queued after commit, not after `saveAndFlush`.** The upload
@@ -141,12 +249,13 @@ would open its own connection and the save would autocommit — right up to the
 first time two writes needed to land together. The boundary is a
 `TransactionTemplate` instead, where no call site can bypass it.
 
-## What C-025 does *not* do
+## What is still *not* done here
 
-- **Thumbnails (C-026).** `thumbnail_key` stays null and the DTO renders
-  `thumbnailUrl: null` rather than omitting it.
 - **Delete (C-028).** No `DELETE` route. It needs a 15-minute window, an uploader
   check and a tombstone, and one that did none of that would be worse than none.
+  When it lands it must delete **both** objects — `AttachmentStorageKey.thumbnail()`
+  derives the second from the column it already reads, so this is one extra line
+  and not a schema question.
 - **Configurable limits (C-027).** §4B.4's three caps are enforced — a pipeline
   that stores an unbounded upload before asking how big it is has already lost —
   but from `edutrack.attachments.*`. C-027 is a settings source, not a rewrite.
@@ -158,6 +267,15 @@ first time two writes needed to land together. The boundary is a
   `TicketAttachmentRepository.findByScanStatus` for it, and the migration calls it
   "the AV worker's work queue". **That worker lives in `worker/`, which is Stream
   D's**, so it is flagged rather than written.
+- **A backfill for attachments uploaded before C-026.** Thumbnails are built on
+  the CLEAN branch of the scan, and an already-CLEAN row never takes that branch
+  again — so every image attached before this landed keeps `thumbnail_key` null
+  for ever. **Nothing is broken by that**: `attachmentPreviewSource` falls back to
+  the full image, which is exactly the WebP path, so an old ticket's strip renders
+  correctly and merely heavily. It is worth a one-off pass eventually and is not
+  worth a migration now — the corpus is nine days old. `ThumbnailTask.generateFor`
+  is already idempotent and re-entrant, so a backfill is a loop over
+  `findByScanStatus("CLEAN")` and needs no new code here.
 
 ## Open for other streams
 

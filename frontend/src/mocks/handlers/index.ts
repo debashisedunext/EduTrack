@@ -1,4 +1,5 @@
 import { delay, http } from 'msw';
+import { fileHandlers } from './files';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
 import { slaHandlers } from './sla';
@@ -30,6 +31,12 @@ export const handlers = [
   ...ticketHandlers,
   ...ribbonHandlers,
   ...restHandlers,
+
+  // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the
+  // `/api/v1` prefix, because a signed URL points at MinIO and not at the API —
+  // which is also why the 501 catch-all below never covered it, and why every
+  // attachment URL the mock has minted since C-023 had nothing behind it.
+  ...fileHandlers,
 
   /**
    * Anything under /api/v1 with no handler.
