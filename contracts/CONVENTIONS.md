@@ -117,6 +117,7 @@ each other:**
 | `PATCH /tickets/{id}/priority` | Reason is mandatory and every change is logged, so concurrent changes are visible rather than lost |
 | `PATCH .../comments/{id}` | Author-only, five-minute window — nobody else can be editing it |
 | `PATCH /projects/{id}/members/{userId}` | Two fields on one membership row. The tag would have to come from `listProjectMembers`, a collection with no `ETag` of its own — so honouring it would mean minting a per-member tag on a read nothing else preconditions, to guard a race whose loser typed a number a moment later and meant it |
+| `PATCH /clients/bulk-status` | Idempotent setter, like the single-client route it batches. A precondition over *n* rows has no single tag to carry anyway: one `If-Match` cannot speak for two hundred clients, and per-row tags in the body would fail the whole batch because somebody else touched one unrelated row |
 
 `ETag` is on every detail read plus the three that are polled or expensive:
 `/import-batches/{batchId}` (polled every couple of seconds while a job runs),

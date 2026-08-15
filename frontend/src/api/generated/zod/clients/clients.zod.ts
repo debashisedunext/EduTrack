@@ -50,6 +50,14 @@ import * as zod from 'zod';
 
 
 /**
+ * Ordered by name, then id — a keyset over `name` alone skips rows wherever
+two clients share one, and after a bulk import they do.
+
+**Reads are open to all six roles, writes are Admin.** The client
+dropdown on the ticket create form (§4B.2) is this operation, and every
+role may raise a ticket; a role that could not list clients could not
+raise one against a client at all.
+
  * @summary List clients
  */
 export const listClientsQueryLimitDefault = 50;
@@ -62,8 +70,13 @@ export const listClientsQueryParams = zod.object({
   "limit": zod.number().min(1).max(listClientsQueryLimitMax).default(listClientsQueryLimitDefault),
   "q": zod.string().optional().describe('Name, code or domain.'),
   "isActive": zod.boolean().optional(),
-  "projectId": zod.number().optional()
+  "projectId": zod.number().optional(),
+  "supportPlan": zod.string().optional().describe('S-32 filter. Matched case-insensitively against the stored plan.'),
+  "accountManagerId": zod.number().optional().describe('S-32 filter.')
 })
+
+export const listClientsResponseDataItemProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
 
 export const listClientsResponse = zod.object({
   "data": zod.array(zod.object({
@@ -92,7 +105,14 @@ export const listClientsResponse = zod.object({
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
   "portalAccess": zod.boolean().optional()
-}).optional()
+}).optional(),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(listClientsResponseDataItemProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('The projects this client is mapped to, from `client_projects` —\nS-32\'s Projects column and the source of its project filter.\nEmpty rather than absent for a client mapped to none.\n'),
+  "lastTicketDate": zod.string().datetime({}).nullish().describe('When this client last had a ticket raised. Null for a client\nwith none — a new one, or one whose relationship never started.\nRead from the ticket rollup, never a per-row `COUNT(\*)`.\n')
 }))),
   "meta": zod.object({
   "nextCursor": zod.string().nullish(),
@@ -127,6 +147,76 @@ export const createClientBody = zod.object({
 })
 
 /**
+ * S-32's bulk action. One request rather than one per selected row: fifty
+sequential `PATCH /clients/{clientId}/status` calls have fifty ways to
+half-succeed, and no way to report that they did.
+
+Applied in one transaction. An id that does not exist fails the whole
+request with 404 rather than being skipped silently — a caller who
+selected fifty rows and changed forty-nine has not been told which one
+got away.
+
+Deactivating here carries the same rule as the single-client route: new
+tickets are blocked, **historical ones are never hidden**.
+
+ * @summary Activate or deactivate several clients at once (S-32)
+ */
+export const setClientStatusBulkBodyClientIdsMax = 200;
+
+
+
+export const setClientStatusBulkBody = zod.object({
+  "clientIds": zod.array(zod.number()).min(1).max(setClientStatusBulkBodyClientIdsMax).describe('Bounded at 200 — the same ceiling `Limit` puts on a page, so the\nselection cannot exceed what one page could have offered. An\nunbounded id list is an unbounded `IN (…)`.\n'),
+  "isActive": zod.boolean()
+})
+
+export const setClientStatusBulkResponseDataItemProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
+export const setClientStatusBulkResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "clientCode": zod.string().optional(),
+  "name": zod.string().optional()
+}).and(zod.object({
+  "domain": zod.string().nullish(),
+  "accountManager": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "supportPlan": zod.string().nullish(),
+  "slaPolicyId": zod.number().nullish(),
+  "timezone": zod.string().nullish(),
+  "isActive": zod.boolean().optional(),
+  "openTicketCount": zod.number().optional(),
+  "primaryContact": zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "email": zod.string().email().optional(),
+  "phone": zod.string().nullish(),
+  "isPrimary": zod.boolean().optional(),
+  "notificationOptIn": zod.boolean().optional(),
+  "portalAccess": zod.boolean().optional()
+}).optional(),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(setClientStatusBulkResponseDataItemProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('The projects this client is mapped to, from `client_projects` —\nS-32\'s Projects column and the source of its project filter.\nEmpty rather than absent for a client mapped to none.\n'),
+  "lastTicketDate": zod.string().datetime({}).nullish().describe('When this client last had a ticket raised. Null for a client\nwith none — a new one, or one whose relationship never started.\nRead from the ticket rollup, never a per-row `COUNT(\*)`.\n')
+}))),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+}).optional()
+})
+
+/**
  * @summary Update a client
  */
 export const updateClientParams = zod.object({
@@ -155,6 +245,9 @@ export const updateClientBody = zod.object({
   "projectIds": zod.array(zod.number()).optional()
 })
 
+export const updateClientResponseDataProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
 export const updateClientResponse = zod.object({
   "data": zod.object({
   "id": zod.number().optional(),
@@ -182,7 +275,14 @@ export const updateClientResponse = zod.object({
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
   "portalAccess": zod.boolean().optional()
-}).optional()
+}).optional(),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(updateClientResponseDataProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('The projects this client is mapped to, from `client_projects` —\nS-32\'s Projects column and the source of its project filter.\nEmpty rather than absent for a client mapped to none.\n'),
+  "lastTicketDate": zod.string().datetime({}).nullish().describe('When this client last had a ticket raised. Null for a client\nwith none — a new one, or one whose relationship never started.\nRead from the ticket rollup, never a per-row `COUNT(\*)`.\n')
 }))
 })
 
@@ -200,6 +300,9 @@ export const setClientStatusParams = zod.object({
 export const setClientStatusBody = zod.object({
   "isActive": zod.boolean()
 })
+
+export const setClientStatusResponseDataProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
 
 export const setClientStatusResponse = zod.object({
   "data": zod.object({
@@ -228,7 +331,14 @@ export const setClientStatusResponse = zod.object({
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
   "portalAccess": zod.boolean().optional()
-}).optional()
+}).optional(),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(setClientStatusResponseDataProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('The projects this client is mapped to, from `client_projects` —\nS-32\'s Projects column and the source of its project filter.\nEmpty rather than absent for a client mapped to none.\n'),
+  "lastTicketDate": zod.string().datetime({}).nullish().describe('When this client last had a ticket raised. Null for a client\nwith none — a new one, or one whose relationship never started.\nRead from the ticket rollup, never a per-row `COUNT(\*)`.\n')
 }))
 })
 
@@ -300,6 +410,7 @@ export const getClient360QueryParams = zod.object({
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']).optional()
 })
 
+export const getClient360ResponseDataClientProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 export const getClient360ResponseDataTicketsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const getClient360ResponseDataTicketsItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 export const getClient360ResponseDataTicketsItemProjectAutoAssignRuleDefault = "MANUAL";export const getClient360ResponseDataTicketsItemScreenNameMax = 120;
@@ -343,7 +454,14 @@ export const getClient360Response = zod.object({
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
   "portalAccess": zod.boolean().optional()
-}).optional()
+}).optional(),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(getClient360ResponseDataClientProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('The projects this client is mapped to, from `client_projects` —\nS-32\'s Projects column and the source of its project filter.\nEmpty rather than absent for a client mapped to none.\n'),
+  "lastTicketDate": zod.string().datetime({}).nullish().describe('When this client last had a ticket raised. Null for a client\nwith none — a new one, or one whose relationship never started.\nRead from the ticket rollup, never a per-row `COUNT(\*)`.\n')
 })).optional(),
   "tickets": zod.array(zod.object({
   "ticketId": zod.string().regex(getClient360ResponseDataTicketsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),

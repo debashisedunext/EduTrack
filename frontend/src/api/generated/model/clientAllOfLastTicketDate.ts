@@ -46,31 +46,11 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { CursorParameter } from './cursorParameter';
-import type { LimitParameter } from './limitParameter';
 
-export type ListClientsParams = {
 /**
- * Opaque cursor from `meta.nextCursor`. Never an offset.
+ * When this client last had a ticket raised. Null for a client
+with none — a new one, or one whose relationship never started.
+Read from the ticket rollup, never a per-row `COUNT(*)`.
+
  */
-cursor?: CursorParameter;
-/**
- * @minimum 1
- * @maximum 200
- */
-limit?: LimitParameter;
-/**
- * Name, code or domain.
- */
-q?: string;
-isActive?: boolean;
-projectId?: number;
-/**
- * S-32 filter. Matched case-insensitively against the stored plan.
- */
-supportPlan?: string;
-/**
- * S-32 filter.
- */
-accountManagerId?: number;
-};
+export type ClientAllOfLastTicketDate = string | null;

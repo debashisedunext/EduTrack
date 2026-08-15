@@ -67,6 +67,7 @@ import type {
 
 import type {
   Client360Response,
+  ClientBulkStatusRequest,
   ClientListResponse,
   ClientResponse,
   ClientWriteRequest,
@@ -74,6 +75,7 @@ import type {
   ContactListResponse,
   ContactResponse,
   ContactWriteRequest,
+  ForbiddenResponse,
   GetClient360Params,
   ListClientsParams,
   NotFoundResponse,
@@ -89,6 +91,14 @@ import { http } from '../../http';
 
 
 /**
+ * Ordered by name, then id — a keyset over `name` alone skips rows wherever
+two clients share one, and after a bulk import they do.
+
+**Reads are open to all six roles, writes are Admin.** The client
+dropdown on the ticket create form (§4B.2) is this operation, and every
+role may raise a ticket; a role that could not list clients could not
+raise one against a client at all.
+
  * @summary List clients
  */
 export const listClients = (
@@ -242,6 +252,81 @@ export const useCreateClient = <TError = ConflictResponse,
       > => {
 
       const mutationOptions = getCreateClientMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * S-32's bulk action. One request rather than one per selected row: fifty
+sequential `PATCH /clients/{clientId}/status` calls have fifty ways to
+half-succeed, and no way to report that they did.
+
+Applied in one transaction. An id that does not exist fails the whole
+request with 404 rather than being skipped silently — a caller who
+selected fifty rows and changed forty-nine has not been told which one
+got away.
+
+Deactivating here carries the same rule as the single-client route: new
+tickets are blocked, **historical ones are never hidden**.
+
+ * @summary Activate or deactivate several clients at once (S-32)
+ */
+export const setClientStatusBulk = (
+    clientBulkStatusRequest: ClientBulkStatusRequest,
+ ) => {
+      
+      
+      return http<ClientListResponse>(
+      {url: `/clients/bulk-status`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: clientBulkStatusRequest
+    },
+      );
+    }
+  
+
+
+export const getSetClientStatusBulkMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClientStatusBulk>>, TError,{data: ClientBulkStatusRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof setClientStatusBulk>>, TError,{data: ClientBulkStatusRequest}, TContext> => {
+
+const mutationKey = ['setClientStatusBulk'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setClientStatusBulk>>, {data: ClientBulkStatusRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setClientStatusBulk(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetClientStatusBulkMutationResult = NonNullable<Awaited<ReturnType<typeof setClientStatusBulk>>>
+    export type SetClientStatusBulkMutationBody = ClientBulkStatusRequest
+    export type SetClientStatusBulkMutationError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse
+
+    /**
+ * @summary Activate or deactivate several clients at once (S-32)
+ */
+export const useSetClientStatusBulk = <TError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClientStatusBulk>>, TError,{data: ClientBulkStatusRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setClientStatusBulk>>,
+        TError,
+        {data: ClientBulkStatusRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSetClientStatusBulkMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

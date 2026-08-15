@@ -11,6 +11,7 @@ import {
 } from './features/tickets/detail/entityLinks'
 import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
+import { ClientListPage } from './features/clients/ClientListPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
 import { ProjectListPage } from './features/masters/projects/ProjectListPage'
@@ -125,6 +126,9 @@ export default function App() {
                       <Button asChild variant="secondary">
                         <Link to="/masters/notification-templates">Notification templates</Link>
                       </Button>
+                      <Button asChild variant="secondary">
+                        <Link to="/masters/clients">Clients</Link>
+                      </Button>
                     </div>
                   }
                 />
@@ -183,6 +187,13 @@ export default function App() {
               path="/masters/notification-templates"
               element={<NotificationTemplateListPage />}
             />
+            {/* B-025 · S-32. Under `/masters` because it is a master screen,
+                while `/clients/:clientId` two routes up is the client 360 — a
+                different screen at a different path, kept apart by the prefix
+                the way `/masters/projects` and `/projects/:id` already are.
+                One route, not two: the create/edit form is B-026 and will be a
+                page of its own like S-33's four tabs demand. */}
+            <Route path="/masters/clients" element={<ClientListPage />} />
             <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />
           </Route>
