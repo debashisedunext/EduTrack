@@ -99,4 +99,77 @@ class AttachmentStorageKeyTest {
             assertThat(AttachmentStorageKey.belongsTo("nonsense", 347)).isFalse();
         }
     }
+
+    @Nested
+    @DisplayName("C-026 · the thumbnail is the same key with one suffix")
+    class Thumbnails {
+
+        @Test
+        void isTheOriginalKeyPlusThumb() {
+            AttachmentStorageKey original = AttachmentStorageKey.mint(347);
+
+            assertThat(original.thumbnail().toString()).isEqualTo(original + "-thumb");
+        }
+
+        @Test
+        void keepsTheOriginalsUuidRatherThanMintingASecondOne() {
+            // One random component per attachment. Deriving is what makes
+            // thumbnail() total — every attachment has a thumbnail key whether or
+            // not an object has been written under it — so nothing has to store a
+            // second key to find the first.
+            AttachmentStorageKey original = AttachmentStorageKey.mint(347);
+            AttachmentStorageKey thumbnail = original.thumbnail();
+
+            assertThat(thumbnail.objectId()).isEqualTo(original.objectId());
+            assertThat(thumbnail.ticketId()).isEqualTo(original.ticketId());
+            assertThat(thumbnail.variant()).isEqualTo(AttachmentStorageKey.Variant.THUMBNAIL);
+        }
+
+        @Test
+        void isIdempotentSoNothingCanBuildThumbThumb() {
+            AttachmentStorageKey thumbnail = AttachmentStorageKey.mint(347).thumbnail();
+
+            assertThat(thumbnail.thumbnail()).isEqualTo(thumbnail);
+            assertThat(thumbnail.thumbnail().toString()).doesNotContain("-thumb-thumb");
+        }
+
+        @Test
+        void roundTripsThroughParseCarryingItsVariant() {
+            AttachmentStorageKey thumbnail = AttachmentStorageKey.mint(347).thumbnail();
+
+            assertThat(AttachmentStorageKey.parse(thumbnail.toString())).isEqualTo(thumbnail);
+        }
+
+        @Test
+        void aMintedKeyIsTheOriginalAndNeverTheThumbnail() {
+            assertThat(AttachmentStorageKey.mint(347).variant()).isEqualTo(AttachmentStorageKey.Variant.ORIGINAL);
+        }
+
+        @Test
+        void belongsToStillAnswersForAThumbnailKey() {
+            // AttachmentService checks a thumbnail_key read out of the database
+            // against the row's own ticket before signing it. If belongsTo could
+            // not parse the suffixed form, that check would refuse every genuine
+            // thumbnail instead of the tampered one it is for.
+            String key = AttachmentStorageKey.mint(347).thumbnail().toString();
+
+            assertThat(AttachmentStorageKey.belongsTo(key, 347)).isTrue();
+            assertThat(AttachmentStorageKey.belongsTo(key, 348)).isFalse();
+        }
+
+        @Test
+        void andThumbIsTheOnlyThingThatMayFollowTheUuid() {
+            // Widening the shape is exactly where a path traversal gets back in.
+            String base = "tickets/347/" + java.util.UUID.randomUUID();
+
+            assertThatThrownBy(() -> AttachmentStorageKey.parse(base + "-thumbnail"))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> AttachmentStorageKey.parse(base + "-thumb-thumb"))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> AttachmentStorageKey.parse(base + "-thumb/../secrets"))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> AttachmentStorageKey.parse(base + "thumb"))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
 }

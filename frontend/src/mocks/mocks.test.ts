@@ -829,3 +829,70 @@ describe('ask status', () => {
     expect(open.data.find((r) => r.id === asked.data.id)?.note).toBeNull();
   });
 });
+
+/**
+ * C-026 · `/mock-files/*`, the stand-in object store.
+ *
+ * Every attachment URL the mock has minted since C-023 pointed at this path and
+ * nothing served it, so the gallery would have rendered broken images under
+ * `npm run dev` while working perfectly against the real backend. These pin the
+ * one thing that could regress silently: that the bytes are a *real* PNG. A
+ * hand-rolled encoder that emits a plausible-looking file every decoder rejects
+ * would look completely fine in review.
+ */
+describe('mock file storage', () => {
+  const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+  const fetchFile = async (path: string) => {
+    const response = await fetch(path);
+    return { response, bytes: new Uint8Array(await response.arrayBuffer()) };
+  };
+
+  it('serves real PNG bytes for a thumbnail', async () => {
+    const { response, bytes } = await fetchFile('/mock-files/1/thumb.png?sig=mock');
+
+    expect(response.headers.get('Content-Type')).toBe('image/png');
+    expect([...bytes.slice(0, 8)]).toEqual(PNG_SIGNATURE);
+    // IHDR is required to be first, and the reader that would reject a
+    // malformed one is the browser nobody is testing in here.
+    expect(String.fromCharCode(...bytes.slice(12, 16))).toBe('IHDR');
+    expect(String.fromCharCode(...bytes.slice(-8, -4))).toBe('IEND');
+  });
+
+  it('declares the dimensions it actually encoded', async () => {
+    // Width and height live in IHDR at a fixed offset. Getting these wrong is
+    // the failure mode of a stored-DEFLATE encoder: the header says one thing,
+    // the pixel data is another length, and the file decodes to garbage.
+    const { bytes } = await fetchFile('/mock-files/1/thumb.png?sig=mock');
+    const view = new DataView(bytes.buffer);
+
+    expect(view.getUint32(16)).toBe(320);
+    expect(view.getUint32(20)).toBe(320);
+    // 3 bytes per pixel plus one filter byte per row, so the payload cannot be
+    // smaller than this — a header-only file would pass every check above.
+    expect(bytes.length).toBeGreaterThan(320 * (320 * 3 + 1) * 0.5);
+  });
+
+  it('serves the full-size file larger than its thumbnail', async () => {
+    // So the strip visibly loads the reduction and the lightbox visibly loads
+    // the original, which is the whole point of storing two objects.
+    const thumbnail = await fetchFile('/mock-files/1/thumb.png?sig=mock');
+    const full = await fetchFile('/mock-files/1/screenshot.png?sig=mock');
+
+    expect(new DataView(full.bytes.buffer).getUint32(16)).toBeGreaterThan(
+      new DataView(thumbnail.bytes.buffer).getUint32(16),
+    );
+  });
+
+  it('gives different files different colours, and the same file the same one', async () => {
+    // Identical swatches would make a navigation or ordering bug in the
+    // lightbox invisible; a colour that changed per request would make a
+    // caching bug look like one.
+    const first = await fetchFile('/mock-files/1/thumb.png?sig=mock');
+    const again = await fetchFile('/mock-files/1/thumb.png?sig=mock');
+    const other = await fetchFile('/mock-files/2/thumb.png?sig=mock');
+
+    expect([...first.bytes]).toEqual([...again.bytes]);
+    expect([...first.bytes]).not.toEqual([...other.bytes]);
+  });
+});

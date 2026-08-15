@@ -102,6 +102,12 @@ handlers/tickets.ts   tickets, comments, attachments, effort, history
 handlers/ribbon.ts    handoff, rework, skip, journey, stage queue
 handlers/rest.ts      auth, users, projects, clients, imports, masters,
                       dashboard, reports, notifications, chat, webhooks, audit
+handlers/sla.ts       SLA policy matrix (C-012)
+handlers/files.ts     /mock-files/* — the stand-in object store (C-026).
+                      NOT under /api/v1, because a signed URL points at MinIO
+                      rather than at the API — so the 501 catch-all never
+                      covered it, and every attachment URL minted since C-023
+                      had nothing behind it. Serves real PNG bytes.
 handlers/index.ts     composition + the 501 catch-all (must stay last)
 browser.ts server.ts  the two entry points
 ```

@@ -251,6 +251,26 @@ edutrack:
     max-ticket-bytes: ${ATTACHMENT_MAX_TICKET_BYTES:52428800}  # 50 MB
     max-files: ${ATTACHMENT_MAX_FILES:20}
 
+    thumbnail:
+      # C-026. A small PNG reduction, built AFTER the virus scan says CLEAN and
+      # served through the same signed URL as the file itself.
+      #
+      # `enabled: false` is an operator's escape hatch for a broken ImageIO, not
+      # a feature flag — every thumbnailUrl simply comes back null, which the
+      # client already renders by falling back to the full image.
+      enabled: ${ATTACHMENT_THUMBNAILS_ENABLED:true}
+
+      # Longest side of the reduction. 320 covers a 160px gallery tile on a 2×
+      # display, which is the biggest place one is drawn.
+      max-edge: ${ATTACHMENT_THUMBNAIL_MAX_EDGE:320}
+
+      # The decompression-bomb ceiling, and the one value here with a security
+      # job. A 10 MB PNG may legitimately be 40000×40000 — 1.6 BILLION pixels and
+      # several GB of heap once decoded — and §4B.4's file-size cap cannot see it,
+      # because the bomb is small until it is opened. Dimensions are read from the
+      # header and checked before a single pixel is decoded.
+      max-source-pixels: ${ATTACHMENT_THUMBNAIL_MAX_SOURCE_PIXELS:50000000}
+
     scan:
       # clamd, spoken to over INSTREAM. Off by default, and off does NOT mean
       # "treat everything as clean": with no scanner every upload is stored,

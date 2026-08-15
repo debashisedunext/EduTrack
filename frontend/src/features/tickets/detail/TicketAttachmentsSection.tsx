@@ -1,9 +1,10 @@
 import type { Attachment } from '@/api/generated/model'
 import { AttachmentPicker } from '@/components/ui/attachment-picker'
+import { AttachmentGallery } from '../attachments/AttachmentGallery'
 import { useTicketAttachments } from '../attachments/useTicketAttachments'
 
 /**
- * S-20's attachment strip — C-023, blueprint §4B.4.
+ * S-20's attachment strip — C-023 and C-026, blueprint §4B.4.
  *
  * Sits directly under the description because that is where §7's S-20 wireframe
  * puts it (`📎 [thumb][thumb] error-log.txt   +2`), immediately above the tabs.
@@ -12,6 +13,15 @@ import { useTicketAttachments } from '../attachments/useTicketAttachments'
  * by cycle and stage, filterable by client-visible — and it stays a
  * `PendingSection` until then. This is the upload surface and the at-a-glance
  * strip, which is all §4B.4 asks the detail page for.
+ *
+ * ## One list, drawn once
+ *
+ * C-026 gave this page thumbnails, and the picker already drew a row per file.
+ * Rendering both would show every attachment twice, so `AttachmentGallery` draws
+ * them and the picker is told `showItems={false}` — while still being handed the
+ * full `items`, because its per-ticket size and count limits are computed from
+ * them. The picker keeps the drop zone, the clipboard paste and the validation;
+ * the gallery keeps the pixels.
  *
  * A separate component rather than JSX inside `TicketDetailPage` because the
  * page early-returns for its loading and 404 states before it renders anything,
@@ -59,17 +69,24 @@ export function TicketAttachmentsSection({
 
       {readOnly ? (
         items.length > 0 ? (
-          <AttachmentPicker items={items} onAdd={() => {}} disabled compact aria-label="Attachments" />
+          // A sealed cycle's files stay readable — that is the whole point of
+          // preserving a cycle — so the gallery renders and the lightbox opens.
+          // Only `onRemove` is withheld: nothing may be added to or taken out of
+          // a journey that has already closed.
+          <AttachmentGallery items={items} />
         ) : (
           <p className="text-caption text-content-muted">Nothing was attached in this cycle.</p>
         )
       ) : (
-        <AttachmentPicker
-          items={items}
-          onAdd={add}
-          onRemove={remove}
-          aria-label="Attachments"
-        />
+        <div className="flex flex-col gap-3">
+          <AttachmentGallery items={items} onRemove={remove} />
+          <AttachmentPicker
+            items={items}
+            onAdd={add}
+            showItems={false}
+            aria-label="Attachments"
+          />
+        </div>
       )}
     </section>
   )

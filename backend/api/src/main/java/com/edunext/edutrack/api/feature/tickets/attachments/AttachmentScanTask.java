@@ -49,6 +49,7 @@ class AttachmentScanTask {
     private final TicketAttachmentRepository attachments;
     private final ExecutorService executor;
     private final AttachmentProperties properties;
+    private final ThumbnailTask thumbnails;
     private final TransactionTemplate transaction;
 
     AttachmentScanTask(AttachmentScanner scanner,
@@ -56,12 +57,14 @@ class AttachmentScanTask {
                        TicketAttachmentRepository attachments,
                        ExecutorService attachmentScanExecutor,
                        AttachmentProperties properties,
+                       ThumbnailTask thumbnails,
                        PlatformTransactionManager transactionManager) {
         this.scanner = scanner;
         this.storage = storage;
         this.attachments = attachments;
         this.executor = attachmentScanExecutor;
         this.properties = properties;
+        this.thumbnails = thumbnails;
 
         // A TransactionTemplate rather than @Transactional on scanNow, and the
         // reason is the bug it avoids: the executor's lambda calls scanNow on
@@ -118,38 +121,60 @@ class AttachmentScanTask {
     }
 
     /**
-     * Scan one attachment and seal its verdict.
+     * Scan one attachment, seal its verdict, and — only if that verdict was CLEAN
+     * — give it C-026's thumbnail.
      *
      * <p>Package-private and directly callable, so a test can drive the whole
      * verdict path on the calling thread without an executor in the way.
+     *
+     * <p>The thumbnail is built <b>after</b> the scan's transaction has closed,
+     * not inside it. {@link ThumbnailTask} carries the argument: a decoder that
+     * throws must not be able to roll a CLEAN verdict back to PENDING and leave a
+     * perfectly good file permanently unreadable because its preview failed.
      */
     void scanNow(long attachmentId) {
-        transaction.executeWithoutResult(status -> resolve(attachmentId));
+        byte[] cleaned = transaction.execute(status -> resolve(attachmentId));
+        if (cleaned != null) {
+            thumbnails.generateFor(attachmentId, cleaned);
+        }
     }
 
-    private void resolve(long attachmentId) {
+    /**
+     * @return the stored bytes when this call sealed the row CLEAN, and
+     *         {@code null} in every other case — including a row that was already
+     *         CLEAN when it arrived, which has either been given a thumbnail
+     *         already or been found not to want one
+     */
+    private byte[] resolve(long attachmentId) {
         TicketAttachment attachment = attachments.findById(attachmentId).orElse(null);
         if (attachment == null || !PENDING.equals(attachment.getScanStatus())) {
             // Already resolved, or deleted inside C-028's window before the scan
             // got to it. Either way there is nothing to decide.
-            return;
+            return null;
         }
 
         AttachmentStorageKey key = AttachmentStorageKey.parse(attachment.getStorageKey());
         byte[] content = storage.read(key).orElse(null);
         if (content == null) {
             log.warn("attachment {} has no stored object at {}; leaving it PENDING", attachmentId, key);
-            return;
+            return null;
         }
 
         AttachmentScanner.Verdict verdict = scanner.scan(attachment.getFileName(), content);
         switch (verdict) {
-            case CLEAN -> seal(attachment, CLEAN);
+            case CLEAN -> {
+                seal(attachment, CLEAN);
+                return content;
+            }
             case INFECTED -> {
                 // The object goes immediately. The row stays, so the History
                 // timeline can still say a file was attached and removed — and
                 // so a second upload of the same file is recognisable rather
                 // than looking like a first.
+                //
+                // No thumbnail has been written at this point and none ever will
+                // be: C-026 runs only on the CLEAN branch, which is why cleaning
+                // up after an infected file is still the single delete it was.
                 storage.delete(key);
                 seal(attachment, INFECTED);
                 log.warn("attachment {} ({}) was infected; the stored object has been deleted",
@@ -162,12 +187,13 @@ class AttachmentScanTask {
                     log.warn("no scan verdict for attachment {}; fail-open is set, marking it CLEAN",
                             attachmentId);
                     seal(attachment, CLEAN);
-                    return;
+                    return content;
                 }
                 log.warn("no scan verdict for attachment {}; it stays PENDING and is not downloadable",
                         attachmentId);
             }
         }
+        return null;
     }
 
     private void seal(TicketAttachment attachment, String status) {

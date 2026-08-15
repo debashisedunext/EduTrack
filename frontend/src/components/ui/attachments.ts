@@ -120,6 +120,36 @@ export function isPreviewableImage(contentType: string | null | undefined): bool
 }
 
 /**
+ * What to put in an `<img>` for this attachment — C-026.
+ *
+ * **`thumbnailUrl` being null does not mean "this is not an image".** The server
+ * stores a reduction only where one is worth storing, and there are four ordinary
+ * reasons it does not: the file is a WebP (the JVM ships no reader for it), the
+ * image is already smaller than the thumbnail box so a copy would be pure waste,
+ * the source could not be decoded, or the operator has thumbnails switched off.
+ * A client that treated a null thumbnail as "no preview" would show a file icon
+ * for a perfectly good screenshot in all four.
+ *
+ * So the fallback is the full image. It is heavier — which is the entire reason
+ * thumbnails exist — and it is right, because the alternative is a strip of grey
+ * rectangles for a set of files the user can plainly see are pictures.
+ *
+ * Returns `undefined` where there is genuinely nothing to show: a document, or an
+ * image whose scan has not passed. §4B.4 is explicit that a file is not visible
+ * until it does, and a thumbnail is visibility — so the caller must have already
+ * decided the row is readable, which in practice means the server signed no URLs
+ * at all and both fields are null anyway.
+ */
+export function attachmentPreviewSource(attachment: {
+  contentType?: string | null
+  thumbnailUrl?: string | null
+  downloadUrl?: string | null
+}): string | undefined {
+  if (!isPreviewableImage(attachment.contentType)) return undefined
+  return attachment.thumbnailUrl ?? attachment.downloadUrl ?? undefined
+}
+
+/**
  * Human file size.
  *
  * Binary units with decimal labels ("KB" for 1024 bytes) because that is what

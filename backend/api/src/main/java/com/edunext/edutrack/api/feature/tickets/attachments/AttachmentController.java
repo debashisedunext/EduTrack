@@ -28,10 +28,16 @@ import java.util.List;
  * C-025 · {@code /tickets/{ticketId}/attachments}, per
  * {@code contracts/openapi.yaml}.
  *
- * <p>Two routes and no more. C-026's thumbnails and C-028's delete are separate
- * tasks with their own rules — a 15-minute window, a tombstone, an uploader
- * check — and adding a {@code DELETE} here that did none of that would be worse
- * than not having one.
+ * <p>Still two routes. <b>C-026 added none</b>, and that is the design rather
+ * than an omission: a thumbnail is served by the same short-lived signed URL
+ * mechanism as the file itself, so it arrives as another field on
+ * {@code listAttachments} instead of as a {@code GET …/thumbnail} endpoint that
+ * would have to re-derive the scope check, the scan-status check and the
+ * expiry — three chances to get §4B.4 wrong, for a redirect.
+ *
+ * <p>C-028's delete is a separate task with its own rules — a 15-minute window, a
+ * tombstone, an uploader check — and adding a {@code DELETE} here that did none of
+ * that would be worse than not having one.
  *
  * <p>The {@code /api/v1} prefix is spelled out because nothing declares it
  * globally; see {@code PlannedCloseDateController}'s note and the 404s that cost.
@@ -78,10 +84,12 @@ class AttachmentController {
         TicketAttachment saved = service.upload(caller, ticketId,
                 new AttachmentService.Upload(originalName(file), bytesOf(file), isClientVisible, commentId));
 
-        // Deliberately no download URL on the 201. The scan has not run, so there
-        // is nothing to sign — and minting one here "for convenience" would be
+        // Deliberately no download URL on the 201, and no thumbnail URL either.
+        // The scan has not run, so there is nothing to sign — and C-026 does not
+        // even build a reduction until the verdict is CLEAN, because a thumbnail
+        // is the file on screen. Minting either here "for convenience" would be
         // exactly the hole §4B.4's "before the file becomes visible" closes.
-        return new AttachmentDtos.AttachmentResponse(AttachmentDtos.AttachmentDto.of(saved, null));
+        return new AttachmentDtos.AttachmentResponse(AttachmentDtos.AttachmentDto.of(saved, null, null));
     }
 
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
@@ -94,7 +102,14 @@ class AttachmentController {
             @RequestParam(required = false) Boolean clientVisibleOnly) {
 
         List<AttachmentDtos.AttachmentDto> data = service.list(caller, ticketId, cycle, clientVisibleOnly).stream()
-                .map(row -> AttachmentDtos.AttachmentDto.of(row, service.signedUrlFor(row).orElse(null)))
+                .map(row -> AttachmentDtos.AttachmentDto.of(
+                        row,
+                        service.signedUrlFor(row).orElse(null),
+                        // C-026. Two presigns per row rather than one, and both
+                        // are local signature computations — no network call and
+                        // no object read — so a twenty-file gallery costs the
+                        // same one query it always did.
+                        service.thumbnailUrlFor(row).orElse(null)))
                 .toList();
 
         return new AttachmentDtos.AttachmentListResponse(data);

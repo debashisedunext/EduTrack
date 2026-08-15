@@ -1054,6 +1054,72 @@ function seedFiller(db: Db) {
     }
   });
 
+  /*
+   * C-026 · attachments, on tickets somebody can actually open.
+   *
+   * The table was `[]` from D-004 until now, which was fine while nothing
+   * rendered a file and stopped being fine the moment S-20 grew a gallery: every
+   * ticket showed an empty strip, so the feature was invisible unless a developer
+   * happened to attach something by hand. A fixture that requires a manual step
+   * before it shows anything is not a fixture.
+   *
+   * Seeded onto the walkthrough ticket **and** onto the first ticket the default
+   * signed-in user owns. `CRM-26-00347` is assigned to Meera and the default user
+   * is Ravi, a Developer scoped to `assigned_to = me` — so seeding only the
+   * walkthrough ticket would have left the strip empty under `npm run dev`
+   * exactly as before, for the reason the C-019 note already records.
+   *
+   * The mix is deliberate and each row is a distinct rendering path:
+   * two CLEAN images (so the lightbox has something to page through), a WebP
+   * (CLEAN, but **no thumbnail** — the server cannot decode one, so this is the
+   * client's fall-back-to-the-full-image path), a document, and one PENDING row
+   * that must render as "Scanning" with no image at all.
+   */
+  const attachmentsFor = (ticket: Ticket, uploadedById: number) => [
+    { fileName: 'fees-screen-error.png', contentType: 'image/png', sizeBytes: 184_320, scanStatus: 'CLEAN' as const },
+    { fileName: 'stack-trace.png', contentType: 'image/png', sizeBytes: 96_180, scanStatus: 'CLEAN' as const },
+    { fileName: 'receipt-preview.webp', contentType: 'image/webp', sizeBytes: 42_110, scanStatus: 'CLEAN' as const },
+    { fileName: 'error-log.txt', contentType: 'text/plain', sizeBytes: 12_884, scanStatus: 'CLEAN' as const },
+    { fileName: 'awaiting-scan.png', contentType: 'image/png', sizeBytes: 220_400, scanStatus: 'PENDING' as const },
+  ].map((file, n) => ({
+    id: nextId(db, 'attachment'),
+    ticketId: ticket.ticketId,
+    ...file,
+    isClientVisible: n === 3,
+    isDeleted: false,
+    uploadedById,
+    stageCode: ticket.currentStageCode,
+    // **The ticket's own cycle, never a hardcoded 1.** `GET /tickets/{id}/full`
+    // filters attachments by the cycle it is rendering, and the generator puts
+    // every seventh ticket on cycle 2 — so a fixed `cycleNo: 1` produces rows
+    // that exist in the store, pass every unit test, and are filtered out of the
+    // only payload the detail page reads. Which is exactly how this was found.
+    cycleNo: ticket.cycleNo,
+    createdAt: iso('2026-08-08T10:0' + n + ':00'),
+  }));
+
+  /*
+   * One populated ticket per signed-in user, not just the walkthrough.
+   *
+   * Row scoping means a Developer sees only `assigned_to = me`, so seeding the
+   * walkthrough alone leaves the strip empty for five of the six seeded logins —
+   * which is the state this fixture was already in, and the reason the gallery
+   * looked broken when it was not.
+   */
+  db.users
+    .filter((u) => u.isActive)
+    .forEach((user) => {
+      const own = db.tickets.find((t) => t.assigneeId === user.id && t.status !== 'CLOSED');
+      if (own && !db.attachments.some((a) => a.ticketId === own.ticketId)) {
+        db.attachments.push(...attachmentsFor(own, user.id));
+      }
+    });
+
+  const walkthrough = db.tickets.find((t) => t.ticketId === 'CRM-26-00347');
+  if (walkthrough && !db.attachments.some((a) => a.ticketId === walkthrough.ticketId && a.cycleNo === walkthrough.cycleNo)) {
+    db.attachments.push(...attachmentsFor(walkthrough, 2));
+  }
+
   db.notifications.push(
     { id: nextId(db, 'notification'), userId: 3, eventKey: 'TICKET_HANDED_OFF', title: 'CRM-26-00347 handed to you at Development', body: 'Meera Iyer handed this to you.', ticketId: 'CRM-26-00347', isRead: false, deepLink: '/tickets/CRM-26-00347', createdAt: iso('2026-08-08T11:00:00') },
     { id: nextId(db, 'notification'), userId: 3, eventKey: 'MENTIONED', title: 'Anil Shah mentioned you', body: 'Retest both flows please.', ticketId: 'CRM-26-00347', isRead: false, deepLink: '/tickets/CRM-26-00347', createdAt: iso('2026-08-06T13:55:00') },

@@ -1,21 +1,25 @@
 # Attachments — §4B.4
 
-**C-023 · Upload surfaces** and **C-024 · Clipboard paste.** The upload lifecycle every surface shares. The
-control itself is `components/ui/attachment-picker.tsx`, because three other
-streams consume that directory; this folder is the half that talks to the API.
+**C-023 · Upload surfaces**, **C-024 · Clipboard paste** and **C-026 ·
+Thumbnails, gallery and lightbox.** The upload lifecycle every surface shares,
+and the strip S-20 draws. The controls themselves are in `components/ui/`,
+because three other streams consume that directory; this folder is the half that
+talks to the API.
 
 | File | What it is |
 |---|---|
 | `useTicketAttachments.ts` | Upload/delete lifecycle, in two modes. The only thing a surface needs. |
 | `uploadTicketAttachment.ts` | `POST …/attachments` by hand. ⚠ Exists because of a defect — see below. |
+| `AttachmentGallery.tsx` | **C-026.** S-20's strip: image tiles, document chips, overflow, and the click that opens the viewer. |
 
 Shared, in `components/ui/`:
 
 | File | What it is |
 |---|---|
-| `attachments.ts` | §4B.4's allow-list, limits, validation, formatting and the clipboard rules. Pure. |
+| `attachments.ts` | §4B.4's allow-list, limits, validation, formatting, the clipboard rules and `attachmentPreviewSource`. Pure. |
 | `attachment-picker.tsx` | Drop zone + file picker + paste + file list. Presentational; no API knowledge. |
 | `use-attachment-paste.ts` | The `document` paste listener and its arbitration. C-024. |
+| `image-lightbox.tsx` | **C-026.** Full-screen viewer: zoom, next/previous, pan. Knows nothing about attachments. |
 
 ---
 
@@ -173,6 +177,113 @@ only watch regions that were already in the tree. It stays absent while
 disabled, so a sealed cycle still does not land a second `role="status"` beside
 its banner.
 
+### Thumbnails, gallery and lightbox — C-026
+
+#### A null `thumbnailUrl` does not mean "not an image"
+
+This is the one rule in C-026 worth reading twice, and it is why
+`attachmentPreviewSource` exists rather than every surface reading
+`item.thumbnailUrl` directly. The server stores a reduction only where one is
+worth storing, and there are four ordinary reasons it does not: the file is a
+WebP (the JVM ships no reader for it), the image is already smaller than the
+thumbnail box, the source could not be decoded, or an operator has thumbnails
+switched off. A client that read the null as "no preview" would show a grey file
+icon for a perfectly good screenshot in all four, with nothing failing anywhere.
+
+So the fallback is the **full image**. It is heavier — which is the entire reason
+thumbnails exist — and it is right, because the alternative is a strip of grey
+rectangles for a set of files the user can plainly see are pictures.
+`AttachmentGallery.test.tsx` pins each case.
+
+#### The gallery replaces the picker's list rather than sitting above it
+
+`AttachmentPicker` renders its own flat list of rows, which is right for the
+create form and the quick update panel. On the detail page that would draw the
+same six files twice, once as tiles and once as rows.
+
+So the picker gained one additive prop, `showItems`, and S-20 passes
+`showItems={false}` — **while still passing the full `items`**. That is the whole
+point of the prop existing rather than the page passing `items={[]}`: the running
+totals that stop twelve individually-legal 5 MB files from walking past a 50 MB
+ticket cap are computed from `items`, so an empty array would silently disable
+every per-ticket limit while looking completely reasonable. The prop says "you
+draw them", never "there are none".
+
+The picker keeps the drop zone, the clipboard paste, the capacity line and the
+validation. The gallery keeps the pixels.
+
+#### The picker's own thumbnail opens the viewer too
+
+`AttachmentPicker` gained `enablePreview` (default on): a `ready` image in its
+row list becomes a button that opens the same `ImageLightbox`.
+
+This is for the **create form** specifically. A file staged there has not been
+uploaded — `TicketCreateRequest` carries no `attachmentIds`, so nothing leaves
+the browser until the 201 — and a 28px square is not enough to tell two captures
+of the same screen apart. Without it, pasting the wrong screenshot is discovered
+*after* the ticket exists. It works for a staged file precisely because
+`useTicketAttachments` gives a local blob its object URL as **both**
+`thumbnailUrl` and `downloadUrl`: the viewer opens the local copy, which is the
+only copy there is.
+
+Quick update gets it for free, and C-029's comment box and C-052's handoff dialog
+will when they arrive.
+
+The viewer is mounted only when `showItems && enablePreview`, so the detail page
+— where the picker draws no rows and `AttachmentGallery` owns both the tiles and
+the viewer — never puts two lightboxes on one screen to fight over focus.
+
+#### Images are tiles, documents are chips
+
+Not one uniform grid. A 64px square is a good look at a screenshot and a terrible
+way to read `qa-signoff-report-final-v2.pdf` — and §7's S-20 wireframe already
+makes the split (`📎 [thumb][thumb] error-log.txt   +2`).
+
+#### The lightbox is shared; the gallery is not
+
+`image-lightbox.tsx` is in `components/ui/` with a Storybook entry, because it is
+genuinely general: it takes `{src, name}[]` and an index and knows nothing about
+tickets, attachments or scan status. C-060's Attachments tab is the same viewer
+over a filtered list, and Stream D's chat image share (D-053) has no other
+candidate.
+
+`AttachmentGallery` stays here, for the reason `SavedViewsMenu` did: its
+arrangement is specific to §4B.4 — the image/document split, the scan-state
+placeholders, the overflow rule. Stream B's import wizard would never want it.
+
+It builds Radix's `Dialog` rather than reusing `modal.tsx`, because
+`ModalContent` is a centred 512px card with a border and padding and a lightbox
+is the opposite shape. The primitive is shared; the chrome is not.
+
+#### The viewer opens the full file, never the reduction
+
+The reduction is 320px on its longest side. Opening a viewer onto it would make
+"zoom" mean "look at a blurry copy", when the one thing zoom is for is reading
+text the strip is too small to show.
+
+It also pages through **every** image on the ticket, including ones behind the
+"+N more" fold — a viewer that stopped at the fold would show fewer images to
+someone who opened it before expanding than to someone who expanded first, which
+is the kind of difference nobody reports and everybody notices.
+
+#### Three behaviours are verified in Storybook, not in vitest
+
+The pan gesture (jsdom has no pointer capture and no layout), the zoom itself (a
+CSS transform jsdom neither applies nor measures) and focus restoration to the
+trigger on close. The story file says so at its top, the same way C-024's
+`ClipboardPaste` story does. What the unit tests cover is everything that is
+logic rather than rendering: which image is shown, how navigation wraps, that
+zoom resets on navigation, and the accessibility contract.
+
+#### A test trap: `alt=""` removes an image from the accessibility tree
+
+A tile's `<img>` is deliberately `alt=""` — the file name is on the enclosing
+button, and repeating it makes a screen reader announce every tile twice. The
+consequence is that `getAllByRole('img')` finds **nothing**, and, far worse, a
+`queryByRole('img')` assertion for *absence* passes whether or not the image is
+there. `AttachmentGallery.test.tsx` reaches into the DOM through a scoped helper
+and says why at the point of use.
+
 ---
 
 ## Open, and for whom
@@ -251,11 +362,27 @@ will not round-trip when C-029 arrives. The client enforces all of it, so the
 gap is invisible under `npm run dev` — until a real server enforces something the
 UI has never seen a rejection for.
 
-Also: `attachmentDto` builds `/mock-files/{id}/{name}` URLs that **no handler
-serves**. Nothing renders them today (a thumbnail is only shown once the scan
-passes, and the mock's rows are `PENDING` until they are `CLEAN`), but C-026's
-gallery and lightbox will 404 on every image until either a handler exists or the
-mapper returns a data URI.
+**Fixed in C-026, and it needs Stream D's sign-off.** `attachmentDto` had been
+building `/mock-files/{id}/{name}` and `/mock-files/{id}/thumb.png` URLs that
+**no handler served** — harmless while nothing rendered them, and exactly the day
+C-023 predicted once a gallery existed. `mocks/handlers/files.ts` is new and
+serves real PNG bytes for that path: a solid colour derived from the path, so
+every attachment is a different swatch and the lightbox's next/previous is
+visibly doing something.
+
+It encodes the PNG by hand — a stored DEFLATE stream in a valid zlib wrapper,
+about fifty lines with a CRC32 and an Adler-32. SVG would have been a fraction of
+that and renders fine in an `<img>`, and it was rejected because the real server
+serves `image/png` from `ThumbnailGenerator`; a mock that serves a different
+media type is a difference waiting to hide something. A committed fixture image
+was rejected too — one PNG means every tile looks identical, which makes ordering
+and navigation bugs invisible. `mocks.test.ts` asserts the bytes are a genuinely
+decodable PNG, because a hand-rolled encoder that emits a plausible-looking file
+every decoder rejects would look completely fine in review.
+
+The handler sits outside the `/api/v1` prefix, which is why `index.ts`'s 501
+catch-all never covered it, and which is faithful: a signed URL points at MinIO,
+not at the API.
 
 ### ⚠ Blueprint — mp4 has two different size limits
 
