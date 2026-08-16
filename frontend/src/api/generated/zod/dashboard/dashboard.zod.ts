@@ -105,6 +105,7 @@ export const getDashboardWidgetResponse = zod.object({
   "data": zod.object({
   "key": zod.string().optional(),
   "asOf": zod.string().datetime({}).optional(),
+  "unavailableReason": zod.string().nullish(),
   "series": zod.array(zod.object({
   "name": zod.string().optional(),
   "points": zod.array(zod.object({

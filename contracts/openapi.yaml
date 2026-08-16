@@ -7410,6 +7410,20 @@ components:
           properties:
             key: { type: string }
             asOf: { type: string, format: date-time }
+            # A-056 · additive and optional. Non-null when the caller's role has
+            # no summary table that can answer this widget — the delivery roles
+            # read `resource_daily_stats`, which carries no task-type split, no
+            # four-way priority breakdown and no aging buckets.
+            #
+            # Deliberately not an empty `series` and not a 404. An empty series
+            # renders as "no tickets matched", which is a claim about the data
+            # and is false; a 404 on a route the role legitimately holds reads
+            # as a bug and has the client retry. Stating it also stops the
+            # frontend re-deriving the role rule for itself, which is the drift
+            # `DashboardScope` exists on the server to prevent.
+            #
+            # ⚠️ contracts/ is Stream D's — flagged for Debashis (D-001).
+            unavailableReason: { type: [string, 'null'] }
             series:
               type: array
               items:

@@ -1,0 +1,61 @@
+-- ---------------------------------------------------------------------
+-- A-056 · the middle segment of §S-05's widget 10, which had no column.
+--
+-- Widget 10 is specified as a horizontal *stacked* bar per resource:
+-- "Open / In Progress / Delayed". A-050 built assigned_open and
+-- assigned_delayed and nothing for the middle, so the widget could be
+-- drawn with two segments or not at all.
+--
+-- DISJOINT, WHICH assigned_critical IS NOT
+--
+-- This column is deliberately exclusive of assigned_delayed, and that is a
+-- departure from the column beside it worth stating plainly.
+--
+-- assigned_critical is a *lens*: critical tickets are a subset of the open
+-- ones, the two are never drawn together, and the overlap is the point.
+-- These three are *stacked*, and a stacked bar makes an arithmetic claim —
+-- the segments abut, so their sum is the bar's length and the bar's length
+-- is read as the person's load. A ticket that is both delayed and actively
+-- being worked would be drawn twice, and the bar would say a resource holds
+-- eleven tickets when they hold nine. Nobody reports that; everybody
+-- misreads it.
+--
+-- So the three partition assigned_open, by precedence:
+--
+--     delayed      = assigned_delayed                  (worst state wins)
+--     in progress  = assigned_in_progress              (open, worked, on time)
+--     waiting      = assigned_open - the other two     (never negative)
+--
+-- The read subtracts rather than storing a fourth column, because three
+-- columns that must sum to a fourth is a consistency the table cannot
+-- enforce and the worker would have to get right on every pass.
+--
+-- WHAT COUNTS AS "IN PROGRESS"
+--
+-- status IN ('IN_PROGRESS', 'REWORK') — the two states in the §13 status
+-- vocabulary where somebody is actually working. Deliberately not:
+--
+--   NEW             assigned but unstarted; that is the waiting segment
+--   ON_HOLD         open and stopped, which is the opposite of in progress
+--   AWAITING_INFO   blocked on somebody else, and counting it as active
+--                   work is how a blocked queue looks busy
+--   RESOLVED        done and awaiting verification; the work is finished
+--
+-- REWORK is included because a ticket bounced back is being worked again,
+-- and excluding it would make a rework-heavy week read as an idle one.
+--
+-- NOT NULL DEFAULT 0, AND WHY THAT IS SAFE HERE
+--
+-- Unlike A-056's type_counts one migration earlier, this backfills to zero
+-- rather than staying NULL, and the difference is what absence means. A
+-- NULL type_counts says "not computed"; a zero here would say "nobody was
+-- working on anything", which is equally false for historical rows — but
+-- resource_daily_stats is DELETEd and rewritten in full for every day the
+-- worker recomputes (see DailyStatsRepository.refreshResourceStats), so no
+-- row survives its next pass carrying a default. The window A-051 recomputes
+-- repairs itself immediately and the backfill sweep repairs the rest, which
+-- is not true of the upserted daily_ticket_stats.
+-- ---------------------------------------------------------------------
+
+ALTER TABLE resource_daily_stats
+  ADD COLUMN assigned_in_progress INT NOT NULL DEFAULT 0 AFTER assigned_delayed;

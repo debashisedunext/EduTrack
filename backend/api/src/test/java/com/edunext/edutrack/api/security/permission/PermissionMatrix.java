@@ -464,6 +464,22 @@ final class PermissionMatrix {
             // filtered. DashboardService holds that decision.
             everyRole("GET", "/api/v1/dashboard/summary"),
 
+            // A-056 · the widget series, and the same answer for a sharper
+            // reason. Here role-awareness has a visible outcome the cards never
+            // had: resource_daily_stats carries no task-type split, no four-way
+            // priority breakdown and no aging buckets, so four of the six
+            // widgets have *no table* that can answer a Developer.
+            //
+            // That is still not a capability denial, and the distinction is the
+            // point. A 403 would say "you are not permitted this", which would
+            // send somebody to an administrator for a grant that does not
+            // exist and would not help. WidgetService answers 200 with
+            // unavailableReason instead — "this is not kept per resource" —
+            // which is a message about the schema and belongs in the backlog,
+            // not in the permission model. Widgets 9 and 10 do answer for a
+            // delivery role, scoped to themselves.
+            everyRole("GET", "/api/v1/dashboard/widget/{widgetKey}"),
+
             // ── attachment limits · C-027, §4B.4 ────────────────────────────
             // Read open to all six, write to master.write.
             //

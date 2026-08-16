@@ -11,6 +11,17 @@ import java.util.Optional;
 /**
  * A-051 · recomputes one day of summary rows from the source tables.
  *
+ * <h2>⚠️ Stream D's directory — needs Debashis's sign-off</h2>
+ *
+ * <p>TEAM-PLAN.md §6 reads {@code worker/ → D, all schedulers (A's hash
+ * verifier is the exception)}, and this class is neither the hash verifier nor
+ * Stream D's. It was built by A-051 and extended by A-056 twice — once for
+ * {@code type_counts}, once for {@code assigned_in_progress} below — so the
+ * precedent is established in the code and nowhere in the ownership map.
+ * <b>Flagged rather than edited quietly</b>, per CLAUDE.md. The ownership row
+ * wants amending to carve out {@code worker/stats/} for Stream A the way the
+ * hash verifier already is, or these edits keep arriving unannounced.
+ *
  * <h2>Recompute, never accumulate</h2>
  *
  * <p>Every figure below is derived from scratch for the given date, so running
@@ -272,13 +283,15 @@ class DailyStatsRepository {
         return jdbc.sql("""
                 INSERT INTO resource_daily_stats (
                     stat_date, user_id, closed, effort_hours,
-                    assigned_open, assigned_critical, assigned_delayed, computed_at)
+                    assigned_open, assigned_critical, assigned_delayed,
+                    assigned_in_progress, computed_at)
                 SELECT :day, u.id,
                     COALESCE(c.closed, 0),
                     COALESCE(e.hours, 0),
                     COALESCE(a.open_count, 0),
                     COALESCE(a.critical_count, 0),
                     COALESCE(a.delayed_count, 0),
+                    COALESCE(a.in_progress_count, 0),
                     :computedAt
                 FROM users u
                 LEFT JOIN (
@@ -302,7 +315,25 @@ class DailyStatsRepository {
                     SELECT assigned_to AS uid,
                            COUNT(*) AS open_count,
                            SUM(level = 'CRITICAL') AS critical_count,
-                           SUM(planned_close_date < :dayEnd) AS delayed_count
+                           SUM(planned_close_date < :dayEnd) AS delayed_count,
+                           -- A-056 · widget 10's middle segment. The
+                           -- `NOT (planned_close_date < :dayEnd)` is what keeps
+                           -- the three segments disjoint, and it is the whole
+                           -- reason this is not simply `status IN (…)`: widget
+                           -- 10 stacks them, so a ticket that is both delayed
+                           -- and being worked would be drawn in two segments
+                           -- and the bar would overstate the person's load.
+                           -- The migration header carries the full argument.
+                           --
+                           -- `planned_close_date` may be NULL — a ticket with
+                           -- no due date cannot be delayed — and NULL < x is
+                           -- NULL, not false, so the comparison is wrapped in
+                           -- COALESCE rather than negated directly. Without it
+                           -- SUM() skips those rows and every ticket without a
+                           -- due date vanishes from the bar entirely.
+                           SUM(status IN ('IN_PROGRESS', 'REWORK')
+                               AND NOT COALESCE(planned_close_date < :dayEnd, FALSE))
+                               AS in_progress_count
                       FROM tickets
                      WHERE assigned_to IS NOT NULL
                        AND date_reported < :dayEnd

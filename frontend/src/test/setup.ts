@@ -26,6 +26,33 @@ afterEach(() => {
 afterAll(() => server.close());
 
 /**
+ * A-056 · `ResizeObserver`, which jsdom does not implement.
+ *
+ * Recharts' `ResponsiveContainer` constructs one on mount, so without this
+ * every test that renders a chart dies with `ReferenceError: ResizeObserver is
+ * not defined` — before any assertion runs, and with a message that points at
+ * recharts internals rather than at the missing browser API.
+ *
+ * The stub observes nothing and reports nothing, which is the honest behaviour
+ * here rather than a limitation: jsdom performs no layout, so every element it
+ * could measure is 0×0 and any size this reported would be fiction. Chart
+ * *dimensions* are therefore not under test — what the dashboard tests assert
+ * is the hidden data table and the legend, both of which are plain DOM and
+ * render at any size. Anything genuinely depending on measured layout belongs
+ * in a browser, not here.
+ *
+ * Global rather than per-file: it is a missing platform API, not a fixture, and
+ * the next chart in A-057 should not have to rediscover this.
+ */
+class ResizeObserverStub implements ResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+globalThis.ResizeObserver ??= ResizeObserverStub;
+
+/**
  * Let a jsdom `AbortSignal` survive contact with Node's `fetch`.
  *
  * Node 24 brand-checks the signal on `RequestInit` and rejects anything that is
