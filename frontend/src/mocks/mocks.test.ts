@@ -1236,4 +1236,83 @@ describe('B-027 · the client_contacts child grid', () => {
     expect(added.data.isPrimary).toBe(false);
     expect(added.data.portalAccess).toBe(false);
   });
+
+  /**
+   * B-028 · this mock was the loosest of the four things that answered "is
+   * this a valid email?" — `email.includes('@')`. So `sara@acme` was accepted
+   * under `npm run dev` and refused by `ClientContactService` against a real
+   * MySQL: right in development, wrong in production, which is the worst way
+   * round for a rule to be. The mock now applies `@/lib/email`, which is the
+   * browser's copy of the server's `EmailFormat`.
+   */
+  it('refuses an address with no dotted TLD, which includes(“@”) accepted', async () => {
+    await expect(
+      post('/clients/2/contacts', { name: 'Priya Nair', email: 'priya@northwind' }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+/**
+ * B-028 · blueprint line 948 — "at least one primary contact before the client
+ * can be selected on a ticket", and the filter that decides whether the client
+ * reaches that dropdown in the first place.
+ */
+describe('B-028 · client selectability', () => {
+  interface ClientRow {
+    id: number; clientCode: string; status: string; isActive: boolean;
+    hasPrimaryContact: boolean; primaryContact: { id: number } | null;
+  }
+
+  const clients = async (query = '') =>
+    (await get<Envelope<ClientRow[]>>(`/clients${query}`)).data;
+
+  /**
+   * The filter and the projection have to agree, and on the server they did
+   * not: `isActive` was reported as `status <> 'INACTIVE'` and *filtered* as
+   * `status = 'ACTIVE'`, so a prospect came back from `/clients` saying it was
+   * active and did not come back from `/clients?isActive=true` — the exact call
+   * S-19's client dropdown makes. This mock always had it right, and its own
+   * comment claimed it was "the derivation the server uses". It was not.
+   */
+  it('includes prospects in ?isActive=true, and only INACTIVE in ?isActive=false', async () => {
+    const active = await clients('?isActive=true&limit=200');
+    const inactive = await clients('?isActive=false&limit=200');
+
+    expect(active.map((c) => c.clientCode)).toContain('KESTREL');
+    expect(active.every((c) => c.status !== 'INACTIVE')).toBe(true);
+    expect(inactive.every((c) => c.status === 'INACTIVE')).toBe(true);
+  });
+
+  /** The gate, on the list row — which is what the ticket form renders. */
+  it('reports the gate on every row, not only on the detail', async () => {
+    const rows = await clients('?limit=200');
+
+    expect(rows.find((c) => c.clientCode === 'ACME')?.hasPrimaryContact).toBe(true);
+    // Kestrel is a prospect with no contacts at all.
+    expect(rows.find((c) => c.clientCode === 'KESTREL')?.hasPrimaryContact).toBe(false);
+  });
+
+  /**
+   * The half a fixture of all-live contacts could never have caught. Removal
+   * deactivates (B-027 — `tickets.client_contact_id` has no cascade), so a
+   * client whose only primary has left must read as having none: they cannot
+   * be reached, and the mock was matching on `isPrimary` alone.
+   */
+  it('stops counting a primary contact once they are removed', async () => {
+    expect((await clients('?limit=200')).find((c) => c.clientCode === 'ACME')
+      ?.hasPrimaryContact).toBe(true);
+
+    await http<void>({ url: '/clients/1/contacts/1', method: 'DELETE' });
+
+    const acme = (await clients('?limit=200')).find((c) => c.clientCode === 'ACME');
+    expect(acme?.hasPrimaryContact).toBe(false);
+    expect(acme?.primaryContact ?? null).toBeNull();
+  });
+
+  /** The three optional addresses on the client form, on the server's rule. */
+  it('refuses a client whose support email has no dotted TLD', async () => {
+    await expect(
+      post('/clients', { clientCode: 'NEWCO', name: 'Newco Ltd', supportEmail: 'desk@newco' }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
 });

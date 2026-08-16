@@ -63,6 +63,20 @@ limit?: LimitParameter;
  * Name, code or domain.
  */
 q?: string;
+/**
+ * B-028 · matched against the same derivation the row reports:
+`true` is `status <> 'INACTIVE'` and therefore **includes
+Prospects**, `false` is `status = 'INACTIVE'`. The two are not
+symmetric because "active" is two of the three statuses and "not
+active" is exactly one.
+
+Stated because it was wrong. B-026 widened the projection when it
+added `PROSPECT` and left the filter comparing `status = 'ACTIVE'`,
+so a prospect came back from `GET /clients` saying `isActive: true`
+and did not come back from `GET /clients?isActive=true` at all —
+the call §4B.2's ticket-form dropdown makes.
+
+ */
 isActive?: boolean;
 projectId?: number;
 /**

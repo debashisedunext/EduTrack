@@ -6,6 +6,7 @@ import com.edunext.edutrack.api.feature.imports.ImportFieldType;
 import com.edunext.edutrack.api.feature.imports.ImportRow;
 import com.edunext.edutrack.api.feature.imports.ImportSchemaDefinition;
 import com.edunext.edutrack.domain.clients.Client;
+import com.edunext.edutrack.domain.clients.ClientCodeFormat;
 import com.edunext.edutrack.domain.clients.ClientRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -76,7 +77,25 @@ public class ClientImportSchema implements ImportSchemaDefinition {
             ImportField.required("clientCode", "Client Code")
                     .maxLength(20)
                     .example("ACME")
-                    .validate(FieldValidators.alphanumeric());
+                    // B-028 · the client master's own rule, not a stricter one.
+                    //
+                    // `FieldValidators.alphanumeric()` was here and refused
+                    // `ACME-IN` — a code S-33 issues and every report displays.
+                    // Because this field is B-035's upsert key, that refusal is
+                    // not a message somebody reads and fixes: the row is
+                    // rejected, so the client it names is silently *not*
+                    // updated by an import that otherwise succeeded.
+                    //
+                    // Stated as a lambda over ClientCodeFormat rather than as a
+                    // `FieldValidators.clientCode()`, and that is the guard's
+                    // call rather than a preference:
+                    // ImportEngineIsolationTest failed the first attempt,
+                    // because a client-shaped rule on the shared engine's front
+                    // door is the first half of a second import flow. Entity
+                    // knowledge belongs in the registration — this file.
+                    .validate(value -> ClientCodeFormat.isValid(value)
+                            ? java.util.Optional.empty()
+                            : java.util.Optional.of(ClientCodeFormat.SENTENCE));
 
     private static final List<ImportField> FIELDS = List.of(
             CLIENT_CODE,

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { EMAIL_MESSAGE, isWellFormedEmail } from '@/lib/email'
 import type { Contact } from '@/api/generated/model/contact'
 import type { ContactWriteRequest } from '@/api/generated/model/contactWriteRequest'
 
@@ -53,12 +54,19 @@ export const contactFormSchema = z.object({
    * `notificationOptIn` defaults to true and a mail D-036 can never deliver is
    * worse than a refused save.
    */
+  /*
+   * B-028 · `isWellFormedEmail`, not zod's `.email()`. zod accepts
+   * `sara@acme` — no dotted TLD — and so did Jakarta's `@Email` on the server
+   * until B-028, while B-030's importer refused it on the same column. A form
+   * looser than the server is the worse direction: the save is accepted here
+   * and refused there, on a field the user was just told was fine.
+   */
   email: z
     .string()
     .trim()
     .min(1, 'An email address is required.')
     .max(150, 'An email address cannot exceed 150 characters.')
-    .email('That is not a well-formed email address.'),
+    .refine(isWellFormedEmail, EMAIL_MESSAGE),
   phone: z.string().trim().max(30, 'A phone number cannot exceed 30 characters.'),
   isPrimary: z.boolean(),
   notificationOptIn: z.boolean(),

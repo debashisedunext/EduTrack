@@ -11,6 +11,21 @@ export interface SearchableDropdownProps<T> {
   getLabel: (option: T) => string
   /** Additional fields to match against, e.g. code/domain for the client dropdown (§4B.2). */
   getSearchable?: (option: T) => string[]
+  /**
+   * B-028 · why an option cannot be chosen, or `null` if it can.
+   *
+   * A disabled option is still **listed, still searchable and still read out**
+   * — it is the reason that makes it useful. The client dropdown's rule is "at
+   * least one primary contact before the client can be selected on a ticket",
+   * and a client that silently vanishes from the list is indistinguishable from
+   * a list that has lost its data; one that is visible and greyed with "No
+   * primary contact" beside it tells the user what to go and fix.
+   *
+   * The returned string is rendered in the row and is what the option's
+   * `title` carries, so it reaches both sighted users and a pointer hover
+   * without the caller wiring anything.
+   */
+  getOptionDisabled?: (option: T) => string | null
   placeholder?: string
   emptyText?: string
   disabled?: boolean
@@ -33,6 +48,7 @@ export function SearchableDropdown<T>({
   getKey,
   getLabel,
   getSearchable,
+  getOptionDisabled,
   placeholder = 'Search…',
   emptyText = 'No results',
   disabled,
@@ -58,6 +74,11 @@ export function SearchableDropdown<T>({
   React.useEffect(() => setActiveIndex(0), [query, open])
 
   function select(option: T) {
+    // B-028 · the single gate. Click, Enter and any future path all arrive
+    // here, so a disabled option cannot be chosen by a route somebody forgot to
+    // guard — which is what a `pointer-events-none` in the row would have left
+    // open for the keyboard.
+    if (getOptionDisabled?.(option)) return
     onChange(option)
     setOpen(false)
     setQuery('')
@@ -127,20 +148,36 @@ export function SearchableDropdown<T>({
             {filtered.map((option, index) => {
               const key = getKey(option)
               const selected = value != null && getKey(value) === key
+              // B-028 · `aria-disabled`, never the `disabled` attribute —
+              // `<li>` has none, and removing the row from the tab order would
+              // hide the reason from the users most dependent on being told it.
+              const unselectable = getOptionDisabled?.(option) ?? null
               return (
                 <li
                   key={key}
                   role="option"
                   aria-selected={selected}
+                  aria-disabled={unselectable != null || undefined}
+                  title={unselectable ?? undefined}
                   onMouseEnter={() => setActiveIndex(index)}
                   onClick={() => select(option)}
                   className={cn(
-                    'relative flex cursor-pointer select-none items-center rounded-control py-1.5 pl-8 pr-2 text-sm text-content',
-                    index === activeIndex && 'bg-primary-soft text-primary',
+                    'relative flex select-none items-center justify-between gap-2 rounded-control py-1.5 pl-8 pr-2 text-sm text-content',
+                    unselectable ? 'cursor-not-allowed' : 'cursor-pointer',
+                    index === activeIndex && !unselectable && 'bg-primary-soft text-primary',
+                    // Highlighted differently rather than not at all: the row
+                    // still takes arrow-key focus, because reading why it
+                    // cannot be picked is the point of leaving it in the list.
+                    index === activeIndex && unselectable && 'bg-subtle',
                   )}
                 >
                   {selected && <Check className="absolute left-2 h-4 w-4" />}
-                  {getLabel(option)}
+                  <span className={unselectable ? 'text-content-muted' : undefined}>
+                    {getLabel(option)}
+                  </span>
+                  {unselectable && (
+                    <span className="shrink-0 text-xs text-content-muted">{unselectable}</span>
+                  )}
                 </li>
               )
             })}

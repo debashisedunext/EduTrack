@@ -264,6 +264,51 @@ class ClientServiceTest {
                     .isFalse();
         }
 
+        // ── B-028 · the gate §4B.2's ticket-form dropdown reads ───────────
+
+        /**
+         * <b>The rule as a boolean, on the row rather than derived at the call
+         * site.</b>
+         *
+         * <p>{@code primaryContact} is {@code @JsonInclude(NON_NULL)}, so a
+         * client without one omits the key entirely — a picker deriving the gate
+         * from the object is reading {@code undefined}, which is one {@code ??}
+         * away from offering every client on the form. The two are asserted
+         * together here because they come off the same lookup and must never
+         * disagree.
+         */
+        @Test
+        @DisplayName("hasPrimaryContact is true exactly when a primary contact is present")
+        void hasPrimaryContactTracksTheContact() {
+            when(query.page(any(), any(), anyInt())).thenReturn(rows("Acme", "Bluewave"));
+            when(query.primaryContacts(anyCollection())).thenReturn(Map.of(
+                    1L, new ClientDtos.Contact(9, "Sara Kapoor", "IT Director",
+                            "sara@acme.example", null, true, true, false, true)));
+
+            List<ClientDtos.Client> page = service.list(noFilter(), null, 50).data();
+
+            assertThat(page.getFirst().hasPrimaryContact()).isTrue();
+            assertThat(page.getFirst().primaryContact()).isNotNull();
+            assertThat(page.get(1).hasPrimaryContact()).isFalse();
+            assertThat(page.get(1).primaryContact()).isNull();
+        }
+
+        /**
+         * The state every client is created in — B-026 cannot supply a contact
+         * on a create, because there is no client id to hang one off until the
+         * create returns. So "no primary contact" is ordinary rather than
+         * exceptional, and the gate has to report it rather than treat it as a
+         * data error.
+         */
+        @Test
+        @DisplayName("a client with no contacts at all reports the gate as unmet")
+        void aClientWithNoContactsFailsTheGate() {
+            when(query.page(any(), any(), anyInt())).thenReturn(rows("Newco"));
+
+            assertThat(service.list(noFilter(), null, 50).data().getFirst().hasPrimaryContact())
+                    .isFalse();
+        }
+
         /** The column is nullable, and an absent manager is a real state. */
         @Test
         @DisplayName("a client with no account manager serialises without one")

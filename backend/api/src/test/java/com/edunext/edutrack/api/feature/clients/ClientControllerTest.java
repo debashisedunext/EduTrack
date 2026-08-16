@@ -352,7 +352,7 @@ class ClientControllerTest {
     private static ClientDtos.Client client(long id, String name) {
         return new ClientDtos.Client(id, name.toUpperCase(java.util.Locale.ROOT), name,
                 null, null, "PREMIUM", null, "Asia/Kolkata", true, "ACTIVE", 0, null,
-                List.of(), null);
+                List.of(), null, false);
     }
 
     private static ClientDtos.ClientDetail detail(long id, String name) {

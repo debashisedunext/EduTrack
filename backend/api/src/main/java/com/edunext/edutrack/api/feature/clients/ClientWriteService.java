@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.clients;
 
 import com.edunext.edutrack.domain.clients.Client;
 import com.edunext.edutrack.domain.clients.ClientRepository;
+import com.edunext.edutrack.domain.validation.EmailFormat;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,11 +37,19 @@ import java.util.Optional;
  *
  * <h2>The validation set, and the order it runs in</h2>
  *
- * <p>Bean Validation on {@link ClientDtos.ClientWriteRequest} covers lengths,
- * email shape and the code's character set. What is here is everything that needs
- * a query or a comparison between two fields:
+ * <p>Bean Validation on {@link ClientDtos.ClientWriteRequest} covers lengths and
+ * the code's character set. What is here is everything that needs a query, a
+ * comparison between two fields, or a rule stated somewhere else:
  *
  * <ol>
+ *   <li><b>Email shape</b> — B-028, on {@link EmailFormat}. It was Bean
+ *       Validation's {@code @Email} until B-028 found that B-030's importer
+ *       answered the same question about the same three columns with a stricter
+ *       pattern, so the form accepted addresses the import would later reject.
+ *       Checked here rather than by an annotation for a second reason: the
+ *       binding layer refuses the whole body at the first failure, and this is a
+ *       four-tab form whose whole error story is that every bad field is named
+ *       at once.</li>
  *   <li><b>Duplicate client code</b> — 409, field-keyed, checked in the service
  *       <em>and</em> enforced by {@code uq_clients_code}. The check is the good
  *       error message and the index is the thing that is actually true under a
@@ -246,6 +255,16 @@ public class ClientWriteService {
             errors.put("clientCode", "Client code " + clientCode + " is already in use.");
         }
 
+        // B-028 · blueprint line 948's "valid emails", on the one rule
+        // EmailFormat states. Absent is fine on all three — every column is
+        // nullable and a client with no billing address is ordinary — so only a
+        // value that is *there* and malformed is a failure. `trimToNull` is what
+        // decides that, and it is the same call `apply` makes when storing, so
+        // nothing is validated that is not kept.
+        checkEmail(errors, "primaryEmail", request.primaryEmail());
+        checkEmail(errors, "supportEmail", request.supportEmail());
+        checkEmail(errors, "billingEmail", request.billingEmail());
+
         ClientStatus status = ClientStatus.parse(request.status()).orElse(null);
         if (status == null) {
             if (request.status() == null || request.status().isBlank()) {
@@ -321,6 +340,23 @@ public class ClientWriteService {
 
         return new Validated(clientCode, status, supportPlan, timezone,
                 normaliseDomain(request.domain()), normaliseTags(request.tags()), projectIds);
+    }
+
+    /**
+     * B-028 · one optional address, against {@link EmailFormat}.
+     *
+     * <p>Blank is not a failure and null is not a failure — {@code supportEmail}
+     * on a client that raises everything by phone is a real, ordinary state, and
+     * the columns are nullable. What is refused is an address that was supplied
+     * and cannot be delivered to, which for {@code supportEmail} additionally
+     * means D-039's inbound matching would never fire and nothing on any screen
+     * would say why.
+     */
+    private static void checkEmail(Map<String, String> errors, String field, String value) {
+        String email = trimToNull(value);
+        if (email != null && !EmailFormat.isValid(email)) {
+            errors.put(field, EmailFormat.message(field));
+        }
     }
 
     /**

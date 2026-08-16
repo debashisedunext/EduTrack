@@ -3,10 +3,10 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { SearchableDropdown } from './searchable-dropdown'
 
 const CLIENTS = [
-  { id: '1', name: 'Acme Corp', code: 'ACME', domain: 'acme.com' },
-  { id: '2', name: 'Globex Inc', code: 'GLBX', domain: 'globex.com' },
-  { id: '3', name: 'Initech', code: 'INIT', domain: 'initech.com' },
-  { id: '4', name: 'Umbrella LLC', code: 'UMBR', domain: 'umbrella.com' },
+  { id: '1', name: 'Acme Corp', code: 'ACME', domain: 'acme.com', hasPrimaryContact: true },
+  { id: '2', name: 'Globex Inc', code: 'GLBX', domain: 'globex.com', hasPrimaryContact: true },
+  { id: '3', name: 'Initech', code: 'INIT', domain: 'initech.com', hasPrimaryContact: false },
+  { id: '4', name: 'Umbrella LLC', code: 'UMBR', domain: 'umbrella.com', hasPrimaryContact: true },
 ]
 
 const meta: Meta<typeof SearchableDropdown> = {
@@ -71,6 +71,39 @@ export const LabelledWithError: Story = {
           </p>
         )}
       </div>
+    )
+  },
+}
+
+/**
+ * B-028 · an option that is listed, searchable and **not selectable**, with the
+ * reason beside it.
+ *
+ * Blueprint line 948: a client cannot be chosen on a ticket until it has at
+ * least one primary contact. Initech has none.
+ *
+ * The alternative — filtering it out of `options` — was rejected: a client that
+ * is simply absent from a dropdown is indistinguishable from a dropdown that
+ * has lost its data, and the person raising the ticket is usually the person
+ * who can go and fix the client master. `getOptionDisabled` returns the reason
+ * rather than a boolean so the row can say what it is, and `select()` refuses
+ * centrally, so Enter is guarded as well as the click.
+ */
+export const WithUnselectableOptions: Story = {
+  render: function Render() {
+    const [client, setClient] = useState<(typeof CLIENTS)[number] | null>(null)
+    return (
+      <SearchableDropdown
+        options={CLIENTS}
+        value={client}
+        onChange={setClient}
+        getKey={(c) => c.id}
+        getLabel={(c) => `${c.code} — ${c.name}`}
+        getSearchable={(c) => [c.code, c.domain]}
+        getOptionDisabled={(c) => (c.hasPrimaryContact ? null : 'No primary contact')}
+        placeholder="Search clients…"
+        className="w-72"
+      />
     )
   },
 }

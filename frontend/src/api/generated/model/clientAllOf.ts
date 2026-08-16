@@ -82,4 +82,33 @@ with none — a new one, or one whose relationship never started.
 Read from the ticket rollup, never a per-row `COUNT(*)`.
  */
   lastTicketDate?: ClientAllOfLastTicketDate;
+  /** B-028 · **whether this client may be selected on a ticket.**
+Blueprint line 948: "at least one primary contact before the
+client can be selected on a ticket".
+
+True when the client has a `client_contacts` row that is both
+`is_primary` and **active**. The active half is the part worth
+stating: a contact is removed by deactivation (B-027 — the
+`tickets.client_contact_id` foreign key has no cascade), so a
+client whose only primary has left reads `false`, which is the
+true and useful answer.
+
+On the **list** row, not only on `ClientDetail`, because the
+list row is what §4B.2's ticket-form dropdown renders. Deriving
+it from `primaryContact` instead would be a second statement of
+the rule, and a fragile one: `primaryContact` is omitted rather
+than nulled when there is none, so a picker reading it gets
+`undefined`.
+
+**`false` is ordinary, not an error state.** It is the state
+every client is created in — `POST /clients` cannot carry a
+contact, because there is no client id to hang one off until it
+returns — and the state a client returns to when somebody
+leaves. S-33's Contacts tab says so on screen; the ticket form
+shows such a client and refuses the selection with the reason,
+rather than filtering it out, because a client silently missing
+from a dropdown is indistinguishable from a dropdown that has
+lost its data.
+ */
+  hasPrimaryContact?: boolean;
 };

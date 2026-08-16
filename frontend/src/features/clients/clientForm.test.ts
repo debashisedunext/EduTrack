@@ -230,12 +230,35 @@ describe('validation', () => {
     ).toBe(true)
   })
 
-  /** These are optional fields; `.email()` on an untouched box is a false refusal. */
+  /** These are optional fields; refusing an untouched box is a false refusal. */
   it('accepts a blank email but refuses a malformed one', () => {
     expect(clientFormSchema.safeParse(values({ billingEmail: '' })).success).toBe(true)
     expect(clientFormSchema.safeParse(values({ billingEmail: 'not-an-email' })).success).toBe(false)
   })
 
+  /**
+   * B-028 · all three addresses, on the rule the server now applies.
+   * `support@acme` was accepted by zod's `.email()` — and `support_email` is
+   * what D-039 matches inbound mail on, so an undeliverable one is not a
+   * cosmetic problem: nothing on any screen looks wrong and email-to-ticket
+   * silently stops working for that client.
+   */
+  it.each(['primaryEmail', 'supportEmail', 'billingEmail'] as const)(
+    'refuses a %s with no dotted TLD, which zod .email() accepted',
+    (field) => {
+      expect(clientFormSchema.safeParse(values({ [field]: 'desk@acme' })).success).toBe(false)
+      expect(clientFormSchema.safeParse(values({ [field]: 'desk@acme.example' })).success)
+        .toBe(true)
+    },
+  )
+
+  /**
+   * B-028 · the hyphen is the case the importer used to refuse. `AC-ME_1`
+   * passing here and `FieldValidators.clientCode()` accepting it are the two
+   * halves of one rule — before B-028 the form issued codes B-035's upsert key
+   * would reject, so a re-import created a second client rather than updating
+   * this one.
+   */
   it('refuses a client code with a space or a slash in it', () => {
     expect(clientFormSchema.safeParse(values({ clientCode: 'AC ME' })).success).toBe(false)
     expect(clientFormSchema.safeParse(values({ clientCode: 'AC/ME' })).success).toBe(false)

@@ -163,6 +163,41 @@ class ClientContactServiceTest {
 
             verify(write, never()).insert(anyLong(), any());
         }
+
+        /**
+         * B-028 · {@code @Email} accepted this, and
+         * {@code notificationOptInOrDefault()} is <b>true</b> — so the old rule
+         * created a contact subscribed to every §11 mail at an address D-036 can
+         * only ever bounce, discovered weeks later by somebody wondering why the
+         * client never hears anything.
+         */
+        @Test
+        @DisplayName("an address with no dotted TLD is refused")
+        void malformedEmailIsRefused() {
+            assertThatThrownBy(() -> service.add(1, request("Sara K", "sara@acme", false)))
+                    .isInstanceOf(ClientContactService.ContactValidationException.class)
+                    .satisfies(e -> assertThat(
+                            ((ClientContactService.ContactValidationException) e).isDuplicate())
+                            .as("a malformed address is a 400, not the duplicate 409")
+                            .isFalse());
+
+            verify(write, never()).insert(anyLong(), any());
+        }
+
+        /**
+         * Shape before uniqueness, and only one of the two reported. Asking the
+         * database whether a non-address is taken spends a query to learn
+         * nothing, and naming both failures would tell an administrator to
+         * resolve a duplicate of something that was never valid.
+         */
+        @Test
+        @DisplayName("a malformed address is not also checked for uniqueness")
+        void malformedEmailSkipsTheUniquenessQuery() {
+            assertThatThrownBy(() -> service.add(1, request("Sara K", "sara@acme", false)))
+                    .isInstanceOf(ClientContactService.ContactValidationException.class);
+
+            verify(write, never()).findConflictingEmail(anyLong(), any(), any());
+        }
     }
 
     // ------------------------------------------------------------------

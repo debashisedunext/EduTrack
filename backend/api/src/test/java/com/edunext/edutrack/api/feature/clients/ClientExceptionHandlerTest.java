@@ -67,18 +67,39 @@ class ClientExceptionHandlerTest {
     // ------------------------------------------------------------------
 
     /**
-     * A contact has one queried rule, so there is no mixture to describe with the
-     * wrong status — which is why this is 409 whenever a duplicate email is
-     * involved, where the client form above needs it to be the sole failure.
+     * A duplicate address is a uniqueness conflict, like a client code.
      */
     @Test
     @DisplayName("a duplicate contact email is 409")
     void duplicateContactEmailIs409() {
         ResponseEntity<ProblemDetail> response = handler.handleContact(
                 new ClientContactService.ContactValidationException(
-                        errors("email", "Sara Kapoor already uses sara@acme.example at this client.")));
+                        errors("email", "Sara Kapoor already uses sara@acme.example at this client."),
+                        true));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    /**
+     * B-028 · <b>the other way an {@code email} key can be produced, and it is
+     * not a conflict.</b>
+     *
+     * <p>{@code isDuplicate()} was {@code errors.containsKey("email")} until
+     * B-028 gave the field a second failure — a malformed address. Under the
+     * inference this response was a <b>409</b>, and CONVENTIONS.md §3 says a
+     * client branches on the status, so the contact editor would have reported
+     * "already in use" about an address no other contact holds. The exception
+     * carries the fact now instead of the handler guessing it.
+     */
+    @Test
+    @DisplayName("a malformed contact email is 400, not the duplicate 409")
+    void malformedContactEmailIs400() {
+        ResponseEntity<ProblemDetail> response = handler.handleContact(
+                new ClientContactService.ContactValidationException(
+                        errors("email", "email is not a well-formed email address."),
+                        false));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     /**
@@ -98,7 +119,7 @@ class ClientExceptionHandlerTest {
                         errors("clientCode", "taken"))).getBody();
         ProblemDetail email = handler.handleContact(
                 new ClientContactService.ContactValidationException(
-                        errors("email", "taken"))).getBody();
+                        errors("email", "taken"), true)).getBody();
 
         assertThat(code).isNotNull();
         assertThat(email).isNotNull();
@@ -119,7 +140,7 @@ class ClientExceptionHandlerTest {
     void messagesAreArrays() {
         ProblemDetail problem = handler.handleContact(
                 new ClientContactService.ContactValidationException(
-                        errors("email", "already used"))).getBody();
+                        errors("email", "already used"), true)).getBody();
 
         assertThat(problem).isNotNull();
         assertThat(fieldsOf(problem).get("email")).isInstanceOf(String[].class);

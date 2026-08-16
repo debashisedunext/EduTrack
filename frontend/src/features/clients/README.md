@@ -117,11 +117,20 @@ Two consequences the tests pin:
 
 ## What is not here yet
 
-- **B-028** — the primary-contact gate *enforced*, on the ticket create path.
-  B-027 refuses a duplicate email and validates its shape; what is left is the
-  half that belongs where a caller can act on it.
-- **B-029** — deactivating blocks *new* tickets. That rule lives on the ticket
-  create path, not on this screen; S-32 only warns, with the count.
+- **B-028's gate refused by a *server*.** B-028 landed the rest of it: the S-19
+  client dropdown reads `hasPrimaryContact` off every row and renders such a
+  client **listed, greyed and unselectable** with the reason beside it
+  (`getOptionDisabled` on `SearchableDropdown` — Stream C's component, one
+  additive prop, flagged). What is still missing is the backstop, and it is
+  missing because `POST /tickets` has no server behind it at all: the
+  obligation is written into that operation's contract description and flagged
+  for Stream C. Shown-and-refused rather than filtered out, because a client
+  that is simply absent from a dropdown is indistinguishable from a dropdown
+  that has lost its data — and the person raising the ticket is usually the one
+  who can go and fix the master.
+- **B-029** — deactivating blocks *new* tickets. That rule lives on the same
+  path, alongside B-028's, and is flagged in the same place; S-32 only warns,
+  with the count.
 - **B-031…B-038** — the Excel wizard behind the disabled "Import from Excel"
   button. Replace it with a `Link` when the route exists.
 
@@ -138,6 +147,20 @@ added §4B.2's third state, and `isActive` derives as `status !== 'INACTIVE'` so
 that a prospect stays in the ticket form's client dropdown. That makes a
 prospect and a contracted client identical to a boolean, which is why
 `columns.tsx` reads `status` and the chip has three words rather than two.
+
+**B-028 · and the server was not doing that.** It projected `isActive` the wide
+way and *filtered* `?isActive=true` as `status = 'ACTIVE'`, so every prospect
+was missing from the S-19 dropdown against a real backend while showing up
+under `npm run dev` — the MSW mock had it right and its comment claimed to be
+matching the server. Fixed in `ClientQueryRepository`; `ClientMasterIT` pins it,
+because a unit test that mocks the repository cannot see a predicate.
+
+**Three forms validate an email and only one rule does the deciding.**
+`@/lib/email` is the browser's copy of the server's `EmailFormat` — zod's
+`.email()` accepts `sara@acme`, which the server now refuses and B-035's import
+always refused. A client-side rule looser than the server's is the worse
+direction of the two: the form says the field is fine and the save comes back
+with an error on it.
 
 **`/masters/clients` is the list; `/clients/:clientId` is the 360.** Two
 screens at two paths, kept apart by the prefix exactly as `/masters/projects`

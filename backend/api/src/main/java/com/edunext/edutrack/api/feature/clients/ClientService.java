@@ -50,12 +50,15 @@ import java.util.Set;
 public class ClientService {
 
     /**
-     * The two values B-025 wrote. The vocabulary itself is {@link ClientStatus},
-     * which B-026 widened with {@code PROSPECT} — these stay as the two the
-     * status setter can produce, and they are its names for them.
+     * The one value the grid's filter compares against. The vocabulary itself is
+     * {@link ClientStatus}, which B-026 widened with {@code PROSPECT}.
+     *
+     * <p><b>{@code ACTIVE} used to sit beside it and B-028 removed it</b>, which
+     * is the smaller half of that fix: {@code ClientQueryRepository} was the only
+     * reader, it compared {@code status = ACTIVE} for {@code ?isActive=true}, and
+     * "active" has meant two of the three statuses since B-026. Leaving the
+     * constant would leave the wrong comparison one autocomplete away.
      */
-    static final String ACTIVE = ClientStatus.ACTIVE.name();
-
     static final String INACTIVE = ClientStatus.INACTIVE.name();
 
     private final ClientRepository clients;
@@ -234,6 +237,9 @@ public class ClientService {
 
         List<ClientDtos.Client> views = new ArrayList<>(rows.size());
         for (ClientQueryRepository.Row row : rows) {
+            // B-028 · the gate and the contact come off the same lookup, so a
+            // client cannot report a primary contact it is not selectable by.
+            ClientDtos.Contact primary = primaries.get(row.id());
             views.add(new ClientDtos.Client(
                     row.id(),
                     row.clientCode(),
@@ -250,9 +256,17 @@ public class ClientService {
                     ClientStatus.isActive(row.status()),
                     row.status(),
                     openCounts.getOrDefault(row.id(), 0L),
-                    primaries.get(row.id()),
+                    primary,
                     projects.getOrDefault(row.id(), List.of()),
-                    lastDates.get(row.id())));
+                    lastDates.get(row.id()),
+                    // B-028 · blueprint line 948's gate, on the row §4B.2's
+                    // ticket-form dropdown renders. `primaryContact` is
+                    // @JsonInclude(NON_NULL) and therefore *absent* rather than
+                    // null when there is none, so a caller deriving the rule
+                    // from the object is reading a missing key — which reaches
+                    // a picker as `undefined` and is one `?? true` away from
+                    // offering every client. Stated as the boolean it is.
+                    primary != null));
         }
         return views;
     }

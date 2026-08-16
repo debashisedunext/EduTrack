@@ -573,6 +573,93 @@ class ClientMasterIT {
                 .extracting(ClientDtos.Client::clientCode).containsExactly("ITCL_OFF");
     }
 
+    /**
+     * B-028 · <b>the filter and the projection have to agree, and they did not.</b>
+     *
+     * <p>{@code absentIsActiveReturnsEveryone} above covers ACTIVE and INACTIVE
+     * and passed throughout, because with two statuses {@code status = 'ACTIVE'}
+     * and {@code status <> 'INACTIVE'} are the same predicate. B-026 added the
+     * third, widened {@link ClientStatus#isActive()} and left the SQL alone — so
+     * a prospect came back from an unfiltered list reporting {@code isActive:
+     * true} and did not come back from {@code ?isActive=true} at all.
+     *
+     * <p>That is the exact call {@code CreateTicketPage} makes, so every prospect
+     * was missing from §4B.2's client dropdown against a real backend while the
+     * MSW mock — which filtered the wide way, and said in a comment that it was
+     * matching the server — showed them. Correct in development, wrong in
+     * production.
+     *
+     * <p>Asserted here rather than only in the unit test because the unit test
+     * mocks {@code ClientQueryRepository}, which is where the predicate lives:
+     * nothing below the SQL can see this.
+     */
+    @Test
+    @DisplayName("?isActive=true includes prospects, because a prospect is not INACTIVE")
+    void isActiveFilterIncludesProspects() {
+        insertClient("ITCL_PA", "IT Gate Active", "ACTIVE");
+        insertClient("ITCL_PP", "IT Gate Prospect", "PROSPECT");
+        insertClient("ITCL_PI", "IT Gate Retired", "INACTIVE");
+
+        assertThat(service.list(
+                new ClientQueryRepository.Filter("IT Gate", true, null, null, null), null, 50)
+                .data())
+                .extracting(ClientDtos.Client::clientCode)
+                .containsExactlyInAnyOrder("ITCL_PA", "ITCL_PP");
+
+        // The false branch is deliberately not symmetric: "not active" is
+        // exactly INACTIVE, where "active" is two of the three.
+        assertThat(service.list(
+                new ClientQueryRepository.Filter("IT Gate", false, null, null, null), null, 50)
+                .data())
+                .extracting(ClientDtos.Client::clientCode).containsExactly("ITCL_PI");
+    }
+
+    /**
+     * B-028 · the gate blueprint line 948 names, on the row the ticket form
+     * renders.
+     *
+     * <p>The removal half is what needs a database: B-027 removes a contact by
+     * deactivating it, so this is the difference between {@code is_primary = 1}
+     * and {@code is_primary = 1 AND is_active = 1} — and a client whose only
+     * primary has left must read as having none, because nobody at the desk can
+     * be reached through them.
+     */
+    @Test
+    @DisplayName("hasPrimaryContact follows the live primary, and a removal clears it")
+    void hasPrimaryContactFollowsTheLivePrimary() {
+        long clientId = insertClient("ITCL_HP", "IT Gate Contacts", "ACTIVE");
+
+        assertThat(gateOf("IT Gate Contacts")).isFalse();
+
+        insertContact(clientId, "Non Primary", false);
+        assertThat(gateOf("IT Gate Contacts"))
+                .as("a contact who is not the primary does not open the gate")
+                .isFalse();
+
+        long primaryId = addContact(clientId, "The Primary", "the.primary@itcl.example", true);
+        assertThat(gateOf("IT Gate Contacts")).isTrue();
+
+        contacts.remove(clientId, primaryId);
+        assertThat(gateOf("IT Gate Contacts"))
+                .as("removal deactivates, and a departed primary is no primary")
+                .isFalse();
+    }
+
+    /** The list row and the detail must answer the gate identically. */
+    @Test
+    @DisplayName("the list row and the detail agree about the gate")
+    void theListAndTheDetailAgreeAboutTheGate() {
+        long clientId = insertClient("ITCL_HD", "IT Gate Detail", "ACTIVE");
+        addContact(clientId, "Primary Person", "primary.person@itcl.example", true);
+
+        assertThat(gateOf("IT Gate Detail")).isTrue();
+        assertThat(service.findDetail(clientId).orElseThrow().hasPrimaryContact()).isTrue();
+    }
+
+    private boolean gateOf(String name) {
+        return service.list(filterOn(name), null, 50).data().getFirst().hasPrimaryContact();
+    }
+
     /** {@code utf8mb4_0900_ai_ci} already matches case-insensitively. */
     @Test
     @DisplayName("the support plan filter is case-insensitive through the collation")

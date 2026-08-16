@@ -65,6 +65,33 @@ describe('the contact form', () => {
     })
 
     /**
+     * B-028 · zod's `.email()` accepted this and the server now does not, so
+     * the form would have taken the address, sent it, and shown the user a
+     * server error on a field it had just marked valid. Blueprint line 948's
+     * "valid emails" is one rule, and `@/lib/email` is the browser's half of it.
+     */
+    it('refuses an address with no dotted TLD, which zod .email() accepted', () => {
+      expect(contactFormSchema.safeParse({ ...valid, email: 'sara@acme' }).success).toBe(false)
+      expect(contactFormSchema.safeParse({ ...valid, email: 'sara@localhost' }).success)
+        .toBe(false)
+      expect(contactFormSchema.safeParse({ ...valid, email: 'sara@acme.example' }).success)
+        .toBe(true)
+    })
+
+    /**
+     * "Missing" and "malformed" stay different answers — the box the desk left
+     * empty is told it is required, not that what they did not type is
+     * malformed.
+     */
+    it('reports a blank address as required, not as malformed', () => {
+      const failure = contactFormSchema.safeParse({ ...valid, email: '  ' })
+
+      expect(failure.success).toBe(false)
+      expect(failure.success === false && failure.error.issues[0].message)
+        .toBe('An email address is required.')
+    })
+
+    /**
      * **120, not 150.** The contract declared `maxLength: 150` against a
      * `VARCHAR(120)` until B-027 — a value the form accepted, the server
      * accepted, and MySQL refused. This file restates the column widths because

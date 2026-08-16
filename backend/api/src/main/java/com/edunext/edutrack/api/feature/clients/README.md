@@ -158,6 +158,64 @@ one and every contact write moves it**, since `contactCount` and
 edits contacts and then saves the client is still stopped by a precondition one
 level up. `contactQueries.ts` invalidates the client for exactly that reason.
 
+## B-028 — the validation set, and where each rule is stated
+
+Blueprint line 948 asks S-33 for three things. Two of them existed and disagreed
+with themselves.
+
+### One email rule, in `domain/validation/EmailFormat`
+
+There were three answers to "is this a valid email?" on the same columns:
+`FieldValidators.EMAIL` (B-030's importer) required a dotted TLD, Jakarta's
+`@Email` on `ClientWriteRequest`/`ContactWriteRequest` did not, and zod's
+`.email()` on both screens did not either. So S-33 accepted `accounts@acme`,
+which `notificationOptIn: true` turns into a subscription D-036 can only bounce,
+and which B-035's import — upserting on the client code S-33 just issued — would
+reject on re-import.
+
+The strict reading won, because every one of these columns exists to be *sent
+to* or *matched against*. It lives in `domain` rather than in either feature:
+`imports` already depends on `domain` (it builds `Client` entities) and neither
+feature should depend on the other — B-024's placement argument for
+`WorkingHoursService`, unchanged. `@Email` is gone from both write shapes and
+the services apply it, which also puts an email failure into the collected error
+map rather than short-circuiting a four-tab form at the binding layer.
+
+### One client-code rule, in `domain/clients/ClientCodeFormat`
+
+The form allowed `ACME-IN`; `FieldValidators.alphanumeric()` on the same column
+did not. Since `client_code` is B-035's upsert key, that refusal was not a
+message somebody reads — it was a client the import silently declined to update.
+`@Pattern(regexp = ClientCodeFormat.REGEX)` and `FieldValidators.clientCode()`
+are now one statement. `alphanumeric()` stays for the fields where letters and
+digits really is the rule.
+
+### The gate is reported here and enforced on `POST /tickets`
+
+`Client.hasPrimaryContact` is on the **list** row as well as `ClientDetail`,
+because the list row is what §4B.2's ticket-form dropdown renders. Not derived
+from `primaryContact` at the call site: that field is `@JsonInclude(NON_NULL)`,
+so a picker reading it gets a missing key. Both come off the same active-only
+lookup, so they cannot disagree.
+
+Enforcement belongs on the ticket create path, which is where a caller can act
+on the refusal — and there is no server behind `POST /tickets` yet. The
+obligation is written into that operation's contract description, beside
+B-029's, and **flagged for Stream C**. The form shows an unmet client and
+refuses the selection with the reason, rather than filtering it out: a client
+that is simply absent from a dropdown is indistinguishable from a dropdown that
+has lost its data.
+
+### `?isActive=true` was dropping every prospect
+
+`ClientQueryRepository.page` filtered `status = 'ACTIVE'` while the row it
+returned projected `status <> 'INACTIVE'`. B-026 widened the projection when it
+added `PROSPECT` and left the predicate alone, so a prospect came back from
+`/clients` saying it was active and did not come back from
+`?isActive=true` — the one call `CreateTicketPage` makes. `ClientService.ACTIVE`
+is deleted rather than corrected, because the wrong comparison should not be one
+autocomplete away.
+
 ## Not here yet
 
 Nothing reads `clients.sla_policy_id`. C-012's `PlannedCloseDate` ladder
