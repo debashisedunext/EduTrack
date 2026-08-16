@@ -11,6 +11,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
+import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -106,8 +109,78 @@ class DashboardService {
             stock = summaries.projectStock(start, end, scope, projectId).orElse(EMPTY_STOCK);
         }
 
+        // A-055 · the preceding window of equal length, for deltaPct. Compared
+        // like against like: a 7-day window is compared with the 7 days before
+        // it, never with "last month", or a Monday-to-Friday view would read as
+        // a collapse every time it was opened on a Saturday.
+        long span = ChronoUnit.DAYS.between(start, end) + 1;
+        LocalDate priorEnd = start.minusDays(1);
+        LocalDate priorStart = priorEnd.minusDays(span - 1);
+
+        DashboardRepository.Flow priorFlow;
+        DashboardRepository.Stock priorStock;
+        List<DashboardRepository.Day> series;
+
+        if (ownWorkOnly || assigneeId != null) {
+            long who = ownWorkOnly ? caller.userId() : assigneeId;
+            priorFlow = summaries.resourceFlow(priorStart, priorEnd, who);
+            priorStock = summaries.resourceStock(priorStart, priorEnd, who).orElse(EMPTY_STOCK);
+            series = summaries.resourceSeries(start, end, who);
+        } else {
+            List<Long> scope = projectScopeOf(caller);
+            priorFlow = summaries.projectFlow(priorStart, priorEnd, scope, projectId);
+            priorStock = summaries.projectStock(priorStart, priorEnd, scope, projectId).orElse(EMPTY_STOCK);
+            series = summaries.projectSeries(start, end, scope, projectId);
+        }
+
         Instant asOf = summaries.computedAt(start, end).orElse(null);
-        return new DashboardDtos.Summary(asOf, cards(flow, stock, projectId, start, end));
+        return new DashboardDtos.Summary(asOf,
+                cards(flow, stock, priorFlow, priorStock, series, projectId, start, end));
+    }
+
+    /**
+     * A-055 · the change against the preceding window, as a percentage.
+     *
+     * <p>Null when the previous window is zero, not "+100%". A team that closed
+     * nothing last week and eleven tickets this week has not improved by a
+     * hundred per cent — the comparison has no denominator, and inventing one
+     * puts a confident green arrow on a number that means nothing. The card
+     * renders no delta at all instead, which is the honest rendering of "there
+     * is nothing to compare with".
+     */
+    private static BigDecimal deltaPct(long now, long before) {
+        if (before == 0) {
+            return null;
+        }
+        return BigDecimal.valueOf(now - before)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(BigDecimal.valueOf(before), 1, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * A-055 · one point per day in the window, gaps filled by carrying forward.
+     *
+     * <p>A day A-051 has not computed is <em>absent</em> from the series, not
+     * zero. Plotting the absence as zero draws a cliff to the axis and back —
+     * on a weekend, or after any outage — and a sparkline's whole job is shape.
+     * Flow metrics fill with zero because no rows genuinely means nothing
+     * happened; stock carries the last known value forward, because "how many
+     * are open" does not become zero simply for not being recomputed.
+     */
+    private static List<BigDecimal> sparkline(List<DashboardRepository.Day> series,
+                                              java.util.function.ToLongFunction<DashboardRepository.Day> metric,
+                                              boolean isStock) {
+        List<BigDecimal> points = new ArrayList<>(series.size());
+        long carried = 0;
+        for (DashboardRepository.Day day : series) {
+            long value = metric.applyAsLong(day);
+            carried = value;
+            points.add(BigDecimal.valueOf(value));
+        }
+        if (points.isEmpty() && isStock) {
+            points.add(BigDecimal.valueOf(carried));
+        }
+        return List.copyOf(points);
     }
 
     private static final DashboardRepository.Stock EMPTY_STOCK =
@@ -134,23 +207,35 @@ class DashboardService {
      * comes to disagree with the list it opens, and the user believes the list.
      */
     private List<DashboardDtos.Card> cards(DashboardRepository.Flow flow, DashboardRepository.Stock stock,
+                                           DashboardRepository.Flow priorFlow,
+                                           DashboardRepository.Stock priorStock,
+                                           List<DashboardRepository.Day> series,
                                            Long projectId, LocalDate from, LocalDate to) {
         String window = "from=" + from + "&to=" + to + (projectId == null ? "" : "&projectId=" + projectId);
         return List.of(
-                card("total", "Total tasks created", flow.created(), "/tickets?" + window),
-                card("open", "Pending / open", stock.openTotal(), "/tickets?excludeClosed=true&" + window),
-                card("closed", "Closed", flow.closed(), "/tickets?status=CLOSED&" + window),
-                card("critical", "Critical", stock.openCritical(),
+                card("total", "Total tasks created", flow.created(), priorFlow.created(),
+                        sparkline(series, DashboardRepository.Day::created, false),
+                        "/tickets?" + window),
+                card("open", "Pending / open", stock.openTotal(), priorStock.openTotal(),
+                        sparkline(series, DashboardRepository.Day::openTotal, true),
+                        "/tickets?excludeClosed=true&" + window),
+                card("closed", "Closed", flow.closed(), priorFlow.closed(),
+                        sparkline(series, DashboardRepository.Day::closed, false),
+                        "/tickets?status=CLOSED&" + window),
+                card("critical", "Critical", stock.openCritical(), priorStock.openCritical(),
+                        sparkline(series, DashboardRepository.Day::openCritical, true),
                         "/tickets?level=CRITICAL&excludeClosed=true&" + window),
-                card("delayed", "Delayed", stock.openDelayed(),
+                card("delayed", "Delayed", stock.openDelayed(), priorStock.openDelayed(),
+                        sparkline(series, DashboardRepository.Day::openDelayed, true),
                         "/tickets?isDelayed=true&excludeClosed=true&" + window),
-                card("reopened", "Reopened", stock.openReopened(),
+                card("reopened", "Reopened", stock.openReopened(), priorStock.openReopened(),
+                        sparkline(series, DashboardRepository.Day::openReopened, true),
                         "/tickets?reopenedOnly=true&" + window));
     }
 
-    private static DashboardDtos.Card card(String key, String label, long value, String drillDown) {
-        // deltaPct and sparkline are A-055's. Null and empty render as absent;
-        // zero and a flat line would render as assertions nobody computed.
-        return new DashboardDtos.Card(key, label, BigDecimal.valueOf(value), null, List.of(), drillDown);
+    private static DashboardDtos.Card card(String key, String label, long value, long prior,
+                                           List<BigDecimal> sparkline, String drillDown) {
+        return new DashboardDtos.Card(key, label, BigDecimal.valueOf(value),
+                deltaPct(value, prior), sparkline, drillDown);
     }
 }
