@@ -133,6 +133,17 @@ export interface Client {
   id: number; clientCode: string; name: string; domain: string;
   accountManagerId: number; supportPlan: string; timezone: string; isActive: boolean;
 }
+/**
+ * B-025 · which clients are reachable from which project.
+ *
+ * S-32's Projects column and its project filter both read this, and the ticket
+ * form's client dropdown is filtered by it (C-021). Seeded to agree with each
+ * project's own `clientName`, so the two ways the fixture names the same
+ * relationship cannot disagree.
+ */
+export interface ClientProject {
+  clientId: number; projectId: number; isDefault: boolean;
+}
 export interface Contact {
   id: number; clientId: number; name: string; email: string; phone: string;
   isPrimary: boolean; notificationOptIn: boolean; portalAccess: boolean;
@@ -341,6 +352,7 @@ export interface StatusRequest {
 // ── the store ───────────────────────────────────────────────────────────────
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
+  clientProjects: ClientProject[];
   taskTypes: TaskType[]; modules: Module[]; priorities: Priority[]; stages: Stage[];
   /** B-015 · S-09. `roleGrants` is keyed by role id — the matrix, one row per role. */
   permissions: Permission[]; roles: Role[]; roleGrants: Record<number, string[]>;
@@ -527,6 +539,34 @@ const CONTACTS: Contact[] = [
   { id: 2, clientId: 1, name: 'Dev Patel', email: 'dev@acme.example', phone: '+91 98200 22222', isPrimary: false, notificationOptIn: true, portalAccess: false },
   { id: 3, clientId: 2, name: 'Tom Fletcher', email: 'tom@northwind.example', phone: '+44 20 7946 0000', isPrimary: true, notificationOptIn: true, portalAccess: false },
   { id: 4, clientId: 3, name: 'Erin Walsh', email: 'erin@bluewave.example', phone: '+1 212 555 0100', isPrimary: true, notificationOptIn: false, portalAccess: false },
+];
+
+/**
+ * B-025 · the project mappings.
+ *
+ * **`/clients?projectId=` was previously ignored by the mock**, so the §4B.2
+ * client dropdown on the create form looked unfiltered in `npm run dev` and
+ * would have narrowed on first contact with a real backend —
+ * `CreateTicketPage.tsx` says so in its own comment. This table is what lets the
+ * handler honour the parameter, so the mock and the server now narrow the same
+ * way.
+ *
+ * Shaped to exercise the cases rather than to be tidy:
+ *
+ * - **Acme is on two projects** — S-32's Projects column must render that as one
+ *   row carrying both, not as two rows.
+ * - **CRM serves two clients** — a project with a single client cannot tell a
+ *   dropdown that filters correctly from one that never had to, and the S-19
+ *   create form switches between them.
+ * - **Bluewave is on none** — the empty cell, which must read "None" rather than
+ *   render blank.
+ */
+const CLIENT_PROJECTS: ClientProject[] = [
+  { clientId: 1, projectId: 1, isDefault: true },
+  { clientId: 1, projectId: 3, isDefault: false },
+  { clientId: 2, projectId: 1, isDefault: false },
+  { clientId: 2, projectId: 2, isDefault: true },
+  { clientId: 4, projectId: 4, isDefault: true },
 ];
 
 /**
@@ -938,6 +978,7 @@ export function createDb(): Db {
     projects: structuredClone(PROJECTS),
     clients: structuredClone(CLIENTS),
     contacts: structuredClone(CONTACTS),
+    clientProjects: structuredClone(CLIENT_PROJECTS),
     taskTypes: structuredClone(TASK_TYPES),
     modules: structuredClone(MODULES),
     priorities: structuredClone(PRIORITIES),

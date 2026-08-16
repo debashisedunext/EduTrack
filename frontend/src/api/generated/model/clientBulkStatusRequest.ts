@@ -46,31 +46,16 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { CursorParameter } from './cursorParameter';
-import type { LimitParameter } from './limitParameter';
 
-export type ListClientsParams = {
-/**
- * Opaque cursor from `meta.nextCursor`. Never an offset.
- */
-cursor?: CursorParameter;
-/**
- * @minimum 1
- * @maximum 200
- */
-limit?: LimitParameter;
-/**
- * Name, code or domain.
- */
-q?: string;
-isActive?: boolean;
-projectId?: number;
-/**
- * S-32 filter. Matched case-insensitively against the stored plan.
- */
-supportPlan?: string;
-/**
- * S-32 filter.
- */
-accountManagerId?: number;
-};
+export interface ClientBulkStatusRequest {
+  /**
+   * Bounded at 200 — the same ceiling `Limit` puts on a page, so the
+selection cannot exceed what one page could have offered. An
+unbounded id list is an unbounded `IN (…)`.
+
+   * @minItems 1
+   * @maxItems 200
+   */
+  clientIds: number[];
+  isActive: boolean;
+}

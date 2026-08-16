@@ -1422,8 +1422,56 @@ export const restHandlers = [
       );
     }
     if (q.get('isActive')) rows = rows.filter((c) => String(c.isActive) === q.get('isActive'));
+    // B-025 · S-32's remaining three filters. `projectId` reads the mapping
+    // table rather than the project's `clientName`, because the name is a label
+    // and the mapping is the relationship.
+    const projectId = q.get('projectId');
+    if (projectId) {
+      const mapped = new Set(
+        db.clientProjects.filter((cp) => cp.projectId === Number(projectId)).map((cp) => cp.clientId),
+      );
+      rows = rows.filter((c) => mapped.has(c.id));
+    }
+    const supportPlan = q.get('supportPlan');
+    // Case-insensitive, matching what `utf8mb4_0900_ai_ci` does server-side —
+    // a mock that is stricter than the database teaches the wrong lesson.
+    if (supportPlan) {
+      rows = rows.filter((c) => c.supportPlan.toLowerCase() === supportPlan.toLowerCase());
+    }
+    const accountManagerId = q.get('accountManagerId');
+    if (accountManagerId) {
+      rows = rows.filter((c) => c.accountManagerId === Number(accountManagerId));
+    }
+    // Ordered by name then id, the keyset the server pages by. Without it the
+    // mock pages in insertion order and a screen that depends on the ordering
+    // passes here and fails against the real backend.
+    rows = [...rows].sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
     const { page, meta } = paginate(rows, new URL(request.url));
     return ok(page.map(clientDto), meta);
+  }),
+  // Declared before `/clients/:clientId/status` so MSW matches the literal
+  // first — msw resolves handlers in array order, unlike Spring and React
+  // Router, which rank a literal above a variable however they are written.
+  http.patch(url('/clients/bulk-status'), async ({ request }) => {
+    const db = getDb();
+    const { clientIds, isActive } = (await request.json()) as {
+      clientIds: number[]
+      isActive: boolean
+    };
+    if (!Array.isArray(clientIds) || clientIds.length === 0) {
+      return validationFailed({ clientIds: ['must name at least one client'] });
+    }
+    // One unknown id fails the whole batch and writes nothing — the server's
+    // rule, mirrored, because a mock that silently skips would let a screen
+    // ship believing partial success is reported.
+    const ids = [...new Set(clientIds)];
+    const missing = ids.filter((id) => !db.clients.some((c) => c.id === id));
+    if (missing.length > 0) {
+      return problem(404, 'not-found', `These clients do not exist: ${missing.join(', ')}.`);
+    }
+    const changed = db.clients.filter((c) => ids.includes(c.id));
+    changed.forEach((c) => { c.isActive = isActive; });
+    return ok(changed.map(clientDto));
   }),
   http.post(url('/clients'), async ({ request }) => {
     const db = getDb();
@@ -2917,6 +2965,22 @@ function clientDto(c: import('../db').Client) {
     isActive: c.isActive,
     openTicketCount: db.tickets.filter((t) => t.clientId === c.id && t.status !== 'CLOSED').length,
     primaryContact: db.contacts.find((x) => x.clientId === c.id && x.isPrimary) ?? null,
+    // B-025 · S-32's Projects and Last Ticket columns. Both derived from the
+    // fixture rather than stored on the client, so a mapping added or a ticket
+    // raised in a test is reflected here without a second place to update.
+    projects: db.clientProjects
+      .filter((cp) => cp.clientId === c.id)
+      .map((cp) => db.projects.find((p) => p.id === cp.projectId))
+      .filter((p): p is NonNullable<typeof p> => p != null)
+      .map((p) => ({ id: p.id, projectCode: p.projectCode, name: p.name })),
+    // Null rather than absent for a client nothing has been raised against —
+    // "Never" is a state the column renders, not missing data.
+    lastTicketDate:
+      db.tickets
+        .filter((t) => t.clientId === c.id)
+        .map((t) => t.createdAt)
+        .sort()
+        .at(-1) ?? null,
   };
 }
 

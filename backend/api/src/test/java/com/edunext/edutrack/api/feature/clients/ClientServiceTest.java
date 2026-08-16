@@ -1,0 +1,401 @@
+package com.edunext.edutrack.api.feature.clients;
+
+import com.edunext.edutrack.common.pagination.Cursor;
+import com.edunext.edutrack.common.pagination.CursorPage;
+import com.edunext.edutrack.domain.clients.Client;
+import com.edunext.edutrack.domain.clients.ClientRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * B-025 · the decisions S-32 makes, without Docker.
+ *
+ * <p>{@code ClientMasterIT} proves the same behaviour against real MySQL, where
+ * the keyset ordering and the {@code statuses.is_terminal} join have opinions of
+ * their own. This proves the decisions themselves.
+ */
+class ClientServiceTest {
+
+    private ClientRepository clients;
+    private ClientQueryRepository query;
+    private ClientService service;
+
+    @BeforeEach
+    void setUp() {
+        clients = mock(ClientRepository.class);
+        query = mock(ClientQueryRepository.class);
+        service = new ClientService(clients, query);
+
+        when(query.openTicketCounts(anyCollection())).thenReturn(Map.of());
+        when(query.lastTicketDates(anyCollection())).thenReturn(Map.of());
+        when(query.projectsByClient(anyCollection())).thenReturn(Map.of());
+        when(query.primaryContacts(anyCollection())).thenReturn(Map.of());
+    }
+
+    // ------------------------------------------------------------------
+    // Paging
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("the page boundary")
+    class Paging {
+
+        @Test
+        @DisplayName("the extra row is evidence of a next page, never returned")
+        void extraRowIsDroppedAndReportedAsHasMore() {
+            when(query.page(any(), any(), anyInt())).thenReturn(rows("Acme", "Bluewave", "Cormorant"));
+
+            CursorPage<ClientDtos.Client> page = service.list(noFilter(), null, 2);
+
+            assertThat(page.data()).extracting(ClientDtos.Client::name)
+                    .containsExactly("Acme", "Bluewave");
+            assertThat(page.meta().hasMore()).isTrue();
+        }
+
+        /**
+         * The cursor names the last <em>returned</em> row, not the extra one.
+         *
+         * <p>Naming the extra row is the mistake A-053's javadoc lists second:
+         * the next page then starts after a row nobody has seen, and it is
+         * skipped silently.
+         */
+        @Test
+        @DisplayName("nextCursor points at the last returned row")
+        void cursorNamesTheLastReturnedRow() {
+            when(query.page(any(), any(), anyInt())).thenReturn(rows("Acme", "Bluewave", "Cormorant"));
+
+            CursorPage<ClientDtos.Client> page = service.list(noFilter(), null, 2);
+            Cursor resumeFrom = Cursor.decode(page.meta().nextCursor());
+
+            assertThat(resumeFrom).isNotNull();
+            assertThat(resumeFrom.sortKey()).isEqualTo("Bluewave");
+        }
+
+        /**
+         * A full final page is not "probably more".
+         *
+         * <p>Deriving {@code hasMore} from {@code rows.size() == limit} is true
+         * on the last page whenever the total divides evenly, and the client then
+         * makes one more request for nothing.
+         */
+        @Test
+        @DisplayName("a page that exactly fills the limit is still the last one")
+        void exactlyFullPageIsNotMore() {
+            when(query.page(any(), any(), anyInt())).thenReturn(rows("Acme", "Bluewave"));
+
+            CursorPage<ClientDtos.Client> page = service.list(noFilter(), null, 2);
+
+            assertThat(page.data()).hasSize(2);
+            assertThat(page.meta().hasMore()).isFalse();
+            assertThat(page.meta().nextCursor()).isNull();
+        }
+
+        /** One more than the page, so the boundary has something to read. */
+        @Test
+        @DisplayName("the query is asked for limit + 1 rows")
+        void fetchesOneMoreThanTheLimit() {
+            when(query.page(any(), any(), anyInt())).thenReturn(List.of());
+
+            service.list(noFilter(), null, 25);
+
+            ArgumentCaptor<Integer> fetchSize = ArgumentCaptor.forClass(Integer.class);
+            verify(query).page(any(), any(), fetchSize.capture());
+            assertThat(fetchSize.getValue()).isEqualTo(26);
+        }
+
+        /** Out of range clamps rather than rejects — PageLimit's rule. */
+        @Test
+        @DisplayName("limit=1000 is clamped to 200, not refused")
+        void limitIsClamped() {
+            when(query.page(any(), any(), anyInt())).thenReturn(List.of());
+
+            service.list(noFilter(), null, 1000);
+
+            ArgumentCaptor<Integer> fetchSize = ArgumentCaptor.forClass(Integer.class);
+            verify(query).page(any(), any(), fetchSize.capture());
+            assertThat(fetchSize.getValue()).isEqualTo(201);
+        }
+
+        /** A bookmarked or forged cursor is the first page, not a 400. */
+        @Test
+        @DisplayName("an unreadable cursor starts at the beginning")
+        void malformedCursorIsTheFirstPage() {
+            when(query.page(any(), any(), anyInt())).thenReturn(List.of());
+
+            service.list(noFilter(), "not-a-cursor", 50);
+
+            ArgumentCaptor<Cursor> cursor = ArgumentCaptor.forClass(Cursor.class);
+            verify(query).page(any(), cursor.capture(), anyInt());
+            assertThat(cursor.getValue()).isNull();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // The grid's derived columns
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("the S-32 columns that are not on the client row")
+    class Aggregates {
+
+        /**
+         * Four queries for the page whatever its size — never four per row.
+         *
+         * <p>An N+1 here is invisible at the four seeded clients and is not
+         * invisible at the five thousand B-032's import allows.
+         */
+        @Test
+        @DisplayName("aggregates are read once for the whole page")
+        void aggregatesAreReadPerPageNotPerRow() {
+            when(query.page(any(), any(), anyInt()))
+                    .thenReturn(rows("Acme", "Bluewave", "Cormorant"));
+
+            service.list(noFilter(), null, 50);
+
+            verify(query).openTicketCounts(anyCollection());
+            verify(query).lastTicketDates(anyCollection());
+            verify(query).projectsByClient(anyCollection());
+            verify(query).primaryContacts(anyCollection());
+        }
+
+        /** A client nothing has been raised against is zero, not absent. */
+        @Test
+        @DisplayName("a client with no tickets reports zero open and a null date")
+        void clientWithNoTicketsIsZeroNotNull() {
+            when(query.page(any(), any(), anyInt())).thenReturn(rows("Acme"));
+
+            ClientDtos.Client acme = service.list(noFilter(), null, 50).data().getFirst();
+
+            assertThat(acme.openTicketCount()).isZero();
+            assertThat(acme.lastTicketDate()).isNull();
+            assertThat(acme.projects()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("counts and dates land on the client they belong to")
+        void aggregatesAreKeyedByClient() {
+            when(query.page(any(), any(), anyInt())).thenReturn(rows("Acme", "Bluewave"));
+            Instant reported = Instant.parse("2026-08-01T09:15:00Z");
+            when(query.openTicketCounts(anyCollection())).thenReturn(Map.of(2L, 7L));
+            when(query.lastTicketDates(anyCollection())).thenReturn(Map.of(2L, reported));
+
+            List<ClientDtos.Client> page = service.list(noFilter(), null, 50).data();
+
+            assertThat(page.getFirst().openTicketCount()).isZero();
+            assertThat(page.get(1).openTicketCount()).isEqualTo(7L);
+            assertThat(page.get(1).lastTicketDate()).isEqualTo(reported);
+        }
+
+        /**
+         * {@code isActive} is derived from {@code status}, never stored — and it
+         * is {@code status = 'ACTIVE'} rather than {@code status <> 'INACTIVE'},
+         * so the third state blueprint §4B.2 names (Prospect, B-026's field) does
+         * not silently read as live.
+         */
+        @Test
+        @DisplayName("isActive is ACTIVE, not merely not-INACTIVE")
+        void isActiveIsDerivedFromStatus() {
+            when(query.page(any(), any(), anyInt())).thenReturn(List.of(
+                    row(1, "Acme", "ACTIVE"),
+                    row(2, "Bluewave", "INACTIVE"),
+                    row(3, "Cormorant", "PROSPECT")));
+
+            List<ClientDtos.Client> page = service.list(noFilter(), null, 50).data();
+
+            assertThat(page).extracting(ClientDtos.Client::isActive)
+                    .containsExactly(true, false, false);
+        }
+
+        /** The column is nullable, and an absent manager is a real state. */
+        @Test
+        @DisplayName("a client with no account manager serialises without one")
+        void missingAccountManagerIsNull() {
+            when(query.page(any(), any(), anyInt())).thenReturn(List.of(
+                    new ClientQueryRepository.Row(1, "ACME", "Acme", "acme.example",
+                            null, null, null, "Premium", null, "Asia/Kolkata", "ACTIVE")));
+
+            assertThat(service.list(noFilter(), null, 50).data().getFirst().accountManager())
+                    .isNull();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Writes
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("the status setters")
+    class Status {
+
+        @Test
+        @DisplayName("deactivating writes INACTIVE, and never deletes")
+        void deactivateFlipsStatus() {
+            Client acme = entity(1, "ACTIVE");
+            when(clients.findById(1L)).thenReturn(Optional.of(acme));
+            when(query.byIds(anyCollection())).thenReturn(rows("Acme"));
+
+            service.setStatus(1, false);
+
+            assertThat(acme.getStatus()).isEqualTo("INACTIVE");
+            // Flushed, not merely saved — the response is read back through
+            // JdbcClient, which Hibernate's auto-flush does not see coming.
+            verify(clients).saveAndFlush(acme);
+            verify(clients, never()).delete(any());
+            verify(clients, never()).deleteById(anyLong());
+        }
+
+        @Test
+        @DisplayName("a client that is not there is empty, not an exception")
+        void unknownSingleClientIsEmpty() {
+            when(clients.findById(9L)).thenReturn(Optional.empty());
+
+            assertThat(service.setStatus(9, false)).isEmpty();
+        }
+
+        /**
+         * The whole request fails, and nothing is written.
+         *
+         * <p>Skipping the unknown id would report success on a bulk action that
+         * changed forty-nine of fifty rows, which is the partial-success story
+         * this endpoint exists to replace.
+         */
+        @Test
+        @DisplayName("one unknown id fails the batch before anything is saved")
+        void unknownIdFailsTheWholeBatch() {
+            when(clients.findAllById(anyCollection()))
+                    .thenReturn(List.of(entity(1, "ACTIVE"), entity(2, "ACTIVE")));
+
+            assertThatThrownBy(() -> service.setStatusBulk(List.of(1L, 2L, 99L), false))
+                    .isInstanceOf(ClientService.UnknownClientException.class)
+                    .hasMessageContaining("99");
+
+            verify(clients, never()).saveAllAndFlush(any());
+        }
+
+        /** Every missing id, so the caller fixes them in one round. */
+        @Test
+        @DisplayName("the failure names every missing id, not the first")
+        void unknownIdFailureNamesAllOfThem() {
+            when(clients.findAllById(anyCollection())).thenReturn(List.of(entity(1, "ACTIVE")));
+
+            assertThatThrownBy(() -> service.setStatusBulk(List.of(1L, 98L, 99L), false))
+                    .isInstanceOf(ClientService.UnknownClientException.class)
+                    .satisfies(e -> assertThat(
+                            ((ClientService.UnknownClientException) e).clientIds())
+                            .containsExactly(98L, 99L));
+        }
+
+        /**
+         * A selection assembled across two pages should not have to be
+         * de-duplicated before it is allowed to act.
+         */
+        @Test
+        @DisplayName("the same id twice is one client, not a 404")
+        void duplicateIdsAreCollapsed() {
+            Client acme = entity(1, "ACTIVE");
+            when(clients.findAllById(anyCollection())).thenReturn(List.of(acme));
+            when(query.byIds(anyCollection())).thenReturn(rows("Acme"));
+
+            service.setStatusBulk(List.of(1L, 1L, 1L), false);
+
+            assertThat(acme.getStatus()).isEqualTo("INACTIVE");
+            verify(clients).saveAllAndFlush(any());
+        }
+
+        @Test
+        @DisplayName("a bulk activate writes ACTIVE to every named client")
+        void bulkActivateWritesAllOfThem() {
+            Client acme = entity(1, "INACTIVE");
+            Client blue = entity(2, "INACTIVE");
+            when(clients.findAllById(anyCollection())).thenReturn(List.of(acme, blue));
+            when(query.byIds(anyCollection())).thenReturn(rows("Acme", "Bluewave"));
+
+            service.setStatusBulk(List.of(1L, 2L), true);
+
+            assertThat(acme.getStatus()).isEqualTo("ACTIVE");
+            assertThat(blue.getStatus()).isEqualTo("ACTIVE");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Contacts
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("the row-expand's contacts")
+    class Contacts {
+
+        /**
+         * An empty expand and a mistyped id look identical to a user, and only
+         * one of them is worth reporting.
+         */
+        @Test
+        @DisplayName("an unknown client is 404, not an empty list")
+        void unknownClientIsEmptyOptional() {
+            when(clients.existsById(9L)).thenReturn(false);
+
+            assertThat(service.contactsOf(9)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a known client with no contacts is an empty list")
+        void knownClientWithNoContactsIsAnEmptyList() {
+            when(clients.existsById(1L)).thenReturn(true);
+            when(query.contactsOf(1L)).thenReturn(List.of());
+
+            assertThat(service.contactsOf(1)).contains(List.of());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // fixtures
+    // ------------------------------------------------------------------
+
+    private static ClientQueryRepository.Filter noFilter() {
+        return new ClientQueryRepository.Filter(null, null, null, null, null);
+    }
+
+    private static List<ClientQueryRepository.Row> rows(String... names) {
+        List<ClientQueryRepository.Row> rows = new ArrayList<>();
+        for (int i = 0; i < names.length; i++) {
+            rows.add(row(i + 1, names[i], "ACTIVE"));
+        }
+        return rows;
+    }
+
+    private static ClientQueryRepository.Row row(long id, String name, String status) {
+        return new ClientQueryRepository.Row(
+                id, name.toUpperCase(java.util.Locale.ROOT), name,
+                name.toLowerCase(java.util.Locale.ROOT) + ".example",
+                2L, "Priya Menon", "PM", "Premium", null, "Asia/Kolkata", status);
+    }
+
+    private static Client entity(long id, String status) {
+        Client client = new Client();
+        client.setId(id);
+        client.setClientCode("C" + id);
+        client.setName("Client " + id);
+        client.setStatus(status);
+        return client;
+    }
+}

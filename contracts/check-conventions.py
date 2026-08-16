@@ -30,6 +30,7 @@ NO_IF_MATCH = {
     "/me/password":                        "currentPassword already proves current state",
     "/users/{userId}/status":              "idempotent setter, last write wins is correct",
     "/clients/{clientId}/status":          "idempotent setter, last write wins is correct",
+    "/clients/bulk-status":                "idempotent setter, like the single-client route it batches — and one If-Match cannot speak for 200 rows, while per-row tags would fail the whole batch because somebody touched one unrelated client",
     "/notifications/{notificationId}/read": "idempotent, a race is harmless",
     "/notifications/read-all":             "idempotent, a race is harmless",
     "/tickets/{ticketId}/priority":        "reason mandatory and every change logged, so concurrent changes are visible not lost",
@@ -80,6 +81,7 @@ ROWLESS_403 = {
     "/masters/notification-templates/vocabulary": "same: a catalogue of enum values, Admin-only because the screen it feeds is",
     "/masters/notification-templates/{templateId}": "same: not row-scoped. Every read here is Admin-only, so a 403 tells a non-Admin only what the 401 already did",
     "/attachments/limits":                 "org-wide settings, not a row — `master.write` is a capability the caller either holds or does not, and the resource has no existence a 404 could conceal (every role already reads it)",
+    "/clients/bulk-status":                "master data, not row-scoped — the ids in the body name rows listClients already returned, and §4B.2's ticket dropdown makes that readable by all six roles, so a 403 conceals nothing a 404 would have",
 }
 
 

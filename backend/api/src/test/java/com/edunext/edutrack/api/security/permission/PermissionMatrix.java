@@ -290,6 +290,19 @@ final class PermissionMatrix {
     private static final String USER_STATUS = """
             {"isActive":false}""";
 
+    /** {@code ClientDtos.StatusRequest} — the same shape, one feature over. */
+    private static final String CLIENT_STATUS = """
+            {"isActive":false}""";
+
+    /**
+     * {@code ClientDtos.BulkStatusRequest}: {@code clientIds} is {@code @NotEmpty},
+     * so the list carries an id. An empty one is a 400 that would arrive before
+     * the guard runs, and the row would then assert nothing — the hole this
+     * class's header describes.
+     */
+    private static final String CLIENT_BULK_STATUS = """
+            {"clientIds":[1],"isActive":false}""";
+
     /**
      * The {@code *Patch} DTOs have every field optional — deliberately, so a
      * partial update is possible at all — so an empty object is valid and
@@ -665,6 +678,30 @@ final class PermissionMatrix {
             adminOnly("PATCH", "/api/v1/users/{userId}", RESOURCE),
             adminOnly("PATCH", "/api/v1/users/{userId}/status", USER_STATUS),
             adminOnly("POST", "/api/v1/users/bulk-status", BULK_STATUS),
+
+            // ── clients · S-32 (B-025) ──────────────────────────────────────
+            // Both reads open to all six, and the argument is §2's rather than
+            // convenience: blueprint §4B.2 puts a client dropdown on the ticket
+            // create form, every role may raise a ticket (§2 row 3), and this
+            // route is that dropdown. The contacts read is the dependent second
+            // dropdown beside it — the individual who reported the issue — so it
+            // carries exactly the same reasoning and no more information than a
+            // ticket raised against the client already shows.
+            everyRole("GET", "/api/v1/clients"),
+            everyRole("GET", "/api/v1/clients/{clientId}/contacts"),
+            // The writes are master.write — Admin alone. §2 row 51 reads "Master
+            // data (task types, SLA, workflow, holidays)" ✅ Admin / ❌ the other
+            // five, and §7.4 heads the module "Master data module (Admin only)"
+            // with the Client Master inside it. Unlike B-018's SLA tab there is
+            // nothing to argue against project.manage here: an SLA policy hangs
+            // off a project and a client does not, so PM is denied like the rest.
+            //
+            // There is no DELETE row because there is no DELETE route, and its
+            // absence is the design: tickets, contacts and project mappings all
+            // point at `clients`, and blueprint §4B.2 says deactivating must
+            // never hide historical tickets. Going away is the status PATCH.
+            adminOnly("PATCH", "/api/v1/clients/bulk-status", CLIENT_BULK_STATUS),
+            adminOnly("PATCH", "/api/v1/clients/{clientId}/status", CLIENT_STATUS),
 
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack

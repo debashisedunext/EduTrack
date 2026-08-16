@@ -52,6 +52,8 @@ import type { ClientAllOfSupportPlan } from './clientAllOfSupportPlan';
 import type { ClientAllOfSlaPolicyId } from './clientAllOfSlaPolicyId';
 import type { ClientAllOfTimezone } from './clientAllOfTimezone';
 import type { Contact } from './contact';
+import type { ProjectRef } from './projectRef';
+import type { ClientAllOfLastTicketDate } from './clientAllOfLastTicketDate';
 
 export type ClientAllOf = {
   domain?: ClientAllOfDomain;
@@ -62,4 +64,14 @@ export type ClientAllOf = {
   isActive?: boolean;
   openTicketCount?: number;
   primaryContact?: Contact;
+  /** The projects this client is mapped to, from `client_projects` —
+S-32's Projects column and the source of its project filter.
+Empty rather than absent for a client mapped to none.
+ */
+  projects?: ProjectRef[];
+  /** When this client last had a ticket raised. Null for a client
+with none — a new one, or one whose relationship never started.
+Read from the ticket rollup, never a per-row `COUNT(*)`.
+ */
+  lastTicketDate?: ClientAllOfLastTicketDate;
 };

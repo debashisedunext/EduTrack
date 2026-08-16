@@ -2142,6 +2142,22 @@ paths:
         - { name: q, in: query, schema: { type: string }, description: 'Name, code or domain.' }
         - { name: isActive, in: query, schema: { type: boolean } }
         - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - name: supportPlan
+          in: query
+          schema: { type: string }
+          description: 'S-32 filter. Matched case-insensitively against the stored plan.'
+        - name: accountManagerId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: 'S-32 filter.'
+      description: |
+        Ordered by name, then id — a keyset over `name` alone skips rows wherever
+        two clients share one, and after a bulk import they do.
+
+        **Reads are open to all six roles, writes are Admin.** The client
+        dropdown on the ticket create form (§4B.2) is this operation, and every
+        role may raise a ticket; a role that could not list clients could not
+        raise one against a client at all.
       responses:
         '200':
           description: OK.
@@ -2166,6 +2182,44 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ClientResponse' }
         '409': { $ref: '#/components/responses/Conflict' }
+
+  # Declared ahead of `/clients/{clientId}` for readability. The literal segment
+  # outranks the variable in Spring's PathPatternParser and in React Router
+  # regardless of order — the same ranking `/tickets/new` and
+  # `/masters/resources/new` already depend on. And `clientId` is an `int64`, so
+  # if a router ever did prefer the variable the request fails as a loud 400
+  # rather than dispatching somewhere unintended.
+  /clients/bulk-status:
+    patch:
+      tags: [clients]
+      operationId: setClientStatusBulk
+      summary: Activate or deactivate several clients at once (S-32)
+      description: |
+        S-32's bulk action. One request rather than one per selected row: fifty
+        sequential `PATCH /clients/{clientId}/status` calls have fifty ways to
+        half-succeed, and no way to report that they did.
+
+        Applied in one transaction. An id that does not exist fails the whole
+        request with 404 rather than being skipped silently — a caller who
+        selected fifty rows and changed forty-nine has not been told which one
+        got away.
+
+        Deactivating here carries the same rule as the single-client route: new
+        tickets are blocked, **historical ones are never hidden**.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientBulkStatusRequest' }
+      responses:
+        '200':
+          description: Changed; every affected client is returned with its refreshed counts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientListResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /clients/{clientId}:
     parameters: [{ $ref: '#/components/parameters/ClientId' }]
@@ -5840,6 +5894,22 @@ components:
             isActive: { type: boolean }
             openTicketCount: { type: integer }
             primaryContact: { $ref: '#/components/schemas/Contact' }
+            # B-025 · the two S-32 columns the schema could not render.
+            # Additive: no existing consumer's fields move.
+            projects:
+              type: array
+              items: { $ref: '#/components/schemas/ProjectRef' }
+              description: |
+                The projects this client is mapped to, from `client_projects` —
+                S-32's Projects column and the source of its project filter.
+                Empty rather than absent for a client mapped to none.
+            lastTicketDate:
+              type: [string, 'null']
+              format: date-time
+              description: |
+                When this client last had a ticket raised. Null for a client
+                with none — a new one, or one whose relationship never started.
+                Read from the ticket rollup, never a per-row `COUNT(*)`.
     ClientWriteRequest:
       type: object
       required: [clientCode, name]
@@ -5852,6 +5922,20 @@ components:
         slaPolicyId: { type: [integer, 'null'], format: int64 }
         timezone: { type: [string, 'null'] }
         projectIds: { type: array, items: { type: integer, format: int64 } }
+    ClientBulkStatusRequest:
+      type: object
+      required: [clientIds, isActive]
+      properties:
+        clientIds:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { type: integer, format: int64 }
+          description: |
+            Bounded at 200 — the same ceiling `Limit` puts on a page, so the
+            selection cannot exceed what one page could have offered. An
+            unbounded id list is an unbounded `IN (…)`.
+        isActive: { type: boolean }
     Contact:
       type: object
       properties:
