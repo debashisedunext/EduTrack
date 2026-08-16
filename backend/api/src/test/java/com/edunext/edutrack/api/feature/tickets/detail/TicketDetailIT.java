@@ -77,19 +77,19 @@ class TicketDetailIT {
         // run makes its own project, user and ticket, and every assertion is
         // scoped to them.
         jdbc.update("INSERT INTO projects (project_code, name, status) VALUES (?, 'Detail IT', 'ACTIVE')",
-                "DTL" + System.nanoTime() % 100000);
+                "DTL" + suffix());
         projectId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
 
         jdbc.update("INSERT INTO projects (project_code, name, status) VALUES (?, 'Other IT', 'ACTIVE')",
-                "OTH" + System.nanoTime() % 100000);
+                "OTH" + suffix());
         otherProjectId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
 
         Long roleId = jdbc.queryForObject("SELECT id FROM roles WHERE code = 'DEVELOPER'", Long.class);
         jdbc.update("""
                 INSERT INTO users (emp_code, username, email, password_hash, full_name, role_id, is_active)
                 VALUES (?, ?, ?, 'x', 'Detail IT', ?, 1)
-                """, "DTL" + System.nanoTime() % 100000, "dtl." + System.nanoTime() % 100000,
-                "dtl" + System.nanoTime() % 100000 + "@example.test", roleId);
+                """, "DTL" + suffix(), "dtl." + suffix(),
+                "dtl" + suffix() + "@example.test", roleId);
         userId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
 
         ticketId = insertTicket(projectId, (short) 2);
@@ -109,8 +109,38 @@ class TicketDetailIT {
                 INSERT INTO tickets (ticket_code, project_id, title, level, original_level,
                                      status, assigned_to, current_cycle_no)
                 VALUES (?, ?, 'detail probe', 'HIGH', 'HIGH', 'IN_PROGRESS', ?, ?)
-                """, "DT-26-" + System.nanoTime() % 1000000, project, userId, currentCycle);
+                """, "DT-26-" + suffix(), project, userId, currentCycle);
         return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    /**
+     * A unique tail for every fixture identifier, seven characters wide.
+     *
+     * <p>Replaces {@code System.nanoTime() % 100000}, which <b>failed a full gate
+     * run on 16 Aug 2026</b>: {@code Duplicate entry 'OTH48000' for key
+     * 'projects.uq_projects_code'}. Five decimal digits is a 100 000-value space,
+     * {@code @BeforeEach} claims six of them per test method, and — as the comment
+     * above says — <em>fixtures are never truncated here</em>, because the
+     * append-only triggers refuse DELETE. So every run adds rows to a space that
+     * never empties, and a collision stops being unlikely and becomes a matter of
+     * time. It is also the worst kind of failure to debug: it lands on a random
+     * test, once, and passes on re-run.
+     *
+     * <p>Base 36 rather than more digits, because {@code projects.project_code} is
+     * {@code VARCHAR(10)} and a three-letter prefix leaves exactly seven. That
+     * buys 36^7 ≈ 78 billion values in the same width — the constraint that
+     * forced {@code % 100000} in the first place.
+     *
+     * <p><b>Not part of C-030.</b> Fixed here because it is Stream C's own file
+     * and it cost this branch a gate run; nothing about the mention fan-out
+     * touches it.
+     */
+    private static String suffix() {
+        // abs() and the length guard because nanoTime's origin is arbitrary and
+        // the spec permits a negative or small value; a '-' in a project code
+        // would fail for a reason nobody would look for here.
+        String base36 = Long.toString(Math.abs(System.nanoTime()), 36);
+        return base36.length() <= 7 ? base36 : base36.substring(base36.length() - 7);
     }
 
     private void insertHistory(long ticket, short cycle, String eventType) {
