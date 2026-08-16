@@ -47,6 +47,21 @@ export function useNotificationStream(): void {
   // unmount — without this a re-raise fires into a torn-down tree in tests and
   // on every logout.
   const snoozes = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+
+  /**
+   * Ids already toasted in this session, and whether a drain is in flight.
+   *
+   * Declared here rather than beside the drain that owns them, because the
+   * realtime handler below also records into `toasted` and reading a `const`
+   * declared further down would be use-before-declaration to anybody scanning
+   * the file, even though the closure makes it legal.
+   *
+   * Both are session-scoped guards against this tab racing *itself*. Delivery
+   * across sessions is the server's to track (D-046) and still is — see the
+   * drain's own note for why that is not sufficient on its own.
+   */
+  const draining = useRef(false)
+  const toasted = useRef<Set<number>>(new Set())
   useEffect(() => {
     const pending = snoozes.current
     return () => {
@@ -100,6 +115,12 @@ export function useNotificationStream(): void {
     if (!event) return
 
     if (event.event === 'notification.created') {
+      // Recorded before raising, so a drain triggered by a visibility change
+      // cannot re-toast something the user has already watched arrive. The
+      // acknowledgement below is what stops it recurring across sessions, but
+      // it can fail — deliberately silently — and this session should not
+      // repeat itself while it waits to be retried.
+      toasted.current.add(event.id)
       raise(event)
       // D-046. A live toast is a delivery like any other. Without this, every
       // notification the user watched arrive would pop again at next login.
@@ -113,6 +134,28 @@ export function useNotificationStream(): void {
   // ------------------------------------------------------------- D-046
 
   /**
+   * The drain reads {@link raise} through a ref, and that is load-bearing.
+   *
+   * <p>`raise` is rebuilt whenever `markRead` or `navigate` changes identity,
+   * and **both change constantly**: `useMarkNotificationRead()` returns a fresh
+   * object on every render, and react-router's `navigate` is re-created when the
+   * location changes. Naming `raise` in the drain effect's dependencies
+   * therefore re-ran the drain on essentially every render and every navigation
+   * — refetching the pending list and toasting all of it again, several times
+   * over, before the asynchronous acknowledge below had cleared anything.
+   *
+   * <p>A ref, rather than making `raise` stable: `raise` genuinely depends on
+   * those two, and pinning it with an empty dependency list would capture a
+   * stale `navigate` and send "Open" to the wrong route. What the effect
+   * actually wants is "the current raise, without re-subscribing when it
+   * changes", which is exactly what a ref expresses.
+   */
+  const raiseRef = useRef(raise)
+  useEffect(() => {
+    raiseRef.current = raise
+  }, [raise])
+
+  /**
    * Pop whatever was raised while nobody was watching.
    *
    * <p>Runs on mount — which is login, and what blueprint §11 asks for — and
@@ -123,20 +166,40 @@ export function useNotificationStream(): void {
    *
    * <p>Re-running is safe **because the server tracks delivery**. Anything
    * already acknowledged is no longer pending, so a second call returns
-   * nothing rather than toasting twice — the idempotence is in the data, not
-   * in a guard here that could drift.
+   * nothing rather than toasting twice.
+   *
+   * <p>That argument holds only once nothing re-runs the drain *faster than the
+   * acknowledgement round-trip*, which is what the ref above fixes and what the
+   * two guards below close off. Server-side delivery tracking is still the
+   * source of truth across reloads; these only stop one session from racing
+   * itself, which no amount of server state can prevent:
+   *
+   * <ul>
+   *   <li>`draining` — mount and a visibility change can overlap, and the
+   *       second call would read the same pending rows the first has toasted
+   *       but not yet acknowledged.</li>
+   *   <li>`toasted` — ids already shown *in this session*. React StrictMode
+   *       invokes mount effects twice in development, which is a duplicate the
+   *       server cannot possibly distinguish from a genuine second session.</li>
+   * </ul>
+   *
+   * <p>Both are declared at the top of the hook, beside `snoozes`.
    */
   useEffect(() => {
     let cancelled = false
 
     const drain = async () => {
+      if (draining.current) return
+      draining.current = true
       try {
         const pending = await listPendingNotifications()
         if (cancelled || !pending.data?.length) return
 
         pending.data.forEach((notification) => {
           if (notification.id == null) return
-          raise({
+          if (toasted.current.has(notification.id)) return
+          toasted.current.add(notification.id)
+          raiseRef.current({
             event: 'notification.created',
             id: notification.id,
             eventCode: notification.eventKey ?? 'UNKNOWN',
@@ -164,6 +227,8 @@ export function useNotificationStream(): void {
         // change or reload tries again. Nothing is lost by staying quiet, and
         // an error toast about the notification system is noise on top of
         // whatever is already wrong.
+      } finally {
+        draining.current = false
       }
     }
 
@@ -177,7 +242,10 @@ export function useNotificationStream(): void {
       cancelled = true
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [raise, refreshBadge])
+    // `raise` is deliberately absent — it is read through `raiseRef`. Listing
+    // it is what made this effect re-run on every render and every navigation,
+    // which is how one login's notifications came to pop again on every click.
+  }, [refreshBadge])
 
   /**
    * D-045 · somebody clicked a browser notification.
