@@ -27,9 +27,38 @@ function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-const rnd = mulberry32(20260803);
+const SEED = 20260803;
+let rnd = mulberry32(SEED);
 const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)];
 const int = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1));
+
+/**
+ * B-029 · rewound at the start of every `createDb()`, which is what makes the
+ * seed mean what its comment says.
+ *
+ * The generator was created once at module load and never reset, so the *stream*
+ * was reproducible but each `createDb()` continued from wherever the last one
+ * stopped. `resetDb()` runs after every test, so ticket N's level, assignee and
+ * dates depended on **how many tests had run before it** — add a test anywhere
+ * in a file and every test after it gets a different fixture.
+ *
+ * That is not a theoretical hazard. B-029 added one test to
+ * `TicketListPage.test.tsx` and `C-016 · gives every Critical row a soft red
+ * left border` began failing three tests later, in another `describe`, on an
+ * assertion it does not own: the shift left Ravi with no CRITICAL ticket at
+ * all, so the grid rendered its empty state and the row under test did not
+ * exist. Both tests pass alone and the failure names neither cause — the worst
+ * possible shape for a fixture bug, and it would have been charged to whoever
+ * next touched that file.
+ *
+ * Rewinding here makes each `createDb()` identical, which is what every test in
+ * the repository already assumes. **Flagged for Stream D** — `mocks/` is their
+ * directory and the seeding strategy is theirs; this is three lines and it
+ * makes the existing comment on `mulberry32` true.
+ */
+function rewindFixtureRandom(): void {
+  rnd = mulberry32(SEED);
+}
 
 // ── types ───────────────────────────────────────────────────────────────────
 export type RoleCode = 'ADMIN' | 'PM' | 'DEVELOPER' | 'QA' | 'DEPLOYMENT' | 'SUPPORT';
@@ -1089,6 +1118,9 @@ const STAGES: Stage[] = [
 ];
 
 export function createDb(): Db {
+  // Before anything reads `pick` or `int` — see `rewindFixtureRandom`. Without
+  // this, two calls to this function produce different fixtures.
+  rewindFixtureRandom();
   const db: Db = {
     users: structuredClone(USERS),
     projects: structuredClone(PROJECTS),
@@ -1445,6 +1477,76 @@ function seedFiller(db: Db) {
         isCorrection: false, correctsEntryId: null, createdAt,
       });
     }
+  });
+
+  /**
+   * B-029 · tickets belonging to the **deactivated** client.
+   *
+   * Until now no ticket in the fixture did. The generator above assigns
+   * `clientId: i % 3 === 0 ? null : i % 3`, which only ever produces 1 and 2 —
+   * both ACTIVE — so Oldco (id 4, INACTIVE) had none, and neither half of
+   * blueprint line 523 could be exercised on any screen. A screen that hides a
+   * deactivated client's history and one that never hides anything behaved
+   * identically against this fixture, which is how the S-15 client filter went
+   * on sending `?isActive=true` for three tasks without anybody noticing.
+   *
+   * Explicit rows rather than widening the generator's modulo: the ticket
+   * distribution across three projects is depended on by the list, the queue and
+   * the dashboard, and a fixture change that moves those numbers to make a point
+   * about clients is a change to every one of their assertions.
+   *
+   * **Two open and one closed**, on project 4 — the mapping `CLIENT_PROJECTS`
+   * already declares. The open pair is what `openTicketCount` reports as 2, so
+   * S-32's warning has a number in it; the closed one is what stops a screen
+   * that happens to filter history by "open" from passing by accident.
+   *
+   * **Assigned to Ravi (id 3), which is load-bearing rather than arbitrary.**
+   * He is `currentUserId` and a Developer, so `scopedTickets` narrows to
+   * `assigneeId === me.id` — put these on anybody else and they are invisible
+   * to every default-user test, and the S-15 filter assertion would be checking
+   * that a dropdown offers a client whose tickets can never be reached.
+   */
+  const OLDCO_TICKETS: [string, StatusCode, string, boolean][] = [
+    ['ARCH-25-00061', 'IN_PROGRESS', 'Legacy import drops the fee-head column', false],
+    ['ARCH-25-00062', 'ON_HOLD', 'Archived pilot still emails the old support address', false],
+    ['ARCH-25-00063', 'CLOSED', 'Final handover pack not generated', true],
+  ];
+  OLDCO_TICKETS.forEach(([ticketId, status, title, closed], i) => {
+    const createdAt = new Date(now - (120 + i) * 86_400_000).toISOString();
+    db.tickets.push({
+      ticketId, title,
+      description: `${title}. Raised before the account was closed; still worked on.`,
+      projectId: 4,
+      clientId: 4,
+      clientContactId: null,
+      isClientRaised: true,
+      taskTypeId: 1,
+      moduleId: null,
+      screenName: null,
+      feature: null,
+      stepsToGenerate: null,
+      level: 'MEDIUM',
+      originalLevel: 'MEDIUM',
+      status,
+      currentStageCode: closed ? 'CLOSED' : 'DEVELOPMENT',
+      assigneeId: 3,
+      reportedById: 6,
+      cycleNo: 1,
+      iterationNo: 1,
+      reopenCount: 0,
+      plannedCloseDate: new Date(now - 90 * 86_400_000).toISOString(),
+      actualCloseDate: closed ? new Date(now - 88 * 86_400_000).toISOString() : null,
+      isDelayed: !closed,
+      delayedSince: closed ? null : new Date(now - 90 * 86_400_000).toISOString(),
+      estimatedHrs: 8,
+      pctComplete: closed ? 100 : 40,
+      watcherIds: [],
+      createdAt, updatedAt: createdAt, version: 1,
+    });
+    db.cycles.push({
+      ticketId, cycleNo: 1, isSealed: closed,
+      startedAt: createdAt, closedAt: null, reason: null,
+    });
   });
 
   /*

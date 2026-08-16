@@ -200,6 +200,52 @@ describe('bulk activate and deactivate', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  /**
+   * B-029 · the blind spot B-025 documented and left open.
+   *
+   * The warning used to be assembled from the *current page*, so a client
+   * selected on page 1 and deactivated from page 2 went through with no dialog
+   * at all — on a grid that deliberately builds a selection across pages
+   * (`togglePage` adds rather than replaces). It is the case the warning exists
+   * for: somebody ticking rows across three pages is exactly somebody who
+   * cannot hold the open-ticket counts in their head.
+   *
+   * Needs more clients than fit on a page, so the fixture is widened here
+   * rather than in `db.ts` — twenty-six near-identical rows would tell every
+   * other test in the suite nothing and slow all of them down.
+   */
+  it('warns about a client selected on an earlier page', async () => {
+    const db = getDb()
+    // Named to sort *after* Acme so Acme stays on page 1 and these fill it.
+    for (let i = 0; i < 30; i++) {
+      db.clients.push({
+        ...db.clients[2],
+        id: 100 + i,
+        clientCode: `FILL${i}`,
+        name: `Zeta Filler ${String(i).padStart(2, '0')}`,
+        status: 'ACTIVE',
+      })
+    }
+
+    renderPage()
+    await rowFor('Acme Retail Ltd')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Acme Retail Ltd' }))
+
+    // Forward a page: Acme is now off screen but still selected.
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }))
+    await waitFor(
+      () => expect(screen.queryByText('Acme Retail Ltd')).not.toBeInTheDocument(),
+      SLOW,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
+
+    const dialog = await screen.findByRole('dialog', undefined, SLOW)
+    // Named in the dialog, with its count, despite not being on the page.
+    expect(within(dialog).getByText('ACME')).toBeInTheDocument()
+    expect(getDb().clients.find((c) => c.id === 1)?.status).toBe('ACTIVE')
+  })
+
   it('sends one request for the whole selection, not one per client', async () => {
     renderPage()
     await rowFor('Acme Retail Ltd')

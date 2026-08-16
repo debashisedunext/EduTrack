@@ -27,6 +27,9 @@ import { AttachmentPicker, type AttachmentPickerHandle } from '@/components/ui/a
 import { toast } from '@/components/ui/use-toast'
 import { createTicketBodyDescriptionMax } from '@/api/generated/zod/tickets/tickets.zod'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
+// B-029 · both new-ticket gates, stated once. Stream B's module, read by
+// Stream C's screen — the same crossing B-028 made for the first of the two.
+import { newTicketBlockReason } from '@/features/clients/ticketEligibility'
 
 import { useAttachmentLimits } from '../attachments/attachmentLimits'
 import { useTicketAttachments } from '../attachments/useTicketAttachments'
@@ -139,7 +142,14 @@ export function CreateTicketPage() {
   // `projectId` is sent per §4B.2 ("filtered to clients mapped to the project").
   // D-004's mock ignores the parameter today and returns every client, so in
   // `npm run dev` the list looks unfiltered; against the real API it is not.
-  const { data: clientsData } = useListClients(
+  //
+  // **B-029 · `isActive: true` stays, and the S-15 ticket list's dropped.**
+  // Same operation, opposite answers, and the question is "new or historical":
+  // this is a picker for a ticket that does not exist yet, which is exactly
+  // what deactivating a client blocks (blueprint line 523). The ticket list
+  // filters tickets that already exist, so sending it there hid the history
+  // the same sentence says must never be hidden.
+  const { data: clientsData, isSuccess: clientsLoaded } = useListClients(
     { projectId: projectId ?? undefined, isActive: true, limit: 200 },
     { query: { enabled: projectId != null } },
   )
@@ -238,7 +248,58 @@ export function CreateTicketPage() {
     }
   }, [clientId, setValue])
 
+  /**
+   * B-029 · the last gate before a ticket is posted against a client that may
+   * no longer take one.
+   *
+   * <h2>Why the dropdown is not enough</h2>
+   *
+   * `getOptionDisabled` guards a *click*. It does not guard a `clientId` that
+   * is already in the form — and this form outlives its own fetches: Save &
+   * Create Another keeps the client (`retainedForNextTicket`) across an
+   * arbitrary number of tickets, so the selection can easily predate a
+   * deactivation or the removal of the client's last primary contact by an
+   * hour. Both gates are administrative acts by somebody else, on another
+   * screen, while this one sits open.
+   *
+   * <h2>And there is nothing behind it</h2>
+   *
+   * `POST /tickets` has no controller. B-028 stated both refusals in
+   * `createTicket`'s contract description — a 400 keyed on `clientId`, not a
+   * 404, because the client is legitimately visible and it is the *combination*
+   * being refused — for whoever mounts it. Until then this is the only
+   * enforcement in the system, which is a thing to say out loud rather than to
+   * leave implied by a disabled option.
+   *
+   * <h2>Absence counts, but only once the list has actually loaded</h2>
+   *
+   * A deactivated client is not merely blocked here, it is gone: the query
+   * sends `isActive: true`. So "selected but not in the list" is the ordinary
+   * shape of this refusal rather than an odd case, and `clientsLoaded` is what
+   * keeps it from firing against an in-flight fetch — refusing a valid ticket
+   * because a request had not come back yet would be a worse bug than the one
+   * this prevents.
+   */
+  function clientRefusal(values: TicketFormValues): string | null {
+    if (values.clientId == null || !clientsLoaded) return null
+    const client = clients.find((c) => c.id === values.clientId)
+    if (!client) {
+      return 'That client is no longer available on this project. Pick another.'
+    }
+    const blocked = newTicketBlockReason(client)
+    return blocked == null ? null : `${blocked}. Pick another client or fix the client master.`
+  }
+
   async function onSubmit(values: TicketFormValues, action: TicketSaveAction) {
+    const refusal = clientRefusal(values)
+    if (refusal) {
+      // On the field, not in a toast: the input is what has to change, and a
+      // toast on a form this long is read after the user has scrolled past it.
+      setError('clientId', { type: 'manual', message: refusal })
+      setFocus('clientId')
+      return
+    }
+
     setSaving(action)
     try {
       const response = await createTicket.mutateAsync({
@@ -471,17 +532,26 @@ export function CreateTicketPage() {
                     getSearchable={(client) => [client.clientCode ?? '', client.name ?? '', client.domain ?? '']}
                     // B-028 · blueprint line 948 — "at least one primary
                     // contact before the client can be selected on a ticket".
+                    // **B-029 ·** and line 523's "blocks new ticket creation",
+                    // which is the second gate on the same control.
+                    //
+                    // Both come from `newTicketBlockReason` rather than being
+                    // derived here. B-028 wrote its half inline, correctly,
+                    // while it was the only half; a second one beside it is how
+                    // a rule ends up with two answers, which is the drift this
+                    // stream has now fixed three times.
                     //
                     // Shown and refused, never filtered out. A client that
                     // simply is not in the list looks like a list that has lost
                     // its data, and the person raising the ticket is usually
-                    // the one who can go and fix the master. Read off the
-                    // server's `hasPrimaryContact` rather than derived from
-                    // `primaryContact`, which is omitted rather than nulled and
-                    // so reaches this as `undefined`.
-                    getOptionDisabled={(client) =>
-                      client.hasPrimaryContact ? null : 'No primary contact'
-                    }
+                    // the one who can go and fix the master. (An *inactive*
+                    // client is filtered out upstream by `isActive: true`, and
+                    // that stays: it is not an oversight to be corrected but a
+                    // deliberate administrative act, and greying every closed
+                    // client forever would grow the list without bound. The
+                    // rule still runs here, because the query says what the
+                    // list holds and this says what may be chosen.)
+                    getOptionDisabled={newTicketBlockReason}
                     placeholder={projectId == null ? 'Select a project first' : 'Search name, code or domain…'}
                     disabled={projectId == null}
                   />

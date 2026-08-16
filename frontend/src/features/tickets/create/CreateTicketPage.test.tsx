@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom'
 import { server } from '@/mocks/server'
+import { getDb } from '@/mocks/db'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
 import { CreateTicketPage } from './CreateTicketPage'
 
@@ -29,8 +30,18 @@ function TicketDetailStub() {
   return <p>Landed on {ticketId}</p>
 }
 
+/**
+ * The page's own cache, exposed so a test can refetch on demand.
+ *
+ * B-029 needs it: the one gate the dropdown cannot hold is a client that became
+ * ineligible *after* it was chosen, and reproducing that means the client list
+ * genuinely reloading rather than the fixture being edited underneath a cache
+ * that never looks again.
+ */
+let queryClient: QueryClient
+
 function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/tickets/new']}>
@@ -266,6 +277,78 @@ describe('S-19 Create Ticket', () => {
 
     await pickFromDropdown('clientId', /KESTREL/)
     expect(screen.getByLabelText(/^Client$/)).not.toHaveTextContent('Kestrel')
+  })
+
+  /**
+   * B-029 · blueprint line 523 — "blocks new ticket creation against it".
+   *
+   * A deactivated client is not merely greyed here, it is *absent*: the query
+   * sends `isActive: true`, and unlike the missing-contact case that is right —
+   * deactivation is a deliberate administrative act rather than an oversight
+   * for the person raising the ticket to go and fix, and greying every closed
+   * client forever would grow this list without bound.
+   *
+   * Northwind is deactivated here rather than asserting against the fixture's
+   * own INACTIVE client: Oldco is mapped only to the Archived Pilot, a CLOSED
+   * project, and this form's project dropdown sends `isActive: true` too — so
+   * there is no project selection from which Oldco could be offered or refused,
+   * and a test that "proved" its absence would be proving the project filter.
+   */
+  it('does not offer a deactivated client', async () => {
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    expect((await readDropdownOptions('clientId')).some((o) => /NORTH/.test(o))).toBe(true)
+
+    getDb().clients.find((c) => c.id === 2)!.status = 'INACTIVE'
+    await queryClient.invalidateQueries()
+
+    await waitFor(
+      async () => expect((await readDropdownOptions('clientId')).some((o) => /NORTH/.test(o))).toBe(false),
+      { timeout: 4000 },
+    )
+  })
+
+  /**
+   * The gate the dropdown cannot hold.
+   *
+   * `getOptionDisabled` guards a click; it does not guard a `clientId` already
+   * in the form. This form outlives its own fetches — Save & Create Another
+   * keeps the client across an arbitrary number of tickets — so a selection can
+   * predate somebody else deactivating that client, on another screen, by an
+   * hour. And there is nothing behind it: `POST /tickets` has no controller, so
+   * until C-013 mounts it this refusal is the only enforcement in the system.
+   */
+  it('refuses at submit when the selected client stops being eligible', async () => {
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Client Bug$/)
+    await pickFromDropdown('clientId', /ACME/)
+    // Filled, or zod refuses the body first and `onSubmit` never runs — which
+    // would make this test pass while asserting nothing about the client.
+    fillTicketBody('Card payments hang at confirmation')
+
+    // Deactivated underneath the open form, exactly as S-32 would, and the
+    // list reloaded — a window refocus, or the next Save & Create Another.
+    getDb().clients.find((c) => c.id === 1)!.status = 'INACTIVE'
+    await queryClient.invalidateQueries()
+
+    // The trigger stops resolving a label once Acme leaves the list — but
+    // `clientId` is still 1 in the form, which is precisely the state that used
+    // to post. Waiting on this rather than on the dropdown so the popup is not
+    // left open over the button the next line clicks.
+    await waitFor(
+      () => expect(screen.getByLabelText(/^Client$/)).not.toHaveTextContent('Acme'),
+      { timeout: 4000 },
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+
+    expect(await screen.findByText(/no longer available on this project/i)).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
   })
 
   it('keeps client and contact dependent, and clears the contact when the client changes', async () => {

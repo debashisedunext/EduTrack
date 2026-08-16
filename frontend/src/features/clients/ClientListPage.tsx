@@ -32,11 +32,9 @@ import { cn } from '@/lib/utils'
 
 import { SUPPORT_PLANS } from './clientForm'
 import { CLIENT_COLUMNS } from './columns'
-import {
-  ClientBulkStatusBar,
-  DeactivationWarningDialog,
-  type DeactivationCandidate,
-} from './ClientBulkStatusBar'
+import { ClientBulkStatusBar } from './ClientBulkStatusBar'
+import type { DeactivationCandidate } from './deactivation'
+import { DeactivationWarningDialog } from './DeactivationWarningDialog'
 import { toQueryParams, useClientFilters } from './useClientFilters'
 
 const PAGE_SIZE = 25
@@ -88,8 +86,14 @@ const SUPPORT_PLAN_OPTIONS = SUPPORT_PLANS.map((plan) => ({
  * not, and the difference is blueprint §4B.2's sentence rather than an
  * inconsistency: a client's open tickets stay open, stay assigned and stay
  * visible. Nothing is orphaned, so there is nothing to refuse until it is
- * fixed. What stops afterwards is *new* tickets, and enforcing that is B-029's
- * on the create path.
+ * fixed. What stops afterwards is *new* tickets — `ticketEligibility.ts`, read
+ * by the S-19 create form.
+ *
+ * <h2>B-029 · the warning now covers the whole selection</h2>
+ *
+ * It used to read the current page, which is not what the selection is: this
+ * grid adds to it across pages on purpose. `seenRows` is the fix and the
+ * comment there is the argument.
  */
 export function ClientListPage() {
   const { filters, setFilter, resetFilters, activeCount } = useClientFilters()
@@ -103,6 +107,30 @@ export function ClientListPage() {
   const [expanded, setExpanded] = React.useState<number | null>(null)
   const [pendingDeactivation, setPendingDeactivation] =
     React.useState<readonly DeactivationCandidate[] | null>(null)
+
+  /**
+   * B-029 · every row this grid has rendered, kept so the warning can cover a
+   * selection built across pages.
+   *
+   * B-025 shipped the warning reading `clients` — the *current* page — and said
+   * so in `applyBulkStatus`: rows selected on an earlier page went through
+   * unwarned because their `openTicketCount` was unknown. That is the one half
+   * of blueprint line 523 this screen owns, and the grid deliberately supports
+   * cross-page selection (`togglePage` adds to the set rather than replacing
+   * it), so it is the ordinary path rather than an edge — tick five rows, page
+   * forward, tick five more, Deactivate, and the first five are silently the
+   * ones you were not warned about.
+   *
+   * A ref rather than state: nothing renders from it directly, and writing it
+   * during render would be a second render per page. It is a cache of rows
+   * already fetched, not a second source of truth — the *selection* still
+   * decides what is acted on, and `runBulkStatus` still sends ids.
+   *
+   * Not cleared when the filters change, unlike the selection. A count read
+   * from a row under a previous filter is the same count; discarding it would
+   * reintroduce exactly the blind spot this exists to close.
+   */
+  const seenRows = React.useRef(new Map<number, DeactivationCandidate>())
 
   const filterSignature = JSON.stringify(filters)
   const lastFilterSignature = React.useRef(filterSignature)
@@ -153,6 +181,21 @@ export function ClientListPage() {
   const clients = React.useMemo(() => data?.data ?? [], [data])
   const meta = data?.meta
 
+  // Recorded as each page lands, and overwritten rather than merged: a refetch
+  // after a bulk write must not leave the pre-write count behind, or the second
+  // deactivation of the session warns with the first one's numbers.
+  React.useEffect(() => {
+    clients.forEach((c) => {
+      if (c.id == null) return
+      seenRows.current.set(c.id, {
+        id: c.id,
+        name: c.name ?? '',
+        clientCode: c.clientCode ?? '',
+        openTicketCount: c.openTicketCount ?? 0,
+      })
+    })
+  }, [clients])
+
   // ── bulk status ───────────────────────────────────────────────────────────
   const bulkStatus = useSetClientStatusBulk({
     mutation: {
@@ -185,12 +228,17 @@ export function ClientListPage() {
   }
 
   /**
-   * Warn before deactivating anything that still has open tickets.
+   * Warn before deactivating anything that still has open tickets — blueprint
+   * line 523's first clause.
    *
-   * Rows outside the current page are in `selected` but not in `clients`, so
-   * their counts are unknown here and they go through unwarned. Fetching them
-   * to complete the picture would be a round trip to improve a warning that
-   * blocks nothing.
+   * **B-029 · read from every row seen, not from the current page.** See
+   * `seenRows`. A client selected three pages ago and deactivated here used to
+   * go through unwarned, which is the case the warning exists for: somebody
+   * assembling a selection across pages is precisely somebody who cannot hold
+   * the counts in their head.
+   *
+   * Activation never warns and never will. It cannot strand anything, and a
+   * confirmation on every bulk action is a confirmation nobody reads.
    */
   function applyBulkStatus(isActive: boolean) {
     const ids = [...selected]
@@ -199,14 +247,13 @@ export function ClientListPage() {
       return
     }
 
-    const affected: DeactivationCandidate[] = clients
-      .filter((c) => c.id != null && selected.has(c.id) && (c.openTicketCount ?? 0) > 0)
-      .map((c) => ({
-        id: c.id!,
-        name: c.name ?? '',
-        clientCode: c.clientCode ?? '',
-        openTicketCount: c.openTicketCount ?? 0,
-      }))
+    const affected: DeactivationCandidate[] = ids
+      .map((id) => seenRows.current.get(id))
+      .filter((row): row is DeactivationCandidate => row != null && row.openTicketCount > 0)
+      // Ordered by exposure, not by the order they were ticked. The dialog's
+      // list scrolls at five rows and the client with forty open tickets is
+      // what the decision is actually about.
+      .sort((a, b) => b.openTicketCount - a.openTicketCount)
 
     if (affected.length === 0) {
       runBulkStatus(ids, false)
