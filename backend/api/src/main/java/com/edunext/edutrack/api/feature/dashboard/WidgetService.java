@@ -87,9 +87,10 @@ class WidgetService {
         this.clock = clock;
     }
 
-    /** The six A-056 owns. The contract's other eight keys belong to A-057 to A-059. */
+    /** A-056's six and A-057's three. The contract's remaining five belong to A-058 and A-059. */
     private static final List<String> IMPLEMENTED = List.of(
-            "type-donut", "daily-stacked", "velocity", "resource-load", "priority-bar", "aging-buckets");
+            "type-donut", "daily-stacked", "velocity", "resource-load", "priority-bar", "aging-buckets",
+            "calendar-heatmap", "sla-gauge", "project-treemap");
 
     static boolean isImplemented(String widgetKey) {
         return IMPLEMENTED.contains(widgetKey);
@@ -134,6 +135,9 @@ class WidgetService {
             case "resource-load" -> resourceLoad(scope, start, end, asOf);
             case "priority-bar" -> priorityBar(scope, projectId, start, end, asOf);
             case "aging-buckets" -> agingBuckets(scope, projectId, start, end, asOf);
+            case "calendar-heatmap" -> calendarHeatmap(scope, projectId, start, end, asOf);
+            case "sla-gauge" -> slaGauge(scope, projectId, start, end, asOf);
+            case "project-treemap" -> projectTreemap(scope, projectId, start, end, asOf);
             default -> throw new IllegalStateException("implemented key with no branch: " + widgetKey);
         };
 
@@ -361,6 +365,139 @@ class WidgetService {
 
         return WidgetDtos.Widget.of("aging-buckets", asOf,
                 List.of(new WidgetDtos.Series("Open by age", points)));
+    }
+
+    // ── widget 13 · calendar heatmap ─────────────────────────────────────────
+
+    /**
+     * A-057 · one cell per day, intensity by that day's activity.
+     *
+     * <h2>The one widget whose measure changes with the role, on purpose</h2>
+     *
+     * <p>§S-05 calls this the "date-wise report" and the project-keyed answer is
+     * tickets <b>created</b> per day. A delivery role has no such figure — intake
+     * is not a fact about an assignee — but they do have one that answers the
+     * same question about their own work: tickets they <b>closed</b> per day.
+     *
+     * <p>So this returns a series either way and the <em>series name</em> carries
+     * the difference, rather than refusing the widget as the other four do. That
+     * is a deliberate departure and worth the sentence: the alternative was
+     * showing a Developer a blank panel where a perfectly good answer exists, or
+     * — far worse — quietly plotting their project's intake under their own
+     * heading. The frontend renders the series name as the legend, so what is
+     * being counted is on the screen and not only in this javadoc.
+     */
+    private WidgetDtos.Widget calendarHeatmap(DashboardScope scope, Long projectId,
+                                              LocalDate from, LocalDate to, Instant asOf) {
+        List<WidgetDtos.Point> points;
+        String seriesName;
+
+        if (scope.ownWorkOnly()) {
+            seriesName = "Tickets you closed";
+            points = widgets.resourceDailyClosed(from, to, scope.userId()).stream()
+                    .map(day -> WidgetDtos.Point.of(
+                            day.day().toString(), day.closed(),
+                            "/tickets?assigneeId=" + scope.userId() + "&status=CLOSED"
+                                    + "&closedFrom=" + day.day() + "&closedTo=" + day.day()))
+                    .toList();
+        } else {
+            seriesName = "Tickets created";
+            points = widgets.dailyFlow(from, to, scope.projectIds(), projectId).stream()
+                    .map(day -> WidgetDtos.Point.of(
+                            day.day().toString(), day.created(),
+                            "/tickets?from=" + day.day() + "&to=" + day.day() + projectParam(projectId)))
+                    .toList();
+        }
+
+        // Unsummarised days stay absent rather than becoming zero-activity
+        // cells. On a heatmap the two are visually identical — an empty square
+        // either way — but one says "a quiet day" and the other says "we did
+        // not look". The frontend draws absent days as gaps in the grid.
+        return WidgetDtos.Widget.of("calendar-heatmap", asOf,
+                List.of(new WidgetDtos.Series(seriesName, points)));
+    }
+
+    // ── widget 14 · SLA compliance gauge ─────────────────────────────────────
+
+    /**
+     * A-057 · the share of finished work that landed on time.
+     *
+     * <p>Two series rather than a single percentage, because a gauge that shows
+     * only a ratio hides its own sample size: 100% off two tickets and 100% off
+     * two hundred are the same needle and very different facts. "Met" and
+     * "Breached" are returned as counts and the client draws the arc from them,
+     * so the figures behind the percentage are always available — in the
+     * tooltip, and in the hidden data table for anybody not looking at it.
+     */
+    private WidgetDtos.Widget slaGauge(DashboardScope scope, Long projectId,
+                                       LocalDate from, LocalDate to, Instant asOf) {
+        if (scope.ownWorkOnly()) {
+            // resource_daily_stats records no SLA outcome. Borrowing the project
+            // figures would show a Developer their whole project's compliance
+            // under a heading they would reasonably read as their own.
+            return WidgetDtos.Widget.unavailable("sla-gauge", NO_RESOURCE_EQUIVALENT);
+        }
+
+        Optional<WidgetRepository.SlaCompliance> compliance =
+                widgets.slaCompliance(from, to, scope.projectIds(), projectId);
+
+        if (compliance.isEmpty()) {
+            // Nothing computed for this window at all — distinct from "nothing
+            // closed", which is a real measurement of zero. An empty series
+            // renders as "nothing to show" rather than as a needle at 0%, which
+            // would read as total failure.
+            return WidgetDtos.Widget.of("sla-gauge", asOf,
+                    List.of(new WidgetDtos.Series("SLA compliance", List.of())));
+        }
+
+        WidgetRepository.SlaCompliance sla = compliance.get();
+        long breached = sla.closed() - sla.met();
+        String window = "from=" + from + "&to=" + to + projectParam(projectId);
+
+        return WidgetDtos.Widget.of("sla-gauge", asOf, List.of(
+                new WidgetDtos.Series("Met", List.of(WidgetDtos.Point.of(
+                        "Met", sla.met(),
+                        // No filter expresses "closed within its due date", so
+                        // the met half opens the closed list for the window and
+                        // no more. Claiming a narrower filter than the list can
+                        // apply is the failure mode A-056's aging buckets chose
+                        // a null link over.
+                        "/tickets?status=CLOSED&" + window))),
+                new WidgetDtos.Series("Breached", List.of(WidgetDtos.Point.of(
+                        "Breached", breached,
+                        // This half *is* expressible: still-open overdue work is
+                        // exactly isDelayed, and §S-05's drill-down column asks
+                        // for the "breached list".
+                        "/tickets?isDelayed=true&" + window)))));
+    }
+
+    // ── widget 15 · project treemap ──────────────────────────────────────────
+
+    /**
+     * A-057 · open tickets per project, sized by share.
+     *
+     * <p>Unavailable to a delivery role, and this one is not about missing
+     * columns so much as a missing question. {@code resource_daily_stats} has no
+     * project dimension at all, and "how is my work spread across projects" is
+     * not what §S-05 asks widget 15 — it asks for the organisation's
+     * distribution, which is a manager's view by construction.
+     */
+    private WidgetDtos.Widget projectTreemap(DashboardScope scope, Long projectId,
+                                             LocalDate from, LocalDate to, Instant asOf) {
+        if (scope.ownWorkOnly()) {
+            return WidgetDtos.Widget.unavailable("project-treemap", NO_RESOURCE_EQUIVALENT);
+        }
+
+        List<WidgetDtos.Point> points =
+                widgets.projectDistribution(from, to, scope.projectIds(), projectId).stream()
+                        .map(share -> WidgetDtos.Point.of(
+                                share.projectName(),
+                                share.openTotal(),
+                                "/tickets?projectId=" + share.projectId() + "&excludeClosed=true"))
+                        .toList();
+
+        return WidgetDtos.Widget.of("project-treemap", asOf,
+                List.of(new WidgetDtos.Series("Open by project", points)));
     }
 
     private static final WidgetRepository.StockBreakdown EMPTY_BREAKDOWN =

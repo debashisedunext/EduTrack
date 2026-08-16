@@ -140,7 +140,8 @@ class DailyStatsRepository {
                     stat_date, project_id, created, closed, reopened,
                     open_total, open_critical, open_high, open_medium, open_low,
                     open_delayed, open_reopened,
-                    aging_0_2, aging_3_7, aging_8_30, aging_31_plus, type_counts, computed_at)
+                    aging_0_2, aging_3_7, aging_8_30, aging_31_plus,
+                    sla_closed, sla_met, type_counts, computed_at)
                 SELECT
                     :day, p.id,
                     -- flow: bounded by the day itself
@@ -167,6 +168,24 @@ class DailyStatsRepository {
                     COALESCE(SUM(o.open_at_eod AND DATEDIFF(:day, DATE(t.date_reported)) BETWEEN 3 AND 7), 0),
                     COALESCE(SUM(o.open_at_eod AND DATEDIFF(:day, DATE(t.date_reported)) BETWEEN 8 AND 30), 0),
                     COALESCE(SUM(o.open_at_eod AND DATEDIFF(:day, DATE(t.date_reported)) > 30), 0),
+                    -- A-057 · widget 14. Flow, bounded by the day like `closed`
+                    -- above and for the same reason: compliance is a property of
+                    -- work *finished*, not of what is currently late.
+                    --
+                    -- The denominator excludes tickets with no
+                    -- planned_close_date — no commitment was made, so there is
+                    -- nothing to meet or breach, and counting them either way
+                    -- moves a percentage nobody promised.
+                    COALESCE(SUM(t.actual_close_date >= :dayStart
+                                 AND t.actual_close_date < :dayEnd
+                                 AND t.planned_close_date IS NOT NULL), 0),
+                    -- `<=`, not `<`: closing exactly on the committed date is
+                    -- meeting the commitment, and DATETIME(6) makes the
+                    -- boundary a real case rather than a theoretical one.
+                    COALESCE(SUM(t.actual_close_date >= :dayStart
+                                 AND t.actual_close_date < :dayEnd
+                                 AND t.planned_close_date IS NOT NULL
+                                 AND t.actual_close_date <= t.planned_close_date), 0),
                     NULL,   -- type_counts, filled by the statement below
                     :computedAt
                 FROM projects p
@@ -185,6 +204,12 @@ class DailyStatsRepository {
                     open_reopened = VALUES(open_reopened),
                     aging_0_2 = VALUES(aging_0_2), aging_3_7 = VALUES(aging_3_7),
                     aging_8_30 = VALUES(aging_8_30), aging_31_plus = VALUES(aging_31_plus),
+                    -- A-057. Easy to add to the INSERT list and forget here,
+                    -- and the failure is silent: the INSERT branch runs once
+                    -- per (day, project), so every subsequent recompute would
+                    -- take the UPDATE branch and leave these two NULL for ever
+                    -- on exactly the days the worker revisits most.
+                    sla_closed = VALUES(sla_closed), sla_met = VALUES(sla_met),
                     type_counts = VALUES(type_counts),
                     computed_at = VALUES(computed_at)
                 """)

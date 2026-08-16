@@ -2,9 +2,12 @@ import type { GetDashboardWidgetParams } from '@/api/generated/model'
 
 import { WidgetFrame } from './WidgetFrame'
 import { AgingBuckets } from './charts/AgingBuckets'
+import { CalendarHeatmap } from './charts/CalendarHeatmap'
 import { DailyStackedArea } from './charts/DailyStackedArea'
 import { PriorityBar } from './charts/PriorityBar'
+import { ProjectTreemap } from './charts/ProjectTreemap'
 import { ResourceLoadBar } from './charts/ResourceLoadBar'
+import { SlaGauge } from './charts/SlaGauge'
 import { TypeDonut } from './charts/TypeDonut'
 import { VelocityLines } from './charts/VelocityLines'
 
@@ -82,6 +85,36 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
         params={params}
       >
         {(series) => <AgingBuckets series={series} />}
+      </WidgetFrame>
+
+      {/* A-057 · widgets 13–15. Appended, with nothing above rearranged —
+          which is what A-054's grid and A-056's frame were shaped for. */}
+      <WidgetFrame
+        widgetKey="calendar-heatmap"
+        title="Date-wise activity"
+        categoryLabel="Date"
+        params={params}
+        wide
+      >
+        {(series) => <CalendarHeatmap series={series} />}
+      </WidgetFrame>
+
+      <WidgetFrame
+        widgetKey="sla-gauge"
+        title="SLA compliance"
+        categoryLabel="Outcome"
+        params={params}
+      >
+        {(series) => <SlaGauge series={series} />}
+      </WidgetFrame>
+
+      <WidgetFrame
+        widgetKey="project-treemap"
+        title="Project-wise distribution"
+        categoryLabel="Project"
+        params={params}
+      >
+        {(series) => <ProjectTreemap series={series} />}
       </WidgetFrame>
     </div>
   )
