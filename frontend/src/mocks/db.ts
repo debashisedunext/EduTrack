@@ -168,9 +168,21 @@ export interface Client {
 export interface ClientProject {
   clientId: number; projectId: number; isDefault: boolean;
 }
+/**
+ * B-027 · `designation` and `isActive` arrived with the child grid.
+ *
+ * `designation` is a column that has been on `client_contacts` since the
+ * baseline and that no schema carried, so the one field telling a desk whether
+ * they are speaking to the IT Director or to a helpdesk operator was
+ * unreadable. `isActive` exists because removal *deactivates* —
+ * `tickets.client_contact_id` is an FK with no cascade — so the store has to be
+ * able to hold a removed contact that `?includeInactive=true` still returns.
+ */
 export interface Contact {
-  id: number; clientId: number; name: string; email: string; phone: string;
+  id: number; clientId: number; name: string; designation: string | null;
+  email: string | null; phone: string;
   isPrimary: boolean; notificationOptIn: boolean; portalAccess: boolean;
+  isActive: boolean;
 }
 /**
  * S-11's master row. `code` and `seq` arrived with B-020, which is the screen
@@ -610,11 +622,25 @@ const CLIENTS: Client[] = [
   },
 ];
 
+/**
+ * B-027 · shaped to exercise the cases rather than to be tidy.
+ *
+ * - **Acme has a removed contact (Ravi Menon).** A fixture in which every
+ *   contact is live cannot tell a grid that renders `isActive` from one that has
+ *   never met a removed row, and it cannot exercise `?includeInactive=` at all —
+ *   which is the parameter separating S-33's grid from C-021's picker.
+ * - **Erin Walsh has no phone and no designation**, so the two nullable columns
+ *   are rendered in both states.
+ * - **Kestrel (client 4) has no contacts at all**, which is why its Contacts tab
+ *   shows B-028's warning — `db.ts` already documents that client as the one
+ *   PROSPECT without a primary.
+ */
 const CONTACTS: Contact[] = [
-  { id: 1, clientId: 1, name: 'Sara Kapoor', email: 'sara@acme.example', phone: '+91 98200 11111', isPrimary: true, notificationOptIn: true, portalAccess: true },
-  { id: 2, clientId: 1, name: 'Dev Patel', email: 'dev@acme.example', phone: '+91 98200 22222', isPrimary: false, notificationOptIn: true, portalAccess: false },
-  { id: 3, clientId: 2, name: 'Tom Fletcher', email: 'tom@northwind.example', phone: '+44 20 7946 0000', isPrimary: true, notificationOptIn: true, portalAccess: false },
-  { id: 4, clientId: 3, name: 'Erin Walsh', email: 'erin@bluewave.example', phone: '+1 212 555 0100', isPrimary: true, notificationOptIn: false, portalAccess: false },
+  { id: 1, clientId: 1, name: 'Sara Kapoor', designation: 'IT Director', email: 'sara@acme.example', phone: '+91 98200 11111', isPrimary: true, notificationOptIn: true, portalAccess: true, isActive: true },
+  { id: 2, clientId: 1, name: 'Dev Patel', designation: 'Helpdesk Lead', email: 'dev@acme.example', phone: '+91 98200 22222', isPrimary: false, notificationOptIn: true, portalAccess: false, isActive: true },
+  { id: 5, clientId: 1, name: 'Ravi Menon', designation: 'Ops Manager', email: 'ravi@acme.example', phone: '+91 98200 33333', isPrimary: false, notificationOptIn: false, portalAccess: false, isActive: false },
+  { id: 3, clientId: 2, name: 'Tom Fletcher', designation: 'Head of Service', email: 'tom@northwind.example', phone: '+44 20 7946 0000', isPrimary: true, notificationOptIn: true, portalAccess: false, isActive: true },
+  { id: 4, clientId: 3, name: 'Erin Walsh', designation: null, email: 'erin@bluewave.example', phone: '', isPrimary: true, notificationOptIn: false, portalAccess: false, isActive: true },
 ];
 
 /**

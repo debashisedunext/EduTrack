@@ -300,6 +300,35 @@ describe('the Contacts tab', () => {
       await screen.findByText(/cannot be chosen on a ticket/, undefined, SLOW),
     ).toBeInTheDocument()
   })
+
+  /**
+   * B-027 · **the tab's buttons must not submit the client form.**
+   *
+   * This panel is inside `ClientFormPage`'s `<form>` and a button's default type
+   * is `submit`, so an "Add contact" without `type="button"` saves the client
+   * and navigates away — doing the right-looking thing for one click and the
+   * wrong thing for the other. It is asserted here because this is the only
+   * place there is a form to submit; `ClientContactsTab.test.tsx` renders the
+   * tab alone and structurally cannot catch it.
+   *
+   * The editor inside the dialog *is* a real `<form>`, and is safe for a
+   * different reason: radix portals `ModalContent` to `document.body`, so it is
+   * a sibling of this form rather than a descendant.
+   */
+  it('does not save the client when a contact button is clicked', async () => {
+    await openEdit(1)
+    fireEvent.click(tab('Contacts'))
+
+    const panel = screen.getByRole('tabpanel', { hidden: false })
+    await within(panel).findByText('Sara Kapoor', undefined, SLOW)
+
+    fireEvent.click(within(panel).getByRole('button', { name: /Add contact/ }))
+
+    // Navigation away is what a submitted form does here — the page routes to
+    // the grid on success.
+    expect(screen.queryByText('Client grid')).toBeNull()
+    expect(await screen.findByRole('dialog', undefined, SLOW)).toBeInTheDocument()
+  })
 })
 
 describe('the SLA field', () => {

@@ -314,6 +314,15 @@ final class PermissionMatrix {
             {"clientCode":"NEWCO","name":"Newco Ltd"}""";
 
     /**
+     * B-027 · {@code ClientDtos.ContactWriteRequest}. {@code name} and
+     * {@code email} are the two {@code @NotBlank} fields, so this is the smallest
+     * body that reaches the authorization check rather than dying at Bean
+     * Validation first.
+     */
+    private static final String CONTACT_WRITE = """
+            {"name":"Sara Kapoor","email":"sara@acme.example"}""";
+
+    /**
      * The {@code *Patch} DTOs have every field optional — deliberately, so a
      * partial update is possible at all — so an empty object is valid and
      * reaches authorisation.
@@ -745,14 +754,31 @@ final class PermissionMatrix {
             // nothing to argue against project.manage here: an SLA policy hangs
             // off a project and a client does not, so PM is denied like the rest.
             //
-            // There is no DELETE row because there is no DELETE route, and its
-            // absence is the design: tickets, contacts and project mappings all
-            // point at `clients`, and blueprint §4B.2 says deactivating must
-            // never hide historical tickets. Going away is the status PATCH.
+            // There is no DELETE row for the client itself because there is no
+            // DELETE route on it, and its absence is the design: tickets,
+            // contacts and project mappings all point at `clients`, and
+            // blueprint §4B.2 says deactivating must never hide historical
+            // tickets. Going away is the status PATCH.
             adminOnly("POST", "/api/v1/clients", CLIENT_WRITE),
             adminOnly("PATCH", "/api/v1/clients/{clientId}", CLIENT_WRITE),
             adminOnly("PATCH", "/api/v1/clients/bulk-status", CLIENT_BULK_STATUS),
             adminOnly("PATCH", "/api/v1/clients/{clientId}/status", CLIENT_STATUS),
+
+            // ── client contacts · S-33's child grid (B-027) ──────────────────
+            // The three writes are Admin's on the client master's argument, one
+            // level down: a contact is master data about a client, not about a
+            // project, so there is nothing for project.manage to be argued for
+            // the way B-018 had to argue it. The read stays every role — it is
+            // §4B.2's *second* dropdown, the individual who reported the issue,
+            // and a role that could not read it could not raise a client ticket.
+            //
+            // The DELETE row is real, unlike the client's, and it does not
+            // contradict the note above: it removes by deactivating, because
+            // `tickets.client_contact_id` is an FK with no cascade. What §4B.2
+            // forbids is destroying the history, and this does not.
+            adminOnly("POST", "/api/v1/clients/{clientId}/contacts", CONTACT_WRITE),
+            adminOnly("PATCH", "/api/v1/clients/{clientId}/contacts/{contactId}", CONTACT_WRITE),
+            adminOnly("DELETE", "/api/v1/clients/{clientId}/contacts/{contactId}"),
 
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack

@@ -33,13 +33,15 @@ class ClientControllerTest {
 
     private ClientService service;
     private ClientWriteService writes;
+    private ClientContactService contacts;
     private ClientController controller;
 
     @BeforeEach
     void setUp() {
         service = mock(ClientService.class);
         writes = mock(ClientWriteService.class);
-        controller = new ClientController(service, writes);
+        contacts = mock(ClientContactService.class);
+        controller = new ClientController(service, writes, contacts);
     }
 
     @Test
@@ -115,9 +117,9 @@ class ClientControllerTest {
     @Test
     @DisplayName("contacts for a client that is not there are 404, not an empty list")
     void unknownClientContactsAreNotFound() {
-        when(service.contactsOf(anyLong())).thenReturn(Optional.empty());
+        when(contacts.list(anyLong(), eq(false))).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> controller.contacts(9))
+        assertThatThrownBy(() -> controller.contacts(9, false))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting(e -> ((ResponseStatusException) e).getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
@@ -126,11 +128,113 @@ class ClientControllerTest {
     @Test
     @DisplayName("contacts come back wrapped in { data }")
     void contactsAreWrapped() {
-        when(service.contactsOf(1L)).thenReturn(Optional.of(List.of(
-                new ClientDtos.Contact(1, "Sara Kapoor", "sara@acme.example", null,
-                        true, true, true))));
+        when(contacts.list(1L, false)).thenReturn(Optional.of(List.of(contact(1, "Sara Kapoor"))));
 
-        assertThat(controller.contacts(1).data()).hasSize(1);
+        assertThat(controller.contacts(1, false).data()).hasSize(1);
+    }
+
+    // ------------------------------------------------------------------
+    // B-027 · S-33's Contacts tab
+    // ------------------------------------------------------------------
+
+    /**
+     * The default is what the pickers get, and it is the half that matters.
+     *
+     * <p>B-027 removes a contact by deactivating it, so a default of
+     * {@code true} would leave the ticket create form offering people who have
+     * left the client — silently, and only against a real backend. The grid asks
+     * for the rest explicitly.
+     */
+    @Test
+    @DisplayName("includeInactive defaults to false and is passed through when set")
+    void includeInactiveReachesTheService() {
+        when(contacts.list(anyLong(), org.mockito.ArgumentMatchers.anyBoolean()))
+                .thenReturn(Optional.of(List.of()));
+
+        controller.contacts(1, false);
+        controller.contacts(1, true);
+
+        org.mockito.Mockito.verify(contacts).list(1L, false);
+        org.mockito.Mockito.verify(contacts).list(1L, true);
+    }
+
+    @Test
+    @DisplayName("adding answers 201 with the contact wrapped in { data }")
+    void addingAnswers201() {
+        when(contacts.add(eq(1L), any())).thenReturn(Optional.of(contact(7, "Dev Patel")));
+
+        var response = controller.addContact(1, contactWrite("Dev Patel", "dev@acme.example"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().data().id()).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("adding to a client that is not there is 404, never 403")
+    void addingToAnUnknownClientIsNotFound() {
+        when(contacts.add(anyLong(), any())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> controller.addContact(9, contactWrite("Dev", "dev@acme.example")))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * A contact id belonging to a <em>different</em> client is 404, not an edit
+     * that lands on somebody else's row. The service returns empty for both that
+     * and an unknown client, and the controller must not distinguish them.
+     */
+    @Test
+    @DisplayName("editing a contact that is not this client's is 404")
+    void editingSomebodyElsesContactIsNotFound() {
+        when(contacts.edit(anyLong(), anyLong(), any())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                controller.editContact(1, 999, contactWrite("Dev", "dev@acme.example")))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("editing answers the saved contact wrapped in { data }")
+    void editingAnswersTheSavedContact() {
+        when(contacts.edit(eq(1L), eq(2L), any()))
+                .thenReturn(Optional.of(contact(2, "Dev Patel")));
+
+        assertThat(controller.editContact(1, 2, contactWrite("Dev Patel", "dev@acme.example"))
+                .data().name())
+                .isEqualTo("Dev Patel");
+    }
+
+    /**
+     * The removal is a setter, so a second call is not an error about something
+     * that did happen — B-014's {@code UNCHANGED} argument. The service reports
+     * "already removed" as success and only "no such contact under this client"
+     * as false.
+     */
+    @Test
+    @DisplayName("removing answers 204, and removing again still answers 204")
+    void removingIsIdempotent() {
+        when(contacts.remove(1L, 2L)).thenReturn(true);
+
+        assertThat(controller.removeContact(1, 2).getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(controller.removeContact(1, 2).getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    @DisplayName("removing a contact that is not this client's is 404")
+    void removingSomebodyElsesContactIsNotFound() {
+        when(contacts.remove(anyLong(), anyLong())).thenReturn(false);
+
+        assertThatThrownBy(() -> controller.removeContact(1, 999))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     // ------------------------------------------------------------------
@@ -257,6 +361,15 @@ class ClientControllerTest {
                 List.of(), null,
                 null, null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, List.of(), null, 0, false);
+    }
+
+    /** B-027 · a live, non-primary contact — the shape every write answers with. */
+    private static ClientDtos.Contact contact(long id, String name) {
+        return new ClientDtos.Contact(id, name, null, null, null, false, true, false, true);
+    }
+
+    private static ClientDtos.ContactWriteRequest contactWrite(String name, String email) {
+        return new ClientDtos.ContactWriteRequest(name, null, email, null, null, null, null);
     }
 
     private static ClientDtos.ClientWriteRequest write(String code, String name) {

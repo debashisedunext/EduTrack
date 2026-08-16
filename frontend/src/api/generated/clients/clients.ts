@@ -78,6 +78,7 @@ import type {
   ContactWriteRequest,
   ForbiddenResponse,
   GetClient360Params,
+  ListClientContactsParams,
   ListClientsParams,
   NotFoundResponse,
   PreconditionFailedResponse,
@@ -604,16 +605,33 @@ export const useSetClientStatus = <TError = NotFoundResponse,
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * The S-32 row-expand, S-33's Contacts tab and §4B.2's reporter dropdown —
+pick a client, then pick the individual who reported the issue (C-021).
+
+**Active contacts only by default.** B-027 removes a contact by
+deactivating it, never by deleting it, so this list would otherwise start
+offering people who have left the client. `includeInactive=true` is the
+B-027 grid's own read: a removed contact still has to be *shown* as
+removed, and a ticket raised by one still has to render their name.
+Same split B-021 made on `listPriorities` and for the same reason — the
+default serves the picker, the flag serves the master screen.
+
+**All six roles.** `listClients` beside it is §4B.2's client dropdown and
+this is the dependent second dropdown; a role that could not read it
+could not raise a ticket against a client at all.
+
  * @summary List contacts
  */
 export const listClientContacts = (
     clientId: number,
+    params?: ListClientContactsParams,
  signal?: AbortSignal
 ) => {
       
       
       return http<ContactListResponse>(
-      {url: `/clients/${clientId}/contacts`, method: 'GET', signal
+      {url: `/clients/${clientId}/contacts`, method: 'GET',
+        params, signal
     },
       );
     }
@@ -621,23 +639,25 @@ export const listClientContacts = (
 
 
 
-export const getListClientContactsQueryKey = (clientId?: number,) => {
+export const getListClientContactsQueryKey = (clientId?: number,
+    params?: ListClientContactsParams,) => {
     return [
-    `/clients/${clientId}/contacts`
+    `/clients/${clientId}/contacts`, ...(params ? [params]: [])
     ] as const;
     }
 
     
-export const getListClientContactsQueryOptions = <TData = Awaited<ReturnType<typeof listClientContacts>>, TError = NotFoundResponse>(clientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>>, }
+export const getListClientContactsQueryOptions = <TData = Awaited<ReturnType<typeof listClientContacts>>, TError = NotFoundResponse>(clientId: number,
+    params?: ListClientContactsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListClientContactsQueryKey(clientId);
+  const queryKey =  queryOptions?.queryKey ?? getListClientContactsQueryKey(clientId,params);
 
   
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listClientContacts>>> = ({ signal }) => listClientContacts(clientId, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listClientContacts>>> = ({ signal }) => listClientContacts(clientId,params, signal);
 
       
 
@@ -651,7 +671,8 @@ export type ListClientContactsQueryError = NotFoundResponse
 
 
 export function useListClientContacts<TData = Awaited<ReturnType<typeof listClientContacts>>, TError = NotFoundResponse>(
- clientId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>> & Pick<
+ clientId: number,
+    params: undefined |  ListClientContactsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listClientContacts>>,
           TError,
@@ -661,7 +682,8 @@ export function useListClientContacts<TData = Awaited<ReturnType<typeof listClie
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListClientContacts<TData = Awaited<ReturnType<typeof listClientContacts>>, TError = NotFoundResponse>(
- clientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>> & Pick<
+ clientId: number,
+    params?: ListClientContactsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listClientContacts>>,
           TError,
@@ -671,7 +693,8 @@ export function useListClientContacts<TData = Awaited<ReturnType<typeof listClie
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListClientContacts<TData = Awaited<ReturnType<typeof listClientContacts>>, TError = NotFoundResponse>(
- clientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>>, }
+ clientId: number,
+    params?: ListClientContactsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -679,11 +702,12 @@ export function useListClientContacts<TData = Awaited<ReturnType<typeof listClie
  */
 
 export function useListClientContacts<TData = Awaited<ReturnType<typeof listClientContacts>>, TError = NotFoundResponse>(
- clientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>>, }
+ clientId: number,
+    params?: ListClientContactsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listClientContacts>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListClientContactsQueryOptions(clientId,options)
+  const queryOptions = getListClientContactsQueryOptions(clientId,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -696,12 +720,24 @@ export function useListClientContacts<TData = Awaited<ReturnType<typeof listClie
 
 
 /**
- * Callable inline from the ticket form. Without that, the desk picks the
+ * B-027 · S-33's Contacts tab, adding.
+
+Callable inline from the ticket form. Without that, the desk picks the
 wrong existing contact rather than taking the detour to the client master.
 
 **A client is not selectable on a ticket until it has one primary
 contact.** Setting a new primary demotes the previous one in the same
-transaction.
+transaction — "at most one primary" is a service-layer rule the schema
+cannot assert, because MySQL has no partial unique index.
+
+**A duplicate email within the same client is refused** (`409`,
+case-insensitively, agreeing with `utf8mb4_0900_ai_ci`). The same address
+under two *different* clients is legitimate and stays allowed — D-039
+disambiguates inbound mail by `website_domain`, and
+`ix_client_contacts_email` is deliberately not unique.
+
+Writes are **Admin only** (`master.write`), where the read beside them is
+every role — the split B-025 and B-026 already make on this resource.
 
  * @summary Add a contact
  */
@@ -722,7 +758,7 @@ export const createClientContact = (
   
 
 
-export const getCreateClientContactMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse,
+export const getCreateClientContactMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createClientContact>>, TError,{clientId: number;data: ContactWriteRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof createClientContact>>, TError,{clientId: number;data: ContactWriteRequest}, TContext> => {
 
@@ -749,12 +785,12 @@ const {mutation: mutationOptions} = options ?
 
     export type CreateClientContactMutationResult = NonNullable<Awaited<ReturnType<typeof createClientContact>>>
     export type CreateClientContactMutationBody = ContactWriteRequest
-    export type CreateClientContactMutationError = ValidationFailedResponse | NotFoundResponse
+    export type CreateClientContactMutationError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse
 
     /**
  * @summary Add a contact
  */
-export const useCreateClientContact = <TError = ValidationFailedResponse | NotFoundResponse,
+export const useCreateClientContact = <TError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createClientContact>>, TError,{clientId: number;data: ContactWriteRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createClientContact>>,
@@ -764,6 +800,180 @@ export const useCreateClientContact = <TError = ValidationFailedResponse | NotFo
       > => {
 
       const mutationOptions = getCreateClientContactMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-027 · S-33's Contacts tab, editing.
+
+**The body is the whole representation, not a sparse patch.** The row
+editor sends every field on every save, so an absent one is a cleared one
+— B-026's call on `ClientWriteRequest`, one screen over, and the reason
+this is a record rather than the POJO B-017's and B-020's patches needed.
+
+**Without this operation an edit is remove-and-re-add**, which
+deactivates the row a historical ticket points at and issues a new id: a
+corrected phone number rendered as a departure and an arrival.
+
+**`isPrimary: true` promotes and demotes the previous primary**, exactly
+as the create does. `isPrimary: false` on the *only* primary is
+**allowed** and leaves the client with none — that is a state the client
+is already in the moment it is created, B-028's gate reports it, and
+refusing it here while the `DELETE` below can produce it anyway would be
+one rule with two answers.
+
+**No `If-Match`**, and it is an exemption with a reason rather than an
+oversight: the tag would have to come from `listClientContacts`, a
+collection carrying no `ETag` of its own. Same call as
+`PATCH /projects/{projectId}/members/{userId}`. The client the contact
+hangs off *does* have a tag, and a contact write moves it — `contactCount`
+and `hasPrimaryContact` are inside it — so the S-33 form must re-read the
+client after any write here or its next Save is a `412`.
+
+ * @summary Edit a contact (S-33)
+ */
+export const updateClientContact = (
+    clientId: number,
+    contactId: number,
+    contactWriteRequest: ContactWriteRequest,
+ ) => {
+      
+      
+      return http<ContactResponse>(
+      {url: `/clients/${clientId}/contacts/${contactId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: contactWriteRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateClientContactMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateClientContact>>, TError,{clientId: number;contactId: number;data: ContactWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateClientContact>>, TError,{clientId: number;contactId: number;data: ContactWriteRequest}, TContext> => {
+
+const mutationKey = ['updateClientContact'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateClientContact>>, {clientId: number;contactId: number;data: ContactWriteRequest}> = (props) => {
+          const {clientId,contactId,data} = props ?? {};
+
+          return  updateClientContact(clientId,contactId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateClientContactMutationResult = NonNullable<Awaited<ReturnType<typeof updateClientContact>>>
+    export type UpdateClientContactMutationBody = ContactWriteRequest
+    export type UpdateClientContactMutationError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse
+
+    /**
+ * @summary Edit a contact (S-33)
+ */
+export const useUpdateClientContact = <TError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateClientContact>>, TError,{clientId: number;contactId: number;data: ContactWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateClientContact>>,
+        TError,
+        {clientId: number;contactId: number;data: ContactWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateClientContactMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-027 · S-33's Contacts tab, removing.
+
+**This deactivates; it does not delete.** `tickets.client_contact_id` is
+a foreign key with no cascade, so a real `DELETE` either fails as a
+constraint violation naming a MySQL index or — "fixed" with a cascade —
+destroys the record of who reported a historical ticket. The row stays,
+`isActive` goes false, and `listClientContacts?includeInactive=true` is
+where it can still be seen. The same call B-017 made on
+`project_members`, B-018 on cleared SLA overrides and B-020 on a retired
+task type.
+
+**Removing an already-removed contact is `204`, not `404`.** It is a
+setter, and the second half of a double-click must not be an error about
+something that did happen — B-014's `UNCHANGED` argument. A contact id
+belonging to a *different* client is `404`.
+
+**Removing the primary is allowed and leaves the client with none.** The
+person left; the alternative is a contact who cannot be removed until
+somebody else is promoted, which is a rule that reads as a broken button.
+B-028's gate reports the consequence on the ticket create path.
+
+ * @summary Remove a contact (S-33)
+ */
+export const removeClientContact = (
+    clientId: number,
+    contactId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/clients/${clientId}/contacts/${contactId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getRemoveClientContactMutationOptions = <TError = ForbiddenResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeClientContact>>, TError,{clientId: number;contactId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof removeClientContact>>, TError,{clientId: number;contactId: number}, TContext> => {
+
+const mutationKey = ['removeClientContact'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeClientContact>>, {clientId: number;contactId: number}> = (props) => {
+          const {clientId,contactId} = props ?? {};
+
+          return  removeClientContact(clientId,contactId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveClientContactMutationResult = NonNullable<Awaited<ReturnType<typeof removeClientContact>>>
+    
+    export type RemoveClientContactMutationError = ForbiddenResponse | NotFoundResponse
+
+    /**
+ * @summary Remove a contact (S-33)
+ */
+export const useRemoveClientContact = <TError = ForbiddenResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeClientContact>>, TError,{clientId: number;contactId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof removeClientContact>>,
+        TError,
+        {clientId: number;contactId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getRemoveClientContactMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

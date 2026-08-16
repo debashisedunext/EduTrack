@@ -48,6 +48,10 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * @maxLength 30
+ * B-027 · their job title at the client. The column has been there
+since the baseline and no schema carried it, so the one field that
+tells a desk whether they are talking to the IT Director or a
+helpdesk operator was unreadable.
+
  */
-export type ContactWriteRequestPhone = string | null;
+export type ContactDesignation = string | null;

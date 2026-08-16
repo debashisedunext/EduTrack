@@ -571,7 +571,16 @@ function ClientRow({
  * client's contacts would be 25 requests to render nothing. The query is keyed
  * by client so a second open is a cache hit.
  *
- * Read-only — add, edit, remove and the primary flag are B-027's child grid.
+ * Read-only, deliberately. Add, edit, remove and the primary flag are B-027's
+ * child grid on S-33 — this is a glance from a row, not the screen that
+ * administers them, and two editors for one child collection is how they end up
+ * behaving differently.
+ *
+ * **Live contacts only**, which is the default and not an omission: B-027 shows
+ * removed contacts on the S-33 tab because an administrator needs to see that
+ * the address is still spoken for. Here it would be noise on a list view — the
+ * question this panel answers is "who do we call", and somebody who has left the
+ * client is not an answer to it.
  */
 function ContactsPanel({ clientId }: { clientId: number }) {
   const { data, isPending, isError } = useListClientContacts(clientId)

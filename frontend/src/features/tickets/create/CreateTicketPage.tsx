@@ -145,7 +145,12 @@ export function CreateTicketPage() {
   )
   const clients = React.useMemo(() => clientsData?.data ?? [], [clientsData])
 
-  const { data: contactsData } = useListClientContacts(clientId ?? 0, {
+  // B-027 · `includeInactive` is deliberately left off here, unlike on the
+  // ticket *detail* page. This is a picker, and a contact removed from the
+  // client master must stop being offered on new tickets — which is the whole
+  // reason that parameter defaults to false. Stream B's edit, one argument
+  // wide, flagged for Stream C.
+  const { data: contactsData } = useListClientContacts(clientId ?? 0, undefined, {
     query: { enabled: clientId != null },
   })
   const contacts = React.useMemo(

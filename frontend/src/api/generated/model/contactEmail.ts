@@ -48,6 +48,13 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * @maxLength 30
+ * **Nullable on the read and required on the write**, and that is not
+an inconsistency. `client_contacts.email` is `NULL`-able and B-035's
+import will write rows from spreadsheets that omit it, so a
+non-nullable read schema would make the generated client's own zod
+reject a row the database permits. New contacts entered through S-33
+must have one — a contact with `notificationOptIn` and no address is
+a mail D-036 can never deliver.
+
  */
-export type ContactWriteRequestPhone = string | null;
+export type ContactEmail = string | null;

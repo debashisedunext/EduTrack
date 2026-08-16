@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * B-025 · the S-32 grid's reads.
@@ -304,9 +305,14 @@ class ClientQueryRepository {
             return Map.of();
         }
         Map<Long, ClientDtos.Contact> byClient = new HashMap<>();
+        // `designation` and `is_active` are projected because `readContact` is
+        // one mapper for all three statements — every row this one returns is
+        // active by its own predicate, and selecting the column is cheaper than
+        // a second mapper that can drift from this one.
         jdbc.sql("""
-                        SELECT cc.client_id, cc.id, cc.name, cc.email, cc.phone,
-                               cc.is_primary, cc.receives_mail, cc.portal_access
+                        SELECT cc.client_id, cc.id, cc.name, cc.designation,
+                               cc.email, cc.phone, cc.is_primary,
+                               cc.receives_mail, cc.portal_access, cc.is_active
                         FROM client_contacts cc
                         WHERE cc.client_id IN (:ids)
                           AND cc.is_primary = 1 AND cc.is_active = 1
@@ -320,22 +326,66 @@ class ClientQueryRepository {
     }
 
     /**
-     * One client's contacts, for the S-32 row-expand.
+     * One client's contacts, for the S-32 row-expand, S-33's Contacts tab and
+     * §4B.2's reporter dropdown.
      *
-     * <p>Active ones only, and CONVENTIONS.md §6 exempts this list from paging:
-     * a client has a handful of contacts, and the expand renders all of them.
+     * <p>CONVENTIONS.md §6 exempts this list from paging: a client has a handful
+     * of contacts, and every caller renders all of them.
+     *
+     * <p><b>{@code includeInactive} defaults to false, and the default is the
+     * one the pickers get.</b> B-027 removes a contact by deactivating it, so a
+     * list that returned everything would go on offering people who have left
+     * the client on the ticket create form. The grid that <em>administers</em>
+     * them needs the opposite — a removed contact has to be visible as removed,
+     * and a ticket raised by one still has to render their name. Exactly the
+     * split B-021 made on {@code listPriorities} and for the same reason.
+     *
+     * <p>The predicate is {@code (? OR cc.is_active = 1)} rather than two
+     * statements or a concatenated string: one prepared statement, one plan, and
+     * nothing that can drift between the two orderings.
      */
-    List<ClientDtos.Contact> contactsOf(long clientId) {
+    List<ClientDtos.Contact> contactsOf(long clientId, boolean includeInactive) {
         return jdbc.sql("""
-                        SELECT cc.id, cc.name, cc.email, cc.phone,
-                               cc.is_primary, cc.receives_mail, cc.portal_access
+                        SELECT cc.id, cc.name, cc.designation, cc.email, cc.phone,
+                               cc.is_primary, cc.receives_mail, cc.portal_access,
+                               cc.is_active
                         FROM client_contacts cc
-                        WHERE cc.client_id = ? AND cc.is_active = 1
-                        ORDER BY cc.is_primary DESC, cc.name, cc.id
+                        WHERE cc.client_id = ?
+                          AND (? = TRUE OR cc.is_active = 1)
+                        ORDER BY cc.is_active DESC, cc.is_primary DESC, cc.name, cc.id
                         """)
                 .param(clientId)
+                .param(includeInactive)
                 .query((rs, n) -> readContact(rs))
                 .list();
+    }
+
+    /**
+     * One contact, <b>scoped to its client</b> — the read behind every B-027
+     * write's response and its 404.
+     *
+     * <p>The {@code client_id} predicate is what makes a contact id belonging to
+     * another client a 404 rather than an edit that silently succeeds against
+     * somebody else's row. Not a scope-guard concern (clients are not
+     * row-scoped) but a nesting one: the path says this contact is under this
+     * client, and if it is not, the resource named does not exist.
+     *
+     * <p>Inactive rows included. The response to a {@code DELETE} that was
+     * already a no-op, and the row a repair edit reaches for, are both inactive
+     * by definition.
+     */
+    Optional<ClientDtos.Contact> contactOf(long clientId, long contactId) {
+        return jdbc.sql("""
+                        SELECT cc.id, cc.name, cc.designation, cc.email, cc.phone,
+                               cc.is_primary, cc.receives_mail, cc.portal_access,
+                               cc.is_active
+                        FROM client_contacts cc
+                        WHERE cc.client_id = ? AND cc.id = ?
+                        """)
+                .param(clientId)
+                .param(contactId)
+                .query((rs, n) -> readContact(rs))
+                .optional();
     }
 
     /**
@@ -466,6 +516,9 @@ class ClientQueryRepository {
         return new ClientDtos.Contact(
                 rs.getLong("id"),
                 rs.getString("name"),
+                // B-027 · a column that has existed since the baseline and that
+                // no schema carried until this task.
+                rs.getString("designation"),
                 rs.getString("email"),
                 rs.getString("phone"),
                 rs.getBoolean("is_primary"),
@@ -473,6 +526,7 @@ class ClientQueryRepository {
                 // `notificationOptIn`. Renamed here rather than in the contract,
                 // which D's mail engine already reads.
                 rs.getBoolean("receives_mail"),
-                rs.getBoolean("portal_access"));
+                rs.getBoolean("portal_access"),
+                rs.getBoolean("is_active"));
     }
 }

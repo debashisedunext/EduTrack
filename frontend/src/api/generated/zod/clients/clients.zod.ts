@@ -101,12 +101,14 @@ export const listClientsResponse = zod.object({
   "primaryContact": zod.object({
   "id": zod.number().optional(),
   "name": zod.string().optional(),
-  "email": zod.string().email().optional(),
+  "designation": zod.string().nullish().describe('B-027 · their job title at the client. The column has been there\nsince the baseline and no schema carried it, so the one field that\ntells a desk whether they are talking to the IT Director or a\nhelpdesk operator was unreadable.\n'),
+  "email": zod.string().email().nullish().describe('\*\*Nullable on the read and required on the write\*\*, and that is not\nan inconsistency. `client_contacts.email` is `NULL`-able and B-035\'s\nimport will write rows from spreadsheets that omit it, so a\nnon-nullable read schema would make the generated client\'s own zod\nreject a row the database permits. New contacts entered through S-33\nmust have one — a contact with `notificationOptIn` and no address is\na mail D-036 can never deliver.\n'),
   "phone": zod.string().nullish(),
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
-  "portalAccess": zod.boolean().optional()
-}).optional(),
+  "portalAccess": zod.boolean().optional(),
+  "isActive": zod.boolean().optional().describe('B-027 · false for a removed contact. Removal deactivates rather than\ndeletes, because `tickets.client_contact_id` points here; only\n`listClientContacts?includeInactive=true` returns these.\n')
+}).optional().describe('A person at the client — blueprint §4B.2, the table B-027\'s child grid\nedits and C-021\'s reporter dropdown reads.\n'),
   "projects": zod.array(zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
@@ -269,12 +271,14 @@ export const setClientStatusBulkResponse = zod.object({
   "primaryContact": zod.object({
   "id": zod.number().optional(),
   "name": zod.string().optional(),
-  "email": zod.string().email().optional(),
+  "designation": zod.string().nullish().describe('B-027 · their job title at the client. The column has been there\nsince the baseline and no schema carried it, so the one field that\ntells a desk whether they are talking to the IT Director or a\nhelpdesk operator was unreadable.\n'),
+  "email": zod.string().email().nullish().describe('\*\*Nullable on the read and required on the write\*\*, and that is not\nan inconsistency. `client_contacts.email` is `NULL`-able and B-035\'s\nimport will write rows from spreadsheets that omit it, so a\nnon-nullable read schema would make the generated client\'s own zod\nreject a row the database permits. New contacts entered through S-33\nmust have one — a contact with `notificationOptIn` and no address is\na mail D-036 can never deliver.\n'),
   "phone": zod.string().nullish(),
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
-  "portalAccess": zod.boolean().optional()
-}).optional(),
+  "portalAccess": zod.boolean().optional(),
+  "isActive": zod.boolean().optional().describe('B-027 · false for a removed contact. Removal deactivates rather than\ndeletes, because `tickets.client_contact_id` points here; only\n`listClientContacts?includeInactive=true` returns these.\n')
+}).optional().describe('A person at the client — blueprint §4B.2, the table B-027\'s child grid\nedits and C-021\'s reporter dropdown reads.\n'),
   "projects": zod.array(zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
@@ -336,12 +340,14 @@ export const getClientResponse = zod.object({
   "primaryContact": zod.object({
   "id": zod.number().optional(),
   "name": zod.string().optional(),
-  "email": zod.string().email().optional(),
+  "designation": zod.string().nullish().describe('B-027 · their job title at the client. The column has been there\nsince the baseline and no schema carried it, so the one field that\ntells a desk whether they are talking to the IT Director or a\nhelpdesk operator was unreadable.\n'),
+  "email": zod.string().email().nullish().describe('\*\*Nullable on the read and required on the write\*\*, and that is not\nan inconsistency. `client_contacts.email` is `NULL`-able and B-035\'s\nimport will write rows from spreadsheets that omit it, so a\nnon-nullable read schema would make the generated client\'s own zod\nreject a row the database permits. New contacts entered through S-33\nmust have one — a contact with `notificationOptIn` and no address is\na mail D-036 can never deliver.\n'),
   "phone": zod.string().nullish(),
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
-  "portalAccess": zod.boolean().optional()
-}).optional(),
+  "portalAccess": zod.boolean().optional(),
+  "isActive": zod.boolean().optional().describe('B-027 · false for a removed contact. Removal deactivates rather than\ndeletes, because `tickets.client_contact_id` points here; only\n`listClientContacts?includeInactive=true` returns these.\n')
+}).optional().describe('A person at the client — blueprint §4B.2, the table B-027\'s child grid\nedits and C-021\'s reporter dropdown reads.\n'),
   "projects": zod.array(zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
@@ -508,12 +514,14 @@ export const updateClientResponse = zod.object({
   "primaryContact": zod.object({
   "id": zod.number().optional(),
   "name": zod.string().optional(),
-  "email": zod.string().email().optional(),
+  "designation": zod.string().nullish().describe('B-027 · their job title at the client. The column has been there\nsince the baseline and no schema carried it, so the one field that\ntells a desk whether they are talking to the IT Director or a\nhelpdesk operator was unreadable.\n'),
+  "email": zod.string().email().nullish().describe('\*\*Nullable on the read and required on the write\*\*, and that is not\nan inconsistency. `client_contacts.email` is `NULL`-able and B-035\'s\nimport will write rows from spreadsheets that omit it, so a\nnon-nullable read schema would make the generated client\'s own zod\nreject a row the database permits. New contacts entered through S-33\nmust have one — a contact with `notificationOptIn` and no address is\na mail D-036 can never deliver.\n'),
   "phone": zod.string().nullish(),
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
-  "portalAccess": zod.boolean().optional()
-}).optional(),
+  "portalAccess": zod.boolean().optional(),
+  "isActive": zod.boolean().optional().describe('B-027 · false for a removed contact. Removal deactivates rather than\ndeletes, because `tickets.client_contact_id` points here; only\n`listClientContacts?includeInactive=true` returns these.\n')
+}).optional().describe('A person at the client — blueprint §4B.2, the table B-027\'s child grid\nedits and C-021\'s reporter dropdown reads.\n'),
   "projects": zod.array(zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
@@ -588,12 +596,14 @@ export const setClientStatusResponse = zod.object({
   "primaryContact": zod.object({
   "id": zod.number().optional(),
   "name": zod.string().optional(),
-  "email": zod.string().email().optional(),
+  "designation": zod.string().nullish().describe('B-027 · their job title at the client. The column has been there\nsince the baseline and no schema carried it, so the one field that\ntells a desk whether they are talking to the IT Director or a\nhelpdesk operator was unreadable.\n'),
+  "email": zod.string().email().nullish().describe('\*\*Nullable on the read and required on the write\*\*, and that is not\nan inconsistency. `client_contacts.email` is `NULL`-able and B-035\'s\nimport will write rows from spreadsheets that omit it, so a\nnon-nullable read schema would make the generated client\'s own zod\nreject a row the database permits. New contacts entered through S-33\nmust have one — a contact with `notificationOptIn` and no address is\na mail D-036 can never deliver.\n'),
   "phone": zod.string().nullish(),
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
-  "portalAccess": zod.boolean().optional()
-}).optional(),
+  "portalAccess": zod.boolean().optional(),
+  "isActive": zod.boolean().optional().describe('B-027 · false for a removed contact. Removal deactivates rather than\ndeletes, because `tickets.client_contact_id` points here; only\n`listClientContacts?includeInactive=true` returns these.\n')
+}).optional().describe('A person at the client — blueprint §4B.2, the table B-027\'s child grid\nedits and C-021\'s reporter dropdown reads.\n'),
   "projects": zod.array(zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
@@ -605,31 +615,66 @@ export const setClientStatusResponse = zod.object({
 })
 
 /**
+ * The S-32 row-expand, S-33's Contacts tab and §4B.2's reporter dropdown —
+pick a client, then pick the individual who reported the issue (C-021).
+
+**Active contacts only by default.** B-027 removes a contact by
+deactivating it, never by deleting it, so this list would otherwise start
+offering people who have left the client. `includeInactive=true` is the
+B-027 grid's own read: a removed contact still has to be *shown* as
+removed, and a ticket raised by one still has to render their name.
+Same split B-021 made on `listPriorities` and for the same reason — the
+default serves the picker, the flag serves the master screen.
+
+**All six roles.** `listClients` beside it is §4B.2's client dropdown and
+this is the dependent second dropdown; a role that could not read it
+could not raise a ticket against a client at all.
+
  * @summary List contacts
  */
 export const listClientContactsParams = zod.object({
   "clientId": zod.number()
 })
 
+export const listClientContactsQueryIncludeInactiveDefault = false;
+
+export const listClientContactsQueryParams = zod.object({
+  "includeInactive": zod.boolean().optional().describe('Include removed contacts, each carrying `isActive: false`. The B-027\ngrid sends it; every picker leaves it off.\n')
+})
+
 export const listClientContactsResponse = zod.object({
   "data": zod.array(zod.object({
   "id": zod.number().optional(),
   "name": zod.string().optional(),
-  "email": zod.string().email().optional(),
+  "designation": zod.string().nullish().describe('B-027 · their job title at the client. The column has been there\nsince the baseline and no schema carried it, so the one field that\ntells a desk whether they are talking to the IT Director or a\nhelpdesk operator was unreadable.\n'),
+  "email": zod.string().email().nullish().describe('\*\*Nullable on the read and required on the write\*\*, and that is not\nan inconsistency. `client_contacts.email` is `NULL`-able and B-035\'s\nimport will write rows from spreadsheets that omit it, so a\nnon-nullable read schema would make the generated client\'s own zod\nreject a row the database permits. New contacts entered through S-33\nmust have one — a contact with `notificationOptIn` and no address is\na mail D-036 can never deliver.\n'),
   "phone": zod.string().nullish(),
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
-  "portalAccess": zod.boolean().optional()
-}))
+  "portalAccess": zod.boolean().optional(),
+  "isActive": zod.boolean().optional().describe('B-027 · false for a removed contact. Removal deactivates rather than\ndeletes, because `tickets.client_contact_id` points here; only\n`listClientContacts?includeInactive=true` returns these.\n')
+}).describe('A person at the client — blueprint §4B.2, the table B-027\'s child grid\nedits and C-021\'s reporter dropdown reads.\n'))
 })
 
 /**
- * Callable inline from the ticket form. Without that, the desk picks the
+ * B-027 · S-33's Contacts tab, adding.
+
+Callable inline from the ticket form. Without that, the desk picks the
 wrong existing contact rather than taking the detour to the client master.
 
 **A client is not selectable on a ticket until it has one primary
 contact.** Setting a new primary demotes the previous one in the same
-transaction.
+transaction — "at most one primary" is a service-layer rule the schema
+cannot assert, because MySQL has no partial unique index.
+
+**A duplicate email within the same client is refused** (`409`,
+case-insensitively, agreeing with `utf8mb4_0900_ai_ci`). The same address
+under two *different* clients is legitimate and stays allowed — D-039
+disambiguates inbound mail by `website_domain`, and
+`ix_client_contacts_email` is deliberately not unique.
+
+Writes are **Admin only** (`master.write`), where the read beside them is
+every role — the split B-025 and B-026 already make on this resource.
 
  * @summary Add a contact
  */
@@ -641,17 +686,121 @@ export const createClientContactHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
 })
 
-export const createClientContactBodyNameMax = 150;
+export const createClientContactBodyNameMax = 120;
+
+export const createClientContactBodyDesignationMax = 80;
+
+export const createClientContactBodyEmailMax = 150;
+
+export const createClientContactBodyPhoneMax = 30;
 
 export const createClientContactBodyIsPrimaryDefault = false;export const createClientContactBodyNotificationOptInDefault = true;export const createClientContactBodyPortalAccessDefault = false;
 
 export const createClientContactBody = zod.object({
-  "name": zod.string().min(1).max(createClientContactBodyNameMax),
-  "email": zod.string().email(),
+  "name": zod.string().min(1).max(createClientContactBodyNameMax).describe('120, not 150. `client_contacts.name` is a `VARCHAR(120)` and the\ncontract was accepting values MySQL would refuse — the same defect\nB-026 fixed on `clientCode` and `name`, found the same way: by\nimplementing the operation.\n'),
+  "designation": zod.string().max(createClientContactBodyDesignationMax).nullish(),
+  "email": zod.string().email().max(createClientContactBodyEmailMax).describe('Unique \*\*within this client\*\*, case-insensitively. The same address\nunder two different clients is legitimate and stays allowed —\n`ix_client_contacts_email` is deliberately not unique and D-039\ndisambiguates inbound mail by `website_domain`.\n'),
+  "phone": zod.string().max(createClientContactBodyPhoneMax).nullish(),
+  "isPrimary": zod.boolean().optional().describe('Promoting demotes the previous primary in the same transaction.\nClearing it on the only primary is allowed and leaves the client with\nnone, which B-028 reports on the ticket create path.\n'),
+  "notificationOptIn": zod.boolean().default(createClientContactBodyNotificationOptInDefault).describe('`client_contacts.receives_mail` — the D-036 recipient list. Named for\nwhat it means to an administrator rather than for the column.\n'),
+  "portalAccess": zod.boolean().optional().describe('The forward hook for client portal login; unused in phase 1.')
+}).describe('B-027 · the whole representation, for both `POST` and `PATCH`. An absent\nfield is a cleared field — the row editor sends every input on every\nsave, so \"the form did not send a designation\" and \"the admin emptied the\ndesignation box\" are the same event. B-026\'s argument on\n`ClientWriteRequest`, one screen over.\n\n`isActive` is deliberately \*\*not\*\* here: removal is the `DELETE`, and a\nboolean that could also do it would be two controls for one outcome —\nwhich is how they end up disagreeing.\n')
+
+/**
+ * B-027 · S-33's Contacts tab, editing.
+
+**The body is the whole representation, not a sparse patch.** The row
+editor sends every field on every save, so an absent one is a cleared one
+— B-026's call on `ClientWriteRequest`, one screen over, and the reason
+this is a record rather than the POJO B-017's and B-020's patches needed.
+
+**Without this operation an edit is remove-and-re-add**, which
+deactivates the row a historical ticket points at and issues a new id: a
+corrected phone number rendered as a departure and an arrival.
+
+**`isPrimary: true` promotes and demotes the previous primary**, exactly
+as the create does. `isPrimary: false` on the *only* primary is
+**allowed** and leaves the client with none — that is a state the client
+is already in the moment it is created, B-028's gate reports it, and
+refusing it here while the `DELETE` below can produce it anyway would be
+one rule with two answers.
+
+**No `If-Match`**, and it is an exemption with a reason rather than an
+oversight: the tag would have to come from `listClientContacts`, a
+collection carrying no `ETag` of its own. Same call as
+`PATCH /projects/{projectId}/members/{userId}`. The client the contact
+hangs off *does* have a tag, and a contact write moves it — `contactCount`
+and `hasPrimaryContact` are inside it — so the S-33 form must re-read the
+client after any write here or its next Save is a `412`.
+
+ * @summary Edit a contact (S-33)
+ */
+export const updateClientContactParams = zod.object({
+  "clientId": zod.number(),
+  "contactId": zod.number().describe('A `client_contacts` id. Nested under the client on purpose: a contact\nbelonging to a \*different\* client is `404`, not `403` — the id is a row\nthis caller has no business knowing exists under that client.\n')
+})
+
+export const updateClientContactBodyNameMax = 120;
+
+export const updateClientContactBodyDesignationMax = 80;
+
+export const updateClientContactBodyEmailMax = 150;
+
+export const updateClientContactBodyPhoneMax = 30;
+
+export const updateClientContactBodyIsPrimaryDefault = false;export const updateClientContactBodyNotificationOptInDefault = true;export const updateClientContactBodyPortalAccessDefault = false;
+
+export const updateClientContactBody = zod.object({
+  "name": zod.string().min(1).max(updateClientContactBodyNameMax).describe('120, not 150. `client_contacts.name` is a `VARCHAR(120)` and the\ncontract was accepting values MySQL would refuse — the same defect\nB-026 fixed on `clientCode` and `name`, found the same way: by\nimplementing the operation.\n'),
+  "designation": zod.string().max(updateClientContactBodyDesignationMax).nullish(),
+  "email": zod.string().email().max(updateClientContactBodyEmailMax).describe('Unique \*\*within this client\*\*, case-insensitively. The same address\nunder two different clients is legitimate and stays allowed —\n`ix_client_contacts_email` is deliberately not unique and D-039\ndisambiguates inbound mail by `website_domain`.\n'),
+  "phone": zod.string().max(updateClientContactBodyPhoneMax).nullish(),
+  "isPrimary": zod.boolean().optional().describe('Promoting demotes the previous primary in the same transaction.\nClearing it on the only primary is allowed and leaves the client with\nnone, which B-028 reports on the ticket create path.\n'),
+  "notificationOptIn": zod.boolean().default(updateClientContactBodyNotificationOptInDefault).describe('`client_contacts.receives_mail` — the D-036 recipient list. Named for\nwhat it means to an administrator rather than for the column.\n'),
+  "portalAccess": zod.boolean().optional().describe('The forward hook for client portal login; unused in phase 1.')
+}).describe('B-027 · the whole representation, for both `POST` and `PATCH`. An absent\nfield is a cleared field — the row editor sends every input on every\nsave, so \"the form did not send a designation\" and \"the admin emptied the\ndesignation box\" are the same event. B-026\'s argument on\n`ClientWriteRequest`, one screen over.\n\n`isActive` is deliberately \*\*not\*\* here: removal is the `DELETE`, and a\nboolean that could also do it would be two controls for one outcome —\nwhich is how they end up disagreeing.\n')
+
+export const updateClientContactResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "designation": zod.string().nullish().describe('B-027 · their job title at the client. The column has been there\nsince the baseline and no schema carried it, so the one field that\ntells a desk whether they are talking to the IT Director or a\nhelpdesk operator was unreadable.\n'),
+  "email": zod.string().email().nullish().describe('\*\*Nullable on the read and required on the write\*\*, and that is not\nan inconsistency. `client_contacts.email` is `NULL`-able and B-035\'s\nimport will write rows from spreadsheets that omit it, so a\nnon-nullable read schema would make the generated client\'s own zod\nreject a row the database permits. New contacts entered through S-33\nmust have one — a contact with `notificationOptIn` and no address is\na mail D-036 can never deliver.\n'),
   "phone": zod.string().nullish(),
   "isPrimary": zod.boolean().optional(),
-  "notificationOptIn": zod.boolean().default(createClientContactBodyNotificationOptInDefault),
-  "portalAccess": zod.boolean().optional()
+  "notificationOptIn": zod.boolean().optional(),
+  "portalAccess": zod.boolean().optional(),
+  "isActive": zod.boolean().optional().describe('B-027 · false for a removed contact. Removal deactivates rather than\ndeletes, because `tickets.client_contact_id` points here; only\n`listClientContacts?includeInactive=true` returns these.\n')
+}).describe('A person at the client — blueprint §4B.2, the table B-027\'s child grid\nedits and C-021\'s reporter dropdown reads.\n')
+})
+
+/**
+ * B-027 · S-33's Contacts tab, removing.
+
+**This deactivates; it does not delete.** `tickets.client_contact_id` is
+a foreign key with no cascade, so a real `DELETE` either fails as a
+constraint violation naming a MySQL index or — "fixed" with a cascade —
+destroys the record of who reported a historical ticket. The row stays,
+`isActive` goes false, and `listClientContacts?includeInactive=true` is
+where it can still be seen. The same call B-017 made on
+`project_members`, B-018 on cleared SLA overrides and B-020 on a retired
+task type.
+
+**Removing an already-removed contact is `204`, not `404`.** It is a
+setter, and the second half of a double-click must not be an error about
+something that did happen — B-014's `UNCHANGED` argument. A contact id
+belonging to a *different* client is `404`.
+
+**Removing the primary is allowed and leaves the client with none.** The
+person left; the alternative is a contact who cannot be removed until
+somebody else is promoted, which is a rule that reads as a broken button.
+B-028's gate reports the consequence on the ticket create path.
+
+ * @summary Remove a contact (S-33)
+ */
+export const removeClientContactParams = zod.object({
+  "clientId": zod.number(),
+  "contactId": zod.number().describe('A `client_contacts` id. Nested under the client on purpose: a contact\nbelonging to a \*different\* client is `404`, not `403` — the id is a row\nthis caller has no business knowing exists under that client.\n')
 })
 
 /**
@@ -712,12 +861,14 @@ export const getClient360Response = zod.object({
   "primaryContact": zod.object({
   "id": zod.number().optional(),
   "name": zod.string().optional(),
-  "email": zod.string().email().optional(),
+  "designation": zod.string().nullish().describe('B-027 · their job title at the client. The column has been there\nsince the baseline and no schema carried it, so the one field that\ntells a desk whether they are talking to the IT Director or a\nhelpdesk operator was unreadable.\n'),
+  "email": zod.string().email().nullish().describe('\*\*Nullable on the read and required on the write\*\*, and that is not\nan inconsistency. `client_contacts.email` is `NULL`-able and B-035\'s\nimport will write rows from spreadsheets that omit it, so a\nnon-nullable read schema would make the generated client\'s own zod\nreject a row the database permits. New contacts entered through S-33\nmust have one — a contact with `notificationOptIn` and no address is\na mail D-036 can never deliver.\n'),
   "phone": zod.string().nullish(),
   "isPrimary": zod.boolean().optional(),
   "notificationOptIn": zod.boolean().optional(),
-  "portalAccess": zod.boolean().optional()
-}).optional(),
+  "portalAccess": zod.boolean().optional(),
+  "isActive": zod.boolean().optional().describe('B-027 · false for a removed contact. Removal deactivates rather than\ndeletes, because `tickets.client_contact_id` points here; only\n`listClientContacts?includeInactive=true` returns these.\n')
+}).optional().describe('A person at the client — blueprint §4B.2, the table B-027\'s child grid\nedits and C-021\'s reporter dropdown reads.\n'),
   "projects": zod.array(zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),

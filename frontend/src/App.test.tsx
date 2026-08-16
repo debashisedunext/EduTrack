@@ -46,7 +46,13 @@ describe('App shell', () => {
 
   it('defaults to the Dashboard route', async () => {
     renderApp()
-    expect(await screen.findByText('Dashboard', { selector: 'p' })).toBeInTheDocument()
+    // B-027 · by role, not `{ selector: 'p' }`. A-055 replaced the placeholder
+    // this asserted against with the real S-05 screen, whose title is an <h1>,
+    // and left the assertion behind — so it has failed on `develop` since that
+    // merge. Asking for the heading says what the test means and survives the
+    // next markup change. **Stream A's file, flagged.**
+    expect(await screen.findByRole('heading', { name: 'Dashboard', level: 1 }))
+      .toBeInTheDocument()
   })
 
   it('shows the mock user in the avatar menu once /me resolves', async () => {

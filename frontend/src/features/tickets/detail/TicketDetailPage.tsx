@@ -91,9 +91,17 @@ export function TicketDetailPage() {
 
   const clientId = ticket?.client?.id
   const contactId = ticket?.clientContactId
-  const { data: contactsData } = useListClientContacts(clientId ?? 0, {
-    query: { enabled: clientId != null && contactId != null },
-  })
+  // B-027 · `includeInactive: true`, and it is not symmetrical with the create
+  // form's picker. This resolves a name for a contact a *historical* ticket was
+  // raised by, and B-027 removes a contact by deactivating the row rather than
+  // deleting it — so without this the "Reported by" line goes blank the moment
+  // that person leaves the client, which reads as missing data rather than as a
+  // departure. Stream B's edit, one argument wide, flagged for Stream C.
+  const { data: contactsData } = useListClientContacts(
+    clientId ?? 0,
+    { includeInactive: true },
+    { query: { enabled: clientId != null && contactId != null } },
+  )
   const contactName = React.useMemo(
     () => (contactId == null ? undefined : (contactsData?.data ?? []).find((c) => c.id === contactId)?.name),
     [contactsData, contactId],

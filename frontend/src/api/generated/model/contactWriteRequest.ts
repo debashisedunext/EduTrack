@@ -46,17 +46,54 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ContactWriteRequestDesignation } from './contactWriteRequestDesignation';
 import type { ContactWriteRequestPhone } from './contactWriteRequestPhone';
 
+/**
+ * B-027 · the whole representation, for both `POST` and `PATCH`. An absent
+field is a cleared field — the row editor sends every input on every
+save, so "the form did not send a designation" and "the admin emptied the
+designation box" are the same event. B-026's argument on
+`ClientWriteRequest`, one screen over.
+
+`isActive` is deliberately **not** here: removal is the `DELETE`, and a
+boolean that could also do it would be two controls for one outcome —
+which is how they end up disagreeing.
+
+ */
 export interface ContactWriteRequest {
   /**
+   * 120, not 150. `client_contacts.name` is a `VARCHAR(120)` and the
+contract was accepting values MySQL would refuse — the same defect
+B-026 fixed on `clientCode` and `name`, found the same way: by
+implementing the operation.
+
    * @minLength 1
-   * @maxLength 150
+   * @maxLength 120
    */
   name: string;
+  /** @maxLength 80 */
+  designation?: ContactWriteRequestDesignation;
+  /**
+   * Unique **within this client**, case-insensitively. The same address
+under two different clients is legitimate and stays allowed —
+`ix_client_contacts_email` is deliberately not unique and D-039
+disambiguates inbound mail by `website_domain`.
+
+   * @maxLength 150
+   */
   email: string;
+  /** @maxLength 30 */
   phone?: ContactWriteRequestPhone;
+  /** Promoting demotes the previous primary in the same transaction.
+Clearing it on the only primary is allowed and leaves the client with
+none, which B-028 reports on the ticket create path.
+ */
   isPrimary?: boolean;
+  /** `client_contacts.receives_mail` — the D-036 recipient list. Named for
+what it means to an administrator rather than for the column.
+ */
   notificationOptIn?: boolean;
+  /** The forward hook for client portal login; unused in phase 1. */
   portalAccess?: boolean;
 }

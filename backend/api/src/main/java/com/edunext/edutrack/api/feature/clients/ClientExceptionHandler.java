@@ -90,4 +90,42 @@ class ClientExceptionHandler {
 
         return ResponseEntity.status(status).body(problem);
     }
+
+    /**
+     * B-027 · a contact write's failures, field-keyed the same way, so the row
+     * editor marks the input rather than showing a banner over a grid.
+     *
+     * <p><b>409 whenever a duplicate email is involved, where the client form
+     * next door is 409 only when a duplicate code is the <em>only</em>
+     * failure.</b> Not an inconsistency between two screens: that rule exists
+     * because {@code ClientWriteRequest} spans four tabs and a mixed failure
+     * carrying both a duplicate code and a bad timezone would be handled by a
+     * status-branching client (CONVENTIONS.md §3) as a uniqueness conflict, so
+     * the second message would never be shown. A contact has one queried rule,
+     * so there is no mixture to describe with the wrong status.
+     *
+     * <p>The {@code type} is the same {@code duplicate} URI the resource, project
+     * and client forms use — {@code ClientExceptionHandlerTest} pins that the two
+     * 409s this advice can emit stay distinguishable by their {@code errors}
+     * keys, not by their prose.
+     */
+    @ExceptionHandler(ClientContactService.ContactValidationException.class)
+    ResponseEntity<ProblemDetail> handleContact(
+            ClientContactService.ContactValidationException e) {
+
+        HttpStatus status = e.isDuplicate() ? HttpStatus.CONFLICT : HttpStatus.BAD_REQUEST;
+
+        ProblemDetail problem = ProblemDetail.forStatus(status);
+        problem.setType(e.isDuplicate() ? DUPLICATE : VALIDATION_FAILED);
+        problem.setTitle(e.isDuplicate()
+                ? "That email is already used at this client"
+                : "The contact was not saved");
+        problem.setDetail(e.getMessage());
+
+        Map<String, String[]> errors = new LinkedHashMap<>();
+        e.errors().forEach((field, message) -> errors.put(field, new String[]{message}));
+        problem.setProperty("errors", errors);
+
+        return ResponseEntity.status(status).body(problem);
+    }
 }

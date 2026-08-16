@@ -107,7 +107,14 @@ export function DashboardPage() {
             value={users.find((u) => String(u.id) === assigneeId) ?? null}
             onChange={(u) => setParam('assigneeId', u ? String(u.id) : null)}
             getKey={(u) => String(u.id)}
-            getLabel={(u) => u.fullName ?? u.username ?? `#${u.id}`}
+            getLabel={(u) =>
+              // B-027 · `displayName`, not `fullName`. `User` is
+              // `UserRef & UserAllOf` and neither half has ever carried a
+              // `fullName` — that is the *column* name (`users.full_name`),
+              // which the contract renames on the wire. `develop` does not
+              // compile without this. **Stream A's file, flagged.**
+              u.displayName || u.username || `#${u.id}`
+            }
             searchable
           />
           <Button variant="secondary" onClick={() => refetch()} disabled={isFetching}>

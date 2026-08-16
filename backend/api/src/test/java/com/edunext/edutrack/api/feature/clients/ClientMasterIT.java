@@ -19,9 +19,11 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * B-025 · S-32 against a real MySQL.
@@ -86,8 +88,25 @@ class ClientMasterIT {
     @Autowired
     ClientWriteService writes;
 
+    /** B-027 · the child grid's own service. */
+    @Autowired
+    ClientContactService contacts;
+
     @Autowired
     JdbcTemplate jdbc;
+
+    /**
+     * Saves spelling out the factory in a dozen assertions.
+     *
+     * <p>The raw {@code List} is AssertJ's own declaration
+     * ({@code InstanceOfAssertFactories.list} returns
+     * {@code InstanceOfAssertFactory<List, ListAssert<ELEMENT>>}), not a
+     * shortcut taken here — parameterising it does not compile.
+     */
+    @SuppressWarnings("rawtypes")
+    private static final org.assertj.core.api.InstanceOfAssertFactory<
+            java.util.List, org.assertj.core.api.ListAssert<ClientDtos.Contact>> CONTACTS =
+            org.assertj.core.api.InstanceOfAssertFactories.list(ClientDtos.Contact.class);
 
     @BeforeEach
     @AfterEach
@@ -275,9 +294,248 @@ class ClientMasterIT {
         ClientDtos.Client client = only(service.list(filterOn("IT Two Primaries"), null, 50));
 
         assertThat(client.primaryContact()).isNotNull();
-        assertThat(service.contactsOf(clientId)).get().asInstanceOf(
+        assertThat(contacts.list(clientId, false)).get().asInstanceOf(
                         org.assertj.core.api.InstanceOfAssertFactories.list(ClientDtos.Contact.class))
                 .hasSize(2);
+    }
+
+    // ------------------------------------------------------------------
+    // B-027 · the client_contacts child grid
+    // ------------------------------------------------------------------
+
+    /**
+     * The whole point of the parameter, against the real predicate.
+     *
+     * <p>A removed contact must disappear from the picker's read and stay in the
+     * grid's. Getting this backwards in either direction is invisible in a unit
+     * test — a mocked repository answers whatever it was told — and the
+     * consequences are opposite: the wrong default offers a departed contact on
+     * every new ticket, and the wrong grid read makes them vanish with no way to
+     * tell "removed" from "never existed".
+     */
+    @Test
+    @DisplayName("includeInactive is what separates the grid's read from the picker's")
+    void includeInactiveSeparatesTheTwoReads() {
+        long clientId = insertClient("ITCL_K1", "IT Contact Visibility", "ACTIVE");
+        long stays = addContact(clientId, "Live Person", "live@itcl.example", false);
+        long goes = addContact(clientId, "Departed Person", "gone@itcl.example", false);
+
+        assertThat(contacts.remove(clientId, goes)).isTrue();
+
+        assertThat(contacts.list(clientId, false)).get().asInstanceOf(CONTACTS)
+                .extracting(ClientDtos.Contact::id)
+                .as("the picker must stop offering somebody who has left the client")
+                .containsExactly(stays);
+
+        assertThat(contacts.list(clientId, true)).get().asInstanceOf(CONTACTS)
+                .extracting(ClientDtos.Contact::id, ClientDtos.Contact::isActive)
+                .as("the grid renders them, greyed — live rows first")
+                .containsExactly(tuple(stays, true), tuple(goes, false));
+    }
+
+    /**
+     * The row survives the removal, and that is the entire reason removal is a
+     * deactivation.
+     *
+     * <p>{@code tickets.client_contact_id} is a foreign key into
+     * {@code client_contacts} <b>without</b> a cascade. A real {@code DELETE}
+     * fails as a constraint violation naming a MySQL index; "fixing" that with a
+     * cascade would rewrite who a historical ticket says reported it. Asserted
+     * against {@code information_schema} rather than left in a comment, the way
+     * B-020 asserted the task-type foreign keys.
+     */
+    @Test
+    @DisplayName("a removed contact's row survives, and the FK is why")
+    void removalDeactivatesBecauseTheForeignKeyIsRestrictive() {
+        long clientId = insertClient("ITCL_K2", "IT Contact FK", "ACTIVE");
+        long contactId = addContact(clientId, "Reporter", "reporter@itcl.example", true);
+
+        assertThat(contacts.remove(clientId, contactId)).isTrue();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM client_contacts WHERE id = ?", Integer.class, contactId))
+                .as("the row is still there — a ticket may point at it")
+                .isEqualTo(1);
+
+        assertThat(jdbc.queryForObject("""
+                SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS
+                WHERE CONSTRAINT_SCHEMA = DATABASE()
+                  AND CONSTRAINT_NAME = 'fk_tickets_client_contact'
+                """, String.class))
+                .as("a cascade here would silently rewrite a historical ticket's reporter")
+                .isEqualTo("NO ACTION");
+    }
+
+    /**
+     * The removal clears {@code is_primary} in the same statement, and it has to.
+     *
+     * <p>{@code primaryContacts} filters on {@code is_active = 1} while
+     * {@code demoteOtherPrimaries} does not, so a removed contact keeping its
+     * flag would leave the grid showing no primary while a later promotion still
+     * had a row to demote — two answers to "who is the primary" that disagree.
+     */
+    @Test
+    @DisplayName("removing the primary clears the flag as well as the row's activity")
+    void removingThePrimaryClearsTheFlag() {
+        long clientId = insertClient("ITCL_K3", "IT Primary Removal", "ACTIVE");
+        long contactId = addContact(clientId, "Only Primary", "only@itcl.example", true);
+
+        assertThat(contacts.remove(clientId, contactId)).isTrue();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT is_primary FROM client_contacts WHERE id = ?", Boolean.class, contactId))
+                .isFalse();
+
+        // B-028's gate, reported not enforced: the client is now unselectable and
+        // the save that got it here was allowed.
+        assertThat(service.findDetail(clientId)).get()
+                .extracting(ClientDtos.ClientDetail::hasPrimaryContact)
+                .isEqualTo(false);
+    }
+
+    /**
+     * Promoting demotes, in one transaction — the single-writer rule the schema
+     * cannot assert, because MySQL has no partial unique index.
+     */
+    @Test
+    @DisplayName("a new primary demotes the previous one")
+    void promotingDemotesThePrevious() {
+        long clientId = insertClient("ITCL_K4", "IT Primary Handover", "ACTIVE");
+        long first = addContact(clientId, "First Primary", "first@itcl.example", true);
+        long second = addContact(clientId, "Second Person", "second@itcl.example", false);
+
+        contacts.edit(clientId, second, request("Second Person", "second@itcl.example", true));
+
+        assertThat(contacts.list(clientId, false)).get().asInstanceOf(CONTACTS)
+                .filteredOn(ClientDtos.Contact::isPrimary)
+                .extracting(ClientDtos.Contact::id)
+                .as("exactly one primary, and it is the one just promoted")
+                .containsExactly(second);
+        assertThat(jdbc.queryForObject(
+                "SELECT is_primary FROM client_contacts WHERE id = ?", Boolean.class, first))
+                .isFalse();
+    }
+
+    /**
+     * <b>An edit cannot resurrect a removed contact.</b>
+     *
+     * <p>{@code is_active} is deliberately not in {@code update}'s statement,
+     * and nothing about reading either file establishes that — which is why this
+     * exists. B-017 had to pin exactly this between {@code project_members}' two
+     * writers with two named regression tests; this is the same claim for the
+     * two writers of {@code client_contacts}, and it fails if anybody widens the
+     * {@code UPDATE}.
+     */
+    @Test
+    @DisplayName("editing a removed contact corrects it without bringing them back")
+    void anEditDoesNotReactivate() {
+        long clientId = insertClient("ITCL_K5", "IT No Resurrection", "ACTIVE");
+        long contactId = addContact(clientId, "Misspelt Nmae", "typo@itcl.example", false);
+        assertThat(contacts.remove(clientId, contactId)).isTrue();
+
+        Optional<ClientDtos.Contact> edited =
+                contacts.edit(clientId, contactId, request("Correct Name", "typo@itcl.example", false));
+
+        assertThat(edited).get()
+                .extracting(ClientDtos.Contact::name, ClientDtos.Contact::isActive)
+                .as("the correction lands; somebody who returns to the client is added again")
+                .containsExactly("Correct Name", false);
+    }
+
+    /**
+     * The uniqueness check agrees with {@code utf8mb4_0900_ai_ci}, which is a
+     * claim about the collation and cannot be made against a mock.
+     *
+     * <p>B-013 made the same assertion for the resource form's username check and
+     * gave the reason: a case-sensitive check in Java would pass the row to the
+     * index instead, and the index refuses with a constraint name rather than the
+     * field-keyed message the form displays on the input. Here there is no index
+     * at all — {@code ix_client_contacts_email} is deliberately non-unique — so
+     * the service is the <em>only</em> thing refusing it.
+     */
+    @Test
+    @DisplayName("a duplicate email is refused case-insensitively, within the client only")
+    void duplicateEmailIsRefusedWithinTheClient() {
+        long clientId = insertClient("ITCL_K6", "IT Duplicate Email", "ACTIVE");
+        long other = insertClient("ITCL_K7", "IT Other Client", "ACTIVE");
+        addContact(clientId, "Sara Kapoor", "sara@itcl.example", true);
+
+        assertThatThrownBy(() -> contacts.add(clientId,
+                request("Sara K", "SARA@ITCL.EXAMPLE", false)))
+                .isInstanceOf(ClientContactService.ContactValidationException.class)
+                .hasMessageContaining("Sara Kapoor");
+
+        // The same address at a *different* client is legitimate — a consultant
+        // retained by both. `ix_client_contacts_email` is non-unique precisely so
+        // D-039 can take the set and disambiguate on `website_domain`.
+        assertThat(contacts.add(other, request("Sara Kapoor", "sara@itcl.example", true)))
+                .isPresent();
+    }
+
+    /**
+     * A removal frees the address, which is the ordinary case rather than an
+     * edge: somebody leaves, and the person who replaces them inherits the
+     * mailbox.
+     */
+    @Test
+    @DisplayName("a removed contact's email can be used again")
+    void aRemovedContactsEmailIsFreed() {
+        long clientId = insertClient("ITCL_K8", "IT Recycled Email", "ACTIVE");
+        long first = addContact(clientId, "Leaver", "desk@itcl.example", false);
+        assertThat(contacts.remove(clientId, first)).isTrue();
+
+        assertThat(contacts.add(clientId, request("Successor", "desk@itcl.example", false)))
+                .as("refusing this would burn the address forever on a removal")
+                .isPresent();
+    }
+
+    /**
+     * The nesting is the 404, and it is a real predicate rather than a comment.
+     *
+     * <p>Without {@code client_id} on the read, an edit aimed at a contact id
+     * belonging to another client would land on that client's row — a write
+     * against a resource the path never named.
+     */
+    @Test
+    @DisplayName("a contact id under the wrong client is 404 for every verb")
+    void contactsAreScopedToTheirClient() {
+        long owner = insertClient("ITCL_K9", "IT Contact Owner", "ACTIVE");
+        long stranger = insertClient("ITCL_KA", "IT Contact Stranger", "ACTIVE");
+        long contactId = addContact(owner, "Owned", "owned@itcl.example", false);
+
+        assertThat(contacts.edit(stranger, contactId, request("Hijacked", "x@itcl.example", false)))
+                .isEmpty();
+        assertThat(contacts.remove(stranger, contactId)).isFalse();
+
+        assertThat(contacts.list(owner, false)).get().asInstanceOf(CONTACTS)
+                .extracting(ClientDtos.Contact::name)
+                .as("neither call touched the row")
+                .containsExactly("Owned");
+    }
+
+    /**
+     * Every contact write moves the client's {@code ETag}, and the S-33 form
+     * depends on knowing it.
+     *
+     * <p>{@code contactCount} and {@code hasPrimaryContact} are fields of
+     * {@code ClientDetail} and the tag is that record's {@code hashCode}. If the
+     * frontend did not invalidate the client after a contact write, the admin's
+     * next Save on the Identity tab would come back 412 about a change they made
+     * themselves seconds earlier — which is why `contactQueries.ts` invalidates
+     * both.
+     */
+    @Test
+    @DisplayName("adding a contact changes the client's detail, and so its ETag")
+    void aContactWriteMovesTheClientsTag() {
+        long clientId = insertClient("ITCL_KB", "IT Tag Movement", "ACTIVE");
+        ClientDtos.ClientDetail before = service.findDetail(clientId).orElseThrow();
+
+        addContact(clientId, "New Contact", "tag@itcl.example", true);
+
+        ClientDtos.ClientDetail after = service.findDetail(clientId).orElseThrow();
+        assertThat(after.contactCount()).isEqualTo(before.contactCount() + 1);
+        assertThat(after.hasPrimaryContact()).isTrue();
+        assertThat(after.hashCode()).isNotEqualTo(before.hashCode());
     }
 
     // ------------------------------------------------------------------
@@ -755,6 +1013,27 @@ class ClientMasterIT {
                 code, name, status, code.toLowerCase(java.util.Locale.ROOT) + ".example");
         return jdbc.queryForObject(
                 "SELECT id FROM clients WHERE client_code = ?", Long.class, code);
+    }
+
+    /**
+     * B-027 · adds a contact <b>through the service</b> and returns its id.
+     *
+     * <p>Deliberately not raw SQL, unlike {@link #insertContact} beside it. These
+     * tests are about what the service does — the demotion, the uniqueness check,
+     * the deactivation — so a fixture that bypassed it would be setting up the
+     * state under test with the code under test's competitor.
+     */
+    private long addContact(long clientId, String name, String email, boolean primary) {
+        return contacts.add(clientId, request(name, email, primary))
+                .orElseThrow(() -> new AssertionError(
+                        "the fixture contact was not created for client " + clientId))
+                .id();
+    }
+
+    private static ClientDtos.ContactWriteRequest request(String name,
+                                                          String email,
+                                                          boolean primary) {
+        return new ClientDtos.ContactWriteRequest(name, null, email, null, primary, null, null);
     }
 
     private void insertContact(long clientId, String name, boolean primary) {
