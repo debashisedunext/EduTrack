@@ -413,6 +413,17 @@ final class PermissionMatrix {
             // can only narrow what they already see and never widen it.
             everyRole("GET", "/api/v1/tickets"),
 
+            // ── dashboard · A-054, and the same reasoning one step further ───
+            //
+            // Every role has a dashboard; denying the capability would leave a
+            // Developer with no landing screen at all. Role-awareness here is
+            // not "who may ask" but *which summary table answers*: Admin and PM
+            // read daily_ticket_stats, Developer/QA/Deployment read
+            // resource_daily_stats keyed by their own user id, because a
+            // project-keyed table cannot express "assigned to me" however it is
+            // filtered. DashboardService holds that decision.
+            everyRole("GET", "/api/v1/dashboard/summary"),
+
             // ── attachment limits · C-027, §4B.4 ────────────────────────────
             // Read open to all six, write to master.write.
             //
