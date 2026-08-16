@@ -88,6 +88,27 @@ export function TicketListPage() {
     applyFilters(recipe)
   }
 
+  /**
+   * Two keys, one URL update — and it has to be, or one of them is lost.
+   *
+   * `updateFilter` is safe for the single-key filters that make up the rest of
+   * this row, but the date range sets `dueFrom` and `dueTo` together. Calling
+   * it twice meant the second write read the URL as it was *before* the first,
+   * and overwrote it: picking a From and a To saved only the To, and the From
+   * silently vanished from the chip. `useTicketListFilters` documents exactly
+   * this on `applyFilters` — "`setSearchParams` updaters don't compose across
+   * separate calls in the same tick" — which is why that function exists.
+   *
+   * `replace: false` merges rather than clearing the row. The default replaces
+   * everything, which is right for a saved view and would be wrong here: it
+   * would drop the project and level somebody had already chosen the moment
+   * they touched the dates.
+   */
+  function updateDateRange(range: { from: string | null; to: string | null }) {
+    setCursorStack([])
+    applyFilters({ dueFrom: range.from, dueTo: range.to }, { replace: false })
+  }
+
   // ── search box — debounced so every keystroke does not refetch ───────────
   const [searchInput, setSearchInput] = React.useState(filters.q)
   React.useEffect(() => setSearchInput(filters.q), [filters.q])
@@ -296,11 +317,7 @@ export function TicketListPage() {
         <DateRangeFilter
           label="Dates"
           value={{ from: filters.dueFrom, to: filters.dueTo }}
-          onChange={(range) => {
-            setCursorStack([])
-            setFilter('dueFrom', range.from)
-            setFilter('dueTo', range.to)
-          }}
+          onChange={updateDateRange}
         />
         {activeCount > 0 && (
           <button

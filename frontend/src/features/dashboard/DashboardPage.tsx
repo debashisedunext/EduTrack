@@ -1,6 +1,3 @@
-import * as React from 'react'
-import { useSearchParams } from 'react-router-dom'
-
 import { useGetDashboardSummary } from '@/api/generated/dashboard/dashboard'
 import { useListProjects } from '@/api/generated/projects/projects'
 import { useListUsers } from '@/api/generated/users/users'
@@ -11,6 +8,7 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DashboardDateRange, type DateRange } from './DashboardDateRange'
 import { DashboardWidgets } from './DashboardWidgets'
 import { KpiCard, KpiCardSkeleton } from './KpiCard'
+import { useDashboardFilters } from './useDashboardFilters'
 
 /**
  * A-054 shell + A-055 cards · S-05.
@@ -44,29 +42,13 @@ const TONE: Record<string, 'critical' | 'delayed'> = {
 }
 
 export function DashboardPage() {
-  const [params, setParams] = useSearchParams()
+  // A-054's URL-held filters, extracted to `useDashboardFilters` so the
+  // multi-key write that the date picker needs is testable — it was inline
+  // here, and it lost the From date on every range somebody chose.
+  const { filters, setFilter, setFilters } = useDashboardFilters()
 
-  const projectId = params.get('projectId')
-  const assigneeId = params.get('assigneeId')
-  const range: DateRange = { from: params.get('from'), to: params.get('to') }
-
-  const setParam = React.useCallback(
-    (key: string, value: string | null) => {
-      setParams(
-        (current) => {
-          const next = new URLSearchParams(current)
-          if (value === null || value === '') {
-            next.delete(key)
-          } else {
-            next.set(key, value)
-          }
-          return next
-        },
-        { replace: true },
-      )
-    },
-    [setParams],
-  )
+  const { projectId, assigneeId } = filters
+  const range: DateRange = { from: filters.from, to: filters.to }
 
   // The masters behind the two dropdowns. Both are bounded lists the server
   // already scopes, so the caller only ever sees projects and people they could
@@ -97,23 +79,22 @@ export function DashboardPage() {
             label="Project"
             options={projects}
             value={projects.find((p) => String(p.id) === projectId) ?? null}
-            onChange={(p) => setParam('projectId', p ? String(p.id) : null)}
+            onChange={(p) => setFilter('projectId', p ? String(p.id) : null)}
             getKey={(p) => String(p.id)}
             getLabel={(p) => p.name ?? `#${p.id}`}
             searchable
           />
           <DashboardDateRange
             value={range}
-            onChange={(next) => {
-              setParam('from', next.from)
-              setParam('to', next.to)
-            }}
+            // Both keys in one update — see `useDashboardFilters`. Two separate
+            // calls here is what emptied the From box on every range picked.
+            onChange={(next) => setFilters({ from: next.from, to: next.to })}
           />
           <FilterDropdown
             label="Resource"
             options={users}
             value={users.find((u) => String(u.id) === assigneeId) ?? null}
-            onChange={(u) => setParam('assigneeId', u ? String(u.id) : null)}
+            onChange={(u) => setFilter('assigneeId', u ? String(u.id) : null)}
             getKey={(u) => String(u.id)}
             getLabel={(u) =>
               // B-027 · `displayName`, not `fullName`. `User` is

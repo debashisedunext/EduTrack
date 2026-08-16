@@ -82,3 +82,47 @@ describe('useTicketListFilters — C-015 additions', () => {
     expect(result.current.filters).toEqual({ ...EMPTY_FILTERS, q: 'payment' })
   })
 })
+
+/**
+ * The date-range picker sets two keys at once, and doing that through
+ * `setFilter` twice loses one of them: the second call reads the URL as it was
+ * before the first and overwrites it. On screen that looked like picking a From
+ * and a To, and watching the From disappear.
+ *
+ * Written as two cases — the broken shape and the fixed one — because the
+ * distinction is entirely invisible in a diff. Both calls look correct in
+ * isolation, and only their composition is wrong.
+ */
+describe('setting two filters at once', () => {
+  it('loses the first key when two setFilter calls are made in one tick', () => {
+    const { result } = renderFiltersHook('/tickets')
+
+    act(() => {
+      result.current.setFilter('dueFrom', '2026-08-01')
+      result.current.setFilter('dueTo', '2026-08-27')
+    })
+
+    // Documenting the trap rather than the intent: this is what the date
+    // picker used to do, and `dueFrom` is gone.
+    expect(result.current.filters.dueFrom).toBeNull()
+    expect(result.current.filters.dueTo).toBe('2026-08-27')
+  })
+
+  it('keeps both when applyFilters writes them in one update', () => {
+    const { result } = renderFiltersHook('/tickets?projectId=1&level=HIGH')
+
+    act(() => {
+      result.current.applyFilters(
+        { dueFrom: '2026-08-01', dueTo: '2026-08-27' },
+        { replace: false },
+      )
+    })
+
+    expect(result.current.filters.dueFrom).toBe('2026-08-01')
+    expect(result.current.filters.dueTo).toBe('2026-08-27')
+    // …and merging, not replacing: filters already chosen survive touching the
+    // dates, which the default `replace: true` would have cleared.
+    expect(result.current.filters.projectId).toBe(1)
+    expect(result.current.filters.level).toBe('HIGH')
+  })
+})
