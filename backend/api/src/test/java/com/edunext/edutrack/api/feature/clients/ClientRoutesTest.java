@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.clients;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -102,12 +103,73 @@ class ClientRoutesTest {
     }
 
     /**
+     * B-027 · the three contact writes are mounted where the contract declares
+     * them.
+     *
+     * <p>{@code createClientContact} was the <b>seventh</b> "declared, mocked,
+     * never mounted" operation this stream has found, and the other two verbs
+     * were not declared at all. B-014's {@code PATCH /users/{userId}/status} is
+     * the cautionary case for this exact shape: a {@code PATCH} that met a
+     * sibling mapping and came back 405, invisible to
+     * {@code MasterRoutesTest} because that asserts where <em>classes</em> are
+     * mounted and it was a missing <em>method</em>.
+     *
+     * <p><b>The {@code DELETE} matters most here.</b> It is the only mutation
+     * verb this feature has, and its path has two variables where every other
+     * route in the controller has at most one — so it is the one most able to be
+     * shadowed by a sibling and answer 405 with nothing failing.
+     */
+    @Test
+    @DisplayName("S-33's contact add, edit and remove are all mounted")
+    void b027OperationsAreMounted() {
+        assertThat(postMappingOf("addContact")).isEqualTo("/{clientId}/contacts");
+        assertThat(mappingOf("editContact")).isEqualTo("/{clientId}/contacts/{contactId}");
+        assertThat(deleteMappingOf("removeContact"))
+                .as("removing a contact deactivates it; the verb is still DELETE, and a "
+                        + "missing mapping answers 405 with nothing else failing")
+                .isEqualTo("/{clientId}/contacts/{contactId}");
+    }
+
+    /**
+     * There is no {@code PUT}, and this fails if anybody adds one.
+     *
+     * <p>The body is the whole representation, which is exactly the argument
+     * somebody will make for {@code PUT} — and the verb is {@code PATCH} because
+     * that is what the contract has declared since D-001 and what the generated
+     * client emits. B-020's {@code thereIsNoDelete} is the same shape of test for
+     * the same reason: a route added later would compile and pass every other
+     * test in this file.
+     */
+    @Test
+    @DisplayName("no contact route is a PUT")
+    void thereIsNoPut() {
+        assertThat(Arrays.stream(ClientController.class.getDeclaredMethods())
+                .anyMatch(m -> m.getAnnotation(
+                        org.springframework.web.bind.annotation.PutMapping.class) != null))
+                .as("the contract has declared PATCH since D-001 and the generated client "
+                        + "emits it; a PUT beside it would be a second way to say one thing")
+                .isFalse();
+    }
+
+    /**
      * {@code POST /clients} sits on the class mapping with no path of its own,
      * and {@code PATCH /clients/{clientId}} has one. If either ever grows or
      * loses a segment the contract stops describing the server.
      */
     private static boolean hasMapping(String methodName, Class<PostMapping> annotation) {
         return method(methodName).getAnnotation(annotation) != null;
+    }
+
+    private static String postMappingOf(String methodName) {
+        PostMapping mapping = method(methodName).getAnnotation(PostMapping.class);
+        assertThat(mapping).as("%s is not a @PostMapping", methodName).isNotNull();
+        return mapping.value().length > 0 ? mapping.value()[0] : mapping.path()[0];
+    }
+
+    private static String deleteMappingOf(String methodName) {
+        DeleteMapping mapping = method(methodName).getAnnotation(DeleteMapping.class);
+        assertThat(mapping).as("%s is not a @DeleteMapping", methodName).isNotNull();
+        return mapping.value().length > 0 ? mapping.value()[0] : mapping.path()[0];
     }
 
     private static String getMappingOf(String methodName) {

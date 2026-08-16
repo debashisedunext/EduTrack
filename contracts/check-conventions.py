@@ -38,6 +38,7 @@ NO_IF_MATCH = {
     "/chat/threads/{threadId}/messages/{messageId}": "author-only inside a 5-minute window",
     "/me/notification-preferences":        "your own settings only, and partial by field so two tabs cannot overwrite each other's untouched switches",
     "/projects/{projectId}/members/{userId}": "two fields on one membership row, both last-write-wins by nature; the tag would have to come from a collection read with no ETag of its own, so the precondition would be machinery around a race whose loser typed a number later and meant it",
+    "/clients/{clientId}/contacts/{contactId}": "B-027 — the tag would have to come from listClientContacts, a collection with no ETag of its own, exactly as for a project member. The client this contact hangs off does have one, and a contact write moves it (contactCount and hasPrimaryContact are inside it), so the S-33 form's own precondition still catches a stale editor one level up",
 }
 
 # §6 — bounded by a constraint the product already enforces.
@@ -84,6 +85,8 @@ ROWLESS_403 = {
     "/clients/bulk-status":                "master data, not row-scoped — the ids in the body name rows listClients already returned, and §4B.2's ticket dropdown makes that readable by all six roles, so a 403 conceals nothing a 404 would have",
     "/clients":                            "master data, not row-scoped — every client is already public through listClients, which §4B.2's ticket dropdown makes readable by all six roles, and there is no row yet on a create",
     "/clients/{clientId}":                 "same: the client's existence is public through the same list, so only the write is Admin-only and a 403 on it conceals nothing a 404 would have",
+    "/clients/{clientId}/contacts":         "B-027 — master data, not row-scoped. Every contact of every client is already public through listClientContacts, which §4B.2's reporter dropdown makes readable by all six roles, and there is no row yet on a create",
+    "/clients/{clientId}/contacts/{contactId}": "same: the contact's existence is public through that list, so only the write is Admin-only. A contact under a *different* client is still 404 — that is the nesting, not the capability",
     # C-028, and the only entry here that IS row-scoped — worth reading before
     # it is used as a precedent.
     #

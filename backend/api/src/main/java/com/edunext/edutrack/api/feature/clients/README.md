@@ -8,11 +8,13 @@ Client master and contacts. Screens S-32, S-33.
 
 | Class | What it is |
 |---|---|
-| `ClientController` | `GET /clients`, `GET /clients/{id}`, `POST /clients`, `PATCH /clients/{id}`, `GET /clients/{id}/contacts`, `PATCH /clients/bulk-status`, `PATCH /clients/{id}/status` |
+| `ClientController` | `GET /clients`, `GET /clients/{id}`, `POST /clients`, `PATCH /clients/{id}`, `PATCH /clients/bulk-status`, `PATCH /clients/{id}/status`, and the four contact routes |
 | `ClientService` | Filters, the keyset page, the detail read, and the two status writes |
 | `ClientWriteService` | B-026 · S-33's create and edit, and the validation set |
+| `ClientContactService` | B-027 · S-33's Contacts tab — the child grid's read and its three writes |
 | `ClientQueryRepository` | The grid's SQL — the page, and the four aggregates S-32 adds to it |
 | `ClientWriteRepository` | B-026 · the reference checks and the `client_projects` replace |
+| `ClientContactWriteRepository` | B-027 · the four `client_contacts` statements |
 | `ClientStatus` / `ClientSupportPlan` | B-026 · the two vocabularies, stated once |
 | `ClientDtos` | Wire types, matching `contracts/openapi.yaml` |
 | `ClientExceptionHandler` | RFC 9457 problems, scoped to this controller |
@@ -93,13 +95,70 @@ holiday a day out means `WorkingHoursService` treats the wrong day as
 non-working, and every SLA crossing it is wrong. Flagged for B-023's follow-up
 and for Stream A, who own the property.
 
-## Not here yet
+## What is here (B-027 · S-33's Contacts tab)
 
-The contact writes are B-027's — `POST /clients/{clientId}/contacts` is a
-seventh "declared, mocked, never mounted" operation waiting for it. B-026's
-Contacts tab reads them and reports `hasPrimaryContact`, which is B-028's gate;
-enforcing that gate belongs on the ticket create path, where a caller can act on
-it.
+`GET`, `POST`, `PATCH` and `DELETE` under `/clients/{clientId}/contacts`.
+`createClientContact` was the **seventh** "declared, mocked, never mounted"
+operation this stream has found; the other two verbs were not merely unmounted
+but **undeclared**, and without the `PATCH` an edit is remove-and-re-add — which
+deactivates the row a historical ticket points at and issues a new id, rendering
+a corrected phone number as a departure and an arrival.
+
+### Removal deactivates, and the foreign key is why
+
+`tickets.client_contact_id` references `client_contacts` **without** a cascade. A
+real `DELETE` fails as a constraint violation naming a MySQL index; "fixing" that
+with a cascade would rewrite who a historical ticket says reported it.
+`ClientMasterIT.removalDeactivatesBecauseTheForeignKeyIsRestrictive` asserts the
+`DELETE_RULE` against `information_schema` rather than leaving it in a comment,
+the way B-020 did for task types.
+
+`is_primary` is cleared in the same statement, because `primaryContacts` filters
+on `is_active = 1` while `demoteOtherPrimaries` does not — a removed contact
+keeping its flag gives two answers to "who is the primary" that disagree.
+
+### `?includeInactive=` is what separates the grid from the picker
+
+Default false. The grid sends true, so a removed contact is rendered as removed
+and a ticket raised by one still renders their name; every picker leaves it off,
+so somebody who left the client stops being offered on new tickets. B-021 made
+the same split on `listPriorities` for the same reason.
+
+### The primary flag is single-writer, and losing it is allowed
+
+Promoting demotes every other row in the same transaction — "at most one primary"
+is not expressible in MySQL, which has no partial unique index, and
+`ClientContact`'s javadoc has named the service as the enforcer since B-005.
+
+**Demoting or removing the last primary is permitted.** B-021 refused the mirror
+case on `is_escalation_trigger` and the two differ in kind: a level with no
+escalation target silently switches off one of §1's headline behaviours, whereas
+a client with no primary contact is the state every client is *created* in, is
+reported by `hasPrimaryContact`, and may simply be the truth after somebody
+leaves. Refusing the demotion while the `DELETE` produces the same state anyway
+would be one rule with two answers.
+
+### A duplicate email is refused within the client, and only within it
+
+Case-insensitively, agreeing with `utf8mb4_0900_ai_ci` and reading through
+`ix_client_contacts_email` rather than wrapping the column in `UPPER()`. The same
+address under two different clients is legitimate — a consultant retained by both
+— which is why that index is deliberately not unique and why D-039 disambiguates
+inbound mail on `website_domain`. There is **no index enforcing this**, so the
+service is the only thing refusing it; `ClientMasterIT` asserts it against a real
+container for that reason.
+
+### No `If-Match` on the contact `PATCH`
+
+Exempted in `check-conventions.py` with its reason: the tag would have to come
+from `listClientContacts`, a collection with no `ETag` of its own — the
+`PATCH /projects/{id}/members/{userId}` call, unchanged. **The parent does have
+one and every contact write moves it**, since `contactCount` and
+`hasPrimaryContact` are inside `ClientDetail`'s `hashCode`, so an S-33 form that
+edits contacts and then saves the client is still stopped by a precondition one
+level up. `contactQueries.ts` invalidates the client for exactly that reason.
+
+## Not here yet
 
 Nothing reads `clients.sla_policy_id`. C-012's `PlannedCloseDate` ladder
 resolves org → project → task type and never consults it, so the form shows the

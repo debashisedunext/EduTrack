@@ -2393,6 +2393,29 @@ paths:
       tags: [clients]
       operationId: listClientContacts
       summary: List contacts
+      description: |
+        The S-32 row-expand, S-33's Contacts tab and §4B.2's reporter dropdown —
+        pick a client, then pick the individual who reported the issue (C-021).
+
+        **Active contacts only by default.** B-027 removes a contact by
+        deactivating it, never by deleting it, so this list would otherwise start
+        offering people who have left the client. `includeInactive=true` is the
+        B-027 grid's own read: a removed contact still has to be *shown* as
+        removed, and a ticket raised by one still has to render their name.
+        Same split B-021 made on `listPriorities` and for the same reason — the
+        default serves the picker, the flag serves the master screen.
+
+        **All six roles.** `listClients` beside it is §4B.2's client dropdown and
+        this is the dependent second dropdown; a role that could not read it
+        could not raise a ticket against a client at all.
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: |
+            Include removed contacts, each carrying `isActive: false`. The B-027
+            grid sends it; every picker leaves it off.
       responses:
         '200':
           description: OK.
@@ -2406,12 +2429,24 @@ paths:
       summary: Add a contact
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       description: |
+        B-027 · S-33's Contacts tab, adding.
+
         Callable inline from the ticket form. Without that, the desk picks the
         wrong existing contact rather than taking the detour to the client master.
 
         **A client is not selectable on a ticket until it has one primary
         contact.** Setting a new primary demotes the previous one in the same
-        transaction.
+        transaction — "at most one primary" is a service-layer rule the schema
+        cannot assert, because MySQL has no partial unique index.
+
+        **A duplicate email within the same client is refused** (`409`,
+        case-insensitively, agreeing with `utf8mb4_0900_ai_ci`). The same address
+        under two *different* clients is legitimate and stays allowed — D-039
+        disambiguates inbound mail by `website_domain`, and
+        `ix_client_contacts_email` is deliberately not unique.
+
+        Writes are **Admin only** (`master.write`), where the read beside them is
+        every role — the split B-025 and B-026 already make on this resource.
       requestBody:
         required: true
         content:
@@ -2424,6 +2459,90 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ContactResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /clients/{clientId}/contacts/{contactId}:
+    parameters:
+      - { $ref: '#/components/parameters/ClientId' }
+      - { $ref: '#/components/parameters/ContactId' }
+    patch:
+      tags: [clients]
+      operationId: updateClientContact
+      summary: Edit a contact (S-33)
+      description: |
+        B-027 · S-33's Contacts tab, editing.
+
+        **The body is the whole representation, not a sparse patch.** The row
+        editor sends every field on every save, so an absent one is a cleared one
+        — B-026's call on `ClientWriteRequest`, one screen over, and the reason
+        this is a record rather than the POJO B-017's and B-020's patches needed.
+
+        **Without this operation an edit is remove-and-re-add**, which
+        deactivates the row a historical ticket points at and issues a new id: a
+        corrected phone number rendered as a departure and an arrival.
+
+        **`isPrimary: true` promotes and demotes the previous primary**, exactly
+        as the create does. `isPrimary: false` on the *only* primary is
+        **allowed** and leaves the client with none — that is a state the client
+        is already in the moment it is created, B-028's gate reports it, and
+        refusing it here while the `DELETE` below can produce it anyway would be
+        one rule with two answers.
+
+        **No `If-Match`**, and it is an exemption with a reason rather than an
+        oversight: the tag would have to come from `listClientContacts`, a
+        collection carrying no `ETag` of its own. Same call as
+        `PATCH /projects/{projectId}/members/{userId}`. The client the contact
+        hangs off *does* have a tag, and a contact write moves it — `contactCount`
+        and `hasPrimaryContact` are inside it — so the S-33 form must re-read the
+        client after any write here or its next Save is a `412`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContactWriteRequest' }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContactResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [clients]
+      operationId: removeClientContact
+      summary: Remove a contact (S-33)
+      description: |
+        B-027 · S-33's Contacts tab, removing.
+
+        **This deactivates; it does not delete.** `tickets.client_contact_id` is
+        a foreign key with no cascade, so a real `DELETE` either fails as a
+        constraint violation naming a MySQL index or — "fixed" with a cascade —
+        destroys the record of who reported a historical ticket. The row stays,
+        `isActive` goes false, and `listClientContacts?includeInactive=true` is
+        where it can still be seen. The same call B-017 made on
+        `project_members`, B-018 on cleared SLA overrides and B-020 on a retired
+        task type.
+
+        **Removing an already-removed contact is `204`, not `404`.** It is a
+        setter, and the second half of a double-click must not be an error about
+        something that did happen — B-014's `UNCHANGED` argument. A contact id
+        belonging to a *different* client is `404`.
+
+        **Removing the primary is allowed and leaves the client with none.** The
+        person left; the alternative is a contact who cannot be removed until
+        somebody else is promoted, which is a rule that reads as a broken button.
+        B-028's gate reports the consequence on the ticket create path.
+      responses:
+        '204':
+          description: |
+            Removed, or already removed — the second is not an error, per B-014's
+            `UNCHANGED` argument.
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /clients/{clientId}/tickets:
@@ -4364,6 +4483,15 @@ components:
       in: path
       required: true
       schema: { type: integer, format: int64 }
+    ContactId:
+      name: contactId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A `client_contacts` id. Nested under the client on purpose: a contact
+        belonging to a *different* client is `404`, not `403` — the id is a row
+        this caller has no business knowing exists under that client.
     RoleId:
       name: roleId
       in: path
@@ -6231,24 +6359,91 @@ components:
         isActive: { type: boolean }
     Contact:
       type: object
+      description: |
+        A person at the client — blueprint §4B.2, the table B-027's child grid
+        edits and C-021's reporter dropdown reads.
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
-        email: { type: string, format: email }
+        designation:
+          type: [string, 'null']
+          description: |
+            B-027 · their job title at the client. The column has been there
+            since the baseline and no schema carried it, so the one field that
+            tells a desk whether they are talking to the IT Director or a
+            helpdesk operator was unreadable.
+        email:
+          type: [string, 'null']
+          format: email
+          description: |
+            **Nullable on the read and required on the write**, and that is not
+            an inconsistency. `client_contacts.email` is `NULL`-able and B-035's
+            import will write rows from spreadsheets that omit it, so a
+            non-nullable read schema would make the generated client's own zod
+            reject a row the database permits. New contacts entered through S-33
+            must have one — a contact with `notificationOptIn` and no address is
+            a mail D-036 can never deliver.
         phone: { type: [string, 'null'] }
         isPrimary: { type: boolean }
         notificationOptIn: { type: boolean }
         portalAccess: { type: boolean }
+        isActive:
+          type: boolean
+          description: |
+            B-027 · false for a removed contact. Removal deactivates rather than
+            deletes, because `tickets.client_contact_id` points here; only
+            `listClientContacts?includeInactive=true` returns these.
     ContactWriteRequest:
       type: object
       required: [name, email]
+      description: |
+        B-027 · the whole representation, for both `POST` and `PATCH`. An absent
+        field is a cleared field — the row editor sends every input on every
+        save, so "the form did not send a designation" and "the admin emptied the
+        designation box" are the same event. B-026's argument on
+        `ClientWriteRequest`, one screen over.
+
+        `isActive` is deliberately **not** here: removal is the `DELETE`, and a
+        boolean that could also do it would be two controls for one outcome —
+        which is how they end up disagreeing.
       properties:
-        name: { type: string, minLength: 1, maxLength: 150 }
-        email: { type: string, format: email }
-        phone: { type: [string, 'null'] }
-        isPrimary: { type: boolean, default: false }
-        notificationOptIn: { type: boolean, default: true }
-        portalAccess: { type: boolean, default: false }
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: |
+            120, not 150. `client_contacts.name` is a `VARCHAR(120)` and the
+            contract was accepting values MySQL would refuse — the same defect
+            B-026 fixed on `clientCode` and `name`, found the same way: by
+            implementing the operation.
+        designation: { type: [string, 'null'], maxLength: 80 }
+        email:
+          type: string
+          format: email
+          maxLength: 150
+          description: |
+            Unique **within this client**, case-insensitively. The same address
+            under two different clients is legitimate and stays allowed —
+            `ix_client_contacts_email` is deliberately not unique and D-039
+            disambiguates inbound mail by `website_domain`.
+        phone: { type: [string, 'null'], maxLength: 30 }
+        isPrimary:
+          type: boolean
+          default: false
+          description: |
+            Promoting demotes the previous primary in the same transaction.
+            Clearing it on the only primary is allowed and leaves the client with
+            none, which B-028 reports on the ticket create path.
+        notificationOptIn:
+          type: boolean
+          default: true
+          description: |
+            `client_contacts.receives_mail` — the D-036 recipient list. Named for
+            what it means to an administrator rather than for the column.
+        portalAccess:
+          type: boolean
+          default: false
+          description: The forward hook for client portal login; unused in phase 1.
     ClientDetail:
       allOf:
         - { $ref: '#/components/schemas/Client' }

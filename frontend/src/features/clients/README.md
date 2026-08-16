@@ -26,8 +26,61 @@ operations that do.
 | `ClientFormPage.tsx` | The four tabs, at `/masters/clients/new` and `/masters/clients/:clientId/edit` |
 | `clientForm.ts` | The schema, the vocabularies, and the two translations |
 | `clientQueries.ts` | The detail read with its `ETag`, and the two writes |
-| `ClientContactsTab.tsx` | The Contacts tab — read-only; the writes are B-027's |
 | `ClientProjectsPicker.tsx` | The project mapping, with the default inside the list |
+
+## What is here (B-027 · S-33's Contacts tab)
+
+| File | What it is |
+|---|---|
+| `ClientContactsTab.tsx` | The child grid — add, edit, remove, promote, and B-028's warning |
+| `ContactEditorDialog.tsx` | The row editor, for both verbs |
+| `contactForm.ts` | The schema and the two translations |
+| `contactQueries.ts` | The three writes, and the invalidation that keeps the client's `ETag` fresh |
+
+### Every button on the tab is `type="button"`, and it is load-bearing
+
+The panel lives inside `ClientFormPage`'s `<form>`, and a button's default type
+is `submit`. An "Add contact" without the attribute **saves the client** and
+navigates away — doing the right-looking thing for one click and the wrong thing
+for the other. `ClientFormPage.test.tsx` asserts it, because that is the only
+place there is a form to submit; the tab's own test file renders it alone and
+structurally cannot catch it.
+
+The editor *is* a real `<form>` and is safe for a different reason: radix portals
+`ModalContent` to `document.body`, so it is a sibling of the client's form rather
+than a descendant, and its submit button belongs to it.
+
+### A contact write invalidates the client, not only the contact list
+
+`contactCount` and `hasPrimaryContact` are fields of `ClientDetail`, and
+`ClientController` takes the `ETag` from that record's `hashCode` — so **every
+write here moves the client's tag**. Refreshing only the contact list would leave
+the form holding a stale one, and the admin's next Save on the Identity tab would
+come back `412`: "somebody else saved this client while you were editing", about
+a change they made themselves on this screen seconds earlier.
+
+That is also why the contact routes take no `If-Match` of their own — the tag
+would have to come from a collection read that has none. The parent's
+precondition is what catches a stale editor.
+
+### Removed contacts are shown, greyed, and cannot be restored
+
+The grid reads `?includeInactive=true` where every picker reads the default.
+Removal deactivates, so hiding the row would mean watching somebody vanish with
+no way to tell "removed" from "never existed" — and no way to see the address is
+still spoken for. There is **no un-remove**: `is_active` is not in the server's
+`UPDATE`, so an edit structurally cannot resurrect a contact, and somebody who
+returns to the client is added again. A removed contact is still *editable*,
+because correcting a misspelt name so a historical ticket reads properly is a
+real thing to want.
+
+### Removing the primary is allowed, and the dialog says what it costs
+
+**A client without a primary contact is not selectable on a ticket** (§4B.2).
+That is warned about, never enforced here: the person may have left, and a
+contact who cannot be removed until somebody else is promoted reads as a broken
+button. The confirmation states the consequence before the click rather than
+leaving it to be discovered on the ticket create form.
 
 ### The tabs are state, not routes — the opposite of `ProjectTabs`
 
@@ -59,16 +112,14 @@ Two consequences the tests pin:
   ladder resolves org → project → task type and never consults it. The stored
   value is shown read-only and the tab points at B-018's matrix. A control whose
   only effect is to write a number nobody looks at is worse than no control.
-- **Contact writes.** B-027's whole task; the tab reads and states B-028's
-  primary-contact rule.
 - **A delete button.** Tickets, contacts and project mappings all point at
   `clients`. Going away is the status control on the grid.
 
 ## What is not here yet
 
-- **B-027** — the `client_contacts` child grid. Both the expand on the grid and
-  the Contacts tab are read-only.
-- **B-028** — unique code, valid emails, and the primary-contact gate.
+- **B-028** — the primary-contact gate *enforced*, on the ticket create path.
+  B-027 refuses a duplicate email and validates its shape; what is left is the
+  half that belongs where a caller can act on it.
 - **B-029** — deactivating blocks *new* tickets. That rule lives on the ticket
   create path, not on this screen; S-32 only warns, with the count.
 - **B-031…B-038** — the Excel wizard behind the disabled "Import from Excel"

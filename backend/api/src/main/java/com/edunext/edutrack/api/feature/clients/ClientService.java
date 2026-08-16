@@ -122,20 +122,19 @@ public class ClientService {
         return Optional.of(toDetail(entity.get(), row.get()));
     }
 
-    /**
-     * One client's contacts — the S-32 row-expand.
+    /*
+     * B-027 · `contactsOf` moved to ClientContactService and is not duplicated
+     * here.
      *
-     * <p>404 for a client that is not there rather than an empty list: an empty
-     * expand and a mistyped id look identical, and only one of them is worth
-     * reporting.
+     * B-025 put the read on this class because there was nothing else for it to
+     * live on. Now that the contact writes exist, keeping a second reader beside
+     * them would mean two classes deciding what a client's contacts are — and
+     * they would disagree the first time one honours `includeInactive` and the
+     * other does not, which is precisely the drift `ProjectRoles` (B-017) and
+     * `PasswordComplexity` (B-013) exist one package over to prevent. The
+     * aggregates this class does still read — `primaryContacts`,
+     * `contactSummary` — are grid columns, not the contact list.
      */
-    @Transactional(readOnly = true)
-    public Optional<List<ClientDtos.Contact>> contactsOf(long clientId) {
-        if (!clients.existsById(clientId)) {
-            return Optional.empty();
-        }
-        return Optional.of(query.contactsOf(clientId));
-    }
 
     // ------------------------------------------------------------------
     // Writes

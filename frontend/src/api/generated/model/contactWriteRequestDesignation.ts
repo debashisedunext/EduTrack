@@ -48,6 +48,6 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * @maxLength 30
+ * @maxLength 80
  */
-export type ContactWriteRequestPhone = string | null;
+export type ContactWriteRequestDesignation = string | null;

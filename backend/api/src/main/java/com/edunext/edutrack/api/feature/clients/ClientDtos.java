@@ -57,17 +57,42 @@ final class ClientDtos {
     }
 
     /**
-     * The contract's {@code Contact} — the shape the row-expand renders and the
-     * §4B.2 reporter dropdown reads.
+     * The contract's {@code Contact} — the shape the row-expand renders, the
+     * §4B.2 reporter dropdown reads and B-027's child grid edits.
+     *
+     * <p><b>{@code designation} and {@code isActive} arrived with B-027.</b> The
+     * first is a column that has been on {@code client_contacts} since the
+     * baseline with no schema carrying it, so the one field that tells a desk
+     * whether they are speaking to the IT Director or to a helpdesk operator was
+     * unreadable. The second exists because B-027 removes a contact by
+     * deactivating it — {@code tickets.client_contact_id} is a foreign key with
+     * no cascade — and a row that comes back from
+     * {@code ?includeInactive=true} has to be able to say which it is.
+     *
+     * <p>{@code email} is nullable here and required on the write, which is not
+     * an inconsistency: the column is nullable, B-035's import will write rows
+     * from spreadsheets that omit it, and a non-null read type would make the
+     * generated client's zod reject a row the database permits.
+     *
+     * <p><b>No {@code @JsonInclude(NON_NULL)}</b>, unlike {@link Client} and
+     * {@link UserRef} above. Those omit a null <em>object</em>; every nullable
+     * field here is a string the contract declares as {@code [string, 'null']},
+     * and the S-33 row editor binds each one to an input. An omitted key and an
+     * explicit null are the same to TypeScript but not to a form: the editor
+     * reads {@code contact.designation ?? ''} either way, and adding the
+     * annotation would change the wire shape of {@code phone} for every existing
+     * consumer to buy nothing.
      */
     record Contact(
             long id,
             String name,
+            String designation,
             String email,
             String phone,
             boolean isPrimary,
             boolean notificationOptIn,
-            boolean portalAccess) {
+            boolean portalAccess,
+            boolean isActive) {
     }
 
     /**
@@ -183,6 +208,9 @@ final class ClientDtos {
     }
 
     record ContactListResponse(List<Contact> data) {
+    }
+
+    record ContactResponse(Contact data) {
     }
 
     record ClientResponse(Client data) {
@@ -311,6 +339,88 @@ final class ClientDtos {
             List<Long> projectIds,
             Long defaultProjectId,
             Long slaPolicyId) {
+    }
+
+    /**
+     * B-027 · S-33's Contacts tab, adding and editing.
+     *
+     * <p><b>One shape for {@code POST} and {@code PATCH}, and a record rather
+     * than a POJO</b> — B-026's call on {@link ClientWriteRequest}, one tab over,
+     * for the same reason. The row editor sends every input on every save, so an
+     * absent field is a cleared field, and B-017's and B-020's argument for a
+     * POJO (absent and explicitly-null must differ) does not arise: there is no
+     * sparse patch here to distinguish.
+     *
+     * <p><b>The maximum lengths are the columns', not the contract's.</b>
+     * {@code name} was declared {@code maxLength: 150} against a
+     * {@code VARCHAR(120)}, so the contract was accepting values MySQL would
+     * refuse — the defect B-026 found on {@code clientCode} and {@code name},
+     * found again the same way, by implementing the operation.
+     *
+     * <p><b>{@code isActive} is deliberately absent.</b> Removal is the
+     * {@code DELETE}; a boolean here that could also do it would be two controls
+     * for one outcome, which is how they end up disagreeing — B-018's argument
+     * against a separate "clear this override" control, one screen over.
+     *
+     * @param isPrimary promoting demotes the previous primary in the same
+     *                  transaction. Clearing it on the only primary is
+     *                  <b>allowed</b> and leaves the client with none, which is
+     *                  the state every client is created in and which B-028
+     *                  reports on the ticket create path
+     * @param notificationOptIn the contract's name for
+     *                  {@code client_contacts.receives_mail}, which feeds
+     *                  D-036's recipient list. Named for what it means to an
+     *                  administrator, not for the column
+     */
+    record ContactWriteRequest(
+            @NotBlank(message = "name is required")
+            @Size(max = 120, message = "name cannot exceed 120 characters")
+            String name,
+
+            @Size(max = 80, message = "designation cannot exceed 80 characters")
+            String designation,
+
+            /*
+             * Required on the write and nullable on the read, deliberately. The
+             * column is nullable and B-035's import will write rows without one,
+             * so `Contact.email` has to tolerate a null; a contact *entered*
+             * through S-33 must have an address, because `notificationOptIn`
+             * defaults to true and a mail D-036 can never deliver is worse than
+             * a refused save.
+             */
+            @NotBlank(message = "email is required")
+            @Email(message = "email must be a well-formed email address")
+            @Size(max = 150, message = "email cannot exceed 150 characters")
+            String email,
+
+            @Size(max = 30, message = "phone cannot exceed 30 characters")
+            String phone,
+
+            Boolean isPrimary,
+            Boolean notificationOptIn,
+            Boolean portalAccess) {
+
+        /**
+         * The contract's {@code default: false}, applied here rather than left
+         * to {@code null} arriving as a boxed null at the setter.
+         */
+        boolean primaryOrDefault() {
+            return Boolean.TRUE.equals(isPrimary);
+        }
+
+        /**
+         * <b>Defaults to true</b>, which is the one default that is not
+         * {@code false}: §11's recipient lists name the client contact on the
+         * mails a client is meant to receive, so a contact added without the
+         * question being answered should hear about their own tickets.
+         */
+        boolean notificationOptInOrDefault() {
+            return !Boolean.FALSE.equals(notificationOptIn);
+        }
+
+        boolean portalAccessOrDefault() {
+            return Boolean.TRUE.equals(portalAccess);
+        }
     }
 
     /** The single-client setter's body. Idempotent — CONVENTIONS.md §5. */

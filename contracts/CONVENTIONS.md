@@ -118,6 +118,7 @@ each other:**
 | `PATCH .../comments/{id}` | Author-only, five-minute window — nobody else can be editing it |
 | `PATCH /projects/{id}/members/{userId}` | Two fields on one membership row. The tag would have to come from `listProjectMembers`, a collection with no `ETag` of its own — so honouring it would mean minting a per-member tag on a read nothing else preconditions, to guard a race whose loser typed a number a moment later and meant it |
 | `PATCH /clients/bulk-status` | Idempotent setter, like the single-client route it batches. A precondition over *n* rows has no single tag to carry anyway: one `If-Match` cannot speak for two hundred clients, and per-row tags in the body would fail the whole batch because somebody else touched one unrelated row |
+| `PATCH /clients/{id}/contacts/{contactId}` | B-027, and the `PATCH /projects/{id}/members/{userId}` argument unchanged: the tag would have to come from `listClientContacts`, a collection with no `ETag` of its own. What is different, and worth knowing, is that the **parent** has one and a contact write moves it — `contactCount` and `hasPrimaryContact` are inside `GET /clients/{clientId}`'s tag — so an S-33 form that edits contacts and then saves the client is still stopped by a precondition, one level up from the row it changed |
 
 `ETag` is on every detail read plus the three that are polled or expensive:
 `/import-batches/{batchId}` (polled every couple of seconds while a job runs),

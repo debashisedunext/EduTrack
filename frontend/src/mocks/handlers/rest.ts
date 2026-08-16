@@ -1557,29 +1557,100 @@ export const restHandlers = [
     // Deactivating warns and blocks NEW tickets — it never hides historical ones.
     return ok(clientDto(c));
   }),
-  http.get(url('/clients/:clientId/contacts'), ({ params }) =>
-    ok(getDb().contacts.filter((x) => x.clientId === Number(params.clientId))),
-  ),
+  // B-027 · the child grid. `includeInactive` defaults to false, and honouring
+  // that default in the mock is the point: a removed contact must stop being
+  // offered on the ticket create form, and a mock that returned everything
+  // would let that regression ship.
+  http.get(url('/clients/:clientId/contacts'), ({ params, request }) => {
+    const db = getDb();
+    const clientId = Number(params.clientId);
+    if (!db.clients.some((c) => c.id === clientId)) return notFound('Client');
+    const includeInactive =
+      new URL(request.url).searchParams.get('includeInactive') === 'true';
+    const rows = db.contacts
+      .filter((x) => x.clientId === clientId && (includeInactive || x.isActive))
+      // The server's ORDER BY: live before removed, primary first, then name.
+      .sort(
+        (a, b) =>
+          Number(b.isActive) - Number(a.isActive) ||
+          Number(b.isPrimary) - Number(a.isPrimary) ||
+          a.name.localeCompare(b.name) ||
+          a.id - b.id,
+      );
+    return ok(rows);
+  }),
   http.post(url('/clients/:clientId/contacts'), async ({ params, request }) => {
     const db = getDb();
-    const body = (await request.json()) as Record<string, unknown>;
-    if (!body.email || !String(body.email).includes('@')) {
-      return validationFailed({ email: ['must be a well-formed email address'] });
-    }
     const clientId = Number(params.clientId);
-    if (body.isPrimary) {
-      // Setting a new primary demotes the previous one, in the same transaction.
-      db.contacts.filter((c) => c.clientId === clientId).forEach((c) => { c.isPrimary = false; });
-    }
-    const c = {
-      id: nextId(db, 'contact') + 100, clientId, name: String(body.name),
-      email: String(body.email), phone: String(body.phone ?? ''),
-      isPrimary: Boolean(body.isPrimary),
+    if (!db.clients.some((c) => c.id === clientId)) return notFound('Client');
+
+    const body = (await request.json()) as Record<string, unknown>;
+    const failure = validateContactWrite(db, clientId, body, null);
+    if (failure) return failure;
+
+    const c: import('../db').Contact = {
+      id: Math.max(0, ...db.contacts.map((x) => x.id)) + 1,
+      clientId,
+      name: String(body.name).trim(),
+      designation: trimOrNull(body.designation),
+      email: trimOrNull(body.email),
+      phone: String(body.phone ?? '').trim(),
+      isPrimary: body.isPrimary === true,
+      // The one default that is not false — §11 names the client contact on
+      // the mails a client is meant to receive.
       notificationOptIn: body.notificationOptIn !== false,
-      portalAccess: Boolean(body.portalAccess),
+      portalAccess: body.portalAccess === true,
+      isActive: true,
     };
     db.contacts.push(c);
+    // Insert first, demote second — the server's ordering, so `exceptId` is a
+    // real id rather than a sentinel meaning "nothing".
+    if (c.isPrimary) demoteOtherPrimaries(db, clientId, c.id);
     return ok(c, undefined, { status: 201 });
+  }),
+  http.patch(url('/clients/:clientId/contacts/:contactId'), async ({ params, request }) => {
+    const db = getDb();
+    const clientId = Number(params.clientId);
+    const contactId = Number(params.contactId);
+    // Scoped to the client: a contact id under a *different* client is 404,
+    // not an edit that silently lands on somebody else's row.
+    const c = db.contacts.find((x) => x.id === contactId && x.clientId === clientId);
+    if (!c) return notFound('Contact');
+
+    const body = (await request.json()) as Record<string, unknown>;
+    const failure = validateContactWrite(db, clientId, body, contactId);
+    if (failure) return failure;
+
+    // The whole representation — an absent field is a cleared field. `isActive`
+    // is deliberately not written: an edit must not resurrect a removed
+    // contact, which is the two-writers rule B-017 had to pin on
+    // `project_members` and which has its own test here.
+    c.name = String(body.name).trim();
+    c.designation = trimOrNull(body.designation);
+    c.email = trimOrNull(body.email);
+    c.phone = String(body.phone ?? '').trim();
+    c.isPrimary = body.isPrimary === true;
+    c.notificationOptIn = body.notificationOptIn !== false;
+    c.portalAccess = body.portalAccess === true;
+
+    if (c.isPrimary) demoteOtherPrimaries(db, clientId, c.id);
+    return ok(c);
+  }),
+  http.delete(url('/clients/:clientId/contacts/:contactId'), ({ params }) => {
+    const db = getDb();
+    const clientId = Number(params.clientId);
+    const c = db.contacts.find(
+      (x) => x.id === Number(params.contactId) && x.clientId === clientId,
+    );
+    if (!c) return notFound('Contact');
+    // Deactivates, never deletes — `tickets.client_contact_id` points here.
+    // `is_primary` is cleared with it: a removed contact must not stay starred,
+    // or the grid shows a primary who has left.
+    c.isActive = false;
+    c.isPrimary = false;
+    // 204 whether or not it was already removed. B-014's UNCHANGED argument:
+    // the second half of a double-click is not an error.
+    return new HttpResponse(null, { status: 204 });
   }),
   http.get(url('/clients/:clientId/tickets'), ({ params, request }) => {
     const db = getDb();
@@ -3174,6 +3245,80 @@ function clientWriteProblem(errors: Record<string, string[]>) {
   return duplicateOnly
     ? problem(409, 'duplicate', 'Client code already in use', { errors })
     : problem(400, 'validation-failed', 'The client was not saved', { errors });
+}
+
+/**
+ * B-027 · a contact write's queried rules, mirroring `ClientContactService`.
+ *
+ * The two `@NotBlank`s are checked here rather than left to zod, because a mock
+ * that accepted a nameless contact would let the row editor's own required-field
+ * handling ship untested against anything.
+ *
+ * The email rule is the one that matters: **unique among this client's live
+ * contacts, case-insensitively, and only within the client.** The same address
+ * under two different clients is a consultant retained by both — the server's
+ * index is deliberately not unique so D-039 can disambiguate on `website_domain`
+ * — and a mock that checked globally would teach the opposite lesson.
+ *
+ * `exceptId` is what stops every ordinary edit reporting the contact's own
+ * address as taken, since the body carries it on every save.
+ */
+function validateContactWrite(
+  db: import('../db').Db,
+  clientId: number,
+  body: Record<string, unknown>,
+  exceptId: number | null,
+) {
+  const name = String(body.name ?? '').trim();
+  if (!name) return validationFailed({ name: ['name is required'] });
+
+  const email = String(body.email ?? '').trim();
+  if (!email) return validationFailed({ email: ['email is required'] });
+  if (!email.includes('@')) {
+    return validationFailed({ email: ['must be a well-formed email address'] });
+  }
+
+  const clash = db.contacts.find(
+    (c) =>
+      c.clientId === clientId &&
+      c.isActive &&
+      c.id !== exceptId &&
+      (c.email ?? '').toLowerCase() === email.toLowerCase(),
+  );
+  if (clash) {
+    // 409 whenever a duplicate email is involved, where the *client* form is
+    // 409 only when a duplicate code is the sole failure — a contact has one
+    // queried rule, so there is no mixture to describe with the wrong status.
+    return problem(409, 'duplicate', 'That email is already used at this client', {
+      errors: {
+        email: [`${clash.name} already uses ${email.toLowerCase()} at this client.`],
+      },
+    });
+  }
+  return null;
+}
+
+/**
+ * Clears `is_primary` on every *other* contact of the client — the single-writer
+ * rule the schema cannot assert, since MySQL has no partial unique index.
+ *
+ * Removed contacts are demoted too, matching the server's predicate: a row that
+ * kept its flag would render starred under `?includeInactive=true`, which is a
+ * person who has left shown as the client's primary.
+ */
+function demoteOtherPrimaries(db: import('../db').Db, clientId: number, exceptId: number) {
+  db.contacts
+    .filter((c) => c.clientId === clientId && c.id !== exceptId)
+    .forEach((c) => {
+      c.isPrimary = false;
+    });
+}
+
+/** An absent or blank optional string is `null`, which is what the column holds. */
+function trimOrNull(raw: unknown): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  return trimmed === '' ? null : trimmed;
 }
 
 /** The `client_projects` replace, mirroring `ClientWriteRepository`. */

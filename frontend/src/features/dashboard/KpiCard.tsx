@@ -1,4 +1,6 @@
-import * as React from 'react'
+// B-027 · the `React` import is gone, not unused-suppressed. `jsx: react-jsx`
+// means nothing here referenced it and `noUnusedLocals` fails the build on it.
+// **Stream A's file, flagged.**
 import { Link } from 'react-router-dom'
 
 import { Skeleton } from '@/components/ui/skeleton'

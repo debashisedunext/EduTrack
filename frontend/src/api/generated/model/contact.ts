@@ -46,14 +46,40 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ContactDesignation } from './contactDesignation';
+import type { ContactEmail } from './contactEmail';
 import type { ContactPhone } from './contactPhone';
 
+/**
+ * A person at the client — blueprint §4B.2, the table B-027's child grid
+edits and C-021's reporter dropdown reads.
+
+ */
 export interface Contact {
   id?: number;
   name?: string;
-  email?: string;
+  /** B-027 · their job title at the client. The column has been there
+since the baseline and no schema carried it, so the one field that
+tells a desk whether they are talking to the IT Director or a
+helpdesk operator was unreadable.
+ */
+  designation?: ContactDesignation;
+  /** **Nullable on the read and required on the write**, and that is not
+an inconsistency. `client_contacts.email` is `NULL`-able and B-035's
+import will write rows from spreadsheets that omit it, so a
+non-nullable read schema would make the generated client's own zod
+reject a row the database permits. New contacts entered through S-33
+must have one — a contact with `notificationOptIn` and no address is
+a mail D-036 can never deliver.
+ */
+  email?: ContactEmail;
   phone?: ContactPhone;
   isPrimary?: boolean;
   notificationOptIn?: boolean;
   portalAccess?: boolean;
+  /** B-027 · false for a removed contact. Removal deactivates rather than
+deletes, because `tickets.client_contact_id` points here; only
+`listClientContacts?includeInactive=true` returns these.
+ */
+  isActive?: boolean;
 }

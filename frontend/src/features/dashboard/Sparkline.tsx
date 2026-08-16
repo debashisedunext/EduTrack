@@ -1,4 +1,4 @@
-import * as React from 'react'
+// B-027 · unused `React` import removed; see `KpiCard.tsx`. **Stream A's file.**
 
 /**
  * A-055 · the trend line on a KPI card.

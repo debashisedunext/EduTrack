@@ -379,31 +379,15 @@ class ClientServiceTest {
     // Contacts
     // ------------------------------------------------------------------
 
-    @Nested
-    @DisplayName("the row-expand's contacts")
-    class Contacts {
-
-        /**
-         * An empty expand and a mistyped id look identical to a user, and only
-         * one of them is worth reporting.
-         */
-        @Test
-        @DisplayName("an unknown client is 404, not an empty list")
-        void unknownClientIsEmptyOptional() {
-            when(clients.existsById(9L)).thenReturn(false);
-
-            assertThat(service.contactsOf(9)).isEmpty();
-        }
-
-        @Test
-        @DisplayName("a known client with no contacts is an empty list")
-        void knownClientWithNoContactsIsAnEmptyList() {
-            when(clients.existsById(1L)).thenReturn(true);
-            when(query.contactsOf(1L)).thenReturn(List.of());
-
-            assertThat(service.contactsOf(1)).contains(List.of());
-        }
-    }
+    /*
+     * B-027 · the contacts read moved to ClientContactService, and its tests
+     * moved with it to ClientContactServiceTest.
+     *
+     * B-025 put the read on ClientService because there was nothing else for it
+     * to live on. Keeping a second reader beside the writes would mean two
+     * classes deciding what a client's contacts are, and they would disagree the
+     * first time one honoured `includeInactive` and the other did not.
+     */
 
     // ------------------------------------------------------------------
     // fixtures

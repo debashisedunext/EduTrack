@@ -47,7 +47,11 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+export type ListClientContactsParams = {
 /**
- * @maxLength 30
+ * Include removed contacts, each carrying `isActive: false`. The B-027
+grid sends it; every picker leaves it off.
+
  */
-export type ContactWriteRequestPhone = string | null;
+includeInactive?: boolean;
+};

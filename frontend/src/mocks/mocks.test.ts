@@ -1097,3 +1097,143 @@ describe('C-028 · removing an attachment', () => {
     await expect(del(`/tickets/${other.ticketId}/attachments/${a.id}`)).rejects.toMatchObject({ status: 404 });
   });
 });
+
+describe('B-027 · the client_contacts child grid', () => {
+  interface Row {
+    id: number; name: string; designation: string | null; email: string | null;
+    isPrimary: boolean; notificationOptIn: boolean; portalAccess: boolean; isActive: boolean;
+  }
+
+  const contactsOf = async (clientId: number, includeInactive = false) =>
+    (await get<Envelope<Row[]>>(
+      `/clients/${clientId}/contacts?includeInactive=${String(includeInactive)}`,
+    )).data;
+
+  const remove = (url: string) => http<void>({ url, method: 'DELETE' });
+  const edit = <T,>(url: string, data: unknown) => http<T>({ url, method: 'PATCH', data });
+
+  /**
+   * The default is the half that matters, and only a request can prove it.
+   *
+   * The component tests always ask for `includeInactive=true`, because that is
+   * what the grid sends. Nothing else asserts the *default* — and the default is
+   * what C-021's reporter dropdown reads, so getting it wrong means the ticket
+   * create form goes on offering somebody who has left the client.
+   */
+  it('hides removed contacts by default and returns them on request', async () => {
+    // Acme's Ravi Menon is seeded removed, which is why the fixture has one.
+    const offered = await contactsOf(1);
+    const administered = await contactsOf(1, true);
+
+    expect(offered.map((c) => c.name)).not.toContain('Ravi Menon');
+    expect(administered.map((c) => c.name)).toContain('Ravi Menon');
+    expect(administered.find((c) => c.name === 'Ravi Menon')?.isActive).toBe(false);
+  });
+
+  /** Live rows before removed ones, primary first — the server's ORDER BY. */
+  it('sorts live before removed, primary before the rest', async () => {
+    const rows = await contactsOf(1, true);
+
+    expect(rows[0].isPrimary).toBe(true);
+    expect(rows[rows.length - 1].isActive).toBe(false);
+  });
+
+  /**
+   * `tickets.client_contact_id` is a foreign key with no cascade, so removal
+   * deactivates. A mock that spliced the row out would let a screen ship that
+   * cannot render the reporter of a historical ticket.
+   */
+  it('removes by deactivating, and removing again is still 204', async () => {
+    const before = getDb().contacts.length;
+
+    await remove('/clients/1/contacts/2');
+    await remove('/clients/1/contacts/2');
+
+    expect(getDb().contacts).toHaveLength(before);
+    expect(getDb().contacts.find((c) => c.id === 2)?.isActive).toBe(false);
+  });
+
+  /** Removing the primary clears the flag too — see the server's UPDATE. */
+  it('clears the primary flag when the primary is removed', async () => {
+    await remove('/clients/1/contacts/1');
+
+    const contact = getDb().contacts.find((c) => c.id === 1);
+    expect(contact?.isActive).toBe(false);
+    expect(contact?.isPrimary).toBe(false);
+  });
+
+  it('is scoped to the client, so another client’s contact id is 404', async () => {
+    await expect(remove('/clients/2/contacts/1')).rejects.toMatchObject({ status: 404 });
+    await expect(
+      edit('/clients/2/contacts/1', { name: 'Hijacked', email: 'x@y.example' }),
+    ).rejects.toMatchObject({ status: 404 });
+
+    expect(getDb().contacts.find((c) => c.id === 1)?.name).toBe('Sara Kapoor');
+  });
+
+  /**
+   * Single-writer. MySQL has no partial unique index, so this rule exists only
+   * in the service — and here, which is what the frontend develops against.
+   */
+  it('demotes the previous primary when another is promoted', async () => {
+    await edit('/clients/1/contacts/2', {
+      name: 'Dev Patel', email: 'dev@acme.example', isPrimary: true,
+    });
+
+    const primaries = getDb().contacts.filter((c) => c.clientId === 1 && c.isPrimary);
+    expect(primaries.map((c) => c.id)).toEqual([2]);
+  });
+
+  /**
+   * Unique within the client, case-insensitively — agreeing with
+   * `utf8mb4_0900_ai_ci`. Across clients it stays legal, which is why
+   * `ix_client_contacts_email` is deliberately not unique and why D-039
+   * disambiguates inbound mail on `website_domain`.
+   */
+  it('refuses a duplicate email at the same client and allows it at another', async () => {
+    await expect(
+      post('/clients/1/contacts', { name: 'Impostor', email: 'SARA@ACME.EXAMPLE' }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    const elsewhere = await post<Envelope<Row>>('/clients/2/contacts', {
+      name: 'Sara Kapoor', email: 'sara@acme.example',
+    });
+    expect(elsewhere.data.id).toBeGreaterThan(0);
+  });
+
+  /** A removal frees the address — somebody leaves and their replacement inherits it. */
+  it('lets a removed contact’s email be used again', async () => {
+    await remove('/clients/1/contacts/2');
+
+    const successor = await post<Envelope<Row>>('/clients/1/contacts', {
+      name: 'Successor', email: 'dev@acme.example',
+    });
+    expect(successor.data.name).toBe('Successor');
+  });
+
+  /**
+   * The body is the whole representation, and `isActive` is not part of it — an
+   * edit must not resurrect a removed contact. B-017 had to pin exactly this
+   * between `project_members`' two writers with a named regression test.
+   */
+  it('cannot resurrect a removed contact through an edit', async () => {
+    await remove('/clients/1/contacts/2');
+
+    await edit('/clients/1/contacts/2', {
+      name: 'Dev Patel', email: 'dev@acme.example', isActive: true,
+    });
+
+    expect(getDb().contacts.find((c) => c.id === 2)?.isActive).toBe(false);
+  });
+
+  /** The one default that is not false — §11 names the client contact on client mail. */
+  it('opts a new contact into notifications unless told otherwise', async () => {
+    const added = await post<Envelope<Row>>('/clients/2/contacts', {
+      name: 'Priya Nair', email: 'priya@northwind.example',
+    });
+
+    expect(added.data.notificationOptIn).toBe(true);
+    expect(added.data.isPrimary).toBe(false);
+    expect(added.data.portalAccess).toBe(false);
+  });
+});

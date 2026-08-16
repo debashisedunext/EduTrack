@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -60,10 +61,14 @@ class ClientController {
 
     private final ClientService service;
     private final ClientWriteService writes;
+    private final ClientContactService contacts;
 
-    ClientController(ClientService service, ClientWriteService writes) {
+    ClientController(ClientService service,
+                     ClientWriteService writes,
+                     ClientContactService contacts) {
         this.service = service;
         this.writes = writes;
+        this.contacts = contacts;
     }
 
     /**
@@ -120,17 +125,118 @@ class ClientController {
     }
 
     /**
-     * The S-32 row-expand's contacts.
+     * The S-32 row-expand's contacts, S-33's Contacts tab and §4B.2's reporter
+     * dropdown.
      *
      * <p>Not paged, and CONVENTIONS.md §6 exempts it: a client has a handful of
-     * contacts and the expand renders all of them.
+     * contacts and every caller renders all of them.
+     *
+     * <p><b>{@code includeInactive} defaults to false.</b> B-027 removes a
+     * contact by deactivating it, so the default is what keeps a departed contact
+     * out of the ticket form's reporter dropdown; the grid that administers them
+     * asks for the rest. Exactly the split B-021 made on {@code listPriorities}.
      */
     @GetMapping(path = "/{clientId}/contacts", produces = MediaType.APPLICATION_JSON_VALUE)
     @PreAuthorize("isAuthenticated()")
     @Operation(operationId = "listClientContacts", summary = "List contacts (S-32)")
-    ClientDtos.ContactListResponse contacts(@PathVariable long clientId) {
+    ClientDtos.ContactListResponse contacts(
+            @PathVariable long clientId,
+            @RequestParam(required = false, defaultValue = "false") boolean includeInactive) {
+
         return new ClientDtos.ContactListResponse(
-                service.contactsOf(clientId).orElseThrow(ClientController::notFound));
+                contacts.list(clientId, includeInactive).orElseThrow(ClientController::notFound));
+    }
+
+    // ------------------------------------------------------------------
+    // B-027 · S-33's Contacts tab — the client_contacts child grid
+    // ------------------------------------------------------------------
+
+    /**
+     * S-33's Contacts tab, adding — and the seventh "declared, mocked, never
+     * mounted" operation this stream has found.
+     *
+     * <p>It has been in the contract, in the MSW mock and in the generated
+     * TypeScript client since D-001 with no server behind it, after B-023's nine
+     * calendar operations, B-014's {@code PATCH /users/{userId}/status}, B-018's
+     * two SLA operations, B-020's {@code listTaskTypes}, B-021's
+     * {@code listPriorities} and B-025's six client operations. B-026's own
+     * Contacts tab named it as B-027's and shipped read-only rather than pretend
+     * otherwise.
+     *
+     * <p>Admin only, where the read above is every role — the split B-025 and
+     * B-026 already make on this resource, and for the same §2 row 51 reason.
+     */
+    @PostMapping(path = "/{clientId}/contacts",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "createClientContact", summary = "Add a contact")
+    ResponseEntity<ClientDtos.ContactResponse> addContact(
+            @PathVariable long clientId,
+            @Valid @RequestBody ClientDtos.ContactWriteRequest request) {
+
+        ClientDtos.Contact created = contacts.add(clientId, request)
+                .orElseThrow(ClientController::notFound);
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new ClientDtos.ContactResponse(created));
+    }
+
+    /**
+     * S-33's Contacts tab, editing.
+     *
+     * <p><b>Without it an edit is remove-and-re-add</b>, which deactivates the
+     * row a historical ticket points at and issues a new id: a corrected phone
+     * number rendered as a departure and an arrival. The same argument B-017 made
+     * for adding {@code PATCH /projects/{id}/members/{userId}}, where the missing
+     * verb would have reset {@code added_at}.
+     *
+     * <p><b>No {@code If-Match}</b>, exempted in {@code check-conventions.py} with
+     * its reason: the tag would have to come from {@code listClientContacts}, a
+     * collection with no {@code ETag} of its own — the
+     * {@code /projects/{id}/members/{userId}} call, unchanged. The client this
+     * contact hangs off <em>does</em> have one and a write here moves it, since
+     * {@code contactCount} and {@code hasPrimaryContact} are inside it, so the
+     * S-33 form's own precondition still catches a stale editor one level up.
+     */
+    @PatchMapping(path = "/{clientId}/contacts/{contactId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "updateClientContact", summary = "Edit a contact (S-33)")
+    ClientDtos.ContactResponse editContact(
+            @PathVariable long clientId,
+            @PathVariable long contactId,
+            @Valid @RequestBody ClientDtos.ContactWriteRequest request) {
+
+        return new ClientDtos.ContactResponse(
+                contacts.edit(clientId, contactId, request)
+                        .orElseThrow(ClientController::notFound));
+    }
+
+    /**
+     * S-33's Contacts tab, removing — which deactivates.
+     *
+     * <p>{@code tickets.client_contact_id} is a foreign key with no cascade, so a
+     * real delete would fail as a constraint violation naming a MySQL index, or —
+     * "fixed" with a cascade — destroy the record of who reported a historical
+     * ticket. See {@code ClientContactWriteRepository}.
+     *
+     * <p><b>204 for a contact that was already removed</b>, 404 only for one that
+     * is not this client's. A setter's second call is not an error about
+     * something that did happen — B-014's {@code UNCHANGED} argument, and B-017's
+     * on removing somebody who is not on the team.
+     */
+    @DeleteMapping(path = "/{clientId}/contacts/{contactId}")
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "removeClientContact", summary = "Remove a contact (S-33)")
+    ResponseEntity<Void> removeContact(@PathVariable long clientId,
+                                       @PathVariable long contactId) {
+
+        if (!contacts.remove(clientId, contactId)) {
+            throw notFound();
+        }
+        return ResponseEntity.noContent().build();
     }
 
     /**
