@@ -73,6 +73,7 @@ class StatsRefreshIT {
         registry.add("edutrack.outbox.enabled", () -> "false");
         // Every scheduled job is pushed out of the way; each test drives its
         // worker directly so the assertions are about the query, not timing.
+        registry.add("edutrack.stats.enabled", () -> "false");
         registry.add("edutrack.stats.refresh-interval", () -> "PT6H");
         registry.add("edutrack.chain.verify-cron", () -> "0 0 5 31 2 *");
         registry.add("edutrack.sla.scan-interval", () -> "PT6H");
@@ -295,6 +296,82 @@ class StatsRefreshIT {
         assertThat(stat(TODAY, "created"))
                 .as("an empty chart and a missing chart are different statements")
                 .isZero();
+    }
+
+    // ── A-056 · the task-type breakdown §S-05's donut reads ──────────────────
+
+    /**
+     * Counts what was <em>open</em> at end of day, matching {@code open_total}
+     * and the level columns beside it. A breakdown of "created by type" would
+     * answer a different question from every other figure on the row, and the
+     * two would be compared anyway.
+     */
+    @Test
+    @DisplayName("type_counts holds open tickets per task type")
+    void typeCountsBreakOpenTicketsDownByType() {
+        Long dev = taskType("DEV_IT");
+        Long qa = taskType("QA_IT");
+        typedTicket("2026-08-10 09:00:00", dev);
+        typedTicket("2026-08-10 09:00:00", dev);
+        typedTicket("2026-08-10 09:00:00", qa);
+        worker.refreshOnce();
+
+        assertThat(typeCount(LocalDate.of(2026, 8, 10), dev)).isEqualTo(2);
+        assertThat(typeCount(LocalDate.of(2026, 8, 10), qa)).isEqualTo(1);
+    }
+
+    /**
+     * A type nobody raised draws no slice. Eleven zero entries per project per
+     * day would be most of the column, and a donut cannot render a zero segment
+     * anyway.
+     */
+    @Test
+    @DisplayName("a type with nothing open is absent, not zero")
+    void typesWithNothingOpenAreOmitted() {
+        Long dev = taskType("DEV_IT2");
+        Long unused = taskType("UNUSED_IT");
+        typedTicket("2026-08-10 09:00:00", dev);
+        worker.refreshOnce();
+
+        assertThat(typeCount(LocalDate.of(2026, 8, 10), unused))
+                .as("absent from the JSON entirely")
+                .isNull();
+    }
+
+    /**
+     * NULL rather than {@code '{}'}. An empty object claims no type had anything
+     * open; NULL says the question does not arise for a project with no tickets.
+     */
+    @Test
+    @DisplayName("a project with nothing open gets NULL, not an empty object")
+    void nothingOpenIsNullNotEmpty() {
+        worker.refreshOnce();
+
+        String json = jdbc.queryForObject(
+                "SELECT type_counts FROM daily_ticket_stats WHERE stat_date = ? AND project_id = ?",
+                String.class, TODAY, projectId);
+        assertThat(json).isNull();
+    }
+
+    private Long taskType(String code) {
+        jdbc.update("INSERT INTO task_types (code, name, is_active) VALUES (?, ?, 1)",
+                code + SEQ.incrementAndGet(), "Type " + code);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    private void typedTicket(String reportedAt, Long taskTypeId) {
+        jdbc.update("INSERT INTO tickets (ticket_code, project_id, title, level, original_level, "
+                        + "date_reported, planned_close_date, assigned_to, task_type_id) "
+                        + "VALUES (?, ?, 'typed probe', 'MEDIUM', 'MEDIUM', ?, '2099-01-01 00:00:00', ?, ?)",
+                "TT-26-" + SEQ.incrementAndGet(), projectId, reportedAt, userId, taskTypeId);
+    }
+
+    /** @return the open count for one type, or null when the type is absent from the JSON */
+    private Integer typeCount(LocalDate day, Long taskTypeId) {
+        return jdbc.queryForObject(
+                "SELECT JSON_EXTRACT(type_counts, ?) FROM daily_ticket_stats "
+                        + "WHERE stat_date = ? AND project_id = ?",
+                Integer.class, "$.\"" + taskTypeId + "\"", day, projectId);
     }
 
     /**

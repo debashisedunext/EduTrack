@@ -67,19 +67,43 @@ class StatsRefreshWorker {
      */
     private final int backfillPerPass;
 
+    /**
+     * Whether the <em>schedule</em> runs. The bean exists either way, so a test
+     * can still drive {@link #refreshOnce()} itself — which is the whole point,
+     * and why this is a field rather than {@code @ConditionalOnProperty} on the
+     * class as {@code OutboxWorker} uses. Removing the bean would break the very
+     * tests that need the schedule off.
+     */
+    private final boolean enabled;
+
     StatsRefreshWorker(DailyStatsRepository stats,
                        Clock clock,
                        @Value("${edutrack.stats.window-days:7}") int windowDays,
-                       @Value("${edutrack.stats.backfill-per-pass:30}") int backfillPerPass) {
+                       @Value("${edutrack.stats.backfill-per-pass:30}") int backfillPerPass,
+                       @Value("${edutrack.stats.enabled:true}") boolean enabled) {
         this.stats = stats;
         this.clock = clock;
         this.windowDays = windowDays;
         this.backfillPerPass = backfillPerPass;
+        this.enabled = enabled;
     }
 
+    /**
+     * <b>{@code fixedDelay} fires once at context startup</b> and then waits —
+     * lengthening the interval does not prevent that first pass, which is what
+     * {@code PT6H} in a test looks like it does and does not. A suite that also
+     * calls {@link #refreshOnce()} therefore has two passes over the same rows
+     * racing, and they contend on {@code resource_daily_stats}:
+     * {@code CannotAcquireLock}, on whichever assertion happened to be running.
+     * The race predates A-056; adding a third statement per day made each pass
+     * long enough for it to start losing.
+     */
     @Scheduled(fixedDelayString = "${edutrack.stats.refresh-interval:PT5M}")
     @SchedulerLock(name = "statsRefresh", lockAtMostFor = "PT4M", lockAtLeastFor = "PT30S")
     public void refresh() {
+        if (!enabled) {
+            return;
+        }
         try {
             refreshOnce();
         } catch (RuntimeException e) {
@@ -103,6 +127,11 @@ class StatsRefreshWorker {
         int days = 0;
         for (LocalDate day = from; !day.isAfter(to); day = day.plusDays(1)) {
             stats.refreshTicketStats(day, clock.instant());
+            // A-056 · a second pass rather than a column in the statement above.
+            // Reading tickets from inside that INSERT … SELECT contended with the
+            // shared locks it already held. Ordered after it because it updates
+            // the rows that statement just wrote.
+            stats.refreshTypeCounts(day, clock.instant());
             stats.refreshResourceStats(day, clock.instant());
             days++;
         }
