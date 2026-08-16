@@ -6,11 +6,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -56,9 +59,11 @@ import org.springframework.web.server.ResponseStatusException;
 class ClientController {
 
     private final ClientService service;
+    private final ClientWriteService writes;
 
-    ClientController(ClientService service) {
+    ClientController(ClientService service, ClientWriteService writes) {
         this.service = service;
+        this.writes = writes;
     }
 
     /**
@@ -88,6 +93,30 @@ class ClientController {
                 cursor, limit);
 
         return new ClientDtos.ClientListResponse(page.data(), page.meta());
+    }
+
+    /**
+     * B-026 · the S-33 form's read, and <b>the only source of the {@code ETag}
+     * the {@code PATCH} requires</b>.
+     *
+     * <p>Its absence is what made {@code updateClient} uncallable: the contract
+     * has declared {@code If-Match} on that operation since D-001 with no read
+     * emitting a tag. Exactly the gap B-011 closed with
+     * {@code GET /users/{userId}} and B-016 with {@code GET /projects/{id}} —
+     * CONVENTIONS.md §5 pairs the two by hand because
+     * {@code check-conventions.py} cannot: its detail-read rule fires on the
+     * <em>path shape</em>, and this path had the right shape and the wrong half
+     * of the pair.
+     *
+     * <p>All six roles, like the list beside it. §4B.2's ticket-form dropdown is
+     * {@code listClients}; a role that can enumerate every client learns nothing
+     * new by reading one.
+     */
+    @GetMapping(path = "/{clientId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    @Operation(operationId = "getClient", summary = "One client (S-33)")
+    ResponseEntity<ClientDtos.ClientDetailResponse> get(@PathVariable long clientId) {
+        return ok(service.findDetail(clientId).orElseThrow(ClientController::notFound));
     }
 
     /**
@@ -151,6 +180,132 @@ class ClientController {
         return new ClientDtos.ClientResponse(
                 service.setStatus(clientId, request.isActive())
                         .orElseThrow(ClientController::notFound));
+    }
+
+    // ------------------------------------------------------------------
+    // B-026 · S-33's create and edit
+    // ------------------------------------------------------------------
+
+    /**
+     * S-33, creating.
+     *
+     * <p><b>A created client is not yet selectable on a ticket</b>, and cannot
+     * be: B-028's rule is at least one primary contact, and there is no client id
+     * to hang a contact off until this returns. {@code hasPrimaryContact} on the
+     * response says so and the form's Contacts tab says so on screen; the
+     * contacts themselves are {@code POST /clients/{clientId}/contacts}, which is
+     * B-027's.
+     *
+     * <p>The {@code ETag} is emitted on the 201 so the form can go straight from
+     * creating a client to editing it without a second read.
+     */
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "createClient", summary = "Create a client (S-33)")
+    ResponseEntity<ClientDtos.ClientDetailResponse> create(
+            @Valid @RequestBody ClientDtos.ClientWriteRequest request) {
+
+        ClientDtos.ClientDetail created = writes.create(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .eTag(etagOf(created))
+                .body(new ClientDtos.ClientDetailResponse(created));
+    }
+
+    /**
+     * S-33, saving.
+     *
+     * <p>The body is the whole representation rather than a sparse patch — S-33
+     * submits every field on every save — and the verb stays {@code PATCH}
+     * because that is what the contract has declared since D-001 and what the
+     * generated client emits. See {@code ClientDtos.ClientWriteRequest} for why
+     * one shape serves both verbs where the project master needed two.
+     */
+    @PatchMapping(path = "/{clientId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "updateClient", summary = "Update a client (S-33)")
+    ResponseEntity<ClientDtos.ClientDetailResponse> update(
+            @PathVariable long clientId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody ClientDtos.ClientWriteRequest request) {
+
+        requirePrecondition(clientId, ifMatch);
+        return ok(writes.update(clientId, request).orElseThrow(ClientController::notFound));
+    }
+
+    // ------------------------------------------------------------------
+    // helpers
+    // ------------------------------------------------------------------
+
+    /**
+     * {@code If-Match} is required, not optional.
+     *
+     * <p>A write without one is 428 rather than allowed through: treating a
+     * missing precondition as "no conflict" means the guard protects only the
+     * callers that already opted in, which is the set that needed it least. Same
+     * reasoning and the same status as B-011's resource form, B-016's project
+     * form and B-023's working week.
+     *
+     * <p><b>The 404 comes first.</b> Answering 428 for a client that does not
+     * exist would send the caller to fetch a tag from a URL that will 404 too.
+     */
+    private void requirePrecondition(long clientId, String ifMatch) {
+        ClientDtos.ClientDetail current = service.findDetail(clientId)
+                .orElseThrow(ClientController::notFound);
+
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+                    "If-Match is required. GET the client first and send back its ETag.");
+        }
+        if (!matches(ifMatch, etagOf(current))) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
+                    "This client changed since you read it. Reload and reapply your edit.");
+        }
+    }
+
+    private static ResponseEntity<ClientDtos.ClientDetailResponse> ok(
+            ClientDtos.ClientDetail client) {
+
+        return ResponseEntity.ok()
+                .eTag(etagOf(client))
+                .body(new ClientDtos.ClientDetailResponse(client));
+    }
+
+    /**
+     * Derived from the content, not from {@code updated_at}.
+     *
+     * <p>A timestamp tag moves when a save rewrites identical values, failing an
+     * edit that conflicts with nothing. Content-derived, two people who saved the
+     * same change do not fight.
+     *
+     * <p><b>{@code contactCount} and {@code hasPrimaryContact} are part of the
+     * record and therefore part of the tag</b>, so a contact added in another tab
+     * costs this form a reload. That is right rather than annoying:
+     * {@code hasPrimaryContact} is B-028's gate, and a save made against a stale
+     * answer to "is this client selectable yet" is exactly the state worth
+     * refusing.
+     *
+     * <p><b>A 32-bit hash, and two states of one client can collide.</b> B-019
+     * found this the honest way on {@code ProjectSettings} — two booleans moving
+     * in opposite directions at the same multiplier in a record's
+     * {@code hashCode} cancel exactly — and {@code ProjectController} and
+     * {@code SlaPolicyController} tag the same way. Recorded here rather than
+     * fixed on one screen: a stronger tag across all four is a change worth
+     * making together.
+     */
+    private static String etagOf(ClientDtos.ClientDetail client) {
+        return Integer.toHexString(client.hashCode());
+    }
+
+    /** {@code *} matches anything, per RFC 9110. */
+    private static boolean matches(String ifMatch, String current) {
+        String candidate = ifMatch.trim();
+        if ("*".equals(candidate)) {
+            return true;
+        }
+        return candidate.replace("W/", "").replace("\"", "").equals(current);
     }
 
     /** 404, never 403, for a row that is not there — CLAUDE.md's rule. */

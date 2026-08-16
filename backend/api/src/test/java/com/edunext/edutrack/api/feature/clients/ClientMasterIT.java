@@ -15,6 +15,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -33,6 +34,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p>Fixture rows are prefixed {@code ITCL} so nothing collides with another
  * suite and the cleanup can be exact. Nothing is seeded into {@code clients} by
  * any migration, so every row here is this suite's own.
+ *
+ * <h2>B-026 · five of these tests were failing, and the reason was one helper</h2>
+ *
+ * <p>They took their project id from {@code allProjectIds()}, whose assertion
+ * message read "the fixture corpus seeds projects" — and it does not, not here.
+ * B-007's corpus is a profile-gated {@code ApplicationRunner} (`local,fixtures`),
+ * no migration inserts a {@code projects} row, and no test in this module
+ * activates either profile, so the table is empty for every run of this suite and
+ * the helper's own assertion failed before the test it served could say anything.
+ * Not intermittent and not environmental: five tests that could never have
+ * passed, in a file whose other eighteen always did, which is exactly the shape a
+ * suite hides.
+ *
+ * <p>Repaired rather than reported, because the fix is {@code insertProject} and
+ * this is the same stream's file. A test that needs a project now makes one and
+ * cleans it up, which also makes each of them independent of what any other
+ * suite left behind.
  */
 @SpringBootTest
 @Testcontainers
@@ -66,6 +84,9 @@ class ClientMasterIT {
     ClientService service;
 
     @Autowired
+    ClientWriteService writes;
+
+    @Autowired
     JdbcTemplate jdbc;
 
     @BeforeEach
@@ -79,6 +100,9 @@ class ClientMasterIT {
         jdbc.update("DELETE FROM client_projects WHERE client_id IN"
                 + " (SELECT id FROM clients WHERE client_code LIKE 'ITCL%')");
         jdbc.update("DELETE FROM clients WHERE client_code LIKE 'ITCL%'");
+        jdbc.update("DELETE FROM client_projects WHERE project_id IN"
+                + " (SELECT id FROM projects WHERE project_code LIKE 'ITP%')");
+        jdbc.update("DELETE FROM projects WHERE project_code LIKE 'ITP%'");
     }
 
     // ------------------------------------------------------------------
@@ -151,7 +175,7 @@ class ClientMasterIT {
     @DisplayName("open tickets exclude every terminal status, not just CLOSED")
     void openCountUsesTheStatusVocabulary() {
         long clientId = insertClient("ITCL_T", "IT Ticketed", "ACTIVE");
-        long projectId = anyProjectId();
+        long projectId = insertProject("ITPT", "IT Ticket Host");
         insertTicket("ITCL-1", projectId, clientId, "NEW");
         insertTicket("ITCL-2", projectId, clientId, "IN_PROGRESS");
         insertTicket("ITCL-3", projectId, clientId, "CLOSED");
@@ -179,7 +203,7 @@ class ClientMasterIT {
                         + " status, client_id, date_reported)"
                         + " VALUES ('ITCL-TZ', ?, 'Fixture', 'MEDIUM', 'MEDIUM', 'NEW', ?,"
                         + " '2026-08-01 09:15:00.000000')",
-                anyProjectId(), clientId);
+                insertProject("ITPZ", "IT Zone Host"), clientId);
 
         ClientDtos.Client client = only(service.list(filterOn("IT Timezone"), null, 50));
 
@@ -206,7 +230,10 @@ class ClientMasterIT {
     @DisplayName("a client mapped to several projects is one row carrying all of them")
     void projectMappingDoesNotFanOutRows() {
         long clientId = insertClient("ITCL_P", "IT Mapped", "ACTIVE");
-        List<Long> projectIds = allProjectIds();
+        List<Long> projectIds = List.of(
+                insertProject("ITPA", "IT Fan-out A"),
+                insertProject("ITPB", "IT Fan-out B"),
+                insertProject("ITPC", "IT Fan-out C"));
         projectIds.forEach(p -> jdbc.update(
                 "INSERT INTO client_projects (client_id, project_id, is_default) VALUES (?, ?, 0)",
                 clientId, p));
@@ -221,7 +248,7 @@ class ClientMasterIT {
     @DisplayName("filtering by project returns each matching client once")
     void projectFilterDoesNotDuplicate() {
         long clientId = insertClient("ITCL_F", "IT Filtered", "ACTIVE");
-        long projectId = anyProjectId();
+        long projectId = insertProject("ITPF", "IT Filter Target");
         jdbc.update("INSERT INTO client_projects (client_id, project_id, is_default)"
                 + " VALUES (?, ?, 0)", clientId, projectId);
 
@@ -313,7 +340,7 @@ class ClientMasterIT {
     @DisplayName("deactivating a client hides none of its history")
     void deactivationNeverHidesHistory() {
         long clientId = insertClient("ITCL_D", "IT Deactivated", "ACTIVE");
-        long projectId = anyProjectId();
+        long projectId = insertProject("ITPD", "IT History Host");
         insertTicket("ITCL-9", projectId, clientId, "NEW");
 
         service.setStatus(clientId, false);
@@ -357,8 +384,361 @@ class ClientMasterIT {
     }
 
     // ------------------------------------------------------------------
+    // B-026 · S-33's create and edit
+    // ------------------------------------------------------------------
+
+    /**
+     * The claim a mocked repository cannot make: that every S-33 field survives
+     * the round trip through real columns.
+     *
+     * <p>Twenty-five fields, four of which only exist because
+     * {@code V20260816_1030} added them. A column missed from the {@code INSERT},
+     * a type MySQL widens or narrows, a {@code JSON} array Hibernate cannot
+     * serialise — none of those fail a unit test that never leaves the JVM.
+     */
+    @Test
+    @DisplayName("every S-33 field round-trips through real columns")
+    void everyFieldSurvivesTheRoundTrip() {
+        long id = writes.create(fullRequest("ITCL_FULL", "IT Full Client")).id();
+
+        ClientDtos.ClientDetail saved = service.findDetail(id).orElseThrow();
+
+        assertThat(saved.clientCode()).isEqualTo("ITCL_FULL");
+        assertThat(saved.shortName()).isEqualTo("Full");
+        assertThat(saved.logoUrl()).isEqualTo("https://full.example/logo.png");
+        assertThat(saved.industry()).isEqualTo("Retail");
+        assertThat(saved.status()).isEqualTo("PROSPECT");
+        assertThat(saved.domain()).isEqualTo("full.example");
+        assertThat(saved.primaryEmail()).isEqualTo("hello@full.example");
+        assertThat(saved.supportEmail()).isEqualTo("support@full.example");
+        assertThat(saved.phone()).isEqualTo("+91 98200 11111");
+        assertThat(saved.addressLine1()).isEqualTo("14 Linking Road");
+        assertThat(saved.addressLine2()).isEqualTo("Bandra West");
+        assertThat(saved.city()).isEqualTo("Mumbai");
+        assertThat(saved.state()).isEqualTo("Maharashtra");
+        assertThat(saved.country()).isEqualTo("India");
+        assertThat(saved.postalCode()).isEqualTo("400050");
+        assertThat(saved.timezone()).isEqualTo("Europe/London");
+        assertThat(saved.contractStart()).isEqualTo(LocalDate.of(2025, 4, 1));
+        assertThat(saved.contractEnd()).isEqualTo(LocalDate.of(2027, 3, 31));
+        assertThat(saved.supportPlan()).isEqualTo("ENTERPRISE");
+        assertThat(saved.billingReference()).isEqualTo("PO-2025-0142");
+        assertThat(saved.billingEmail()).isEqualTo("accounts@full.example");
+        assertThat(saved.notes()).isEqualTo("Quarterly review every January.");
+        assertThat(saved.tags()).containsExactly("retail", "strategic");
+    }
+
+    /**
+     * <b>The named regression test for the defect the round-trip above found.</b>
+     *
+     * <p>{@code contract_start = '2025-04-01'} written through JPA and read back
+     * through JPA came out as <b>2025-03-31</b>, with the JVM at UTC, the
+     * connection at UTC, the MySQL session at {@code +00:00} and the raw column
+     * holding the right value the whole time — so it is not a time-zone
+     * misconfiguration, it is the {@code getDate}/{@code Calendar} path
+     * {@code hibernate.jdbc.time_zone} forces Hibernate onto.
+     *
+     * <p>This asserts the two readings against each other on one connection, so
+     * the claim in {@code ClientQueryRepository.contractDates}' javadoc is
+     * measured rather than remembered — and so that the day the underlying
+     * setting is fixed for everybody, the discrepancy disappearing here is what
+     * says the workaround can go.
+     *
+     * <p><b>{@code Holiday.holidayDate} has the same bug and is not fixed here.</b>
+     * An org holiday a day out means {@code WorkingHoursService} treats the wrong
+     * day as non-working, and every SLA crossing it is wrong. Flagged for B-023's
+     * follow-up and for Stream A, who own the property.
+     */
+    @Test
+    @DisplayName("a DATE survives the read — getDate loses a day where getObject does not")
+    void contractDatesAreNotReadADayEarly() {
+        long id = writes.create(fullRequest("ITCL_DT", "IT Dates")).id();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT CAST(contract_start AS CHAR) FROM clients WHERE id = ?", String.class, id))
+                .as("the write is not the problem; the stored value is correct")
+                .isEqualTo("2025-04-01");
+
+        assertThat(jdbc.queryForObject(
+                "SELECT contract_start FROM clients WHERE id = ?", LocalDate.class, id))
+                .as("getObject(LocalDate.class) is exact — this is the path "
+                        + "ClientQueryRepository.contractDates takes")
+                .isEqualTo(LocalDate.of(2025, 4, 1));
+
+        assertThat(service.findDetail(id).orElseThrow().contractStart())
+                .as("and the detail read reports the same day the contract does")
+                .isEqualTo(LocalDate.of(2025, 4, 1));
+    }
+
+    /**
+     * {@code tags} is a MySQL {@code JSON} column mapped through Hibernate's own
+     * JSON type, and {@code ck_clients_tags} constrains its <em>shape</em>. Both
+     * halves are database behaviour, so both are asserted here rather than
+     * against a mock that would echo back whatever it was handed.
+     */
+    @Test
+    @DisplayName("tags are stored as a real JSON array, and the CHECK holds the shape")
+    void tagsAreStoredAsJson() {
+        long id = writes.create(request("ITCL_TAG", "IT Tagged",
+                b -> b.tags(List.of("retail", "vip")))).id();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT JSON_TYPE(tags) FROM clients WHERE id = ?", String.class, id))
+                .isEqualTo("ARRAY");
+
+        assertThatThrownBy(() -> jdbc.update(
+                "UPDATE clients SET tags = '{\"a\":1}' WHERE id = ?", id))
+                .as("ck_clients_tags is the backstop for the writers that do not go "
+                        + "through the service — B-035's import, and a hand-run UPDATE")
+                .isInstanceOf(Exception.class);
+    }
+
+    /**
+     * {@code ck_clients_status} lands at the column's first writer of the third
+     * value — B-016's rule. The service refuses a bad status before the database
+     * sees it, so this asserts the constraint directly: a hand-run UPDATE is the
+     * writer it exists for.
+     */
+    @Test
+    @DisplayName("ck_clients_status permits exactly the three §4B.2 states")
+    void statusVocabularyIsHeldByTheDatabase() {
+        long id = insertClient("ITCL_ST", "IT Status", "ACTIVE");
+
+        for (String status : ClientStatus.CODES) {
+            jdbc.update("UPDATE clients SET status = ? WHERE id = ?", status, id);
+        }
+
+        assertThatThrownBy(() ->
+                jdbc.update("UPDATE clients SET status = 'ARCHIVED' WHERE id = ?", id))
+                .as("a fourth value means a migration and a contract change, "
+                        + "not an UPDATE somebody runs")
+                .isInstanceOf(Exception.class);
+    }
+
+    /**
+     * The claim {@code ClientWriteRepository.findConflictingCode} makes about the
+     * collation: {@code client_code} collates {@code utf8mb4_0900_ai_ci}, so
+     * MySQL already matches {@code itcl_dup} against {@code ITCL_DUP} — and a
+     * case-sensitive check in Java would have passed the second one to the index,
+     * which refuses with a constraint name rather than the field-keyed 409 the
+     * form displays on the input. B-013 asserted the same thing for the resource
+     * form.
+     */
+    @Test
+    @DisplayName("a duplicate code is refused case-insensitively, agreeing with the collation")
+    void duplicateCodeAgreesWithTheCollation() {
+        writes.create(request("ITCL_DUP", "IT Duplicate", b -> b));
+
+        assertThatThrownBy(() -> writes.create(request("itcl_dup", "IT Duplicate Again", b -> b)))
+                .isInstanceOf(ClientWriteService.ClientValidationException.class)
+                .satisfies(e -> assertThat(
+                        ((ClientWriteService.ClientValidationException) e).errors())
+                        .containsOnlyKeys("clientCode"));
+    }
+
+    /**
+     * S-33 submits the whole form on every save, so without {@code id <> ?} in
+     * the conflict query every ordinary edit would 409 on the code the client
+     * already holds — the mirror of the {@code u.id <> ?} B-013 documents on the
+     * resource form, and the sort of thing that is right in a mock and wrong in
+     * SQL.
+     */
+    @Test
+    @DisplayName("re-sending a client's own code is not a conflict")
+    void ownCodeIsNotAConflict() {
+        long id = writes.create(request("ITCL_OWN", "IT Own Code", b -> b)).id();
+
+        ClientDtos.ClientDetail saved = writes
+                .update(id, request("ITCL_OWN", "IT Own Code Renamed", b -> b))
+                .orElseThrow();
+
+        assertThat(saved.name()).isEqualTo("IT Own Code Renamed");
+    }
+
+    /**
+     * The mapping is a wholesale replace, and {@code is_default} is set in the
+     * same pass — so a client cannot be left with a default pointing at a project
+     * it is no longer mapped to.
+     */
+    @Test
+    @DisplayName("the project mapping is replaced, default and all")
+    void projectMappingIsReplaced() {
+        // This suite's own projects rather than the corpus's. `projects` is
+        // seeded by no migration — B-007's fixture corpus is profile-gated to
+        // `local,fixtures` and no test activates it — so a claim about the
+        // mapping has to bring the rows it maps to.
+        long first = insertProject("ITP1", "IT Project One");
+        long second = insertProject("ITP2", "IT Project Two");
+
+        long id = writes.create(request("ITCL_MAP", "IT Mapped",
+                b -> b.projectIds(List.of(first)).defaultProjectId(first))).id();
+
+        assertThat(service.findDetail(id).orElseThrow().defaultProjectId()).isEqualTo(first);
+
+        writes.update(id, request("ITCL_MAP", "IT Mapped",
+                b -> b.projectIds(List.of(second)).defaultProjectId(second)));
+
+        ClientDtos.ClientDetail after = service.findDetail(id).orElseThrow();
+        assertThat(after.projects()).extracting(ClientDtos.ProjectRef::id).containsExactly(second);
+        assertThat(after.defaultProjectId()).isEqualTo(second);
+    }
+
+    /**
+     * B-035's import writes client rows and never touches project associations.
+     * A null read as "unmap" would have every import silently detach every client
+     * it updated from every project — surfacing much later as a ticket form whose
+     * client dropdown has gone empty.
+     */
+    @Test
+    @DisplayName("an absent projectIds leaves the mapping alone; an empty one clears it")
+    void absentAndEmptyMappingsDiffer() {
+        long project = insertProject("ITP3", "IT Project Three");
+        long id = writes.create(request("ITCL_ABS", "IT Absent",
+                b -> b.projectIds(List.of(project)))).id();
+
+        writes.update(id, request("ITCL_ABS", "IT Absent", b -> b.projectIds(null)));
+        assertThat(service.findDetail(id).orElseThrow().projects()).hasSize(1);
+
+        writes.update(id, request("ITCL_ABS", "IT Absent", b -> b.projectIds(List.of())));
+        assertThat(service.findDetail(id).orElseThrow().projects()).isEmpty();
+    }
+
+    /**
+     * B-028's gate, reported off the detail read. Enforcing it belongs on the
+     * ticket create path, where a caller can act on it; what this task owes that
+     * decision is an answer the form can state.
+     */
+    @Test
+    @DisplayName("hasPrimaryContact tracks the live primary contact")
+    void primaryContactIsReported() {
+        long id = writes.create(request("ITCL_PC", "IT Primary", b -> b)).id();
+
+        assertThat(service.findDetail(id).orElseThrow().hasPrimaryContact()).isFalse();
+
+        insertContact(id, "Sara Kapoor", false);
+        assertThat(service.findDetail(id).orElseThrow().hasPrimaryContact()).isFalse();
+        assertThat(service.findDetail(id).orElseThrow().contactCount()).isEqualTo(1);
+
+        insertContact(id, "Dev Patel", true);
+        assertThat(service.findDetail(id).orElseThrow().hasPrimaryContact()).isTrue();
+        assertThat(service.findDetail(id).orElseThrow().contactCount()).isEqualTo(2);
+    }
+
+    /**
+     * The consequence of {@code isActive} deriving as "not INACTIVE": setting the
+     * state a prospect already holds must not rewrite it to {@code ACTIVE}, or
+     * S-32's bulk Activate turns a shortlist of prospects into contracted clients
+     * with nothing recording that it happened.
+     */
+    @Test
+    @DisplayName("activating a prospect through the status setter leaves it a prospect")
+    void activatingAProspectLeavesItAProspect() {
+        long id = insertClient("ITCL_PR", "IT Prospect", "PROSPECT");
+
+        service.setStatus(id, true);
+        assertThat(storedStatus(id)).isEqualTo("PROSPECT");
+
+        service.setStatusBulk(List.of(id), true);
+        assertThat(storedStatus(id)).isEqualTo("PROSPECT");
+
+        service.setStatus(id, false);
+        assertThat(storedStatus(id)).isEqualTo("INACTIVE");
+    }
+
+    /**
+     * The reference check reaching a real table.
+     *
+     * <p>An unknown id rather than a deactivated one, and the substitution is
+     * forced rather than chosen: nothing seeds {@code users} either, so there is
+     * no resource here to deactivate. The "has left" half is
+     * {@code ClientWriteServiceTest.deactivatedAccountManager}, which is about
+     * the service's reading of {@code is_active} and needs no database to be
+     * true. What only a database can show is that the lookup finds nothing when
+     * there is nothing to find — a mocked repository would answer whatever it
+     * was told.
+     */
+    @Test
+    @DisplayName("an account manager who does not exist is refused")
+    void unknownAccountManagerIsRefused() {
+        assertThatThrownBy(() -> writes.create(request("ITCL_AM", "IT Manager",
+                b -> b.accountManagerId(9_999_999L))))
+                .isInstanceOf(ClientWriteService.ClientValidationException.class)
+                .satisfies(e -> assertThat(
+                        ((ClientWriteService.ClientValidationException) e).errors())
+                        .containsKey("accountManagerId"));
+    }
+
+    // ------------------------------------------------------------------
     // fixtures
     // ------------------------------------------------------------------
+
+    private String storedStatus(long clientId) {
+        return jdbc.queryForObject(
+                "SELECT status FROM clients WHERE id = ?", String.class, clientId);
+    }
+
+    /** Every S-33 field populated, so the round-trip test has something to lose. */
+    private static ClientDtos.ClientWriteRequest fullRequest(String code, String name) {
+        return new ClientDtos.ClientWriteRequest(
+                code, name, "Full", "https://full.example/logo.png", "Retail", "PROSPECT",
+                "https://www.Full.Example/support",
+                "hello@full.example", "support@full.example", "+91 98200 11111",
+                "14 Linking Road", "Bandra West", "Mumbai", "Maharashtra", "India", "400050",
+                "Europe/London",
+                null, LocalDate.of(2025, 4, 1), LocalDate.of(2027, 3, 31), "enterprise",
+                "PO-2025-0142", "accounts@full.example",
+                "Quarterly review every January.", List.of("retail", "strategic"),
+                null, null, null);
+    }
+
+    private static ClientDtos.ClientWriteRequest request(
+            String code, String name, java.util.function.UnaryOperator<RequestBuilder> customise) {
+
+        return customise.apply(new RequestBuilder(code, name)).build();
+    }
+
+    /** Enough of a builder for the fields these tests vary; the rest stay null. */
+    private static final class RequestBuilder {
+        private final String code;
+        private final String name;
+        private Long accountManagerId;
+        private List<String> tags;
+        private List<Long> projectIds;
+        private Long defaultProjectId;
+
+        RequestBuilder(String code, String name) {
+            this.code = code;
+            this.name = name;
+        }
+
+        RequestBuilder accountManagerId(Long v) {
+            this.accountManagerId = v;
+            return this;
+        }
+
+        RequestBuilder tags(List<String> v) {
+            this.tags = v;
+            return this;
+        }
+
+        RequestBuilder projectIds(List<Long> v) {
+            this.projectIds = v;
+            return this;
+        }
+
+        RequestBuilder defaultProjectId(Long v) {
+            this.defaultProjectId = v;
+            return this;
+        }
+
+        ClientDtos.ClientWriteRequest build() {
+            return new ClientDtos.ClientWriteRequest(
+                    code, name, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null,
+                    accountManagerId, null, null, null, null, null, null, tags,
+                    projectIds, defaultProjectId, null);
+        }
+    }
 
     private static ClientQueryRepository.Filter filterOn(String q) {
         return new ClientQueryRepository.Filter(q, null, null, null, null);
@@ -390,16 +770,19 @@ class ClientMasterIT {
                 code, projectId, "Fixture " + code, status, clientId);
     }
 
-    /** Any seeded project — this suite is about clients, not about which one. */
-    private long anyProjectId() {
-        return allProjectIds().getFirst();
+    /**
+     * B-026 · a project this suite owns.
+     *
+     * <p>Nothing seeds {@code projects}: A-003 creates the table and no migration
+     * inserts a row, and B-007's corpus is a profile-gated {@code ApplicationRunner}
+     * (`local,fixtures`) that no test activates. A test that needs a project has
+     * to make one.
+     */
+    private long insertProject(String code, String name) {
+        jdbc.update("INSERT INTO projects (project_code, name, status) VALUES (?, ?, 'ACTIVE')",
+                code, name);
+        return jdbc.queryForObject(
+                "SELECT id FROM projects WHERE project_code = ?", Long.class, code);
     }
 
-    private List<Long> allProjectIds() {
-        List<Long> ids = jdbc.queryForList("SELECT id FROM projects ORDER BY id", Long.class);
-        assertThat(ids)
-                .as("the fixture corpus seeds projects; a ticket needs one to hang off")
-                .isNotEmpty();
-        return ids;
-    }
 }

@@ -51,7 +51,7 @@ describe('the client grid', () => {
    * deactivation.
    */
   it('lists deactivated clients too, marked inactive', async () => {
-    expect(getDb().clients.some((c) => !c.isActive)).toBe(true)
+    expect(getDb().clients.some((c) => c.status === 'INACTIVE')).toBe(true)
 
     renderPage()
 
@@ -168,7 +168,7 @@ describe('bulk activate and deactivate', () => {
     // Still on the grid — deactivating hides nothing.
     const acme = await rowFor('Acme Retail Ltd')
     await waitFor(() => expect(within(acme).getByText('Inactive')).toBeInTheDocument(), SLOW)
-    expect(getDb().clients.find((c) => c.id === 1)?.isActive).toBe(false)
+    expect(getDb().clients.find((c) => c.id === 1)?.status).toBe('INACTIVE')
   })
 
   /**
@@ -181,7 +181,7 @@ describe('bulk activate and deactivate', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Activate' }))
 
     await waitFor(
-      () => expect(getDb().clients.find((c) => c.id === 4)?.isActive).toBe(true),
+      () => expect(getDb().clients.find((c) => c.id === 4)?.status).toBe('ACTIVE'),
       SLOW,
     )
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -194,7 +194,7 @@ describe('bulk activate and deactivate', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
 
     await waitFor(
-      () => expect(getDb().clients.find((c) => c.id === 3)?.isActive).toBe(false),
+      () => expect(getDb().clients.find((c) => c.id === 3)?.status).toBe('INACTIVE'),
       SLOW,
     )
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -209,7 +209,10 @@ describe('bulk activate and deactivate', () => {
 
     // Every client on the page ends up active off a single bulk call; if this
     // were N requests a partial failure would leave some of them behind.
-    await waitFor(() => expect(getDb().clients.every((c) => c.isActive)).toBe(true), SLOW)
+    await waitFor(
+      () => expect(getDb().clients.every((c) => c.status !== 'INACTIVE')).toBe(true),
+      SLOW,
+    )
   })
 })
 

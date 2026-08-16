@@ -47,4 +47,10 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * Must name an **active** resource. The role is deliberately not
+checked — B-016 made the same call for a project manager, and a
+hardcoded role set is what B-015 removed from `ResourceController`.
+
+ */
 export type ClientWriteRequestAccountManagerId = number | null;

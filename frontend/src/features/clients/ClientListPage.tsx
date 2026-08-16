@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { keepPreviousData } from '@tanstack/react-query'
-import { ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Search, Upload } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, RotateCcw, Search, Upload } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import {
@@ -30,6 +30,7 @@ import {
 import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 
+import { SUPPORT_PLANS } from './clientForm'
 import { CLIENT_COLUMNS } from './columns'
 import {
   ClientBulkStatusBar,
@@ -50,13 +51,19 @@ const STATUS_OPTIONS = [
  * The plans blueprint §4B.2 names in the Commercial group.
  *
  * A fixed list rather than a lookup, because there is no support-plan master —
- * §4B.2 states the four values and B-031's import template puts a
- * data-validation dropdown on the same column. If a master ever arrives this
- * becomes a query, and the filter is the only thing that changes.
+ * §4B.2 states the values and B-031's import template puts a data-validation
+ * dropdown on the same column. If a master ever arrives this becomes a query,
+ * and the filter is the only thing that changes.
+ *
+ * **B-026 · the values are the stored codes now, not title-case labels.** The
+ * filter worked either way — the server matches case-insensitively, agreeing
+ * with `utf8mb4_0900_ai_ci` — but a filter whose value is not the stored value
+ * is a coincidence rather than a design, and S-33's `<Select>` binds to the same
+ * vocabulary. One list, shared with the form.
  */
-const SUPPORT_PLAN_OPTIONS = ['Basic', 'Standard', 'Premium', 'Enterprise'].map((value) => ({
-  value,
-  label: value,
+const SUPPORT_PLAN_OPTIONS = SUPPORT_PLANS.map((plan) => ({
+  value: plan.value,
+  label: plan.label,
 }))
 
 /**
@@ -274,8 +281,16 @@ export function ClientListPage() {
             <Upload className="h-4 w-4" />
             Import from Excel
           </Button>
-          <Button asChild size="sm">
+          <Button asChild variant="secondary" size="sm">
             <Link to="/masters">Back to masters</Link>
+          </Button>
+          {/* B-026 · S-33. The primary action on a master grid is adding a row,
+              so it takes the primary variant and "Back to masters" gives it up. */}
+          <Button asChild size="sm">
+            <Link to="/masters/clients/new">
+              <Plus className="h-4 w-4" />
+              New client
+            </Link>
           </Button>
         </div>
       </div>

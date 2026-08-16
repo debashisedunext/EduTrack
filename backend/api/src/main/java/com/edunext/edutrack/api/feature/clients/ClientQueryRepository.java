@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -335,6 +336,128 @@ class ClientQueryRepository {
                 .param(clientId)
                 .query((rs, n) -> readContact(rs))
                 .list();
+    }
+
+    /**
+     * B-026 · the project this client defaults to on the ticket form —
+     * {@code client_projects.is_default}.
+     *
+     * <p>Null where the client is mapped to projects but none is flagged, which
+     * is the state every imported client starts in and is <b>not</b> the same as
+     * "mapped to nothing". The form renders the two differently, so collapsing
+     * them into a zero here would be losing the distinction one layer too early.
+     *
+     * <p>Takes the lowest project id where two rows are somehow flagged. The
+     * composite primary key makes the pair unique and nothing makes the flag so —
+     * the same reason {@link #primaryContacts} takes the lowest contact id rather
+     * than assuming a uniqueness the schema does not assert.
+     */
+    Long defaultProjectId(long clientId) {
+        return jdbc.sql("""
+                        SELECT cp.project_id
+                        FROM client_projects cp
+                        WHERE cp.client_id = ? AND cp.is_default = 1
+                        ORDER BY cp.project_id
+                        LIMIT 1
+                        """)
+                .param(clientId)
+                .query(Long.class)
+                .optional()
+                .orElse(null);
+    }
+
+    /**
+     * B-026 · how many live contacts a client has, and whether one of them is
+     * primary.
+     *
+     * <p>One statement for both, because they are read together on every detail
+     * and the second question is a filter on the first. {@code hasPrimary} is
+     * B-028's gate — a client without one is not selectable on a ticket — and it
+     * is <b>reported here, never enforced here</b>: enforcement belongs on the
+     * ticket create path, which is where a caller can be told what to do about
+     * it.
+     *
+     * <p>Active contacts only, agreeing with {@link #contactsOf} and
+     * {@link #primaryContacts}. A client whose only primary contact has left
+     * should read as having none, which is the true and useful answer.
+     */
+    record ContactSummary(int count, boolean hasPrimary) {
+    }
+
+    /**
+     * B-026 · the two contract dates, read as {@link LocalDate} rather than
+     * through the entity — <b>and this is a correctness fix, not a preference.</b>
+     *
+     * <h2>What was wrong</h2>
+     *
+     * <p>{@code contract_start = '2025-04-01'} written through JPA and read back
+     * through JPA came out as <b>2025-03-31</b>. Not a time-zone misconfiguration
+     * to be argued about: {@code ClientMasterIT} measured it with the JVM at UTC,
+     * the connection at UTC and the MySQL session at {@code +00:00}, and the raw
+     * column holding {@code 2025-04-01} the whole time. Against that same row and
+     * that same connection:
+     *
+     * <pre>
+     *   SELECT contract_start → getObject(LocalDate.class)  → 2025-04-01  ✅
+     *   SELECT contract_start → getDate(...)                → 2025-03-31  ❌
+     * </pre>
+     *
+     * <p>{@code spring.jpa.properties.hibernate.jdbc.time_zone: UTC} makes
+     * Hibernate bind and read temporal columns through the
+     * {@code java.sql.Date}/{@code Calendar} path, so every {@code LocalDate}
+     * mapped through JPA loses the day on the way out. The write is unaffected —
+     * the stored value is right — which is what makes it invisible: nothing looks
+     * wrong until somebody compares a contract end date on screen with the
+     * contract.
+     *
+     * <p>This is the same shape as the defect B-023 hit with {@code TIME} — 09:30
+     * written, 15:00 read — and its resolution was the same one: take the
+     * conversion out rather than configure around it.
+     *
+     * <h2>What is fixed here, and what is flagged</h2>
+     *
+     * <p>B-026 fixes it for the two columns it owns, by reading them here.
+     * <b>{@code Holiday.holidayDate} has the same bug</b> — a {@code LocalDate}
+     * mapped through JPA on a table the working calendar reads, which means every
+     * org holiday can be a day out, which means {@code WorkingHoursService} can
+     * treat the wrong day as non-working and every SLA crossing it is wrong.
+     * {@code resource_leaves} is the same. **Flagged for Stream B (B-023's
+     * follow-up) and for Stream A**, whose {@code application.yml} carries the
+     * setting; fixing it there is one property and a re-run of every temporal
+     * test, which is not a change to make on a masters branch on the way past.
+     *
+     * <p>{@code Project.startDate}/{@code endDate} are unaffected only because
+     * B-016 happened to write and read them through {@link JdbcClient} already.
+     */
+    record ContractDates(LocalDate start, LocalDate end) {
+    }
+
+    ContractDates contractDates(long clientId) {
+        return jdbc.sql("""
+                        SELECT c.contract_start, c.contract_end
+                        FROM clients c
+                        WHERE c.id = ?
+                        """)
+                .param(clientId)
+                // getObject(LocalDate.class), never getDate — see the javadoc.
+                .query((rs, n) -> new ContractDates(
+                        rs.getObject("contract_start", LocalDate.class),
+                        rs.getObject("contract_end", LocalDate.class)))
+                .single();
+    }
+
+    ContactSummary contactSummary(long clientId) {
+        return jdbc.sql("""
+                        SELECT COUNT(*)                                     AS contact_count,
+                               COALESCE(MAX(cc.is_primary), 0)              AS has_primary
+                        FROM client_contacts cc
+                        WHERE cc.client_id = ? AND cc.is_active = 1
+                        """)
+                .param(clientId)
+                .query((rs, n) -> new ContactSummary(
+                        rs.getInt("contact_count"),
+                        rs.getBoolean("has_primary")))
+                .single();
     }
 
     private static ClientDtos.Contact readContact(java.sql.ResultSet rs)

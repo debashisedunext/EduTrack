@@ -13,6 +13,7 @@ import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ClientListPage } from './features/clients/ClientListPage'
+import { ClientFormPage } from './features/clients/ClientFormPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
 import { ProjectListPage } from './features/masters/projects/ProjectListPage'
@@ -192,9 +193,16 @@ export default function App() {
                 while `/clients/:clientId` two routes up is the client 360 — a
                 different screen at a different path, kept apart by the prefix
                 the way `/masters/projects` and `/projects/:id` already are.
-                One route, not two: the create/edit form is B-026 and will be a
-                page of its own like S-33's four tabs demand. */}
+                The create/edit form is B-026's, on the two routes below. */}
             <Route path="/masters/clients" element={<ClientListPage />} />
+            {/* B-026 · S-33. `/new` before `/:clientId/edit` for readability
+                only — React Router ranks the literal segment above the variable
+                regardless of order, the same ranking `/tickets/new` and
+                `/masters/resources/new` already depend on. One component serves
+                both: they are one form, and two would be the same file twice
+                with one copy always slightly behind. */}
+            <Route path="/masters/clients/new" element={<ClientFormPage />} />
+            <Route path="/masters/clients/:clientId/edit" element={<ClientFormPage />} />
             <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />
           </Route>

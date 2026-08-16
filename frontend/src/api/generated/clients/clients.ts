@@ -68,6 +68,7 @@ import type {
 import type {
   Client360Response,
   ClientBulkStatusRequest,
+  ClientDetailResponse,
   ClientListResponse,
   ClientResponse,
   ClientWriteRequest,
@@ -80,6 +81,7 @@ import type {
   ListClientsParams,
   NotFoundResponse,
   PreconditionFailedResponse,
+  Problem,
   SetClientStatusBody,
   UnauthorizedResponse,
   ValidationFailedResponse
@@ -192,7 +194,21 @@ export function useListClients<TData = Awaited<ReturnType<typeof listClients>>, 
 
 
 /**
- * @summary Create a client
+ * B-026 · S-33's four-tab form, creating.
+
+**A created client has no contacts, and is therefore not yet selectable
+on a ticket** — B-028's rule is "at least one primary contact before the
+client can be chosen". That is not enforced here (there is nothing to
+enforce it against on a create) and the form says so on its Contacts
+tab; the contacts themselves are `POST /clients/{clientId}/contacts`.
+
+`clientCode` is unique, case-insensitively — `clients.client_code`
+collates `utf8mb4_0900_ai_ci`, so `acme` and `ACME` are one code as far
+as `uq_clients_code` is concerned, and the service refuses the second
+with a field-keyed `409` rather than letting the index refuse it with a
+message naming a MySQL constraint.
+
+ * @summary Create a client (S-33)
  */
 export const createClient = (
     clientWriteRequest: ClientWriteRequest,
@@ -210,7 +226,7 @@ export const createClient = (
   
 
 
-export const getCreateClientMutationOptions = <TError = ConflictResponse,
+export const getCreateClientMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | ConflictResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createClient>>, TError,{data: ClientWriteRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof createClient>>, TError,{data: ClientWriteRequest}, TContext> => {
 
@@ -237,12 +253,12 @@ const {mutation: mutationOptions} = options ?
 
     export type CreateClientMutationResult = NonNullable<Awaited<ReturnType<typeof createClient>>>
     export type CreateClientMutationBody = ClientWriteRequest
-    export type CreateClientMutationError = ConflictResponse
+    export type CreateClientMutationError = ValidationFailedResponse | ForbiddenResponse | ConflictResponse
 
     /**
- * @summary Create a client
+ * @summary Create a client (S-33)
  */
-export const useCreateClient = <TError = ConflictResponse,
+export const useCreateClient = <TError = ValidationFailedResponse | ForbiddenResponse | ConflictResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createClient>>, TError,{data: ClientWriteRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createClient>>,
@@ -331,7 +347,132 @@ export const useSetClientStatusBulk = <TError = ValidationFailedResponse | Forbi
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * @summary Update a client
+ * B-026 · the read half of the S-33 form, and **the only place the `ETag`
+that `PATCH` requires can be obtained**. Without it the write below
+declared a precondition with nowhere to satisfy it — the same gap B-011
+closed for `GET /users/{userId}` and B-016 for `GET /projects/{id}`.
+
+Carries the whole §4B.2 field set, which the list row deliberately does
+not: the grid renders nine columns and inlining twenty-five fields per
+row would be weight on every page of it.
+
+**All six roles**, like `listClients` beside it — §4B.2's ticket-form
+dropdown is that operation, and a role that can list clients learns
+nothing new from reading one.
+
+ * @summary One client (S-33)
+ */
+export const getClient = (
+    clientId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ClientDetailResponse>(
+      {url: `/clients/${clientId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetClientQueryKey = (clientId?: number,) => {
+    return [
+    `/clients/${clientId}`
+    ] as const;
+    }
+
+    
+export const getGetClientQueryOptions = <TData = Awaited<ReturnType<typeof getClient>>, TError = UnauthorizedResponse | NotFoundResponse>(clientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getClient>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetClientQueryKey(clientId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getClient>>> = ({ signal }) => getClient(clientId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(clientId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getClient>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetClientQueryResult = NonNullable<Awaited<ReturnType<typeof getClient>>>
+export type GetClientQueryError = UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetClient<TData = Awaited<ReturnType<typeof getClient>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ clientId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getClient>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getClient>>,
+          TError,
+          Awaited<ReturnType<typeof getClient>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetClient<TData = Awaited<ReturnType<typeof getClient>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ clientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getClient>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getClient>>,
+          TError,
+          Awaited<ReturnType<typeof getClient>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetClient<TData = Awaited<ReturnType<typeof getClient>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ clientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getClient>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One client (S-33)
+ */
+
+export function useGetClient<TData = Awaited<ReturnType<typeof getClient>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ clientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getClient>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetClientQueryOptions(clientId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * B-026 · S-33's four-tab form, saving.
+
+**The body is the whole representation, not a sparse patch**, and the
+verb stays `PATCH` because that is what the contract has declared since
+D-001 and what the generated client already emits. S-33 submits every
+field on every save, so `ClientWriteRequest` is the shape both verbs
+take — unlike the project master next door, which needed a separate
+`ProjectPatchRequest` because `projectCode` is immutable and requiring
+it on a patch would have made every edit to a live project a `409`.
+**No client field is immutable**, so no such split is needed here.
+
+`client_code` is editable, with one consequence worth knowing: it is
+B-035's upsert key, so a code changed here means the next Excel import
+carrying the *old* code creates a second client rather than updating
+this one. The form says so at the field.
+
+`If-Match` is **required**. A write without one is `428`, not a silent
+overwrite — treating a missing precondition as "no conflict" protects
+only the callers that already opted in.
+
+ * @summary Update a client (S-33)
  */
 export const updateClient = (
     clientId: number,
@@ -339,7 +480,7 @@ export const updateClient = (
  ) => {
       
       
-      return http<ClientResponse>(
+      return http<ClientDetailResponse>(
       {url: `/clients/${clientId}`, method: 'PATCH',
       headers: {'Content-Type': 'application/json', },
       data: clientWriteRequest
@@ -349,7 +490,7 @@ export const updateClient = (
   
 
 
-export const getUpdateClientMutationOptions = <TError = NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
+export const getUpdateClientMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateClient>>, TError,{clientId: number;data: ClientWriteRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof updateClient>>, TError,{clientId: number;data: ClientWriteRequest}, TContext> => {
 
@@ -376,12 +517,12 @@ const {mutation: mutationOptions} = options ?
 
     export type UpdateClientMutationResult = NonNullable<Awaited<ReturnType<typeof updateClient>>>
     export type UpdateClientMutationBody = ClientWriteRequest
-    export type UpdateClientMutationError = NotFoundResponse | ConflictResponse | PreconditionFailedResponse
+    export type UpdateClientMutationError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
 
     /**
- * @summary Update a client
+ * @summary Update a client (S-33)
  */
-export const useUpdateClient = <TError = NotFoundResponse | ConflictResponse | PreconditionFailedResponse,
+export const useUpdateClient = <TError = ValidationFailedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateClient>>, TError,{clientId: number;data: ClientWriteRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateClient>>,

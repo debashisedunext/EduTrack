@@ -82,6 +82,8 @@ ROWLESS_403 = {
     "/masters/notification-templates/{templateId}": "same: not row-scoped. Every read here is Admin-only, so a 403 tells a non-Admin only what the 401 already did",
     "/attachments/limits":                 "org-wide settings, not a row — `master.write` is a capability the caller either holds or does not, and the resource has no existence a 404 could conceal (every role already reads it)",
     "/clients/bulk-status":                "master data, not row-scoped — the ids in the body name rows listClients already returned, and §4B.2's ticket dropdown makes that readable by all six roles, so a 403 conceals nothing a 404 would have",
+    "/clients":                            "master data, not row-scoped — every client is already public through listClients, which §4B.2's ticket dropdown makes readable by all six roles, and there is no row yet on a create",
+    "/clients/{clientId}":                 "same: the client's existence is public through the same list, so only the write is Admin-only and a 403 on it conceals nothing a 404 would have",
     # C-028, and the only entry here that IS row-scoped — worth reading before
     # it is used as a precedent.
     #

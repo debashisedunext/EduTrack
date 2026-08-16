@@ -101,7 +101,7 @@ each other:**
 | `PATCH /projects/{id}` | Field updates |
 | `PUT /projects/{id}/sla-policies` | Wholesale replace — the worst case for a lost update |
 | `PUT /projects/{id}/settings` | Wholesale replace of three settings behind one Save button |
-| `PATCH /clients/{id}` | Field updates |
+| `PATCH /clients/{id}` | Field updates — and B-026 made this real by adding `GET /clients/{clientId}`, without which the precondition was declared with nowhere to satisfy it and the operation was uncallable. The same gap `GET /users/{userId}` (B-011) and `GET /projects/{projectId}` (B-016) closed |
 | `PATCH /tickets/{id}` | Field updates |
 | `PATCH /masters/priorities/{id}` | Field updates, and two of them are org-wide switches: retiring drops the level's column out of every project's SLA matrix, and the escalation flag is a single-writer pointer §6 needs to resolve to exactly one row |
 | `PATCH /masters/task-types/{id}` | Field updates, and one of them retires the type from every picker and every project's SLA matrix at once |

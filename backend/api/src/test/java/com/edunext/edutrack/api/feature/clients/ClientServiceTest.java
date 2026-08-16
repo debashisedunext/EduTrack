@@ -207,13 +207,30 @@ class ClientServiceTest {
         }
 
         /**
-         * {@code isActive} is derived from {@code status}, never stored — and it
-         * is {@code status = 'ACTIVE'} rather than {@code status <> 'INACTIVE'},
-         * so the third state blueprint §4B.2 names (Prospect, B-026's field) does
-         * not silently read as live.
+         * <b>B-026 inverted this assertion, deliberately.</b>
+         *
+         * <p>B-025 wrote it as "{@code isActive} is {@code status = 'ACTIVE'}
+         * rather than {@code status <> 'INACTIVE'}, so the third state blueprint
+         * §4B.2 names does not silently read as live" — exact while the column
+         * carried two values, and the wrong reading once the third arrived.
+         *
+         * <p>§4B.2 puts a client dropdown on the ticket create form
+         * <b>filtered on this boolean</b>. Under the narrow reading every
+         * Prospect would have vanished from that form the moment B-026 shipped
+         * the field — silently, with nothing on screen saying why, and looking
+         * exactly like a dropdown that had lost its data. A prospect is somebody
+         * you are talking to; raising a pre-sales ticket against them is a normal
+         * thing to want, and the blueprint reserves "blocks new tickets" for
+         * deactivation alone.
+         *
+         * <p>Same call B-016 made on {@code Project.isActive}, which derives as
+         * {@code status <> 'CLOSED'} so that putting a project on hold does not
+         * remove it from five pickers. {@link ClientStatus} carries the full
+         * argument, and {@code ClientStatusTest} pins the consequence for the
+         * status setter.
          */
         @Test
-        @DisplayName("isActive is ACTIVE, not merely not-INACTIVE")
+        @DisplayName("isActive is not-INACTIVE, so a prospect stays selectable on a ticket")
         void isActiveIsDerivedFromStatus() {
             when(query.page(any(), any(), anyInt())).thenReturn(List.of(
                     row(1, "Acme", "ACTIVE"),
@@ -223,7 +240,28 @@ class ClientServiceTest {
             List<ClientDtos.Client> page = service.list(noFilter(), null, 50).data();
 
             assertThat(page).extracting(ClientDtos.Client::isActive)
-                    .containsExactly(true, false, false);
+                    .containsExactly(true, false, true);
+            // The status itself is on the wire beside it — B-026 — because a
+            // boolean cannot render S-32's status chip once a prospect and a
+            // contracted client are both active by that projection.
+            assertThat(page).extracting(ClientDtos.Client::status)
+                    .containsExactly("ACTIVE", "INACTIVE", "PROSPECT");
+        }
+
+        /**
+         * The safe direction for a value nobody can interpret is the one that
+         * does not put a client in front of a ticket form. A row written before
+         * {@code ck_clients_status} existed, or by a hand-run {@code UPDATE}, can
+         * carry anything.
+         */
+        @Test
+        @DisplayName("a status nothing recognises reads as inactive, not as active")
+        void unrecognisedStatusIsNotActive() {
+            when(query.page(any(), any(), anyInt()))
+                    .thenReturn(List.of(row(1, "Archived", "ARCHIVED")));
+
+            assertThat(service.list(noFilter(), null, 50).data().getFirst().isActive())
+                    .isFalse();
         }
 
         /** The column is nullable, and an absent manager is a real state. */
