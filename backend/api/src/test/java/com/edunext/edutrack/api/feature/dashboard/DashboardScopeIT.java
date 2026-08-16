@@ -312,7 +312,11 @@ class DashboardScopeIT {
             assertThat(s.cards()).hasSize(6).allSatisfy(c -> {
                 assertThat(c.drillDown()).as("§S-05: a number nobody can click is a number nobody trusts")
                         .startsWith("/tickets?");
-                assertThat(c.drillDown()).contains("from=" + D1, "to=" + D3);
+                // A-060 · named in full. The old assertion was `contains("from="
+                // + D1)`, which is a substring of `reportedFrom=` and therefore
+                // passed identically before and after the rename — it could
+                // never have caught the parameter the list did not implement.
+                assertThat(c.drillDown()).contains("reportedFrom=" + D1, "reportedTo=" + D3);
             });
         }
 

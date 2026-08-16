@@ -82,6 +82,8 @@ export const listTicketsQueryParams = zod.object({
   "dueTo": zod.string().date().optional(),
   "closedFrom": zod.string().date().optional().describe('Filters on actualCloseDate, inclusive.'),
   "closedTo": zod.string().date().optional().describe('Filters on actualCloseDate, inclusive.'),
+  "reportedFrom": zod.string().date().optional().describe('Filters on dateReported, inclusive.'),
+  "reportedTo": zod.string().date().optional().describe('Filters on dateReported, inclusive.'),
   "sort": zod.string().default(listTicketsQuerySortDefault)
 })
 

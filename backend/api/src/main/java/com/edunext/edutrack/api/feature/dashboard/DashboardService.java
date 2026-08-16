@@ -202,7 +202,13 @@ class DashboardService {
                                            DashboardRepository.Stock priorStock,
                                            List<DashboardRepository.Day> series,
                                            Long projectId, LocalDate from, LocalDate to) {
-        String window = "from=" + from + "&to=" + to + (projectId == null ? "" : "&projectId=" + projectId);
+        // A-060 · `reportedFrom`/`reportedTo`, not the bare `from`/`to` this
+        // emitted from A-055 until now. The list never had a reported-date
+        // window, so every card here opened the right filter over *all time* —
+        // a discrepancy invisible from the dashboard, because the card's own
+        // figure was right and only the list behind it was wider.
+        String window = "reportedFrom=" + from + "&reportedTo=" + to
+                + (projectId == null ? "" : "&projectId=" + projectId);
         return List.of(
                 card("total", "Total tasks created", flow.created(), priorFlow.created(),
                         sparkline(series, DashboardRepository.Day::created, false),
