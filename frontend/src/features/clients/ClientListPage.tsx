@@ -272,14 +272,16 @@ export function ClientListPage() {
         <div className="ml-auto flex items-center gap-2">
           {/*
             S-34, the five-step import wizard — B-030 built the engine and
-            B-031…B-038 build the steps. The route is not registered yet, so
-            this is deliberately not a Link: a button that navigates nowhere is
-            worse than one that says what is coming. **Replace with a Link the
-            day the wizard route lands.**
+            B-031…B-038 build the steps. B-031 landed the route and step 1, so
+            this is now the Link the previous comment asked for. Step 1 is the
+            template download; the screen names the four steps it cannot do yet
+            rather than pretending to be finished.
           */}
-          <Button variant="secondary" size="sm" disabled title="Excel import — S-34, coming with B-031">
-            <Upload className="h-4 w-4" />
-            Import from Excel
+          <Button asChild variant="secondary" size="sm">
+            <Link to="/masters/clients/import">
+              <Upload className="h-4 w-4" />
+              Import from Excel
+            </Link>
           </Button>
           <Button asChild variant="secondary" size="sm">
             <Link to="/masters">Back to masters</Link>

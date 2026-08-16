@@ -54,6 +54,16 @@ import * as zod from 'zod';
 Status and Support Plan plus one filled example row. A template with a
 worked example produces far fewer rejected rows than one with only headers.
 
+The header row is **exactly** the column names the import matches on —
+no asterisk on the required ones, no type hints. Decorating them would
+make the file this API just produced fail to auto-match on `POST
+/imports/{schema}/upload`. Which columns are required, what the natural
+key is and what each dropdown accepts are on a second **Instructions**
+sheet; the data sheet is first, so a caller taking the default sheet
+gets the one that is filled in.
+
+`master.write`, like the three operations beside it — B-031.
+
  * @summary Download the .xlsx template for a schema
  */
 export const downloadImportTemplateParams = zod.object({

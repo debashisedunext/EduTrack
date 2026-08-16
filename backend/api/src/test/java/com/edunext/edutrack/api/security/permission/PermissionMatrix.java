@@ -840,6 +840,26 @@ final class PermissionMatrix {
             adminOnly("PATCH", "/api/v1/clients/{clientId}/contacts/{contactId}", CONTACT_WRITE),
             adminOnly("DELETE", "/api/v1/clients/{clientId}/contacts/{contactId}"),
 
+            // ── the import wizard · S-34 (B-031) ────────────────────────────
+            // Admin alone, and this is the row where a good counter-argument
+            // exists and is refused. The template carries no organisation data
+            // whatsoever — column headings, the enum values already public
+            // through the client list's own filters, and a fictional example
+            // row — so a wider rule would leak nothing at all.
+            //
+            // It is master.write anyway, because the file's only use is a screen
+            // no other role can open: §7.4 heads the module "Master data module
+            // (Admin only)" and S-34 is inside it, and the three routes joining
+            // this one on the same path (B-032…B-035) write the client master in
+            // bulk. A route whose permission is looser than the screen it serves
+            // is how a screen quietly acquires a second entrance.
+            //
+            // 403 rather than 404 for the five refused roles: a blank template
+            // is not a row, so there is no existence for CLAUDE.md's no-leak
+            // rule to protect. Recorded in check-conventions.py's ROWLESS_403
+            // with that reason.
+            adminOnly("GET", "/api/v1/imports/{schema}/template"),
+
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack
             // account; the actual gate is the X-Webhook-Signature HMAC inside

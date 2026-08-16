@@ -66,6 +66,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ForbiddenResponse,
   ImportBatchResponse,
   ImportCommitRequest,
   ImportPreviewResponse,
@@ -87,6 +88,16 @@ import { http } from '../../http';
  * Generated with Apache POI SXSSF, carrying data-validation dropdowns on
 Status and Support Plan plus one filled example row. A template with a
 worked example produces far fewer rejected rows than one with only headers.
+
+The header row is **exactly** the column names the import matches on —
+no asterisk on the required ones, no type hints. Decorating them would
+make the file this API just produced fail to auto-match on `POST
+/imports/{schema}/upload`. Which columns are required, what the natural
+key is and what each dropdown accepts are on a second **Instructions**
+sheet; the data sheet is first, so a caller taking the default sheet
+gets the one that is filled in.
+
+`master.write`, like the three operations beside it — B-031.
 
  * @summary Download the .xlsx template for a schema
  */
@@ -113,7 +124,7 @@ export const getDownloadImportTemplateQueryKey = (schema?: 'clients' | 'users',)
     }
 
     
-export const getDownloadImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse>(schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportTemplate>>, TError, TData>>, }
+export const getDownloadImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportTemplate>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
@@ -132,10 +143,10 @@ const {query: queryOptions} = options ?? {};
 }
 
 export type DownloadImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof downloadImportTemplate>>>
-export type DownloadImportTemplateQueryError = UnauthorizedResponse
+export type DownloadImportTemplateQueryError = UnauthorizedResponse | ForbiddenResponse | Problem
 
 
-export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse>(
+export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
  schema: 'clients' | 'users', options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportTemplate>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof downloadImportTemplate>>,
@@ -145,7 +156,7 @@ export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof down
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse>(
+export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
  schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportTemplate>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof downloadImportTemplate>>,
@@ -155,7 +166,7 @@ export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof down
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse>(
+export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
  schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportTemplate>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -163,7 +174,7 @@ export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof down
  * @summary Download the .xlsx template for a schema
  */
 
-export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse>(
+export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof downloadImportTemplate>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
  schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportTemplate>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

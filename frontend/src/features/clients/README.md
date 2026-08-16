@@ -115,6 +115,28 @@ Two consequences the tests pin:
 - **A delete button.** Tickets, contacts and project mappings all point at
   `clients`. Going away is the status control on the grid.
 
+## What is here (B-031 · S-34's first step)
+
+| File | What it is |
+|---|---|
+| `import/ClientImportPage.tsx` | The wizard at `/masters/clients/import` — five steps named, step 1 working |
+| `import/importQueries.ts` | The download, the `Content-Disposition` name, and the blob save |
+
+**Steps 2 to 5 are on screen and disabled, not hidden.** Hiding them would make
+the page look finished and leave the user to find out at the end of step 1 that
+there is no step 2 — and it would drop §4B.3's actual promise, which is that
+nothing is written until a per-row preview has been seen. That promise is the
+reason this is a five-step wizard rather than one upload button, and it is worth
+making before somebody starts typing four hundred rows.
+
+**The download does not use the generated `useDownloadImportTemplate`,** for two
+structural reasons rather than a preference. It is a `useQuery`, so it would
+fetch a workbook on mount and again on every window focus — a download is an
+event, not cached state. And `http()` parses a body and drops the `Response`, so
+it cannot return the file *name*; this hook reads `Content-Disposition` off a
+plain `fetch`, exactly as `useClient` reads `ETag` off one, and for the same
+reason. Delete both the day `http()` exposes response headers.
+
 ## What is not here yet
 
 - **B-028's gate refused by a *server*.** B-028 landed the rest of it: the S-19
@@ -131,8 +153,10 @@ Two consequences the tests pin:
 - **B-029** — deactivating blocks *new* tickets. That rule lives on the same
   path, alongside B-028's, and is flagged in the same place; S-32 only warns,
   with the count.
-- **B-031…B-038** — the Excel wizard behind the disabled "Import from Excel"
-  button. Replace it with a `Link` when the route exists.
+- **B-032…B-038** — the rest of the Excel wizard. B-031 landed the route, the
+  step rail and the template download, so the S-32 grid's "Import from Excel" is
+  now a `Link`; upload, mapping, the dry run and the commit are still to come and
+  the screen says so where the Continue button is.
 
 ## Two things that look like inconsistencies and are not
 
