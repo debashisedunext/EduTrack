@@ -270,6 +270,11 @@ export function TicketDetailPage() {
             onPost={comments.post}
             isPosting={comments.isPosting}
             postError={comments.postError}
+            // C-030 · the population the `@` type-ahead offers. Read from the
+            // ticket this page already has rather than fetched: the server
+            // resolves mentions against the same project on the write path, so
+            // anything else here would offer names it then refuses.
+            projectId={ticket.project?.id}
             disabled={isEarlierCycle}
             disabledReason={`Cycle ${selectedCycleNo} is sealed. Its comments stay readable, but new ones belong to the current cycle.`}
             clientName={ticket.client?.name}

@@ -56,17 +56,23 @@ class CommentService {
     private final CommentRows rows;
     private final CommentUserRefs people;
     private final CommentSanitizer sanitizer;
+    private final CommentMentions mentions;
+    private final CommentMentionNotifier mentionNotifier;
 
     CommentService(ScopedTickets tickets,
                    TicketCommentRepository comments,
                    CommentRows rows,
                    CommentUserRefs people,
-                   CommentSanitizer sanitizer) {
+                   CommentSanitizer sanitizer,
+                   CommentMentions mentions,
+                   CommentMentionNotifier mentionNotifier) {
         this.tickets = tickets;
         this.comments = comments;
         this.rows = rows;
         this.people = people;
         this.sanitizer = sanitizer;
+        this.mentions = mentions;
+        this.mentionNotifier = mentionNotifier;
     }
 
     /**
@@ -101,11 +107,20 @@ class CommentService {
         // Resolved over the page rather than the fetch: one IN query for the
         // whole thread, and it must not include the extra boundary row's author,
         // who may not appear on this page at all.
-        List<Long> authorIds = new ArrayList<>(page.data().size());
+        //
+        // C-030 folds the mentioned ids into the same call rather than adding a
+        // second. They are overwhelmingly the same people — a thread's mentions
+        // are its participants — so a separate lookup would be a second IN query
+        // over a set that mostly overlaps the first, and `resolve` already
+        // de-duplicates.
+        List<Long> wanted = new ArrayList<>(page.data().size());
         for (TicketComment row : page.data()) {
-            authorIds.add(row.getAuthorId());
+            wanted.add(row.getAuthorId());
+            if (row.getMentionedUserIds() != null) {
+                wanted.addAll(row.getMentionedUserIds());
+            }
         }
-        CommentUserRefs.Resolved resolved = people.resolve(authorIds);
+        CommentUserRefs.Resolved resolved = people.resolve(wanted);
 
         return new CursorPage<>(
                 page.data().stream()
@@ -147,28 +162,90 @@ class CommentService {
             throw InvalidCommentException.tooLong(html.length());
         }
 
+        long author = authorId(caller);
+        String plainText = sanitizer.toPlainText(html);
+
+        // C-030. Parsed from the body, resolved against the ticket's project —
+        // see #mentioned for why the request's own list is not what is stored.
+        List<CommentMentions.MentionedUser> mentioned = mentioned(ticket, plainText);
+
         TicketComment row = new TicketComment();
         row.setTicketId(ticketId);
-        row.setAuthorId(authorId(caller));
+        row.setAuthorId(author);
         row.setBodyHtml(html);
-        row.setBodyText(sanitizer.toPlainText(html));
+        row.setBodyText(plainText);
         row.setInternal(isInternal(request));
         // Stored only when there is something to store, so a null column means
         // "nobody was mentioned" rather than "mentions were parsed and the list
-        // was empty" — a distinction C-030 will want when it starts fanning
-        // notifications out and needs to find the comments it has not processed.
-        row.setMentionedUserIds(
-                request.mentionUserIds() == null || request.mentionUserIds().isEmpty()
-                        ? null
-                        : List.copyOf(request.mentionUserIds()));
+        // was empty" — a distinction worth keeping now that something reads it.
+        row.setMentionedUserIds(mentioned.isEmpty()
+                ? null
+                : mentioned.stream().map(CommentMentions.MentionedUser::id).toList());
         row.setSource("WEB");
         stamp(row, ticket);
 
         TicketComment saved = comments.save(row);
         ticket.setCommentCount(ticket.getCommentCount() + 1);
 
-        CommentUserRefs.Resolved resolved = people.resolve(List.of(saved.getAuthorId()));
+        CommentUserRefs.Resolved resolved = people.resolve(mentionedAnd(saved, mentioned));
+
+        // After the row exists, because the notification deep-links to its id,
+        // and last because nothing below it may fail the write. The notifier
+        // swallows and logs its own failures for that reason.
+        if (!mentioned.isEmpty()) {
+            CommentDtos.UserRef authorRef = resolved.people().get(author);
+            mentionNotifier.mentioned(ticket, saved.getId(), author,
+                    authorRef == null ? null : authorRef.displayName(), mentioned);
+        }
+
         return CommentDtos.CommentDto.of(saved, resolved.people(), resolved.roles());
+    }
+
+    /**
+     * C-030 · who this comment mentions, decided by the server.
+     *
+     * <p><b>{@code CommentWriteRequest.mentionUserIds} is not consulted.</b>
+     * C-029 stored it verbatim, which was harmless while nothing read the column
+     * and stops being harmless the moment a bell entry and an email hang off it:
+     * a caller-supplied recipient list is a fan-out anybody can aim at anybody,
+     * with no membership check in front of it. D-052 settled this for chat in as
+     * many words — <em>"the server parses; the request never says who it
+     * mentioned"</em> — and the same rule is applied here rather than a second,
+     * weaker one for comments.
+     *
+     * <p>The field stays on the request because the contract declares it and an
+     * older client may still send it. It is accepted and has no effect, which is
+     * the one shape "accepted and ignored" is defensible in: C-028 and C-029
+     * both refused that pattern where a client would be entitled to believe
+     * something was stored, and here what the client asked for either names a
+     * real project member — in which case the body already named them and they
+     * are notified — or it does not, in which case honouring it is the bug.
+     * Refusing with a 400 instead would break every client that sends the field
+     * today for a request that is not wrong, only redundant.
+     *
+     * @return active project members named in the body, in id order, never null
+     */
+    private List<CommentMentions.MentionedUser> mentioned(Ticket ticket, String plainText) {
+        if (ticket.getProjectId() == null) {
+            // project_id is NOT NULL in the schema. Guarded rather than trusted
+            // because the alternative is a NullPointerException on the write
+            // path of a comment, and a ticket with no project is a ticket with
+            // no members — the empty answer is also the correct one.
+            return List.of();
+        }
+        return mentions.resolveProjectMembers(
+                ticket.getProjectId(), CommentMentionParser.handles(plainText));
+    }
+
+    /** The author plus everyone mentioned, for one {@code IN} lookup rather than two. */
+    private static List<Long> mentionedAnd(TicketComment saved,
+                                           List<CommentMentions.MentionedUser> mentioned) {
+        List<Long> ids = new ArrayList<>(mentioned.size() + 1);
+        ids.add(saved.getAuthorId());
+        for (CommentMentions.MentionedUser person : mentioned) {
+            ids.add(person.id());
+        }
+        return ids;
     }
 
     /**
