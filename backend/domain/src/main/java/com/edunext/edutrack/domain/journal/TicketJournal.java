@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -417,6 +418,60 @@ public class TicketJournal {
         }
 
         return transitions.seal(transitionId, exitedAt, durationMins) == 1;
+    }
+
+    // ------------------------------------------------------------------
+    // Reads
+    //
+    // A-052 needed to read the journals to assemble the detail page and found
+    // no sanctioned way to: A-037's rule forbids depending on an AppendOnly
+    // repository from outside this package, and it forbids it for reads as well
+    // as writes, because the rule is stated over the dependency rather than
+    // over the method. That is the right shape — a class holding the repository
+    // is one edit away from calling save on it — so the door is widened here
+    // rather than a hole cut in the rule.
+    //
+    // Nothing about append-only is weakened by a read. A read cannot fork a
+    // chain, cannot leave a NULL row_hash, and needs no lock. What these
+    // methods buy is that the set of classes able to reach these three tables
+    // stays exactly one, so the question "who touches ticket_history" keeps its
+    // short answer.
+    // ------------------------------------------------------------------
+
+    /**
+     * One cycle's history, oldest first — the order the chain was built in and
+     * the order a history tab reads in.
+     *
+     * <p>Returns the rows as stored, {@code prev_hash} and {@code row_hash}
+     * included. Callers rendering these to a client should drop the hashes:
+     * they are what A-044 verifies, and publishing them tells an attacker the
+     * shape of what a forgery would have to reproduce.
+     */
+    @Transactional(readOnly = true)
+    public List<TicketHistory> historyFor(Long ticketId, Short cycleNo) {
+        require(ticketId != null, "a ticket id is required to read history");
+        return cycleNo == null
+                ? history.findByTicketIdOrderByIdAsc(ticketId)
+                : history.findByTicketIdAndCycleNoOrderByIdAsc(ticketId, cycleNo);
+    }
+
+    /**
+     * One cycle's effort logs, oldest first.
+     *
+     * <p>Correction rows are included and carry negative hours, so a caller
+     * summing this gets the corrected total for free — which is the whole point
+     * of A-043's compensating entries and the reason nothing here filters them
+     * out. A caller that hides corrections shows a total that disagrees with
+     * its own rows.
+     */
+    @Transactional(readOnly = true)
+    public List<TicketEffortLog> effortFor(Long ticketId, Short cycleNo) {
+        require(ticketId != null, "a ticket id is required to read effort logs");
+        List<TicketEffortLog> all = effortLogs.findByTicketIdOrderByIdAsc(ticketId);
+        if (cycleNo == null) {
+            return all;
+        }
+        return all.stream().filter(e -> e.getCycleNo() == cycleNo).toList();
     }
 
     // ------------------------------------------------------------------
