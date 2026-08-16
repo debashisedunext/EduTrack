@@ -257,6 +257,14 @@ export function TicketDetailPage() {
             C-029 · §4B.5's box, above the tabs rather than inside the Comments
             tab. §7 gives the reason in as many words: "the comment box itself is
             always visible above the tabs so posting never costs a click."
+
+            C-031 · `clientName` is what decides whether the visibility toggle is
+            drawn. Passing the name and not a boolean is deliberate: the warning
+            has to name the client, and a `hasClient` flag would leave the box
+            saying "the client will see this" — a sentence people read past. Not
+            `contactName`: a client-visible comment goes to the client's portal
+            and mail thread, which is the organisation, not the one contact who
+            happened to raise the ticket.
           */}
           <CommentBox
             onPost={comments.post}
@@ -264,6 +272,7 @@ export function TicketDetailPage() {
             postError={comments.postError}
             disabled={isEarlierCycle}
             disabledReason={`Cycle ${selectedCycleNo} is sealed. Its comments stay readable, but new ones belong to the current cycle.`}
+            clientName={ticket.client?.name}
           />
 
           <TicketDetailTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} />

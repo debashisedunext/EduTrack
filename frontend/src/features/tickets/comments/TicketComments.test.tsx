@@ -78,6 +78,32 @@ const openComments = () => fireEvent.click(screen.getByRole('tab', { name: 'Comm
 const thread = () => screen.findByRole('list', { name: 'Comments' })
 const commentsIn = async () => within(await thread()).getAllByRole('listitem')
 
+/**
+ * The card in the thread whose text contains `needle`, once the post has
+ * actually round-tripped.
+ *
+ * ⚠ **`findByText` is the wrong tool for this and looks like the right one.**
+ * The composer is a contentEditable holding the very paragraph being posted, so
+ * `screen.findByText(/Retested on staging/)` resolves *immediately* against the
+ * draft — before the request is sent, and identically if the server refuses it.
+ * A test written that way passes on a build where posting is completely broken,
+ * which is what it was doing here until C-031 tried to assert something about
+ * the posted card and got the editor's own `<p>` back.
+ *
+ * Scoping to the thread's `<li>` is what makes the assertion mean "the server
+ * took it and the thread re-read it", and the `waitFor` is what waits for the
+ * invalidated query rather than the keystroke.
+ */
+async function postedCard(needle: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const found = within(screen.getByRole('list', { name: 'Comments' }))
+      .getAllByRole('listitem')
+      .find((item) => item.textContent?.includes(needle))
+    expect(found).toBeDefined()
+    return found!
+  })
+}
+
 describe('the comment box on S-20', () => {
   /**
    * §7: "the comment box itself is always visible above the tabs so posting
@@ -110,7 +136,10 @@ describe('the comment box on S-20', () => {
     write('<p>Retested on staging, all three flows pass.</p>')
     fireEvent.click(screen.getByRole('button', { name: 'Post' }))
 
-    expect(await screen.findByText(/Retested on staging, all three flows pass/)).toBeInTheDocument()
+    // In the thread's own list, not merely somewhere on the page — see
+    // `postedCard`. The version of this that read `findByText` was matching the
+    // draft still sitting in the composer.
+    expect(await postedCard('Retested on staging, all three flows pass')).toBeInTheDocument()
     // The draft is gone, which is how the box says the server took it.
     await waitFor(() => expect(commentEditor()).toHaveTextContent(''))
   })
@@ -174,9 +203,9 @@ describe('the Comments tab', () => {
   })
 
   /**
-   * Until C-031 draws the colour, the fact still has to be on screen: a comment
-   * going to the client that looks exactly like one that is not is the mistake
-   * §4B.5 exists to prevent.
+   * A comment going to the client that looks exactly like one that is not is
+   * the mistake §4B.5 exists to prevent — so the label, and since C-031 the two
+   * backgrounds §4B.5 specifies as well.
    */
   it('marks a client-visible comment', async () => {
     renderPage()
@@ -191,5 +220,80 @@ describe('the Comments tab', () => {
     // And the internal ones are not marked.
     const reproduced = items.find((item) => item.textContent?.includes('Reproduced on prod'))
     expect(within(reproduced!).queryByText('Client visible')).not.toBeInTheDocument()
+
+    // C-031 · §4B.5's pair, read in the blueprint's own order: "Internal note
+    // (grey background)… Client visible (white)". Before this task both were
+    // white, which meant every comment looked like the safe kind.
+    expect(signoff!.className).toContain('bg-surface')
+    expect(reproduced!.className).toContain('bg-subtle')
+  })
+})
+
+/**
+ * C-031 · the toggle, through the mock server rather than a stubbed `onPost`.
+ *
+ * `CommentBox.test.tsx` proves the composer passes the flag to its callback.
+ * What that cannot see is the rest of the path: that `TicketDetailPage` hands
+ * the composer a client at all, that `useTicketComments` puts `isClientVisible`
+ * in the request body, that the mock stores it and that the thread reads it
+ * back marked. Four seams, each of which has been the one that was wrong in a
+ * feature that unit-tested clean — C-028's delete button worked against the
+ * mock and did nothing in production for three tasks.
+ */
+describe('C-031 · posting a client-visible comment', () => {
+  const clientVisibleRadio = () => screen.getByRole('radio', { name: /Client visible/ })
+
+  it('offers the toggle on a ticket that has a client, defaulted to internal', async () => {
+    renderPage()
+    await waitForTicket()
+
+    expect(screen.getByRole('radiogroup', { name: 'Visibility' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Internal note/ })).toBeChecked()
+    // The client's real name, from the ticket — not the word "client".
+    expect(clientVisibleRadio()).toHaveAccessibleName(/Acme Retail Ltd/)
+  })
+
+  it('posts it client-visible and the thread shows it marked', async () => {
+    renderPage()
+    await waitForTicket()
+    openComments()
+    await screen.findByText(/Reproduced on prod with two Acme accounts/)
+
+    fireEvent.click(clientVisibleRadio())
+    write('<p>Root cause fixed, live at 18:40.</p>')
+    fireEvent.click(screen.getByRole('button', { name: 'Post' }))
+
+    const posted = await postedCard('Root cause fixed, live at 18:40')
+
+    expect(within(posted).getByText('Client visible')).toBeInTheDocument()
+    expect(posted.className).toContain('border-warning')
+    expect(posted.className).toContain('bg-surface')
+  })
+
+  /**
+   * The default is only worth anything if it is also where the composer returns
+   * to. This is the second comment — the one that leaks in the failure §17
+   * describes, because the first was a deliberate client-facing summary and
+   * nothing on screen changed in between.
+   */
+  it('leaves the next comment internal, and posts it internal', async () => {
+    renderPage()
+    await waitForTicket()
+    openComments()
+    await screen.findByText(/Reproduced on prod with two Acme accounts/)
+
+    fireEvent.click(clientVisibleRadio())
+    write('<p>Root cause fixed, live at 18:40.</p>')
+    fireEvent.click(screen.getByRole('button', { name: 'Post' }))
+    await postedCard('Root cause fixed, live at 18:40')
+
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Internal note/ })).toBeChecked())
+
+    write('<p>Stack trace was in the retry handler, not the gateway.</p>')
+    fireEvent.click(screen.getByRole('button', { name: 'Post' }))
+
+    const posted = await postedCard('Stack trace was in the retry handler')
+    expect(within(posted).queryByText('Client visible')).not.toBeInTheDocument()
+    expect(posted.className).toContain('bg-subtle')
   })
 })
