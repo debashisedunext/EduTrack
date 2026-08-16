@@ -2,7 +2,9 @@ package com.edunext.edutrack.api.feature.clients;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.lang.reflect.Method;
@@ -69,15 +71,62 @@ class ClientRoutesTest {
                 .isFalse();
     }
 
-    private static String mappingOf(String methodName) {
-        Method method = Arrays.stream(ClientController.class.getDeclaredMethods())
+    /**
+     * B-026 · the three S-33 operations exist and are mapped where the contract
+     * declares them.
+     *
+     * <p>Not a formality. All six client operations were "declared, mocked and
+     * never mounted" until B-025 — the sixth such set this stream has found — and
+     * B-014's {@code PATCH /users/{userId}/status} is the cautionary case for
+     * exactly this shape: it was in the contract, answered by the MSW mock,
+     * described by three javadocs, and no server ever mounted it, because a
+     * {@code PATCH} to that path met a sibling mapping and came back 405.
+     * {@code MasterRoutesTest} could not have caught it — it asserts where
+     * <em>classes</em> are mounted and that was a missing <em>method</em>. This
+     * is the method-level version of the same claim, added on the day the
+     * methods were written rather than after a gap was found.
+     */
+    @Test
+    @DisplayName("S-33's detail read, create and update are all mounted")
+    void s33OperationsAreMounted() {
+        assertThat(getMappingOf("get"))
+                .as("without GET /clients/{clientId} there is nowhere to obtain the "
+                        + "ETag that updateClient requires as If-Match")
+                .isEqualTo("/{clientId}");
+
+        assertThat(hasMapping("create", PostMapping.class))
+                .as("createClient has been in the contract since D-001")
+                .isTrue();
+
+        assertThat(mappingOf("update")).isEqualTo("/{clientId}");
+    }
+
+    /**
+     * {@code POST /clients} sits on the class mapping with no path of its own,
+     * and {@code PATCH /clients/{clientId}} has one. If either ever grows or
+     * loses a segment the contract stops describing the server.
+     */
+    private static boolean hasMapping(String methodName, Class<PostMapping> annotation) {
+        return method(methodName).getAnnotation(annotation) != null;
+    }
+
+    private static String getMappingOf(String methodName) {
+        GetMapping mapping = method(methodName).getAnnotation(GetMapping.class);
+        assertThat(mapping).as("%s is not a @GetMapping", methodName).isNotNull();
+        return mapping.value().length > 0 ? mapping.value()[0] : mapping.path()[0];
+    }
+
+    private static Method method(String methodName) {
+        return Arrays.stream(ClientController.class.getDeclaredMethods())
                 .filter(m -> m.getName().equals(methodName))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
                         "ClientController." + methodName + " is gone. If it was renamed, "
                                 + "update this test — the routing rule still applies to it."));
+    }
 
-        PatchMapping mapping = method.getAnnotation(PatchMapping.class);
+    private static String mappingOf(String methodName) {
+        PatchMapping mapping = method(methodName).getAnnotation(PatchMapping.class);
         assertThat(mapping).as("%s is not a @PatchMapping", methodName).isNotNull();
         return mapping.value().length > 0 ? mapping.value()[0] : mapping.path()[0];
     }

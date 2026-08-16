@@ -51,6 +51,7 @@ import type { UserRef } from './userRef';
 import type { ClientAllOfSupportPlan } from './clientAllOfSupportPlan';
 import type { ClientAllOfSlaPolicyId } from './clientAllOfSlaPolicyId';
 import type { ClientAllOfTimezone } from './clientAllOfTimezone';
+import type { ClientStatus } from './clientStatus';
 import type { Contact } from './contact';
 import type { ProjectRef } from './projectRef';
 import type { ClientAllOfLastTicketDate } from './clientAllOfLastTicketDate';
@@ -62,6 +63,13 @@ export type ClientAllOf = {
   slaPolicyId?: ClientAllOfSlaPolicyId;
   timezone?: ClientAllOfTimezone;
   isActive?: boolean;
+  /** Populated everywhere. On the **list** row and not only on the
+detail because `isActive` alone cannot render S-32's status
+chip once Prospect exists — a prospect and a contracted client
+are both `isActive: true` and the grid would label them
+identically.
+ */
+  status?: ClientStatus;
   openTicketCount?: number;
   primaryContact?: Contact;
   /** The projects this client is mapped to, from `client_projects` —

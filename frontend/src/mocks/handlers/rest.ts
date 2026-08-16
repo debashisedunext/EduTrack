@@ -1421,7 +1421,11 @@ export const restHandlers = [
         [c.name, c.clientCode, c.domain].some((f) => f.toLowerCase().includes(text)),
       );
     }
-    if (q.get('isActive')) rows = rows.filter((c) => String(c.isActive) === q.get('isActive'));
+    // B-026 · derived from `status`, and it is the derivation the server uses:
+    // `status !== 'INACTIVE'`, so `?isActive=true` returns prospects too.
+    if (q.get('isActive')) {
+      rows = rows.filter((c) => String(c.status !== 'INACTIVE') === q.get('isActive'));
+    }
     // B-025 · S-32's remaining three filters. `projectId` reads the mapping
     // table rather than the project's `clientName`, because the name is a label
     // and the mapping is the relationship.
@@ -1436,7 +1440,9 @@ export const restHandlers = [
     // Case-insensitive, matching what `utf8mb4_0900_ai_ci` does server-side —
     // a mock that is stricter than the database teaches the wrong lesson.
     if (supportPlan) {
-      rows = rows.filter((c) => c.supportPlan.toLowerCase() === supportPlan.toLowerCase());
+      rows = rows.filter(
+        (c) => (c.supportPlan ?? '').toLowerCase() === supportPlan.toLowerCase(),
+      );
     }
     const accountManagerId = q.get('accountManagerId');
     if (accountManagerId) {
@@ -1470,37 +1476,84 @@ export const restHandlers = [
       return problem(404, 'not-found', `These clients do not exist: ${missing.join(', ')}.`);
     }
     const changed = db.clients.filter((c) => ids.includes(c.id));
-    changed.forEach((c) => { c.isActive = isActive; });
+    // Per row, not one status for the batch: a selection containing prospects
+    // must come back with those prospects intact. ClientStatus.activatedFrom.
+    changed.forEach((c) => {
+      c.status = !isActive ? 'INACTIVE' : (c.status !== 'INACTIVE' ? c.status : 'ACTIVE');
+    });
     return ok(changed.map(clientDto));
+  }),
+  // B-026 · S-33's read. Emits the ETag, which is the only place the PATCH
+  // below can obtain the `If-Match` it requires.
+  http.get(url('/clients/:clientId'), ({ params }) => {
+    const c = getDb().clients.find((x) => x.id === Number(params.clientId));
+    if (!c) return notFound('Client');
+    return ok(clientDetailDto(c), undefined, { headers: { ETag: clientEtag(c) } });
   }),
   http.post(url('/clients'), async ({ request }) => {
     const db = getDb();
-    const body = (await request.json()) as Record<string, string>;
-    if (db.clients.some((c) => c.clientCode === body.clientCode)) {
-      return problem(409, 'duplicate', 'That client code is already in use');
+    const body = (await request.json()) as Record<string, unknown>;
+
+    const errors = validateClientWrite(body, null);
+    if (Object.keys(errors).length > 0) {
+      // 409 when a duplicate code is the ONLY failure, 400 otherwise — the
+      // server's rule, mirrored, because a client branching on the status
+      // would otherwise handle a mixed failure as a uniqueness conflict and
+      // never show the other message.
+      return clientWriteProblem(errors);
     }
-    const c = {
-      id: db.clients.length + 1, clientCode: body.clientCode, name: body.name,
-      domain: body.domain ?? '', accountManagerId: Number(body.accountManagerId ?? 2),
-      supportPlan: body.supportPlan ?? 'Standard',
-      timezone: body.timezone ?? 'Asia/Kolkata', isActive: true,
+
+    const c: import('../db').Client = {
+      id: Math.max(0, ...db.clients.map((x) => x.id)) + 1,
+      clientCode: '', name: '', domain: '', accountManagerId: null,
+      supportPlan: null, timezone: 'Asia/Kolkata', status: 'ACTIVE',
     };
+    applyClientWrite(c, body);
     db.clients.push(c);
-    return ok(clientDto(c), undefined, { status: 201 });
+    applyClientProjects(c.id, body);
+
+    return ok(clientDetailDto(c), undefined, {
+      status: 201,
+      headers: { ETag: clientEtag(c) },
+    });
   }),
   http.patch(url('/clients/:clientId'), async ({ params, request }) => {
     const db = getDb();
     const c = db.clients.find((x) => x.id === Number(params.clientId));
+    // 404 before the precondition: answering 428 for a client that does not
+    // exist sends the caller to fetch a tag from a URL that will 404 too.
     if (!c) return notFound('Client');
-    Object.assign(c, await request.json());
-    return ok(clientDto(c));
+
+    const ifMatch = request.headers.get('If-Match');
+    if (!ifMatch) {
+      return problem(428, 'precondition-required',
+        'If-Match is required. GET the client first and send back its ETag.');
+    }
+    if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== clientEtag(c).replace(/"/g, '')) {
+      return problem(412, 'precondition-failed',
+        'This client changed since you read it. Reload and reapply your edit.');
+    }
+
+    const body = (await request.json()) as Record<string, unknown>;
+    const errors = validateClientWrite(body, c.id);
+    if (Object.keys(errors).length > 0) {
+      return clientWriteProblem(errors);
+    }
+
+    applyClientWrite(c, body);
+    applyClientProjects(c.id, body);
+    return ok(clientDetailDto(c), undefined, { headers: { ETag: clientEtag(c) } });
   }),
   http.patch(url('/clients/:clientId/status'), async ({ params, request }) => {
     const db = getDb();
     const c = db.clients.find((x) => x.id === Number(params.clientId));
     if (!c) return notFound('Client');
     const { isActive } = (await request.json()) as { isActive: boolean };
-    c.isActive = isActive;
+    // B-026 · a Prospect is already active by the `status !== 'INACTIVE'`
+    // projection, so activating one leaves it a Prospect. Writing 'ACTIVE'
+    // anyway would let the grid's bulk Activate promote a shortlist of
+    // prospects into contracted clients. Mirrors ClientStatus.activatedFrom.
+    c.status = !isActive ? 'INACTIVE' : (c.status !== 'INACTIVE' ? c.status : 'ACTIVE');
     // Deactivating warns and blocks NEW tickets — it never hides historical ones.
     return ok(clientDto(c));
   }),
@@ -2960,9 +3013,15 @@ function clientDto(c: import('../db').Client) {
   const db = getDb();
   return {
     ...clientRef(c.id, db),
-    domain: c.domain, accountManager: userRef(c.accountManagerId, db),
-    supportPlan: c.supportPlan, slaPolicyId: null, timezone: c.timezone,
-    isActive: c.isActive,
+    domain: c.domain,
+    accountManager: c.accountManagerId == null ? null : userRef(c.accountManagerId, db),
+    supportPlan: c.supportPlan, slaPolicyId: c.slaPolicyId ?? null, timezone: c.timezone,
+    // B-026 · `status !== 'INACTIVE'`, never `status === 'ACTIVE'`. §4B.2's
+    // ticket-form dropdown filters on this boolean, so the narrow reading would
+    // remove every prospect from it — the server's ClientStatus carries the
+    // argument and the mock must not disagree with it.
+    isActive: c.status !== 'INACTIVE',
+    status: c.status,
     openTicketCount: db.tickets.filter((t) => t.clientId === c.id && t.status !== 'CLOSED').length,
     primaryContact: db.contacts.find((x) => x.clientId === c.id && x.isPrimary) ?? null,
     // B-025 · S-32's Projects and Last Ticket columns. Both derived from the
@@ -2982,6 +3041,201 @@ function clientDto(c: import('../db').Client) {
         .sort()
         .at(-1) ?? null,
   };
+}
+
+/**
+ * B-026 · S-33's read — the grid row plus the §4B.2 groups the grid has no
+ * column for, matching `ClientDtos.ClientDetail`.
+ */
+function clientDetailDto(c: import('../db').Client) {
+  const db = getDb();
+  const contacts = db.contacts.filter((x) => x.clientId === c.id);
+  return {
+    ...clientDto(c),
+    shortName: c.shortName ?? null,
+    logoUrl: c.logoUrl ?? null,
+    industry: c.industry ?? null,
+    primaryEmail: c.primaryEmail ?? null,
+    supportEmail: c.supportEmail ?? null,
+    phone: c.phone ?? null,
+    addressLine1: c.addressLine1 ?? null,
+    addressLine2: c.addressLine2 ?? null,
+    city: c.city ?? null,
+    state: c.state ?? null,
+    country: c.country ?? null,
+    postalCode: c.postalCode ?? null,
+    contractStart: c.contractStart ?? null,
+    contractEnd: c.contractEnd ?? null,
+    billingReference: c.billingReference ?? null,
+    billingEmail: c.billingEmail ?? null,
+    notes: c.notes ?? null,
+    tags: c.tags ?? [],
+    defaultProjectId:
+      db.clientProjects.find((cp) => cp.clientId === c.id && cp.isDefault)?.projectId ?? null,
+    contactCount: contacts.length,
+    // B-028's gate, reported and not enforced — the form warns, the ticket
+    // create path is what refuses.
+    hasPrimaryContact: contacts.some((x) => x.isPrimary),
+  };
+}
+
+/**
+ * Content-derived, like the server's — a timestamp tag moves when a save
+ * rewrites identical values, failing an edit that conflicts with nothing.
+ * `contactCount` is in it on purpose: a contact added elsewhere is precisely
+ * the event that makes the client selectable on a ticket.
+ */
+function clientEtag(c: import('../db').Client) {
+  return `"${JSON.stringify(clientDetailDto(c)).length.toString(16)}-${c.clientCode}"`;
+}
+
+/**
+ * The mock's copy of `ClientWriteService`'s validation set.
+ *
+ * Deliberately the same rules and the same field keys, because the form's
+ * "which tab does this error belong to" routing is driven off those keys — a
+ * mock that refused nothing would let a whole class of UI behaviour ship
+ * untested, and one that used different keys would test it against the wrong
+ * contract. Returns a field-keyed map, empty when the body is good.
+ */
+function validateClientWrite(
+  body: Record<string, unknown>,
+  exceptId: number | null,
+): Record<string, string[]> {
+  const db = getDb();
+  const errors: Record<string, string[]> = {};
+
+  const code = String(body.clientCode ?? '').trim().toUpperCase();
+  if (db.clients.some((c) => c.clientCode.toUpperCase() === code && c.id !== exceptId)) {
+    errors.clientCode = [`Client code ${code} is already in use.`];
+  }
+
+  const status = body.status == null ? 'ACTIVE' : String(body.status).toUpperCase();
+  if (!['ACTIVE', 'INACTIVE', 'PROSPECT'].includes(status)) {
+    errors.status = ['Status must be one of [ACTIVE, INACTIVE, PROSPECT].'];
+  }
+
+  if (body.supportPlan != null && String(body.supportPlan) !== '') {
+    const plan = String(body.supportPlan).toUpperCase();
+    if (!['BASIC', 'STANDARD', 'PREMIUM', 'ENTERPRISE'].includes(plan)) {
+      errors.supportPlan = ['Support plan must be one of [BASIC, STANDARD, PREMIUM, ENTERPRISE].'];
+    }
+  }
+
+  const timezone = body.timezone == null ? null : String(body.timezone).trim();
+  if (timezone) {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone: timezone });
+    } catch {
+      errors.timezone = [`'${timezone}' is not a known time zone.`];
+    }
+  }
+
+  if (body.contractStart && body.contractEnd
+      && String(body.contractEnd) < String(body.contractStart)) {
+    errors.contractEnd = ['The contract cannot end before it starts.'];
+  }
+
+  if (body.accountManagerId != null) {
+    const manager = db.users.find((u) => u.id === Number(body.accountManagerId));
+    if (!manager) {
+      errors.accountManagerId = ['That resource does not exist.'];
+    } else if (!manager.isActive) {
+      errors.accountManagerId = [
+        `${manager.displayName} is deactivated and cannot be an account manager.`,
+      ];
+    }
+  }
+
+  const projectIds = Array.isArray(body.projectIds) ? (body.projectIds as number[]) : [];
+  const missing = projectIds.filter((id) => !db.projects.some((p) => p.id === Number(id)));
+  if (missing.length > 0) {
+    errors.projectIds = [`These projects do not exist: ${missing.join(', ')}.`];
+  }
+  if (body.defaultProjectId != null && !projectIds.includes(Number(body.defaultProjectId))) {
+    errors.defaultProjectId = [
+      'The default project must be one of the projects this client is mapped to.',
+    ];
+  }
+
+  return errors;
+}
+
+/**
+ * 409 when a duplicate client code is the **only** failure, 400 otherwise —
+ * `ClientExceptionHandler`'s rule, mirrored.
+ *
+ * Not cosmetic: CONVENTIONS.md §3 says clients branch on the status and the
+ * `type`, so a 409 that also carried a bad timezone would be handled as a
+ * uniqueness conflict and the other message would never be shown.
+ */
+function clientWriteProblem(errors: Record<string, string[]>) {
+  const duplicateOnly = Object.keys(errors).length === 1 && 'clientCode' in errors;
+  return duplicateOnly
+    ? problem(409, 'duplicate', 'Client code already in use', { errors })
+    : problem(400, 'validation-failed', 'The client was not saved', { errors });
+}
+
+/** The `client_projects` replace, mirroring `ClientWriteRepository`. */
+function applyClientProjects(clientId: number, body: Record<string, unknown>) {
+  if (!Array.isArray(body.projectIds)) {
+    // Absent leaves the mapping alone; only an explicit array replaces it.
+    return;
+  }
+  const db = getDb();
+  const ids = [...new Set((body.projectIds as number[]).map(Number))];
+  db.clientProjects = db.clientProjects.filter((cp) => cp.clientId !== clientId);
+  ids.forEach((projectId) => {
+    db.clientProjects.push({
+      clientId,
+      projectId,
+      isDefault: Number(body.defaultProjectId) === projectId,
+    });
+  });
+}
+
+/** Applies an S-33 body to a client row. Absent means cleared — see the server's `apply`. */
+function applyClientWrite(c: import('../db').Client, body: Record<string, unknown>) {
+  const text = (key: string) => {
+    const raw = body[key];
+    if (raw == null) return null;
+    const trimmed = String(raw).trim();
+    return trimmed === '' ? null : trimmed;
+  };
+
+  c.clientCode = String(body.clientCode ?? c.clientCode).trim().toUpperCase();
+  c.name = String(body.name ?? c.name).trim();
+  c.shortName = text('shortName');
+  c.logoUrl = text('logoUrl');
+  c.industry = text('industry');
+  c.status = (body.status == null
+    ? 'ACTIVE'
+    : String(body.status).toUpperCase()) as import('../db').Client['status'];
+  // The same normalisation the server does, so a domain saved here matches an
+  // inbound sender address the way it will in production.
+  c.domain = (text('domain') ?? '').toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/^www\./, '').split('/')[0];
+  c.primaryEmail = text('primaryEmail');
+  c.supportEmail = text('supportEmail');
+  c.phone = text('phone');
+  c.addressLine1 = text('addressLine1');
+  c.addressLine2 = text('addressLine2');
+  c.city = text('city');
+  c.state = text('state');
+  c.country = text('country');
+  c.postalCode = text('postalCode');
+  c.timezone = text('timezone') ?? 'Asia/Kolkata';
+  c.accountManagerId = body.accountManagerId == null ? null : Number(body.accountManagerId);
+  c.contractStart = text('contractStart');
+  c.contractEnd = text('contractEnd');
+  c.supportPlan = body.supportPlan == null || String(body.supportPlan) === ''
+    ? null
+    : String(body.supportPlan).toUpperCase();
+  c.billingReference = text('billingReference');
+  c.billingEmail = text('billingEmail');
+  c.notes = text('notes');
+  c.tags = Array.isArray(body.tags) ? (body.tags as string[]).map((t) => String(t).trim()) : [];
+  c.slaPolicyId = body.slaPolicyId == null ? null : Number(body.slaPolicyId);
 }
 
 /**

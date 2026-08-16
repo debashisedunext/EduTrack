@@ -46,27 +46,159 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ClientWriteRequestShortName } from './clientWriteRequestShortName';
+import type { ClientWriteRequestLogoUrl } from './clientWriteRequestLogoUrl';
+import type { ClientWriteRequestIndustry } from './clientWriteRequestIndustry';
+import type { ClientStatus } from './clientStatus';
 import type { ClientWriteRequestDomain } from './clientWriteRequestDomain';
-import type { ClientWriteRequestAccountManagerId } from './clientWriteRequestAccountManagerId';
-import type { ClientWriteRequestSupportPlan } from './clientWriteRequestSupportPlan';
-import type { ClientWriteRequestSlaPolicyId } from './clientWriteRequestSlaPolicyId';
+import type { ClientWriteRequestPrimaryEmail } from './clientWriteRequestPrimaryEmail';
+import type { ClientWriteRequestSupportEmail } from './clientWriteRequestSupportEmail';
+import type { ClientWriteRequestPhone } from './clientWriteRequestPhone';
+import type { ClientWriteRequestAddressLine1 } from './clientWriteRequestAddressLine1';
+import type { ClientWriteRequestAddressLine2 } from './clientWriteRequestAddressLine2';
+import type { ClientWriteRequestCity } from './clientWriteRequestCity';
+import type { ClientWriteRequestState } from './clientWriteRequestState';
+import type { ClientWriteRequestCountry } from './clientWriteRequestCountry';
+import type { ClientWriteRequestPostalCode } from './clientWriteRequestPostalCode';
 import type { ClientWriteRequestTimezone } from './clientWriteRequestTimezone';
+import type { ClientWriteRequestAccountManagerId } from './clientWriteRequestAccountManagerId';
+import type { ClientWriteRequestContractStart } from './clientWriteRequestContractStart';
+import type { ClientWriteRequestContractEnd } from './clientWriteRequestContractEnd';
+import type { ClientWriteRequestSupportPlan } from './clientWriteRequestSupportPlan';
+import type { ClientWriteRequestBillingReference } from './clientWriteRequestBillingReference';
+import type { ClientWriteRequestBillingEmail } from './clientWriteRequestBillingEmail';
+import type { ClientWriteRequestNotes } from './clientWriteRequestNotes';
+import type { ClientWriteRequestDefaultProjectId } from './clientWriteRequestDefaultProjectId';
+import type { ClientWriteRequestSlaPolicyId } from './clientWriteRequestSlaPolicyId';
 
+/**
+ * B-026 · S-33's four tabs, in one body. The same shape serves `POST` and
+`PATCH` because the form submits every field on every save and **no
+client field is immutable** — unlike the project master, which needed a
+separate patch schema to keep an immutable `projectCode` off it.
+
+`maxLength` on `clientCode` and `name` was `50` and `200` and the
+columns are `VARCHAR(20)` and `VARCHAR(150)`. The contract was
+accepting values MySQL would refuse, which nothing had discovered
+because no server implemented the operation. Corrected to the columns.
+
+ */
 export interface ClientWriteRequest {
   /**
+   * Unique, case-insensitively — the column collates
+`utf8mb4_0900_ai_ci`. Normalised to upper case on the way in, so
+`acme` and `ACME` are one client and not a 409 an admin has to
+interpret.
+
+**This is B-035's upsert key.** Changing it means the next import
+carrying the old code creates a second client rather than updating
+this one. Editable anyway — a code typed wrong on day one has to be
+fixable — with the consequence stated on the form at the field.
+
    * @minLength 2
-   * @maxLength 50
+   * @maxLength 20
+   * @pattern ^[A-Za-z0-9][A-Za-z0-9_-]*$
    */
   clientCode: string;
   /**
    * @minLength 1
-   * @maxLength 200
+   * @maxLength 150
    */
   name: string;
+  /** @maxLength 60 */
+  shortName?: ClientWriteRequestShortName;
+  /**
+   * A URL. The row is read on every grid page; image bytes are not.
+   * @maxLength 500
+   */
+  logoUrl?: ClientWriteRequestLogoUrl;
+  /** @maxLength 80 */
+  industry?: ClientWriteRequestIndustry;
+  status?: ClientStatus;
+  /**
+   * Website domain. D-039 matches inbound mail against it, which is why
+a scheme or a `www.` prefix is stripped rather than stored — a
+client saved as `https://acme.example/` would match no sender
+address at all.
+
+   * @maxLength 120
+   */
   domain?: ClientWriteRequestDomain;
-  accountManagerId?: ClientWriteRequestAccountManagerId;
-  supportPlan?: ClientWriteRequestSupportPlan;
-  slaPolicyId?: ClientWriteRequestSlaPolicyId;
+  /** @maxLength 150 */
+  primaryEmail?: ClientWriteRequestPrimaryEmail;
+  /**
+   * Used for email-to-ticket matching (§4B.2, D-039).
+   * @maxLength 150
+   */
+  supportEmail?: ClientWriteRequestSupportEmail;
+  /** @maxLength 30 */
+  phone?: ClientWriteRequestPhone;
+  /** @maxLength 150 */
+  addressLine1?: ClientWriteRequestAddressLine1;
+  /** @maxLength 150 */
+  addressLine2?: ClientWriteRequestAddressLine2;
+  /** @maxLength 80 */
+  city?: ClientWriteRequestCity;
+  /** @maxLength 80 */
+  state?: ClientWriteRequestState;
+  /** @maxLength 80 */
+  country?: ClientWriteRequestCountry;
+  /** @maxLength 20 */
+  postalCode?: ClientWriteRequestPostalCode;
+  /**
+   * An IANA zone id, validated against `ZoneId`. Presentation only —
+every instant in the schema is UTC (PLAN.md §3.1). Defaults to
+`Asia/Kolkata`, which is the column default and not a guess made
+here.
+
+   * @maxLength 50
+   */
   timezone?: ClientWriteRequestTimezone;
+  /** Must name an **active** resource. The role is deliberately not
+checked — B-016 made the same call for a project manager, and a
+hardcoded role set is what B-015 removed from `ResourceController`.
+ */
+  accountManagerId?: ClientWriteRequestAccountManagerId;
+  contractStart?: ClientWriteRequestContractStart;
+  /** Must not precede `contractStart`. */
+  contractEnd?: ClientWriteRequestContractEnd;
+  supportPlan?: ClientWriteRequestSupportPlan;
+  /** @maxLength 60 */
+  billingReference?: ClientWriteRequestBillingReference;
+  /**
+   * Distinct from `primaryEmail` and `supportEmail`. Collapsing the
+three sends a support auto-reply to accounts payable.
+
+   * @maxLength 150
+   */
+  billingEmail?: ClientWriteRequestBillingEmail;
+  notes?: ClientWriteRequestNotes;
+  /**
+   * Free vocabulary. `ck_clients_tags` constrains the shape — an array
+of strings — and not the values, which is the point of the field.
+
+   * @maxItems 20
+   */
+  tags?: string[];
+  /** Replaces the whole `client_projects` mapping. Sending it empty
+unmaps the client from every project, which is a real thing to
+want and is why an *absent* array and an *empty* one have to mean
+different things — absent leaves the mapping alone.
+ */
   projectIds?: number[];
+  /** `client_projects.is_default`. Must be one of `projectIds`; a default
+the client is not mapped to is a row the ticket form can never
+offer.
+ */
+  defaultProjectId?: ClientWriteRequestDefaultProjectId;
+  /** Stored, and **read by nothing today**. C-012's `PlannedCloseDate`
+ladder resolves org → project → task type and never consults
+`clients.sla_policy_id`; B-018's matrix is where a project's SLA is
+actually configured. Kept on the wire because the column exists and
+B-035's import writes it, and rendered read-only on the form rather
+than as a picker — a control whose only effect is to write a number
+nothing reads is worse than no control. **Flagged**: making it
+resolve is a C-012 change, not a masters one.
+ */
+  slaPolicyId?: ClientWriteRequestSlaPolicyId;
 }

@@ -304,6 +304,16 @@ final class PermissionMatrix {
             {"clientIds":[1],"isActive":false}""";
 
     /**
+     * B-026 · {@code ClientDtos.ClientWriteRequest}. Only {@code clientCode} and
+     * {@code name} are {@code @NotBlank}; every other S-33 field is optional, so
+     * this is the smallest body that reaches the authorization check rather than
+     * dying at Bean Validation first — which is the property this matrix needs,
+     * since a 400 proves nothing about who was allowed through.
+     */
+    private static final String CLIENT_WRITE = """
+            {"clientCode":"NEWCO","name":"Newco Ltd"}""";
+
+    /**
      * The {@code *Patch} DTOs have every field optional — deliberately, so a
      * partial update is possible at all — so an empty object is valid and
      * reaches authorisation.
@@ -721,6 +731,13 @@ final class PermissionMatrix {
             // ticket raised against the client already shows.
             everyRole("GET", "/api/v1/clients"),
             everyRole("GET", "/api/v1/clients/{clientId}/contacts"),
+            // B-026 · the S-33 detail read carries the same argument as the list
+            // it is opened from. A role that can enumerate every client through
+            // §4B.2's ticket-form dropdown learns nothing new by reading one, and
+            // making the detail Admin-only would mean the client 360 view (S-32)
+            // could not render a header for a PM looking at their own project's
+            // client.
+            everyRole("GET", "/api/v1/clients/{clientId}"),
             // The writes are master.write — Admin alone. §2 row 51 reads "Master
             // data (task types, SLA, workflow, holidays)" ✅ Admin / ❌ the other
             // five, and §7.4 heads the module "Master data module (Admin only)"
@@ -732,6 +749,8 @@ final class PermissionMatrix {
             // absence is the design: tickets, contacts and project mappings all
             // point at `clients`, and blueprint §4B.2 says deactivating must
             // never hide historical tickets. Going away is the status PATCH.
+            adminOnly("POST", "/api/v1/clients", CLIENT_WRITE),
+            adminOnly("PATCH", "/api/v1/clients/{clientId}", CLIENT_WRITE),
             adminOnly("PATCH", "/api/v1/clients/bulk-status", CLIENT_BULK_STATUS),
             adminOnly("PATCH", "/api/v1/clients/{clientId}/status", CLIENT_STATUS),
 

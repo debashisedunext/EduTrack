@@ -96,6 +96,7 @@ export const listClientsResponse = zod.object({
   "slaPolicyId": zod.number().nullish(),
   "timezone": zod.string().nullish(),
   "isActive": zod.boolean().optional(),
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
   "openTicketCount": zod.number().optional(),
   "primaryContact": zod.object({
   "id": zod.number().optional(),
@@ -122,29 +123,101 @@ export const listClientsResponse = zod.object({
 })
 
 /**
- * @summary Create a client
+ * B-026 · S-33's four-tab form, creating.
+
+**A created client has no contacts, and is therefore not yet selectable
+on a ticket** — B-028's rule is "at least one primary contact before the
+client can be chosen". That is not enforced here (there is nothing to
+enforce it against on a create) and the form says so on its Contacts
+tab; the contacts themselves are `POST /clients/{clientId}/contacts`.
+
+`clientCode` is unique, case-insensitively — `clients.client_code`
+collates `utf8mb4_0900_ai_ci`, so `acme` and `ACME` are one code as far
+as `uq_clients_code` is concerned, and the service refuses the second
+with a field-keyed `409` rather than letting the index refuse it with a
+message naming a MySQL constraint.
+
+ * @summary Create a client (S-33)
  */
 export const createClientHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
 })
 
 export const createClientBodyClientCodeMin = 2;
-export const createClientBodyClientCodeMax = 50;
+export const createClientBodyClientCodeMax = 20;
 
-export const createClientBodyNameMax = 200;
+
+export const createClientBodyClientCodeRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9_-]\*$');
+export const createClientBodyNameMax = 150;
+
+export const createClientBodyShortNameMax = 60;
+
+export const createClientBodyLogoUrlMax = 500;
+
+export const createClientBodyIndustryMax = 80;
+
+export const createClientBodyDomainMax = 120;
+
+export const createClientBodyPrimaryEmailMax = 150;
+
+export const createClientBodySupportEmailMax = 150;
+
+export const createClientBodyPhoneMax = 30;
+
+export const createClientBodyAddressLine1Max = 150;
+
+export const createClientBodyAddressLine2Max = 150;
+
+export const createClientBodyCityMax = 80;
+
+export const createClientBodyStateMax = 80;
+
+export const createClientBodyCountryMax = 80;
+
+export const createClientBodyPostalCodeMax = 20;
+
+export const createClientBodyTimezoneMax = 50;
+
+export const createClientBodyBillingReferenceMax = 60;
+
+export const createClientBodyBillingEmailMax = 150;
+
+export const createClientBodyTagsItemMax = 40;
+
+export const createClientBodyTagsMax = 20;
 
 
 
 export const createClientBody = zod.object({
-  "clientCode": zod.string().min(createClientBodyClientCodeMin).max(createClientBodyClientCodeMax),
+  "clientCode": zod.string().min(createClientBodyClientCodeMin).max(createClientBodyClientCodeMax).regex(createClientBodyClientCodeRegExp).describe('Unique, case-insensitively — the column collates\n`utf8mb4_0900_ai_ci`. Normalised to upper case on the way in, so\n`acme` and `ACME` are one client and not a 409 an admin has to\ninterpret.\n\n\*\*This is B-035\'s upsert key.\*\* Changing it means the next import\ncarrying the old code creates a second client rather than updating\nthis one. Editable anyway — a code typed wrong on day one has to be\nfixable — with the consequence stated on the form at the field.\n'),
   "name": zod.string().min(1).max(createClientBodyNameMax),
-  "domain": zod.string().nullish(),
-  "accountManagerId": zod.number().nullish(),
-  "supportPlan": zod.string().nullish(),
-  "slaPolicyId": zod.number().nullish(),
-  "timezone": zod.string().nullish(),
-  "projectIds": zod.array(zod.number()).optional()
-})
+  "shortName": zod.string().max(createClientBodyShortNameMax).nullish(),
+  "logoUrl": zod.string().max(createClientBodyLogoUrlMax).nullish().describe('A URL. The row is read on every grid page; image bytes are not.'),
+  "industry": zod.string().max(createClientBodyIndustryMax).nullish(),
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
+  "domain": zod.string().max(createClientBodyDomainMax).nullish().describe('Website domain. D-039 matches inbound mail against it, which is why\na scheme or a `www.` prefix is stripped rather than stored — a\nclient saved as `https:\/\/acme.example\/` would match no sender\naddress at all.\n'),
+  "primaryEmail": zod.string().email().max(createClientBodyPrimaryEmailMax).nullish(),
+  "supportEmail": zod.string().email().max(createClientBodySupportEmailMax).nullish().describe('Used for email-to-ticket matching (§4B.2, D-039).'),
+  "phone": zod.string().max(createClientBodyPhoneMax).nullish(),
+  "addressLine1": zod.string().max(createClientBodyAddressLine1Max).nullish(),
+  "addressLine2": zod.string().max(createClientBodyAddressLine2Max).nullish(),
+  "city": zod.string().max(createClientBodyCityMax).nullish(),
+  "state": zod.string().max(createClientBodyStateMax).nullish(),
+  "country": zod.string().max(createClientBodyCountryMax).nullish(),
+  "postalCode": zod.string().max(createClientBodyPostalCodeMax).nullish(),
+  "timezone": zod.string().max(createClientBodyTimezoneMax).nullish().describe('An IANA zone id, validated against `ZoneId`. Presentation only —\nevery instant in the schema is UTC (PLAN.md §3.1). Defaults to\n`Asia\/Kolkata`, which is the column default and not a guess made\nhere.\n'),
+  "accountManagerId": zod.number().nullish().describe('Must name an \*\*active\*\* resource. The role is deliberately not\nchecked — B-016 made the same call for a project manager, and a\nhardcoded role set is what B-015 removed from `ResourceController`.\n'),
+  "contractStart": zod.string().date().nullish(),
+  "contractEnd": zod.string().date().nullish().describe('Must not precede `contractStart`.'),
+  "supportPlan": zod.union([zod.enum(['BASIC', 'STANDARD', 'PREMIUM', 'ENTERPRISE']).describe('B-026 · uppercase codes, which is what `ReferenceDataFixture` and the\nserver have always stored. Blueprint §4B.2\'s Commercial group names\nStandard \/ Premium \/ Enterprise and A-006\'s column comment names\n`BASIC|STANDARD|PREMIUM|…`; the union is the vocabulary, because Basic\nis a plan eight seeded clients are already on and dropping it would\norphan them.\n\n\*\*No `CHECK` backs this\*\*, deliberately, and it is not an oversight:\nB-035\'s import is a second writer, and B-011 established that a MySQL\n`CHECK` violation arrives as `UncategorizedSQLException` — a 500, not a\nfield-keyed 400. A rejected import row must say which cell was wrong.\nThe service validates it; `ck_clients_status` exists because the status\nvocabulary is closed by the product and this one is closed by us.\n'),zod.null()]).optional(),
+  "billingReference": zod.string().max(createClientBodyBillingReferenceMax).nullish(),
+  "billingEmail": zod.string().email().max(createClientBodyBillingEmailMax).nullish().describe('Distinct from `primaryEmail` and `supportEmail`. Collapsing the\nthree sends a support auto-reply to accounts payable.\n'),
+  "notes": zod.string().nullish(),
+  "tags": zod.array(zod.string().min(1).max(createClientBodyTagsItemMax)).max(createClientBodyTagsMax).optional().describe('Free vocabulary. `ck_clients_tags` constrains the shape — an array\nof strings — and not the values, which is the point of the field.\n'),
+  "projectIds": zod.array(zod.number()).optional().describe('Replaces the whole `client_projects` mapping. Sending it empty\nunmaps the client from every project, which is a real thing to\nwant and is why an \*absent\* array and an \*empty\* one have to mean\ndifferent things — absent leaves the mapping alone.\n'),
+  "defaultProjectId": zod.number().nullish().describe('`client_projects.is_default`. Must be one of `projectIds`; a default\nthe client is not mapped to is a row the ticket form can never\noffer.\n'),
+  "slaPolicyId": zod.number().nullish().describe('Stored, and \*\*read by nothing today\*\*. C-012\'s `PlannedCloseDate`\nladder resolves org → project → task type and never consults\n`clients.sla_policy_id`; B-018\'s matrix is where a project\'s SLA is\nactually configured. Kept on the wire because the column exists and\nB-035\'s import writes it, and rendered read-only on the form rather\nthan as a picker — a control whose only effect is to write a number\nnothing reads is worse than no control. \*\*Flagged\*\*: making it\nresolve is a C-012 change, not a masters one.\n')
+}).describe('B-026 · S-33\'s four tabs, in one body. The same shape serves `POST` and\n`PATCH` because the form submits every field on every save and \*\*no\nclient field is immutable\*\* — unlike the project master, which needed a\nseparate patch schema to keep an immutable `projectCode` off it.\n\n`maxLength` on `clientCode` and `name` was `50` and `200` and the\ncolumns are `VARCHAR(20)` and `VARCHAR(150)`. The contract was\naccepting values MySQL would refuse, which nothing had discovered\nbecause no server implemented the operation. Corrected to the columns.\n')
 
 /**
  * S-32's bulk action. One request rather than one per selected row: fifty
@@ -191,6 +264,7 @@ export const setClientStatusBulkResponse = zod.object({
   "slaPolicyId": zod.number().nullish(),
   "timezone": zod.string().nullish(),
   "isActive": zod.boolean().optional(),
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
   "openTicketCount": zod.number().optional(),
   "primaryContact": zod.object({
   "id": zod.number().optional(),
@@ -217,7 +291,112 @@ export const setClientStatusBulkResponse = zod.object({
 })
 
 /**
- * @summary Update a client
+ * B-026 · the read half of the S-33 form, and **the only place the `ETag`
+that `PATCH` requires can be obtained**. Without it the write below
+declared a precondition with nowhere to satisfy it — the same gap B-011
+closed for `GET /users/{userId}` and B-016 for `GET /projects/{id}`.
+
+Carries the whole §4B.2 field set, which the list row deliberately does
+not: the grid renders nine columns and inlining twenty-five fields per
+row would be weight on every page of it.
+
+**All six roles**, like `listClients` beside it — §4B.2's ticket-form
+dropdown is that operation, and a role that can list clients learns
+nothing new from reading one.
+
+ * @summary One client (S-33)
+ */
+export const getClientParams = zod.object({
+  "clientId": zod.number()
+})
+
+export const getClientResponseDataProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
+export const getClientResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number().optional(),
+  "clientCode": zod.string().optional(),
+  "name": zod.string().optional()
+}).and(zod.object({
+  "domain": zod.string().nullish(),
+  "accountManager": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "supportPlan": zod.string().nullish(),
+  "slaPolicyId": zod.number().nullish(),
+  "timezone": zod.string().nullish(),
+  "isActive": zod.boolean().optional(),
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
+  "openTicketCount": zod.number().optional(),
+  "primaryContact": zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "email": zod.string().email().optional(),
+  "phone": zod.string().nullish(),
+  "isPrimary": zod.boolean().optional(),
+  "notificationOptIn": zod.boolean().optional(),
+  "portalAccess": zod.boolean().optional()
+}).optional(),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(getClientResponseDataProjectsItemColourTagRegExp).nullish()
+}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('The projects this client is mapped to, from `client_projects` —\nS-32\'s Projects column and the source of its project filter.\nEmpty rather than absent for a client mapped to none.\n'),
+  "lastTicketDate": zod.string().datetime({}).nullish().describe('When this client last had a ticket raised. Null for a client\nwith none — a new one, or one whose relationship never started.\nRead from the ticket rollup, never a per-row `COUNT(\*)`.\n')
+})).and(zod.object({
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
+  "shortName": zod.string().nullish(),
+  "logoUrl": zod.string().nullish(),
+  "industry": zod.string().nullish(),
+  "primaryEmail": zod.string().nullish(),
+  "supportEmail": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "addressLine1": zod.string().nullish(),
+  "addressLine2": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "country": zod.string().nullish(),
+  "postalCode": zod.string().nullish(),
+  "contractStart": zod.string().date().nullish(),
+  "contractEnd": zod.string().date().nullish(),
+  "billingReference": zod.string().nullish(),
+  "billingEmail": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "tags": zod.array(zod.string()).optional(),
+  "defaultProjectId": zod.number().nullish().describe('The `client_projects` row flagged `is_default`. Null when the\nclient is mapped to projects but none is marked, which is the\nstate every imported client starts in.\n'),
+  "contactCount": zod.number().optional().describe('How many contacts this client has. On the detail so the form\'s\nContacts tab can say what it is showing before the tab is\nopened, and so B-028\'s \"at least one primary contact\" rule has\na number to state rather than an abstraction.\n'),
+  "hasPrimaryContact": zod.boolean().optional().describe('B-028\'s gate, reported rather than enforced here: a client\nwithout one is \*\*not selectable on a ticket\*\*. The form says so\non the Contacts tab. Enforcing it on the ticket create path is\nB-028\'s, the way B-029\'s block on new tickets is B-029\'s.\n')
+}).describe('B-026 · the S-33 form\'s read. Everything on `Client` plus the\n§4B.2 groups the grid has no column for.\n\n\*\*A separate schema rather than more fields on `Client`.\*\* The list\ninlines a row per client per page; twenty-five more fields on it\nwould be paid for by the grid, the ticket form\'s client dropdown\nand every other `listClients` caller, none of which render them.\nThe same split `UserDetail`\/`User` and `ProjectDetail`\/`Project`\nalready make.\n'))
+})
+
+/**
+ * B-026 · S-33's four-tab form, saving.
+
+**The body is the whole representation, not a sparse patch**, and the
+verb stays `PATCH` because that is what the contract has declared since
+D-001 and what the generated client already emits. S-33 submits every
+field on every save, so `ClientWriteRequest` is the shape both verbs
+take — unlike the project master next door, which needed a separate
+`ProjectPatchRequest` because `projectCode` is immutable and requiring
+it on a patch would have made every edit to a live project a `409`.
+**No client field is immutable**, so no such split is needed here.
+
+`client_code` is editable, with one consequence worth knowing: it is
+B-035's upsert key, so a code changed here means the next Excel import
+carrying the *old* code creates a second client rather than updating
+this one. The form says so at the field.
+
+`If-Match` is **required**. A write without one is `428`, not a silent
+overwrite — treating a missing precondition as "no conflict" protects
+only the callers that already opted in.
+
+ * @summary Update a client (S-33)
  */
 export const updateClientParams = zod.object({
   "clientId": zod.number()
@@ -228,22 +407,80 @@ export const updateClientHeader = zod.object({
 })
 
 export const updateClientBodyClientCodeMin = 2;
-export const updateClientBodyClientCodeMax = 50;
+export const updateClientBodyClientCodeMax = 20;
 
-export const updateClientBodyNameMax = 200;
+
+export const updateClientBodyClientCodeRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9_-]\*$');
+export const updateClientBodyNameMax = 150;
+
+export const updateClientBodyShortNameMax = 60;
+
+export const updateClientBodyLogoUrlMax = 500;
+
+export const updateClientBodyIndustryMax = 80;
+
+export const updateClientBodyDomainMax = 120;
+
+export const updateClientBodyPrimaryEmailMax = 150;
+
+export const updateClientBodySupportEmailMax = 150;
+
+export const updateClientBodyPhoneMax = 30;
+
+export const updateClientBodyAddressLine1Max = 150;
+
+export const updateClientBodyAddressLine2Max = 150;
+
+export const updateClientBodyCityMax = 80;
+
+export const updateClientBodyStateMax = 80;
+
+export const updateClientBodyCountryMax = 80;
+
+export const updateClientBodyPostalCodeMax = 20;
+
+export const updateClientBodyTimezoneMax = 50;
+
+export const updateClientBodyBillingReferenceMax = 60;
+
+export const updateClientBodyBillingEmailMax = 150;
+
+export const updateClientBodyTagsItemMax = 40;
+
+export const updateClientBodyTagsMax = 20;
 
 
 
 export const updateClientBody = zod.object({
-  "clientCode": zod.string().min(updateClientBodyClientCodeMin).max(updateClientBodyClientCodeMax),
+  "clientCode": zod.string().min(updateClientBodyClientCodeMin).max(updateClientBodyClientCodeMax).regex(updateClientBodyClientCodeRegExp).describe('Unique, case-insensitively — the column collates\n`utf8mb4_0900_ai_ci`. Normalised to upper case on the way in, so\n`acme` and `ACME` are one client and not a 409 an admin has to\ninterpret.\n\n\*\*This is B-035\'s upsert key.\*\* Changing it means the next import\ncarrying the old code creates a second client rather than updating\nthis one. Editable anyway — a code typed wrong on day one has to be\nfixable — with the consequence stated on the form at the field.\n'),
   "name": zod.string().min(1).max(updateClientBodyNameMax),
-  "domain": zod.string().nullish(),
-  "accountManagerId": zod.number().nullish(),
-  "supportPlan": zod.string().nullish(),
-  "slaPolicyId": zod.number().nullish(),
-  "timezone": zod.string().nullish(),
-  "projectIds": zod.array(zod.number()).optional()
-})
+  "shortName": zod.string().max(updateClientBodyShortNameMax).nullish(),
+  "logoUrl": zod.string().max(updateClientBodyLogoUrlMax).nullish().describe('A URL. The row is read on every grid page; image bytes are not.'),
+  "industry": zod.string().max(updateClientBodyIndustryMax).nullish(),
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
+  "domain": zod.string().max(updateClientBodyDomainMax).nullish().describe('Website domain. D-039 matches inbound mail against it, which is why\na scheme or a `www.` prefix is stripped rather than stored — a\nclient saved as `https:\/\/acme.example\/` would match no sender\naddress at all.\n'),
+  "primaryEmail": zod.string().email().max(updateClientBodyPrimaryEmailMax).nullish(),
+  "supportEmail": zod.string().email().max(updateClientBodySupportEmailMax).nullish().describe('Used for email-to-ticket matching (§4B.2, D-039).'),
+  "phone": zod.string().max(updateClientBodyPhoneMax).nullish(),
+  "addressLine1": zod.string().max(updateClientBodyAddressLine1Max).nullish(),
+  "addressLine2": zod.string().max(updateClientBodyAddressLine2Max).nullish(),
+  "city": zod.string().max(updateClientBodyCityMax).nullish(),
+  "state": zod.string().max(updateClientBodyStateMax).nullish(),
+  "country": zod.string().max(updateClientBodyCountryMax).nullish(),
+  "postalCode": zod.string().max(updateClientBodyPostalCodeMax).nullish(),
+  "timezone": zod.string().max(updateClientBodyTimezoneMax).nullish().describe('An IANA zone id, validated against `ZoneId`. Presentation only —\nevery instant in the schema is UTC (PLAN.md §3.1). Defaults to\n`Asia\/Kolkata`, which is the column default and not a guess made\nhere.\n'),
+  "accountManagerId": zod.number().nullish().describe('Must name an \*\*active\*\* resource. The role is deliberately not\nchecked — B-016 made the same call for a project manager, and a\nhardcoded role set is what B-015 removed from `ResourceController`.\n'),
+  "contractStart": zod.string().date().nullish(),
+  "contractEnd": zod.string().date().nullish().describe('Must not precede `contractStart`.'),
+  "supportPlan": zod.union([zod.enum(['BASIC', 'STANDARD', 'PREMIUM', 'ENTERPRISE']).describe('B-026 · uppercase codes, which is what `ReferenceDataFixture` and the\nserver have always stored. Blueprint §4B.2\'s Commercial group names\nStandard \/ Premium \/ Enterprise and A-006\'s column comment names\n`BASIC|STANDARD|PREMIUM|…`; the union is the vocabulary, because Basic\nis a plan eight seeded clients are already on and dropping it would\norphan them.\n\n\*\*No `CHECK` backs this\*\*, deliberately, and it is not an oversight:\nB-035\'s import is a second writer, and B-011 established that a MySQL\n`CHECK` violation arrives as `UncategorizedSQLException` — a 500, not a\nfield-keyed 400. A rejected import row must say which cell was wrong.\nThe service validates it; `ck_clients_status` exists because the status\nvocabulary is closed by the product and this one is closed by us.\n'),zod.null()]).optional(),
+  "billingReference": zod.string().max(updateClientBodyBillingReferenceMax).nullish(),
+  "billingEmail": zod.string().email().max(updateClientBodyBillingEmailMax).nullish().describe('Distinct from `primaryEmail` and `supportEmail`. Collapsing the\nthree sends a support auto-reply to accounts payable.\n'),
+  "notes": zod.string().nullish(),
+  "tags": zod.array(zod.string().min(1).max(updateClientBodyTagsItemMax)).max(updateClientBodyTagsMax).optional().describe('Free vocabulary. `ck_clients_tags` constrains the shape — an array\nof strings — and not the values, which is the point of the field.\n'),
+  "projectIds": zod.array(zod.number()).optional().describe('Replaces the whole `client_projects` mapping. Sending it empty\nunmaps the client from every project, which is a real thing to\nwant and is why an \*absent\* array and an \*empty\* one have to mean\ndifferent things — absent leaves the mapping alone.\n'),
+  "defaultProjectId": zod.number().nullish().describe('`client_projects.is_default`. Must be one of `projectIds`; a default\nthe client is not mapped to is a row the ticket form can never\noffer.\n'),
+  "slaPolicyId": zod.number().nullish().describe('Stored, and \*\*read by nothing today\*\*. C-012\'s `PlannedCloseDate`\nladder resolves org → project → task type and never consults\n`clients.sla_policy_id`; B-018\'s matrix is where a project\'s SLA is\nactually configured. Kept on the wire because the column exists and\nB-035\'s import writes it, and rendered read-only on the form rather\nthan as a picker — a control whose only effect is to write a number\nnothing reads is worse than no control. \*\*Flagged\*\*: making it\nresolve is a C-012 change, not a masters one.\n')
+}).describe('B-026 · S-33\'s four tabs, in one body. The same shape serves `POST` and\n`PATCH` because the form submits every field on every save and \*\*no\nclient field is immutable\*\* — unlike the project master, which needed a\nseparate patch schema to keep an immutable `projectCode` off it.\n\n`maxLength` on `clientCode` and `name` was `50` and `200` and the\ncolumns are `VARCHAR(20)` and `VARCHAR(150)`. The contract was\naccepting values MySQL would refuse, which nothing had discovered\nbecause no server implemented the operation. Corrected to the columns.\n')
 
 export const updateClientResponseDataProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
 
@@ -266,6 +503,7 @@ export const updateClientResponse = zod.object({
   "slaPolicyId": zod.number().nullish(),
   "timezone": zod.string().nullish(),
   "isActive": zod.boolean().optional(),
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
   "openTicketCount": zod.number().optional(),
   "primaryContact": zod.object({
   "id": zod.number().optional(),
@@ -283,7 +521,30 @@ export const updateClientResponse = zod.object({
   "colourTag": zod.string().regex(updateClientResponseDataProjectsItemColourTagRegExp).nullish()
 }).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('The projects this client is mapped to, from `client_projects` —\nS-32\'s Projects column and the source of its project filter.\nEmpty rather than absent for a client mapped to none.\n'),
   "lastTicketDate": zod.string().datetime({}).nullish().describe('When this client last had a ticket raised. Null for a client\nwith none — a new one, or one whose relationship never started.\nRead from the ticket rollup, never a per-row `COUNT(\*)`.\n')
-}))
+})).and(zod.object({
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
+  "shortName": zod.string().nullish(),
+  "logoUrl": zod.string().nullish(),
+  "industry": zod.string().nullish(),
+  "primaryEmail": zod.string().nullish(),
+  "supportEmail": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "addressLine1": zod.string().nullish(),
+  "addressLine2": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "country": zod.string().nullish(),
+  "postalCode": zod.string().nullish(),
+  "contractStart": zod.string().date().nullish(),
+  "contractEnd": zod.string().date().nullish(),
+  "billingReference": zod.string().nullish(),
+  "billingEmail": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "tags": zod.array(zod.string()).optional(),
+  "defaultProjectId": zod.number().nullish().describe('The `client_projects` row flagged `is_default`. Null when the\nclient is mapped to projects but none is marked, which is the\nstate every imported client starts in.\n'),
+  "contactCount": zod.number().optional().describe('How many contacts this client has. On the detail so the form\'s\nContacts tab can say what it is showing before the tab is\nopened, and so B-028\'s \"at least one primary contact\" rule has\na number to state rather than an abstraction.\n'),
+  "hasPrimaryContact": zod.boolean().optional().describe('B-028\'s gate, reported rather than enforced here: a client\nwithout one is \*\*not selectable on a ticket\*\*. The form says so\non the Contacts tab. Enforcing it on the ticket create path is\nB-028\'s, the way B-029\'s block on new tickets is B-029\'s.\n')
+}).describe('B-026 · the S-33 form\'s read. Everything on `Client` plus the\n§4B.2 groups the grid has no column for.\n\n\*\*A separate schema rather than more fields on `Client`.\*\* The list\ninlines a row per client per page; twenty-five more fields on it\nwould be paid for by the grid, the ticket form\'s client dropdown\nand every other `listClients` caller, none of which render them.\nThe same split `UserDetail`\/`User` and `ProjectDetail`\/`Project`\nalready make.\n'))
 })
 
 /**
@@ -322,6 +583,7 @@ export const setClientStatusResponse = zod.object({
   "slaPolicyId": zod.number().nullish(),
   "timezone": zod.string().nullish(),
   "isActive": zod.boolean().optional(),
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
   "openTicketCount": zod.number().optional(),
   "primaryContact": zod.object({
   "id": zod.number().optional(),
@@ -445,6 +707,7 @@ export const getClient360Response = zod.object({
   "slaPolicyId": zod.number().nullish(),
   "timezone": zod.string().nullish(),
   "isActive": zod.boolean().optional(),
+  "status": zod.enum(['ACTIVE', 'INACTIVE', 'PROSPECT']).optional().describe('B-026 · blueprint §4B.2\'s Identity group, held by `ck_clients_status`.\n\n\*\*`isActive` derives as `status <> \'INACTIVE\'`, not `status =\n\'ACTIVE\'`.\*\* §4B.2 puts a client dropdown on the ticket create form\nfiltered on that boolean, so the narrower reading would have made every\nProspect vanish from the form the moment this field shipped, with\nnothing on screen saying why — the call B-016 made on `Project.isActive`\nfor the same reason, one master over.\n\nThe consequence for `PATCH \/clients\/{clientId}\/status`: `isActive: true`\nagainst a Prospect is a \*\*no-op\*\*, because a Prospect is already active\nby that projection. Silently rewriting it to `ACTIVE` would let the\ngrid\'s bulk Activate promote a prospect to a contracted client, which\nis a commercial fact and not a checkbox. Setting `ACTIVE` explicitly\nthrough this field is how a prospect is converted.\n'),
   "openTicketCount": zod.number().optional(),
   "primaryContact": zod.object({
   "id": zod.number().optional(),

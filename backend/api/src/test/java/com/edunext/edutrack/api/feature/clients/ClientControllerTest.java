@@ -32,12 +32,14 @@ import static org.mockito.Mockito.when;
 class ClientControllerTest {
 
     private ClientService service;
+    private ClientWriteService writes;
     private ClientController controller;
 
     @BeforeEach
     void setUp() {
         service = mock(ClientService.class);
-        controller = new ClientController(service);
+        writes = mock(ClientWriteService.class);
+        controller = new ClientController(service, writes);
     }
 
     @Test
@@ -131,8 +133,137 @@ class ClientControllerTest {
         assertThat(controller.contacts(1).data()).hasSize(1);
     }
 
+    // ------------------------------------------------------------------
+    // B-026 · S-33's create and edit
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("the detail read emits an ETag, which is the only place the PATCH can get one")
+    void detailEmitsAnEtag() {
+        when(service.findDetail(1L)).thenReturn(Optional.of(detail(1, "Acme")));
+
+        var response = controller.get(1);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getETag())
+                .as("without this header updateClient declares a precondition "
+                        + "with nowhere to satisfy it")
+                .isNotBlank();
+    }
+
+    @Test
+    @DisplayName("a detail read for a client that is not there is 404, never 403")
+    void unknownClientDetailIsNotFound() {
+        when(service.findDetail(anyLong())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> controller.get(9))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("a create answers 201 with the ETag, so the form can save again without re-reading")
+    void createAnswers201WithAnEtag() {
+        when(writes.create(any())).thenReturn(detail(7, "Newco"));
+
+        var response = controller.create(write("NEWCO", "Newco Ltd"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getHeaders().getETag()).isNotBlank();
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().data().name()).isEqualTo("Newco");
+    }
+
+    /**
+     * The precondition is required, not opt-in. Allowing a write through without
+     * one would protect only the callers that already sent one — the set that
+     * needed the guard least.
+     */
+    @Test
+    @DisplayName("a PATCH with no If-Match is 428, not a silent overwrite")
+    void patchWithoutIfMatchIs428() {
+        when(service.findDetail(1L)).thenReturn(Optional.of(detail(1, "Acme")));
+
+        assertThatThrownBy(() -> controller.update(1, null, write("ACME", "Acme Retail Ltd")))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.PRECONDITION_REQUIRED);
+    }
+
+    @Test
+    @DisplayName("a PATCH with a stale If-Match is 412")
+    void staleIfMatchIs412() {
+        when(service.findDetail(1L)).thenReturn(Optional.of(detail(1, "Acme")));
+
+        assertThatThrownBy(() ->
+                controller.update(1, "\"not-the-tag\"", write("ACME", "Acme Retail Ltd")))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.PRECONDITION_FAILED);
+    }
+
+    /**
+     * The 404 has to come first. Answering 428 for a client that does not exist
+     * sends the caller to fetch a tag from a URL that will 404 as well.
+     */
+    @Test
+    @DisplayName("a PATCH on a client that is not there is 404, not 428")
+    void unknownClientOnPatchIs404BeforeThePrecondition() {
+        when(service.findDetail(anyLong())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> controller.update(9, null, write("X", "X")))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("a PATCH carrying the current tag is accepted and answers the refreshed one")
+    void currentTagIsAccepted() {
+        ClientDtos.ClientDetail current = detail(1, "Acme");
+        when(service.findDetail(1L)).thenReturn(Optional.of(current));
+        when(writes.update(eq(1L), any())).thenReturn(Optional.of(detail(1, "Acme Retail")));
+
+        String tag = Integer.toHexString(current.hashCode());
+        var response = controller.update(1, '"' + tag + '"', write("ACME", "Acme Retail"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getETag())
+                .as("the tag moves with the content, so the next save preconditions on the new state")
+                .doesNotContain(tag);
+    }
+
+    /** {@code *} matches anything, per RFC 9110. */
+    @Test
+    @DisplayName("If-Match: * is accepted")
+    void wildcardIfMatchIsAccepted() {
+        when(service.findDetail(1L)).thenReturn(Optional.of(detail(1, "Acme")));
+        when(writes.update(eq(1L), any())).thenReturn(Optional.of(detail(1, "Acme")));
+
+        assertThat(controller.update(1, "*", write("ACME", "Acme")).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
     private static ClientDtos.Client client(long id, String name) {
         return new ClientDtos.Client(id, name.toUpperCase(java.util.Locale.ROOT), name,
-                null, null, "Premium", null, "Asia/Kolkata", true, 0, null, List.of(), null);
+                null, null, "PREMIUM", null, "Asia/Kolkata", true, "ACTIVE", 0, null,
+                List.of(), null);
+    }
+
+    private static ClientDtos.ClientDetail detail(long id, String name) {
+        return new ClientDtos.ClientDetail(id, name.toUpperCase(java.util.Locale.ROOT), name,
+                null, null, "PREMIUM", null, "Asia/Kolkata", true, "ACTIVE", 0, null,
+                List.of(), null,
+                null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, List.of(), null, 0, false);
+    }
+
+    private static ClientDtos.ClientWriteRequest write(String code, String name) {
+        return new ClientDtos.ClientWriteRequest(
+                code, name, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null,
+                null, null, null, null, null);
     }
 }

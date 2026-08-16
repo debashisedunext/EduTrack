@@ -2204,8 +2204,22 @@ paths:
     post:
       tags: [clients]
       operationId: createClient
-      summary: Create a client
+      summary: Create a client (S-33)
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        B-026 · S-33's four-tab form, creating.
+
+        **A created client has no contacts, and is therefore not yet selectable
+        on a ticket** — B-028's rule is "at least one primary contact before the
+        client can be chosen". That is not enforced here (there is nothing to
+        enforce it against on a create) and the form says so on its Contacts
+        tab; the contacts themselves are `POST /clients/{clientId}/contacts`.
+
+        `clientCode` is unique, case-insensitively — `clients.client_code`
+        collates `utf8mb4_0900_ai_ci`, so `acme` and `ACME` are one code as far
+        as `uq_clients_code` is concerned, and the service refuses the second
+        with a field-keyed `409` rather than letting the index refuse it with a
+        message naming a MySQL constraint.
       requestBody:
         required: true
         content:
@@ -2214,9 +2228,15 @@ paths:
       responses:
         '201':
           description: Created.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ClientResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
 
   # Declared ahead of `/clients/{clientId}` for readability. The literal segment
@@ -2259,12 +2279,61 @@ paths:
 
   /clients/{clientId}:
     parameters: [{ $ref: '#/components/parameters/ClientId' }]
+    get:
+      tags: [clients]
+      operationId: getClient
+      summary: One client (S-33)
+      description: |
+        B-026 · the read half of the S-33 form, and **the only place the `ETag`
+        that `PATCH` requires can be obtained**. Without it the write below
+        declared a precondition with nowhere to satisfy it — the same gap B-011
+        closed for `GET /users/{userId}` and B-016 for `GET /projects/{id}`.
+
+        Carries the whole §4B.2 field set, which the list row deliberately does
+        not: the grid renders nine columns and inlining twenty-five fields per
+        row would be weight on every page of it.
+
+        **All six roles**, like `listClients` beside it — §4B.2's ticket-form
+        dropdown is that operation, and a role that can list clients learns
+        nothing new from reading one.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [clients]
       operationId: updateClient
-      summary: Update a client
+      summary: Update a client (S-33)
       parameters:
         - { $ref: '#/components/parameters/IfMatch' }
+      description: |
+        B-026 · S-33's four-tab form, saving.
+
+        **The body is the whole representation, not a sparse patch**, and the
+        verb stays `PATCH` because that is what the contract has declared since
+        D-001 and what the generated client already emits. S-33 submits every
+        field on every save, so `ClientWriteRequest` is the shape both verbs
+        take — unlike the project master next door, which needed a separate
+        `ProjectPatchRequest` because `projectCode` is immutable and requiring
+        it on a patch would have made every edit to a live project a `409`.
+        **No client field is immutable**, so no such split is needed here.
+
+        `client_code` is editable, with one consequence worth knowing: it is
+        B-035's upsert key, so a code changed here means the next Excel import
+        carrying the *old* code creates a second client rather than updating
+        this one. The form says so at the field.
+
+        `If-Match` is **required**. A write without one is `428`, not a silent
+        overwrite — treating a missing precondition as "no conflict" protects
+        only the callers that already opted in.
       requestBody:
         required: true
         content:
@@ -2273,12 +2342,23 @@ paths:
       responses:
         '200':
           description: Updated.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: The refreshed tag. Send it back on the next save.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ClientResponse' }
+              schema: { $ref: '#/components/schemas/ClientDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: '`If-Match` absent. GET the client and send back its `ETag`.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /clients/{clientId}/status:
     parameters: [{ $ref: '#/components/parameters/ClientId' }]
@@ -5938,6 +6018,19 @@ components:
             slaPolicyId: { type: [integer, 'null'], format: int64 }
             timezone: { type: [string, 'null'] }
             isActive: { type: boolean }
+            # B-026 · additive, and not `required` — B-016's call on
+            # `Project.status`, for the same reason: `Client` is inlined by
+            # `Client360Response` and by the ticket form's dropdown, and a new
+            # obligation on every consumer that builds one buys nothing for a
+            # field they do not read.
+            status:
+              $ref: '#/components/schemas/ClientStatus'
+              description: |
+                Populated everywhere. On the **list** row and not only on the
+                detail because `isActive` alone cannot render S-32's status
+                chip once Prospect exists — a prospect and a contracted client
+                are both `isActive: true` and the grid would label them
+                identically.
             openTicketCount: { type: integer }
             primaryContact: { $ref: '#/components/schemas/Contact' }
             # B-025 · the two S-32 columns the schema could not render.
@@ -5956,18 +6049,172 @@ components:
                 When this client last had a ticket raised. Null for a client
                 with none — a new one, or one whose relationship never started.
                 Read from the ticket rollup, never a per-row `COUNT(*)`.
+    ClientStatus:
+      type: string
+      enum: [ACTIVE, INACTIVE, PROSPECT]
+      description: |
+        B-026 · blueprint §4B.2's Identity group, held by `ck_clients_status`.
+
+        **`isActive` derives as `status <> 'INACTIVE'`, not `status =
+        'ACTIVE'`.** §4B.2 puts a client dropdown on the ticket create form
+        filtered on that boolean, so the narrower reading would have made every
+        Prospect vanish from the form the moment this field shipped, with
+        nothing on screen saying why — the call B-016 made on `Project.isActive`
+        for the same reason, one master over.
+
+        The consequence for `PATCH /clients/{clientId}/status`: `isActive: true`
+        against a Prospect is a **no-op**, because a Prospect is already active
+        by that projection. Silently rewriting it to `ACTIVE` would let the
+        grid's bulk Activate promote a prospect to a contracted client, which
+        is a commercial fact and not a checkbox. Setting `ACTIVE` explicitly
+        through this field is how a prospect is converted.
+    ClientSupportPlan:
+      type: string
+      enum: [BASIC, STANDARD, PREMIUM, ENTERPRISE]
+      description: |
+        B-026 · uppercase codes, which is what `ReferenceDataFixture` and the
+        server have always stored. Blueprint §4B.2's Commercial group names
+        Standard / Premium / Enterprise and A-006's column comment names
+        `BASIC|STANDARD|PREMIUM|…`; the union is the vocabulary, because Basic
+        is a plan eight seeded clients are already on and dropping it would
+        orphan them.
+
+        **No `CHECK` backs this**, deliberately, and it is not an oversight:
+        B-035's import is a second writer, and B-011 established that a MySQL
+        `CHECK` violation arrives as `UncategorizedSQLException` — a 500, not a
+        field-keyed 400. A rejected import row must say which cell was wrong.
+        The service validates it; `ck_clients_status` exists because the status
+        vocabulary is closed by the product and this one is closed by us.
     ClientWriteRequest:
       type: object
       required: [clientCode, name]
+      description: |
+        B-026 · S-33's four tabs, in one body. The same shape serves `POST` and
+        `PATCH` because the form submits every field on every save and **no
+        client field is immutable** — unlike the project master, which needed a
+        separate patch schema to keep an immutable `projectCode` off it.
+
+        `maxLength` on `clientCode` and `name` was `50` and `200` and the
+        columns are `VARCHAR(20)` and `VARCHAR(150)`. The contract was
+        accepting values MySQL would refuse, which nothing had discovered
+        because no server implemented the operation. Corrected to the columns.
       properties:
-        clientCode: { type: string, minLength: 2, maxLength: 50 }
-        name: { type: string, minLength: 1, maxLength: 200 }
-        domain: { type: [string, 'null'] }
-        accountManagerId: { type: [integer, 'null'], format: int64 }
-        supportPlan: { type: [string, 'null'] }
-        slaPolicyId: { type: [integer, 'null'], format: int64 }
-        timezone: { type: [string, 'null'] }
-        projectIds: { type: array, items: { type: integer, format: int64 } }
+        # ── Identity ──────────────────────────────────────────────────────
+        clientCode:
+          type: string
+          minLength: 2
+          maxLength: 20
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+          description: |
+            Unique, case-insensitively — the column collates
+            `utf8mb4_0900_ai_ci`. Normalised to upper case on the way in, so
+            `acme` and `ACME` are one client and not a 409 an admin has to
+            interpret.
+
+            **This is B-035's upsert key.** Changing it means the next import
+            carrying the old code creates a second client rather than updating
+            this one. Editable anyway — a code typed wrong on day one has to be
+            fixable — with the consequence stated on the form at the field.
+        name: { type: string, minLength: 1, maxLength: 150 }
+        shortName: { type: [string, 'null'], maxLength: 60 }
+        logoUrl:
+          type: [string, 'null']
+          maxLength: 500
+          description: A URL. The row is read on every grid page; image bytes are not.
+        industry: { type: [string, 'null'], maxLength: 80 }
+        status: { $ref: '#/components/schemas/ClientStatus' }
+        domain:
+          type: [string, 'null']
+          maxLength: 120
+          description: |
+            Website domain. D-039 matches inbound mail against it, which is why
+            a scheme or a `www.` prefix is stripped rather than stored — a
+            client saved as `https://acme.example/` would match no sender
+            address at all.
+        primaryEmail: { type: [string, 'null'], format: email, maxLength: 150 }
+        supportEmail:
+          type: [string, 'null']
+          format: email
+          maxLength: 150
+          description: Used for email-to-ticket matching (§4B.2, D-039).
+        phone: { type: [string, 'null'], maxLength: 30 }
+        # ── Address ───────────────────────────────────────────────────────
+        addressLine1: { type: [string, 'null'], maxLength: 150 }
+        addressLine2: { type: [string, 'null'], maxLength: 150 }
+        city: { type: [string, 'null'], maxLength: 80 }
+        state: { type: [string, 'null'], maxLength: 80 }
+        country: { type: [string, 'null'], maxLength: 80 }
+        postalCode: { type: [string, 'null'], maxLength: 20 }
+        timezone:
+          type: [string, 'null']
+          maxLength: 50
+          description: |
+            An IANA zone id, validated against `ZoneId`. Presentation only —
+            every instant in the schema is UTC (PLAN.md §3.1). Defaults to
+            `Asia/Kolkata`, which is the column default and not a guess made
+            here.
+        # ── Commercial ────────────────────────────────────────────────────
+        accountManagerId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            Must name an **active** resource. The role is deliberately not
+            checked — B-016 made the same call for a project manager, and a
+            hardcoded role set is what B-015 removed from `ResourceController`.
+        contractStart: { type: [string, 'null'], format: date }
+        contractEnd:
+          type: [string, 'null']
+          format: date
+          description: Must not precede `contractStart`.
+        supportPlan:
+          oneOf:
+            - { $ref: '#/components/schemas/ClientSupportPlan' }
+            - { type: 'null' }
+        billingReference: { type: [string, 'null'], maxLength: 60 }
+        billingEmail:
+          type: [string, 'null']
+          format: email
+          maxLength: 150
+          description: |
+            Distinct from `primaryEmail` and `supportEmail`. Collapsing the
+            three sends a support auto-reply to accounts payable.
+        # ── Notes ─────────────────────────────────────────────────────────
+        notes: { type: [string, 'null'] }
+        tags:
+          type: array
+          items: { type: string, minLength: 1, maxLength: 40 }
+          maxItems: 20
+          description: |
+            Free vocabulary. `ck_clients_tags` constrains the shape — an array
+            of strings — and not the values, which is the point of the field.
+        # ── Projects & SLA ────────────────────────────────────────────────
+        projectIds:
+          type: array
+          items: { type: integer, format: int64 }
+          description: |
+            Replaces the whole `client_projects` mapping. Sending it empty
+            unmaps the client from every project, which is a real thing to
+            want and is why an *absent* array and an *empty* one have to mean
+            different things — absent leaves the mapping alone.
+        defaultProjectId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            `client_projects.is_default`. Must be one of `projectIds`; a default
+            the client is not mapped to is a row the ticket form can never
+            offer.
+        slaPolicyId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            Stored, and **read by nothing today**. C-012's `PlannedCloseDate`
+            ladder resolves org → project → task type and never consults
+            `clients.sla_policy_id`; B-018's matrix is where a project's SLA is
+            actually configured. Kept on the wire because the column exists and
+            B-035's import writes it, and rendered read-only on the form rather
+            than as a picker — a control whose only effect is to write a number
+            nothing reads is worse than no control. **Flagged**: making it
+            resolve is a C-012 change, not a masters one.
     ClientBulkStatusRequest:
       type: object
       required: [clientIds, isActive]
@@ -6002,10 +6249,69 @@ components:
         isPrimary: { type: boolean, default: false }
         notificationOptIn: { type: boolean, default: true }
         portalAccess: { type: boolean, default: false }
+    ClientDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Client' }
+        - type: object
+          description: |
+            B-026 · the S-33 form's read. Everything on `Client` plus the
+            §4B.2 groups the grid has no column for.
+
+            **A separate schema rather than more fields on `Client`.** The list
+            inlines a row per client per page; twenty-five more fields on it
+            would be paid for by the grid, the ticket form's client dropdown
+            and every other `listClients` caller, none of which render them.
+            The same split `UserDetail`/`User` and `ProjectDetail`/`Project`
+            already make.
+          properties:
+            status: { $ref: '#/components/schemas/ClientStatus' }
+            shortName: { type: [string, 'null'] }
+            logoUrl: { type: [string, 'null'] }
+            industry: { type: [string, 'null'] }
+            primaryEmail: { type: [string, 'null'] }
+            supportEmail: { type: [string, 'null'] }
+            phone: { type: [string, 'null'] }
+            addressLine1: { type: [string, 'null'] }
+            addressLine2: { type: [string, 'null'] }
+            city: { type: [string, 'null'] }
+            state: { type: [string, 'null'] }
+            country: { type: [string, 'null'] }
+            postalCode: { type: [string, 'null'] }
+            contractStart: { type: [string, 'null'], format: date }
+            contractEnd: { type: [string, 'null'], format: date }
+            billingReference: { type: [string, 'null'] }
+            billingEmail: { type: [string, 'null'] }
+            notes: { type: [string, 'null'] }
+            tags: { type: array, items: { type: string } }
+            defaultProjectId:
+              type: [integer, 'null']
+              format: int64
+              description: |
+                The `client_projects` row flagged `is_default`. Null when the
+                client is mapped to projects but none is marked, which is the
+                state every imported client starts in.
+            contactCount:
+              type: integer
+              description: |
+                How many contacts this client has. On the detail so the form's
+                Contacts tab can say what it is showing before the tab is
+                opened, and so B-028's "at least one primary contact" rule has
+                a number to state rather than an abstraction.
+            hasPrimaryContact:
+              type: boolean
+              description: |
+                B-028's gate, reported rather than enforced here: a client
+                without one is **not selectable on a ticket**. The form says so
+                on the Contacts tab. Enforcing it on the ticket create path is
+                B-028's, the way B-029's block on new tickets is B-029's.
     ClientResponse:
       type: object
       required: [data]
       properties: { data: { $ref: '#/components/schemas/Client' } }
+    ClientDetailResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ClientDetail' } }
     ClientListResponse:
       type: object
       required: [data]

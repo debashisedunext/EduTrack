@@ -46,5 +46,6 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ClientSupportPlan } from './clientSupportPlan';
 
-export type ClientWriteRequestSupportPlan = string | null;
+export type ClientWriteRequestSupportPlan = ClientSupportPlan | null;

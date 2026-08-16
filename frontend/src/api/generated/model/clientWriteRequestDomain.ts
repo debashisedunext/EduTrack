@@ -47,4 +47,12 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * Website domain. D-039 matches inbound mail against it, which is why
+a scheme or a `www.` prefix is stripped rather than stored — a
+client saved as `https://acme.example/` would match no sender
+address at all.
+
+ * @maxLength 120
+ */
 export type ClientWriteRequestDomain = string | null;

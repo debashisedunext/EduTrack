@@ -9,7 +9,7 @@
 ## Task IDs
 
 <!-- e.g. A-034, C-051 — from docs/streams/STREAM-*.md -->
-
+ 
 ## Paths touched
 
 - [ ] Only my stream's owned paths (docs/TEAM-PLAN.md §6)

@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -23,6 +24,12 @@ import java.util.Map;
 class ClientExceptionHandler {
 
     private static final URI NOT_FOUND = URI.create("https://edutrack/errors/not-found");
+
+    /** B-026 · the same {@code type} the resource and project forms use for a duplicate. */
+    private static final URI DUPLICATE = URI.create("https://edutrack/errors/duplicate");
+
+    private static final URI VALIDATION_FAILED =
+            URI.create("https://edutrack/errors/validation-failed");
 
     /**
      * 404, and it names <b>every</b> missing id rather than the first.
@@ -46,5 +53,41 @@ class ClientExceptionHandler {
         problem.setProperty("clientIds", e.clientIds());
         problem.setProperty("errors", Map.of("clientIds", new String[]{e.getMessage()}));
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+    }
+
+    /**
+     * B-026 · S-33's write failures, field-keyed so each message lands on its own
+     * input — which is also what tells a four-tab form which tab to open.
+     *
+     * <p><b>409 when a duplicate client code is the only thing wrong, 400
+     * otherwise.</b> Not a cosmetic split. CONVENTIONS.md §3 says clients branch
+     * on the status and the {@code type}, so a 409 that also carried a bad
+     * timezone would be handled as a uniqueness conflict and the other message
+     * would never be shown. {@code isDuplicateCodeOnly} is the whole rule, stated
+     * on the exception rather than re-derived here.
+     *
+     * <p>The {@code errors} map is string-keyed to a <b>string array</b>, which
+     * is what {@code ValidationProblem} declares and what
+     * {@code ApiError.fieldErrors} on the frontend reads. A bare string would
+     * deserialise into a shape the form's {@code messages[0]} silently indexes
+     * character by character.
+     */
+    @ExceptionHandler(ClientWriteService.ClientValidationException.class)
+    ResponseEntity<ProblemDetail> handleValidation(
+            ClientWriteService.ClientValidationException e) {
+
+        boolean duplicate = e.isDuplicateCodeOnly();
+        HttpStatus status = duplicate ? HttpStatus.CONFLICT : HttpStatus.BAD_REQUEST;
+
+        ProblemDetail problem = ProblemDetail.forStatus(status);
+        problem.setType(duplicate ? DUPLICATE : VALIDATION_FAILED);
+        problem.setTitle(duplicate ? "Client code already in use" : "The client was not saved");
+        problem.setDetail(e.getMessage());
+
+        Map<String, String[]> errors = new LinkedHashMap<>();
+        e.errors().forEach((field, message) -> errors.put(field, new String[]{message}));
+        problem.setProperty("errors", errors);
+
+        return ResponseEntity.status(status).body(problem);
     }
 }

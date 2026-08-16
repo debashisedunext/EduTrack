@@ -47,4 +47,15 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * Stored, and **read by nothing today**. C-012's `PlannedCloseDate`
+ladder resolves org → project → task type and never consults
+`clients.sla_policy_id`; B-018's matrix is where a project's SLA is
+actually configured. Kept on the wire because the column exists and
+B-035's import writes it, and rendered read-only on the form rather
+than as a picker — a control whose only effect is to write a number
+nothing reads is worse than no control. **Flagged**: making it
+resolve is a C-012 change, not a masters one.
+
+ */
 export type ClientWriteRequestSlaPolicyId = number | null;

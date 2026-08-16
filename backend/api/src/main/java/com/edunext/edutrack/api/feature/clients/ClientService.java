@@ -49,10 +49,14 @@ import java.util.Set;
 @Service
 public class ClientService {
 
-    /** The two values {@code clients.status} carries today. */
-    static final String ACTIVE = "ACTIVE";
+    /**
+     * The two values B-025 wrote. The vocabulary itself is {@link ClientStatus},
+     * which B-026 widened with {@code PROSPECT} — these stay as the two the
+     * status setter can produce, and they are its names for them.
+     */
+    static final String ACTIVE = ClientStatus.ACTIVE.name();
 
-    static final String INACTIVE = "INACTIVE";
+    static final String INACTIVE = ClientStatus.INACTIVE.name();
 
     private final ClientRepository clients;
     private final ClientQueryRepository query;
@@ -96,6 +100,29 @@ public class ClientService {
     }
 
     /**
+     * B-026 · one client with the whole §4B.2 field set — the S-33 form's read,
+     * and the only source of the {@code ETag} its {@code PATCH} requires.
+     *
+     * <p>Built from the entity plus {@link #find}'s aggregates rather than from a
+     * second wide {@code SELECT}. The grid's four aggregates are exactly what the
+     * detail needs too — projects, open tickets, last ticket date, primary
+     * contact — and computing them twice from two statements is how the form and
+     * the row it was opened from start disagreeing about the same client.
+     */
+    @Transactional(readOnly = true)
+    public Optional<ClientDtos.ClientDetail> findDetail(long clientId) {
+        Optional<Client> entity = clients.findById(clientId);
+        if (entity.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<ClientDtos.Client> row = find(clientId);
+        if (row.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(toDetail(entity.get(), row.get()));
+    }
+
+    /**
      * One client's contacts — the S-32 row-expand.
      *
      * <p>404 for a client that is not there rather than an empty list: an empty
@@ -124,7 +151,12 @@ public class ClientService {
         if (found.isEmpty()) {
             return Optional.empty();
         }
-        found.get().setStatus(isActive ? ACTIVE : INACTIVE);
+        // B-026 · not `isActive ? ACTIVE : INACTIVE`. A Prospect is already
+        // active by ClientStatus.isActive(), so writing ACTIVE would let this
+        // route — and S-32's bulk Activate through it — silently promote a
+        // prospect into a contracted client. ClientStatus.activatedFrom holds
+        // the rule so the single and bulk setters cannot drift.
+        found.get().setStatus(ClientStatus.activatedFrom(found.get().getStatus(), isActive));
         // Flushed for the reason setStatusBulk gives: the response is read back
         // through JdbcClient, which Hibernate's auto-flush does not see coming.
         clients.saveAndFlush(found.get());
@@ -162,8 +194,10 @@ public class ClientService {
             throw new UnknownClientException(missing);
         }
 
-        String status = isActive ? ACTIVE : INACTIVE;
-        found.forEach(c -> c.setStatus(status));
+        // Per row, not one status for the batch: a selection of forty containing
+        // three prospects must come back with three prospects. See
+        // ClientStatus.activatedFrom.
+        found.forEach(c -> c.setStatus(ClientStatus.activatedFrom(c.getStatus(), isActive)));
         // Flushed, not merely saved. The response is assembled by
         // ClientQueryRepository through JdbcClient, which issues SQL outside the
         // EntityManager — and Hibernate's AUTO flush only triggers ahead of
@@ -210,13 +244,77 @@ public class ClientService {
                     row.supportPlan(),
                     row.slaPolicyId(),
                     row.timezone(),
-                    ACTIVE.equals(row.status()),
+                    // B-026 · `status <> 'INACTIVE'`, not `status = 'ACTIVE'`.
+                    // ClientStatus carries the argument: the narrow reading
+                    // removes every Prospect from §4B.2's ticket-form dropdown,
+                    // which filters on this boolean.
+                    ClientStatus.isActive(row.status()),
+                    row.status(),
                     openCounts.getOrDefault(row.id(), 0L),
                     primaries.get(row.id()),
                     projects.getOrDefault(row.id(), List.of()),
                     lastDates.get(row.id())));
         }
         return views;
+    }
+
+    /**
+     * B-026 · the grid row widened to the S-33 form's field set.
+     *
+     * <p>Package-private and not private: {@code ClientWriteService} assembles
+     * its own response through this after a save, so a create and a read of the
+     * client just created cannot describe it differently.
+     *
+     * <p>{@code tags} is normalised to an empty list rather than left null. The
+     * column is nullable and the form binds an array; a null would arrive as
+     * {@code undefined} and the first render of a client that has never been
+     * tagged would throw on {@code .map}.
+     */
+    ClientDtos.ClientDetail toDetail(Client entity, ClientDtos.Client row) {
+        ClientQueryRepository.ContactSummary contacts = query.contactSummary(entity.getId());
+        // Read through JdbcClient, not off the entity. `hibernate.jdbc.time_zone`
+        // makes JPA read a DATE a day early — measured, not suspected; the whole
+        // account is on ClientQueryRepository.contractDates. Everything else on
+        // this record comes off the entity, which is correct for every type but
+        // this one.
+        ClientQueryRepository.ContractDates contract = query.contractDates(entity.getId());
+
+        return new ClientDtos.ClientDetail(
+                row.id(),
+                row.clientCode(),
+                row.name(),
+                row.domain(),
+                row.accountManager(),
+                row.supportPlan(),
+                row.slaPolicyId(),
+                row.timezone(),
+                row.isActive(),
+                row.status(),
+                row.openTicketCount(),
+                row.primaryContact(),
+                row.projects(),
+                row.lastTicketDate(),
+                entity.getShortName(),
+                entity.getLogoUrl(),
+                entity.getIndustry(),
+                entity.getPrimaryEmail(),
+                entity.getSupportEmail(),
+                entity.getPhone(),
+                entity.getAddressLine1(),
+                entity.getAddressLine2(),
+                entity.getCity(),
+                entity.getState(),
+                entity.getCountry(),
+                entity.getPostalCode(),
+                contract.start(),
+                contract.end(),
+                entity.getBillingReference(),
+                entity.getBillingEmail(),
+                entity.getNotes(),
+                entity.getTags() == null ? List.of() : List.copyOf(entity.getTags()),
+                query.defaultProjectId(entity.getId()),
+                contacts.count(),
+                contacts.hasPrimary());
     }
 
     /**

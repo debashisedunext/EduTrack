@@ -47,4 +47,12 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * An IANA zone id, validated against `ZoneId`. Presentation only —
+every instant in the schema is UTC (PLAN.md §3.1). Defaults to
+`Asia/Kolkata`, which is the column default and not a guess made
+here.
+
+ * @maxLength 50
+ */
 export type ClientWriteRequestTimezone = string | null;

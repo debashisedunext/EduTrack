@@ -129,9 +129,33 @@ export interface Project {
 export interface ProjectTaskType {
   projectId: number; taskTypeId: number;
 }
+/**
+ * B-026 · widened to S-33's field set.
+ *
+ * **`status` replaces `isActive` as the stored fact**, and the DTO derives the
+ * boolean from it as the server does — `status !== 'INACTIVE'`, not
+ * `status === 'ACTIVE'`. A fixture that kept the boolean could not represent a
+ * Prospect at all, so nothing in the browser would ever exercise the third state
+ * the form now offers.
+ *
+ * **Support plans are upper-case codes.** They were title-case (`'Premium'`)
+ * while `ReferenceDataFixture` and every server write have always stored
+ * `'PREMIUM'` — a disagreement nothing caught because the grid renders the
+ * stored string and B-025's filter matches case-insensitively. S-33's `<Select>`
+ * binds to the codes, so against the old fixture it would have shown nothing
+ * selected in `npm run dev` and been perfectly correct against a real backend.
+ */
 export interface Client {
   id: number; clientCode: string; name: string; domain: string;
-  accountManagerId: number; supportPlan: string; timezone: string; isActive: boolean;
+  accountManagerId: number | null; supportPlan: string | null; timezone: string;
+  status: 'ACTIVE' | 'INACTIVE' | 'PROSPECT';
+  shortName?: string | null; logoUrl?: string | null; industry?: string | null;
+  primaryEmail?: string | null; supportEmail?: string | null; phone?: string | null;
+  addressLine1?: string | null; addressLine2?: string | null; city?: string | null;
+  state?: string | null; country?: string | null; postalCode?: string | null;
+  contractStart?: string | null; contractEnd?: string | null;
+  billingReference?: string | null; billingEmail?: string | null;
+  notes?: string | null; tags?: string[]; slaPolicyId?: number | null;
 }
 /**
  * B-025 · which clients are reachable from which project.
@@ -538,11 +562,52 @@ const PROJECTS: Project[] = [
   { id: 4, projectCode: 'ARCH', name: 'Archived Pilot', description: 'Retired. Kept because its tickets are still readable.', clientName: 'Oldco Industries', projectManagerId: 1, colourTag: '#8B5CF6', status: 'CLOSED', startDate: '2025-04-01', endDate: '2025-11-30', autoAssignRule: 'MANUAL', ticketSeq: 0, mandatoryFields: null },
 ];
 
+/**
+ * B-026 · shaped to exercise the cases rather than to be tidy.
+ *
+ * - **Acme is filled in** — every S-33 field populated, so the edit form has
+ *   something to render on all four tabs and a round-trip test can prove nothing
+ *   was dropped.
+ * - **Northwind is sparse** — the state an imported client is really in, and the
+ *   one where a form that confuses "absent" with "cleared" shows it.
+ * - **Kestrel is a PROSPECT**, which is the whole reason `status` is stored: a
+ *   fixture with only ACTIVE and INACTIVE cannot tell a screen that handles the
+ *   third state from one that has never met it. It has **no primary contact**
+ *   either, so the Contacts tab's B-028 warning is exercised.
+ * - **Oldco is inactive** and stays that way — §4B.2's "never hides historical
+ *   tickets".
+ */
 const CLIENTS: Client[] = [
-  { id: 1, clientCode: 'ACME', name: 'Acme Retail Ltd', domain: 'acme.example', accountManagerId: 2, supportPlan: 'Premium', timezone: 'Asia/Kolkata', isActive: true },
-  { id: 2, clientCode: 'NORTH', name: 'Northwind Logistics', domain: 'northwind.example', accountManagerId: 2, supportPlan: 'Standard', timezone: 'Europe/London', isActive: true },
-  { id: 3, clientCode: 'BLUE', name: 'Bluewave Media', domain: 'bluewave.example', accountManagerId: 1, supportPlan: 'Standard', timezone: 'America/New_York', isActive: true },
-  { id: 4, clientCode: 'OLDCO', name: 'Oldco Industries', domain: 'oldco.example', accountManagerId: 1, supportPlan: 'Basic', timezone: 'Asia/Kolkata', isActive: false },
+  {
+    id: 1, clientCode: 'ACME', name: 'Acme Retail Ltd', domain: 'acme.example',
+    accountManagerId: 2, supportPlan: 'PREMIUM', timezone: 'Asia/Kolkata', status: 'ACTIVE',
+    shortName: 'Acme', logoUrl: null, industry: 'Retail',
+    primaryEmail: 'hello@acme.example', supportEmail: 'support@acme.example',
+    phone: '+91 98200 11111',
+    addressLine1: '14 Linking Road', addressLine2: 'Bandra West', city: 'Mumbai',
+    state: 'Maharashtra', country: 'India', postalCode: '400050',
+    contractStart: '2025-04-01', contractEnd: '2027-03-31',
+    billingReference: 'PO-2025-0142', billingEmail: 'accounts@acme.example',
+    notes: 'Escalates through their IT Director. Quarterly review every January.',
+    tags: ['retail', 'strategic'], slaPolicyId: null,
+  },
+  {
+    id: 2, clientCode: 'NORTH', name: 'Northwind Logistics', domain: 'northwind.example',
+    accountManagerId: 2, supportPlan: 'STANDARD', timezone: 'Europe/London', status: 'ACTIVE',
+  },
+  {
+    id: 3, clientCode: 'BLUE', name: 'Bluewave Media', domain: 'bluewave.example',
+    accountManagerId: 1, supportPlan: 'STANDARD', timezone: 'America/New_York', status: 'ACTIVE',
+  },
+  {
+    id: 4, clientCode: 'OLDCO', name: 'Oldco Industries', domain: 'oldco.example',
+    accountManagerId: 1, supportPlan: 'BASIC', timezone: 'Asia/Kolkata', status: 'INACTIVE',
+  },
+  {
+    id: 5, clientCode: 'KESTREL', name: 'Kestrel Analytics', domain: 'kestrel.example',
+    accountManagerId: null, supportPlan: null, timezone: 'Asia/Kolkata', status: 'PROSPECT',
+    industry: 'Technology', tags: ['pre-sales'],
+  },
 ];
 
 const CONTACTS: Contact[] = [

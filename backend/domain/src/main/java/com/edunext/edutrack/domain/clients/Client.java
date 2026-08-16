@@ -7,10 +7,13 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Generated;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.generator.EventType;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * The client master — blueprint §4B.2, screens S-32/S-33.
@@ -47,10 +50,29 @@ public class Client {
     @Column(name = "short_name", length = 60)
     private String shortName;
 
+    /**
+     * B-026 · S-33's Identity group. A URL, not image bytes — the grid reads
+     * this row on every page and would otherwise pay for a logo it does not
+     * render.
+     */
+    @Column(name = "logo_url", length = 500)
+    private String logoUrl;
+
     @Column(name = "industry", length = 80)
     private String industry;
 
-    /** ACTIVE | INACTIVE — B-029 flips this instead of deleting. */
+    /**
+     * ACTIVE | INACTIVE | PROSPECT — B-029 flips this instead of deleting, and
+     * B-026 added the third value with {@code ck_clients_status} to hold the set.
+     *
+     * <p><b>Prospect is active for the purposes of {@code isActive}.</b> The wire
+     * boolean derives as {@code status <> 'INACTIVE'}, not {@code status =
+     * 'ACTIVE'}: §4B.2 gives the ticket create form a client dropdown filtered on
+     * it, so the narrower reading would have made every prospect vanish from that
+     * form the moment the field shipped, with nothing on screen saying why. Same
+     * call B-016 made on {@code Project.isActive}, which derives as
+     * {@code status <> 'CLOSED'} for the same five pickers' sake.
+     */
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
 
@@ -115,8 +137,39 @@ public class Client {
     @Column(name = "contract_end")
     private LocalDate contractEnd;
 
+    /**
+     * B-026 · S-33's Commercial group — the client's own reference for us, a PO
+     * number or a contract id. Free text because it is their vocabulary.
+     */
+    @Column(name = "billing_reference", length = 60)
+    private String billingReference;
+
+    /**
+     * B-026 · deliberately distinct from {@link #primaryEmail} (the account
+     * contact) and {@link #supportEmail} (which D-039 matches inbound mail
+     * against). Collapsing the three sends a support auto-reply to accounts
+     * payable.
+     */
+    @Column(name = "billing_email", length = 150)
+    private String billingEmail;
+
     @Column(name = "notes", columnDefinition = "text")
     private String notes;
+
+    /**
+     * B-026 · S-33's Notes group. A JSON array of strings, mapped by Hibernate's
+     * own JSON type rather than through a {@code client_tags} join table — the
+     * call {@code users.skills} made in {@code V20260811_1520} and
+     * {@code projects.mandatory_fields} in {@code V20260814_1120}. Nothing
+     * queries tags across clients; the day a report does, normalising is a
+     * backfill rather than a redesign.
+     *
+     * <p>{@code ck_clients_tags} constrains the <em>shape</em> — an array of
+     * strings — and not the vocabulary, which is the whole point of the field.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "tags")
+    private List<String> tags;
 
     /** Traces a bulk-imported row back to its batch so B-037 can reverse the set. */
     @Column(name = "import_batch_id")
@@ -160,6 +213,14 @@ public class Client {
 
     public void setShortName(String shortName) {
         this.shortName = shortName;
+    }
+
+    public String getLogoUrl() {
+        return logoUrl;
+    }
+
+    public void setLogoUrl(String logoUrl) {
+        this.logoUrl = logoUrl;
     }
 
     public String getIndustry() {
@@ -306,12 +367,36 @@ public class Client {
         this.contractEnd = contractEnd;
     }
 
+    public String getBillingReference() {
+        return billingReference;
+    }
+
+    public void setBillingReference(String billingReference) {
+        this.billingReference = billingReference;
+    }
+
+    public String getBillingEmail() {
+        return billingEmail;
+    }
+
+    public void setBillingEmail(String billingEmail) {
+        this.billingEmail = billingEmail;
+    }
+
     public String getNotes() {
         return notes;
     }
 
     public void setNotes(String notes) {
         this.notes = notes;
+    }
+
+    public List<String> getTags() {
+        return tags;
+    }
+
+    public void setTags(List<String> tags) {
+        this.tags = tags;
     }
 
     public Long getImportBatchId() {

@@ -4,6 +4,7 @@ import { Chip } from '@/components/ui/chip'
 import type { Client } from '@/api/generated/model/client'
 
 import { clientPath } from '../tickets/detail/entityLinks'
+import { SUPPORT_PLANS } from './clientForm'
 
 /**
  * B-025 · the S-32 columns, in blueprint line 946's order.
@@ -42,6 +43,17 @@ export function formatLastTicketDate(value: string | null | undefined): string {
     month: 'short',
     year: 'numeric',
   })
+}
+
+/**
+ * The code as a human reads it.
+ *
+ * Falls back to the stored string rather than to a dash: a plan this build does
+ * not know about is still something the organisation wrote down, and blanking it
+ * would hide a row that needs correcting.
+ */
+export function supportPlanLabel(code: string): string {
+  return SUPPORT_PLANS.find((plan) => plan.value === code.toUpperCase())?.label ?? code
 }
 
 export const CLIENT_COLUMNS: ClientColumn[] = [
@@ -93,9 +105,14 @@ export const CLIENT_COLUMNS: ClientColumn[] = [
     key: 'supportPlan',
     header: 'Support plan',
     widthClassName: 'w-32',
+    // B-026 · the stored value is an upper-case code — `PREMIUM`, which is what
+    // `ReferenceDataFixture` and every server write have always held. The grid
+    // showed it raw, which was invisible only because the MSW mock was storing
+    // title-case and disagreeing with the server. Labelled here rather than
+    // stored differently: the code is the vocabulary, the label is presentation.
     render: (client) =>
       client.supportPlan ? (
-        <span className="text-content">{client.supportPlan}</span>
+        <span className="text-content">{supportPlanLabel(client.supportPlan)}</span>
       ) : (
         <span className="text-content-muted">—</span>
       ),
@@ -139,14 +156,22 @@ export const CLIENT_COLUMNS: ClientColumn[] = [
     key: 'status',
     header: 'Status',
     widthClassName: 'w-28',
-    render: (client) =>
-      // Never colour alone — blueprint §12.1. The chip carries its own word, so
-      // a colour-blind user and a printed page read the same row.
-      client.isActive ? (
-        <Chip variant="success">Active</Chip>
-      ) : (
-        <Chip variant="neutral">Inactive</Chip>
-      ),
+    // B-026 · reads `status`, not `isActive`, and that is the point of putting
+    // the field on the list row at all. §4B.2's Identity group has three states
+    // and `isActive` collapses two of them: a Prospect is active by that
+    // projection — deliberately, so it stays in the ticket form's client
+    // dropdown — so a boolean chip would label a prospect and a contracted
+    // client identically. `isActive` remains the fallback for a row served by a
+    // backend that predates the field.
+    //
+    // Never colour alone (§12.1). Each chip carries its own word, so a
+    // colour-blind user and a printed page read the same row.
+    render: (client) => {
+      const status = client.status ?? (client.isActive ? 'ACTIVE' : 'INACTIVE')
+      if (status === 'PROSPECT') return <Chip variant="info">Prospect</Chip>
+      if (status === 'INACTIVE') return <Chip variant="neutral">Inactive</Chip>
+      return <Chip variant="success">Active</Chip>
+    },
   },
   {
     key: 'lastTicketDate',
@@ -154,6 +179,27 @@ export const CLIENT_COLUMNS: ClientColumn[] = [
     widthClassName: 'w-32',
     render: (client) => (
       <span className="text-content-muted">{formatLastTicketDate(client.lastTicketDate)}</span>
+    ),
+  },
+  {
+    key: 'actions',
+    header: 'Actions',
+    widthClassName: 'w-20',
+    // B-026 · blueprint line 946's ninth column, which had nothing to point at
+    // until S-33 existed. A link and not a menu: there is exactly one action, and
+    // a kebab hiding a single item is a click bought for nothing.
+    // The accessible name is `aria-label`, not an `sr-only` span carrying the
+    // client's name. A span would put a second copy of that name in the row's
+    // text, so `getByText('Acme Retail Ltd')` — and any screen reader reading
+    // the row straight through — would meet it twice.
+    render: (client) => (
+      <Link
+        to={`/masters/clients/${client.id}/edit`}
+        aria-label={`Edit ${client.name}`}
+        className="text-sm text-primary hover:underline"
+      >
+        Edit
+      </Link>
     ),
   },
 ]
