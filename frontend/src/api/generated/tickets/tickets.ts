@@ -213,6 +213,25 @@ fails silently. The sequence does not reset at year rollover.
 On success: the ID is issued, a `CREATED` history row is written, the
 assignee is notified, and mail is queued in the same transaction.
 
+**B-028 — the client gate, owed by whoever implements this operation.**
+Blueprint line 948: a client is not selectable on a ticket until it has
+at least one primary contact. `Client.hasPrimaryContact` reports it on
+every row `GET /clients` returns, and the create form refuses the
+selection with the reason on screen — but this endpoint is the only
+place it can be *enforced*, and there is no server behind `POST
+/tickets` yet (C-013's own notes say the ticket-create service does not
+exist). So: a `clientId` naming a client with `hasPrimaryContact:
+false` must be a **400** keyed on `clientId`, not a silent accept.
+
+B-029's mirror rule belongs at the same point: a client whose `status`
+is `INACTIVE` blocks a **new** ticket, and never hides historical ones.
+
+Both are `400` rather than `404` — unlike the row-scope `404` below,
+which exists so an out-of-scope id leaks nothing. These two clients are
+legitimately visible to the caller; what is refused is the combination,
+and a caller who cannot tell "does not exist" from "not yet usable"
+cannot act on either.
+
  * @summary Create a ticket
  */
 export const createTicket = (

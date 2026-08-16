@@ -241,6 +241,33 @@ describe('S-19 Create Ticket', () => {
     expect(creates).toHaveLength(0)
   })
 
+  /**
+   * B-028 · blueprint line 948 — "at least one primary contact before the
+   * client can be selected on a ticket".
+   *
+   * Kestrel is a PROSPECT with no contacts, mapped to CRM by `db.ts` so this
+   * screen can exercise the rule at all. Both halves are asserted together
+   * because they pull in opposite directions and getting either backwards is
+   * invisible: it has to be **offered** (a prospect is active — the server was
+   * filtering `status = 'ACTIVE'` and dropping every one of them from this
+   * dropdown) and it has to be **refused** (no primary contact).
+   */
+  it('offers a client with no primary contact but will not let it be chosen', async () => {
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+
+    const options = await readDropdownOptions('clientId')
+    // Listed, and saying why — a client silently absent from a dropdown is
+    // indistinguishable from a dropdown that has lost its data, and the person
+    // raising the ticket is usually the one who can go and fix the master.
+    expect(options.some((o) => /KESTREL/.test(o) && /No primary contact/.test(o))).toBe(true)
+
+    await pickFromDropdown('clientId', /KESTREL/)
+    expect(screen.getByLabelText(/^Client$/)).not.toHaveTextContent('Kestrel')
+  })
+
   it('keeps client and contact dependent, and clears the contact when the client changes', async () => {
     renderPage()
     await formReady()

@@ -631,9 +631,14 @@ const CLIENTS: Client[] = [
  *   which is the parameter separating S-33's grid from C-021's picker.
  * - **Erin Walsh has no phone and no designation**, so the two nullable columns
  *   are rendered in both states.
- * - **Kestrel (client 4) has no contacts at all**, which is why its Contacts tab
+ * - **Kestrel (client 5) has no contacts at all**, which is why its Contacts tab
  *   shows B-028's warning — `db.ts` already documents that client as the one
- *   PROSPECT without a primary.
+ *   PROSPECT without a primary. B-028 maps it to project 1 so the S-19 client
+ *   dropdown can exercise the gate as well as the tab.
+ * - **Ravi Menon is removed and not primary.** Worth stating because B-028's
+ *   gate turns on the pair: a *primary* contact who has been removed must read
+ *   as no primary at all, which is what `primaryContact` filtering on
+ *   `isActive` is for.
  */
 const CONTACTS: Contact[] = [
   { id: 1, clientId: 1, name: 'Sara Kapoor', designation: 'IT Director', email: 'sara@acme.example', phone: '+91 98200 11111', isPrimary: true, notificationOptIn: true, portalAccess: true, isActive: true },
@@ -662,6 +667,14 @@ const CONTACTS: Contact[] = [
  *   create form switches between them.
  * - **Bluewave is on none** — the empty cell, which must read "None" rather than
  *   render blank.
+ * - **B-028 · Kestrel is on project 1**, and it is the row that makes the S-19
+ *   client dropdown testable at all. It is a **PROSPECT with no contacts**, so
+ *   one mapping exercises both of B-028's findings on the one screen the rule
+ *   is about: it must be *offered* (`?isActive=true` is `status <> 'INACTIVE'`,
+ *   so prospects are in the list — the server was filtering `= 'ACTIVE'` and
+ *   dropping them) and it must not be *selectable* (`hasPrimaryContact: false`).
+ *   Before this row, every client any project mapped had a primary contact, so
+ *   a picker that ignored the gate entirely would have passed every test.
  */
 const CLIENT_PROJECTS: ClientProject[] = [
   { clientId: 1, projectId: 1, isDefault: true },
@@ -669,6 +682,7 @@ const CLIENT_PROJECTS: ClientProject[] = [
   { clientId: 2, projectId: 1, isDefault: false },
   { clientId: 2, projectId: 2, isDefault: true },
   { clientId: 4, projectId: 4, isDefault: true },
+  { clientId: 5, projectId: 1, isDefault: false },
 ];
 
 /**

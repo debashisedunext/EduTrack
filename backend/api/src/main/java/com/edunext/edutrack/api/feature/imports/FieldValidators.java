@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.imports;
 
+import com.edunext.edutrack.domain.validation.EmailFormat;
+
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.Locale;
@@ -20,6 +22,24 @@ import java.util.regex.Pattern;
  * against the file (duplicate-in-file) and against the table (create versus
  * update), both of which need the whole row set and live in
  * {@link ImportValidationEngine}.
+ *
+ * <p><b>B-028 · {@link #email()} delegates rather than states.</b> The prediction
+ * above came true faster than "the second release": B-026 and B-027 gave S-33's
+ * form and its contact editor their own answer to "is this a valid email?" —
+ * Jakarta's {@code @Email}, which accepts {@code accounts@acme} — on the same
+ * columns this reads off a spreadsheet. The canonical statement is
+ * {@link EmailFormat}, in {@code domain} because {@code imports} and
+ * {@code clients} both already depend on it and neither should depend on the
+ * other. Generic, and rightly here: B-038's resource registration validates
+ * addresses on the same rule.
+ *
+ * <p><b>The matching client-code fix is deliberately <em>not</em> here</b>, and
+ * {@code ImportEngineIsolationTest} is why — it caught the first attempt. A
+ * {@code clientCode()} on the engine's front door would mean the shared engine
+ * knowing what a client is, which is the first half of a second import flow.
+ * {@code ClientCodeFormat} is client-specific, so it belongs to the
+ * registration: see {@code ClientImportSchema}, where entity knowledge is
+ * allowed. The distinction is exactly the one B-030 drew and it held.
  */
 public final class FieldValidators {
 
@@ -29,26 +49,34 @@ public final class FieldValidators {
     private static final Pattern ALPHANUMERIC = Pattern.compile("^[A-Za-z0-9]+$");
 
     /**
-     * Shape only, and deliberately permissive.
+     * Letters and digits only — a generic field rule, kept for the schemas that
+     * genuinely want it.
      *
-     * <p>RFC 5322 done properly rejects addresses that work and accepts ones
-     * that do not, and an importer's job is not to adjudicate that. This catches
-     * what actually appears in spreadsheets — a missing {@code @}, a trailing
-     * comma from a copied list, a bare domain — and lets D-034's bounce handling
-     * discover the rest, which is the only thing that can.
+     * <p><b>B-028 took {@code clientCode} off it.</b> It was never wrong as a
+     * rule; it was the wrong rule for that field, which has its own statement on
+     * {@link ClientCodeFormat} and permits the hyphens S-33 issues. Left here
+     * because {@code TestImportSchema} exercises the engine through it and
+     * B-038's resource registration has fields — an employee code — where
+     * letters and digits really is the constraint.
      */
-    private static final Pattern EMAIL =
-            Pattern.compile("^[^\\s@,;]+@[^\\s@,;.]+(\\.[^\\s@,;.]+)+$");
-
-    /** {@code clientCode} is a ticket-facing natural key; punctuation in it breaks the upsert match. */
     public static FieldValidator alphanumeric() {
         return value -> ALPHANUMERIC.matcher(value).matches()
                 ? Optional.empty()
                 : Optional.of("Must be letters and numbers only");
     }
 
+    /**
+     * B-028 · shape only and deliberately permissive, on
+     * {@link EmailFormat}'s single statement of it.
+     *
+     * <p>The pattern moved rather than changed: B-030 wrote it here, and S-33's
+     * form and B-027's contact editor were meanwhile answering the same question
+     * with Bean Validation's {@code @Email}, which accepts {@code accounts@acme}.
+     * A form that accepts an address the importer rejects means B-035 refusing a
+     * row describing a client the system itself created.
+     */
     public static FieldValidator email() {
-        return value -> EMAIL.matcher(value).matches()
+        return value -> EmailFormat.isValid(value)
                 ? Optional.empty()
                 : Optional.of("Invalid email");
     }

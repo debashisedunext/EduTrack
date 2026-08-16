@@ -1,8 +1,8 @@
 package com.edunext.edutrack.api.feature.clients;
 
 import com.edunext.edutrack.common.pagination.PageMeta;
+import com.edunext.edutrack.domain.clients.ClientCodeFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -107,6 +107,18 @@ final class ClientDtos {
      * exists: a prospect and a contracted client are both active by that
      * projection and the grid would label them identically.
      *
+     * <p><b>{@code hasPrimaryContact} arrived with B-028</b>, and it is on the
+     * <em>list</em> row rather than only on {@link ClientDetail} because the
+     * list row is what §4B.2's ticket-form dropdown renders. The rule is "at
+     * least one primary contact before the client can be selected on a ticket";
+     * a picker that cannot see the answer cannot apply it, and the alternative —
+     * deriving it from {@code primaryContact != null} at each call site — is a
+     * second statement of the rule that would drift the first time somebody
+     * asked whether a <em>deactivated</em> primary still counts. (It does not:
+     * both fields come off the same active-only read.) The same call B-025 made
+     * putting {@code openTicketCount} on every row rather than only in the
+     * dialog that needed it.
+     *
      * @param openTicketCount tickets against this client whose status is not
      *                        terminal — the figure that makes a bulk deactivate
      *                        an informed decision rather than one whose size is
@@ -114,6 +126,10 @@ final class ClientDtos {
      *                        {@code userCount} and B-020 with {@code ticketCount}
      * @param lastTicketDate  null for a client nothing has ever been raised
      *                        against, which is a real state and not a zero
+     * @param hasPrimaryContact B-028's gate. A live contact flagged primary —
+     *                        equivalently, whether {@code primaryContact} is
+     *                        present, stated as the rule rather than left to be
+     *                        inferred from a nullable object
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record Client(
@@ -130,7 +146,8 @@ final class ClientDtos {
             long openTicketCount,
             Contact primaryContact,
             List<ProjectRef> projects,
-            Instant lastTicketDate) {
+            Instant lastTicketDate,
+            boolean hasPrimaryContact) {
     }
 
     /**
@@ -250,11 +267,20 @@ final class ClientDtos {
      */
     record ClientWriteRequest(
             // ── Identity ──────────────────────────────────────────────────
+            /*
+             * B-028 · the expression is ClientCodeFormat.REGEX rather than a
+             * literal. It was a literal here and a *different* literal in
+             * `FieldValidators.alphanumeric()`, which the importer applied to
+             * the same column — so S-33 issued codes B-035's upsert key would
+             * later refuse. An annotation needs a compile-time constant, which
+             * a `static final String` is; the wording comes from the same class
+             * so the form's 400 and B-034's dry-run row read alike.
+             */
             @NotBlank(message = "clientCode is required")
-            @Size(min = 2, max = 20, message = "clientCode must be 2–20 characters")
-            @Pattern(regexp = "^[A-Za-z0-9][A-Za-z0-9_-]*$",
-                    message = "clientCode may contain letters, digits, hyphens and underscores, "
-                            + "and must start with a letter or digit")
+            @Size(min = ClientCodeFormat.MIN_LENGTH, max = ClientCodeFormat.MAX_LENGTH,
+                    message = "clientCode must be 2–20 characters")
+            @Pattern(regexp = ClientCodeFormat.REGEX,
+                    message = "clientCode " + ClientCodeFormat.MESSAGE)
             String clientCode,
 
             @NotBlank(message = "name is required")
@@ -282,11 +308,24 @@ final class ClientDtos {
             @Size(max = 120, message = "domain cannot exceed 120 characters")
             String domain,
 
-            @Email(message = "primaryEmail must be a well-formed email address")
+            /*
+             * B-028 · the three addresses below carry no @Email, and that is the
+             * fix rather than a relaxation.
+             *
+             * Bean Validation's @Email accepts `accounts@acme` and
+             * `bob@localhost`, while B-030's importer — validating these same
+             * three columns off a spreadsheet — requires a dotted TLD. Two rules
+             * on one column, and the permissive one on the screen that feeds the
+             * strict one. EmailFormat is now the single statement and
+             * ClientWriteService applies it, which also gets these fields into
+             * the collected error map with everything else on the four-tab form
+             * rather than short-circuiting the save at the binding layer.
+             *
+             * @Size stays: a length is the column's business, not the rule's.
+             */
             @Size(max = 150, message = "primaryEmail cannot exceed 150 characters")
             String primaryEmail,
 
-            @Email(message = "supportEmail must be a well-formed email address")
             @Size(max = 150, message = "supportEmail cannot exceed 150 characters")
             String supportEmail,
 
@@ -324,7 +363,7 @@ final class ClientDtos {
             @Size(max = 60, message = "billingReference cannot exceed 60 characters")
             String billingReference,
 
-            @Email(message = "billingEmail must be a well-formed email address")
+            // See primaryEmail — validated by EmailFormat in ClientWriteService.
             @Size(max = 150, message = "billingEmail cannot exceed 150 characters")
             String billingEmail,
 
@@ -388,8 +427,20 @@ final class ClientDtos {
              * defaults to true and a mail D-036 can never deliver is worse than
              * a refused save.
              */
+            /*
+             * B-028 · @NotBlank stays and @Email is gone — the format is
+             * EmailFormat, applied in ClientContactService. "Not supplied" and
+             * "supplied and wrong" are different answers to an administrator and
+             * only the first is a missing-field error; @Email conflated them by
+             * treating blank as valid, so the two annotations were already
+             * splitting one question between them.
+             *
+             * This is the field that most needs the stricter rule.
+             * `notificationOptIn` defaults to true, so an address D-036 can
+             * never deliver to is created silently and discovered as a bounce
+             * weeks later, against a contact who believes they are subscribed.
+             */
             @NotBlank(message = "email is required")
-            @Email(message = "email must be a well-formed email address")
             @Size(max = 150, message = "email cannot exceed 150 characters")
             String email,
 

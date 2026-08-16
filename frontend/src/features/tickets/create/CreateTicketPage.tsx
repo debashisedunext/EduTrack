@@ -469,6 +469,19 @@ export function CreateTicketPage() {
                     getKey={(client) => String(client.id)}
                     getLabel={(client) => `${client.clientCode} — ${client.name}`}
                     getSearchable={(client) => [client.clientCode ?? '', client.name ?? '', client.domain ?? '']}
+                    // B-028 · blueprint line 948 — "at least one primary
+                    // contact before the client can be selected on a ticket".
+                    //
+                    // Shown and refused, never filtered out. A client that
+                    // simply is not in the list looks like a list that has lost
+                    // its data, and the person raising the ticket is usually
+                    // the one who can go and fix the master. Read off the
+                    // server's `hasPrimaryContact` rather than derived from
+                    // `primaryContact`, which is omitted rather than nulled and
+                    // so reaches this as `undefined`.
+                    getOptionDisabled={(client) =>
+                      client.hasPrimaryContact ? null : 'No primary contact'
+                    }
                     placeholder={projectId == null ? 'Select a project first' : 'Search name, code or domain…'}
                     disabled={projectId == null}
                   />

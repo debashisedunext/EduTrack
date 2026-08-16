@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { isWellFormedEmail } from '@/lib/email'
 import type { ClientDetail } from '@/api/generated/model/clientDetail'
 import type { ClientStatus } from '@/api/generated/model/clientStatus'
 import type { ClientSupportPlan } from '@/api/generated/model/clientSupportPlan'
@@ -355,9 +356,16 @@ function blankToNull(value: string): string | null {
 }
 
 /**
- * Blank passes — these fields are optional, and zod's `.email()` on an empty
- * string reports "not a valid email" for a box nobody filled in.
+ * Blank passes — all three of these fields are optional, and a client that
+ * raises everything by phone genuinely has no support address. Reporting "not a
+ * valid email" for a box nobody filled in would make the three of them feel
+ * required when only the shape is checked.
+ *
+ * B-028 · the shape itself is `isWellFormedEmail`, the same rule `EmailFormat`
+ * applies on the server, rather than zod's `.email()` — which accepted
+ * `accounts@acme` and would have let the form pass an address the save now
+ * refuses and B-035's import would reject.
  */
 function isBlankOrEmail(value: string): boolean {
-  return value.trim() === '' || z.string().email().safeParse(value.trim()).success
+  return value.trim() === '' || isWellFormedEmail(value)
 }

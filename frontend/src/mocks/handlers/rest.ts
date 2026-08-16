@@ -1,4 +1,5 @@
 import { http, HttpResponse } from 'msw';
+import { isWellFormedEmail } from '@/lib/email';
 import { getDb, nextId } from '../db';
 import type {
   Db, Holiday, Level, NotificationChannelCode, NotificationTemplateRow, Priority,
@@ -3094,7 +3095,17 @@ function clientDto(c: import('../db').Client) {
     isActive: c.status !== 'INACTIVE',
     status: c.status,
     openTicketCount: db.tickets.filter((t) => t.clientId === c.id && t.status !== 'CLOSED').length,
-    primaryContact: db.contacts.find((x) => x.clientId === c.id && x.isPrimary) ?? null,
+    // B-028 · `isActive` matters here and the mock was missing it. The server's
+    // `primaryContacts` reads `is_primary = 1 AND is_active = 1`, because B-027
+    // removes a contact by deactivating it — a client whose only primary has
+    // left is a client nobody can be reached through, and counting them keeps
+    // it selectable on a ticket it should not be.
+    primaryContact:
+      db.contacts.find((x) => x.clientId === c.id && x.isPrimary && x.isActive) ?? null,
+    // B-028's gate. Stated rather than derived from `primaryContact` for the
+    // reason the contract gives: the server omits that key rather than nulling
+    // it, so a consumer reading the object gets `undefined`.
+    hasPrimaryContact: db.contacts.some((x) => x.clientId === c.id && x.isPrimary && x.isActive),
     // B-025 · S-32's Projects and Last Ticket columns. Both derived from the
     // fixture rather than stored on the client, so a mapping added or a ticket
     // raised in a test is reflected here without a second place to update.
@@ -3143,10 +3154,11 @@ function clientDetailDto(c: import('../db').Client) {
     tags: c.tags ?? [],
     defaultProjectId:
       db.clientProjects.find((cp) => cp.clientId === c.id && cp.isDefault)?.projectId ?? null,
-    contactCount: contacts.length,
-    // B-028's gate, reported and not enforced — the form warns, the ticket
-    // create path is what refuses.
-    hasPrimaryContact: contacts.some((x) => x.isPrimary),
+    // Live contacts only, agreeing with the server's `contactSummary`. B-028 ·
+    // `hasPrimaryContact` is not repeated here — `clientDto` above states it
+    // once and this spreads it, so the list row and the detail cannot answer
+    // the gate differently.
+    contactCount: contacts.filter((x) => x.isActive).length,
   };
 }
 
@@ -3179,6 +3191,16 @@ function validateClientWrite(
   const code = String(body.clientCode ?? '').trim().toUpperCase();
   if (db.clients.some((c) => c.clientCode.toUpperCase() === code && c.id !== exceptId)) {
     errors.clientCode = [`Client code ${code} is already in use.`];
+  }
+
+  // B-028 · the three optional addresses, on the one rule. Absent and blank are
+  // not failures — every column is nullable — so only a value that is there and
+  // malformed is refused, which is `ClientWriteService.checkEmail` exactly.
+  for (const field of ['primaryEmail', 'supportEmail', 'billingEmail'] as const) {
+    const value = body[field] == null ? '' : String(body[field]).trim();
+    if (value !== '' && !isWellFormedEmail(value)) {
+      errors[field] = [`${field} is not a well-formed email address.`];
+    }
   }
 
   const status = body.status == null ? 'ACTIVE' : String(body.status).toUpperCase();
@@ -3274,8 +3296,13 @@ function validateContactWrite(
 
   const email = String(body.email ?? '').trim();
   if (!email) return validationFailed({ email: ['email is required'] });
-  if (!email.includes('@')) {
-    return validationFailed({ email: ['must be a well-formed email address'] });
+  // B-028 · the server's rule, not `includes('@')`. This mock was the loosest
+  // of the four things that answered "is this a valid email?", so a contact
+  // added under `npm run dev` at `sara@acme` was accepted here and refused by
+  // MySQL-backed `ClientContactService` — correct in dev, wrong in production,
+  // which is the worst way round.
+  if (!isWellFormedEmail(email)) {
+    return validationFailed({ email: ['email is not a well-formed email address.'] });
   }
 
   const clash = db.contacts.find(

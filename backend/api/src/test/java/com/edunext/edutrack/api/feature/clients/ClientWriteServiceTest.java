@@ -256,6 +256,74 @@ class ClientWriteServiceTest {
             verify(write).findConflictingCode("ACME", 1L);
         }
 
+        // ── B-028 · blueprint line 948's "valid emails" ───────────────────
+
+        /**
+         * The address Bean Validation's {@code @Email} accepted. It was on all
+         * three of these fields until B-028, while B-030's importer — reading
+         * the same three columns off a spreadsheet — refused it, so S-33 could
+         * create a client that B-035's re-import would reject.
+         */
+        @Test
+        @DisplayName("an address with no dotted TLD is refused on all three email fields")
+        void malformedEmails() {
+            assertThatThrownBy(() -> service.create(write(b -> b.primaryEmail("accounts@acme"))))
+                    .isInstanceOf(ClientWriteService.ClientValidationException.class)
+                    .satisfies(errorsOn("primaryEmail"));
+
+            assertThatThrownBy(() -> service.create(write(b -> b.supportEmail("desk@localhost"))))
+                    .isInstanceOf(ClientWriteService.ClientValidationException.class)
+                    .satisfies(errorsOn("supportEmail"));
+
+            assertThatThrownBy(() -> service.create(write(b -> b.billingEmail("ap@acme,"))))
+                    .isInstanceOf(ClientWriteService.ClientValidationException.class)
+                    .satisfies(errorsOn("billingEmail"));
+        }
+
+        /**
+         * <b>Absent is not malformed.</b> Every one of these columns is
+         * nullable, and a client that raises everything by phone has no support
+         * address — refusing that would make the form unusable for exactly the
+         * clients whose contact details are thinnest.
+         */
+        @Test
+        @DisplayName("an absent or blank email is not a failure")
+        void absentEmailsAreFine() {
+            service.create(write(b -> b.primaryEmail(null).supportEmail("  ")));
+
+            assertThat(saved().getSupportEmail()).isNull();
+        }
+
+        /**
+         * The pattern used to run against the raw value while {@code apply}
+         * stored the trimmed one, so an address pasted out of a spreadsheet cell
+         * was refused and the same address typed by hand was accepted.
+         */
+        @Test
+        @DisplayName("a surrounding-whitespace address is accepted and stored trimmed")
+        void whitespaceAroundAnEmail() {
+            service.create(write(b -> b.supportEmail("  desk@acme.example ")));
+
+            assertThat(saved().getSupportEmail()).isEqualTo("desk@acme.example");
+        }
+
+        /**
+         * Every failure in one document — the four-tab form's whole error story,
+         * and an email failure has to join it rather than short-circuit at the
+         * binding layer the way {@code @Email} did.
+         */
+        @Test
+        @DisplayName("a bad email is collected with the other failures, not thrown at")
+        void emailJoinsTheCollectedErrors() {
+            assertThatThrownBy(() -> service.create(write(b -> b
+                    .supportEmail("desk@acme")
+                    .timezone("Mars/Olympus"))))
+                    .isInstanceOf(ClientWriteService.ClientValidationException.class)
+                    .satisfies(e -> assertThat(
+                            ((ClientWriteService.ClientValidationException) e).errors())
+                            .containsOnlyKeys("supportEmail", "timezone"));
+        }
+
         @Test
         @DisplayName("an unknown time zone is refused rather than stored as a string")
         void unknownTimezone() {
@@ -464,7 +532,7 @@ class ClientWriteServiceTest {
 
     private static ClientDtos.Client row() {
         return new ClientDtos.Client(42, "NEWCO", "Newco Ltd", null, null, null, null,
-                "Asia/Kolkata", true, "ACTIVE", 0, null, List.of(), null);
+                "Asia/Kolkata", true, "ACTIVE", 0, null, List.of(), null, false);
     }
 
     private static ClientDtos.ClientDetail detail() {
@@ -542,6 +610,21 @@ class ClientWriteServiceTest {
 
         Builder timezone(String v) {
             this.timezone = v;
+            return this;
+        }
+
+        Builder primaryEmail(String v) {
+            this.primaryEmail = v;
+            return this;
+        }
+
+        Builder supportEmail(String v) {
+            this.supportEmail = v;
+            return this;
+        }
+
+        Builder billingEmail(String v) {
+            this.billingEmail = v;
             return this;
         }
 

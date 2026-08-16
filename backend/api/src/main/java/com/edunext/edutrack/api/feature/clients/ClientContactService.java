@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.clients;
 
 import com.edunext.edutrack.domain.clients.ClientRepository;
+import com.edunext.edutrack.domain.validation.EmailFormat;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,8 +50,12 @@ import java.util.Optional;
  * <h2>Validation</h2>
  *
  * <p>Bean Validation on {@link ClientDtos.ContactWriteRequest} covers lengths and
- * email shape. What is here is the one rule that needs a query: <b>an email
- * address is unique among a client's live contacts</b>, case-insensitively, and
+ * requiredness. <b>B-028 moved the email <em>format</em> here</b>, onto
+ * {@link EmailFormat} — {@code @Email} accepted {@code bob@acme}, which
+ * {@code notificationOptIn} defaulting to true turns into a subscription that
+ * can only ever bounce, and which B-030's importer refused on the same column.
+ * The other rule here is the one that needs a query: <b>an email address is
+ * unique among a client's live contacts</b>, case-insensitively, and
  * <b>only</b> within the client. Two rows with one address under one client mean
  * D-036 mails the same person twice and C-021's reporter dropdown offers two
  * identical options; the same address under two different clients is a
@@ -201,19 +206,32 @@ public class ClientContactService {
                           Long exceptId) {
 
         Map<String, String> errors = new LinkedHashMap<>();
+        boolean duplicate = false;
 
         String email = request.email() == null ? null : request.email().trim();
         if (email != null && !email.isEmpty()) {
-            Optional<String> holder = write.findConflictingEmail(clientId, email, exceptId);
-            // The message names who holds it. "That email is already in use" on a
-            // client with nine contacts is a search; naming the row is the fix.
-            holder.ifPresent(name -> errors.put("email",
-                    name + " already uses " + email.toLowerCase(Locale.ROOT)
-                            + " at this client."));
+            // B-028 · shape before uniqueness, and only one of the two is
+            // reported. Asking `findConflictingEmail` about a string that is not
+            // an address spends a query to learn nothing, and a response naming
+            // both failures would tell an administrator to fix a duplicate of
+            // something that was never valid.
+            if (!EmailFormat.isValid(email)) {
+                errors.put("email", EmailFormat.message("email"));
+            } else {
+                Optional<String> holder = write.findConflictingEmail(clientId, email, exceptId);
+                // The message names who holds it. "That email is already in use"
+                // on a client with nine contacts is a search; naming the row is
+                // the fix.
+                if (holder.isPresent()) {
+                    errors.put("email", holder.get() + " already uses "
+                            + email.toLowerCase(Locale.ROOT) + " at this client.");
+                    duplicate = true;
+                }
+            }
         }
 
         if (!errors.isEmpty()) {
-            throw new ContactValidationException(errors);
+            throw new ContactValidationException(errors, duplicate);
         }
     }
 
@@ -237,9 +255,27 @@ public class ClientContactService {
 
         private final transient Map<String, String> errors;
 
-        ContactValidationException(Map<String, String> errors) {
+        /**
+         * B-028 · stated by the thrower, <b>not inferred from the key</b>.
+         *
+         * <p>It used to be {@code errors.containsKey("email")}, which was exact
+         * while a duplicate was the only thing that could fail on that field.
+         * B-028 adds a second — a malformed address — and it lands on the same
+         * key, so the inference would have rendered
+         * {@code "bob@acme" is not a well-formed email address} as a <b>409
+         * Conflict</b>. CONVENTIONS.md §3 says a client branches on the status,
+         * so the editor would have shown a duplicate-contact message about an
+         * address no other contact holds. The same shape as
+         * {@code ClientValidationException.isDuplicateCodeOnly}, which describes
+         * a status rule by looking at the map — and gets away with it only
+         * because {@code clientCode} still has exactly one way to fail.
+         */
+        private final boolean duplicate;
+
+        ContactValidationException(Map<String, String> errors, boolean duplicate) {
             super(String.join(" ", errors.values()));
             this.errors = Map.copyOf(errors);
+            this.duplicate = duplicate;
         }
 
         Map<String, String> errors() {
@@ -248,7 +284,7 @@ public class ClientContactService {
 
         /** A duplicate address is a uniqueness conflict — 409, like a client code. */
         boolean isDuplicate() {
-            return errors.containsKey("email");
+            return duplicate;
         }
     }
 }

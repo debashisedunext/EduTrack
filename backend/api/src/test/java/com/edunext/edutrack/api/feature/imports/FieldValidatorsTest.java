@@ -11,6 +11,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** B-030 · blueprint §4B.3's validation rules, one test class for all of them. */
 class FieldValidatorsTest {
 
+    /**
+     * B-028 · <b>{@code clientCode} is no longer one of this rule's callers.</b>
+     * It is a generic field rule and stays for the fields where letters and
+     * digits really is the constraint (B-038's employee code); the client
+     * master's own rule permits hyphens and lives on {@code ClientCodeFormat},
+     * applied by {@code ClientImportSchema}. The wording below is no longer
+     * about the upsert match, because the field it referred to has left.
+     */
     @Nested
     class Alphanumeric {
 
@@ -21,7 +29,7 @@ class FieldValidatorsTest {
         }
 
         @ParameterizedTest
-        @DisplayName("punctuation and spacing are rejected — they break the upsert match")
+        @DisplayName("punctuation and spacing are rejected")
         @ValueSource(strings = {"AC-ME", "AC ME", "AC_ME", "ACME!", "ACMÉ"})
         void rejects(String code) {
             assertThat(FieldValidators.alphanumeric().validate(code))

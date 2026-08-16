@@ -116,8 +116,29 @@ class ClientQueryRepository {
             params.add(like);
         }
         if (filter.isActive() != null) {
-            sql.append(" AND c.status = ?");
-            params.add(filter.isActive() ? ClientService.ACTIVE : ClientService.INACTIVE);
+            // B-028 · `<> INACTIVE`, not `= ACTIVE`, and this was a live defect.
+            //
+            // B-026 added PROSPECT and widened the *projection* to
+            // `status <> 'INACTIVE'` (ClientStatus.isActive) precisely because
+            // §4B.2 puts a client dropdown on the ticket create form filtered on
+            // that boolean. It did not widen this filter. So the row for a
+            // prospect came back saying `isActive: true` while
+            // `GET /clients?isActive=true` — the exact call CreateTicketPage
+            // makes — did not return it: the response and the predicate
+            // disagreeing about one word, on one screen, in the direction that
+            // empties a dropdown.
+            //
+            // Nothing failed because nothing had run the two against each other:
+            // the MSW mock filters it the wide way and its comment claims "it is
+            // the derivation the server uses". It was not. Same mock-versus-
+            // server shape as the support-plan casing B-026 found, and the same
+            // worst-way-round — correct under `npm run dev`, wrong against MySQL.
+            //
+            // `= INACTIVE` on the false branch is deliberately not symmetric
+            // with it, and is already right: "not active" is exactly INACTIVE,
+            // whereas "active" is two of the three statuses.
+            sql.append(filter.isActive() ? " AND c.status <> ?" : " AND c.status = ?");
+            params.add(ClientService.INACTIVE);
         }
         if (filter.projectId() != null) {
             // EXISTS rather than a join: a client on three projects must appear
@@ -292,8 +313,15 @@ class ClientQueryRepository {
     }
 
     /**
-     * Each client's live primary contact, for the grid's contact column and the
-     * B-028 gate the ticket form will read.
+     * Each client's live primary contact, for the grid's contact column and for
+     * {@code Client.hasPrimaryContact} — B-028's gate, which §4B.2's ticket-form
+     * dropdown reads off every row.
+     *
+     * <p><b>{@code is_active = 1} is what makes the gate mean anything.</b>
+     * B-027 removes a contact by deactivating it, and a client whose only
+     * primary has left is a client nobody at the desk can be reached through;
+     * counting them would keep it selectable and send every §11 mail to somebody
+     * who is gone.
      *
      * <p>Takes the lowest id where a client somehow has two. "At most one
      * primary" is a service-layer rule the schema cannot assert — see
