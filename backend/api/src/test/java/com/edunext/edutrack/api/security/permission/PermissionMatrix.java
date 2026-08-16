@@ -381,6 +381,17 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/tickets/{ticketId}/attachments"),
             everyRole("GET", "/api/v1/tickets/{ticketId}/attachments"),
 
+            // ── ticket detail · every role, because permission is not scope ──
+            //
+            // A-052. All six reach it, and that is blueprint §2's answer rather
+            // than a permissive one: what differs per role is the *rows*, not
+            // the right to ask. ScopedTickets answers 404 rather than 403 for a
+            // ticket outside the caller's scope, so a permission denial here
+            // would confirm the ticket exists — the existence leak A-035
+            // removed. Denying the capability would be the wrong tool for that
+            // job and would break the roles it is meant to protect.
+            everyRole("GET", "/api/v1/tickets/{ticketId}/full"),
+
             // ── attachment limits · C-027, §4B.4 ────────────────────────────
             // Read open to all six, write to master.write.
             //
