@@ -112,6 +112,64 @@ class DashboardRepository {
                 .optional();
     }
 
+    /**
+     * One row per day in the window — A-055's sparklines.
+     *
+     * <p>Days with no summary row are absent rather than zero, and the service
+     * fills the gaps. That distinction is the point: a project with no row for
+     * Sunday has not had "zero open tickets since Friday", it has not been
+     * computed for Sunday, and a sparkline that dips to the axis every weekend
+     * is a chart that lies quietly.
+     */
+    record Day(LocalDate day, long created, long closed, long openTotal,
+               long openCritical, long openDelayed, long openReopened) {
+    }
+
+    List<Day> projectSeries(LocalDate from, LocalDate to, List<Long> projectIds, Long projectFilter) {
+        return jdbc.sql("""
+                        SELECT stat_date,
+                               SUM(created)       AS created,
+                               SUM(closed)        AS closed,
+                               SUM(open_total)    AS open_total,
+                               SUM(open_critical) AS open_critical,
+                               SUM(open_delayed)  AS open_delayed,
+                               SUM(open_reopened) AS open_reopened
+                          FROM daily_ticket_stats
+                         WHERE stat_date BETWEEN :from AND :to
+                           AND (:unscoped = 1 OR project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR project_id = :projectFilter)
+                         GROUP BY stat_date
+                         ORDER BY stat_date
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .param("projectFilter", projectFilter)
+                .query((rs, n) -> new Day(
+                        rs.getObject("stat_date", LocalDate.class),
+                        rs.getLong("created"), rs.getLong("closed"), rs.getLong("open_total"),
+                        rs.getLong("open_critical"), rs.getLong("open_delayed"),
+                        rs.getLong("open_reopened")))
+                .list();
+    }
+
+    /** The same series for one person. Created and reopened are not theirs to own — see {@link #resourceFlow}. */
+    List<Day> resourceSeries(LocalDate from, LocalDate to, long userId) {
+        return jdbc.sql("""
+                        SELECT stat_date, closed, assigned_open, assigned_critical, assigned_delayed
+                          FROM resource_daily_stats
+                         WHERE stat_date BETWEEN :from AND :to AND user_id = :userId
+                         ORDER BY stat_date
+                        """)
+                .param("from", from).param("to", to).param("userId", userId)
+                .query((rs, n) -> new Day(
+                        rs.getObject("stat_date", LocalDate.class),
+                        0, rs.getLong("closed"), rs.getLong("assigned_open"),
+                        rs.getLong("assigned_critical"), rs.getLong("assigned_delayed"), 0))
+                .list();
+    }
+
     /** The same two questions for one person, from the resource-keyed table. */
     Flow resourceFlow(LocalDate from, LocalDate to, long userId) {
         return jdbc.sql("""

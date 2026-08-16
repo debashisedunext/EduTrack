@@ -316,21 +316,57 @@ class DashboardScopeIT {
             });
         }
 
+        @Test
+        @DisplayName("every card carries one sparkline point per summarised day")
+        void sparklineHasAPointPerDay() {
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "PM", List.of(mine)), null, D1, D3, null);
+
+            assertThat(s.cards()).allSatisfy(c ->
+                    assertThat(c.sparkline()).as("three days seeded").hasSize(3));
+        }
+
         /**
-         * A-055 fills these. Null and empty render as absent; zero would render
-         * as "no change" and a zero-filled sparkline as a flat line — both are
-         * assertions nobody computed.
+         * The comparison has no denominator, so there is no percentage to state.
+         * "+100%" would be a confident green arrow on a number that means
+         * nothing — a team that closed nothing last week and eleven this week
+         * has not improved by a hundred per cent.
          */
         @Test
-        @DisplayName("deltaPct and sparkline stay empty until A-055")
-        void unbuiltFieldsAreNotFaked() {
+        @DisplayName("deltaPct is null when the previous window held nothing")
+        void deltaIsNullWithNothingToCompareAgainst() {
             DashboardDtos.Summary s = service.summary(
-                    caller(me, "ADMIN", List.of()), null, D1, D3, null);
+                    caller(me, "PM", List.of(mine)), null, D1, D3, null);
 
-            assertThat(s.cards()).allSatisfy(c -> {
-                assertThat(c.deltaPct()).isNull();
-                assertThat(c.sparkline()).isEmpty();
-            });
+            assertThat(valueOf(s, "closed")).isEqualByComparingTo("3");
+            assertThat(s.cards().stream().filter(c -> c.key().equals("closed")).findFirst()
+                    .orElseThrow().deltaPct())
+                    .as("nothing was summarised in the three days before D1")
+                    .isNull();
+        }
+
+        /**
+         * Like against like: a three-day window compares with the three days
+         * before it, never with a fixed "last month". Otherwise a Monday-to-
+         * Friday view would read as a collapse whenever it was opened on a
+         * Saturday.
+         */
+        @Test
+        @DisplayName("deltaPct compares against the preceding window of equal length")
+        void deltaComparesEqualWindows() {
+            // Three days immediately before D1, closing 1 per day — same as the
+            // window itself, so the delta is exactly zero rather than absent.
+            for (int back = 1; back <= 3; back++) {
+                projectStat(D1.minusDays(back), mine, 2, 1, 0, 5, 1, 1, 1);
+            }
+
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "PM", List.of(mine)), null, D1, D3, null);
+
+            assertThat(s.cards().stream().filter(c -> c.key().equals("closed")).findFirst()
+                    .orElseThrow().deltaPct())
+                    .as("3 closed against 3 closed")
+                    .isEqualByComparingTo("0.0");
         }
     }
 }

@@ -11,6 +11,7 @@ import {
 } from './features/tickets/detail/entityLinks'
 import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
+import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ClientListPage } from './features/clients/ClientListPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
@@ -56,7 +57,7 @@ export default function App() {
 
           <Route element={<AppShell />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<ScreenPlaceholder title="Dashboard" />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/my-tasks" element={<MyTasksPage />} />
             <Route path="/tickets" element={<TicketListPage />} />
             {/* Ahead of `/tickets/:ticketId` for readability; React Router ranks
