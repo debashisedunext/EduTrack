@@ -125,7 +125,9 @@ backend/
   api/feature/notifications/   → D
   api/feature/chat/            → D
   api/realtime/                → D    STOMP config, channel interceptor, topics
-  worker/                      → D    all schedulers  (A's hash verifier is the exception)
+  worker/                      → D    all schedulers
+  worker/journal/              → A    A-044's hash-chain verifier
+  worker/stats/                → A    A-051's summary refresh  ⚠️ see note below
 
 frontend/src/
   components/ui/               → C    shared design system  (additive changes only)
@@ -139,6 +141,17 @@ frontend/src/
 ```
 
 This map is committed as `.github/CODEOWNERS`, so GitHub requests the right reviewer automatically on every pull request. Keep the two in sync — the file is the enforceable version of this table.
+
+> ⚠️ **`worker/` is D's, with two carve-outs — and the second one is new. Needs Debashis's confirmation.**
+>
+> The row used to read `worker/ → D, all schedulers (A's hash verifier is the exception)`, and that parenthesis has been out of date since A-051. Two directories under `worker/` are Stream A's work, for the same reason: both are *scheduled jobs serving A's own subsystem*, and neither is an engine.
+>
+> - `worker/journal/` — A-044's hash-chain verifier, which the old parenthesis already meant.
+> - `worker/stats/` — A-051's summary refresh. It exists because CLAUDE.md forbids a live `COUNT(*)` behind a dashboard, so A-050's summary tables need something to fill them. **A-056 and A-057 have since edited it three times** — `type_counts`, `assigned_in_progress`, then `sla_closed`/`sla_met` — each flagged in the code and in a pull request, each time against a map that said the file was D's.
+>
+> Splitting the row is the honest fix. The alternative is that every dashboard widget needing a new aggregate arrives as an unannounced edit to another stream's directory, which is precisely what §6 exists to prevent — and A-058 and A-059 both need aggregates that do not exist yet, so this recurs immediately if left alone.
+>
+> **This entry records the state of the code, not an agreement.** It was raised by Stream A and is written here so the map stops disagreeing with the repository; it is not D's assent, which is still outstanding. If Debashis would rather own the stats refresh outright, the carve-out comes back out and A-058's aggregates get raised as requests instead — either answer is workable, and the one thing that is not is the map staying wrong. `.github/CODEOWNERS` is deliberately **not** updated until that conversation happens, because that file is the enforceable version and changing who GitHub asks for review is exactly the part that needs both streams to agree.
 
 > ⚠️ **The table above is a package map; CODEOWNERS matches paths.** `api/feature/auth/` here means `backend/api/src/main/java/com/edunext/edutrack/api/feature/auth/` on disk, and until 14 Aug 2026 CODEOWNERS was written the short way — so 17 of its 20 backend rules matched nothing, every pull request requested only the lead, and no stream was ever auto-notified of a change to its own code. Fixed in A-040 by dropping the leading slash so the patterns match at any depth. **If you add a row here, add the path form to CODEOWNERS and prove it resolves** with `git ls-files | grep -E '<pattern>'` — an empty result is a rule that does nothing and looks exactly like one that works.
 
