@@ -82,6 +82,26 @@ ROWLESS_403 = {
     "/masters/notification-templates/{templateId}": "same: not row-scoped. Every read here is Admin-only, so a 403 tells a non-Admin only what the 401 already did",
     "/attachments/limits":                 "org-wide settings, not a row — `master.write` is a capability the caller either holds or does not, and the resource has no existence a 404 could conceal (every role already reads it)",
     "/clients/bulk-status":                "master data, not row-scoped — the ids in the body name rows listClients already returned, and §4B.2's ticket dropdown makes that readable by all six roles, so a 403 conceals nothing a 404 would have",
+    # C-028, and the only entry here that IS row-scoped — worth reading before
+    # it is used as a precedent.
+    #
+    # Every other line above says "not a row, so there is no existence to
+    # protect". This one concedes the row exists and refuses the verb anyway,
+    # because by the time §4B.4's deletion rule is consulted the caller has
+    # already passed ScopedTickets AND the attachment has been confirmed to be on
+    # that ticket. They are looking at it in a listing they just fetched, with its
+    # file name and its size. The 404 would be protecting an existence the
+    # previous request disclosed.
+    #
+    # It would also be actively worse: the client would have to render "that
+    # attachment no longer exists" for a file still on screen, and the user's next
+    # move — asking a PM to remove it — is one the true answer suggests and the
+    # false one hides.
+    #
+    # The line this preserves: 404 conceals whether a row exists, 403 concedes
+    # that it does and refuses the verb. An out-of-scope ticket is still 404 here,
+    # thrown before this refusal is reachable.
+    "/tickets/{ticketId}/attachments/{attachmentId}": "row-scoped, but scope has already answered — a 404 here would deny a file the caller can see in the listing they just fetched; §4B.4's rule is about who may remove it, not whether it exists",
 }
 
 

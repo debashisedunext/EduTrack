@@ -50,6 +50,7 @@ the database rejects mutation independently via triggers and grants.
 export * from './askTicketStatusBody';
 export * from './assignTicketBody';
 export * from './attachment';
+export * from './attachmentDeletedAt';
 export * from './attachmentDownloadUrl';
 export * from './attachmentLimits';
 export * from './attachmentLimitsResponse';

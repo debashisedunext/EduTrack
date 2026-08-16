@@ -415,9 +415,6 @@ to say so first.**
 - **MIME sniffing, AV, EXIF, S3 keys, signed URLs — C-025.** Server-side.
 - **Thumbnails, gallery, lightbox — C-026.** The picker shows a 28px preview only
   once the scan has passed.
-- **The 15-minute delete window and the tombstone — C-028.** `onRemove` is
-  optional and a surface that does not pass it renders no remove control at all,
-  so nothing offers an affordance the API will refuse.
 - **The Attachments tab — C-060.** The detail page's strip is the upload surface
   and the at-a-glance list; the grouped, filterable gallery is that task.
 - **The comment box (C-029) and the handoff dialog (C-052)** are two of §4B.4's
@@ -425,3 +422,43 @@ to say so first.**
   `attachmentIds` on the wire, and the picker's `compact` variant was built for
   §4B.5's inline `[📎]`. They adopt it unchanged.
 - **Inbound email**, §4B.4's sixth surface, is Stream D's.
+
+## C-028 · removals, on the client
+
+Two things arrive from `useTicketAttachments` that did not before.
+
+**`tombstones`, separate from `items`.** §4B.4's "file removed by X on date".
+Kept out of `items` rather than given a fifth `AttachmentItemStatus`, for two
+reasons. `AttachmentItem` lives in `components/ui/`, which all four streams
+consume, and widening its status union would turn every exhaustive `switch` on it
+in three other streams' code into a change they did not ask for. And a tombstone
+is not a file in any sense the picker cares about — it cannot be previewed,
+downloaded, removed, or counted against §4B.4's caps — so putting it in the same
+array would mean teaching every consumer to filter it out again.
+
+The server sends only the removals worth showing. A screenshot its uploader
+pasted by mistake and took back within fifteen minutes never reaches the client
+at all, so there is no client-side rule here to keep in step with the server's.
+
+`AttachmentGallery` renders them as a struck-through line under the strip, not as
+a tile: there is nothing to show, so a 64px square would be an empty box the same
+size as a real screenshot. Both halves of the sentence are optional — a deleted
+account leaves no name, a row removed before C-028 has no timestamp — and
+"removed" on its own is still true and useful where "removed by undefined" is
+not.
+
+**`removeError`.** Until §4B.4's rule was enforced, a delete could only fail on a
+network fault, and silently putting the row back was the whole of the right
+behaviour. Now the server can refuse: a Developer clicking × on a colleague's
+file gets a 403. The row still comes back, but a row that reappears with no
+explanation reads as a broken button, and the user's response to a broken button
+is to click it again.
+
+The message is the server's `detail`, carried verbatim. The rule depends on the
+row, the caller and the clock, and this feature has already had one client-side
+copy of a server rule drift — C-027's hard-coded caps, which silently overrode a
+raised setting rather than merely disagreeing with it.
+
+**`onRemove` is presentation only.** Passing it does not assert that the caller
+may remove anything; it decides whether a control is drawn. §4B.4's rule is
+enforced server-side and a refusal comes back as a 403.

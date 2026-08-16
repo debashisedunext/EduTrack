@@ -31,6 +31,7 @@ class AttachmentExceptionHandler {
     private static final URI UNSUPPORTED_TYPE = URI.create("https://edutrack/errors/unsupported-attachment-type");
     private static final URI TOO_LARGE = URI.create("https://edutrack/errors/attachment-too-large");
     private static final URI INVALID_LIMITS = URI.create("https://edutrack/errors/invalid-attachment-limits");
+    private static final URI DELETE_REFUSED = URI.create("https://edutrack/errors/attachment-delete-refused");
 
     /**
      * 415, per the contract: "Extension or sniffed MIME type not allowed."
@@ -87,6 +88,24 @@ class AttachmentExceptionHandler {
         problem.setTitle("Those limits cannot be applied");
         problem.setDetail(e.getMessage());
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(problem);
+    }
+
+    /**
+     * C-028 · 403. §4B.4's deletion rule refused the verb, not the row.
+     *
+     * <p>The only 403 in this feature, and the only one it should ever have.
+     * Everything about <em>which</em> tickets and which attachments a caller may
+     * reach is A-035's 404, decided in {@code ScopedTickets} before this package
+     * sees the request — see {@link AttachmentDeletionNotPermittedException} on
+     * why conceding existence is right here and wrong there.
+     */
+    @ExceptionHandler(AttachmentDeletionNotPermittedException.class)
+    ResponseEntity<ProblemDetail> handleDeleteRefused(AttachmentDeletionNotPermittedException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.FORBIDDEN);
+        problem.setType(DELETE_REFUSED);
+        problem.setTitle("That attachment cannot be removed");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
     }
 
     private ResponseEntity<ProblemDetail> payloadTooLarge(String detail) {

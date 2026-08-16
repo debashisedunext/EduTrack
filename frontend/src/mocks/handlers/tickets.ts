@@ -1,6 +1,6 @@
 import { http } from 'msw';
 import { getDb, nextId } from '../db';
-import type { Ticket } from '../db';
+import type { Attachment, Ticket } from '../db';
 import { plannedCloseDateFor } from './sla';
 import {
   currentUser, findTicket, noContent, notFound, ok, paginate,
@@ -592,8 +592,14 @@ export const ticketHandlers = [
     const t = findTicket(String(params.ticketId), db);
     if (!t) return notFound('Ticket');
     const q = new URL(request.url).searchParams;
-    let rows = db.attachments.filter((a) => a.ticketId === t.ticketId && !a.isDeleted);
+    // C-028 · a removed row is no longer uniformly hidden. §4B.4 wants a
+    // tombstone for the removals worth recording, and the mock has to reproduce
+    // which ones those are — a mock that hid every deleted row would let the
+    // gallery's tombstone rendering pass `npm run dev` without ever appearing.
+    let rows = db.attachments.filter((a) => a.ticketId === t.ticketId && (!a.isDeleted || isVisibleTombstone(a)));
     if (q.get('cycle')) rows = rows.filter((a) => a.cycleNo === Number(q.get('cycle')));
+    // Applied to tombstones exactly as to live rows: "debug-log.txt was removed"
+    // names the internal file as surely as serving it would.
     if (q.get('clientVisibleOnly') === 'true') rows = rows.filter((a) => a.isClientVisible);
     return ok(rows.map(attachmentDto));
   }),
@@ -712,11 +718,43 @@ export const ticketHandlers = [
     return ok(db.attachmentLimits, undefined, { headers: { ETag: limitsEtag(db) } });
   }),
 
+  /**
+   * C-028 · §4B.4's deletion rule.
+   *
+   * Previously this set `isDeleted` for anybody who asked, with no window, no
+   * uploader check and no tombstone — which meant the client could not be
+   * developed against the behaviour it has to render. All three are here now,
+   * and the 403 in particular: a picker that only ever saw 204 would have no
+   * reason to handle the refusal, and the first person to meet one would be a
+   * user rather than a test.
+   */
   http.delete(url('/tickets/:ticketId/attachments/:attachmentId'), ({ params }) => {
     const db = getDb();
+    const t = findTicket(String(params.ticketId), db);
+    if (!t) return notFound('Ticket');
     const a = db.attachments.find((x) => x.id === Number(params.attachmentId));
-    if (!a) return notFound('Attachment');
+    // Checked against the path's ticket, not just by id — otherwise
+    // /tickets/9/attachments/41 answers differently depending on whose 41 it is,
+    // which enumerates attachment ids across tickets.
+    if (!a || a.ticketId !== t.ticketId) return notFound('Attachment');
+    // Idempotent: the caller asked for the file to be gone and it is gone.
+    if (a.isDeleted) return noContent();
+
+    const me = currentUser(db);
+    const mayRemove = a.uploadedById === me.id || me.role === 'PM' || me.role === 'ADMIN';
+    if (!mayRemove) {
+      return problem(403, 'attachment-delete-refused', 'That attachment cannot be removed', {
+        detail: withinDeleteWindow(a)
+          ? 'Only the person who attached this file can remove it in the first few minutes. '
+            + 'After that a project manager or an administrator can remove it, leaving a note that it was here.'
+          : 'The window for removing this file has passed. A project manager or an administrator '
+            + 'can still remove it, and the ticket will show that it was here.',
+      });
+    }
+
     a.isDeleted = true;
+    a.deletedById = me.id;
+    a.deletedAt = new Date().toISOString();
     return noContent();
   }),
 
@@ -925,7 +963,44 @@ export function attachmentDto(a: import('../db').Attachment) {
     isClientVisible: a.isClientVisible, isDeleted: a.isDeleted,
     uploadedBy: userRef(a.uploadedById), stageCode: a.stageCode,
     cycleNo: a.cycleNo, createdAt: a.createdAt,
+    // C-028 · the two halves of "file removed by X on date". Null on a live row,
+    // and `deletedBy` is additionally null when the account no longer exists —
+    // userRef already answers null for an unknown id, so the client's
+    // no-actor branch is reachable here rather than only in a unit test.
+    deletedBy: a.isDeleted ? userRef(a.deletedById ?? null) : null,
+    deletedAt: a.isDeleted ? (a.deletedAt ?? null) : null,
   };
+}
+
+/**
+ * C-028 · §4B.4's fifteen minutes, from upload.
+ *
+ * Hard-coded rather than read from `/attachments/limits`: the window is not one
+ * of the three caps C-027 made configurable, and the server keeps it in
+ * `application.yml` for the same reason — an operator who could set it to a year
+ * could make the tombstone unreachable.
+ */
+const DELETE_WINDOW_MS = 15 * 60 * 1000;
+
+function withinDeleteWindow(a: Attachment): boolean {
+  return Date.now() - new Date(a.createdAt).getTime() <= DELETE_WINDOW_MS;
+}
+
+/**
+ * C-028 · whether a removed row still says so on the ticket — the mock's copy of
+ * `AttachmentService.isVisibleTombstone`, and deliberately the same shape.
+ *
+ * The uploader fixing their own mis-paste promptly leaves nothing behind;
+ * everyone else, and the same person later, leaves a mark. The uploader
+ * comparison is the half that matters: a clock-only rule would hide a PM's
+ * supervisory removal at minute three, which is exactly the deletion the ticket
+ * most needs to record.
+ */
+function isVisibleTombstone(a: Attachment): boolean {
+  if (!a.isDeleted) return false;
+  if (!a.deletedAt) return true;
+  if (a.deletedById == null || a.deletedById !== a.uploadedById) return true;
+  return new Date(a.deletedAt).getTime() - new Date(a.createdAt).getTime() > DELETE_WINDOW_MS;
 }
 
 /** Shared with the ribbon handlers — see ribbon.ts for the transition writes. */

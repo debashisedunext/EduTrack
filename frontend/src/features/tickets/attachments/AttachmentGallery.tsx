@@ -1,7 +1,8 @@
 import * as React from 'react'
-import { AlertTriangle, FileText, Loader2, ShieldAlert, X } from 'lucide-react'
+import { AlertTriangle, FileText, Loader2, ShieldAlert, Trash2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import type { Attachment } from '@/api/generated/model'
 import type { AttachmentItem } from '@/components/ui/attachment-picker'
 import { attachmentPreviewSource, formatFileSize, isPreviewableImage } from '@/components/ui/attachments'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
@@ -44,11 +45,24 @@ const COLLAPSED_LIMIT = 8
 
 export function AttachmentGallery({
   items,
+  tombstones,
   onRemove,
   className,
 }: {
   items: readonly AttachmentItem[]
-  /** Omit to render no remove control at all — C-028 owns the 15-minute rule. */
+  /**
+   * C-028 · files that were here and are not — §4B.4's "file removed by X on
+   * date". The server sends only the removals worth showing, so this renders
+   * whatever it is given; a mis-paste its uploader took back within fifteen
+   * minutes never reaches the client.
+   */
+  tombstones?: readonly Attachment[]
+  /**
+   * Omit to render no remove control at all — a sealed cycle, or a surface with
+   * nothing to refetch. Note this is *presentation only*: §4B.4's rule about who
+   * may remove what is enforced server-side, and passing `onRemove` does not
+   * assert that the caller may remove anything. A refusal comes back as a 403.
+   */
   onRemove?: (id: string) => void
   className?: string
 }) {
@@ -80,7 +94,10 @@ export function AttachmentGallery({
     [lightboxImages],
   )
 
-  if (items.length === 0) return null
+  // A ticket whose only attachment was removed still has something to say, so
+  // the empty check covers both lists. Returning null on `items.length === 0`
+  // alone would drop the tombstone that is the whole record of what happened.
+  if (items.length === 0 && (tombstones?.length ?? 0) === 0) return null
 
   const visible = expanded ? items : items.slice(0, COLLAPSED_LIMIT)
   const hidden = items.length - visible.length
@@ -148,8 +165,55 @@ export function AttachmentGallery({
         </Button>
       )}
 
+      {tombstones && tombstones.length > 0 && (
+        <ul className="flex flex-col gap-1" aria-label="Removed files">
+          {tombstones.map((row) => (
+            <Tombstone key={row.id} row={row} />
+          ))}
+        </ul>
+      )}
+
       <ImageLightbox images={lightboxImages} index={lightboxIndex} onIndexChange={setLightboxIndex} />
     </div>
+  )
+}
+
+/**
+ * C-028 · "file removed by X on date" — §4B.4's tombstone.
+ *
+ * Text, not a tile. A tombstone has nothing to show: the object and its
+ * thumbnail are both gone, so a 64px square would be an empty box the same size
+ * as a real screenshot, and the strip's job is to let someone see at a glance
+ * what is on the ticket. Sitting under the tiles as a quiet line keeps it out of
+ * that scan while leaving it findable by anyone asking where a file went.
+ *
+ * Struck-through and muted rather than coloured: this is a record, not a
+ * problem, and rendering it in danger tones would put a permanent red mark on
+ * every ticket where somebody tidied up after themselves.
+ */
+function Tombstone({ row }: { row: Attachment }) {
+  const name = row.fileName ?? 'A file'
+  const who = row.deletedBy?.displayName
+  // The date is the fact worth keeping; the time is noise on a record that is
+  // read weeks later. `undefined` locale so it follows the user's own format
+  // rather than imposing one — CLAUDE.md keeps storage in UTC and does the
+  // conversion here, in the presentation layer.
+  const when = row.deletedAt
+    ? new Date(row.deletedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+    : null
+
+  // Assembled as a sentence rather than interpolated with fallbacks inline,
+  // because both halves are genuinely optional: a deleted user account leaves no
+  // name, and a row written before this task has no timestamp. "Removed" on its
+  // own is still a true and useful statement; "removed by undefined" is not.
+  const detail = [who && `by ${who}`, when && `on ${when}`].filter(Boolean).join(' ')
+
+  return (
+    <li className="flex items-center gap-1.5 text-caption text-content-muted">
+      <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span className="line-through">{name}</span>
+      <span>{detail ? `removed ${detail}` : 'removed'}</span>
+    </li>
   )
 }
 

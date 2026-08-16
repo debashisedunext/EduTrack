@@ -38,6 +38,17 @@ import java.time.Duration;
  *                     clamps such a read.
  * @param maxTicketBytes 50 MB per ticket, §4B.4. Fallback, as above.
  * @param maxFiles 20 files per ticket, §4B.4. Fallback, as above.
+ * @param deleteWindow C-028 · how long after upload the uploader's own delete
+ *                     leaves no trace — §4B.4's fifteen minutes. Deliberately
+ *                     <b>not</b> in {@code attachment_settings} beside the three
+ *                     caps: C-027 moved those because §4B.4 says "all
+ *                     configurable in system settings", and that sentence is
+ *                     about the caps. This one is a retention rule rather than a
+ *                     quota, and an administrator who could set it to a year
+ *                     would be able to make the tombstone unreachable — which is
+ *                     the record §4B.4 exists to keep. Configurable at deploy for
+ *                     a test that cannot wait fifteen minutes, not at runtime for
+ *                     an operator.
  * @param scan the AV scanner
  * @param thumbnail C-026's reductions
  */
@@ -48,6 +59,7 @@ record AttachmentProperties(
         @DefaultValue("10485760") long maxFileBytes,
         @DefaultValue("52428800") long maxTicketBytes,
         @DefaultValue("20") int maxFiles,
+        @DefaultValue("PT15M") Duration deleteWindow,
         @DefaultValue Scan scan,
         @DefaultValue Thumbnail thumbnail) {
 

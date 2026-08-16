@@ -59,7 +59,7 @@ class AttachmentScanTaskTest {
 
     private AttachmentScanTask taskWith(boolean failOpen) {
         AttachmentProperties properties = new AttachmentProperties(
-                Duration.ofMinutes(5), 10L * 1024 * 1024, 50L * 1024 * 1024, 20,
+                Duration.ofMinutes(5), 10L * 1024 * 1024, 50L * 1024 * 1024, 20, Duration.ofMinutes(15),
                 new AttachmentProperties.Scan(true, "localhost", 3310, Duration.ofSeconds(30), failOpen),
                 new AttachmentProperties.Thumbnail(true, 320, 50_000_000L));
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());

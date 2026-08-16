@@ -85,6 +85,14 @@ export const listAttachmentsResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
+  "deletedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "deletedAt": zod.string().datetime({}).nullish(),
   "stageCode": zod.string().nullish(),
   "cycleNo": zod.number().optional(),
   "createdAt": zod.string().datetime({}).optional()
@@ -130,9 +138,35 @@ export const uploadAttachmentBody = zod.object({
 })
 
 /**
- * Hard delete by the uploader within 15 minutes. After that it is a soft
-delete leaving a tombstone, so the history still shows something was
-attached and removed.
+ * §4B.4's deletion rule. **The stored object and its thumbnail are removed
+in every case; the row always survives.**
+
+The row surviving is not a hedge — `deletedBy` and `deletedAt` exist to
+be read afterwards, and C-034's History timeline cannot place an
+attachment whose row is gone. The baseline migration that created
+`ticket_attachments` says the same in its own comment. *(This paragraph
+corrects an earlier description here that called the in-window case a
+"hard delete"; no implementation ever did that.)*
+
+What differs is whether the removal leaves a **visible tombstone**:
+
+- **The uploader, within 15 minutes** — no tombstone. The row disappears
+  from `listAttachments` entirely. A support agent who pastes the wrong
+  screenshot and removes it has not done something the ticket needs to
+  remember.
+- **Anyone else, or after 15 minutes** — the row is returned by
+  `listAttachments` with `isDeleted: true` and both tombstone fields set,
+  rendering as "file removed by X on date".
+
+A PM or an administrator removing a file is therefore *never* silent,
+even inside the window — that is the supervisory act the tombstone exists
+to record, and the case the `isClientVisible` flag beside it anticipates
+(an internal debug log attached as client-visible is a disclosure that
+cannot wait out a timer).
+
+**Idempotent.** Deleting an already-deleted attachment answers 204, not
+404 — the caller asked for the file to be gone and it is gone, and
+refusing would distinguish "already removed" from "never existed".
 
  * @summary Delete an attachment
  */

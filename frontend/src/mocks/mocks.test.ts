@@ -977,3 +977,123 @@ describe('attachment limits', () => {
     expect((await get<Envelope<Limits>>('/attachments/limits')).data.ceilingBytes).toBe(10 * 1024 * 1024);
   });
 });
+
+/**
+ * C-028 · §4B.4's deletion rule, as the mock enforces it.
+ *
+ * Worth testing here rather than only against the server, because the mock is
+ * what Stream C's screens are developed against: before this task it set
+ * `isDeleted` for anybody who asked, with no window, no uploader check and no
+ * tombstone — so a picker built against it would have met its first 403 in
+ * production. These pin the three behaviours the client actually has to render.
+ */
+describe('C-028 · removing an attachment', () => {
+  const del = (url: string) => http<void>({ url, method: 'DELETE' });
+
+  interface Row { id: number; fileName: string; isDeleted: boolean; deletedBy: { displayName: string } | null }
+
+  /**
+   * The seeded attachment, on a ticket the current caller can actually see.
+   *
+   * The scope fixing is the point. `findTicket` is scope-aware — a Developer
+   * sees only tickets assigned to them — so without this every assertion below
+   * would answer 404 and the whole block would pass or fail on A-035's row scope
+   * rather than on §4B.4's deletion rule. Both scopes are satisfied because the
+   * caller's role varies between these tests: assignee for a Developer, project
+   * membership for a PM.
+   */
+  function seeded() {
+    const db = getDb();
+    const a = db.attachments[0];
+    const ticket = db.tickets.find((t) => t.ticketId === a.ticketId)!;
+    const me = db.users.find((u) => u.id === db.currentUserId)!;
+    ticket.assigneeId = me.id;
+    if (!me.projectIds.includes(ticket.projectId)) me.projectIds.push(ticket.projectId);
+    return { db, a, ticket: a.ticketId };
+  }
+
+  const list = async (ticketId: string) =>
+    (await get<Envelope<Row[]>>(`/tickets/${ticketId}/attachments`)).data;
+
+  it('lets the uploader take their own file back, leaving nothing behind', async () => {
+    const { db, a, ticket } = seeded();
+    a.uploadedById = db.currentUserId;
+    a.createdAt = new Date().toISOString();
+
+    await del(`/tickets/${ticket}/attachments/${a.id}`);
+
+    // Gone entirely — not a tombstone. A support agent who pastes the wrong
+    // screenshot and removes it has not done something the ticket must remember.
+    expect(await list(ticket)).not.toContainEqual(expect.objectContaining({ id: a.id }));
+  });
+
+  it('refuses a colleague, and says why', async () => {
+    const { db, a, ticket } = seeded();
+    a.uploadedById = db.currentUserId + 1;
+    a.createdAt = new Date().toISOString();
+
+    // The message matters as much as the status: the row reappears in the
+    // picker, and without a reason that reads as a broken button.
+    await expect(del(`/tickets/${ticket}/attachments/${a.id}`)).rejects.toMatchObject({
+      status: 403,
+      problem: { detail: expect.stringContaining('person who attached this file') },
+    });
+    expect(await list(ticket)).toContainEqual(expect.objectContaining({ id: a.id }));
+  });
+
+  it('lets a PM remove somebody else’s file, and records that they did', async () => {
+    // The role is switched *before* seeded(), so the ticket lands in the PM's
+    // project scope rather than in the Developer's assignee scope.
+    getDb().currentUserId = getDb().users.find((u) => u.role === 'PM')!.id;
+    const { db, a, ticket } = seeded();
+    a.uploadedById = db.currentUserId + 1000;
+    a.createdAt = new Date().toISOString();
+
+    await del(`/tickets/${ticket}/attachments/${a.id}`);
+
+    // Inside the window and still a tombstone — the assertion that separates
+    // §4B.4's rule from a plain timer. A supervisory removal is exactly the one
+    // the ticket needs to record.
+    const row = (await list(ticket)).find((r) => r.id === a.id);
+    expect(row).toMatchObject({ isDeleted: true });
+    expect(row?.deletedBy?.displayName).toBeTruthy();
+  });
+
+  it('leaves a tombstone when the uploader removes it long afterwards', async () => {
+    const { db, a, ticket } = seeded();
+    a.uploadedById = db.currentUserId;
+    a.createdAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    await del(`/tickets/${ticket}/attachments/${a.id}`);
+
+    expect((await list(ticket)).find((r) => r.id === a.id)).toMatchObject({ isDeleted: true });
+  });
+
+  it('is idempotent — a retry is not an error', async () => {
+    const { db, a, ticket } = seeded();
+    a.uploadedById = db.currentUserId;
+    a.createdAt = new Date().toISOString();
+
+    await del(`/tickets/${ticket}/attachments/${a.id}`);
+    // The client removes optimistically and a retry after a dropped response is
+    // ordinary. Refusing would also distinguish "already removed" from "never
+    // existed" for anyone allowed to ask.
+    // Resolving is the whole assertion — a 204 carries no body, so there is
+    // nothing to be defined and the point is only that it did not reject.
+    await expect(del(`/tickets/${ticket}/attachments/${a.id}`)).resolves.toBeUndefined();
+  });
+
+  it('will not remove an attachment through another ticket’s path', async () => {
+    const { db, a } = seeded();
+    a.uploadedById = db.currentUserId;
+    const other = db.tickets.find((t) => t.ticketId !== a.ticketId)!;
+    // The other ticket is put in scope too, so the 404 proves the ticket check
+    // and not merely that the caller could not see the path. Without this the
+    // test would pass with the check deleted.
+    other.assigneeId = db.currentUserId;
+
+    // Ids are bare integers, so without the check this would answer differently
+    // depending on whose attachment it is — which enumerates them.
+    await expect(del(`/tickets/${other.ticketId}/attachments/${a.id}`)).rejects.toMatchObject({ status: 404 });
+  });
+});

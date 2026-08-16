@@ -46,7 +46,7 @@ export function TicketAttachmentsSection({
    */
   readOnly?: boolean
 }) {
-  const { items, add, remove, isUploading } = useTicketAttachments({
+  const { items, tombstones, removeError, add, remove, isUploading } = useTicketAttachments({
     ticketId,
     existing: attachments,
     onUploaded: onChanged,
@@ -73,18 +73,29 @@ export function TicketAttachmentsSection({
       </div>
 
       {readOnly ? (
-        items.length > 0 ? (
+        items.length > 0 || tombstones.length > 0 ? (
           // A sealed cycle's files stay readable — that is the whole point of
           // preserving a cycle — so the gallery renders and the lightbox opens.
           // Only `onRemove` is withheld: nothing may be added to or taken out of
-          // a journey that has already closed.
-          <AttachmentGallery items={items} />
+          // a journey that has already closed. C-028's tombstones still render:
+          // a sealed cycle is exactly where "a file was here and is not" is
+          // worth knowing, and it is a record rather than an action.
+          <AttachmentGallery items={items} tombstones={tombstones} />
         ) : (
           <p className="text-caption text-content-muted">Nothing was attached in this cycle.</p>
         )
       ) : (
         <div className="flex flex-col gap-3">
-          <AttachmentGallery items={items} onRemove={remove} />
+          <AttachmentGallery items={items} tombstones={tombstones} onRemove={remove} />
+          {removeError && (
+            // C-028 · §4B.4's rule is server-side, so a × on somebody else's file
+            // comes back 403 and the row reappears. Saying why is what stops that
+            // reading as a broken button — the user's next move is to ask a PM,
+            // and nothing on screen would otherwise suggest it.
+            <p role="alert" className="text-caption text-danger-text">
+              {removeError}
+            </p>
+          )}
           <AttachmentPicker
             items={items}
             onAdd={add}

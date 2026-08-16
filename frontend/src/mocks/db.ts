@@ -301,6 +301,17 @@ export interface Attachment {
   sizeBytes: number; scanStatus: 'PENDING' | 'CLEAN' | 'INFECTED';
   isClientVisible: boolean; isDeleted: boolean; uploadedById: number;
   stageCode: string | null; cycleNo: number; createdAt: string;
+  /**
+   * C-028 · the tombstone. Both null until the file is removed, and both stamped
+   * by the same write — a row carrying one without the other is not a state the
+   * server produces.
+   *
+   * Whether a removal is *shown* is derived from these against `uploadedById`
+   * and `createdAt`, not stored: the uploader removing their own file inside
+   * §4B.4's fifteen minutes leaves nothing behind, and anyone else — or the same
+   * person later — leaves "file removed by X on date".
+   */
+  deletedById?: number | null; deletedAt?: string | null;
 }
 export interface Notification {
   id: number; userId: number; eventKey: string; title: string; body: string;

@@ -347,3 +347,56 @@ page. Flagged in `STREAM-C-TICKETS.md` and in `DEPENDENCIES.md`.
   `AttachmentStorageProperties` and the S3 beans should move out of this package
   rather than be imported across a feature boundary. It is a rename, and doing it
   now would be speculative generality.
+
+## C-028 · deletion, and why the row never goes
+
+§4B.4: "The uploader may delete within 15 minutes; after that it is a soft delete
+leaving a tombstone row so the record of it existing survives."
+
+**Every delete is the same write.** `is_deleted`, `deleted_by` and `deleted_at`
+are stamped, and the stored object and its thumbnail are both removed. There is
+no branch that issues a SQL `DELETE`, and `AttachmentRows` deliberately extends
+`Repository` rather than `JpaRepository` so no such method is even reachable from
+this package.
+
+The contract used to call the in-window case a "hard delete". Nothing ever
+implemented that, and three things say it would be wrong: the baseline migration's
+own comment on this table ("removes the object, but the row stays with
+is_deleted = 1"), the existence of `deleted_by` and `deleted_at` as columns whose
+only purpose is to be read afterwards, and C-034's History timeline, which cannot
+place an attachment whose row is gone. The spec's wording is corrected.
+
+**What differs is visibility, and it is derived.** `isVisibleTombstone` asks two
+questions of data already on the row:
+
+| Who removed it | When | Shown |
+|---|---|---|
+| The uploader | within 15 min | **No** — the row vanishes from `listAttachments` |
+| The uploader | after 15 min | Yes |
+| A PM or Admin | any time | Yes |
+
+The second column alone is not enough, and this is the part most likely to be
+"simplified" later: a clock-only rule reads three minutes and hides a PM removing
+somebody else's leaked file — the one deletion the ticket most needs to record.
+`AttachmentServiceTest.Tombstones.someoneElseRemovingItInsideTheWindowStillLeavesATombstone`
+fails if the uploader comparison is dropped.
+
+Deriving it also means no `is_silent` column: a stored flag would be a third
+thing to keep in step with the two that decide it, and would let a hand-edited
+row present a supervisory removal as a self-correction.
+
+**A tombstone inherits `is_client_visible`.** "debug-log.txt was removed" names
+the internal file as surely as serving it would.
+
+**The 403 is the only one in this feature.** Everything about *which* rows a
+caller may reach is A-035's 404, decided in `ScopedTickets` before this package
+runs. By the time a deletion is refused the caller has passed scope and the row
+has been confirmed to be on that ticket — they are looking at it in a listing
+they just fetched. See `AttachmentDeletionNotPermittedException`, and the
+`ROWLESS_403` entry in `contracts/check-conventions.py`, which is the only
+row-scoped exemption in that file.
+
+**The window lives in `application.yml`, not in `attachment_settings`.** C-027
+moved the three caps because §4B.4 calls *the limits* configurable in system
+settings. This is a retention rule, and an operator who could set it to a year
+could make the tombstone unreachable.
