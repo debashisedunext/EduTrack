@@ -37,7 +37,7 @@ class ThumbnailGeneratorTest {
 
     private static ThumbnailGenerator generator(boolean enabled, int maxEdge, long maxSourcePixels) {
         return new ThumbnailGenerator(new AttachmentProperties(
-                Duration.ofMinutes(5), 10L * 1024 * 1024, 50L * 1024 * 1024, 20,
+                Duration.ofMinutes(5), 10L * 1024 * 1024, 50L * 1024 * 1024, 20, Duration.ofMinutes(15),
                 new AttachmentProperties.Scan(false, "localhost", 3310, Duration.ofSeconds(30), false),
                 new AttachmentProperties.Thumbnail(enabled, maxEdge, maxSourcePixels)));
     }

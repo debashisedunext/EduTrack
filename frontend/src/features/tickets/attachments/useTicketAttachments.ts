@@ -116,6 +116,32 @@ export interface UseTicketAttachmentsResult {
   /** Server rows plus anything still local, ready for `<AttachmentPicker items>`. */
   items: AttachmentItem[]
   /**
+   * C-028 · removed files the ticket still records — §4B.4's "file removed by X
+   * on date".
+   *
+   * Kept apart from `items` rather than given a fifth `AttachmentItemStatus`,
+   * which was the first shape tried. `AttachmentItem` is `components/ui/`, which
+   * all four streams consume, and widening its status union would make every
+   * exhaustive `switch` on it in three other streams' code a change they did not
+   * ask for. A tombstone is also not a *file* in any sense the picker cares
+   * about — it cannot be previewed, downloaded, removed or counted against
+   * §4B.4's caps — so putting it in the same array would mean teaching every
+   * consumer to filter it out again.
+   *
+   * The server sends only the removals worth showing; a file its uploader took
+   * back within fifteen minutes never arrives here at all.
+   */
+  tombstones: Attachment[]
+  /**
+   * C-028 · why the last removal was refused, or null.
+   *
+   * Carries the server's `detail` verbatim rather than a message composed here.
+   * §4B.4's rule is enforced server-side and the refusal depends on the row, the
+   * caller and the clock — restating it in the client would be a second copy of
+   * a rule that has already gone out of step once in this feature.
+   */
+  removeError: string | null
+  /**
    * Uploaded server IDs, for `QuickUpdateRequest.attachmentIds`,
    * `CommentWriteRequest.attachmentIds` and `HandoffRequest.attachmentIds`.
    */
@@ -155,6 +181,8 @@ export function useTicketAttachments({
    * ID, so the detail page does not show each file twice once its refetch lands.
    */
   const [uploaded, setUploaded] = React.useState<Attachment[]>([])
+  /** C-028 · why the last remove did not take. Null once another one is tried. */
+  const [removeError, setRemoveError] = React.useState<string | null>(null)
 
   const localRef = React.useRef(local)
   localRef.current = local
@@ -269,14 +297,23 @@ export function useTicketAttachments({
       // A server row. Hide it optimistically — the surface's own refetch is what
       // makes it permanent, and `deleted` keeps it from flashing back in between.
       setDeleted((prev) => new Set(prev).add(id))
+      setRemoveError(null)
       void deleteAttachment(ticketId ?? '', Number(id))
         .then(() => optionsRef.current.onUploaded?.())
-        .catch(() => {
+        .catch((error: unknown) => {
+          // C-028 made this branch reachable for a reason a user can act on.
+          // Before it, a delete only failed on a network fault and silently
+          // restoring the row was the whole of the right behaviour. Now §4B.4's
+          // rule can refuse it — a Developer clicking × on a colleague's file
+          // gets a 403 — and a row that reappears with no explanation reads as a
+          // broken button, which is the one outcome worth avoiding: the user
+          // will click it again.
           setDeleted((prev) => {
             const next = new Set(prev)
             next.delete(id)
             return next
           })
+          setRemoveError(removeErrorMessage(error))
         })
     },
     [ticketId],
@@ -311,12 +348,28 @@ export function useTicketAttachments({
    * signed URLs. Insertion order keeps our uploads last, which is where the user
    * just put them.
    */
-  const merged = React.useMemo<Attachment[]>(() => {
+  const all = React.useMemo<Attachment[]>(() => {
     const byId = new Map<string, Attachment>()
     for (const a of uploaded) byId.set(String(a.id), a)
     for (const a of existing ?? []) byId.set(String(a.id), a)
-    return [...byId.values()].filter((a) => !a.isDeleted && !deleted.has(String(a.id)))
-  }, [existing, uploaded, deleted])
+    return [...byId.values()]
+  }, [existing, uploaded])
+
+  const merged = React.useMemo<Attachment[]>(
+    () => all.filter((a) => !a.isDeleted && !deleted.has(String(a.id))),
+    [all, deleted],
+  )
+
+  /**
+   * C-028 · the removals the server chose to keep visible.
+   *
+   * `deleted` is not consulted, and that is deliberate. It holds ids this hook
+   * has optimistically hidden, and a removal that turns out to warrant a
+   * tombstone should appear as one the moment the refetch lands rather than stay
+   * hidden because we hid it a second earlier — the optimistic set is about not
+   * flashing a row back in, not about what the ticket records.
+   */
+  const tombstones = React.useMemo<Attachment[]>(() => all.filter((a) => a.isDeleted), [all])
 
   const items = React.useMemo<AttachmentItem[]>(() => {
     const server = merged.map(serverToItem)
@@ -346,8 +399,10 @@ export function useTicketAttachments({
 
   return {
     items,
-    attachmentIds,
+    tombstones,
+    removeError,
     add,
+    attachmentIds,
     remove,
     flush,
     reset,
@@ -361,6 +416,21 @@ export function useTicketAttachments({
  * saying plainly — a 413 means "make room", a 415 means "this will never work".
  * Anything else falls back to the problem title, never to `error.message`.
  */
+/**
+ * C-028 · why a removal was refused.
+ *
+ * The 403's `detail` is the whole message and is written for the person who
+ * clicked — it names the window and who can act instead. Anything else falls
+ * back to a plain sentence rather than to `error.message`, which on a network
+ * fault is a stack-shaped string.
+ */
+function removeErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.problem.detail ?? error.problem.title ?? 'That file could not be removed'
+  }
+  return 'That file could not be removed'
+}
+
 function uploadErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 413) return error.problem.detail ?? 'Too large for this ticket'

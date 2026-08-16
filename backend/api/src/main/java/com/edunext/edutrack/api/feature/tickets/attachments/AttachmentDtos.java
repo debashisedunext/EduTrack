@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /**
  * C-025 · the wire shapes for {@code listAttachments} and
@@ -19,6 +20,24 @@ import java.util.List;
 final class AttachmentDtos {
 
     private AttachmentDtos() {
+    }
+
+    /**
+     * The contract's {@code UserRef}, as this feature needs it.
+     *
+     * <p>Only the two fields {@code UserRef} declares as required. {@code avatarUrl}
+     * and {@code role} are optional in the schema and are not populated here: the
+     * two places this appears are an uploader's name under a file and §4B.4's
+     * tombstone, and neither draws an avatar or branches on a role. Sending them
+     * would mean a join per listing for fields nothing reads.
+     *
+     * <p>Declared locally rather than shared, following {@code ChatDtos.UserRef}
+     * and {@code ProjectDtos}: a common DTO across four streams' features is shared
+     * surface that has to be renegotiated whenever any one of them needs another
+     * field. The contract is the agreement, not a Java class.
+     */
+    @Schema(name = "UserRef")
+    record UserRef(long id, String displayName) {
     }
 
     /**
@@ -51,7 +70,21 @@ final class AttachmentDtos {
             URI thumbnailUrl,
             boolean isClientVisible,
             boolean isDeleted,
-            Long uploadedBy,
+            @Schema(description = """
+                    Who attached it. **C-028 corrected this from a bare id to the `UserRef` the \
+                    contract and the generated client have always declared** — the mismatch went \
+                    unnoticed through C-025, C-026 and C-027 because no screen read the field.""",
+                    nullable = true)
+            UserRef uploadedBy,
+            @Schema(description = """
+                    C-028 · who removed it, on a row where `isDeleted` is true. Null otherwise, and \
+                    null on a removal by a user account that no longer exists — the client renders \
+                    the tombstone without an actor rather than inventing a name.""", nullable = true)
+            UserRef deletedBy,
+            @Schema(description = """
+                    C-028 · when it was removed. Present exactly when `deletedBy` can be, and the \
+                    other half of §4B.4's "file removed by X on date".""", nullable = true)
+            Instant deletedAt,
             String stageCode,
             Integer cycleNo,
             Instant createdAt) {
@@ -61,8 +94,14 @@ final class AttachmentDtos {
          * @param thumbnailUrl from {@link AttachmentService#thumbnailUrlFor}, or
          *                     null — which is the ordinary case for most of what
          *                     gets attached, not an error
+         * @param people       resolved ids from {@link AttachmentUserRefs#resolve},
+         *                     which is given every id in the listing at once. A
+         *                     missing id yields null rather than a placeholder
          */
-        static AttachmentDto of(TicketAttachment row, URI downloadUrl, URI thumbnailUrl) {
+        static AttachmentDto of(TicketAttachment row,
+                                URI downloadUrl,
+                                URI thumbnailUrl,
+                                Map<Long, UserRef> people) {
             return new AttachmentDto(
                     row.getId(),
                     row.getFileName(),
@@ -75,10 +114,21 @@ final class AttachmentDtos {
                     thumbnailUrl,
                     row.isClientVisible(),
                     row.isDeleted(),
-                    row.getUploadedBy(),
+                    person(people, row.getUploadedBy()),
+                    // C-028. Both are stamped by the same write, so a row carrying
+                    // one without the other is a hand edit rather than a state this
+                    // application produces — they are passed through as they are
+                    // found rather than reconciled, because inventing the missing
+                    // half would conceal exactly that.
+                    person(people, row.getDeletedBy()),
+                    row.getDeletedAt(),
                     row.getStageCode(),
                     row.getCycleNo() == null ? null : (int) row.getCycleNo(),
                     row.getCreatedAt());
+        }
+
+        private static UserRef person(Map<Long, UserRef> people, Long id) {
+            return id == null ? null : people.get(id);
         }
     }
 

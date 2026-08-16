@@ -1,17 +1,22 @@
 package com.edunext.edutrack.api.feature.tickets.attachments;
 
 import com.edunext.edutrack.api.security.CallerIdentity;
+import com.edunext.edutrack.api.security.permission.RolePermissions;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketAttachment;
 import com.edunext.edutrack.domain.tickets.TicketAttachmentRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -57,29 +62,53 @@ class AttachmentService {
 
     private final ScopedTickets tickets;
     private final TicketAttachmentRepository attachments;
+    private final AttachmentRows rows;
     private final AttachmentTypePolicy types;
     private final ImageMetadataStripper stripper;
     private final AttachmentStorage storage;
     private final AttachmentScanTask scans;
     private final AttachmentProperties properties;
     private final AttachmentSettingsService limits;
+    private final Clock clock;
 
+    @Autowired
     AttachmentService(ScopedTickets tickets,
                       TicketAttachmentRepository attachments,
+                      AttachmentRows rows,
                       AttachmentTypePolicy types,
                       ImageMetadataStripper stripper,
                       AttachmentStorage storage,
                       AttachmentScanTask scans,
                       AttachmentProperties properties,
                       AttachmentSettingsService limits) {
+        this(tickets, attachments, rows, types, stripper, storage, scans, properties, limits, Clock.systemUTC());
+    }
+
+    /**
+     * Test seam — a fixed clock is the only way to assert C-028's fifteen-minute
+     * window without a test that sleeps, following {@code TicketCodeGenerator}'s
+     * pair of constructors for the same reason.
+     */
+    AttachmentService(ScopedTickets tickets,
+                      TicketAttachmentRepository attachments,
+                      AttachmentRows rows,
+                      AttachmentTypePolicy types,
+                      ImageMetadataStripper stripper,
+                      AttachmentStorage storage,
+                      AttachmentScanTask scans,
+                      AttachmentProperties properties,
+                      AttachmentSettingsService limits,
+                      Clock clock) {
         this.tickets = tickets;
         this.attachments = attachments;
+        this.rows = rows;
         this.types = types;
         this.stripper = stripper;
         this.storage = storage;
         this.scans = scans;
         this.properties = properties;
         this.limits = limits;
+        this.clock = clock;
     }
 
     /**
@@ -124,24 +153,206 @@ class AttachmentService {
     }
 
     /**
-     * Everything attached to a ticket the caller may see.
+     * Everything attached to a ticket the caller may see, plus C-028's tombstones.
      *
      * <p>PENDING and INFECTED rows are <b>returned, not hidden</b>. Hiding them
      * would make a virus-scan delay indistinguishable from a failed upload and
      * would leave a user re-attaching the same file; §4B.4's requirement is that
      * the file not become <em>readable</em>, and that is enforced by the absent
      * download URL rather than by the row's absence.
+     *
+     * <p><b>C-028 · deleted rows are no longer uniformly excluded.</b> §4B.4 asks
+     * for a tombstone — "file removed by X on date" — "so the record of it
+     * existing survives", and a listing that filtered every {@code is_deleted}
+     * row could not produce one. Which deletions leave a visible mark is
+     * {@link #isVisibleTombstone}'s question, not this method's.
+     *
+     * <p>{@code clientVisibleOnly} is applied to tombstones exactly as it is to
+     * live rows, and that is the important half: an internal debug log removed
+     * after the window must not surface its own name on the client portal. The
+     * tombstone inherits the visibility of the file it replaces, because it is
+     * still a statement about that file.
      */
     @Transactional(readOnly = true)
     List<TicketAttachment> list(Authentication caller, long ticketId, Integer cycle, Boolean clientVisibleOnly) {
         tickets.require(caller, ticketId);
 
-        return attachments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(ticketId).stream()
+        return rows.findByTicketIdOrderByCreatedAtAsc(ticketId).stream()
+                .filter(row -> !row.isDeleted() || isVisibleTombstone(row))
                 .filter(row -> cycle == null || (row.getCycleNo() != null && row.getCycleNo() == cycle.shortValue()))
                 .filter(row -> !Boolean.TRUE.equals(clientVisibleOnly) || row.isClientVisible())
                 .sorted(Comparator.comparing(TicketAttachment::getCreatedAt,
                         Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
+    }
+
+    /**
+     * C-028 · whether a deleted row still says so on the ticket.
+     *
+     * <p>§4B.4 draws the line at the uploader fixing their own mistake promptly:
+     * "the uploader may delete within 15 minutes; <em>after that</em> it is a soft
+     * delete leaving a tombstone". A support agent who pastes the wrong screenshot
+     * and removes it ten seconds later has not done anything the ticket needs to
+     * remember, and a permanent "file removed by …" for every mis-paste would
+     * train everyone to read past the line that matters.
+     *
+     * <h2>Derived, not stored</h2>
+     *
+     * <p>Both facts are already on the row, so no column and no migration was
+     * needed for this: <b>who</b> removed it against who uploaded it, and
+     * <b>when</b> against when it arrived. A stored {@code is_silent} flag would
+     * be a third thing to keep in step with the two that decide it, and would let
+     * a hand-edited row present a supervisory removal as a self-correction.
+     *
+     * <p>The uploader comparison is what makes the rule right rather than merely
+     * time-based. A PM removing a leaked client-visible file at minute three is
+     * inside the window but is <em>not</em> the uploader, and that removal must
+     * leave a mark — it is the supervisory act the tombstone exists to record.
+     * A clock-only test would silently swallow it.
+     *
+     * <p><b>Unknown data shows the tombstone.</b> A null {@code deletedAt} or
+     * {@code createdAt} — a row deleted before this task existed, or one written
+     * by hand — cannot be placed inside the window, and the safe direction is
+     * plainly the visible one: a tombstone shown where it need not be is a
+     * cosmetic surprise, where one hidden that should have shown is the loss of
+     * the record §4B.4 asked for.
+     */
+    private boolean isVisibleTombstone(TicketAttachment row) {
+        if (!row.isDeleted()) {
+            return false;
+        }
+        Instant uploadedAt = row.getCreatedAt();
+        Instant removedAt = row.getDeletedAt();
+        if (uploadedAt == null || removedAt == null) {
+            return true;
+        }
+        if (row.getUploadedBy() == null || !Objects.equals(row.getUploadedBy(), row.getDeletedBy())) {
+            return true;
+        }
+        return removedAt.isAfter(uploadedAt.plus(properties.deleteWindow()));
+    }
+
+    /**
+     * C-028 · remove an attachment — blueprint §4B.4's deletion rule.
+     *
+     * <h2>The row always survives; only the bytes go</h2>
+     *
+     * <p>Every delete here is the same write: {@code is_deleted}, {@code deleted_by}
+     * and {@code deleted_at} are stamped and the stored objects are removed. There
+     * is no branch that issues a {@code DELETE}, and the contract's summary — which
+     * calls the in-window case a "hard delete" — overstates it. The baseline
+     * migration that created this table settled the question in its own comment
+     * ("deletion inside the 15-minute window (C-028) removes the object, but the row
+     * stays with is_deleted = 1"), and so does {@link AttachmentStorage#delete}'s.
+     * Both are right: {@code deleted_by} and {@code deleted_at} are columns that
+     * exist only to be read afterwards, and C-034's History timeline cannot place
+     * an attachment whose row is gone.
+     *
+     * <p>What actually differs between the two cases is whether anyone
+     * <em>sees</em> the tombstone, and that is decided at read time by
+     * {@link #isVisibleTombstone} from data this method has already written. Two
+     * delete paths that wrote different rows would be a second place for the rule
+     * to live.
+     *
+     * <h2>Who may</h2>
+     *
+     * <p>The uploader, a PM, or an Admin. §4B.4 names the uploader and the window
+     * together, and a PM or Admin is added for the case the flag beside it exists
+     * for: an internal debug log attached as client-visible is a disclosure, and
+     * waiting out a window to remove it would be absurd. Their removal is never
+     * silent — they are not the uploader, so {@link #isVisibleTombstone} marks it —
+     * which is the right asymmetry: a supervisory deletion is exactly the kind the
+     * ticket should remember.
+     *
+     * <p>Everyone else gets 403 and not 404, because the caller is looking at the
+     * row: see {@link AttachmentDeletionNotPermittedException}.
+     *
+     * <h2>Idempotent</h2>
+     *
+     * <p>A second delete of an already-deleted row is a no-op answering 204, not a
+     * 404 and not a 403. The client removes optimistically
+     * ({@code useTicketAttachments}) and a retry after a dropped response is
+     * ordinary; the caller asked for the file to be gone and it is gone. Refusing
+     * would also be a small information leak — it would distinguish "already
+     * removed" from "never existed" for anyone allowed to ask.
+     */
+    @Transactional
+    void delete(Authentication caller, long ticketId, long attachmentId) {
+        tickets.require(caller, ticketId);
+
+        // Loaded by id and then checked against the path's ticket rather than
+        // queried by both. The check has to exist either way, and doing it here
+        // means one lookup answers "no such row" and "not on this ticket" with the
+        // same exception from the same line — which is what keeps them
+        // indistinguishable (AttachmentNotFoundException).
+        TicketAttachment row = attachments.findById(attachmentId)
+                .filter(candidate -> candidate.getTicketId() != null && candidate.getTicketId() == ticketId)
+                .orElseThrow(AttachmentNotFoundException::new);
+
+        if (row.isDeleted()) {
+            return;
+        }
+
+        CallerIdentity identity = CallerIdentity.of(caller).orElseThrow(AttachmentNotFoundException::new);
+        requireMayDelete(identity, row);
+
+        // The objects go before the row is stamped, and the order matters less
+        // than the transaction does: both storage deletes are idempotent, so a
+        // rollback after them leaves a live row pointing at bytes that are gone —
+        // recoverable, visible, and strictly better than the reverse, which is a
+        // tombstoned row whose bytes are still in the bucket and still reachable
+        // by anyone holding an unexpired signed URL.
+        AttachmentStorageKey key = AttachmentStorageKey.parse(row.getStorageKey());
+        storage.delete(key);
+        // C-026's reduction is a second object under a derived key. Deleting the
+        // original alone would leave a thumbnail of a removed file in the bucket —
+        // a small, legible picture of the thing that was supposed to be gone.
+        // Derived rather than read from thumbnail_key so this is total: a row whose
+        // key was never written still had one built if the scan reached it.
+        storage.delete(key.thumbnail());
+
+        row.setDeleted(true);
+        row.setDeletedBy(identity.userId());
+        row.setDeletedAt(Instant.now(clock));
+        attachments.save(row);
+    }
+
+    /**
+     * §4B.4's "the uploader may delete", widened to the two roles that supervise
+     * the ticket.
+     *
+     * <p>The two refusal messages differ because the caller's next step does. Inside
+     * the window a Developer looking at a colleague's file may simply be about to
+     * ask them; outside it, nobody but a PM or Admin can act at all and saying so
+     * saves a wasted request. Neither message names the uploader — the row already
+     * does, and a refusal phrased around a person reads as permanent when the rule
+     * is temporal.
+     */
+    private void requireMayDelete(CallerIdentity identity, TicketAttachment row) {
+        if (Objects.equals(row.getUploadedBy(), identity.userId())) {
+            return;
+        }
+        if (RolePermissions.ADMIN.equals(identity.roleCode()) || RolePermissions.PM.equals(identity.roleCode())) {
+            return;
+        }
+        throw withinDeleteWindow(row)
+                ? AttachmentDeletionNotPermittedException.notTheUploader()
+                : AttachmentDeletionNotPermittedException.windowClosed();
+    }
+
+    /**
+     * Whether the row is still inside §4B.4's fifteen minutes, measured from
+     * upload.
+     *
+     * <p>Only ever asked to choose a refusal message — the permission decision
+     * above does not depend on it, and neither does the write. A row with no
+     * {@code createdAt} is treated as outside the window, which is the message
+     * that concedes less.
+     */
+    private boolean withinDeleteWindow(TicketAttachment row) {
+        Instant uploadedAt = row.getCreatedAt();
+        return uploadedAt != null
+                && !Instant.now(clock).isAfter(uploadedAt.plus(properties.deleteWindow()));
     }
 
     /**

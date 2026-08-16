@@ -335,3 +335,112 @@ describe('existing rows the surface already loaded', () => {
     expect(result.current.attachmentIds).toEqual([])
   })
 })
+
+/**
+ * C-028 · what the hook does with a removal — §4B.4's deletion rule.
+ *
+ * Two behaviours the surfaces depend on and neither of which existed before:
+ * tombstones arrive separately from live files, and a refusal is reported rather
+ * than swallowed. The second is the one that changed character: until §4B.4's
+ * rule was enforced a delete could only fail on a network fault, and silently
+ * putting the row back was the whole of the right answer.
+ */
+describe('C-028 · removals', () => {
+  const attachment = (overrides: Record<string, unknown> = {}) =>
+    ({
+      id: 1,
+      fileName: 'gateway-500.png',
+      contentType: 'image/png',
+      sizeBytes: 1024,
+      scanStatus: 'CLEAN',
+      downloadUrl: 'https://minio.example/a?sig=x',
+      isDeleted: false,
+      ...overrides,
+    }) as never
+
+  it('keeps tombstones out of items and offers them separately', () => {
+    // A tombstone is not a file in any sense the picker cares about — it cannot
+    // be previewed, downloaded or counted against §4B.4's caps — so it must not
+    // arrive in the array the picker validates.
+    const { result } = renderHook(() =>
+      useTicketAttachments({
+        ticketId: 'CRM-26-00347',
+        existing: [
+          attachment(),
+          attachment({ id: 2, fileName: 'debug-log.txt', isDeleted: true, deletedAt: '2026-08-16T14:22:00Z' }),
+        ],
+      }),
+    )
+
+    expect(result.current.items.map((i) => i.name)).toEqual(['gateway-500.png'])
+    expect(result.current.tombstones.map((t) => t.fileName)).toEqual(['debug-log.txt'])
+  })
+
+  it('does not count a tombstone towards the ids sent with a comment or handoff', () => {
+    // `attachmentIds` rides on QuickUpdateRequest, CommentWriteRequest and
+    // HandoffRequest. Naming a removed file there would ask the server to attach
+    // something whose bytes are gone.
+    const { result } = renderHook(() =>
+      useTicketAttachments({
+        ticketId: 'CRM-26-00347',
+        existing: [attachment(), attachment({ id: 2, isDeleted: true })],
+      }),
+    )
+
+    expect(result.current.attachmentIds).toEqual([1])
+  })
+
+  it('puts the row back and says why when the server refuses', async () => {
+    server.use(
+      http.delete('*/tickets/:ticketId/attachments/:attachmentId', () =>
+        HttpResponse.json(
+          {
+            type: 'https://edutrack/errors/attachment-delete-refused',
+            title: 'That attachment cannot be removed',
+            detail: 'Only the person who attached this file can remove it in the first few minutes.',
+            status: 403,
+          },
+          { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    const { result } = renderHook(() =>
+      useTicketAttachments({ ticketId: 'CRM-26-00347', existing: [attachment()] }),
+    )
+
+    act(() => result.current.remove('1'))
+
+    // Both halves matter. The row coming back without an explanation reads as a
+    // broken button, and the user's response to that is to click it again.
+    await waitFor(() => expect(result.current.removeError).toContain('person who attached this file'))
+    expect(result.current.items.map((i) => i.name)).toEqual(['gateway-500.png'])
+  })
+
+  it('clears a previous refusal when another removal is tried', async () => {
+    let refuse = true
+    server.use(
+      http.delete('*/tickets/:ticketId/attachments/:attachmentId', () =>
+        refuse
+          ? HttpResponse.json(
+              { type: 'x', title: 'no', detail: 'Not yours to remove.', status: 403 },
+              { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
+            )
+          : new HttpResponse(null, { status: 204 }),
+      ),
+    )
+
+    const { result } = renderHook(() =>
+      useTicketAttachments({ ticketId: 'CRM-26-00347', existing: [attachment(), attachment({ id: 2 })] }),
+    )
+
+    act(() => result.current.remove('1'))
+    await waitFor(() => expect(result.current.removeError).toBe('Not yours to remove.'))
+
+    // A stale message beside a removal that worked is worse than none — it
+    // describes the previous click.
+    refuse = false
+    act(() => result.current.remove('2'))
+    await waitFor(() => expect(result.current.removeError).toBeNull())
+  })
+})

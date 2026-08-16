@@ -2043,11 +2043,47 @@ paths:
       operationId: deleteAttachment
       summary: Delete an attachment
       description: |
-        Hard delete by the uploader within 15 minutes. After that it is a soft
-        delete leaving a tombstone, so the history still shows something was
-        attached and removed.
+        §4B.4's deletion rule. **The stored object and its thumbnail are removed
+        in every case; the row always survives.**
+
+        The row surviving is not a hedge — `deletedBy` and `deletedAt` exist to
+        be read afterwards, and C-034's History timeline cannot place an
+        attachment whose row is gone. The baseline migration that created
+        `ticket_attachments` says the same in its own comment. *(This paragraph
+        corrects an earlier description here that called the in-window case a
+        "hard delete"; no implementation ever did that.)*
+
+        What differs is whether the removal leaves a **visible tombstone**:
+
+        - **The uploader, within 15 minutes** — no tombstone. The row disappears
+          from `listAttachments` entirely. A support agent who pastes the wrong
+          screenshot and removes it has not done something the ticket needs to
+          remember.
+        - **Anyone else, or after 15 minutes** — the row is returned by
+          `listAttachments` with `isDeleted: true` and both tombstone fields set,
+          rendering as "file removed by X on date".
+
+        A PM or an administrator removing a file is therefore *never* silent,
+        even inside the window — that is the supervisory act the tombstone exists
+        to record, and the case the `isClientVisible` flag beside it anticipates
+        (an internal debug log attached as client-visible is a disclosure that
+        cannot wait out a timer).
+
+        **Idempotent.** Deleting an already-deleted attachment answers 204, not
+        404 — the caller asked for the file to be gone and it is gone, and
+        refusing would distinguish "already removed" from "never existed".
       responses:
         '204': { description: Deleted or tombstoned. }
+        '403':
+          description: |
+            Visible to this caller, but not theirs to remove — they are neither
+            the uploader nor a PM or administrator. Deliberately **not** 404: the
+            caller is looking at the row in a listing they just fetched, so there
+            is no existence to conceal. Row scope is a separate question and is
+            answered as 404 before this one is asked.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /attachments/limits:
@@ -5826,8 +5862,18 @@ components:
         downloadUrl: { type: [string, 'null'], description: Short-lived signed URL. Never a public bucket path. }
         thumbnailUrl: { type: [string, 'null'] }
         isClientVisible: { type: boolean }
+        # C-028 · true on a tombstone. A listing returns a deleted row ONLY when
+        # the removal is one §4B.4 wants recorded — see `deleteAttachment`. A
+        # tombstone never carries `downloadUrl` or `thumbnailUrl`; the bytes are
+        # gone, not merely hidden.
         isDeleted: { type: boolean }
         uploadedBy: { $ref: '#/components/schemas/UserRef' }
+        # C-028 · the two halves of "file removed by X on date". Both null unless
+        # `isDeleted`; `deletedBy` is additionally null when the account that
+        # removed it no longer exists, and the client renders the tombstone
+        # without an actor rather than inventing a name.
+        deletedBy: { $ref: '#/components/schemas/UserRef' }
+        deletedAt: { type: [string, 'null'], format: date-time }
         stageCode: { type: [string, 'null'] }
         cycleNo: { type: integer }
         createdAt: { type: string, format: date-time }

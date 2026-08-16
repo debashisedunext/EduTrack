@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.tickets.attachments;
 
+import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
 import com.edunext.edutrack.domain.tickets.Ticket;
@@ -14,12 +15,16 @@ import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
 
 import java.net.URI;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -54,7 +59,7 @@ class AttachmentServiceTest {
     private final AttachmentTypePolicy types = new AttachmentTypePolicy(new AttachmentSniffer());
 
     private final AttachmentProperties properties = new AttachmentProperties(
-            Duration.ofMinutes(5), 10L * 1024 * 1024, 50L * 1024 * 1024, 20,
+            Duration.ofMinutes(5), 10L * 1024 * 1024, 50L * 1024 * 1024, 20, Duration.ofMinutes(15),
             new AttachmentProperties.Scan(false, "localhost", 3310, Duration.ofSeconds(30), false),
             new AttachmentProperties.Thumbnail(true, 320, 50_000_000L));
 
@@ -71,8 +76,23 @@ class AttachmentServiceTest {
      */
     private final AttachmentSettingsService limits = mock(AttachmentSettingsService.class);
 
-    private final AttachmentService service =
-            new AttachmentService(tickets, attachments, types, stripper, storage, scans, properties, limits);
+    /**
+     * C-028 · the listing reads through here so it can see tombstones, which
+     * {@code TicketAttachmentRepository}'s {@code …IsDeletedFalse…} finder cannot.
+     */
+    private final AttachmentRows rows = mock(AttachmentRows.class);
+
+    /**
+     * C-028 · fixed, because §4B.4's fifteen-minute window is otherwise only
+     * testable by waiting fifteen minutes. Every timestamp in this file is
+     * expressed as an offset from {@link #NOW} so the window's two sides are
+     * chosen rather than raced for.
+     */
+    private static final Instant NOW = Instant.parse("2026-08-16T14:30:00Z");
+    private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+
+    private final AttachmentService service = new AttachmentService(
+            tickets, attachments, rows, types, stripper, storage, scans, properties, limits, clock);
 
     private final Authentication caller = new TestingAuthenticationToken("ravi", "n/a");
 
@@ -86,7 +106,19 @@ class AttachmentServiceTest {
         Ticket ticket = new Ticket();
         ticket.setId(TICKET);
         when(tickets.require(any(), eq(TICKET))).thenReturn(ticket);
-        when(attachments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(TICKET)).thenReturn(existing);
+        // C-028 · both finders are driven from `existing`, and the difference
+        // between them is reproduced rather than ignored: the upload path's finder
+        // filters deleted rows the way its query does, and the listing's returns
+        // everything the way its query does. Answers rather than fixed returns, so
+        // a test that adds a row after this runs still sees it.
+        //
+        // Stubbing both to the same unfiltered list would have been simpler and
+        // would have quietly broken the one assertion C-028 most needs to hold —
+        // that a tombstone stops counting towards §4B.4's twenty-file cap. The
+        // 15-minute window is pointless if removing a file does not make room.
+        when(attachments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(TICKET))
+                .thenAnswer(call -> existing.stream().filter(row -> !row.isDeleted()).toList());
+        when(rows.findByTicketIdOrderByCreatedAtAsc(TICKET)).thenAnswer(call -> List.copyOf(existing));
         when(attachments.saveAndFlush(any())).thenAnswer(call -> {
             TicketAttachment row = call.getArgument(0);
             row.setId(9001L);
@@ -96,6 +128,28 @@ class AttachmentServiceTest {
 
     private AttachmentService.Upload upload(String fileName, byte[] content) {
         return new AttachmentService.Upload(fileName, content, false, null);
+    }
+
+    /**
+     * C-028 · stamp {@code created_at} on a detached row.
+     *
+     * <p>Reflection because the column is {@code @Generated(INSERT)} and has no
+     * setter — the database owns it, which is right, and is exactly why a unit
+     * test has no other way to place a row on one side of §4B.4's fifteen-minute
+     * window. The alternative was adding a setter to a Stream A entity so a Stream
+     * C test could reach it, which trades a real invariant for a test convenience.
+     */
+    private static void setCreatedAt(TicketAttachment row, Instant createdAt) {
+        try {
+            java.lang.reflect.Field field = TicketAttachment.class.getDeclaredField("createdAt");
+            field.setAccessible(true);
+            field.set(row, createdAt);
+        } catch (ReflectiveOperationException unreachable) {
+            // The field is declared on the class above. If this ever throws, the
+            // entity was renamed and every window assertion below is meaningless —
+            // so it fails the test rather than defaulting to "now".
+            throw new AssertionError("TicketAttachment.createdAt could not be set", unreachable);
+        }
     }
 
     private static TicketAttachment stored(long sizeBytes, String scanStatus) {
@@ -547,6 +601,301 @@ class AttachmentServiceTest {
             service.thumbnailUrlFor(withThumbnail("CLEAN"));
 
             verify(storage).signedDownloadUrl(any(), anyString(), anyString(), eq(Duration.ofMinutes(5)));
+        }
+    }
+
+    /**
+     * C-028 · §4B.4's deletion rule — "the uploader may delete within 15 minutes;
+     * after that it is a soft delete leaving a tombstone".
+     *
+     * <p>The rule has two independent halves and they are tested apart, because
+     * conflating them is the mistake the implementation is shaped to avoid:
+     * <b>who may remove a file</b> (this class) and <b>whether the removal leaves a
+     * mark</b> ({@link Tombstones}). A version that answered the second from the
+     * clock alone passes every test in this class and silently swallows the case
+     * the rule exists for — a PM removing somebody else's leaked file inside the
+     * window.
+     */
+    @Nested
+    @DisplayName("C-028 · who may remove an attachment")
+    class Deletion {
+
+        private static final long RAVI = 41L;
+        private static final long ANIL = 42L;
+
+        /**
+         * A caller the service can actually identify.
+         *
+         * <p>{@code setAuthenticated(true)} is load-bearing and is the reason this
+         * helper exists rather than a bare token inline: {@code CallerIdentity.of}
+         * returns empty for anything not authenticated, and an unidentifiable
+         * caller is scoped to nothing — so every deletion here would have failed
+         * as a 404 with the permission logic never reached, which reads as a bug
+         * in the rule rather than in the fixture.
+         */
+        private Authentication user(long userId, String role) {
+            DevPrincipal principal =
+                    new DevPrincipal(userId, "u" + userId, "User " + userId, role, List.of(), List.of());
+            TestingAuthenticationToken token = new TestingAuthenticationToken(principal, "n/a");
+            token.setAuthenticated(true);
+            return token;
+        }
+
+        private TicketAttachment uploaded(Duration ago) {
+            TicketAttachment row = stored(1024, "CLEAN");
+            row.setUploadedBy(RAVI);
+            setCreatedAt(row, NOW.minus(ago));
+            when(attachments.findById(row.getId())).thenReturn(Optional.of(row));
+            return row;
+        }
+
+        @Test
+        void theUploaderMayRemoveTheirOwnFile() {
+            TicketAttachment row = uploaded(Duration.ofMinutes(3));
+
+            service.delete(user(RAVI, "DEVELOPER"), TICKET, row.getId());
+
+            assertThat(row.isDeleted()).isTrue();
+            assertThat(row.getDeletedBy()).isEqualTo(RAVI);
+            assertThat(row.getDeletedAt()).isEqualTo(NOW);
+        }
+
+        @Test
+        void aColleagueMayNot() {
+            TicketAttachment row = uploaded(Duration.ofMinutes(3));
+
+            assertThatThrownBy(() -> service.delete(user(ANIL, "DEVELOPER"), TICKET, row.getId()))
+                    .isInstanceOf(AttachmentDeletionNotPermittedException.class)
+                    // The wording is asserted, not just the type. Both refusals
+                    // are the same exception and the same 403, and the only thing
+                    // separating them is the sentence the user reads — so a
+                    // regression in the choice is invisible to a type assertion
+                    // and visible to nobody until it is on screen. Inside the
+                    // window the honest message is that they may simply be about
+                    // to ask the uploader.
+                    .hasMessageContaining("first few minutes");
+
+            // And nothing happened — refusing after removing the object would
+            // leave a row pointing at bytes that are gone.
+            assertThat(row.isDeleted()).isFalse();
+            verifyNoInteractions(storage);
+        }
+
+        @Test
+        void aColleagueIsToldTheWindowHasClosedOnceItHas() {
+            // The other half of the same refusal. Outside the window nobody but a
+            // PM or Admin can act at all, and saying so saves a wasted request —
+            // where "wait and you may be able to" would be false.
+            TicketAttachment row = uploaded(Duration.ofDays(1));
+
+            assertThatThrownBy(() -> service.delete(user(ANIL, "DEVELOPER"), TICKET, row.getId()))
+                    .isInstanceOf(AttachmentDeletionNotPermittedException.class)
+                    .hasMessageContaining("window for removing this file has passed");
+
+            assertThat(row.isDeleted()).isFalse();
+        }
+
+        @Test
+        void aPmMayRemoveSomebodyElsesFile() {
+            // §4B.4 puts is_client_visible on the same row as the deletion rule,
+            // and this is the case the pairing anticipates: an internal debug log
+            // attached as client-visible is a disclosure, and it cannot wait for a
+            // timer to expire or for its uploader to come back from leave.
+            TicketAttachment row = uploaded(Duration.ofMinutes(3));
+
+            service.delete(user(ANIL, "PM"), TICKET, row.getId());
+
+            assertThat(row.isDeleted()).isTrue();
+            assertThat(row.getDeletedBy()).isEqualTo(ANIL);
+        }
+
+        @Test
+        void soMayAnAdmin() {
+            TicketAttachment row = uploaded(Duration.ofHours(30));
+
+            service.delete(user(ANIL, "ADMIN"), TICKET, row.getId());
+
+            assertThat(row.isDeleted()).isTrue();
+        }
+
+        @Test
+        void theUploaderMayStillRemoveItLongAfterTheWindow() {
+            // The window decides whether the removal is silent, NOT whether the
+            // uploader is still allowed to make it. §4B.4 never withdraws their
+            // permission, and a version that did would leave the person who
+            // attached a file the only one who could not take it off.
+            TicketAttachment row = uploaded(Duration.ofDays(2));
+
+            service.delete(user(RAVI, "DEVELOPER"), TICKET, row.getId());
+
+            assertThat(row.isDeleted()).isTrue();
+        }
+
+        @Test
+        void bothStoredObjectsGoAndTheRowStays() {
+            // The row surviving is the whole design: deleted_by and deleted_at
+            // exist to be read afterwards, and C-034's timeline cannot place an
+            // attachment whose row is gone. The thumbnail goes with it, because a
+            // small legible picture of the removed file is still the removed file.
+            TicketAttachment row = uploaded(Duration.ofMinutes(1));
+            AttachmentStorageKey key = AttachmentStorageKey.parse(row.getStorageKey());
+
+            service.delete(user(RAVI, "DEVELOPER"), TICKET, row.getId());
+
+            verify(storage).delete(key);
+            verify(storage).delete(key.thumbnail());
+            verify(attachments).save(row);
+            verify(attachments, never()).delete(any());
+            verify(attachments, never()).deleteById(anyLong());
+        }
+
+        @Test
+        void aSecondDeleteIsANoOpRatherThanARefusal() {
+            // The client removes optimistically and a retry after a dropped
+            // response is ordinary. Refusing would also distinguish "already
+            // removed" from "never existed" for anyone allowed to ask.
+            TicketAttachment row = uploaded(Duration.ofMinutes(1));
+            service.delete(user(RAVI, "DEVELOPER"), TICKET, row.getId());
+            Instant firstRemoval = row.getDeletedAt();
+
+            service.delete(user(ANIL, "DEVELOPER"), TICKET, row.getId());
+
+            // Not merely "did not throw" — the original tombstone is intact. A
+            // second delete that re-stamped it would rewrite who removed the file.
+            assertThat(row.getDeletedBy()).isEqualTo(RAVI);
+            assertThat(row.getDeletedAt()).isEqualTo(firstRemoval);
+            // Two, not one: the first delete removes the object and its thumbnail.
+            // The point is that the second added none — an early return before the
+            // storage calls, not merely before the row is re-stamped.
+            verify(storage, times(2)).delete(any());
+            verify(attachments, times(1)).save(any());
+        }
+
+        @Test
+        void anAttachmentOnAnotherTicketIs404AndNot403() {
+            // The probe this closes: ids are bare BIGINTs, so without the check
+            // /tickets/347/attachments/{id} would answer differently depending on
+            // whether the id belongs to ticket 347 — which enumerates them.
+            TicketAttachment elsewhere = stored(1024, "CLEAN");
+            elsewhere.setTicketId(999L);
+            when(attachments.findById(elsewhere.getId())).thenReturn(Optional.of(elsewhere));
+
+            assertThatThrownBy(() -> service.delete(user(RAVI, "ADMIN"), TICKET, elsewhere.getId()))
+                    .isInstanceOf(AttachmentNotFoundException.class);
+        }
+
+        @Test
+        void anOutOfScopeTicketIs404BeforeTheAttachmentIsEvenLookedUp() {
+            when(tickets.require(any(), eq(999L))).thenThrow(new TicketNotFoundException());
+
+            assertThatThrownBy(() -> service.delete(user(RAVI, "ADMIN"), 999L, 1L))
+                    .isInstanceOf(TicketNotFoundException.class);
+
+            // Row scope is asked first, so an out-of-scope caller cannot even
+            // learn that an attachment id resolves.
+            verifyNoInteractions(storage);
+            verify(attachments, never()).findById(anyLong());
+        }
+
+        @Test
+        void aTombstoneStopsCountingTowardsTheTwentyFileCap() {
+            // Without this the 15-minute window is pointless: a user who hits the
+            // cap, removes a file and tries again would still be refused, and the
+            // ticket would be permanently full with nineteen files on it.
+            for (int i = 0; i < 20; i++) {
+                existing.add(stored(1024, "CLEAN"));
+            }
+            assertThatThrownBy(() -> service.upload(caller, TICKET, upload("a.png", AttachmentFixtures.pngWithExif())))
+                    .isInstanceOf(AttachmentLimitExceededException.class);
+
+            existing.getFirst().setDeleted(true);
+
+            assertThatCode(() -> service.upload(caller, TICKET, upload("a.png", AttachmentFixtures.pngWithExif())))
+                    .doesNotThrowAnyException();
+        }
+    }
+
+    /**
+     * C-028 · whether a removal leaves a visible mark — the half decided at read
+     * time, from data already on the row.
+     */
+    @Nested
+    @DisplayName("C-028 · tombstones")
+    class Tombstones {
+
+        private static final long RAVI = 41L;
+        private static final long ANIL = 42L;
+
+        private TicketAttachment removed(Long uploader, Long remover, Duration after) {
+            TicketAttachment row = stored(1024, "CLEAN");
+            row.setUploadedBy(uploader);
+            setCreatedAt(row, NOW);
+            row.setDeleted(true);
+            row.setDeletedBy(remover);
+            row.setDeletedAt(NOW.plus(after));
+            existing.add(row);
+            return row;
+        }
+
+        @Test
+        void theUploaderRemovingTheirOwnFilePromptlyLeavesNothingBehind() {
+            // A support agent pastes the wrong screenshot and removes it. The
+            // ticket has no reason to remember that, and a permanent "file removed
+            // by …" for every mis-paste trains everyone to read past the line that
+            // matters.
+            removed(RAVI, RAVI, Duration.ofMinutes(3));
+
+            assertThat(service.list(caller, TICKET, null, null)).isEmpty();
+        }
+
+        @Test
+        void theUploaderRemovingItAfterTheWindowLeavesATombstone() {
+            TicketAttachment row = removed(RAVI, RAVI, Duration.ofMinutes(16));
+
+            assertThat(service.list(caller, TICKET, null, null)).containsExactly(row);
+        }
+
+        @Test
+        void someoneElseRemovingItInsideTheWindowStillLeavesATombstone() {
+            // The assertion this whole class exists for. A clock-only rule would
+            // read three minutes and hide a PM's supervisory removal — which is
+            // precisely the deletion the ticket most needs to record.
+            TicketAttachment row = removed(RAVI, ANIL, Duration.ofMinutes(3));
+
+            assertThat(service.list(caller, TICKET, null, null)).containsExactly(row);
+        }
+
+        @Test
+        void aTombstoneIsNeverDownloadable() {
+            // The bytes are gone, not hidden — isReadable already refuses a deleted
+            // row, so the tombstone inherits it rather than restating it.
+            TicketAttachment row = removed(RAVI, ANIL, Duration.ofMinutes(3));
+
+            assertThat(service.signedUrlFor(row)).isEmpty();
+            assertThat(service.thumbnailUrlFor(row)).isEmpty();
+        }
+
+        @Test
+        void anInternalFilesTombstoneDoesNotSurfaceOnTheClientPortal() {
+            // The tombstone inherits the visibility of the file it replaces,
+            // because it is still a statement about that file — "debug-log.txt was
+            // removed" names the internal file as surely as serving it would.
+            removed(RAVI, ANIL, Duration.ofMinutes(3));
+
+            assertThat(service.list(caller, TICKET, null, true)).isEmpty();
+        }
+
+        @Test
+        void aRowWithNoRemovalTimestampShowsRatherThanHides() {
+            // A row deleted before this task existed, or written by hand, cannot be
+            // placed inside the window. Showing it is the safe direction: a
+            // tombstone shown where it need not be is a cosmetic surprise, one
+            // hidden that should have shown is the loss of the record §4B.4 asked
+            // for.
+            TicketAttachment row = removed(RAVI, RAVI, Duration.ZERO);
+            row.setDeletedAt(null);
+
+            assertThat(service.list(caller, TICKET, null, null)).containsExactly(row);
         }
     }
 }

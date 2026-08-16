@@ -222,3 +222,85 @@ describe('AttachmentGallery — removal', () => {
     expect(screen.getByRole('button', { name: 'Remove screenshot.png' })).toBeVisible()
   })
 })
+
+/**
+ * C-028 · §4B.4's tombstone — "file removed by X on date".
+ *
+ * The component renders whatever tombstones it is handed and decides nothing
+ * about which removals deserve one: that rule is the server's, it depends on the
+ * uploader and the clock, and `AttachmentServiceTest.Tombstones` is where it is
+ * proved. What is worth pinning here is that both halves of the sentence are
+ * genuinely optional, because both have ordinary causes — a deleted user account
+ * leaves no name, and a row removed before this task existed has no timestamp.
+ */
+describe('C-028 · tombstones', () => {
+  function tombstone(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 9,
+      fileName: 'debug-log.txt',
+      isDeleted: true,
+      deletedBy: { id: 41, displayName: 'Ravi Kumar' },
+      deletedAt: '2026-08-16T14:22:00Z',
+      ...overrides,
+    } as never
+  }
+
+  it('names the file, the person and the date', () => {
+    render(<AttachmentGallery items={[]} tombstones={[tombstone()]} />)
+
+    const row = screen.getByRole('listitem')
+    expect(row).toHaveTextContent('debug-log.txt')
+    expect(row).toHaveTextContent(/removed by Ravi Kumar on/)
+  })
+
+  it('renders even when every file on the ticket has been removed', () => {
+    // The empty check covers both lists. Returning null on `items.length === 0`
+    // alone would drop the only record that anything was ever attached — which
+    // is exactly the case §4B.4 keeps the row for.
+    render(<AttachmentGallery items={[]} tombstones={[tombstone()]} />)
+    expect(screen.getByLabelText('Removed files')).toBeInTheDocument()
+  })
+
+  it('still says the file was removed when the account that removed it is gone', () => {
+    // `deletedBy` is null for a deleted user. "removed by undefined" is worse
+    // than saying less, and the fact that the file went is still worth stating.
+    render(<AttachmentGallery items={[]} tombstones={[tombstone({ deletedBy: null })]} />)
+
+    const row = screen.getByRole('listitem')
+    expect(row).toHaveTextContent(/debug-log\.txt\s*removed on/)
+    expect(row).not.toHaveTextContent('undefined')
+  })
+
+  it('falls back to a bare "removed" when neither half is known', () => {
+    render(<AttachmentGallery items={[]} tombstones={[tombstone({ deletedBy: null, deletedAt: null })]} />)
+
+    const row = screen.getByRole('listitem')
+    expect(row).toHaveTextContent(/debug-log\.txt\s*removed$/)
+    expect(row).not.toHaveTextContent('undefined')
+    expect(row).not.toHaveTextContent('null')
+  })
+
+  it('offers no remove control on a tombstone', () => {
+    // There is nothing left to remove — the object and its thumbnail are both
+    // gone — and a × here would suggest the record itself could be erased.
+    render(<AttachmentGallery items={[]} tombstones={[tombstone()]} onRemove={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /Remove/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps tombstones out of the live file list', () => {
+    // Two lists with two labels, so a screen reader user is told which is which
+    // rather than meeting a struck-through name among the openable ones.
+    //
+    // A document rather than an image, deliberately: a tile renders its name
+    // into `aria-label` and leaves `alt=""`, so `toHaveTextContent` on the live
+    // list would find nothing and the first assertion would fail for a reason
+    // that has nothing to do with tombstones. A chip prints its name.
+    const live = item({ name: 'notes.txt', contentType: 'text/plain' })
+    render(<AttachmentGallery items={[live]} tombstones={[tombstone()]} />)
+
+    expect(screen.getByLabelText('Attached files')).toHaveTextContent('notes.txt')
+    expect(screen.getByLabelText('Attached files')).not.toHaveTextContent('debug-log.txt')
+    expect(screen.getByLabelText('Removed files')).toHaveTextContent('debug-log.txt')
+    expect(screen.getByLabelText('Removed files')).not.toHaveTextContent('notes.txt')
+  })
+})

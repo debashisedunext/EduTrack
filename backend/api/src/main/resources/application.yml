@@ -262,6 +262,18 @@ edutrack:
     max-ticket-bytes: ${ATTACHMENT_MAX_TICKET_BYTES:52428800}  # 50 MB
     max-files: ${ATTACHMENT_MAX_FILES:20}
 
+    # C-028 · §4B.4's fifteen minutes. Inside it the uploader's own delete leaves
+    # no visible trace; outside it the row renders as a tombstone naming who
+    # removed the file and when.
+    #
+    # NOT in `attachment_settings` beside the three caps above, and the omission
+    # is deliberate. Those moved because §4B.4 says the *limits* are configurable
+    # in system settings; this is a retention rule, and an administrator able to
+    # set it to a year could make the tombstone unreachable — which is the record
+    # §4B.4 asks for in the same sentence. Overridable at deploy so a test need
+    # not wait fifteen minutes, not at runtime by an operator.
+    delete-window: ${ATTACHMENT_DELETE_WINDOW:PT15M}
+
     thumbnail:
       # C-026. A small PNG reduction, built AFTER the virus scan says CLEAN and
       # served through the same signed URL as the file itself.

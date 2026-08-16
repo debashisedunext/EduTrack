@@ -40,7 +40,7 @@ class AttachmentSettingsServiceTest {
     /** §4B.4's numbers, as {@code application.yml} carries them. */
     private static AttachmentProperties properties() {
         return new AttachmentProperties(
-                Duration.ofMinutes(5), TEN_MB, FIFTY_MB, 20,
+                Duration.ofMinutes(5), TEN_MB, FIFTY_MB, 20, Duration.ofMinutes(15),
                 new AttachmentProperties.Scan(false, "localhost", 3310, Duration.ofSeconds(30), false),
                 new AttachmentProperties.Thumbnail(true, 320, 50_000_000L));
     }

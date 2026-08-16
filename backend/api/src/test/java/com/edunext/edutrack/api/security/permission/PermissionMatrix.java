@@ -393,6 +393,27 @@ final class PermissionMatrix {
             // argument resolution does not pre-empt the guard.
             everyRole("POST", "/api/v1/tickets/{ticketId}/attachments"),
             everyRole("GET", "/api/v1/tickets/{ticketId}/attachments"),
+            // C-028's delete asserts the same ticket.update_progress as the
+            // upload, so all six reach it here — and this row is the one most
+            // likely to be misread, so it is worth being explicit about what it
+            // does and does not say.
+            //
+            // It says: every role may remove SOME attachment. That follows from
+            // the upload being open to all six — a role that can attach a file to
+            // the wrong ticket and cannot take it off again would have no way to
+            // correct itself, and §4B.4 grants the fifteen-minute window to "the
+            // uploader" without qualifying which role they hold.
+            //
+            // It does NOT say every role may remove ANY attachment. §4B.4's real
+            // rule — the uploader, or a PM or Admin, and the window that decides
+            // whether the removal leaves a tombstone — is per-row and lives in
+            // AttachmentService.delete. A capability cannot express it: it would
+            // have to be recomputed for every attachment against the caller and
+            // the clock, which is not what an authority is. A Developer reaching
+            // this route for a colleague's file gets 403 from the service with
+            // the capability satisfied, and AttachmentServiceTest is where that
+            // is proved.
+            everyRole("DELETE", "/api/v1/tickets/{ticketId}/attachments/{attachmentId}"),
 
             // ── ticket detail · every role, because permission is not scope ──
             //

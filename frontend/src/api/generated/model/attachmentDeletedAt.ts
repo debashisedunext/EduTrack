@@ -46,29 +46,5 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { AttachmentScanStatus } from './attachmentScanStatus';
-import type { AttachmentDownloadUrl } from './attachmentDownloadUrl';
-import type { AttachmentThumbnailUrl } from './attachmentThumbnailUrl';
-import type { UserRef } from './userRef';
-import type { AttachmentDeletedAt } from './attachmentDeletedAt';
-import type { AttachmentStageCode } from './attachmentStageCode';
 
-export interface Attachment {
-  id?: number;
-  fileName?: string;
-  contentType?: string;
-  sizeBytes?: number;
-  /** Not downloadable until `CLEAN`. */
-  scanStatus?: AttachmentScanStatus;
-  /** Short-lived signed URL. Never a public bucket path. */
-  downloadUrl?: AttachmentDownloadUrl;
-  thumbnailUrl?: AttachmentThumbnailUrl;
-  isClientVisible?: boolean;
-  isDeleted?: boolean;
-  uploadedBy?: UserRef;
-  deletedBy?: UserRef;
-  deletedAt?: AttachmentDeletedAt;
-  stageCode?: AttachmentStageCode;
-  cycleNo?: number;
-  createdAt?: string;
-}
+export type AttachmentDeletedAt = string | null;
