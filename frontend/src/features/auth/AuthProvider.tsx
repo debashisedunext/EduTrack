@@ -55,6 +55,49 @@ const MIN_RENEW_DELAY_MS = 5_000;
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
 const LISTENER_OPTIONS: AddEventListenerOptions = { passive: true, capture: true };
 
+/**
+ * 🔴 One startup refresh per page load, however many times the effect runs.
+ *
+ * The effect below was written to run once and its dependencies genuinely never
+ * change — but **React StrictMode deliberately invokes mount effects twice** in
+ * development, and the `cancelled` flag it carries suppresses the second
+ * *state update*, not the second *request*. So every page load issued two
+ * `POST /auth/refresh` calls.
+ *
+ * Under A-024's rotation that is not a wasted round trip, it is a logout. The
+ * first call consumes the refresh token and issues its successor; the second
+ * replays the consumed one; the server correctly reads a replayed token as
+ * theft and **revokes the entire family**. Measured against the running app:
+ * `[200, 401]` on the first load and `[401, 401]` on every reload after it,
+ * with the user on `/login` both times. The effect's own note predicted this
+ * exactly — it just did not account for StrictMode being the thing that re-ran
+ * it.
+ *
+ * A module-level promise rather than a `useRef` guard: a ref would fix the
+ * StrictMode remount and nothing else, whereas the invariant that actually
+ * matters is *one refresh per page load, full stop* — which also holds if two
+ * `AuthProvider`s are ever mounted, or if one is remounted by a route change.
+ * Every caller shares the single in-flight promise and therefore the single
+ * token rotation.
+ *
+ * It needs no reset. The module is re-evaluated on every page load, which is
+ * precisely the scope this is meant to cover; deliberately *not* cleared on
+ * sign-out, because `LoginPage` establishes its session through `signIn`
+ * directly and never comes back through here.
+ *
+ * **One consequence for tests.** Vitest reuses a module across the cases in a
+ * file, so a second `AuthProvider` mounted in the same file resolves from the
+ * first case's promise rather than issuing its own request — correct by this
+ * design, and surprising if you are asserting on the call. `vi.resetModules()`
+ * between such cases is the way out.
+ */
+let startupRefreshInFlight: ReturnType<typeof refreshSession> | null = null;
+
+function startupRefresh(): ReturnType<typeof refreshSession> {
+  startupRefreshInFlight ??= refreshSession();
+  return startupRefreshInFlight;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = useAuthStore((state) => state.signIn);
   const signOut = useAuthStore((state) => state.signOut);
@@ -103,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     let cancelled = false;
 
-    refreshSession()
+    startupRefresh()
       .then((response) => {
         if (!cancelled) signIn(response.data);
       })
