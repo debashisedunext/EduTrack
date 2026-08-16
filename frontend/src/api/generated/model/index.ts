@@ -597,6 +597,7 @@ export * from './widgetResponseDataSeriesItem';
 export * from './widgetResponseDataSeriesItemPointsItem';
 export * from './widgetResponseDataSeriesItemPointsItemDrillDown';
 export * from './widgetResponseDataSeriesItemPointsItemX';
+export * from './widgetResponseDataUnavailableReason';
 export * from './workflowStage';
 export * from './workflowStageIcon';
 export * from './workflowStageStageSlaHrs';

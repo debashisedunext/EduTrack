@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 
 import { DashboardDateRange, type DateRange } from './DashboardDateRange'
+import { DashboardWidgets } from './DashboardWidgets'
 import { KpiCard, KpiCardSkeleton } from './KpiCard'
 
 /**
@@ -24,9 +25,16 @@ import { KpiCard, KpiCardSkeleton } from './KpiCard'
  *
  * <h2>What is not here</h2>
  *
- * Widgets 7 onward — the donut, the stacked area, the velocity lines — are
- * A-056 and A-057. The grid below is deliberately laid out to take them without
- * being rearranged.
+ * Widgets 13–15 — the calendar heatmap, the SLA gauge and the project treemap —
+ * are A-057, and append to `DashboardWidgets` without anything moving. A-056
+ * added widgets 7–12 into the space this grid was laid out to take.
+ *
+ * The widget block reads the same URL filter state as the cards, so narrowing
+ * to a project narrows the whole screen at once and the result is still a link
+ * somebody can send. `assigneeId` is deliberately **not** passed down: the
+ * widget endpoint does not accept it (the contract gives it `projectId`, `from`
+ * and `to` only), and the two resource widgets are already scoped by role —
+ * a delivery role sees their own line and nobody else's.
  */
 
 /** §S-05 colours widgets 4 and 5. The rest are neutral. */
@@ -151,6 +159,17 @@ export function DashboardPage() {
               ))}
         </section>
       )}
+
+      {/* Rendered even when the cards failed. The six widgets are six
+          independent requests against the same summary tables, and a failure in
+          the summary read says nothing about whether they can be answered. */}
+      <DashboardWidgets
+        params={{
+          ...(projectId ? { projectId: Number(projectId) } : {}),
+          ...(range.from ? { from: range.from } : {}),
+          ...(range.to ? { to: range.to } : {}),
+        }}
+      />
     </div>
   )
 }

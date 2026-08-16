@@ -72,6 +72,28 @@ class OutboxWorkerIT {
         // api, so it builds the schema itself from the same migrations.
         registry.add("spring.flyway.enabled", () -> true);
         registry.add("edutrack.outbox.enabled", () -> false);
+        // ⚠️ A-056 · Stream A's line in Stream D's file — flagged for Debashis.
+        //
+        // Without it this suite is red, and had been before A-056 touched
+        // anything: 22 of its 25 cases fail in reset() on
+        //
+        //   DELETE FROM projects — a foreign key constraint fails
+        //   (`daily_ticket_stats`, CONSTRAINT `fk_daily_stats_project`)
+        //
+        // A-051's stats scheduler is a @Scheduled fixedDelay, which fires once
+        // at context startup regardless of its interval, and it summarises
+        // every project into daily_ticket_stats. This suite's reset() deletes
+        // projects and knows nothing about that table, so the FK holds the rows
+        // it never created. Exactly the race PR #147 diagnosed; the switch it
+        // added for it was applied only to StatsRefreshIT, and this suite was
+        // left exposed.
+        //
+        // The same shape as `edutrack.outbox.enabled` above, and for the same
+        // reason: a background schedule writing rows underneath a test that is
+        // trying to control its own fixtures. Fixed here rather than by adding
+        // daily_ticket_stats to reset(), which would make every future summary
+        // table one more line every worker IT has to remember.
+        registry.add("edutrack.stats.enabled", () -> "false");
     }
 
     @Autowired

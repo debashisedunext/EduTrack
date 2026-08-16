@@ -87,7 +87,11 @@ class DashboardService {
         LocalDate end = to != null ? to : LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
         LocalDate start = from != null ? from : end.minusDays(DEFAULT_WINDOW_DAYS - 1L);
 
-        boolean ownWorkOnly = isOwnWorkOnly(caller.roleCode());
+        // A-056 · the role decision moved to DashboardScope so WidgetService
+        // reads the same one. Stated twice, it drifts — and the way it drifts
+        // is a Developer seeing their own cards above a chart of everybody's.
+        DashboardScope scope = DashboardScope.of(caller);
+        boolean ownWorkOnly = scope.ownWorkOnly();
 
         DashboardRepository.Flow flow;
         DashboardRepository.Stock stock;
@@ -104,9 +108,8 @@ class DashboardService {
             flow = summaries.resourceFlow(start, end, assigneeId);
             stock = summaries.resourceStock(start, end, assigneeId).orElse(EMPTY_STOCK);
         } else {
-            List<Long> scope = projectScopeOf(caller);
-            flow = summaries.projectFlow(start, end, scope, projectId);
-            stock = summaries.projectStock(start, end, scope, projectId).orElse(EMPTY_STOCK);
+            flow = summaries.projectFlow(start, end, scope.projectIds(), projectId);
+            stock = summaries.projectStock(start, end, scope.projectIds(), projectId).orElse(EMPTY_STOCK);
         }
 
         // A-055 · the preceding window of equal length, for deltaPct. Compared
@@ -127,10 +130,10 @@ class DashboardService {
             priorStock = summaries.resourceStock(priorStart, priorEnd, who).orElse(EMPTY_STOCK);
             series = summaries.resourceSeries(start, end, who);
         } else {
-            List<Long> scope = projectScopeOf(caller);
-            priorFlow = summaries.projectFlow(priorStart, priorEnd, scope, projectId);
-            priorStock = summaries.projectStock(priorStart, priorEnd, scope, projectId).orElse(EMPTY_STOCK);
-            series = summaries.projectSeries(start, end, scope, projectId);
+            priorFlow = summaries.projectFlow(priorStart, priorEnd, scope.projectIds(), projectId);
+            priorStock = summaries.projectStock(priorStart, priorEnd, scope.projectIds(), projectId)
+                    .orElse(EMPTY_STOCK);
+            series = summaries.projectSeries(start, end, scope.projectIds(), projectId);
         }
 
         Instant asOf = summaries.computedAt(start, end).orElse(null);
@@ -185,18 +188,6 @@ class DashboardService {
 
     private static final DashboardRepository.Stock EMPTY_STOCK =
             new DashboardRepository.Stock(0, 0, 0, 0);
-
-    /** §2's three delivery roles see their own work and nothing else. */
-    private static boolean isOwnWorkOnly(String roleCode) {
-        return RolePermissions.DEVELOPER.equals(roleCode)
-                || RolePermissions.QA.equals(roleCode)
-                || RolePermissions.DEPLOYMENT.equals(roleCode);
-    }
-
-    /** Empty means unrestricted, matching {@code ScopeResolver}'s own convention for Admin. */
-    private static List<Long> projectScopeOf(CallerIdentity caller) {
-        return RolePermissions.ADMIN.equals(caller.roleCode()) ? List.of() : caller.projectIds();
-    }
 
     /**
      * Widgets 1–6 of §S-05, each carrying the list it opens.

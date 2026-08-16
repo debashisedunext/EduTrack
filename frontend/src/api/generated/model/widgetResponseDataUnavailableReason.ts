@@ -46,12 +46,5 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { WidgetResponseDataUnavailableReason } from './widgetResponseDataUnavailableReason';
-import type { WidgetResponseDataSeriesItem } from './widgetResponseDataSeriesItem';
 
-export type WidgetResponseData = {
-  key?: string;
-  asOf?: string;
-  unavailableReason?: WidgetResponseDataUnavailableReason;
-  series?: WidgetResponseDataSeriesItem[];
-};
+export type WidgetResponseDataUnavailableReason = string | null;
