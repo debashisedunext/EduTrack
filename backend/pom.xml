@@ -73,6 +73,25 @@
     <bouncycastle.version>1.79</bouncycastle.version>
     <awssdk.version>2.29.29</awssdk.version>
     <poi.version>5.3.0</poi.version>
+    <!--
+      C-029: the server-side half of PLAN.md §3.9. Stream C is adding a
+      dependency to Stream A's build file, which the working agreement asks be
+      said out loud rather than done quietly — flagged for Debashis in the PR.
+
+      §3.9 is normative and unambiguous: sanitisation happens "on the server, on
+      write, always … the only sanitiser an attacker cannot skip is the one on
+      the write path". Until now only the client copy existed
+      (`components/ui/rich-text.ts`), which §3.9 itself calls advice. The
+      comment box is the first field written by one user and rendered to
+      another, so it is where the missing half stops being theoretical.
+
+      jsoup over OWASP's html-sanitizer because `Safelist` maps almost
+      one-to-one onto §3.9's fourteen tags and two protocol rules, so
+      `CommentSanitizer` reads as the spec rather than as a builder DSL around
+      it. Both are maintained and either would do; this one makes the
+      correspondence checkable by eye.
+    -->
+    <jsoup.version>1.18.3</jsoup.version>
   </properties>
 
   <dependencyManagement>
@@ -139,6 +158,13 @@
         <groupId>org.apache.poi</groupId>
         <artifactId>poi-ooxml</artifactId>
         <version>${poi.version}</version>
+      </dependency>
+
+      <!-- Rich-text sanitisation on the write path (PLAN.md §3.9) — C-029 -->
+      <dependency>
+        <groupId>org.jsoup</groupId>
+        <artifactId>jsoup</artifactId>
+        <version>${jsoup.version}</version>
       </dependency>
 
       <!-- test -->

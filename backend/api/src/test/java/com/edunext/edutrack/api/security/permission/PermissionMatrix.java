@@ -140,6 +140,20 @@ final class PermissionMatrix {
     private static final String DELIVERED = """
             {"ids":[1]}""";
 
+    /**
+     * C-029 · {@code CommentDtos.CommentWriteRequest}: {@code body} is
+     * {@code @NotBlank}.
+     *
+     * <p>Deliberately plain prose rather than markup. This fixture has to clear
+     * two gates, not one — Bean Validation's {@code @NotBlank}, and PLAN.md
+     * §3.9's sanitiser, which {@code CommentService} runs before it will store
+     * anything. A body of {@code <b>x</b>} passes the first and could fail the
+     * second on a future tightening of the allow-list, and the row would then be
+     * asserting a 400 rather than the guard.
+     */
+    private static final String COMMENT = """
+            {"body":"matrix fixture comment"}""";
+
     /** {@code PreferenceDtos.PreferenceUpdateRequest}: an empty list is valid. */
     private static final String PREFERENCES = """
             {"preferences":[]}""";
@@ -433,6 +447,36 @@ final class PermissionMatrix {
             // the capability satisfied, and AttachmentServiceTest is where that
             // is proved.
             everyRole("DELETE", "/api/v1/tickets/{ticketId}/attachments/{attachmentId}"),
+
+            // ── comments · C-029, §4B.5 ─────────────────────────────────────
+            // All six, and for §2's reason rather than convenience. §4B.5 calls
+            // the thread "the conversational record of the ticket" — a Developer
+            // explaining a root cause, a QA engineer reporting a retest and a
+            // Support agent relaying what the client said are the daily substance
+            // of the job, not decisions about it. The write asserts
+            // ticket.update_progress, the same capability as an upload and a
+            // quick update; a seventh role without that grant would be denied.
+            //
+            // Note what is NOT gated here: posting a CLIENT-VISIBLE comment takes
+            // no extra capability, and there is deliberately no separate row for
+            // it. §4B.5 makes visibility a per-comment toggle rather than a
+            // privilege, and the defence is that the safe option is the default
+            // and the unsafe one is deliberate — CommentService defaults every
+            // comment to internal and only an explicit `true` overrides it, which
+            // CommentServiceTest pins four ways. Gating it by role would also aim
+            // at the wrong people: Support is frequently who most needs to write
+            // to the client.
+            //
+            // *Which* tickets is not this file's question. ScopedTickets applies
+            // the row scope inside the service, so a ticket the caller may not see
+            // is 404 (A-035) whatever capability they hold.
+            everyRole("GET", "/api/v1/tickets/{ticketId}/comments"),
+            // Carries a fixture because the handler takes a required @RequestBody:
+            // without one the 400 from argument resolution pre-empts @PreAuthorize
+            // and the row would assert nothing. `body` is @NotBlank, and the value
+            // has to survive §3.9's sanitiser as well — a body of pure markup is a
+            // 400 from CommentService, which would defeat the row just as surely.
+            everyRole("POST", "/api/v1/tickets/{ticketId}/comments", COMMENT),
 
             // ── ticket detail · every role, because permission is not scope ──
             //
