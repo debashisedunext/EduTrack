@@ -1,0 +1,58 @@
+-- ---------------------------------------------------------------------
+-- A-057 · §S-05 widget 14's numerator and denominator, which A-050 built
+-- neither of.
+--
+-- The SLA compliance gauge is a ratio, and a ratio needs both halves
+-- recorded. daily_ticket_stats carries `closed` — every ticket closed that
+-- day — and nothing about whether any of them met their commitment.
+--
+-- WHY NOT DERIVE IT FROM open_delayed
+--
+-- open_delayed already counts "still open with the due date past", and it
+-- is tempting to read compliance off it. It answers a different question.
+-- open_delayed is *stock*: a snapshot of what is late right now, which
+-- says nothing about the tickets that were delivered late last Tuesday and
+-- are now closed. A gauge fed from it would improve every time somebody
+-- closed an overdue ticket, which is precisely backwards — late delivery
+-- would register as compliance rising.
+--
+-- Compliance is *flow*: of the work finished in this window, how much
+-- landed on time. That sums across days, which is what a window needs.
+--
+-- TWO COLUMNS, BECAUSE A TICKET WITHOUT A DUE DATE HAS NO SLA
+--
+--     sla_closed  closed that day AND had a planned_close_date
+--     sla_met     of those, actual_close_date <= planned_close_date
+--
+-- `closed` cannot serve as the denominator. A ticket with no
+-- planned_close_date has made no commitment, so it can neither meet one
+-- nor breach one — counting it as met would inflate the gauge with work
+-- nobody promised a date for, and counting it as breached would punish the
+-- same. It is excluded from both, which is why the denominator is its own
+-- column rather than a subtraction.
+--
+-- `sla_met <= sla_closed <= closed` holds by construction, and the read
+-- clamps anyway rather than betting a rendered percentage on it.
+--
+-- NULL, NOT ZERO, AND THE DIFFERENCE FROM A-056's OTHER COLUMN
+--
+-- Both are NULL until A-051 recomputes, exactly as A-056's type_counts is
+-- and unlike its assigned_in_progress. The distinction is which table:
+--
+--   · resource_daily_stats is DELETEd and rewritten per day, so no row
+--     there outlives its default and 0 is safe.
+--   · daily_ticket_stats is UPSERTed, so a historical row keeps whatever
+--     it is given here until something recomputes that day. `0` would
+--     claim "nothing with an SLA closed", which is false for most
+--     historical rows; NULL says "not computed", which is true.
+--
+-- The cost is that a window mixing computed and uncomputed days sums only
+-- the computed ones — SUM skips NULL — so the gauge answers over the days
+-- it actually has. That is the honest reading, it self-heals as A-051's
+-- trailing window and backfill sweep advance, and `computed_at` is already
+-- surfaced to the screen so the staleness is visible rather than implied.
+-- ---------------------------------------------------------------------
+
+ALTER TABLE daily_ticket_stats
+  ADD COLUMN sla_closed INT NULL AFTER aging_31_plus,
+  ADD COLUMN sla_met    INT NULL AFTER sla_closed;

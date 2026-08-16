@@ -39,6 +39,15 @@ import { Skeleton } from '@/components/ui/skeleton'
  * numbers into one string nobody can re-read a part of.
  */
 
+/**
+ * The keys the server actually serves — A-056's six and A-057's three.
+ *
+ * Narrower than the contract's enum on purpose. That enum also lists
+ * `stage-funnel`, `rework`, `stage-duration`, `handoff-latency` and
+ * `client-volume`, which answer 404 until A-058 and A-059 land; naming one here
+ * would compile and then render an error card, where this way it does not
+ * compile at all.
+ */
 export type WidgetKey =
   | 'type-donut'
   | 'daily-stacked'
@@ -46,6 +55,9 @@ export type WidgetKey =
   | 'resource-load'
   | 'priority-bar'
   | 'aging-buckets'
+  | 'calendar-heatmap'
+  | 'sla-gauge'
+  | 'project-treemap'
 
 export interface WidgetPoint {
   x: string

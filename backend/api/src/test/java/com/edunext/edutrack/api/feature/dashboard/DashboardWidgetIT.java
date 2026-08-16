@@ -434,11 +434,15 @@ class DashboardWidgetIT {
         @Test
         @DisplayName("a key the contract declares but nothing implements is absent, not unavailable")
         void unimplementedKeysAre404() {
+            // Was `sla-gauge` until A-057 implemented it, and this test failing
+            // is how that landed — which is the useful behaviour: a key moving
+            // from 404 to served should not pass silently. `stage-funnel` is
+            // A-058's and needs Stream C's transitions, so it will outlive this.
             Optional<WidgetService.Rendered> rendered = service.widget(
-                    caller(me, "ADMIN", List.of()), "sla-gauge", null, D1, D3);
+                    caller(me, "ADMIN", List.of()), "stage-funnel", null, D1, D3);
 
             assertThat(rendered)
-                    .as("A-057's; a role message would send somebody after a permission that would not help")
+                    .as("A-058's; a role message would send somebody after a permission that would not help")
                     .isEmpty();
         }
 
@@ -489,6 +493,176 @@ class DashboardWidgetIT {
         }
     }
 
+    // ── A-057 · widgets 13–15 ────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("widget 13 · calendar heatmap")
+    class Heatmap {
+
+        @Test
+        @DisplayName("one cell per summarised day, counting tickets created")
+        void oneCellPerDay() {
+            WidgetDtos.Widget w = widget("PM", "calendar-heatmap", List.of(mine));
+
+            assertThat(w.series()).hasSize(1);
+            assertThat(w.series().getFirst().name()).isEqualTo("Tickets created");
+            assertThat(w.series().getFirst().points()).hasSize(3);
+            assertThat(w.series().getFirst().points())
+                    .extracting(WidgetDtos.Point::y)
+                    .allSatisfy(v -> assertThat(v).isEqualByComparingTo("2"));
+        }
+
+        /**
+         * The one widget whose measure changes with the role, deliberately.
+         * Intake is not a fact about an assignee, and the series name is what
+         * carries the difference onto the screen.
+         */
+        @Test
+        @DisplayName("a delivery role gets their own closures, named as such")
+        void deliveryRoleGetsTheirOwnClosures() {
+            WidgetDtos.Widget w = widget("DEVELOPER", "calendar-heatmap", List.of(mine));
+
+            assertThat(w.unavailableReason()).isNull();
+            assertThat(w.series().getFirst().name()).isEqualTo("Tickets you closed");
+            assertThat(w.series().getFirst().points())
+                    .extracting(WidgetDtos.Point::y)
+                    .allSatisfy(v -> assertThat(v).as("seeded 1 closed per day for me")
+                            .isEqualByComparingTo("1"));
+        }
+
+        /**
+         * An unsummarised day and a zero-activity day are pixel-identical on a
+         * heatmap, and only one of them is a claim about the team.
+         */
+        @Test
+        @DisplayName("a day with no summary row is absent rather than an empty cell")
+        void gapsAreAbsent() {
+            WidgetDtos.Widget w = widget("PM", "calendar-heatmap", List.of(mine), D1, D8);
+
+            assertThat(w.series().getFirst().points()).hasSize(3);
+        }
+    }
+
+    @Nested
+    @DisplayName("widget 14 · SLA compliance gauge")
+    class SlaGauge {
+
+        @Test
+        @DisplayName("met and breached come back as counts, not as a percentage")
+        void metAndBreachedAreCounts() {
+            slaStat(D1, mine, 4, 3);
+            slaStat(D2, mine, 4, 1);
+            slaStat(D3, mine, 2, 2);
+
+            WidgetDtos.Widget w = widget("PM", "sla-gauge", List.of(mine));
+
+            assertThat(pointNamed(seriesNamed(w, "Met"), "Met")).isEqualByComparingTo("6");
+            assertThat(pointNamed(seriesNamed(w, "Breached"), "Breached"))
+                    .as("10 closed with a due date, 6 met")
+                    .isEqualByComparingTo("4");
+        }
+
+        /**
+         * Compliance is flow and sums across the window. Reading it off
+         * `open_delayed` would be stock, and the gauge would rise every time
+         * somebody closed an overdue ticket.
+         */
+        @Test
+        @DisplayName("sums across the window rather than reading one day")
+        void complianceSumsAcrossTheWindow() {
+            slaStat(D1, mine, 1, 1);
+            slaStat(D2, mine, 1, 0);
+            slaStat(D3, mine, 1, 1);
+
+            WidgetDtos.Widget w = widget("PM", "sla-gauge", List.of(mine));
+
+            assertThat(pointNamed(seriesNamed(w, "Met"), "Met")).isEqualByComparingTo("2");
+            assertThat(pointNamed(seriesNamed(w, "Breached"), "Breached")).isEqualByComparingTo("1");
+        }
+
+        /**
+         * NULL means "not computed" and must not render as a needle at 0%,
+         * which reads as total failure rather than as no measurement.
+         */
+        @Test
+        @DisplayName("an uncomputed window is an empty series, never 0%")
+        void uncomputedIsNotZeroPercent() {
+            WidgetDtos.Widget w = widget("PM", "sla-gauge", List.of(mine));
+
+            assertThat(w.unavailableReason()).isNull();
+            assertThat(w.series()).hasSize(1);
+            assertThat(w.series().getFirst().points()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("the breached half deep-links to the overdue list")
+        void breachedDeepLinks() {
+            slaStat(D1, mine, 2, 1);
+
+            WidgetDtos.Widget w = widget("PM", "sla-gauge", List.of(mine));
+
+            assertThat(seriesNamed(w, "Breached").points().getFirst().drillDown())
+                    .contains("isDelayed=true");
+        }
+
+        @Test
+        @DisplayName("a delivery role has no SLA outcome recorded and is told so")
+        void unavailableToDeliveryRoles() {
+            slaStat(D1, mine, 2, 1);
+
+            assertThat(widget("DEVELOPER", "sla-gauge", List.of(mine)).unavailableReason())
+                    .isNotNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("widget 15 · project treemap")
+    class Treemap {
+
+        /**
+         * The invisible failure on a treemap: every rectangle scales by the
+         * same factor, so a window summed looks exactly like a single day —
+         * identical proportions, identical layout, only the figures wrong.
+         */
+        @Test
+        @DisplayName("reads the latest summarised day rather than summing")
+        void stockIsNotSummed() {
+            WidgetDtos.Widget w = widget("ADMIN", "project-treemap", List.of());
+
+            assertThat(pointNamed(w, nameOfProject(mine)))
+                    .as("10 open on each of three days is 10, not 30")
+                    .isEqualByComparingTo("10");
+            assertThat(pointNamed(w, nameOfProject(theirs))).isEqualByComparingTo("100");
+        }
+
+        @Test
+        @DisplayName("a PM sees only their own projects")
+        void scopedToTheCallersProjects() {
+            WidgetDtos.Widget w = widget("PM", "project-treemap", List.of(mine));
+
+            assertThat(w.series().getFirst().points())
+                    .extracting(WidgetDtos.Point::x)
+                    .containsExactly(nameOfProject(mine));
+        }
+
+        @Test
+        @DisplayName("every tile deep-links to that project's open list")
+        void tilesDeepLink() {
+            WidgetDtos.Widget w = widget("ADMIN", "project-treemap", List.of());
+
+            assertThat(w.series().getFirst().points()).allSatisfy(p ->
+                    assertThat(p.drillDown()).startsWith("/tickets?projectId=")
+                            .contains("excludeClosed=true"));
+        }
+
+        @Test
+        @DisplayName("a delivery role has no project dimension and is told so")
+        void unavailableToDeliveryRoles() {
+            assertThat(widget("DEVELOPER", "project-treemap", List.of(mine)).unavailableReason())
+                    .isNotNull();
+        }
+    }
+
     // ── fixture ──────────────────────────────────────────────────────────────
 
     private WidgetDtos.Widget widget(String role, String key, List<Long> projects) {
@@ -531,9 +705,16 @@ class DashboardWidgetIT {
     /** A plain counter — {@code project_code} is unique and VARCHAR(10). See {@code DashboardScopeIT}. */
     private static final AtomicInteger SEQ = new AtomicInteger();
 
+    /**
+     * A-057 gave these distinct <em>names</em>, not merely distinct codes. The
+     * treemap is the first widget keyed by project name, and two projects both
+     * called "Widget IT" would let an assertion about one of them pass against
+     * the other — the quiet kind of green.
+     */
     private long project(String code) {
+        String unique = code + SEQ.incrementAndGet();
         jdbc.update("INSERT INTO projects (project_code, name, status) VALUES (?, ?, 'ACTIVE')",
-                code + SEQ.incrementAndGet(), "Widget IT");
+                unique, "Widget IT " + unique);
         return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     }
 
@@ -571,6 +752,28 @@ class DashboardWidgetIT {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?, '2026-08-12 06:00:00')
                 """, day, projectId, created, closed, reopened, openTotal, openCritical, openHigh,
                 openMedium, openLow, openDelayed, aging02, aging37, aging830, typeCounts);
+    }
+
+    /**
+     * A-057 · widget 14's two columns, set separately rather than as two more
+     * positional arguments on the fifteen-parameter method above.
+     *
+     * <p>That method is already long enough that its first version had the
+     * priority arguments transposed, and the assertions were written to match
+     * the mistake. Two more `int`s in the same row is asking for the same bug.
+     * Keeping these apart also makes "never computed" the default: a test that
+     * does not call this leaves both NULL, which is the state the gauge has to
+     * distinguish from a genuine zero.
+     */
+    private void slaStat(LocalDate day, long projectId, Integer slaClosed, Integer slaMet) {
+        jdbc.update("""
+                UPDATE daily_ticket_stats SET sla_closed = ?, sla_met = ?
+                 WHERE stat_date = ? AND project_id = ?
+                """, slaClosed, slaMet, day, projectId);
+    }
+
+    private String nameOfProject(long projectId) {
+        return jdbc.queryForObject("SELECT name FROM projects WHERE id = ?", String.class, projectId);
     }
 
     private void resourceStat(LocalDate day, long userId, int closed, int assignedOpen,

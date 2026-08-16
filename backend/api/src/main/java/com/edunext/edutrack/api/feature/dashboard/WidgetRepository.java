@@ -335,6 +335,136 @@ class WidgetRepository {
                 .optional();
     }
 
+    // ── widget 13 · the calendar heatmap's per-day activity ──────────────────
+
+    /**
+     * One point per day for a delivery role's heatmap.
+     *
+     * <p>{@code resource_daily_stats.closed} — what this person finished that
+     * day. Deliberately a <em>different measure</em> from the project heatmap's
+     * "created", and the service labels the series accordingly: intake is not a
+     * fact about an assignee, and showing a Developer their project's daily
+     * intake on a chart headed with their own name would be the same
+     * mis-attribution {@code DashboardRepository.resourceFlow} already refuses.
+     */
+    record ResourceDay(LocalDate day, long closed) {
+    }
+
+    List<ResourceDay> resourceDailyClosed(LocalDate from, LocalDate to, long userId) {
+        return jdbc.sql("""
+                        SELECT stat_date, closed
+                          FROM resource_daily_stats
+                         WHERE stat_date BETWEEN :from AND :to AND user_id = :userId
+                         ORDER BY stat_date
+                        """)
+                .param("from", from).param("to", to).param("userId", userId)
+                .query((rs, n) -> new ResourceDay(
+                        rs.getObject("stat_date", LocalDate.class), rs.getLong("closed")))
+                .list();
+    }
+
+    // ── widget 14 · SLA compliance ───────────────────────────────────────────
+
+    /**
+     * Widget 14 — of the work finished in the window, how much landed on time.
+     *
+     * <p><b>Flow, summed across the window</b>, which is the one thing about
+     * this widget that is easy to get wrong. The instinct is to read compliance
+     * off {@code open_delayed}, which is stock and answers "what is late right
+     * now" — a gauge fed from that would tick <em>upwards</em> every time
+     * somebody closed an overdue ticket, reporting late delivery as an
+     * improvement. The migration header carries the full argument.
+     *
+     * <p>Days A-051 has not computed hold NULL and {@code SUM} skips them, so
+     * the gauge answers over the days it actually has rather than diluting the
+     * ratio with zeroes. {@code asOf} is already on screen to say how current
+     * that is.
+     *
+     * @param closed tickets closed in the window that carried a
+     *               {@code planned_close_date}. Tickets without one made no
+     *               commitment and are in neither half.
+     * @param met    of those, closed on or before it.
+     */
+    record SlaCompliance(long closed, long met) {
+    }
+
+    Optional<SlaCompliance> slaCompliance(LocalDate from, LocalDate to,
+                                          List<Long> projectIds, Long projectFilter) {
+        return jdbc.sql("""
+                        SELECT SUM(sla_closed) AS sla_closed,
+                               SUM(sla_met)    AS sla_met
+                          FROM daily_ticket_stats
+                         WHERE stat_date BETWEEN :from AND :to
+                           AND (:unscoped = 1 OR project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR project_id = :projectFilter)
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .param("projectFilter", projectFilter)
+                .query((rs, n) -> {
+                    long closed = rs.getLong("sla_closed");
+                    // A window of entirely uncomputed days sums to SQL NULL,
+                    // which getLong reports as 0 — indistinguishable from "no
+                    // SLA work closed". wasNull separates them, and the service
+                    // needs that distinction to choose between "100%" and
+                    // "nothing to measure yet".
+                    if (rs.wasNull()) {
+                        return null;
+                    }
+                    long met = rs.getLong("sla_met");
+                    // Clamped rather than trusted. sla_met <= sla_closed holds
+                    // by construction, but a rendered percentage is not the
+                    // place to discover that a recompute disagreed.
+                    return new SlaCompliance(closed, Math.min(met, closed));
+                })
+                .optional()
+                .filter(java.util.Objects::nonNull);
+    }
+
+    // ── widget 15 · project treemap ──────────────────────────────────────────
+
+    /**
+     * Widget 15 — open tickets per project, as at the latest summarised day.
+     *
+     * <p>Stock, so the latest day rather than a sum. On a treemap the error
+     * would be perfectly invisible: every rectangle scales by the same factor,
+     * so a fortnight summed looks exactly like a day — identical proportions,
+     * identical layout, and only the tooltip figure wrong.
+     *
+     * <p>Projects with nothing open are omitted rather than drawn as
+     * zero-area rectangles carrying a label with nowhere to sit.
+     */
+    record ProjectShare(long projectId, String projectName, long openTotal) {
+    }
+
+    List<ProjectShare> projectDistribution(LocalDate from, LocalDate to,
+                                           List<Long> projectIds, Long projectFilter) {
+        return jdbc.sql("""
+                        SELECT s.project_id, p.name, s.open_total
+                          FROM daily_ticket_stats s
+                          JOIN projects p ON p.id = s.project_id
+                         WHERE s.stat_date = (
+                                   SELECT MAX(stat_date) FROM daily_ticket_stats
+                                    WHERE stat_date BETWEEN :from AND :to
+                                      AND (:unscoped = 1 OR project_id IN (:projectIds))
+                                      AND (:projectFilter IS NULL OR project_id = :projectFilter))
+                           AND s.open_total > 0
+                           AND (:unscoped = 1 OR s.project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR s.project_id = :projectFilter)
+                         ORDER BY s.open_total DESC, p.name
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .param("projectFilter", projectFilter)
+                .query((rs, n) -> new ProjectShare(
+                        rs.getLong("project_id"), rs.getString("name"), rs.getLong("open_total")))
+                .list();
+    }
+
     /**
      * An empty {@code IN ()} list is a MySQL syntax error, and the guard against
      * reaching it is the {@code :unscoped} flag beside every use. The sentinel
