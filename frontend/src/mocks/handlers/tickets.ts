@@ -1,6 +1,9 @@
 import { http } from 'msw';
 import { getDb, nextId } from '../db';
 import type { Attachment, Ticket } from '../db';
+// C-029 · the client's copy of PLAN.md §3.9's allow-list, so the mock's POST
+// refuses what the real server refuses. See the comment handler.
+import { isRichTextEmpty, sanitizeRichText } from '@/components/ui/rich-text';
 import { plannedCloseDateFor } from './sla';
 import {
   currentUser, findTicket, noContent, notFound, ok, paginate,
@@ -541,11 +544,33 @@ export const ticketHandlers = [
     const t = findTicket(String(params.ticketId), db);
     if (!t) return notFound('Ticket');
     const body = (await request.json()) as {
-      body: string; isClientVisible?: boolean; mentionUserIds?: number[];
+      body: string; isClientVisible?: boolean;
+      mentionUserIds?: number[]; attachmentIds?: number[];
     };
+    // C-029 · refused rather than accepted and ignored, mirroring
+    // CommentService. §4B.5 does let a comment carry files and the server does
+    // not implement it yet — a mock that answered 201 would let a client be
+    // written against a promise production does not keep, which is exactly the
+    // failure C-028 found in this file's own delete handler.
+    if (body.attachmentIds?.length) {
+      return validationFailed({
+        attachmentIds: ['Files cannot be attached to a comment yet.'],
+      });
+    }
     if (!body.body?.trim()) return validationFailed({ body: ['must not be blank'] });
+    // PLAN.md §3.9 runs on the server before anything is stored, so a body of
+    // pure markup is a 400 there and has to be one here too. `sanitizeRichText`
+    // is the client's copy of the same allow-list — not the same code as the
+    // server's jsoup Safelist, but the same fourteen tags, which is what makes
+    // this a faithful stand-in rather than a second opinion.
+    const clean = sanitizeRichText(body.body);
+    if (isRichTextEmpty(clean)) {
+      return validationFailed({
+        body: ['A comment needs some text. Formatting on its own is not enough.'],
+      });
+    }
     const c = {
-      id: nextId(db, 'comment'), ticketId: t.ticketId, body: body.body, originalBody: null,
+      id: nextId(db, 'comment'), ticketId: t.ticketId, body: clean, originalBody: null,
       authorId: db.currentUserId,
       // Default internal, always. An accidental leak to a client costs far more
       // than an extra click.

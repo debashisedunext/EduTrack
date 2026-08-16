@@ -12,6 +12,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { RichTextView } from '@/components/ui/rich-text-view'
 import { ensureRichText } from '@/components/ui/rich-text'
 
+import { CommentBox } from '../comments/CommentBox'
+import { CommentThread } from '../comments/CommentThread'
+import { useTicketComments } from '../comments/useTicketComments'
+
 import { PendingSection } from './PendingSection'
 import { TicketAttachmentsSection } from './TicketAttachmentsSection'
 import { TicketDetailHeader } from './TicketDetailHeader'
@@ -24,6 +28,9 @@ const DEFAULT_TAB = 'journey'
 const TAB_OWNERS: { id: string; label: string; owner: string; note?: string }[] = [
   { id: 'journey', label: 'Journey', owner: 'C-055', note: 'The stage-by-stage roll-up — every hop, its duration, and the active-versus-idle split.' },
   { id: 'history', label: 'History', owner: 'C-059', note: 'Cycle-grouped field changes and handoffs. Append-only: no edit or delete affordance exists for any role.' },
+  // C-029 fills this one. It keeps its entry here so the strip's order, labels
+  // and ownership stay in one list, and `content` below is what decides whether
+  // a tab renders a `PendingSection` or the real thing.
   { id: 'comments', label: 'Comments', owner: 'C-029', note: 'The comment stream, with the always-visible box above it.' },
   { id: 'attachments', label: 'Attachments', owner: 'C-060', note: 'The gallery, grouped by cycle and stage.' },
   { id: 'effort', label: 'Effort', owner: 'C-061', note: 'Every effort line for the selected cycle, with per-cycle and grand totals.' },
@@ -107,14 +114,37 @@ export function TicketDetailPage() {
     [contactsData, contactId],
   )
 
+  /*
+    C-029. Called here rather than inside a section component, because both
+    halves of §4B.5 need it and they render in different places: the box is
+    always visible above the tabs, and the stream is inside the Comments tab.
+    One hook, one query, two consumers — the alternative is two components each
+    calling `useListComments` and react-query dedupes them into one request,
+    which works by coincidence rather than by design.
+
+    Unlike the attachment strip this does not read from the `/full` payload;
+    `useTicketComments` explains why at length, and the short version is that a
+    thread has no cap and the contract pages it.
+  */
+  const comments = useTicketComments({ ticketId, cycle })
+
   const tabs: DetailTab[] = React.useMemo(
     () =>
       TAB_OWNERS.map(({ id, label, owner, note }) => ({
         id,
         label,
-        content: <PendingSection title={`${label} tab`} owner={owner} note={note} />,
+        content:
+          id === 'comments' ? (
+            <CommentThread
+              comments={comments.comments}
+              isLoading={comments.isLoading}
+              loadError={comments.loadError}
+            />
+          ) : (
+            <PendingSection title={`${label} tab`} owner={owner} note={note} />
+          ),
       })),
-    [],
+    [comments.comments, comments.isLoading, comments.loadError],
   )
 
   if (isPending) {
@@ -221,6 +251,19 @@ export function TicketDetailPage() {
             attachments={detail?.attachments}
             onChanged={() => void refetch()}
             readOnly={isEarlierCycle}
+          />
+
+          {/*
+            C-029 · §4B.5's box, above the tabs rather than inside the Comments
+            tab. §7 gives the reason in as many words: "the comment box itself is
+            always visible above the tabs so posting never costs a click."
+          */}
+          <CommentBox
+            onPost={comments.post}
+            isPosting={comments.isPosting}
+            postError={comments.postError}
+            disabled={isEarlierCycle}
+            disabledReason={`Cycle ${selectedCycleNo} is sealed. Its comments stay readable, but new ones belong to the current cycle.`}
           />
 
           <TicketDetailTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} />
