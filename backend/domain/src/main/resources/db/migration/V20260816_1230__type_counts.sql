@@ -1,0 +1,48 @@
+-- ---------------------------------------------------------------------
+-- A-056 · the task-type breakdown §S-05's donut needs, and A-050 did not build.
+--
+-- A-050 gave daily_ticket_stats columns for level, aging, delay and reopen —
+-- every breakdown the KPI cards ask for — and none for task type. Widget 7 is
+-- a donut over the eleven seeded types, and there was nothing to read it from.
+-- Answering it with a live COUNT(*) over tickets is what CLAUDE.md forbids and
+-- what these tables exist to avoid, so the breakdown is summarised like every
+-- other one.
+--
+-- JSON, NOT A COLUMN PER TYPE
+--
+-- task_types is a master an Admin extends (B-020, and §S-13 lets them). A
+-- column per type would mean a migration every time somebody adds one, which
+-- is precisely the argument A-050 already made for wip_by_stage:
+--
+--     "JSON rather than a column per stage because stages are a master table
+--      and a workflow template can define its own — a column set would need a
+--      migration every time somebody adds a stage."
+--
+-- The same master, the same reasoning, the same answer. Consistency here is
+-- worth more than the marginal queryability of real columns: two breakdowns
+-- stored two different ways is a choice the next person has to relearn.
+--
+-- SHAPE: {"3": 41, "7": 12} — task_type_id to open count, ids as JSON keys
+-- because JSON object keys are strings and MySQL will not pretend otherwise.
+-- Ids rather than names, so renaming a task type does not rewrite history; the
+-- name is resolved through GET /masters/task-types on read, exactly as the
+-- contract already tells clients to do for moduleId.
+--
+-- STOCK, NOT FLOW
+--
+-- It counts what was OPEN at the end of the day, matching open_total and the
+-- level columns beside it. A donut of "created by type" would answer a
+-- different question from every other figure on the row, and the two would be
+-- compared anyway.
+--
+-- NULL UNTIL A-051 RECOMPUTES
+--
+-- Existing rows keep NULL rather than being backfilled to '{}'. An empty object
+-- would claim "no tickets of any type were open that day", which is false for
+-- every historical row; NULL says "not computed", which is true. A-051's
+-- recompute is idempotent per day, so the window it covers fills in on the next
+-- pass and the backfill sweep repairs the rest.
+-- ---------------------------------------------------------------------
+
+ALTER TABLE daily_ticket_stats
+  ADD COLUMN type_counts JSON NULL AFTER wip_by_stage;

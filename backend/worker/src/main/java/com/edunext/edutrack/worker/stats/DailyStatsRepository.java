@@ -129,7 +129,7 @@ class DailyStatsRepository {
                     stat_date, project_id, created, closed, reopened,
                     open_total, open_critical, open_high, open_medium, open_low,
                     open_delayed, open_reopened,
-                    aging_0_2, aging_3_7, aging_8_30, aging_31_plus, computed_at)
+                    aging_0_2, aging_3_7, aging_8_30, aging_31_plus, type_counts, computed_at)
                 SELECT
                     :day, p.id,
                     -- flow: bounded by the day itself
@@ -156,6 +156,7 @@ class DailyStatsRepository {
                     COALESCE(SUM(o.open_at_eod AND DATEDIFF(:day, DATE(t.date_reported)) BETWEEN 3 AND 7), 0),
                     COALESCE(SUM(o.open_at_eod AND DATEDIFF(:day, DATE(t.date_reported)) BETWEEN 8 AND 30), 0),
                     COALESCE(SUM(o.open_at_eod AND DATEDIFF(:day, DATE(t.date_reported)) > 30), 0),
+                    NULL,   -- type_counts, filled by the statement below
                     :computedAt
                 FROM projects p
                 LEFT JOIN tickets t ON t.project_id = p.id
@@ -173,12 +174,61 @@ class DailyStatsRepository {
                     open_reopened = VALUES(open_reopened),
                     aging_0_2 = VALUES(aging_0_2), aging_3_7 = VALUES(aging_3_7),
                     aging_8_30 = VALUES(aging_8_30), aging_31_plus = VALUES(aging_31_plus),
+                    type_counts = VALUES(type_counts),
                     computed_at = VALUES(computed_at)
                 """)
                 .param("day", day)
                 .param("dayStart", day.atStartOfDay())
                 .param("dayEnd", day.plusDays(1).atStartOfDay())
                 .param("computedAt", computedAt)
+                .update();
+    }
+
+    /**
+     * A-056 · the task-type breakdown §S-05's donut reads, as a second pass.
+     *
+     * <h2>Why this is not a column in the statement above</h2>
+     *
+     * <p>It was, and it deadlocked. {@code INSERT … SELECT} takes shared locks
+     * on every row it reads from {@code tickets}, and a correlated subquery
+     * re-reading {@code tickets} from inside that same statement contends with
+     * the locks the statement is already holding — {@code CannotAcquireLock},
+     * on a suite that passed the day before. Splitting the read out of the
+     * insert removes the contention entirely.
+     *
+     * <p>The cost is a second statement per day. That is the right trade: the
+     * alternative is one clever statement that works at fixture scale and times
+     * out under A-073's 50,000 tickets, which is exactly the failure these
+     * summary tables exist to prevent.
+     *
+     * <h2>The shape, and what absence means</h2>
+     *
+     * <p>{@code {"3": 41}} — task_type_id to <b>open</b> count, matching
+     * {@code open_total} and the level columns rather than counting creations.
+     * A type with nothing open is absent rather than zero: a donut draws no
+     * slice for a type nobody raised, and eleven zero entries per project per
+     * day would be most of the column. A project with nothing open at all keeps
+     * NULL, because {@code '{}'} would claim no type had anything open, and
+     * NULL says the question does not arise.
+     */
+    int refreshTypeCounts(LocalDate day, Instant computedAt) {
+        return jdbc.sql("""
+                UPDATE daily_ticket_stats s
+                   JOIN (SELECT t.project_id,
+                                JSON_OBJECTAGG(t.task_type_id, t.open_count) AS counts
+                           FROM (SELECT project_id, task_type_id, COUNT(*) AS open_count
+                                   FROM tickets
+                                  WHERE task_type_id IS NOT NULL
+                                    AND date_reported < :dayEnd
+                                    AND (actual_close_date IS NULL OR actual_close_date >= :dayEnd)
+                                  GROUP BY project_id, task_type_id) t
+                          GROUP BY t.project_id) byProject
+                     ON byProject.project_id = s.project_id
+                    SET s.type_counts = byProject.counts
+                 WHERE s.stat_date = :day
+                """)
+                .param("day", day)
+                .param("dayEnd", day.plusDays(1).atStartOfDay())
                 .update();
     }
 

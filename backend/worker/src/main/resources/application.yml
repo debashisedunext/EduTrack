@@ -5,6 +5,23 @@ spring:
   main:
     web-application-type: none
 
+    # Without this the process starts and exits inside a tenth of a second, and
+    # every @Scheduled job in it — the SLA scans, the escalations, the mail
+    # outbox, A-051's stats refresh — never runs once.
+    #
+    # It is the combination that does it, which is why neither setting looks
+    # wrong on its own. `web-application-type: none` means no web server is
+    # holding a non-daemon thread open, and `threads.virtual.enabled` below
+    # means the task scheduler runs on virtual threads, which are *always*
+    # daemon threads and cannot keep a JVM alive. Nothing else in this process
+    # holds one, so the JVM has no reason to stay up and does not.
+    #
+    # Nothing fails when that happens. The log says "Started WorkerApplication"
+    # and the process is simply gone — which is how it survived: every worker IT
+    # drives its bean directly rather than waiting for a schedule, so the whole
+    # suite passes against a process that would never run a job in production.
+    keep-alive: true
+
   # Java 25 virtual threads (PLAN.md §2.1 — the reason the runtime was raised
   # from 21). A batch of mail sends is almost entirely blocked on SMTP I/O, so
   # carrying one platform thread per in-flight message buys nothing.
