@@ -392,6 +392,14 @@ final class PermissionMatrix {
             // job and would break the roles it is meant to protect.
             everyRole("GET", "/api/v1/tickets/{ticketId}/full"),
 
+            // The list, for the same reason and one more: a Developer who could
+            // not call it would have no ticket screen at all. ScopeResolver
+            // narrows the rows — Admin unrestricted, PM and Support to their
+            // projects, Developer/QA/Deployment to assigned_to = me — and a
+            // caller's own ?projectId= is ANDed underneath that, so a filter
+            // can only narrow what they already see and never widen it.
+            everyRole("GET", "/api/v1/tickets"),
+
             // ── attachment limits · C-027, §4B.4 ────────────────────────────
             // Read open to all six, write to master.write.
             //
