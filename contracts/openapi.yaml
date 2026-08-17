@@ -2703,10 +2703,42 @@ paths:
       description: |
         Max 5 MB and 5,000 rows. Parsed with the **event-driven SAX reader**, not
         the DOM reader — the DOM reader loads the entire workbook into memory per
-        concurrent import and will not survive two users at once.
+        concurrent import and will not survive two users at once. The row cap
+        aborts the parse rather than trimming afterwards, so a million-row sheet
+        is refused after 5,001 rows instead of after all of them.
 
-        Returns detected sheets and headers for the mapping step. Nothing is
-        written.
+        Accepts `.xlsx` and `.csv`. **`.xls` is refused with a 415** naming the
+        fix: the Excel 97–2003 format is a binary OLE container with no XML to
+        stream, so the only reader for it is the whole-workbook one this
+        operation exists to avoid.
+
+        Returns detected sheets and headers for the mapping step, plus the
+        auto-match B-033 presents as its starting point. `master.write`, like the
+        three operations beside it. **Nothing is written** — the upload is staged,
+        and no row of the target table is touched before `/commit`.
+      parameters:
+        - name: sheet
+          in: query
+          schema: { type: string }
+          description: |
+            Which sheet to read. Omitted means the first one, which is what the
+            initial upload sends.
+
+            This is how the multi-sheet selector works: the response lists every
+            sheet in the workbook, and choosing a different one re-posts the same
+            file naming it. Re-posting rather than re-reading a staged copy is
+            deliberate — the alternative is holding the raw bytes of every open
+            upload for the staging TTL, and the browser already has the file in
+            hand.
+        - name: replaces
+          in: query
+          schema: { type: string, format: uuid }
+          description: |
+            The `uploadId` this upload supersedes, released as this one is staged.
+
+            Sent by the sheet selector so that flipping between sheets does not
+            consume a staging slot per attempt. Unknown or already-expired ids
+            are ignored; this is a courtesy, not a precondition.
       requestBody:
         required: true
         content:
@@ -2722,8 +2754,43 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ImportUploadResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            No schema is registered under that key — the same case as the
+            template route, and `users` until B-038.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '413':
           description: Over the size or row limit.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '415':
+          description: |
+            Not a file type this endpoint reads — `.xls`, or anything that is
+            neither `.xlsx` nor `.csv`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            The right extension over the wrong bytes, an empty sheet, a sheet
+            with no header row, or a `sheet` the workbook does not contain.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: |
+            Every staging slot is taken — too many imports in progress at once.
+            Temporary and nothing the caller did wrong, so it carries
+            `Retry-After`. Reachable only because staging is currently
+            in-process and capped; it goes away when import artefacts move to
+            object storage (PLAN.md §2.2).
+          headers:
+            Retry-After: { schema: { type: integer } }
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -6706,8 +6773,28 @@ components:
           type: object
           properties:
             uploadId: { type: string, format: uuid }
+            fileName:
+              type: string
+              description: |
+                As the browser sent it, stripped of any path. Echoed back so the
+                screen can name the file it is about to import in the words the
+                user recognises, across the four requests the wizard spans.
             sheets: { type: array, items: { type: string } }
-            headers: { type: array, items: { type: string } }
+            sheet:
+              type: string
+              description: |
+                Which of `sheets` these `headers` and this `rowCount` describe.
+                Stated rather than assumed to be the first: re-posting with
+                `?sheet=` is how the selector works, and a client that inferred
+                "the first one" would mislabel every subsequent read.
+            headers:
+              type: array
+              items: { type: string }
+              description: |
+                The heading row, in sheet order. A heading repeated in the same
+                sheet is suffixed — `Email`, `Email (2)` — because rows are keyed
+                by heading and the alternative is one of the two columns silently
+                disappearing before the user ever sees it.
             rowCount: { type: integer }
             suggestedMapping:
               type: object

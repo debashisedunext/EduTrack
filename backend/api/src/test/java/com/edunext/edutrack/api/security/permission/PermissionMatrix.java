@@ -188,6 +188,21 @@ final class PermissionMatrix {
      */
     private static final String RAW_BYTES = "{}";
 
+    /**
+     * B-032 · not a body — a marker meaning "send this as a file upload".
+     *
+     * <p>{@link PermissionMatrixTest} builds a multipart request carrying one
+     * small file part when it sees this, instead of posting {@code body} as JSON.
+     * A route declaring {@code consumes = multipart/form-data} answers 415 to
+     * anything else, and 415 is decided during handler mapping — before
+     * {@code @PreAuthorize} runs — so every row for such a route would pass
+     * without ever reaching authorisation.
+     *
+     * <p>Sentinel-shaped on purpose: it starts with a character no JSON body can,
+     * so it cannot collide with a real fixture.
+     */
+    static final String MULTIPART = " multipart";
+
     /** {@code HolidayWrite}: date and name are required. */
     private static final String HOLIDAY = """
             {"date":"2026-01-26","name":"Republic Day"}""";
@@ -906,6 +921,22 @@ final class PermissionMatrix {
             // rule to protect. Recorded in check-conventions.py's ROWLESS_403
             // with that reason.
             adminOnly("GET", "/api/v1/imports/{schema}/template"),
+
+            // B-032 · step 2, and the same reasoning one step further along. The
+            // template row above had a real counter-argument (the file contains
+            // nothing of the organisation's); this one does not. An upload is the
+            // first half of a bulk write to the client master, and its response
+            // describes a file the caller supplied — so master.write is the
+            // capability by any reading, and 403 is a rowless refusal because the
+            // decision is made before the body is looked at.
+            //
+            // MULTIPART, not a JSON fixture: the handler declares
+            // `consumes = multipart/form-data`, so a JSON request is refused 415
+            // during handler mapping — before @PreAuthorize — and all six rows
+            // would assert nothing. That is the same failure
+            // `everyRouteWithARequiredBodyCarriesAFixture` exists to catch for
+            // @RequestBody, which cannot see a @RequestPart.
+            adminOnly("POST", "/api/v1/imports/{schema}/upload", MULTIPART),
 
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack

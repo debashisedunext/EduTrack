@@ -65,8 +65,10 @@ class InMemoryImportStagingStore implements ImportStagingStore {
             // Refusing is the honest failure. Evicting somebody else's upload to
             // make room would fail their wizard at commit, in a way they cannot
             // distinguish from losing their work.
-            throw new IllegalStateException(
-                    "Too many imports in progress (" + maxUploads + "). Try again shortly.");
+            //
+            // B-032 gave this a type of its own: it is now reachable over HTTP,
+            // and 503-with-an-explanation is a different answer from 500.
+            throw new ImportStagingFullException(maxUploads);
         }
         staged.put(upload.uploadId(), upload);
         return upload.uploadId();

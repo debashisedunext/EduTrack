@@ -558,6 +558,7 @@ export * from './unprocessableTransitionResponse';
 export * from './unsubscribeFromPushParams';
 export * from './uploadAttachmentBody';
 export * from './uploadImportFileBody';
+export * from './uploadImportFileParams';
 export * from './user';
 export * from './userAllOf';
 export * from './userAllOfDepartment';

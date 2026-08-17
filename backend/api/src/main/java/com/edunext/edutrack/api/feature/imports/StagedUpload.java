@@ -18,6 +18,11 @@ import java.util.UUID;
  * and the commit if the user goes back a step. {@link ImportMapping#apply} is
  * what converts these, per request, from whatever the mapping is at that moment.
  *
+ * <p><b>B-032 gave the rows their source row numbers</b> — see {@link StagedRow},
+ * which is where the reason is written down. In short: blank rows are dropped,
+ * so position in this list stopped being the row in the sheet, and step 4 quotes
+ * the row number back to a user who is going to go and look at it.
+ *
  * @param sheets every sheet in the workbook, for the multi-sheet selector; the
  *               first is the default
  * @param sheet  the one {@code rows} was read from
@@ -28,16 +33,21 @@ public record StagedUpload(
         List<String> sheets,
         String sheet,
         List<String> headers,
-        List<Map<String, String>> rows,
+        List<StagedRow> rows,
         Instant stagedAt) {
 
     public StagedUpload {
         sheets = List.copyOf(sheets);
         headers = List.copyOf(headers);
-        rows = rows.stream().<Map<String, String>>map(Map::copyOf).toList();
+        rows = List.copyOf(rows);
     }
 
     public int rowCount() {
         return rows.size();
+    }
+
+    /** Convenience for the steps that only want the cells — the numbers stay on the rows. */
+    public List<Map<String, String>> cells() {
+        return rows.stream().map(StagedRow::cells).toList();
     }
 }

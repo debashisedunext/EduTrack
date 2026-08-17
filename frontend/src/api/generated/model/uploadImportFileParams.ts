@@ -46,29 +46,28 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ImportUploadResponseDataSuggestedMapping } from './importUploadResponseDataSuggestedMapping';
 
-export type ImportUploadResponseData = {
-  uploadId?: string;
-  /** As the browser sent it, stripped of any path. Echoed back so the
-screen can name the file it is about to import in the words the
-user recognises, across the four requests the wizard spans.
+export type UploadImportFileParams = {
+/**
+ * Which sheet to read. Omitted means the first one, which is what the
+initial upload sends.
+
+This is how the multi-sheet selector works: the response lists every
+sheet in the workbook, and choosing a different one re-posts the same
+file naming it. Re-posting rather than re-reading a staged copy is
+deliberate — the alternative is holding the raw bytes of every open
+upload for the staging TTL, and the browser already has the file in
+hand.
+
  */
-  fileName?: string;
-  sheets?: string[];
-  /** Which of `sheets` these `headers` and this `rowCount` describe.
-Stated rather than assumed to be the first: re-posting with
-`?sheet=` is how the selector works, and a client that inferred
-"the first one" would mislabel every subsequent read.
+sheet?: string;
+/**
+ * The `uploadId` this upload supersedes, released as this one is staged.
+
+Sent by the sheet selector so that flipping between sheets does not
+consume a staging slot per attempt. Unknown or already-expired ids
+are ignored; this is a courtesy, not a precondition.
+
  */
-  sheet?: string;
-  /** The heading row, in sheet order. A heading repeated in the same
-sheet is suffixed — `Email`, `Email (2)` — because rows are keyed
-by heading and the alternative is one of the two columns silently
-disappearing before the user ever sees it.
- */
-  headers?: string[];
-  rowCount?: number;
-  /** Auto-matched by header; every column stays manually overridable. */
-  suggestedMapping?: ImportUploadResponseDataSuggestedMapping;
+replaces?: string;
 };

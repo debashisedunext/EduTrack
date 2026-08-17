@@ -1678,17 +1678,35 @@ export const restHandlers = [
       },
     }),
   ),
-  http.post(url('/imports/:schema/upload'), () =>
-    ok({
+  // B-032 · step 2, answering as a two-sheet workbook so the multi-sheet
+  // selector has something to exercise. `?sheet=` is honoured and the row count
+  // moves with it: a selector that only re-styled a button would otherwise pass,
+  // and it is the one control on this screen with state.
+  //
+  // The uploaded file is deliberately not read. Under vitest no genuine
+  // multipart body reaches a handler — jsdom supplies FormData while Node
+  // supplies Request, and Node stringifies the foreign object to the literal
+  // `[object FormData]` — which `useTicketAttachments.test.tsx` documents at
+  // length. `request.formData()` here does not fail, it *hangs*, and every test
+  // that uploads times out with no hint why. The name is echoed as a constant
+  // instead; the screen shows the browser's own File name anyway.
+  http.post(url('/imports/:schema/upload'), ({ request }) => {
+    const sheets = ['Clients', 'Archive'];
+    const requested = new URL(request.url).searchParams.get('sheet');
+    const sheet = requested && sheets.includes(requested) ? requested : sheets[0];
+
+    return ok({
       uploadId: '11111111-2222-3333-4444-555555555555',
-      sheets: ['Clients'], rowCount: 128,
+      fileName: 'clients.xlsx',
+      sheets, sheet,
+      rowCount: sheet === 'Archive' ? 12 : 128,
       headers: ['Client Code', 'Name', 'Domain', 'Support Plan', 'Status'],
       suggestedMapping: {
         clientCode: 'Client Code', name: 'Name', domain: 'Domain',
         supportPlan: 'Support Plan', isActive: 'Status',
       },
-    }),
-  ),
+    });
+  }),
   http.post(url('/imports/:schema/validate'), () =>
     // A dry run writes nothing and shows a per-row verdict. This is the step
     // that makes a bulk import safe to run at all.
