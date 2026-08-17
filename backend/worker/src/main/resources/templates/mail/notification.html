@@ -1,20 +1,26 @@
 <!DOCTYPE html>
-<!--
-  D-029 · the shell every §4B.6 mail is rendered into.
+<!--/*
+  D-029/D-030 · the shell every §4B.6 mail is rendered into.
 
   Deliberately 2004-era HTML. Mail clients are not browsers: Outlook renders
   with Word's engine, Gmail strips <style> blocks and <head> entirely, and
   neither supports flexbox or grid. So this is a table, with inline styles, and
   it should stay that way however wrong it looks next to the app's own markup.
+  Colours are inline hex for the same reason — §12.1's tokens are CSS custom
+  properties and a mail cannot reach them.
 
   The Admin owns the wording (B-022's master); this file owns the chrome. That
-  split is why th:utext appears below on `body` — the body has already been
-  substituted and HTML-escaped by MailRenderer, so escaping it a second time
-  here would print &lt;p&gt; to the recipient. Nothing else in this file uses
-  utext, and nothing else should.
+  split is why th:utext appears on `body` and on nothing else: the body has
+  already been substituted and HTML-escaped by MailRenderer, so escaping it
+  again would print &lt;p&gt; to the recipient. Every other value here goes
+  through th:text, which escapes on output. Adding a second utext to this file
+  is how a ticket title becomes markup in a client's inbox.
 
-  D-030 fills in the level chip, the metadata rows and the reply hint.
--->
+  Every block below is conditional. §4B.6 mail covers fifteen events, from a
+  handoff (ticket, stage, actor, comment) to a chain-verification failure
+  (none of those), and a row rendering "Project:" with nothing after it reads
+  as a bug in the product rather than an absent field.
+*/-->
 <html xmlns:th="http://www.thymeleaf.org">
 <body style="margin:0;padding:0;background:#f4f5f7;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
@@ -26,34 +32,127 @@
                       border-radius:8px;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
                       color:#0b1220;">
 
+          <!--/* ── header: the ticket, and how urgent it is ────────────────── */-->
           <tr>
-            <td style="padding:20px 24px 8px;border-bottom:1px solid #eceff6;">
+            <td style="padding:18px 24px 14px;border-bottom:1px solid #eceff6;">
               <span style="font-size:13px;font-weight:600;color:#475069;">EduTrack</span>
+
+              <!--/* Soft background, solid text — §12.1, never a heavy solid
+                   block. A red band across the top of an alert is what makes
+                   people filter the alert. */-->
+              <span th:if="${level != null and !level.isEmpty()}"
+                    th:text="${level}"
+                    th:style="'display:inline-block;margin-left:10px;padding:2px 9px;border-radius:999px;'
+                            + 'font-size:11px;font-weight:700;letter-spacing:.04em;'
+                            + 'background:' + ${levelBackground} + ';color:' + ${levelText} + ';'">CRITICAL</span>
+
+              <div th:if="${ticket_id != null and !ticket_id.isEmpty()}"
+                   style="margin-top:10px;font-size:16px;font-weight:650;line-height:1.35;">
+                <span th:text="${ticket_id}">CRM-26-00347</span>
+                <span th:if="${ticket_title != null and !ticket_title.isEmpty()}"
+                      th:text="' — ' + ${ticket_title}"> — Import fails on header row</span>
+              </div>
             </td>
           </tr>
 
+          <!--/* ── what happened, in the Admin's words ─────────────────────── */-->
           <tr>
-            <td style="padding:20px 24px;font-size:14px;line-height:1.6;">
+            <td style="padding:18px 24px 6px;font-size:14px;line-height:1.6;">
               <div th:utext="${body}">The rendered template body goes here.</div>
             </td>
           </tr>
 
+          <!--/* ── who acted, and what they said ───────────────────────────── */-->
+          <!--/* §4B.6's "who acted and what they said". The comment is quoted
+               rather than run into the prose: it is somebody else's words, and
+               a handoff note reading as though the system wrote it is how a
+               recipient misattributes a decision. */-->
+          <tr th:if="${comment != null and !comment.isEmpty()}">
+            <td style="padding:6px 24px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="background:#f7f8fb;border-left:3px solid #dfe3ed;border-radius:4px;">
+                <tr>
+                  <td style="padding:10px 14px;font-size:14px;line-height:1.55;color:#0b1220;">
+                    <span th:text="${comment}">Blocked on the client's sandbox credentials.</span>
+                    <div th:if="${actor != null and !actor.isEmpty()}"
+                         style="margin-top:6px;font-size:12px;color:#7c859c;">
+                      — <span th:text="${actor}">Ravi Kumar</span>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!--/* An actor with no comment still gets attributed: "Meera moved this
+               to QA" is the whole content of several §4B.6 events. */-->
+          <tr th:if="${(comment == null or comment.isEmpty()) and actor != null and !actor.isEmpty()}">
+            <td style="padding:2px 24px 0;font-size:13px;color:#475069;">
+              Actioned by <span th:text="${actor}" style="font-weight:600;">Ravi Kumar</span>
+            </td>
+          </tr>
+
+          <!--/* ── the ticket's facts ──────────────────────────────────────── */-->
           <tr>
-            <td style="padding:0 24px 22px;">
-              <!-- Rendered only for ticket mail. A digest has no single ticket
+            <td style="padding:16px 24px 4px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="font-size:13px;color:#0b1220;">
+                <tr th:if="${project != null and !project.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;width:130px;">Project</td>
+                  <td style="padding:3px 0;" th:text="${project}">CRM Revamp</td>
+                </tr>
+                <tr th:if="${client != null and !client.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;">Client</td>
+                  <td style="padding:3px 0;" th:text="${client}">Acme Ltd</td>
+                </tr>
+                <tr th:if="${stage != null and !stage.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;">Current stage</td>
+                  <td style="padding:3px 0;" th:text="${stage}">QA</td>
+                </tr>
+                <tr th:if="${assignee != null and !assignee.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;">Assigned to</td>
+                  <td style="padding:3px 0;" th:text="${assignee}">Ravi Kumar</td>
+                </tr>
+                <tr th:if="${planned_close != null and !planned_close.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;">Planned close</td>
+                  <td style="padding:3px 0;" th:text="${planned_close}">22 Aug 2026</td>
+                </tr>
+                <!--/* Only ever set on a breach mail, where it is the point. */-->
+                <tr th:if="${overdue_by != null and !overdue_by.isEmpty()}">
+                  <td style="padding:3px 0;color:#b91c1c;">Overdue by</td>
+                  <td style="padding:3px 0;color:#b91c1c;font-weight:600;"
+                      th:text="${overdue_by}">6 working hours</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!--/* ── the one thing to do ─────────────────────────────────────── */-->
+          <tr>
+            <td style="padding:18px 24px 22px;">
+              <!--/* Rendered only for ticket mail. A digest has no single ticket
                    to open, and a button linking to /tickets/ is worse than no
-                   button at all. -->
+                   button at all. */-->
               <a th:if="${ticket_url != null and !ticket_url.isEmpty()}"
                  th:href="${ticket_url}"
                  style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;
-                        font-size:14px;font-weight:600;padding:10px 18px;border-radius:6px;">
+                        font-size:14px;font-weight:600;padding:11px 20px;border-radius:6px;">
                 Open ticket
               </a>
             </td>
           </tr>
 
+          <!--/* ── footer: the reply hint ──────────────────────────────────── */-->
+          <!--/* §4B.6 asks for a reply hint, and this is the honest version of
+               one. D-039's inbound parser is not wired, so a reply reaches
+               nobody — telling somebody they may reply would lose whatever
+               they wrote, silently, which is worse than not offering. Revisit
+               this wording when inbound mail lands, and not before. */-->
           <tr>
-            <td style="padding:14px 24px;border-top:1px solid #eceff6;font-size:12px;color:#7c859c;">
+            <td style="padding:14px 24px;border-top:1px solid #eceff6;font-size:12px;
+                       color:#7c859c;line-height:1.55;">
+              Replies to this address are not monitored — comment on the ticket so the
+              conversation stays with it.
+              <br>
               You are receiving this because you are involved in this ticket.
               Notification settings live in EduTrack under your profile.
             </td>
