@@ -1,11 +1,37 @@
 #!/usr/bin/env bash
 #
-# EduTrack — the integration gate.
+# EduTrack — the integration gate.  ⚠️ RETIRED 17 Aug 2026 — DO NOT RUN ROUTINELY.
 #
-# Runs, locally, every check .github/workflows/ci.yml runs. This exists because
-# the GitHub Actions allowance was exhausted on 11 Aug 2026 and no job will run
-# until the calendar month resets on 1 Sep. Merging on an unverified branch for
-# three weeks is not an option on a codebase whose central guarantee is
+# The repository was made public, which restores unlimited GitHub Actions
+# minutes and branch protection. .github/workflows/ci.yml runs the same checks
+# on every push and every pull request, and the platform can now refuse an
+# unverified merge on its own. That is what this script was standing in for.
+#
+# Run unit and smoke tests locally instead; push and let CI do the rest.
+# CLAUDE.md §"Verification before merge" is the current instruction.
+#
+# Kept, not deleted, as insurance for the next Actions outage — and because
+# what it records is worth keeping: the concurrency hazards below are real and
+# cost several unreproducible failures to learn.
+#
+# ── why it was retired, which matters more than that it was ──────────────────
+#
+# It was too expensive to use. A full run is ~50 minutes on a machine that can
+# do nothing else meanwhile — 45 integration-test classes each starting their
+# own MySQL container — so in practice it was skipped, and between 16 and 17
+# Aug seven PRs reached develop with it never run. A verification step nobody
+# can afford is a verification step nobody performs, which is worse than an
+# honest gap because it reads as coverage.
+#
+# If it is ever needed again, fix the cost first: share one container across
+# the suite. Until then this will be skipped again for the same reason.
+#
+# ── original rationale ───────────────────────────────────────────────────────
+#
+# Runs, locally, every check .github/workflows/ci.yml runs. This existed because
+# the GitHub Actions allowance was exhausted on 11 Aug 2026 and no job would run
+# until the calendar month reset on 1 Sep. Merging on an unverified branch for
+# three weeks was not an option on a codebase whose central guarantee is
 # append-only hash-chained history, so the verification moved here.
 #
 # Run it on the MERGE RESULT, not on the branch:

@@ -32,9 +32,17 @@ api: ## Run the API on :8080 with the local profile
 web: ## Run the frontend on :5173
 	cd frontend && npm run dev
 
-verify: ## Full gate — everything CI runs
+verify: ## Everything CI runs — ~1h. Since 17 Aug CI does this for you; prefer `make check`
+	@echo "  Note: the repo is public, so GitHub Actions runs this on every push."
+	@echo "  This takes the best part of an hour locally. Ctrl-C and use 'make check'"
+	@echo "  unless you specifically need the full suite offline."
 	cd backend  && ./mvnw -B verify
 	cd frontend && npm run lint && npm run test -- --run && npm run build
+
+check: ## Unit + type + lint only — what to run before pushing
+	cd frontend && npm run lint
+	cd frontend && npx tsc --noEmit -p tsconfig.app.json
+	cd backend  && ./mvnw -B -q -pl common,domain,api test -DskipFrontend=true
 
 test: ## Tests only
 	cd backend  && ./mvnw -B test

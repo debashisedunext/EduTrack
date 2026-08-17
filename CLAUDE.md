@@ -81,34 +81,45 @@ Until Stream A lands the guard (week 7), use the `dev-noauth` profile. **Do not 
 
 **Every PR is verified before it is merged. No exception, and no PR merges any other way.**
 
-Claude runs `tools/integration-gate.sh` **on the merge result** — not on any one branch, because a branch that is green alone can still break `develop`. If every check passes, it merges. If anything fails, the offending PR goes back with the failing check named; it is not merged and not partially merged.
+**GitHub Actions is the authority again, as of 17 Aug 2026.** The repository was made public, which restores unlimited Actions minutes *and* branch protection — so `.github/workflows/ci.yml` runs on every push and every PR, and the platform can refuse an unverified merge on its own.
 
-The gate runs, locally, exactly what `.github/workflows/ci.yml` runs:
+CI runs: migration guard · backend `mvn verify` · frontend lint, test and build · OpenAPI validity, conventions and client staleness · the packaged jar actually starting and serving a request.
 
-migration guard · backend `mvn verify` · frontend lint, test and build · OpenAPI validity, conventions and client staleness · the packaged jar actually starting and serving a request.
+**`tools/integration-gate.sh` is retired.** It exists only as insurance if Actions is ever unavailable again; its header says so. Do not run it as a matter of course — a full run is ~50 minutes of a machine that cannot be used for anything else meanwhile, which is now GitHub's time to spend rather than yours.
+
+**What to run locally: unit and smoke tests for what you touched.** Not the whole suite.
+
+```bash
+cd frontend && npm run test -- --run src/features/<area>
+cd frontend && npm run lint && npx tsc --noEmit -p tsconfig.app.json
+cd backend  && ./mvnw -pl api -Dtest=<SomeUnitTest> test     # no container
+cd backend  && ./mvnw -pl api -Dit.test=<OneIT> verify       # one smoke IT
+```
+
+Push and let CI do the rest. A red check on your PR is cheaper than an hour of your laptop.
 
 ### Integration happens in batches, across all four streams
 
 **A batch is every PR that is ready at that moment, whoever wrote it** — not one stream's, and not one PR at a time.
 
-That scope is the whole point. A gate run takes about twelve minutes, and on 12 Aug three runs in a row were invalidated by *somebody else's* merge landing while they were in progress — A-076, then B-013, then A-031. Batching one stream's work fixes nothing, because the race is with the other three. One batch, one gate run, one push, and the window in which `develop` can move underneath it is a single push wide instead of four.
+That scope is the whole point. On 12 Aug three verification runs in a row were invalidated by *somebody else's* merge landing while they were in progress — A-076, then B-013, then A-031. Batching one stream's work fixes nothing, because the race is with the other three. One batch, one CI run on the combined result, one push, and the window in which `develop` can move underneath it is a single push wide instead of four.
 
 How it runs:
 
 1. Claude collects every PR marked ready and merges them together into one integration branch.
-2. The gate runs **once**, on that combined result.
+2. CI runs **once**, on that combined result.
 3. Green: all of them merge, and `develop` moves once.
-4. Red: the PR that broke it is dropped, the rest are re-gated and merged, and the offender goes back to its author. **One bad PR does not hold three good ones hostage.**
+4. Red: the PR that broke it is dropped, the rest are re-run and merged, and the offender goes back to its author. **One bad PR does not hold three good ones hostage.**
 
 Twice a working day, or whenever the queue is worth clearing — the point is to batch what is ready, not to wait for a clock.
 
-**Keep opening PRs while a batch is in flight.** They cost nothing, they are how the other three see and review your work, and holding them back would make work invisible until integration day without helping the race at all — the queue is of *merges*, not of PRs. Open early, open as a draft, mark ready when `make verify` is green.
+**Keep opening PRs while a batch is in flight.** They cost nothing, they are how the other three see and review your work, and holding them back would make work invisible until integration day without helping the race at all — the queue is of *merges*, not of PRs. Open early, open as a draft, mark ready when your own unit tests are green and let CI take it from there.
 
-**Why it is local.** The GitHub Actions free allowance (2,000 minutes) was exhausted on 11 Aug 2026. No job runs until the calendar month resets on **1 Sep**, and free private repositories get no branch protection — so nothing on the platform prevents an unverified merge. A-030 reached `develop` unverified during a two-day outage; three weeks of that is not acceptable on a codebase whose central guarantee is append-only hash-chained history. The verification moved to the one point every change already passes through.
+**Why the rule outlived its workaround.** Between 11 and 17 Aug 2026 the Actions allowance was exhausted and the repository was private, so nothing on the platform could refuse an unverified merge — and A-030 reached `develop` unverified during a two-day outage. `tools/integration-gate.sh` existed to close that window locally. It closed it badly: a run cost ~50 minutes on a machine that could do nothing else, so it was skipped, and on 16–17 Aug seven PRs reached `develop` with it never run. **A verification step nobody can afford is a verification step nobody performs.**
 
-**What this asks of you:** run `make verify` locally before marking a PR ready. It is the same backend and frontend suite, so a PR that fails the gate has usually already failed on your machine — finding it there costs minutes, finding it at integration costs a round trip.
+Going public fixed the cause rather than the symptom. Enforce it where it cannot be skipped: **branch protection on `develop` with the CI checks required**. That is stronger than any convention in this file, because it does not depend on anyone remembering.
 
-The gate is a stand-in, not a second system. When CI runs again it resumes as the authority, and `tools/integration-gate.sh` is retired — but **the rule itself does not lapse**: verified, then merged, always.
+**The rule itself never lapsed and does not now:** verified, then merged, always.
 
 ### Never commit
 
@@ -134,5 +145,5 @@ The gate is a stand-in, not a second system. When CI runs again it resumes as th
 - [ ] Storybook entry for any new shared component
 - [ ] No new lint or compiler warnings
 - [ ] Rebased on current `develop`
-- [ ] `make verify` green locally before the PR is marked ready — while CI is down this is what stands between a mistake and `develop`
+- [ ] Unit and smoke tests green locally for what you touched — then push and let CI run the full suite. `make verify` runs everything and takes the best part of an hour; it is no longer what stands between a mistake and `develop`, because CI is
 - [ ] Only your stream's paths touched, or sign-off obtained
