@@ -135,6 +135,10 @@ public class OutboxEnqueuer {
      */
     @Transactional(propagation = Propagation.REQUIRED)
     public OptionalLong enqueue(NewMail mail) {
+        if (hasNoEmailChannel(mail)) {
+            log.debug("outbox: {} has no email channel in §11 — not queued", mail.eventCode());
+            return OptionalLong.empty();
+        }
         if (isSuppressedByPreference(mail)) {
             log.debug("outbox: {} to {} suppressed by preference", mail.eventCode(), mail.toEmail());
             return OptionalLong.empty();
@@ -177,6 +181,33 @@ public class OutboxEnqueuer {
      * <p>A mail with no {@code toUserId} — a client contact, who is not a user
      * — has no preferences to consult and is always enqueued.
      */
+    /**
+     * D-040 · §11 says this event has no email column at all.
+     *
+     * <p>Checked <strong>before</strong> the preference and before the rate
+     * limit, because it is a different kind of statement from either. A
+     * preference is a user's choice about a mail that exists; this is the
+     * product saying the mail does not exist. Ordering it after the preference
+     * check would let {@link NotificationEvent#isMandatoryMail()} force-queue a
+     * mail the blueprint never wanted — the exact contradiction D-040 found in
+     * {@code TICKET_REASSIGNED_AWAY}, which is an assignment and therefore
+     * "mandatory", and which §11 gives a dash in the Email column.
+     *
+     * <p>{@code OPT_IN} is treated as having a channel, not as suppressed: it
+     * is off by <em>default</em>, and D-042 stores only deviations, so the
+     * preference lookup below is what turns it on for somebody who asked.
+     *
+     * <p>An event code this build does not know is <strong>not</strong> refused.
+     * Mail is raised by producers across three modules and a row from a newer
+     * deploy must still send — the enum is authoritative about what it declares,
+     * not about what exists.
+     */
+    private boolean hasNoEmailChannel(NewMail mail) {
+        return NotificationEvent.of(mail.eventCode())
+                .map(event -> event.mail() == NotificationEvent.Mail.NEVER)
+                .orElse(false);
+    }
+
     private boolean isSuppressedByPreference(NewMail mail) {
         if (mail.toUserId() == null) {
             return false;

@@ -73,6 +73,22 @@ public class NotificationPreferences {
             return true;
         }
 
+        if (channel == NotificationChannel.IN_APP && event != null && !event.popsUp()) {
+            // D-040. §11 gives some events a dash in the in-app popup column —
+            // "Comment added", "80% SLA elapsed", "Ticket closed" — and that is
+            // a product decision, not an absent preference. A toast for every
+            // comment is how somebody learns to dismiss toasts without reading
+            // them, which costs the channel its value for the events that do
+            // pop.
+            //
+            // Refused here rather than at each producer for the same reason
+            // D-045 hangs push off NotificationWriter: roughly two dozen §11
+            // producers each remembering the rule is a design where the ones
+            // written last quietly do not. The bell entry is unaffected — this
+            // silences the popup, never the record.
+            return false;
+        }
+
         return jdbc.sql(ONE_OVERRIDE)
                 .param("userId", userId)
                 .param("eventCode", eventCode)

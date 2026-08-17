@@ -30,10 +30,31 @@ class MandatoryMailTest {
     @Test
     @DisplayName("nothing outside those three categories is locked")
     void everythingElseRespectsPreferences() {
+        // D-040 refined this. The rule used to be "mandatory == one of three
+        // categories", so its converse was "not mandatory == one of the other
+        // two". That stopped being the whole truth once §11's Email column was
+        // declared: an event can sit in a locked category and still have no
+        // email at all, and there is nothing to lock about a channel that does
+        // not exist.
+        //
+        // Stated the honest way round: an event outside the three categories is
+        // never locked, and one inside them is locked exactly when §11 gives it
+        // mail. Asserting the old converse would now require pretending
+        // TICKET_REASSIGNED_AWAY and STATUS_REQUEST_ANSWERED are not
+        // assignments and status requests, which they are.
         assertThat(Arrays.stream(NotificationEvent.values())
-                .filter(e -> !e.isMandatoryMail()))
-                .allMatch(e -> e.category() == NotificationEvent.Category.MENTION
-                        || e.category() == NotificationEvent.Category.OTHER);
+                .filter(e -> e.category() != NotificationEvent.Category.ASSIGNMENT
+                        && e.category() != NotificationEvent.Category.ESCALATION
+                        && e.category() != NotificationEvent.Category.STATUS_REQUEST))
+                .noneMatch(NotificationEvent::isMandatoryMail);
+
+        assertThat(Arrays.stream(NotificationEvent.values())
+                .filter(e -> !e.isMandatoryMail())
+                .filter(e -> e.category() == NotificationEvent.Category.ASSIGNMENT
+                        || e.category() == NotificationEvent.Category.ESCALATION
+                        || e.category() == NotificationEvent.Category.STATUS_REQUEST))
+                .as("a locked category is only unlocked by §11 giving it no mail")
+                .allMatch(e -> e.mail() != NotificationEvent.Mail.ALWAYS);
     }
 
     @Test
@@ -59,8 +80,9 @@ class MandatoryMailTest {
         // STATUS_REQUESTED was added above.
         for (NotificationEvent locked : new NotificationEvent[]{
                 NotificationEvent.TICKET_ASSIGNED,          // Ticket created and assigned
+                                                            // …and "Reassigned within a stage",
+                                                            // whose subject is "Reassigned to you"
                 NotificationEvent.HANDOFF_RECEIVED,         // Handoff — ribbon moves
-                NotificationEvent.TICKET_REASSIGNED_AWAY,   // Reassigned within a stage
                 NotificationEvent.QA_FAILED_REWORK,         // Sent back for rework
                 NotificationEvent.DEPLOYMENT_DONE_VERIFY,   // Deployment done
                 NotificationEvent.LEVEL_RAISED_CRITICAL,    // Level raised to Critical
@@ -74,7 +96,29 @@ class MandatoryMailTest {
                     .isTrue();
         }
 
+        // D-040 moved TICKET_REASSIGNED_AWAY out of the list above, and the
+        // reason is a mapping error rather than a change of mind.
+        //
+        // §4B.6's row reads "Reassigned within a stage | New assignee, cc
+        // previous | [CRM-26-00347] Reassigned to you | ❌ never". Its subject
+        // is addressed to the person picking the ticket up, so the ❌ never
+        // belongs to *their* mail — TICKET_ASSIGNED. This test had asserted it
+        // over the event named for the person letting the ticket go, which §11
+        // gives its own row: "Ticket reassigned away | — | ✅ | — | Previous
+        // assignee". Bell, no popup, no mail.
+        //
+        // Both sections are satisfiable together, which is why neither is being
+        // overruled: one mail goes out, to the new assignee, cc the previous
+        // one, and the previous assignee additionally gets a bell entry of
+        // their own. **The cc is a recipient-list concern of TICKET_ASSIGNED**
+        // and belongs to whoever wires that producer — recorded here because
+        // nothing else in the codebase currently says so.
+        //
+        // Left as a mandatory event, the category rule would have force-queued
+        // a separate unsuppressable mail to somebody about a ticket that is no
+        // longer theirs.
         for (NotificationEvent optional : new NotificationEvent[]{
+                NotificationEvent.TICKET_REASSIGNED_AWAY,   // §11: bell only
                 NotificationEvent.COMMENT_ADDED,            // ✅ digest option
                 NotificationEvent.MENTIONED,                // ✅
                 NotificationEvent.TICKET_CLOSED,            // ✅

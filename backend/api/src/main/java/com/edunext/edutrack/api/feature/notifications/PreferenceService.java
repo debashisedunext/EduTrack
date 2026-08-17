@@ -55,7 +55,14 @@ public class PreferenceService {
                         .map(event -> new PreferenceDtos.PreferenceRow(
                                 event.name(),
                                 event.category().name(),
-                                inApp.getOrDefault(event.name(), true),
+                                // D-040. The mirror of the mail rule below: the
+                                // screen must never show a switch as *on* that
+                                // the send path ignores. §11 gives some events a
+                                // dash in the in-app popup column, so there is
+                                // no toast to enable and the honest reading is
+                                // off. The bell entry is unaffected — it is not
+                                // a preference and never appears on this screen.
+                                event.popsUp() && inApp.getOrDefault(event.name(), true),
                                 // A locked mail always reads as on, whatever a
                                 // stale row says. The screen must never show a
                                 // switch as off that the send path ignores.
@@ -101,7 +108,12 @@ public class PreferenceService {
         for (PreferenceDtos.PreferenceUpdate update : request.preferences()) {
             NotificationEvent event = NotificationEvent.of(update.eventKey()).orElseThrow();
 
-            if (update.inApp() != null) {
+            if (update.inApp() != null && event.popsUp()) {
+                // D-040, discarded rather than rejected for the same reason a
+                // locked mail is: the client posts back the grid it was shown.
+                // Storing the row instead would be worse than useless — it
+                // would record a choice the send path has no way to honour, and
+                // the next reader would have to work out why it changed nothing.
                 repository.upsert(userId, event.name(), NotificationChannel.IN_APP, update.inApp());
             }
             if (update.email() != null && !event.isMandatoryMail()) {

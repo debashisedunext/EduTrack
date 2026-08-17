@@ -23,21 +23,21 @@ import java.util.Optional;
 public enum NotificationEvent {
 
     // ── assignments: who is responsible, or what is expected of them ────────
-    TICKET_ASSIGNED(Category.ASSIGNMENT),
-    HANDOFF_RECEIVED(Category.ASSIGNMENT),
-    QA_FAILED_REWORK(Category.ASSIGNMENT),
-    DEPLOYMENT_DONE_VERIFY(Category.ASSIGNMENT),
-    TICKET_REASSIGNED_AWAY(Category.ASSIGNMENT),
-    TICKET_REOPENED(Category.ASSIGNMENT),
-    NEW_UNASSIGNED_TICKET(Category.ASSIGNMENT),
+    TICKET_ASSIGNED(Category.ASSIGNMENT, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
+    HANDOFF_RECEIVED(Category.ASSIGNMENT, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
+    QA_FAILED_REWORK(Category.ASSIGNMENT, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
+    DEPLOYMENT_DONE_VERIFY(Category.ASSIGNMENT, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
+    TICKET_REASSIGNED_AWAY(Category.ASSIGNMENT, Col.QUIET, Col.RINGS_BELL, Mail.NEVER),
+    TICKET_REOPENED(Category.ASSIGNMENT, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
+    NEW_UNASSIGNED_TICKET(Category.ASSIGNMENT, Col.QUIET, Col.RINGS_BELL, Mail.ALWAYS),
 
     // ── escalations: something is late, failed, or has got worse ───────────
-    SLA_BREACHED(Category.ESCALATION),
-    SLA_80_PERCENT_ELAPSED(Category.ESCALATION),
-    STAGE_SLA_BREACHED(Category.ESCALATION),
-    LEVEL_RAISED_CRITICAL(Category.ESCALATION),
-    ITERATION_LIMIT_REACHED(Category.ESCALATION),
-    DEPLOYMENT_FAILED(Category.ESCALATION),
+    SLA_BREACHED(Category.ESCALATION, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
+    SLA_80_PERCENT_ELAPSED(Category.ESCALATION, Col.QUIET, Col.RINGS_BELL, Mail.ALWAYS),
+    STAGE_SLA_BREACHED(Category.ESCALATION, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
+    LEVEL_RAISED_CRITICAL(Category.ESCALATION, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
+    ITERATION_LIMIT_REACHED(Category.ESCALATION, Col.QUIET, Col.RINGS_BELL, Mail.ALWAYS),
+    DEPLOYMENT_FAILED(Category.ESCALATION, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
 
     /**
      * A-044 · the nightly verifier found a hash chain that does not verify.
@@ -56,21 +56,21 @@ public enum NotificationEvent {
      * mute. Left as an ordinary escalation for now rather than inventing an
      * unmutable class unilaterally.
      */
-    CHAIN_VERIFICATION_FAILED(Category.ESCALATION),
+    CHAIN_VERIFICATION_FAILED(Category.ESCALATION, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
 
     // ── status requests (D-055/D-056) ──────────────────────────────────────
-    STATUS_REQUESTED(Category.STATUS_REQUEST),
-    STATUS_REQUEST_ANSWERED(Category.STATUS_REQUEST),
+    STATUS_REQUESTED(Category.STATUS_REQUEST, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
+    STATUS_REQUEST_ANSWERED(Category.STATUS_REQUEST, Col.POPS_UP, Col.RINGS_BELL, Mail.NEVER),
 
     // ── mentions (D-052) ───────────────────────────────────────────────────
-    MENTIONED(Category.MENTION),
+    MENTIONED(Category.MENTION, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
 
     // ── everything else: real notifications, no tab of their own ───────────
-    TICKET_CLOSED(Category.OTHER),
-    COMMENT_ADDED(Category.OTHER),
-    COMMENT_MARKED_CLIENT_VISIBLE(Category.OTHER),
-    ATTACHMENT_ADDED(Category.OTHER),
-    PRIORITY_CHANGED(Category.OTHER),
+    TICKET_CLOSED(Category.OTHER, Col.QUIET, Col.RINGS_BELL, Mail.ALWAYS),
+    COMMENT_ADDED(Category.OTHER, Col.QUIET, Col.RINGS_BELL, Mail.ALWAYS),
+    COMMENT_MARKED_CLIENT_VISIBLE(Category.OTHER, Col.QUIET, Col.RINGS_BELL, Mail.ALWAYS),
+    ATTACHMENT_ADDED(Category.OTHER, Col.QUIET, Col.RINGS_BELL, Mail.OPT_IN),
+    PRIORITY_CHANGED(Category.OTHER, Col.POPS_UP, Col.RINGS_BELL, Mail.ALWAYS),
     /**
      * D-022. Not in blueprint §11's list of 24, and added rather than
      * borrowed: nothing there means "nobody has touched this in a while".
@@ -84,16 +84,16 @@ public enum NotificationEvent {
      * do matter. Nothing has gone wrong when this fires — that is the point of
      * sending it.
      */
-    STALE_TICKET_NUDGE(Category.OTHER),
+    STALE_TICKET_NUDGE(Category.OTHER, Col.QUIET, Col.RINGS_BELL, Mail.ALWAYS),
 
-    DAILY_DIGEST(Category.OTHER),
-    WEEKLY_MANAGER_SUMMARY(Category.OTHER),
+    DAILY_DIGEST(Category.OTHER, Col.QUIET, Col.NO_BELL, Mail.ALWAYS),
+    WEEKLY_MANAGER_SUMMARY(Category.OTHER, Col.QUIET, Col.NO_BELL, Mail.ALWAYS),
 
     /** D-033. Operational rather than §11: a mail this system gave up on. */
-    MAIL_DELIVERY_FAILED(Category.OTHER),
+    MAIL_DELIVERY_FAILED(Category.OTHER, Col.QUIET, Col.RINGS_BELL, Mail.NEVER),
 
     /** D-034. An address the provider told us to stop writing to. */
-    EMAIL_ADDRESS_SUPPRESSED(Category.OTHER);
+    EMAIL_ADDRESS_SUPPRESSED(Category.OTHER, Col.QUIET, Col.RINGS_BELL, Mail.ALWAYS);
 
     /**
      * What kind of thing happened, which is what S-26's tabs group on.
@@ -113,10 +113,53 @@ public enum NotificationEvent {
         MENTION, ASSIGNMENT, ESCALATION, STATUS_REQUEST, OTHER
     }
 
-    private final Category category;
+    /**
+     * D-040 · readable names for §11's popup and bell columns.
+     *
+     * <p>Booleans at a call site are unreadable — {@code (Category.OTHER, false,
+     * true, Mail.ALWAYS)} tells you nothing about which column is which, and a
+     * transposed pair is invisible in review. Named constants make each
+     * declaration read as the row it transcribes.
+     */
+    private static final class Col {
+        // In a holder rather than on the enum itself: an enum constant may not
+        // reference a static field of its own enum, however it is ordered.
+        private static final boolean POPS_UP = true;
+        private static final boolean QUIET = false;
+        private static final boolean RINGS_BELL = true;
+        private static final boolean NO_BELL = false;
 
-    NotificationEvent(Category category) {
+        private Col() {
+        }
+    }
+
+    /**
+     * D-040 · §11's Email column, which has three states rather than two.
+     *
+     * <p>The table marks most rows ✅, two rows —, and "Attachment added"
+     * <em>opt</em>. Modelling that last one as a boolean would force a choice
+     * between mailing everybody about every attachment or never mailing anybody,
+     * and both are wrong.
+     */
+    public enum Mail {
+        /** ✅ — sent unless the user has switched it off, where that is allowed. */
+        ALWAYS,
+        /** opt — off by default; the user has to ask for it. */
+        OPT_IN,
+        /** — — this event has no email channel at all. */
+        NEVER
+    }
+
+    private final Category category;
+    private final boolean popsUp;
+    private final boolean ringsBell;
+    private final Mail mail;
+
+    NotificationEvent(Category category, boolean popsUp, boolean ringsBell, Mail mail) {
         this.category = category;
+        this.popsUp = popsUp;
+        this.ringsBell = ringsBell;
+        this.mail = mail;
     }
 
     public Category category() {
@@ -160,9 +203,55 @@ public enum NotificationEvent {
      * record.
      */
     public boolean isMandatoryMail() {
-        return category == Category.ASSIGNMENT
+        // D-040 added the second clause, and it is what makes the sentence true
+        // rather than nearly true. "Cannot be switched off" is a statement about
+        // mail that exists; for an event §11 gives no email column at all there
+        // is nothing to switch off, and claiming otherwise would have
+        // OutboxEnqueuer force-queue a mail the blueprint says never to send.
+        //
+        // Two events are in exactly that position, and the paragraph above
+        // already reasoned about one of them (STATUS_REQUEST_ANSWERED) as moot.
+        // TICKET_REASSIGNED_AWAY is the other and was not moot: an ASSIGNMENT
+        // whose §11 row reads bell-only, so the category rule alone would have
+        // mailed the *previous* assignee about a ticket that is no longer
+        // theirs, unsuppressably. §4B.6's table does not contradict this — it
+        // has no "reassigned away" row at all; its "Reassigned within a stage"
+        // row is about the person picking the ticket up, who does get mandatory
+        // mail as TICKET_ASSIGNED.
+        return mail == Mail.ALWAYS
+                && (category == Category.ASSIGNMENT
                 || category == Category.ESCALATION
-                || category == Category.STATUS_REQUEST;
+                || category == Category.STATUS_REQUEST);
+    }
+
+    /**
+     * D-040 · does §11 give this event an in-app popup?
+     *
+     * <p>A dash in that column is a product decision, not an absence: "Comment
+     * added" and "80% SLA elapsed" are deliberately quiet, because a toast for
+     * every comment is how somebody learns to dismiss toasts without reading
+     * them. It is <em>not</em> a preference — {@link NotificationPreferences}
+     * answers the separate question of whether this particular user wants the
+     * ones §11 does allow.
+     */
+    public boolean popsUp() {
+        return popsUp;
+    }
+
+    /**
+     * D-040 · does this event leave a bell entry?
+     *
+     * <p>True for everything except the two digests, which are mail by
+     * definition — a "daily digest" bell entry would be a summary of things the
+     * bell is already holding individually.
+     */
+    public boolean ringsBell() {
+        return ringsBell;
+    }
+
+    /** D-040 · §11's Email column for this event. */
+    public Mail mail() {
+        return mail;
     }
 
     /**
