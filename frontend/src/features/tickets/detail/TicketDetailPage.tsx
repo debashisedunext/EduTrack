@@ -17,6 +17,7 @@ import { CommentBox } from '../comments/CommentBox'
 import { CommentThread } from '../comments/CommentThread'
 import { useTicketComments } from '../comments/useTicketComments'
 
+import { canChangeLevel } from './levelChange'
 import { PendingSection } from './PendingSection'
 import { TicketAttachmentsSection } from './TicketAttachmentsSection'
 import { TicketDetailHeader } from './TicketDetailHeader'
@@ -329,6 +330,21 @@ export function TicketDetailPage() {
           selectedCycleNo={selectedCycleNo}
           taskTypeName={taskTypeName}
           contactName={contactName}
+          /*
+            C-020 · §4B.1's three roles, and never on a sealed cycle. The second
+            half is the same rule the comment box and the attachment strip
+            already follow: an earlier cycle is read-only, and its level belongs
+            to a journey that ended. The write would in fact land on the current
+            cycle — the server has no notion of "change the level as it was in
+            cycle 1" — so offering it here would be offering the wrong act under
+            the right label.
+
+            Server-side either way: `PriorityChangeService` refuses a caller
+            without the capability with 403. This only stops the panel offering a
+            control that will be refused.
+          */
+          canChangeLevel={canChangeLevel(viewer.role) && !isEarlierCycle}
+          onLevelChanged={() => void refetch()}
         />
       </div>
     </div>

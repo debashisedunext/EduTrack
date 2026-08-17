@@ -320,11 +320,39 @@ export const ticketHandlers = [
     return ok(ticketDto(t, db));
   }),
 
+  /**
+   * C-020 · §4B.1's level change.
+   *
+   * ⚠ **For Stream D — two things this handler did not do, both of which made
+   * the mock disagree with `PriorityChangeService` in ways a client could be
+   * written against.** Same class of gap C-028 found in the delete handler and
+   * C-029 in the comment POST, fixed the same way and flagged rather than done
+   * quietly, because `frontend/src/mocks/` is yours.
+   *
+   * 1. **The planned close date was not recomputed.** §4B.1's whole second half
+   *    is "resolves the SLA policy → recomputes the Planned Close Date", the
+   *    dialog previews exactly that number before committing, and the server
+   *    writes it. Without this the mock moved the chip and left the date beside
+   *    it stale, so `npm run dev` showed a screen production never produces —
+   *    and the preview the user had just read would be contradicted by the panel
+   *    two rows below it the moment they saved.
+   *
+   * 2. **Re-picking the current level was recorded as a change.** The server
+   *    treats it as a no-op precisely because a `HIGH → HIGH` row cannot be
+   *    deleted once written; the mock appended one, so a misclick against the
+   *    mock produced history the real one refuses.
+   */
   http.patch(url('/tickets/:ticketId/priority'), async ({ params, request }) => {
     const db = getDb();
     const t = findTicket(String(params.ticketId), db);
     if (!t) return notFound('Ticket');
     const { level, reason } = (await request.json()) as { level: Ticket['level']; reason?: string };
+
+    // No-op before anything else, including the reason check — re-picking the
+    // selected chip must not be refused for want of a reason for a change that
+    // is not happening.
+    if (level === t.level) return ok(ticketDto(t, db));
+
     if (t.assigneeId && !reason) {
       return validationFailed({ reason: ['is mandatory once the ticket is assigned'] });
     }
@@ -332,6 +360,19 @@ export const ticketHandlers = [
     t.level = level;
     // originalLevel is never overwritten — it is what makes "born critical vs
     // became critical" reportable, and it is the first thing a manager asks.
+
+    // Measured from the current cycle's start, falling back to when the ticket
+    // was raised — NOT from now. An SLA is "resolve within N hours of being
+    // reported", so escalating an old ticket to a short level really does land
+    // in the past and really does mean it is breached. `PriorityChangeService`
+    // and `levelChange.ts` both compute the same instant the same way.
+    const clockStart =
+      db.cycles.find((c) => c.ticketId === t.ticketId && c.cycleNo === t.cycleNo)?.startedAt ?? t.createdAt;
+    t.plannedCloseDate = plannedCloseDateFor(
+      { projectId: t.projectId, taskTypeId: t.taskTypeId, level, assigneeId: t.assigneeId, from: clockStart },
+      db,
+    ).plannedCloseDate;
+
     t.version += 1;
     db.history.push({
       id: nextId(db, 'history'), ticketId: t.ticketId, action: 'LEVEL_CHANGED',
