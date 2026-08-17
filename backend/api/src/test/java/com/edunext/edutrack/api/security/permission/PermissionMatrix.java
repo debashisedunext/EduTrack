@@ -110,6 +110,12 @@ final class PermissionMatrix {
      * {@code ticket.reopen} — blueprint §2's "Reopen ticket" row, and the only
      * three-role set in the file.
      *
+     * <p>C-020's priority change is the second route to use it, from §4B.1's own
+     * three-role sentence rather than from §2. That the two sets coincide is not
+     * a coincidence — see {@code PriorityChangeController} — but they are
+     * authored from different sentences, so this constant is shared and the two
+     * rows are not.
+     *
      * <p>Support is in it and Developer, QA and Deployment are not, which is the
      * §2 answer and worth stating because it inverts the usual shape here: most
      * ticket capabilities are held by all six precisely so that scope rather than
@@ -159,6 +165,20 @@ final class PermissionMatrix {
      */
     private static final String REOPEN = """
             {"reason":"Client reports the defect has recurred in production."}""";
+
+    /**
+     * C-020 · {@code PriorityChangeDtos.ChangePriorityRequest}: {@code level} is
+     * the only {@code @NotBlank} field.
+     *
+     * <p>{@code reason} is omitted deliberately, and that is the stronger
+     * fixture here in a way it is not elsewhere: §4B.1 makes the reason
+     * mandatory <em>once the ticket is assigned</em>, which is a rule about a row
+     * this request has not fetched. So a body without one still reaches
+     * authorisation — which is the only thing this matrix measures — and proves
+     * the row is not passing because some optional field satisfied a validator.
+     */
+    private static final String CHANGE_PRIORITY = """
+            {"level":"HIGH"}""";
 
     /** {@code TwoFactorRequests.ConfirmRequest}: six digits exactly. */
     private static final String TOTP_CODE = """
@@ -623,6 +643,36 @@ final class PermissionMatrix {
             // which is the hole this file's own header describes and was caught
             // by mis-stating a row and watching the suite stay green.
             adminPmAndSupport("POST", "/api/v1/tickets/{ticketId}/reopen", REOPEN),
+
+            // ── priority · C-020, §4B.1, and the file's SECOND three-role row ─
+            //
+            // Admin, PM and Support again, and authored from §4B.1's own
+            // sentence rather than from the annotation: "Admin, PM, Support
+            // Desk. Developer/QA/Deployment can only *request* a change, which
+            // raises a notification to the PM". Three roles, stated as plainly
+            // as §2's Reopen row states its three.
+            //
+            // It is a capability and not a row rule in disguise, on the reopen
+            // row's test: whether a Developer may relevel does not depend on
+            // which ticket, on who is assigned, or on the clock. What DOES
+            // depend on the row — whether a reason is mandatory — is §4B.1's
+            // other rule, and it lives in PriorityChangeService where the ticket
+            // has been read, as a 400 rather than a 403.
+            //
+            // ⚠ The annotation this must agree with says `ticket.assign`, and
+            // that capability is BORROWED. §2 has no "change priority" row, so
+            // no permission code exists for it, and minting one is a migration
+            // in Stream A's db/migration. PriorityChangeController carries the
+            // full argument for the borrowing and for why ticket.reopen and
+            // ticket.close were the wrong things to reuse.
+            //
+            // This row is authored from §4B.1 and is therefore unaffected by
+            // that choice: it asserts the three roles §4B.1 names, and it would
+            // fail if the borrowed capability ever stopped covering exactly
+            // them. Which is the whole value of writing the expectation twice —
+            // the day somebody grants ticket.assign to a custom S-09 role, this
+            // is what says so.
+            adminPmAndSupport("PATCH", "/api/v1/tickets/{ticketId}/priority", CHANGE_PRIORITY),
 
             // The list, for the same reason and one more: a Developer who could
             // not call it would have no ticket screen at all. ScopeResolver
@@ -1127,7 +1177,10 @@ final class PermissionMatrix {
         return new Entry(method, pattern, body, ADMIN_ONLY);
     }
 
-    /** C-038 · {@code ticket.reopen}, the file's only three-role grant. */
+    /**
+     * The file's only three-role shape: {@code ticket.reopen} (C-038) and the
+     * priority change (C-020), which §2 and §4B.1 grant to the same three.
+     */
     private static Entry adminPmAndSupport(String method, String pattern, String body) {
         return new Entry(method, pattern, body, ADMIN_PM_AND_SUPPORT);
     }
