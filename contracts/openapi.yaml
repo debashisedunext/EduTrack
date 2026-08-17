@@ -4189,6 +4189,44 @@ paths:
         '304': { description: Not modified. }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /reports:
+    get:
+      tags: [reports]
+      operationId: listReports
+      summary: The report catalogue (S-27)
+      description: |
+        A-063 · what reports exist, so the hub's card grid does not have to
+        know. Every descriptor carries its own title, category, chart type and
+        **which filters apply to it** — the viewer renders the filter bar from
+        this rather than showing all five everywhere, because a resource filter
+        on the email-delivery-log is a control that cannot do anything.
+
+        **The catalogue is served rather than hardcoded** for the reason
+        `/me/notification-preferences` gives for returning the whole event
+        catalogue: a client that had to know all eighteen keys would be a second
+        copy of the server's vocabulary, and a nineteenth report would silently
+        fail to appear.
+
+        **Unbuilt reports are listed, not hidden**, with `available: false` and a
+        reason. This is A-056's answer to the same shape one screen over: a
+        dashboard widget with no table to answer it returns `unavailableReason`
+        rather than an empty series, because an empty result is a claim about
+        the data and a 404 on a legitimate route reads as a bug. A hub that
+        showed only what works would make the other seventeen reports
+        indistinguishable from reports that do not exist. The unavailable set
+        shrinks as A-066–A-068 land, and it is visible in the meantime.
+
+        Scoped like every other read: the catalogue itself is the same for
+        everybody, but a delivery role sees `scopeNote` explaining that its rows
+        will cover its own work only (§2 — "Own perf.").
+      responses:
+        '200':
+          description: Every report this deployment knows about, built or not.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportCatalogueResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /reports/{reportKey}:
     parameters:
       - { name: reportKey, in: path, required: true, schema: { type: string, examples: [resource-scorecard] } }
@@ -4202,6 +4240,19 @@ paths:
 
         Returns an `ETag`. Reports are expensive to compute and are re-run every
         time somebody changes a filter and changes it back.
+
+        **Row scope is applied server-side and the request cannot widen it**
+        (§2, blueprint line 50): Admin sees everything, PM and Support their own
+        projects, and Developer/QA/Deployment their own work only. For those
+        three, `?resourceId=` is **ignored rather than honoured** — answering it
+        would let a Developer read a colleague's scorecard by guessing a user
+        id, and `403` would wrongly imply a grant exists that could be given.
+
+        **`404` for a report key that does not exist, and for one that is not
+        built yet.** The catalogue is where "exists but unbuilt" is expressed,
+        with a reason a person can read; by the time a caller is running a key,
+        an unbuilt report has no rows to describe and no columns to name, so
+        there is nothing honest to return with a `200`.
       parameters:
         - { $ref: '#/components/parameters/IfNoneMatch' }
         - { name: export, in: query, schema: { type: string, enum: [xlsx, csv, pdf] } }
@@ -4209,6 +4260,20 @@ paths:
         - { name: clientId, in: query, schema: { type: integer, format: int64 } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
+        # A-063 · §7.8 names five filters — "date range, project, resource, type,
+        # level" — and D-001 carried only the first two plus client. The three
+        # below close that gap. Which of them a given report honours is declared
+        # per descriptor in the catalogue, not guessed from whether it was sent.
+        - name: resourceId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: >
+            Ignored for Developer/QA/Deployment, who are always their own
+            subject. Silently, not with a 400 — the client is usually posting
+            back a filter bar it rendered, and the response states the scope
+            that was applied in `meta.appliedScope`.
+        - { name: taskTypeId, in: query, schema: { type: integer, format: int64 } }
+        - { name: level, in: query, schema: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] } }
       responses:
         '200':
           description: Rows and columns, or the exported file.
@@ -7972,6 +8037,71 @@ components:
                         x: { type: [string, number] }
                         y: { type: number }
                         drillDown: { type: [string, 'null'] }
+    ReportCategory:
+      type: string
+      description: >
+        A-063 · the hub groups its cards by this. §7.8 lists eighteen reports in
+        one table; eighteen ungrouped cards is a wall, and the grouping people
+        actually use when asking for a report is by subject.
+      enum: [PEOPLE, DELIVERY, QUALITY, WORKFLOW, OPERATIONS]
+    ReportFilterKind:
+      type: string
+      description: >
+        Which controls the viewer draws for a report. §7.8's five filters, plus
+        CLIENT, which D-001 already accepted as a query parameter.
+      enum: [DATE_RANGE, PROJECT, RESOURCE, TASK_TYPE, LEVEL, CLIENT]
+    ReportDescriptor:
+      type: object
+      required: [key, title, category, filters, available]
+      properties:
+        key: { type: string, examples: [date-wise] }
+        title: { type: string, examples: [Date-wise Report] }
+        description:
+          type: string
+          description: One line, shown on the card. What question the report answers.
+        category: { $ref: '#/components/schemas/ReportCategory' }
+        chart:
+          type: [string, 'null']
+          enum: [line, bar, stacked-bar, donut, null]
+          description: >
+            The visual §7.8 names for this report, or null for a report that is
+            a table only. The viewer shows a chart *and* a table when this is
+            set — never a chart alone, because a chart cannot be read for exact
+            values and this is a reporting screen.
+        filters:
+          type: array
+          description: >
+            Only the filters this report honours. The viewer renders exactly
+            these, so a control the runner would ignore is never drawn.
+          items: { $ref: '#/components/schemas/ReportFilterKind' }
+        available:
+          type: boolean
+          description: False for a report declared but not yet built (A-066–A-068).
+        unavailableReason:
+          type: [string, 'null']
+          description: >
+            Why it cannot be run yet, in a sentence a user can read. Present
+            exactly when `available` is false. Same contract as the dashboard's
+            widget `unavailableReason` (A-056).
+    ReportCatalogueResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [reports]
+          properties:
+            reports:
+              type: array
+              items: { $ref: '#/components/schemas/ReportDescriptor' }
+            scopeNote:
+              type: [string, 'null']
+              description: >
+                Set when the caller's rows will be narrower than the whole
+                organisation — "these reports cover your own work only" for a
+                delivery role, or "your projects" for a PM. Null for Admin.
+                Stated once here rather than repeated on every card.
+        meta: { $ref: '#/components/schemas/Meta' }
     ReportResponse:
       type: object
       required: [data]
@@ -7984,12 +8114,31 @@ components:
               type: array
               items:
                 type: object
+                # A-063 · required, so the generated client types them as
+                # present. They always are — a column with no key cannot be
+                # looked up in a row and a column with no type cannot be
+                # aligned or formatted — and leaving them optional pushed a
+                # null check into every renderer for a state the server cannot
+                # produce.
+                required: [key, label, type]
                 properties:
                   key: { type: string }
                   label: { type: string }
                   type: { type: string, enum: [string, number, date, duration, percent] }
             rows: { type: array, items: { type: object, additionalProperties: true } }
-        meta: { $ref: '#/components/schemas/Meta' }
+        meta:
+          allOf:
+            - { $ref: '#/components/schemas/Meta' }
+            - type: object
+              properties:
+                appliedScope:
+                  type: [string, 'null']
+                  description: >
+                    A-063 · what the server actually narrowed the rows to, e.g.
+                    "your own work" or "projects 1, 4". Present because a
+                    delivery role's `?resourceId=` is ignored silently: without
+                    this, a filter that did nothing would be indistinguishable
+                    from a filter that matched nothing.
     ReportScheduleRequest:
       type: object
       required: [reportKey, cadence, recipients]

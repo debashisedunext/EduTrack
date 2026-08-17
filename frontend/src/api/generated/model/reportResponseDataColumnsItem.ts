@@ -49,7 +49,7 @@ the database rejects mutation independently via triggers and grants.
 import type { ReportResponseDataColumnsItemType } from './reportResponseDataColumnsItemType';
 
 export type ReportResponseDataColumnsItem = {
-  key?: string;
-  label?: string;
-  type?: ReportResponseDataColumnsItemType;
+  key: string;
+  label: string;
+  type: ReportResponseDataColumnsItemType;
 };

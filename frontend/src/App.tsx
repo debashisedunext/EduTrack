@@ -33,6 +33,8 @@ import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage'
 import { LoginPage } from './features/auth/LoginPage'
 import { RequireAuth } from './features/auth/RequireAuth'
 import { ResetPasswordPage } from './features/auth/ResetPasswordPage'
+import { ReportsHubPage } from './features/reports/ReportsHubPage'
+import { ReportViewerPage } from './features/reports/ReportViewerPage'
 import { Button } from './components/ui/button'
 
 export default function App() {
@@ -98,7 +100,14 @@ export default function App() {
             <Route path={CLIENT_ROUTE} element={<ScreenPlaceholder title="Client 360" />} />
             <Route path={RESOURCE_ROUTE} element={<ScreenPlaceholder title="Resource profile" />} />
             <Route path="/chat" element={<ScreenPlaceholder title="Chat" />} />
-            <Route path="/reports" element={<ScreenPlaceholder title="Reports" />} />
+            {/*
+              A-063 · the hub and its viewer. The viewer is a nested path rather
+              than a modal because a filtered report is a URL people send to
+              each other and bookmark — which is also why its filters live in
+              the query string.
+            */}
+            <Route path="/reports" element={<ReportsHubPage />} />
+            <Route path="/reports/:reportKey" element={<ReportViewerPage />} />
             <Route
               path="/masters"
               element={

@@ -46,10 +46,19 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
-}
+/**
+ * A-063 · the hub groups its cards by this. §7.8 lists eighteen reports in one table; eighteen ungrouped cards is a wall, and the grouping people actually use when asking for a report is by subject.
+
+ */
+export type ReportCategory = typeof ReportCategory[keyof typeof ReportCategory];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ReportCategory = {
+  PEOPLE: 'PEOPLE',
+  DELIVERY: 'DELIVERY',
+  QUALITY: 'QUALITY',
+  WORKFLOW: 'WORKFLOW',
+  OPERATIONS: 'OPERATIONS',
+} as const;

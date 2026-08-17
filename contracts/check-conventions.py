@@ -59,6 +59,7 @@ NO_PAGINATION = {
     "/chat/ticket-cards":                "bounded by the caller's own `codes` list, and capped below that; paging a lookup you supplied the keys for is not a page",
     "/projects/{projectId}/members":     "one project's team — tens of people, and the S-10 tab totals their allocations, so it needs the whole set on every read anyway",
     "/imports/{schema}/mapping-presets": "B-033 — one row per column mapping an Admin chose to name and reuse. Bounded by the only thing that creates them, which is a person typing a name on S-34 step 3: an organisation has one or two exports it imports from, not a hundred. The step-3 control is a picker, so it needs every preset on the one read anyway",
+    "/reports":                          "the eighteen of §7.8 — a catalogue of what the deployment can run, not a query over rows. It is bounded by the code that declares it, so a nineteenth arrives by a release rather than by use, and the hub groups the whole set by category on one screen. Listed here rather than left to pass silently on `data` being an object: the exemption is the decision, and it should be reviewable if the shape ever changes",
     "/masters/notification-templates":   "at most one row per NotificationEvent per channel — 27 x 3, so bounded by two enums the way /me/notification-preferences is bounded by one; the S-15 grid groups by event and needs every channel of a group together, which a cursor cutting mid-event would break",
 }
 

@@ -46,10 +46,20 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
-}
+/**
+ * Which controls the viewer draws for a report. §7.8's five filters, plus CLIENT, which D-001 already accepted as a query parameter.
+
+ */
+export type ReportFilterKind = typeof ReportFilterKind[keyof typeof ReportFilterKind];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ReportFilterKind = {
+  DATE_RANGE: 'DATE_RANGE',
+  PROJECT: 'PROJECT',
+  RESOURCE: 'RESOURCE',
+  TASK_TYPE: 'TASK_TYPE',
+  LEVEL: 'LEVEL',
+  CLIENT: 'CLIENT',
+} as const;

@@ -46,10 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
-}
+/**
+ * Set when the caller's rows will be narrower than the whole organisation — "these reports cover your own work only" for a delivery role, or "your projects" for a PM. Null for Admin. Stated once here rather than repeated on every card.
+
+ */
+export type ReportCatalogueResponseDataScopeNote = string | null;

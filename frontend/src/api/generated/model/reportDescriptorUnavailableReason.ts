@@ -46,10 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
-}
+/**
+ * Why it cannot be run yet, in a sentence a user can read. Present exactly when `available` is false. Same contract as the dashboard's widget `unavailableReason` (A-056).
+
+ */
+export type ReportDescriptorUnavailableReason = string | null;
