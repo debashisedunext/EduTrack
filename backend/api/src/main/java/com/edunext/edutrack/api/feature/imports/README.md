@@ -9,6 +9,7 @@ The Excel import engine — screen S-34, blueprint §4B.3.
 | Task | Files |
 |---|---|
 | **B-030** Import engine as a schema registry | everything below |
+| **B-031** Step 1 — template download | `ImportTemplateWriter`, `ImportController`, `ImportExceptionHandler` |
 
 ## The one thing to understand
 
@@ -102,12 +103,48 @@ puts import artefacts in MinIO/S3 and no object-storage client is wired into thi
 backend yet. Two API pods would stage on one and validate on the other. B-032
 replaces it; the seam is named so that replacement is a class, not a refactor.
 
+## B-031 · the first endpoint, and what it fixed in place
+
+`GET /imports/{schema}/template` is the first route in this package, so
+`ImportController` and the `@RestControllerAdvice` this file said would "arrive
+with the first endpoint" both land here. Steps 2 to 5 add handlers to that same
+controller.
+
+**The header row is exactly `ImportField#header()`, undecorated.** Marking the
+required columns with an asterisk was the obvious first draft and it breaks step
+3: `HeaderMatcher` matches on that text, so the file this product handed the user
+would fail to auto-match when they upload it back, and every column would land in
+B-033's manual override dropdown. Required-ness went to a second **Instructions**
+sheet instead, which also carries the two rules a user cannot guess — that the
+natural key updates rather than duplicating, and that a blank cell does not clear
+a stored value. `ImportTemplateWriterTest` pins the round trip (template →
+`HeaderMatcher` → nothing missing) rather than pinning the strings.
+
+**A dropdown Excel cannot carry is a failure, not a degradation.** The explicit-
+list constraint stops at 255 characters. Writing the sheet without that column's
+dropdown would leave it looking like free text, so the user types their own
+spelling and the refusal arrives at step 4 pointing at a cell the template never
+constrained. The writer throws instead, naming the field and what it needs (a
+hidden lookup sheet and a formula constraint). No registration is near the limit
+today.
+
+**Every cell is text-formatted.** Left to Excel's general format, `00123` is
+stored as 123 and a postal code loses its leading zero — and the row is then
+rejected at step 4 for a value the user never typed.
+
+**`master.write`, and the counter-argument is on the record.** The template
+carries no organisation data at all, so a wider rule would leak nothing. It is
+Admin's anyway because the file's only use is a screen §7.4 puts inside the
+Admin-only master data module, and a route whose permission is looser than its
+screen is how a screen acquires a second entrance. The 403 is registered in
+`check-conventions.py`'s `ROWLESS_403`: a blank template is not a row.
+
 ## Not here yet
 
-No controller. Each endpoint belongs to the step that introduces it (B-031
-onwards), and `UnknownImportSchemaException` gets its `@RestControllerAdvice`
-alongside the first one — advice on a controller that does not exist is dead code
-until it silently is not.
+No upload, mapping, dry run or commit — B-032…B-035. `/imports/users/template`
+answers 404 until B-038 registers the second schema, and
+`ImportTemplateControllerTest` asserts that, so the day the registration lands
+one test fails and is deleted.
 
 ## Tests
 
@@ -120,6 +157,8 @@ until it silently is not.
 | `InMemoryImportStagingStoreTest` | expiry and the concurrency ceiling |
 | `ImportEngineIsolationTest` | the engine names no business entity; the dry run reaches no repository |
 | `ClientImportUpsertIT` | upsert against real MySQL — re-upload updates, never duplicates |
+| `ImportTemplateWriterTest` | B-031, read back through POI — the header round trip, the dropdowns, the example row, the oversized-enum refusal |
+| `ImportTemplateControllerTest` | B-031, the route — §4B.3's two client-specific promises, the 404 for an unregistered schema, and the 403 a Developer gets |
 
 `ImportEngineIsolationTest` reads **source, not bytecode**, and says why in its
 javadoc: ArchUnit 1.3.0 cannot parse Java 25 class files, skips every one of them

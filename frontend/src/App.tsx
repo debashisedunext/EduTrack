@@ -14,6 +14,7 @@ import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ClientListPage } from './features/clients/ClientListPage'
 import { ClientFormPage } from './features/clients/ClientFormPage'
+import { ClientImportPage } from './features/clients/import/ClientImportPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
 import { ProjectListPage } from './features/masters/projects/ProjectListPage'
@@ -202,6 +203,11 @@ export default function App() {
                 both: they are one form, and two would be the same file twice
                 with one copy always slightly behind. */}
             <Route path="/masters/clients/new" element={<ClientFormPage />} />
+            {/* B-031 · S-34, the Excel import wizard. A literal segment beside
+                `/new`, and the same ranking applies: `:clientId` never swallows
+                it. Only step 1 works today — B-032…B-035 are the rest, and the
+                screen says so rather than looking finished. */}
+            <Route path="/masters/clients/import" element={<ClientImportPage />} />
             <Route path="/masters/clients/:clientId/edit" element={<ClientFormPage />} />
             <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />
