@@ -49,6 +49,12 @@
     "reason": "Debashis — git reads this as done, and the backlog entry says otherwise in its own first line: search shipped, the other two are blocked. File/image share has nowhere to put the row (ticket_attachments.ticket_id is NOT NULL, so an attachment on a DM or project channel is unrepresentable) and no storage layer — C-024/C-025 own upload, MinIO keys, MIME sniffing and AV scan, and a second pipeline here would put two answers next to each other for 'is this file safe'. Needs Divyansh's sign-off on the table shape. Emoji has no backend at all and belongs to S-25's composer",
     "_blocked_by": "C-024, C-025 (Divyansh)"
   },
+  "D-037": {
+    "status": "blocked",
+    "pct": 33,
+    "reason": "Debashis — git reads this as done off the merge of branch feat/engines/d-037-mail-events, and the branch was named for the task while carrying only D-030's mail body and one of the fifteen events. 5 of §4B.6's 15 rows have a producer today: level raised to Critical, SLA breach, stage SLA breach, @mention and status requested. 8 have nowhere to fire from — handoff, sent back for rework, deployment done, reassigned within a stage, closed, reopened, created-and-assigned and comment added — because C-042's transition service, C-044's handoff dialog, C-038's reopen transaction, C-040's close dialog and C-049's within-stage reassignment are all unbuilt, and there is no event to hang a mail on until they exist. The remaining 2 rows are the digests and belong to D-038. The engine itself is finished — enqueue, render, thread, retry, rate limit and the preference lock — so what is left is wiring, not building",
+    "_blocked_by": "C-038, C-040, C-042, C-044, C-049 (Divyansh)"
+  },
   "A-030": {
     "status": "done",
     "reason": "Shivendra, PR #87 merged 2026-08-11 — features/auth/ with LoginPage, ForgotPassword, ResetPassword, ChangePassword, authStore, RequireAuth and the strength meter, verified against the real stack (MySQL, Redis, packaged jar, Vite proxy with VITE_USE_MOCKS=false), and checked off in STREAM-A-PLATFORM.md. Commit subject carried no task ID and the merge subject only had the lowercase branch slug 'a-030', which the [A-D]-\\d{3} pattern does not match"

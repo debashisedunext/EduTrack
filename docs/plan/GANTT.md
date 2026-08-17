@@ -12,7 +12,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 150 of 231 (65%) | 218.0 of 348.8 (63%) |
+| Complete | 149 of 231 (65%) | 216.0 of 348.8 (62%) |
 | In flight | 1 | 2.0 |
 | On the driving chain | 41 | 59.5 |
 | Zero float (no slack at all) | 41 | 59.5 |
@@ -24,7 +24,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | **A** | Shivendra | 64 | 49 | 93.0 | 70 | 133% ⚠️ | Thu 29 Oct |
 | **B** | Ayush | 51 | 31 | 84.8 | 70 | 121% ⚠️ | Fri 16 Oct |
 | **C** | Divyansh | 67 | 26 | 99.5 | 70 | 142% ⚠️ | Sat 07 Nov |
-| **D** | Debashis | 49 | 44 | 71.5 | 70 | 102% ⚠️ | Thu 29 Oct |
+| **D** | Debashis | 49 | 43 | 71.5 | 70 | 102% ⚠️ | Thu 29 Oct |
 
 ### Slipping
 
@@ -51,7 +51,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `C-033` ~~5-minute edit window~~ no time limit | Divyansh | Fri 25 Sep | Mon 17 Aug | +33d |
 | `A-053` Cursor pagination + virtualised grid rendering b | Shivendra | Tue 29 Sep | Sun 16 Aug | +32d |
 
-*…and 30 more — see the interactive chart.*
+*…and 29 more — see the interactive chart.*
 
 ---
 
@@ -164,7 +164,7 @@ gantt
     section Milestones
     Sprint 0 — weeks 1–2 :done, d0, 2026-08-06, 4d
     Infrastructure — weeks 3–5 :done, d1, 2026-08-07, 68d
-    M5 — SLA  escalation & mail — weeks 6–11 :active, d2, 2026-08-07, 9d
+    M5 — SLA  escalation & mail — weeks 6–11 :active, d2, 2026-08-07, 11d
     M7 — Chat & realtime — weeks 12–16 :active, d3, 2026-08-08, 59d
     Contract changes :done, d4, 2026-08-11, 1d
 ```
@@ -414,8 +414,8 @@ gantt
 |  | `D-034` | Bounce and complaint webhooks | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 66 | ✅ done |
 |  | `D-035` | Rate limit | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 66 | ✅ done |
 | 🔴 | `D-036` | "Critical mails cannot be disabled" | 1 | `D-029` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
-|  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Tue 18 Aug | Wed 19 Aug | 55 | ▫️ to do |
+|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Tue 18 Aug | Wed 19 Aug | 52 | ⛔ blocked |
+|  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Thu 20 Aug | Fri 21 Aug | 52 | ▫️ to do |
 |  | `D-039` | Inbound webhook — reply-to-comment parsing with quoted text stripped | 2 | `D-032` ᶦ | Wed 12 Aug | Wed 12 Aug | 63 | ✅ done |
 |  | `D-040` | All 24 events from blueprint §11 across in-app / bell / email… | 2 | `D-012` `B-022` | Tue 18 Aug | Tue 18 Aug | 57 | 🔵 in review |
 |  | `D-041` | Notification centre — bell dropdown (last 10) + full page with tabs | 2.5 | `D-040` `C-005` | Sat 08 Aug | Sat 08 Aug | 60 | ✅ done |
@@ -424,10 +424,10 @@ gantt
 |  | `D-044` | Persistent bell badge with unread count | 0.5 | `D-041` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-045` | Browser push via the Web Push API for users who opt in | 1.5 | `D-043` ᶦ | Tue 11 Aug | Fri 14 Aug | 61 | ✅ done |
 | 🔴 | `D-046` | Offline queueing | 1.5 | `D-043` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 62 | ✅ done |
+|  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 61 | ✅ done |
 |  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 65 | ✅ done |
 |  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 65 | ✅ done |
-|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Thu 20 Aug | Thu 20 Aug | 55 | ⛔ blocked |
+|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Fri 21 Aug | Sat 22 Aug | 53 | ⛔ blocked |
 |  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Thu 13 Aug | Thu 13 Aug | 62 | ✅ done |
 | 🔴 | `D-055` | Ask Status | 1.5 | `D-050` `C-036` | Thu 13 Aug | Thu 13 Aug | 61 | ✅ done |
 |  | `D-056` | Manager response time recorded as a reportable metric; status… | 1 | `D-055` ᶦ | Thu 13 Aug | Thu 13 Aug | 62 | ✅ done |
