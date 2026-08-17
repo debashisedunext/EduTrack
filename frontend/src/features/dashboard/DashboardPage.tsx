@@ -10,6 +10,7 @@ import { DashboardWidgets } from './DashboardWidgets'
 import { DrillDownPanel } from './DrillDownPanel'
 import { KpiCard, KpiCardSkeleton } from './KpiCard'
 import { useDashboardFilters } from './useDashboardFilters'
+import { useDashboardVariant } from './useDashboardVariant'
 
 /**
  * A-054 shell + A-055 cards · S-05.
@@ -48,14 +49,27 @@ export function DashboardPage() {
   // here, and it lost the From date on every range somebody chose.
   const { filters, setFilter, setFilters } = useDashboardFilters()
 
+  // A-062 · §S-05's developer variant. Layout only — every figure on this page
+  // is scoped by the server regardless of what this returns. See the hook.
+  const variant = useDashboardVariant()
+  const ownWork = variant === 'own-work'
+
   const { projectId, assigneeId } = filters
   const range: DateRange = { from: filters.from, to: filters.to }
 
   // The masters behind the two dropdowns. Both are bounded lists the server
   // already scopes, so the caller only ever sees projects and people they could
   // filter by anyway.
-  const { data: projectsData } = useListProjects({ isActive: true, limit: 200 })
-  const { data: usersData } = useListUsers({ limit: 200 })
+  //
+  // A-062 · not fetched at all on the developer variant, because neither
+  // dropdown is rendered there. Two list requests to populate controls nobody
+  // will see is the kind of cost that survives for years because nothing
+  // visibly breaks.
+  const { data: projectsData } = useListProjects(
+    { isActive: true, limit: 200 },
+    { query: { enabled: !ownWork } },
+  )
+  const { data: usersData } = useListUsers({ limit: 200 }, { query: { enabled: !ownWork } })
 
   const projects = projectsData?.data ?? []
   const users = usersData?.data ?? []
@@ -76,37 +90,53 @@ export function DashboardPage() {
         <h1 className="text-xl font-semibold text-[color:var(--text-primary)]">Dashboard</h1>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <FilterDropdown
-            label="Project"
-            options={projects}
-            value={projects.find((p) => String(p.id) === projectId) ?? null}
-            onChange={(p) => setFilter('projectId', p ? String(p.id) : null)}
-            getKey={(p) => String(p.id)}
-            getLabel={(p) => p.name ?? `#${p.id}`}
-            searchable
-          />
+          {/* A-062 · neither dropdown is rendered on the developer variant, and
+              the reason is that neither one does anything there.
+
+              `?assigneeId=` is *ignored* for a delivery role — deliberately, in
+              `DashboardScope.resourceSubject`, because honouring it would let
+              somebody read a colleague's dashboard by guessing a user id. And
+              `resource_daily_stats` has no project column at all, so
+              `?projectId=` is dropped on the way past. Both therefore rendered
+              as controls that could be moved, changed the URL, and left every
+              figure on the page exactly where it was. A filter that visibly
+              does nothing is read as a broken page, and the honest fix is not
+              to offer it. */}
+          {!ownWork && (
+            <FilterDropdown
+              label="Project"
+              options={projects}
+              value={projects.find((p) => String(p.id) === projectId) ?? null}
+              onChange={(p) => setFilter('projectId', p ? String(p.id) : null)}
+              getKey={(p) => String(p.id)}
+              getLabel={(p) => p.name ?? `#${p.id}`}
+              searchable
+            />
+          )}
           <DashboardDateRange
             value={range}
             // Both keys in one update — see `useDashboardFilters`. Two separate
             // calls here is what emptied the From box on every range picked.
             onChange={(next) => setFilters({ from: next.from, to: next.to })}
           />
-          <FilterDropdown
-            label="Resource"
-            options={users}
-            value={users.find((u) => String(u.id) === assigneeId) ?? null}
-            onChange={(u) => setFilter('assigneeId', u ? String(u.id) : null)}
-            getKey={(u) => String(u.id)}
-            getLabel={(u) =>
-              // B-027 · `displayName`, not `fullName`. `User` is
-              // `UserRef & UserAllOf` and neither half has ever carried a
-              // `fullName` — that is the *column* name (`users.full_name`),
-              // which the contract renames on the wire. `develop` does not
-              // compile without this. **Stream A's file, flagged.**
-              u.displayName || u.username || `#${u.id}`
-            }
-            searchable
-          />
+          {!ownWork && (
+            <FilterDropdown
+              label="Resource"
+              options={users}
+              value={users.find((u) => String(u.id) === assigneeId) ?? null}
+              onChange={(u) => setFilter('assigneeId', u ? String(u.id) : null)}
+              getKey={(u) => String(u.id)}
+              getLabel={(u) =>
+                // B-027 · `displayName`, not `fullName`. `User` is
+                // `UserRef & UserAllOf` and neither half has ever carried a
+                // `fullName` — that is the *column* name (`users.full_name`),
+                // which the contract renames on the wire. `develop` does not
+                // compile without this. **Stream A's file, flagged.**
+                u.displayName || u.username || `#${u.id}`
+              }
+              searchable
+            />
+          )}
           <Button variant="secondary" onClick={() => refetch()} disabled={isFetching}>
             {isFetching ? 'Refreshing…' : 'Refresh'}
           </Button>

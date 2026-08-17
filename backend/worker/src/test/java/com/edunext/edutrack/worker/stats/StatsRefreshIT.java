@@ -440,10 +440,136 @@ class StatsRefreshIT {
 
     /** No row and holding nothing are the same statement, so both read as zero. */
     private int assignedOpen(LocalDate day, long uid) {
-        Integer open = jdbc.queryForObject(
-                "SELECT COALESCE((SELECT assigned_open FROM resource_daily_stats "
+        return resourceStat(day, uid, "assigned_open");
+    }
+
+    private int resourceStat(LocalDate day, long uid, String column) {
+        Integer value = jdbc.queryForObject(
+                "SELECT COALESCE((SELECT " + column + " FROM resource_daily_stats "
                         + "WHERE stat_date = ? AND user_id = ?), 0)",
                 Integer.class, day, uid);
-        return open == null ? 0 : open;
+        return value == null ? 0 : value;
+    }
+
+    /**
+     * A-062 · a ticket with a real due date. {@link #ticket} pins
+     * {@code planned_close_date} to 2099 so that nothing it creates is ever
+     * delayed; the due columns need one that lands inside the window.
+     */
+    private void ticketDue(String reportedAt, String plannedCloseAt) {
+        jdbc.update("INSERT INTO tickets (ticket_code, project_id, title, level, original_level, "
+                        + "date_reported, actual_close_date, planned_close_date, assigned_to) "
+                        + "VALUES (?, ?, 'due probe', 'MEDIUM', 'MEDIUM', ?, NULL, ?, ?)",
+                "ST-26-" + SEQ.incrementAndGet(), projectId, reportedAt, plannedCloseAt, userId);
+    }
+
+    // ── A-062 · the resource-keyed due and aging columns ─────────────────────
+
+    private static final LocalDate DUE_DAY = LocalDate.of(2026, 8, 10);
+
+    /**
+     * The window is seven days <em>including</em> the day itself, which is what
+     * the two card labels claim and what makes {@code due_today} a subset of it.
+     * The edges are what this pins: day 6 is the last day inside, day 7 is out.
+     */
+    @Test
+    @DisplayName("due counts today, the next six days, and nothing beyond them")
+    void dueWindowEdges() {
+        ticketDue("2026-08-01 09:00:00", "2026-08-10 17:00:00");   // due on the day
+        ticketDue("2026-08-01 09:00:00", "2026-08-16 17:00:00");   // day + 6, last one inside
+        ticketDue("2026-08-01 09:00:00", "2026-08-17 09:00:00");   // day + 7, outside
+
+        worker.refreshOnce();
+
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_due_today"))
+                .as("one ticket due that day, whatever time of day it is due")
+                .isEqualTo(1);
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_due_next_7"))
+                .as("today plus six more days, so two of the three")
+                .isEqualTo(2);
+    }
+
+    /**
+     * Due is what is <em>coming</em>; delayed is what is already late. A ticket
+     * that appeared in both would be counted twice by a developer reading four
+     * figures that are meant to partition their work — and the tile people plan
+     * their day around would be the one overstating it.
+     */
+    @Test
+    @DisplayName("an overdue ticket is delayed and is not due")
+    void overdueIsNeverAlsoDue() {
+        ticketDue("2026-08-01 09:00:00", "2026-08-05 17:00:00");
+
+        worker.refreshOnce();
+
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_delayed")).isEqualTo(1);
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_due_today")).isZero();
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_due_next_7")).isZero();
+    }
+
+    /** No commitment was made, so there is nothing to be due. */
+    @Test
+    @DisplayName("a ticket with no due date is in neither due column")
+    void noDueDateIsNotDue() {
+        jdbc.update("INSERT INTO tickets (ticket_code, project_id, title, level, original_level, "
+                        + "date_reported, planned_close_date, assigned_to) "
+                        + "VALUES (?, ?, 'no due date', 'MEDIUM', 'MEDIUM', ?, NULL, ?)",
+                "ST-26-" + SEQ.incrementAndGet(), projectId, "2026-08-01 09:00:00", userId);
+
+        worker.refreshOnce();
+
+        assertThat(assignedOpen(DUE_DAY, userId)).as("it is still open work").isEqualTo(1);
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_due_next_7")).isZero();
+    }
+
+    /**
+     * The four buckets partition the person's open set, with the project
+     * table's own edges — 0–2 / 3–7 / 8–30 / 31+. Two charts that share their
+     * labels and their drill-down links but not their boundaries produce two
+     * figures that never reconcile and no way to see why.
+     */
+    @Test
+    @DisplayName("resource aging uses the project table's bucket edges and sums to the open count")
+    void resourceAgingBuckets() {
+        ticket("2026-08-09 09:00:00", null, "MEDIUM");   // 1 day old on the 10th
+        ticket("2026-08-05 09:00:00", null, "MEDIUM");   // 5 days
+        ticket("2026-07-25 09:00:00", null, "MEDIUM");   // 16 days
+        ticket("2026-06-01 09:00:00", null, "MEDIUM");   // 70 days
+
+        worker.refreshOnce();
+
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_aging_0_2")).isEqualTo(1);
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_aging_3_7")).isEqualTo(1);
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_aging_8_30")).isEqualTo(1);
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_aging_31_plus")).isEqualTo(1);
+
+        assertThat(resourceStat(DUE_DAY, userId, "assigned_aging_0_2")
+                + resourceStat(DUE_DAY, userId, "assigned_aging_3_7")
+                + resourceStat(DUE_DAY, userId, "assigned_aging_8_30")
+                + resourceStat(DUE_DAY, userId, "assigned_aging_31_plus"))
+                .as("every open ticket falls in exactly one bucket, so the four sum to assigned_open")
+                .isEqualTo(assignedOpen(DUE_DAY, userId));
+    }
+
+    /**
+     * The resource buckets are computed by the same {@code DATEDIFF} against the
+     * same day as the project ones, so for a single assignee holding everything
+     * the two tables have to agree bucket for bucket. They are two statements of
+     * one definition and this is what stops them drifting.
+     */
+    @Test
+    @DisplayName("the resource buckets agree with the project buckets")
+    void resourceAndProjectAgingAgree() {
+        ticket("2026-08-09 09:00:00", null, "MEDIUM");
+        ticket("2026-08-05 09:00:00", null, "MEDIUM");
+        ticket("2026-07-25 09:00:00", null, "MEDIUM");
+
+        worker.refreshOnce();
+
+        for (String bucket : new String[] {"aging_0_2", "aging_3_7", "aging_8_30", "aging_31_plus"}) {
+            assertThat(resourceStat(DUE_DAY, userId, "assigned_" + bucket))
+                    .as(bucket)
+                    .isEqualTo(stat(DUE_DAY, bucket));
+        }
     }
 }

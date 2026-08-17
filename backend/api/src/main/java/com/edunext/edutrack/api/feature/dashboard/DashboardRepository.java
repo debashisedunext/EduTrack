@@ -206,6 +206,64 @@ class DashboardRepository {
     }
 
     /**
+     * A-062 · what is <em>coming</em> for one person, as at the latest
+     * summarised day.
+     *
+     * <p>Stock, so it reads the latest row rather than summing — for the reason
+     * the class note gives, and with a sharper edge than usual here: summing
+     * "due today" across a thirty-day window would count the same ticket on
+     * every day it was outstanding and produce a figure many times the number
+     * of tickets that exist. It would also look entirely plausible.
+     *
+     * <p>{@code dueNext7} contains {@code dueToday} and neither contains
+     * anything already overdue — the migration fixes that by construction, and
+     * {@link #resourceStock}'s {@code openDelayed} is where late work is
+     * counted.
+     */
+    record Due(long dueToday, long dueNext7) {
+    }
+
+    Optional<Due> resourceDue(LocalDate from, LocalDate to, long userId) {
+        return jdbc.sql("""
+                        SELECT assigned_due_today, assigned_due_next_7
+                          FROM resource_daily_stats
+                         WHERE user_id = :userId
+                           AND stat_date = (
+                                   SELECT MAX(stat_date) FROM resource_daily_stats
+                                    WHERE stat_date BETWEEN :from AND :to AND user_id = :userId)
+                        """)
+                .param("from", from).param("to", to).param("userId", userId)
+                .query((rs, n) -> new Due(rs.getLong("assigned_due_today"),
+                        rs.getLong("assigned_due_next_7")))
+                .optional();
+    }
+
+    /**
+     * A-062 · the day the due and aging figures were measured for.
+     *
+     * <p>Not {@code to}, and not today. The tiles say "due today" and the aging
+     * bars carry reported-date drill-downs derived by subtracting from a day —
+     * both of which are claims about a <em>specific</em> date, and the only
+     * date they can honestly be about is the last one the worker summarised for
+     * this person. Resolving them against {@code to} would label a Friday
+     * figure as Sunday's after a weekend of no recomputation, and resolving
+     * them against the clock would open drill-down lists that no longer match
+     * the bar that was clicked.
+     *
+     * <p>Empty when this person has no summarised day in the window at all,
+     * which is distinct from having one with nothing due.
+     */
+    Optional<LocalDate> resourceLatestDay(LocalDate from, LocalDate to, long userId) {
+        return jdbc.sql("""
+                        SELECT MAX(stat_date) AS stat_date FROM resource_daily_stats
+                         WHERE stat_date BETWEEN :from AND :to AND user_id = :userId
+                        """)
+                .param("from", from).param("to", to).param("userId", userId)
+                .query((rs, n) -> rs.getObject("stat_date", LocalDate.class))
+                .optional();
+    }
+
+    /**
      * The freshness stamp A-050 declared so a stale row is visible rather than
      * merely wrong.
      *

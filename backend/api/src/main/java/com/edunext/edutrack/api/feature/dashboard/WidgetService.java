@@ -39,15 +39,21 @@ import java.util.Optional;
  * tables do not carry the same columns, so for §2's three delivery roles there
  * are widgets with <b>no table that can answer them</b> at all.
  * {@code resource_daily_stats} has no task-type breakdown, no four-way priority
- * split, no aging buckets, and no created/reopened counts — the last because a
- * ticket is raised by a reporter and reopened by a manager, and neither is the
- * assignee whose dashboard this is.
+ * split and no created/reopened counts — the last because a ticket is raised by
+ * a reporter and reopened by a manager, and neither is the assignee whose
+ * dashboard this is.
  *
  * <p>Those widgets return {@code unavailableReason} rather than an empty series
  * or a 404, and the reason is in {@link WidgetDtos.Widget}. Widgets 9 and 10 do
- * work for a delivery role, scoped to themselves — which is exactly the subset
- * §S-05 says the developer dashboard shows, so A-062 inherits this rather than
- * re-deciding it.
+ * work for a delivery role, scoped to themselves.
+ *
+ * <p><b>A-062 · widget 12 has since joined them.</b> Aging was refused for the
+ * same reason until the columns existed; §S-05 names it in the developer
+ * variant, so A-062 added them to A-050's table with the project table's own
+ * bucket edges and this class grew a branch rather than a second widget key.
+ * The three that remain unavailable are unavailable because the question does
+ * not apply to an assignee, not because a column is missing — which is why they
+ * are not simply the next task's schema change.
  *
  * <h2>🔴 The drill-down window the ticket list does not implement</h2>
  *
@@ -338,11 +344,12 @@ class WidgetService {
     private WidgetDtos.Widget agingBuckets(DashboardScope scope, Long projectId,
                                            LocalDate from, LocalDate to, Instant asOf) {
         if (scope.ownWorkOnly()) {
-            // §S-05 lists aging in the developer variant, and A-062 will need it.
-            // resource_daily_stats has no aging columns, so that is a schema
-            // change on A-050's table and belongs to the task that needs it
-            // rather than being smuggled in here.
-            return WidgetDtos.Widget.unavailable("aging-buckets", NO_RESOURCE_EQUIVALENT);
+            // A-062 · answered now. A-056 refused this because
+            // resource_daily_stats had no aging columns and said the schema
+            // change belonged to the task that needed it; V20260817_1130 adds
+            // them with the project table's own edges, so the two charts stay
+            // comparable.
+            return resourceAging(scope, from, to, asOf);
         }
 
         WidgetRepository.StockBreakdown stock =
@@ -371,14 +378,62 @@ class WidgetService {
         // window against a clock that has moved since would open a list that
         // no longer matches the bar which was clicked.
         List<WidgetDtos.Point> points = List.of(
-                agingBucket("0–2 days", stock.aging02(), to, 0, 2, projectId),
-                agingBucket("3–7 days", stock.aging37(), to, 3, 7, projectId),
-                agingBucket("8–30 days", stock.aging830(), to, 8, 30, projectId),
+                agingBucket("0–2 days", stock.aging02(), to, 0, 2, projectId, ""),
+                agingBucket("3–7 days", stock.aging37(), to, 3, 7, projectId, ""),
+                agingBucket("8–30 days", stock.aging830(), to, 8, 30, projectId, ""),
                 // The open-ended bucket has no lower bound on the reported date
                 // — "31 days or older" is everything up to day-31, with nothing
                 // on the far side. Passing a `maxDays` of null rather than an
                 // arbitrary large number, so the URL says what it means.
-                agingBucket("31+ days", stock.aging31Plus(), to, 31, null, projectId));
+                agingBucket("31+ days", stock.aging31Plus(), to, 31, null, projectId, ""));
+
+        return WidgetDtos.Widget.of("aging-buckets", asOf,
+                List.of(new WidgetDtos.Series("Open by age", points)));
+    }
+
+    /**
+     * A-062 · widget 12 for a delivery role — the same four bars, their own work.
+     *
+     * <h2>Why this is a branch and not a second widget</h2>
+     *
+     * <p>It answers the same question with the same four buckets and the same
+     * drill-down convention; only the table differs. A second widget key would
+     * have given the frontend a role decision to make about which one to ask
+     * for — a second statement of the rule {@link DashboardScope} exists to
+     * state once, and one that could disagree with the server's.
+     *
+     * <p>The bars are anchored on the day the row was <em>measured</em>, which
+     * comes back from the query rather than being assumed to be {@code to}. For
+     * the project table {@code to} is a fair approximation because every project
+     * gets a row every day; here a person only earns a row on days they held or
+     * did something, so the latest summarised day for one resource can be
+     * several days behind the window's end — and the aging drill-downs are built
+     * by subtracting from that day. Getting it from the row is the only way the
+     * link and the bar can be about the same date.
+     */
+    private WidgetDtos.Widget resourceAging(DashboardScope scope, LocalDate from, LocalDate to,
+                                            Instant asOf) {
+        Optional<WidgetRepository.ResourceAging> row =
+                widgets.resourceAging(from, to, scope.userId());
+
+        if (row.isEmpty()) {
+            // Nothing summarised for this person in the window. An empty series
+            // renders as "nothing to show for this filter and date range",
+            // which is the honest reading — four zero-height bars would claim
+            // they hold no open work at all.
+            return WidgetDtos.Widget.of("aging-buckets", asOf,
+                    List.of(new WidgetDtos.Series("Open by age", List.of())));
+        }
+
+        WidgetRepository.ResourceAging aging = row.get();
+        LocalDate measured = aging.measuredOn();
+        String mine = "&assigneeId=" + scope.userId();
+
+        List<WidgetDtos.Point> points = List.of(
+                agingBucket("0–2 days", aging.aging02(), measured, 0, 2, null, mine),
+                agingBucket("3–7 days", aging.aging37(), measured, 3, 7, null, mine),
+                agingBucket("8–30 days", aging.aging830(), measured, 8, 30, null, mine),
+                agingBucket("31+ days", aging.aging31Plus(), measured, 31, null, null, mine));
 
         return WidgetDtos.Widget.of("aging-buckets", asOf,
                 List.of(new WidgetDtos.Series("Open by age", points)));
@@ -399,15 +454,22 @@ class WidgetService {
      *
      * @param maxDays null for the open-ended oldest bucket, which has no
      *                earliest reported date to bound it.
+     * @param extra   A-062 · already-formed extra parameters, for the resource
+     *                variant's {@code &assigneeId=}. Empty for the project bars.
+     *                Appended rather than given its own branch so both roles'
+     *                links are built by one method — the inversion below is the
+     *                part that must not be reimplemented twice.
      */
     private static WidgetDtos.Point agingBucket(String label, long value, LocalDate asOfDay,
-                                                int minDays, Integer maxDays, Long projectId) {
+                                                int minDays, Integer maxDays, Long projectId,
+                                                String extra) {
         StringBuilder link = new StringBuilder("/tickets?excludeClosed=true");
         if (maxDays != null) {
             link.append("&reportedFrom=").append(asOfDay.minusDays(maxDays));
         }
         link.append("&reportedTo=").append(asOfDay.minusDays(minDays));
         link.append(projectParam(projectId));
+        link.append(extra);
 
         return WidgetDtos.Point.of(label, value, link.toString());
     }

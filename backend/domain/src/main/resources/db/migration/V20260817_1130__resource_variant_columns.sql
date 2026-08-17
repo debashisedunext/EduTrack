@@ -1,0 +1,91 @@
+-- ---------------------------------------------------------------------
+-- A-062 · the six columns §S-05's developer dashboard needs and A-050
+-- did not leave.
+--
+-- The developer variant is "widgets 1–6, 9, 12 scoped to assignee = me,
+-- plus My due today / this week". Widgets 1–6 and 9 already answer from
+-- this table. Two things do not:
+--
+--   widget 12 (aging)   — resource_daily_stats has no aging columns at
+--                         all, so A-056 returned unavailableReason and
+--                         wrote down that the schema change belonged to
+--                         the task that needed it. This is that task.
+--   "due today / week"  — no column anywhere records how much of a
+--                         person's open work is due, as opposed to how
+--                         much of it is already late.
+--
+-- THE AGING EDGES ARE A-050'S, NOT §S-05'S — DELIBERATELY THE SAME AS
+-- THE PROJECT TABLE'S
+--
+-- 0–2 / 3–7 / 8–30 / 31+, character for character what daily_ticket_stats
+-- stores. The blueprint draws 0–2 / 3–5 / 6–10 / >10 and A-050 departed
+-- from it on purpose, so that a bucket boundary cannot move between two
+-- loads of the same day. Departing a *second* time here — even to get
+-- closer to the blueprint — would be worse than the original deviation:
+-- a Developer and their PM would then be looking at two charts with the
+-- same four labels, the same drill-down links and different edges, and
+-- the disagreement would only ever show up as two numbers that will not
+-- reconcile. One set of edges, stored once, or the two charts are not
+-- comparable and nobody is told.
+--
+-- The buckets partition the open set, as they do on the project table:
+-- every open ticket falls in exactly one, so the four sum to
+-- assigned_open. That is what lets the chart be read as a whole.
+--
+-- DUE IS NOT DELAY, AND THE TWO ARE DISJOINT BY CONSTRUCTION
+--
+-- assigned_delayed already counts work whose planned_close_date has
+-- passed. These two count work whose planned_close_date has *not*:
+--
+--   assigned_due_today   planned_close_date falls on this stat_date
+--   assigned_due_next_7  planned_close_date falls in stat_date … +6
+--
+-- so due_today ⊆ due_next_7, and neither overlaps assigned_delayed. A
+-- developer's four figures — open, delayed, due today, due this week —
+-- can therefore be read together without any of them double-counting a
+-- ticket into two of them. Overdue work appearing under "due today"
+-- would be the obvious way to get this wrong, and it would understate
+-- nothing and overstate the thing somebody is about to plan their day
+-- around.
+--
+-- SEVEN ROLLING DAYS, NOT THE CALENDAR WEEK
+--
+-- "This week" in §S-05 is a phrase, not a definition, and the calendar
+-- reading makes the tile mean six days on a Monday and one on a Friday —
+-- a figure that falls through the week for no reason connected to the
+-- work. Seven days from the day being summarised is a constant window,
+-- is what "due this week" is asking in practice, and is computable per
+-- stat_date without knowing which day the organisation starts its week
+-- on. The card's label says "next 7 days" rather than "this week", so
+-- the screen states the definition it is using.
+--
+-- INCLUSIVE OF TODAY, and named next_7 rather than next_6 for it. The
+-- alternative — a "this week" that excludes today — makes the two tiles
+-- disjoint and forces the reader to add them to answer "what is on my
+-- plate this week", which is the question being asked. Nesting them is
+-- the containment people expect from the words, and the label carries it.
+--
+-- NO WORKING-CALENDAR MATHS HERE, ON PURPOSE
+--
+-- CLAUDE.md requires the working calendar for all SLA and duration
+-- arithmetic, and this is neither: nothing below computes an elapsed
+-- time or a deadline. It filters on a planned_close_date that was
+-- already decided — by whatever calendar-aware rule set it — and asks
+-- which side of a date it falls. Skipping a weekend here would silently
+-- widen the window past what the label says, which is the exact class of
+-- quiet disagreement A-060 spent a task removing.
+--
+-- NOT NULL DEFAULT 0, for the reason A-056's assigned_in_progress gave
+-- one migration earlier: resource_daily_stats is DELETEd and rewritten
+-- in full for every day the worker recomputes, so no row outlives its
+-- next pass still carrying a default. The upserted daily_ticket_stats
+-- cannot do this, which is why A-057's sla columns are NULL there.
+-- ---------------------------------------------------------------------
+
+ALTER TABLE resource_daily_stats
+  ADD COLUMN assigned_aging_0_2     INT NOT NULL DEFAULT 0 AFTER assigned_in_progress,
+  ADD COLUMN assigned_aging_3_7     INT NOT NULL DEFAULT 0 AFTER assigned_aging_0_2,
+  ADD COLUMN assigned_aging_8_30    INT NOT NULL DEFAULT 0 AFTER assigned_aging_3_7,
+  ADD COLUMN assigned_aging_31_plus INT NOT NULL DEFAULT 0 AFTER assigned_aging_8_30,
+  ADD COLUMN assigned_due_today     INT NOT NULL DEFAULT 0 AFTER assigned_aging_31_plus,
+  ADD COLUMN assigned_due_next_7    INT NOT NULL DEFAULT 0 AFTER assigned_due_today;

@@ -159,6 +159,22 @@ class DashboardScopeIT {
                 """, day, userId, closed, assignedOpen, assignedCritical, assignedDelayed);
     }
 
+    /**
+     * A-062 · the due counts, set on a row {@link #resourceStat} has already
+     * written.
+     *
+     * <p>An UPDATE rather than more parameters on the insert, so that every
+     * existing case keeps seeding the same row it always did and a failure in
+     * one of them cannot be blamed on a wider fixture.
+     */
+    private void resourceDue(LocalDate day, long userId, int dueToday, int dueNext7) {
+        jdbc.update("""
+                UPDATE resource_daily_stats
+                   SET assigned_due_today = ?, assigned_due_next_7 = ?
+                 WHERE stat_date = ? AND user_id = ?
+                """, dueToday, dueNext7, day, userId);
+    }
+
     private CallerIdentity caller(long userId, String role, List<Long> projects) {
         return new CallerIdentity(userId, role, projects);
     }
@@ -217,6 +233,178 @@ class DashboardScopeIT {
                     .as("asking for the colleague's 60 returns my own 3")
                     .isEqualByComparingTo("3");
         }
+    }
+
+    // ── A-062 · §S-05's developer variant ────────────────────────────────────
+
+    @Nested
+    @DisplayName("the developer card set")
+    class DeveloperVariant {
+
+        private static final List<String> RESOURCE_KEYS =
+                List.of("open", "closed", "critical", "delayed", "dueToday", "dueThisWeek");
+
+        /**
+         * The two cards that could only ever read zero are gone, and the two
+         * §S-05 asks for in their place are here.
+         *
+         * <p>Asserted as the whole set rather than as "does not contain total",
+         * because the failure being guarded against is a card <em>reappearing</em>
+         * — a future edit adding the project set back for a role the resource
+         * table answers — and a negative assertion on one key would not see it.
+         */
+        @Test
+        @DisplayName("a delivery role gets the six of §S-05's variant, not the project six")
+        void deliveryRoleGetsTheResourceCardSet() {
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "DEVELOPER", List.of(mine)), null, D1, D3, null);
+
+            assertThat(s.cards().stream().map(DashboardDtos.Card::key))
+                    .containsExactlyElementsOf(RESOURCE_KEYS);
+        }
+
+        /**
+         * "Total tasks created" and "Reopened" answered <b>0</b> for every
+         * delivery role on every window, for ever — creation is a reporter's act
+         * and reopening a manager's, and neither is recorded per assignee. A
+         * chart with no series says "nothing to show"; a KPI card reading zero
+         * is a measurement, and that one was wrong.
+         */
+        @Test
+        @DisplayName("the two cards that could only ever read zero are not shown")
+        void permanentZeroesAreNotShown() {
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "DEVELOPER", List.of(mine)), null, D1, D3, null);
+
+            assertThat(s.cards().stream().map(DashboardDtos.Card::key))
+                    .doesNotContain("total", "reopened");
+        }
+
+        /**
+         * The card set follows <b>which table answered</b>, not the role. A PM
+         * who picks a resource in §S-05's filter is reading
+         * {@code resource_daily_stats} too, and was getting a "Total tasks
+         * created" over it that could only read zero.
+         */
+        @Test
+        @DisplayName("a PM filtering to one resource gets the resource card set as well")
+        void resourceFilterSwitchesTheCardSetForAPmToo() {
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "PM", List.of(mine, theirs)), null, D1, D3, colleague);
+
+            assertThat(s.cards().stream().map(DashboardDtos.Card::key))
+                    .containsExactlyElementsOf(RESOURCE_KEYS);
+            assertThat(valueOf(s, "open"))
+                    .as("the colleague's 60, which a PM may legitimately ask for")
+                    .isEqualByComparingTo("60");
+        }
+
+        @Test
+        @DisplayName("due is stock: the latest summarised day, never summed across the window")
+        void dueReadsTheLatestDayOnly() {
+            resourceDue(D1, me, 4, 9);
+            resourceDue(D2, me, 4, 9);
+            resourceDue(D3, me, 2, 7);
+
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "DEVELOPER", List.of(mine)), null, D1, D3, null);
+
+            assertThat(valueOf(s, "dueToday"))
+                    .as("three days of due counts is not ten tickets due today")
+                    .isEqualByComparingTo("2");
+            assertThat(valueOf(s, "dueThisWeek")).isEqualByComparingTo("7");
+        }
+
+        /**
+         * The card says "due today" and the list behind it has to agree. A person
+         * only earns a row on days they held or did something, so their latest
+         * summarised day can sit several days behind the window's end —
+         * anchoring the link on {@code to} would open a different day's work
+         * under the same figure, and it would look entirely reasonable.
+         */
+        @Test
+        @DisplayName("the due drill-downs are anchored on the day the figure was measured")
+        void dueLinksUseTheMeasuredDayNotTheWindowEnd() {
+            jdbc.update("DELETE FROM resource_daily_stats WHERE user_id = ? AND stat_date > ?", me, D2);
+            resourceDue(D2, me, 2, 5);
+
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "DEVELOPER", List.of(mine)), null, D1, D3, null);
+
+            assertThat(drillDownOf(s, "dueToday"))
+                    .as("D2 is the last day summarised for this person; D3 is merely the window's end")
+                    .contains("dueFrom=" + D2 + "&dueTo=" + D2);
+            assertThat(drillDownOf(s, "dueThisWeek"))
+                    .as("inclusive of the measured day, so seven days is +6")
+                    .contains("dueFrom=" + D2 + "&dueTo=" + D2.plusDays(6));
+        }
+
+        @Test
+        @DisplayName("every resource card names the assignee it counts")
+        void everyResourceCardCarriesAssigneeId() {
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "DEVELOPER", List.of(mine)), null, D1, D3, null);
+
+            assertThat(s.cards()).allSatisfy(c ->
+                    assertThat(c.drillDown()).contains("assigneeId=" + me));
+        }
+
+        /**
+         * A stock figure is what was true at a moment, and the tickets behind it
+         * were raised whenever they were raised. Narrowing the list by the
+         * window would open four rows under a card reading nine.
+         */
+        @Test
+        @DisplayName("the stock cards do not narrow their list by the reported-date window")
+        void stockCardsCarryNoReportedWindow() {
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "DEVELOPER", List.of(mine)), null, D1, D3, null);
+
+            assertThat(drillDownOf(s, "open")).doesNotContain("reportedFrom=");
+            assertThat(drillDownOf(s, "critical")).doesNotContain("reportedFrom=");
+            assertThat(drillDownOf(s, "delayed")).doesNotContain("reportedFrom=");
+        }
+
+        /**
+         * Not an oversight. A sparkline under a card is read as that card's own
+         * history, and "how much was due on each of the last thirty days" is a
+         * different quantity from "how much is due today"; the delta would be
+         * worse still, rendering a month-apart comparison as an arrow that looks
+         * like progress.
+         */
+        @Test
+        @DisplayName("the due cards carry no delta and no sparkline")
+        void dueCardsMakeNoComparison() {
+            resourceDue(D3, me, 2, 7);
+
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "DEVELOPER", List.of(mine)), null, D1, D3, null);
+
+            assertThat(cardOf(s, "dueToday").deltaPct()).isNull();
+            assertThat(cardOf(s, "dueToday").sparkline()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a person with nothing summarised in the window reads zero rather than failing")
+        void noSummarisedDayIsZeroNotAnError() {
+            jdbc.update("DELETE FROM resource_daily_stats WHERE user_id = ?", me);
+
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "DEVELOPER", List.of(mine)), null, D1, D3, null);
+
+            assertThat(valueOf(s, "dueToday")).isEqualByComparingTo("0");
+            assertThat(drillDownOf(s, "dueToday"))
+                    .as("falls back to the window's end, since there is no measured day to name")
+                    .contains("dueFrom=" + D3);
+        }
+    }
+
+    private static DashboardDtos.Card cardOf(DashboardDtos.Summary s, String key) {
+        return s.cards().stream().filter(c -> c.key().equals(key)).findFirst().orElseThrow();
+    }
+
+    private static String drillDownOf(DashboardDtos.Summary s, String key) {
+        return cardOf(s, key).drillDown();
     }
 
     // ── project scope ────────────────────────────────────────────────────────

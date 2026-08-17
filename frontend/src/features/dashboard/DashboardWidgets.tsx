@@ -1,6 +1,7 @@
 import type { GetDashboardWidgetParams } from '@/api/generated/model'
 
 import { WidgetFrame } from './WidgetFrame'
+import { useDashboardVariant } from './useDashboardVariant'
 import { AgingBuckets } from './charts/AgingBuckets'
 import { CalendarHeatmap } from './charts/CalendarHeatmap'
 import { DailyStackedArea } from './charts/DailyStackedArea'
@@ -29,8 +30,56 @@ import { VelocityLines } from './charts/VelocityLines'
  * Two columns at `xl`, one below — the pairing §S-05 draws, and the same grid
  * A-054's shell was laid out to take without rearranging. Widgets 13–15 append
  * to this list; nothing here needs to move for them.
+ *
+ * <h2>A-062 · the developer variant is this list, shorter</h2>
+ *
+ * §S-05: the Developer's dashboard "shows only widgets 1–6, 9, 12". Cards 1–6
+ * are the row above; 9 and 12 are the two rendered below when the variant is
+ * `own-work`, and the other seven are not requested at all.
+ *
+ * Before this, a delivery role loaded all nine and got six panels of
+ * "this breakdown is not kept per resource" — each an accurate sentence, and
+ * together a screen that reads as broken. The sentences stay, because they are
+ * right for a PM who has filtered to a resource and for anybody who reaches a
+ * widget another way; what changes is that the developer dashboard no longer
+ * asks seven questions it already knows have no answer.
+ *
+ * **Widgets 10 and 13 are omitted although they would answer.** A-057 gave the
+ * heatmap a per-resource measure ("tickets you closed") and widget 10 renders a
+ * delivery role their own single bar. Both are left out because §S-05 names the
+ * subset with the word "only" — a deliberate omission, not an oversight, and a
+ * one-line change here if the variant should grow.
  */
 export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams }) {
+  const variant = useDashboardVariant()
+
+  if (variant === 'own-work') {
+    return (
+      <div className="grid gap-3 xl:grid-cols-2">
+        <WidgetFrame
+          widgetKey="velocity"
+          title="My velocity (tickets closed per week)"
+          categoryLabel="Week beginning"
+          params={params}
+        >
+          {(series) => <VelocityLines series={series} />}
+        </WidgetFrame>
+
+        <WidgetFrame
+          widgetKey="aging-buckets"
+          // Titled as theirs. The server scopes it to them either way, and a
+          // bar chart headed "Ticket aging" beside five figures that are all
+          // "mine" invites being read as the organisation's.
+          title="My ticket aging"
+          categoryLabel="Age range"
+          params={params}
+        >
+          {(series) => <AgingBuckets series={series} />}
+        </WidgetFrame>
+      </div>
+    )
+  }
+
   return (
     <div className="grid gap-3 xl:grid-cols-2">
       <WidgetFrame
