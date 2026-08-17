@@ -69,7 +69,11 @@ import type {
   ForbiddenResponse,
   ImportBatchResponse,
   ImportCommitRequest,
+  ImportMappingPresetRequest,
+  ImportMappingPresetResponse,
+  ImportMappingPresetsResponse,
   ImportPreviewResponse,
+  ImportSchemaFieldsResponse,
   ImportUploadResponse,
   ImportValidateRequest,
   NotFoundResponse,
@@ -274,6 +278,361 @@ export const useUploadImportFile = <TError = UnauthorizedResponse | ForbiddenRes
       > => {
 
       const mutationOptions = getUploadImportFileMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The registration's own field declarations, so step 3 can render one row
+per target field and decide which of them block Next.
+
+**This exists so the field list is declared once.** Every other step
+reads `ImportSchemaDefinition.fields()` server-side; without this
+operation the mapping screen would have to carry its own copy of the
+same list in TypeScript, and B-038's second registration would have to
+add a second copy. `required` in particular is not derivable from
+anything the upload response returns.
+
+Constant for the life of a deployment — a schema is a class, not data —
+so a client may cache it for the session. It is not folded into
+`/upload`'s response because it is a property of the schema rather than
+of the file, and the sheet selector re-posts that request.
+
+`master.write`, like every operation on this path.
+
+ * @summary The columns a schema accepts (S-34 step 3)
+ */
+export const describeImportSchema = (
+    schema: 'clients' | 'users',
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ImportSchemaFieldsResponse>(
+      {url: `/imports/${schema}/fields`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getDescribeImportSchemaQueryKey = (schema?: 'clients' | 'users',) => {
+    return [
+    `/imports/${schema}/fields`
+    ] as const;
+    }
+
+    
+export const getDescribeImportSchemaQueryOptions = <TData = Awaited<ReturnType<typeof describeImportSchema>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describeImportSchema>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDescribeImportSchemaQueryKey(schema);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof describeImportSchema>>> = ({ signal }) => describeImportSchema(schema, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(schema), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof describeImportSchema>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DescribeImportSchemaQueryResult = NonNullable<Awaited<ReturnType<typeof describeImportSchema>>>
+export type DescribeImportSchemaQueryError = UnauthorizedResponse | ForbiddenResponse | Problem
+
+
+export function useDescribeImportSchema<TData = Awaited<ReturnType<typeof describeImportSchema>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ schema: 'clients' | 'users', options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof describeImportSchema>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof describeImportSchema>>,
+          TError,
+          Awaited<ReturnType<typeof describeImportSchema>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDescribeImportSchema<TData = Awaited<ReturnType<typeof describeImportSchema>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describeImportSchema>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof describeImportSchema>>,
+          TError,
+          Awaited<ReturnType<typeof describeImportSchema>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDescribeImportSchema<TData = Awaited<ReturnType<typeof describeImportSchema>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describeImportSchema>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The columns a schema accepts (S-34 step 3)
+ */
+
+export function useDescribeImportSchema<TData = Awaited<ReturnType<typeof describeImportSchema>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describeImportSchema>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getDescribeImportSchemaQueryOptions(schema,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * §4B.3: "Mapping presets can be saved and reused for the next import."
+
+Presets are **organisation-wide, not per user.** A preset records how a
+particular export — a CRM's, a finance system's — lines up with our
+columns, and that is knowledge the next person to run the import needs
+whether or not they are the person who saved it. Held per user it would
+be lost to a change of laptop or of staff, which is the case the feature
+exists for.
+
+Ordered by name, so the list reads the same on every visit.
+
+ * @summary Saved column mappings for a schema (S-34 step 3)
+ */
+export const listImportMappingPresets = (
+    schema: 'clients' | 'users',
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ImportMappingPresetsResponse>(
+      {url: `/imports/${schema}/mapping-presets`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListImportMappingPresetsQueryKey = (schema?: 'clients' | 'users',) => {
+    return [
+    `/imports/${schema}/mapping-presets`
+    ] as const;
+    }
+
+    
+export const getListImportMappingPresetsQueryOptions = <TData = Awaited<ReturnType<typeof listImportMappingPresets>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportMappingPresets>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListImportMappingPresetsQueryKey(schema);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImportMappingPresets>>> = ({ signal }) => listImportMappingPresets(schema, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(schema), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listImportMappingPresets>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListImportMappingPresetsQueryResult = NonNullable<Awaited<ReturnType<typeof listImportMappingPresets>>>
+export type ListImportMappingPresetsQueryError = UnauthorizedResponse | ForbiddenResponse | Problem
+
+
+export function useListImportMappingPresets<TData = Awaited<ReturnType<typeof listImportMappingPresets>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ schema: 'clients' | 'users', options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportMappingPresets>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportMappingPresets>>,
+          TError,
+          Awaited<ReturnType<typeof listImportMappingPresets>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportMappingPresets<TData = Awaited<ReturnType<typeof listImportMappingPresets>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportMappingPresets>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportMappingPresets>>,
+          TError,
+          Awaited<ReturnType<typeof listImportMappingPresets>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportMappingPresets<TData = Awaited<ReturnType<typeof listImportMappingPresets>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportMappingPresets>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Saved column mappings for a schema (S-34 step 3)
+ */
+
+export function useListImportMappingPresets<TData = Awaited<ReturnType<typeof listImportMappingPresets>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ schema: 'clients' | 'users', options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportMappingPresets>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListImportMappingPresetsQueryOptions(schema,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * **An upsert on `(schema, name)`, so this answers 200 and not 201** — and
+therefore takes no `Idempotency-Key`. Saving again under a name that
+exists replaces that preset, because that is what "Save" means to
+somebody who has just corrected one column: the alternative is five
+presets called *CRM export* and no way to tell which is current.
+
+The mapping's keys must be fields this schema declares. A preset is
+applied weeks after it is saved, against a file nobody is looking at
+today, so a key that matches nothing is refused here rather than
+silently dropped when it is next used.
+
+ * @summary Save a column mapping under a name
+ */
+export const saveImportMappingPreset = (
+    schema: 'clients' | 'users',
+    importMappingPresetRequest: ImportMappingPresetRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ImportMappingPresetResponse>(
+      {url: `/imports/${schema}/mapping-presets`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: importMappingPresetRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getSaveImportMappingPresetMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveImportMappingPreset>>, TError,{schema: 'clients' | 'users';data: ImportMappingPresetRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof saveImportMappingPreset>>, TError,{schema: 'clients' | 'users';data: ImportMappingPresetRequest}, TContext> => {
+
+const mutationKey = ['saveImportMappingPreset'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveImportMappingPreset>>, {schema: 'clients' | 'users';data: ImportMappingPresetRequest}> = (props) => {
+          const {schema,data} = props ?? {};
+
+          return  saveImportMappingPreset(schema,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveImportMappingPresetMutationResult = NonNullable<Awaited<ReturnType<typeof saveImportMappingPreset>>>
+    export type SaveImportMappingPresetMutationBody = ImportMappingPresetRequest
+    export type SaveImportMappingPresetMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | Problem
+
+    /**
+ * @summary Save a column mapping under a name
+ */
+export const useSaveImportMappingPreset = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveImportMappingPreset>>, TError,{schema: 'clients' | 'users';data: ImportMappingPresetRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof saveImportMappingPreset>>,
+        TError,
+        {schema: 'clients' | 'users';data: ImportMappingPresetRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSaveImportMappingPresetMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * A hard delete. A preset is a convenience with no history attached to it
+and nothing referencing it — an import records the mapping it actually
+used, never the preset it came from — so a tombstone would preserve
+nothing anybody could use.
+
+ * @summary Delete a saved column mapping
+ */
+export const deleteImportMappingPreset = (
+    schema: 'clients' | 'users',
+    presetId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/imports/${schema}/mapping-presets/${presetId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteImportMappingPresetMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImportMappingPreset>>, TError,{schema: 'clients' | 'users';presetId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteImportMappingPreset>>, TError,{schema: 'clients' | 'users';presetId: number}, TContext> => {
+
+const mutationKey = ['deleteImportMappingPreset'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteImportMappingPreset>>, {schema: 'clients' | 'users';presetId: number}> = (props) => {
+          const {schema,presetId} = props ?? {};
+
+          return  deleteImportMappingPreset(schema,presetId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteImportMappingPresetMutationResult = NonNullable<Awaited<ReturnType<typeof deleteImportMappingPreset>>>
+    
+    export type DeleteImportMappingPresetMutationError = UnauthorizedResponse | ForbiddenResponse | Problem
+
+    /**
+ * @summary Delete a saved column mapping
+ */
+export const useDeleteImportMappingPreset = <TError = UnauthorizedResponse | ForbiddenResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImportMappingPreset>>, TError,{schema: 'clients' | 'users';presetId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteImportMappingPreset>>,
+        TError,
+        {schema: 'clients' | 'users';presetId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteImportMappingPresetMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

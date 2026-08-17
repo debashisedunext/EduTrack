@@ -11,6 +11,7 @@ The Excel import engine — screen S-34, blueprint §4B.3.
 | **B-030** Import engine as a schema registry | everything below |
 | **B-031** Step 1 — template download | `ImportTemplateWriter`, `ImportController`, `ImportExceptionHandler` |
 | **B-032** Step 2 — upload and parse | `SheetReader` + `XlsxSheetReader`/`CsvSheetReader`, `SheetHeadings`, `ImportFileParser`, `ImportUploadService`, `ImportUploadLimits`, `StagedRow` |
+| **B-033** Step 3 — column mapping | `ImportDtos.SchemaField(s)`, `ImportMappingPresetService`, `ImportMappingPresetRepository`, `UnknownImportFieldException`, `MappingPresetNotFoundException` |
 
 ## The one thing to understand
 
@@ -68,7 +69,7 @@ B-030 is the engine, not the wizard. The five steps plug into it:
 |---|---|---|
 | B-031 | template download | `ImportField` — `header`, `allowedValues` (the dropdown), `example` |
 | B-032 | upload, SAX parse | produces `StagedUpload` — ✅ done, though it kept `InMemoryImportStagingStore`; see below |
-| B-033 | column mapping | `HeaderMatcher` → `ImportMapping`; `missingRequired` blocks Next |
+| B-033 | column mapping | `HeaderMatcher` → `ImportMapping`; `missingRequired` blocks Next — ✅ done, and it turned out to need **no mapping route at all**; see below |
 | B-034 | dry-run preview | `ImportValidationEngine` → `ImportPreview` |
 | B-035 | commit job | `ImportPreview.writable()` → `ImportSchemaDefinition.upsert` |
 | B-036 | error report | `ImportRowVerdict` — the rejected rows plus their reason |
@@ -227,12 +228,100 @@ not fire. One was written, found unreachable, and removed rather than left in
 looking like coverage. Spring's own problem-details handler (A-020) answers those
 instead, with the framework's wording rather than ours.
 
+## B-033 · step 3, and the route it did *not* add
+
+**There is no endpoint for the mapping, and that is the finding rather than an
+omission.** The mapping is chosen in the browser out of what step 2 returned, and
+it travels with step 4's `/validate` body and step 5's `/commit` body — which is
+what the contract has encoded since B-030. Parking a copy server-side would give
+the wizard a fifth piece of state to keep in step with the other four, and the
+dry run needs the mapping in its own request regardless, because the user can go
+back a step and change it.
+
+What step 3 genuinely could not get anywhere else is *our* half of the mapping,
+and that is what the new routes are:
+
+| Route | Why it has to exist |
+|---|---|
+| `GET /{schema}/fields` | the field names, their headings, and **`required`** — which decides whether Next is blocked and is derivable from nothing step 2 returns |
+| `GET /{schema}/mapping-presets` | §4B.3's "presets can be saved and reused for the next import" |
+| `POST /{schema}/mapping-presets` | an upsert on `(schema, name)` — **200, not 201** |
+| `DELETE /{schema}/mapping-presets/{presetId}` | a preset is a convenience with nothing referencing it |
+
+**`/fields` exists so the field list stays declared once.** The alternative was a
+copy of `ImportField`'s declarations in TypeScript — a second declaration of the
+schema, which is exactly what this package's design exists to prevent, and which
+B-038's resource import would have had to copy a third time. It is a *projection*
+of `ImportField` rather than the record serialised: `validators()` is a list of
+lambdas with no wire representation, and serialising the definition whole is how
+an internal type becomes a public contract by accident.
+
+It is deliberately **not** folded into the upload response, though that would have
+saved a route. `/fields` is a property of the schema and the upload response is a
+property of the file; the sheet selector re-posts the upload, and a caller that
+wanted to say what the import accepts before a file had been chosen could not.
+
+### Presets are org-wide rows, not browser storage
+
+`import_mapping_presets` (`V20260817_1130`), and the migration carries the
+argument at length. In short: §4B.3 says "reused for the *next* import", which is
+next month, quite possibly from a reimaged laptop and by a different Admin. A
+preset records how another system's export is shaped — organisation knowledge, not
+a display preference. `created_by` is recorded and is on no key; nothing filters
+on it, and an unidentifiable caller saves a preset with no attribution rather than
+being refused.
+
+**Save is an upsert, and the unique key is what makes it one.** Saving under a
+name that exists replaces it, because that is what Save means to somebody who has
+just corrected one column — the alternative is five presets called *CRM export* in
+a picker that cannot tell them apart. Case-insensitive, through the table's own
+collation, for the same reason.
+
+**A mapping naming an undeclared field is refused, 422, and not trimmed.** This is
+the decision most worth keeping. A preset is applied weeks after it is saved,
+against a file nobody is looking at today; dropping the unknown key silently
+leaves the preset *looking* complete in the picker, applying cleanly, and the
+column it was meant to map simply not imported — which surfaces as four hundred
+clients created with no support email and nothing on screen having said so. The
+`unknownFields` and `fields` lists both go on the problem body, because the
+realistic cause is a preset built against an older registration rather than a typo.
+
+**The source column is not checked, and cannot be.** A preset exists to be applied
+to a *different* file, so "does this column exist" has no answer at save time. That
+question is asked when the preset is applied, on the client, against the headings
+of the file actually in hand — `columnMapping.applyPreset` drops what it cannot
+place and the screen says which entries those were.
+
+### No `@Transactional` on the preset service, on purpose
+
+It was written with it. `list` and `delete` are one statement each; `save` is two —
+the upsert, then a read of the row it settled on — and the race a transaction looks
+like it closes (another Admin re-saving that name in between) is not closed by one:
+under `READ COMMITTED` the other session's commit is visible to the second
+statement either way, and both statements address the row for `(schema_key, name)`
+so the id is the same regardless. What the annotation *did* do was open a JPA
+`EntityManager` per call, which put a live database between the routes and any test
+of them. Removed; four route tests gained, nothing lost.
+
+The read-back is by `(schema_key, name)` rather than by `LAST_INSERT_ID()`, which
+reports 0 for an update that changed nothing — so re-saving a preset whose mapping
+was already correct would have answered with a preset id of zero.
+
+### This is not a hole in the isolation rule
+
+`ImportEngineIsolationTest` bans persistence from `ImportValidationEngine` and
+business entities from the whole package. `ImportMappingPresetRepository` violates
+neither: a preset is *the engine's own* record, like `import_batches`, and it names
+no client, user, project or ticket. Nothing on the validate path can reach it,
+because nothing on the validate path holds one.
+
 ## Not here yet
 
-No mapping, dry run or commit — B-033…B-035. `/imports/users/template` and
-`/imports/users/upload` answer 404 until B-038 registers the second schema, and
-`ImportTemplateControllerTest` asserts that, so the day the registration lands
-one test fails and is deleted.
+No dry run or commit — B-034, B-035. `/imports/users/*` answers 404 on all four
+routes until B-038 registers the second schema, and
+`ImportTemplateControllerTest`, `ImportSchemaFieldsControllerTest` and
+`ImportMappingPresetControllerTest` each assert that — so the day the registration
+lands, three tests fail and are deleted.
 
 ## Tests
 
@@ -253,6 +342,10 @@ one test fails and is deleted.
 | `ImportUploadServiceTest` | B-032 — the order of the checks, what gets staged, and that `replaces` releases a slot |
 | `ImportUploadControllerTest` | B-032, the route — the response shape, and each refusal arriving as the status and problem document the contract promises |
 | `ImportExceptionHandlerTest` | B-032 — the 503 the route-level suite structurally cannot reach, and that the three file refusals do not share a `type` |
+| `ImportSchemaFieldsControllerTest` | B-033 — against the **real** client registration, because a test over a stub would prove the projection works while saying nothing about whether it describes what the template hands out. Includes that the headers are undecorated and that validators are not on the wire |
+| `ImportMappingPresetServiceTest` | B-033 — the order of the checks, that the unknown-field refusal names every offender at once, and that nothing reaches a query before the schema resolves |
+| `ImportMappingPresetControllerTest` | B-033, the routes — 200 for the upsert, 422 for an undeclared field, 400 for a mapping that maps nothing, 404 for a delete that removed no row, and the 403 on all three verbs |
+| `ImportMappingPresetIT` | B-033 against real MySQL — everything that is a property of the schema rather than of the Java: the unique index behind the upsert, the collation deciding that `CRM export` and `CRM Export` are one preset, and that the delete is really scoped by schema |
 
 `ImportEngineIsolationTest` reads **source, not bytecode**, and says why in its
 javadoc: ArchUnit 1.3.0 cannot parse Java 25 class files, skips every one of them

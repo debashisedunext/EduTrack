@@ -627,6 +627,47 @@ const otpauthUri = (secret: string) =>
   `otpauth://totp/EduTrack:${encodeURIComponent(currentUser().email)}`
   + `?secret=${secret}&issuer=EduTrack&algorithm=SHA1&digits=6&period=30`;
 
+/**
+ * B-033 · `ClientImportSchema.fields()`, mirrored — what `GET
+ * /imports/{schema}/fields` answers with.
+ *
+ * The headers are exactly what B-031's template writes, undecorated: no asterisk
+ * on the required ones, because `HeaderMatcher` matches on this text and a
+ * decorated header would make the file this product hands out fail to auto-match
+ * when it is uploaded back.
+ *
+ * `allowedValues` is the same list the template's data-validation dropdown is
+ * built from, which is why step 3 can safely display it — one declaration means
+ * the template cannot offer a value the import rejects.
+ *
+ * **Account manager and SLA policy are deliberately absent**, matching the real
+ * registration: both are foreign keys and a spreadsheet carries only a name. A
+ * column that resolves when the spelling happens to match and silently nulls the
+ * field when it does not is worse than no column.
+ */
+const CLIENT_IMPORT_FIELDS = [
+  { name: 'clientCode', header: 'Client Code', required: true, naturalKey: true, type: 'TEXT', maxLength: 20, allowedValues: [], example: 'ACME' },
+  { name: 'name', header: 'Name', required: true, naturalKey: false, type: 'TEXT', maxLength: 150, allowedValues: [], example: 'Acme Corporation' },
+  { name: 'shortName', header: 'Short Name', required: false, naturalKey: false, type: 'TEXT', maxLength: 60, allowedValues: [], example: 'Acme' },
+  { name: 'industry', header: 'Industry', required: false, naturalKey: false, type: 'TEXT', maxLength: 80, allowedValues: [], example: 'Manufacturing' },
+  { name: 'status', header: 'Status', required: false, naturalKey: false, type: 'ENUM', maxLength: 0, allowedValues: ['ACTIVE', 'INACTIVE'], example: 'ACTIVE' },
+  { name: 'supportPlan', header: 'Support Plan', required: false, naturalKey: false, type: 'ENUM', maxLength: 0, allowedValues: ['BASIC', 'STANDARD', 'PREMIUM'], example: 'STANDARD' },
+  { name: 'primaryEmail', header: 'Primary Email', required: false, naturalKey: false, type: 'EMAIL', maxLength: 150, allowedValues: [], example: 'accounts@acme.example' },
+  { name: 'supportEmail', header: 'Support Email', required: false, naturalKey: false, type: 'EMAIL', maxLength: 150, allowedValues: [], example: 'support@acme.example' },
+  { name: 'phone', header: 'Phone', required: false, naturalKey: false, type: 'TEXT', maxLength: 30, allowedValues: [], example: '+91 22 4000 1000' },
+  { name: 'websiteDomain', header: 'Website Domain', required: false, naturalKey: false, type: 'TEXT', maxLength: 120, allowedValues: [], example: 'acme.example' },
+  { name: 'addressLine1', header: 'Address Line 1', required: false, naturalKey: false, type: 'TEXT', maxLength: 150, allowedValues: [], example: '14 Marine Drive' },
+  { name: 'addressLine2', header: 'Address Line 2', required: false, naturalKey: false, type: 'TEXT', maxLength: 150, allowedValues: [], example: null },
+  { name: 'city', header: 'City', required: false, naturalKey: false, type: 'TEXT', maxLength: 80, allowedValues: [], example: 'Mumbai' },
+  { name: 'state', header: 'State', required: false, naturalKey: false, type: 'TEXT', maxLength: 80, allowedValues: [], example: 'Maharashtra' },
+  { name: 'country', header: 'Country', required: false, naturalKey: false, type: 'TEXT', maxLength: 80, allowedValues: [], example: 'India' },
+  { name: 'postalCode', header: 'Postal Code', required: false, naturalKey: false, type: 'TEXT', maxLength: 20, allowedValues: [], example: '400020' },
+  { name: 'timezone', header: 'Timezone', required: false, naturalKey: false, type: 'TEXT', maxLength: 50, allowedValues: [], example: 'Asia/Kolkata' },
+  { name: 'contractStart', header: 'Contract Start', required: false, naturalKey: false, type: 'DATE', maxLength: 0, allowedValues: [], example: '2026-04-01' },
+  { name: 'contractEnd', header: 'Contract End', required: false, naturalKey: false, type: 'DATE', maxLength: 0, allowedValues: [], example: '2027-03-31' },
+  { name: 'notes', header: 'Notes', required: false, naturalKey: false, type: 'TEXT', maxLength: 0, allowedValues: [], example: 'Renewal due Q1' },
+];
+
 export const restHandlers = [
   // ── auth ──────────────────────────────────────────────────────────────────
   http.post(url('/auth/login'), async ({ request }) => {
@@ -1700,12 +1741,116 @@ export const restHandlers = [
       fileName: 'clients.xlsx',
       sheets, sheet,
       rowCount: sheet === 'Archive' ? 12 : 128,
-      headers: ['Client Code', 'Name', 'Domain', 'Support Plan', 'Status'],
+      // B-033 corrected two of these. `suggestedMapping` was keyed `domain` and
+      // `isActive`, which are not fields `ClientImportSchema` declares — the
+      // real names are `websiteDomain` and `status`. Harmless while step 2 only
+      // counted the entries; step 3 renders a row per declared field and looks
+      // the mapping up by name, so the stale keys would have shown two columns
+      // as matched in the summary and unmapped in the table.
+      //
+      // `Account Manager` is a column the import deliberately has no home for
+      // (see ClientImportSchema: it is a foreign key and a spreadsheet carries
+      // only a name), so it exercises step 3's "will not be imported" notice
+      // with the exact case that notice exists for.
+      headers: [
+        'Client Code', 'Name', 'Website Domain', 'Support Plan', 'Status', 'Account Manager',
+      ],
       suggestedMapping: {
-        clientCode: 'Client Code', name: 'Name', domain: 'Domain',
-        supportPlan: 'Support Plan', isActive: 'Status',
+        clientCode: 'Client Code', name: 'Name', websiteDomain: 'Website Domain',
+        supportPlan: 'Support Plan', status: 'Status',
       },
     });
+  }),
+  // B-033 · step 3. The columns the import accepts, mirroring
+  // `ClientImportSchema.fields()` — in template order, with the same headers the
+  // template writes and the same `allowedValues` its dropdowns are built from.
+  //
+  // Mirrored in full rather than sampled: the whole point of the route is that
+  // the field list is declared once server-side, and a fixture holding five of
+  // twenty would let a screen be built against a client master that does not
+  // exist. The staleness this can still develop is what the OpenAPI check and
+  // the real backend catch.
+  http.get(url('/imports/:schema/fields'), ({ params }) =>
+    ok({
+      schema: String(params.schema),
+      entity: 'CLIENT',
+      naturalKey: 'clientCode',
+      fields: CLIENT_IMPORT_FIELDS,
+    }),
+  ),
+  // §4B.3: "Mapping presets can be saved and reused for the next import."
+  // Org-wide, so no caller identity is read — every Admin sees the same list.
+  http.get(url('/imports/:schema/mapping-presets'), ({ params }) => {
+    const db = getDb();
+    return ok([...(db.mappingPresets[String(params.schema)] ?? [])]
+      .sort((a, b) => a.name.localeCompare(b.name)));
+  }),
+  // An upsert on (schema, name), so 200 and not 201 — and saving under a name
+  // that exists replaces it rather than adding a second entry the picker could
+  // not tell apart. Case-insensitive, matching the table's own collation.
+  http.post(url('/imports/:schema/mapping-presets'), async ({ params, request }) => {
+    const body = (await request.json()) as { name?: string; mapping?: Record<string, string> };
+    const schema = String(params.schema);
+    const name = (body.name ?? '').trim();
+    const mapping = Object.fromEntries(
+      Object.entries(body.mapping ?? {}).filter(([, column]) => column.trim().length > 0),
+    );
+
+    if (name.length === 0 || Object.keys(mapping).length === 0) {
+      return problem(400, 'validation-failed', 'Mapping preset was not saved', {
+        detail: 'A preset must have a name and map at least one column.',
+        errors: { mapping: ['A preset must map at least one column.'] },
+      });
+    }
+
+    // The 422 the real service answers: a mapping may only name fields the
+    // schema declares, because a preset is applied weeks later against a file
+    // nobody is looking at today.
+    const declared = new Set(CLIENT_IMPORT_FIELDS.map((field) => field.name));
+    const unknown = Object.keys(mapping).filter((field) => !declared.has(field));
+    if (unknown.length > 0) {
+      return problem(422, 'import-unknown-field', 'Unknown import field', {
+        detail: `The '${schema}' import declares no field called ${unknown.join(', ')}.`,
+        unknownFields: unknown,
+        fields: [...declared],
+      });
+    }
+
+    const db = getDb();
+    const saved = db.mappingPresets[schema] ?? (db.mappingPresets[schema] = []);
+    const existing = saved.find(
+      (preset) => preset.name.toLowerCase() === name.toLowerCase(),
+    );
+    const updatedAt = '2026-08-17T09:00:00Z';
+
+    if (existing) {
+      existing.mapping = mapping;
+      existing.updatedAt = updatedAt;
+      return ok(existing);
+    }
+
+    const preset = { presetId: nextId(db, 'mappingPreset'), name, mapping, updatedAt };
+    saved.push(preset);
+    return ok(preset);
+  }),
+  http.delete(url('/imports/:schema/mapping-presets/:presetId'), ({ params }) => {
+    const db = getDb();
+    const schema = String(params.schema);
+    const saved = db.mappingPresets[schema] ?? [];
+    const at = saved.findIndex((preset) => preset.presetId === Number(params.presetId));
+
+    if (at < 0) {
+      // Scoped by schema as well as by id, and a 404 rather than a cheerful 204:
+      // the ordinary case is another Admin having deleted it, and the picker has
+      // to know to drop the entry.
+      return problem(404, 'not-found', 'Mapping preset not found', {
+        detail: `No mapping preset ${params.presetId} saved for the '${schema}' import.`,
+        presetId: Number(params.presetId),
+      });
+    }
+
+    saved.splice(at, 1);
+    return noContent();
   }),
   http.post(url('/imports/:schema/validate'), () =>
     // A dry run writes nothing and shows a per-row verdict. This is the step

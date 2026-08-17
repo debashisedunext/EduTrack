@@ -48,6 +48,18 @@ class ImportExceptionHandler {
     private static final URI STAGING_FULL = URI.create("https://edutrack/errors/import-staging-full");
 
     /**
+     * B-033's two, and the second is deliberately <em>not</em> new.
+     *
+     * <p>{@code import-unknown-field} is its own type because step 3 does
+     * something specific with it — it names the entries it would have to drop
+     * from a preset. {@code validation-failed} is the type every other form in
+     * the product answers with, and an empty mapping is that failure reached by a
+     * path {@code @NotEmpty} cannot see, not a new kind of refusal.
+     */
+    private static final URI UNKNOWN_FIELD = URI.create("https://edutrack/errors/import-unknown-field");
+    private static final URI VALIDATION_FAILED = URI.create("https://edutrack/errors/validation-failed");
+
+    /**
      * 404, because {@code schema} is a path segment.
      *
      * <p>An unregistered key does not make the request malformed — it makes the
@@ -168,6 +180,70 @@ class ImportExceptionHandler {
                 .header(HttpHeaders.RETRY_AFTER, "30")
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(problem);
+    }
+
+    /**
+     * B-033 · 404 for a preset that is not there under this schema.
+     *
+     * <p>The same {@code type} as the unknown-schema 404 above, because to a
+     * caller they are one condition: the addressed resource is absent. The
+     * {@code presetId} property is what lets step 3 drop a stale entry from its
+     * picker rather than only reporting the failure — a preset another Admin
+     * deleted between the list read and the click is the ordinary case here.
+     */
+    @ExceptionHandler(MappingPresetNotFoundException.class)
+    ResponseEntity<ProblemDetail> handlePresetNotFound(MappingPresetNotFoundException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problem.setType(NOT_FOUND);
+        problem.setTitle("Mapping preset not found");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("schema", e.schemaKey());
+        problem.setProperty("presetId", e.presetId());
+
+        return problem(HttpStatus.NOT_FOUND, problem);
+    }
+
+    /**
+     * B-033 · 422 when a preset names a target field the schema does not declare.
+     *
+     * <p>422 rather than 400: the body is well-formed JSON of the declared shape,
+     * and what is wrong is that it refers to something absent. The realistic cause
+     * is a preset built against an older registration rather than a typo, so both
+     * lists go on the body — the screen can then say which entries it would have
+     * to drop, instead of asking the user to compare two column lists by eye.
+     */
+    @ExceptionHandler(UnknownImportFieldException.class)
+    ResponseEntity<ProblemDetail> handleUnknownField(UnknownImportFieldException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(UNKNOWN_FIELD);
+        problem.setTitle("Unknown import field");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("schema", e.schemaKey());
+        problem.setProperty("unknownFields", e.unknownFields());
+        problem.setProperty("fields", e.declaredFields());
+
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
+    }
+
+    /**
+     * B-033 · 400 for a preset that maps nothing.
+     *
+     * <p>The same status, {@code type} and {@code errors} shape Spring's own
+     * {@code @Valid} failure produces, keyed on {@code mapping} — because this
+     * <em>is</em> that failure, reached by a route {@code @NotEmpty} cannot see:
+     * a map whose every value is the empty string is non-empty and maps nothing.
+     * A caller should not have to handle "you sent no mapping" twice.
+     */
+    @ExceptionHandler(ImportMappingPresetService.EmptyMappingException.class)
+    ResponseEntity<ProblemDetail> handleEmptyMapping(
+            ImportMappingPresetService.EmptyMappingException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+        problem.setType(VALIDATION_FAILED);
+        problem.setTitle("Mapping preset was not saved");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("errors", java.util.Map.of("mapping", new String[]{e.getMessage()}));
+
+        return problem(HttpStatus.BAD_REQUEST, problem);
     }
 
     /** The content type is stated on every one of these, for the reason given above. */

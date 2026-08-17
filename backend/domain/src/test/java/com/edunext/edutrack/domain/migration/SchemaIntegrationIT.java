@@ -193,7 +193,13 @@ class SchemaIntegrationIT {
                                 // A-044
                                 "chain_anchors",
                                 // A-050
-                                "daily_ticket_stats", "resource_daily_stats");
+                                "daily_ticket_stats", "resource_daily_stats",
+                                // B-033 · S-34 step 3's saveable column mappings.
+                                // `.contains` would not have failed without this
+                                // line, but the paragraphs above ask for the name
+                                // and the point of naming them is that a
+                                // *missing* table says which one.
+                                "import_mapping_presets");
             }
             // Named, not counted — taking the same correction A-029 already
             // applied to the table assertion above. "expected: 8 but was: 10"

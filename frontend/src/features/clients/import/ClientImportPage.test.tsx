@@ -176,6 +176,10 @@ describe('the client import wizard, step 2', () => {
    * Blueprint §4B.3's promise, and the reason the wizard is five steps: a user
    * who has just handed over four hundred rows must be told, on this screen,
    * that nothing has changed yet.
+   *
+   * B-033 turned the Continue button on — it was disabled with a "not available
+   * yet" note while step 3 did not exist — so what is asserted now is that it is
+   * *enabled* and the promise is still on screen beside it.
    */
   it('says plainly that uploading has written nothing', async () => {
     renderPage()
@@ -183,7 +187,7 @@ describe('the client import wizard, step 2', () => {
     await drop(file('clients.xlsx', 'binary-ish'))
 
     expect(await screen.findByText(/no client has changed/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /continue to mapping/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /continue to mapping/i })).toBeEnabled()
   })
 
   /**
@@ -291,6 +295,255 @@ describe('the client import wizard, step 2', () => {
 
     expect(screen.queryByText('clients.xlsx')).not.toBeInTheDocument()
     expect(screen.getByText(/drop your spreadsheet here/i)).toBeInTheDocument()
+  })
+})
+
+/**
+ * B-033 · S-34 step 3.
+ *
+ * What is worth asserting here is the rule §4B.3 states and the two failures that
+ * rule is easy to satisfy without: that Next is blocked by an unmapped *required*
+ * column specifically, and that a preset applied to a file whose columns have
+ * been renamed does not enable it anyway.
+ *
+ * The mapping table itself — twenty rows of `<select>` — is driven through the
+ * real controls rather than around them, because `columnMapping.test.ts` already
+ * covers the rules as functions and what is left to prove here is the wiring.
+ */
+describe('the client import wizard, step 3', () => {
+  /** Gets a staged file and opens the mapping step. */
+  async function toMapping() {
+    renderPage()
+    await drop(file('clients.xlsx', 'binary-ish'))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to mapping/i }))
+    return await screen.findByRole('combobox', { name: /^client code/i })
+  }
+
+  /**
+   * The auto-match is the starting point, not a suggestion the user has to accept
+   * — a file built from the template arrives fully mapped and they only confirm.
+   * The mock's `suggestedMapping` covers both required fields, so Next is open.
+   */
+  it('opens on the server’s auto-match, with a row per column the import accepts', async () => {
+    const clientCode = await toMapping()
+
+    expect(clientCode).toHaveValue('Client Code')
+    expect(screen.getByRole('combobox', { name: /^name/i })).toHaveValue('Name')
+    // Optional, unmatched in the mock — left out rather than guessed at.
+    expect(screen.getByRole('combobox', { name: /^city/i })).toHaveValue('')
+    expect(screen.getByRole('button', { name: /continue to validation/i })).toBeInTheDocument()
+  })
+
+  /**
+   * The field list comes off `GET /imports/{schema}/fields`, which is the whole
+   * reason that route exists — the headings shown are the template's own, so the
+   * user is matching the words they saw in the file they downloaded.
+   */
+  it('names the natural key as the column rows are matched on', async () => {
+    await toMapping()
+
+    expect(screen.getByText(/rows are matched on this column/i)).toBeInTheDocument()
+  })
+
+  /**
+   * §4B.3: "Unmapped required columns block the Next button." Asserted by
+   * *clearing* one rather than by starting from empty, because that is how it
+   * actually happens — the auto-match filled it in and the user changed it.
+   */
+  it('blocks Next when a required column is unmapped, and names it', async () => {
+    const clientCode = await toMapping()
+
+    fireEvent.change(clientCode, { target: { value: '' } })
+
+    expect(screen.getByRole('button', { name: /continue to validation/i })).toBeDisabled()
+    expect(await screen.findByText(/one required column is not mapped yet/i))
+      .toHaveTextContent('Client Code')
+  })
+
+  /** An optional column left out is the ordinary case and must not block anything. */
+  it('does not block Next for an unmapped optional column', async () => {
+    await toMapping()
+
+    fireEvent.change(screen.getByRole('combobox', { name: /^support plan/i }), {
+      target: { value: '' },
+    })
+
+    expect(screen.queryByText(/required columns? .* not mapped/i)).not.toBeInTheDocument()
+  })
+
+  /**
+   * The columns the import will not read. Not an error — but the mock's file
+   * carries `Account Manager`, which `ClientImportSchema` deliberately has no
+   * column for, and somebody who filled it in is entitled to know before the
+   * commit rather than after it.
+   */
+  it('says which of the file’s columns will not be imported', async () => {
+    await toMapping()
+
+    expect(await screen.findByText(/will not be imported/i))
+      .toHaveTextContent('Account Manager')
+  })
+
+  it('goes back to upload without unwinding the upload', async () => {
+    await toMapping()
+
+    fireEvent.click(screen.getByRole('button', { name: /back to upload/i }))
+
+    expect(screen.queryByRole('combobox', { name: /^client code/i })).not.toBeInTheDocument()
+    // Still staged: the file is not re-sent, and the row count is still on screen.
+    expect(screen.getByText(/128 rows/)).toBeInTheDocument()
+  })
+
+  /**
+   * Step 4 is B-034. Disabled and labelled rather than absent, for the reason
+   * B-032 left step 2's Continue in the same state: a button that silently does
+   * nothing is worse than one that says what is missing.
+   */
+  it('leaves validation disabled and says why, rather than doing nothing', async () => {
+    await toMapping()
+
+    const next = screen.getByRole('button', { name: /continue to validation/i })
+    expect(next).toBeDisabled()
+    expect(next).toHaveAttribute('title', expect.stringContaining('next step'))
+    expect(screen.getByText(/the mapping is complete/i)).toBeInTheDocument()
+  })
+})
+
+describe('step 3’s mapping presets', () => {
+  async function toMapping() {
+    renderPage()
+    await drop(file('clients.xlsx', 'binary-ish'))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to mapping/i }))
+    await screen.findByRole('combobox', { name: /^client code/i })
+  }
+
+  /**
+   * §4B.3's preset, saved and then reused — the round trip, because that is the
+   * whole feature. The mock stores it in `db.mappingPresets`, so a preset that
+   * did not really persist would not come back in the list.
+   */
+  it('saves the current mapping and offers it back', async () => {
+    await toMapping()
+
+    fireEvent.change(screen.getByLabelText(/save this mapping as/i), {
+      target: { value: 'CRM export' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^save preset$/i }))
+
+    const saved = await screen.findByRole('list', { name: /saved mappings/i })
+    // Exact, not a substring: the delete button beside it is labelled "Delete the
+    // CRM export preset" and would match too.
+    expect(within(saved).getByRole('button', { name: 'CRM export' })).toBeInTheDocument()
+  })
+
+  /**
+   * Saving under a name that exists replaces it, and the button says so *before*
+   * it is pressed. The server upserts on `(schema, name)` — that is what makes
+   * correcting a preset possible — and the destructive reading of Save should be
+   * the one on screen when it is the one that applies.
+   */
+  it('offers Replace rather than Save once the name is taken', async () => {
+    await toMapping()
+
+    fireEvent.change(screen.getByLabelText(/save this mapping as/i), {
+      target: { value: 'CRM export' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^save preset$/i }))
+    await screen.findByRole('list', { name: /saved mappings/i })
+
+    expect(await screen.findByRole('button', { name: /replace .*CRM export/i }))
+      .toBeInTheDocument()
+  })
+
+  /**
+   * The case `applyPreset` exists for, end to end.
+   *
+   * The preset is saved against this file and then applied to one whose `Name`
+   * column has been renamed. The entry is dropped, the screen says which column
+   * it could not find, and — the half that matters — **Next stays blocked**,
+   * because `name` is required and is now genuinely unmapped. Carrying the stale
+   * entry over would have left the mapping claiming a heading that is in no
+   * dropdown on screen.
+   */
+  it('drops a preset entry whose column this file does not have, and keeps Next blocked', async () => {
+    await toMapping()
+
+    fireEvent.change(screen.getByLabelText(/save this mapping as/i), {
+      target: { value: 'CRM export' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^save preset$/i }))
+    await screen.findByRole('list', { name: /saved mappings/i })
+
+    // A different file: `Name` is now `Account Name`, so the preset's entry for
+    // it cannot be placed. Re-uploading is how the user gets here.
+    server.use(
+      http.post('*/imports/:schema/upload', () =>
+        HttpResponse.json({
+          data: {
+            uploadId: 'u-2', fileName: 'renamed.xlsx', sheets: ['Clients'], sheet: 'Clients',
+            rowCount: 9, headers: ['Client Code', 'Account Name'], suggestedMapping: {},
+          },
+        }),
+      ),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /back to upload/i }))
+    fireEvent.click(screen.getByRole('button', { name: /choose a different file/i }))
+    await drop(file('renamed.xlsx', 'binary-ish'))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to mapping/i }))
+    await screen.findByRole('combobox', { name: /^client code/i })
+
+    fireEvent.click(screen.getByRole('button', { name: 'CRM export' }))
+
+    expect(await screen.findByText(/this file has no column called/i))
+      .toHaveTextContent('Name')
+    expect(screen.getByRole('combobox', { name: /^client code/i })).toHaveValue('Client Code')
+    expect(screen.getByRole('button', { name: /continue to validation/i })).toBeDisabled()
+  })
+
+  /**
+   * `import-unknown-field`, branched on by `type` rather than by wording —
+   * CONVENTIONS.md §3. It means the mapping names a field the import no longer
+   * has, which is not something the user can fix by retyping the name, so the
+   * message has to say something else.
+   */
+  it('explains a refusal that names a field the import no longer has', async () => {
+    server.use(
+      http.post('*/imports/:schema/mapping-presets', () =>
+        HttpResponse.json(
+          {
+            type: 'https://edutrack/errors/import-unknown-field',
+            title: 'Unknown import field',
+            status: 422,
+            detail: "The 'clients' import declares no field called faxNumber.",
+          },
+          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+    await toMapping()
+
+    fireEvent.change(screen.getByLabelText(/save this mapping as/i), {
+      target: { value: 'Old preset' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^save preset$/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('faxNumber')
+  })
+
+  it('deletes a preset it no longer wants', async () => {
+    await toMapping()
+
+    fireEvent.change(screen.getByLabelText(/save this mapping as/i), {
+      target: { value: 'CRM export' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^save preset$/i }))
+    await screen.findByRole('list', { name: /saved mappings/i })
+
+    fireEvent.click(screen.getByRole('button', { name: /delete the CRM export preset/i }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('list', { name: /saved mappings/i })).not.toBeInTheDocument(),
+    )
   })
 })
 

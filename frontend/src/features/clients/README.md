@@ -115,17 +115,20 @@ Two consequences the tests pin:
 - **A delete button.** Tickets, contacts and project mappings all point at
   `clients`. Going away is the status control on the grid.
 
-## What is here (B-031, B-032 · S-34's first two steps)
+## What is here (B-031, B-032, B-033 · S-34's first three steps)
 
 | File | What it is |
 |---|---|
-| `import/ClientImportPage.tsx` | The wizard at `/masters/clients/import` — five steps named, steps 1 and 2 working |
+| `import/ClientImportPage.tsx` | The wizard at `/masters/clients/import` — five steps named, steps 1 to 3 working |
 | `import/UploadDropzone.tsx` | §4B.3's drag-drop and file picker |
 | `import/importQueries.ts` | The template download, the pre-flight check, and the upload |
+| `import/MappingStep.tsx` | B-033 · step 3's table — one row per column the import accepts |
+| `import/MappingPresets.tsx` | B-033 · §4B.3's saveable presets, and what applying one could not place |
+| `import/columnMapping.ts` | B-033 · step 3's rules as pure functions |
 
-**Steps 3 to 5 are on screen and disabled, not hidden.** Hiding them would make
-the page look finished and leave the user to find out at the end of step 2 that
-there is no step 3 — and it would drop §4B.3's actual promise, which is that
+**Steps 4 and 5 are on screen and disabled, not hidden.** Hiding them would make
+the page look finished and leave the user to find out at the end of step 3 that
+there is no step 4 — and it would drop §4B.3's actual promise, which is that
 nothing is written until a per-row preview has been seen. That promise is the
 reason this is a five-step wizard rather than one upload button, and it is worth
 making before somebody starts typing four hundred rows.
@@ -174,14 +177,6 @@ same workaround**, which is the argument for the one-line fix in `api/http.ts`
 (Stream D's). `uploadImportFile.test.ts` is the regression guard; delete both
 wrappers on the day that lands.
 
-**The download still does not use the generated `useDownloadImportTemplate`,**
-for two structural reasons rather than a preference. It is a `useQuery`, so it
-would fetch a workbook on mount and again on every window focus — a download is
-an event, not cached state. And `http()` parses a body and drops the `Response`,
-so it cannot return the file *name*; that hook reads `Content-Disposition` off a
-plain `fetch`, exactly as `useClient` reads `ETag` off one. Delete both the day
-`http()` exposes response headers.
-
 **The download does not use the generated `useDownloadImportTemplate`,** for two
 structural reasons rather than a preference. It is a `useQuery`, so it would
 fetch a workbook on mount and again on every window focus — a download is an
@@ -189,6 +184,74 @@ event, not cached state. And `http()` parses a body and drops the `Response`, so
 it cannot return the file *name*; this hook reads `Content-Disposition` off a
 plain `fetch`, exactly as `useClient` reads `ETag` off one, and for the same
 reason. Delete both the day `http()` exposes response headers.
+
+### B-033 · the mapping never goes to the server, and does not need to
+
+Step 3 adds **no** write of the mapping. `/validate` and `/commit` both take
+`mapping` in their own body — which the contract has said since B-030 — so a
+parked server copy would be a fifth piece of wizard state to keep in step with the
+other four, and the dry run needs the mapping in its own request regardless
+because the user can go back and change it. The mapping lives in
+`ClientImportPage`'s state and is handed down.
+
+What step 3 *does* read from the server is the two things the browser cannot know:
+**which columns the import accepts** (`useDescribeImportSchema`) and the saved
+presets. A field list hardcoded here would be a second declaration of the client
+master — the exact thing B-030's registry exists to prevent — and `required`, which
+is the whole basis of §4B.3's "unmapped required columns block Next", is derivable
+from nothing step 2 returns.
+
+### One row per *our* field, not per *their* column
+
+§4B.3 asks for "a manual override dropdown per column", and the direction it has
+to be read in is the mapping's own: target field → source column. Rendered the
+other way round — a row per column in the file, each with a dropdown of our fields
+— the screen **cannot show a required column that is missing from the file
+entirely**, because there is no row for a column that is not there. That is the one
+case the step exists to catch.
+
+Twenty native `<select>`s, not Radix ones, for the reason `TaskTypeListPage`
+records: a plain option list with no search, grouping or custom rendering is what
+the platform control already does, keyboard- and screen-reader-correct for free —
+and twenty Radix selects would be twenty portals on one screen.
+
+### Applying a preset is a function, because it can fail partially
+
+`applyPreset` drops the entries whose source column this file does not have, and
+`MappingPresets` says which ones. Both halves matter:
+
+- **Carrying a stale entry over is the worse bug.** The mapping would name a
+  heading that is in no dropdown on screen, so the row would render as unmapped
+  while `missingRequiredFields` counted it as mapped — and Next would be enabled
+  over a required column that is not mapped at all.
+- **Dropping it silently is the other one.** A user who picks *CRM export* and
+  watches three fields fill in out of eleven cannot otherwise tell a preset that
+  was always partial from one whose columns have since been renamed.
+
+A target field the schema no longer declares is dropped the same way. The server
+refuses to *save* one (`import-unknown-field`, 422) — this covers rows saved before
+a field was renamed, which that refusal cannot reach retroactively.
+
+Matching is exact, for `HeaderMatcher`'s reason: normalising "Support Email" onto
+"Email" would put the helpdesk address in the account contact field, in a mapping
+the user was shown and skimmed.
+
+### Three smaller calls worth knowing about
+
+**Clearing a `<select>` removes the key** rather than storing `''`. Absence needs
+one representation: an empty string still counts in `Object.keys(mapping).length`,
+which is what the "n of m mapped" summary reads, and the server strips it on save
+— so leaving it in would make the screen disagree with the preset it just saved.
+
+**Two fields reading one column is allowed and named, not blocked.** One `Email`
+column feeding both email fields is a real file and the mapping can express it. It
+is surfaced because the other way it happens is a slip on a misread row.
+
+**Columns the import will not read are reported, and are not an error.** A file
+exported from another system carries columns this import has no home for. Said
+anyway, because `Account Manager` is the live case: `ClientImportSchema`
+deliberately has no column for it (a foreign key, and a spreadsheet carries only a
+name), so somebody who filled it in learns that now rather than after the commit.
 
 ## What is not here yet
 
@@ -206,12 +269,12 @@ reason. Delete both the day `http()` exposes response headers.
 - **B-029** — deactivating blocks *new* tickets. That rule lives on the same
   path, alongside B-028's, and is flagged in the same place; S-32 only warns,
   with the count.
-- **B-033…B-038** — the rest of the Excel wizard. B-031 landed the route, the
-  step rail and the template download; B-032 landed the upload, the sheet
-  selector and the columns-found summary. Mapping, the dry run and the commit are
-  still to come, and the screen says so where the Continue button is — together
-  with the sentence that matters most at that moment: *your file has been read
-  and nothing has been written*.
+- **B-034…B-038** — the rest of the Excel wizard. B-031 landed the route, the
+  step rail and the template download; B-032 the upload, the sheet selector and
+  the columns-found summary; B-033 the mapping table, the presets and §4B.3's gate
+  on Next. The dry run and the commit are still to come, and the screen says so
+  where step 3's Continue button is — together with the sentence that matters most
+  at that moment: *the mapping is complete, and nothing has been written*.
 
 ## Two things that look like inconsistencies and are not
 
