@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.imports;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -62,7 +63,8 @@ public interface ImportSchemaDefinition {
     ImportField naturalKey();
 
     /**
-     * Which of these natural-key values already exist.
+     * Which of these natural-key values already exist, and what they currently
+     * hold.
      *
      * <p><b>Takes the whole set and returns the whole set — never one at a
      * time.</b> The limit is 5,000 rows; asked per row this becomes 5,000
@@ -71,10 +73,40 @@ public interface ImportSchemaDefinition {
      *
      * <p>Read-only. Called during a dry run, which writes nothing.
      *
+     * <h2>Why the values and not just the keys — B-034</h2>
+     *
+     * <p>Existence alone decides {@link ImportVerdict#WILL_CREATE} versus
+     * {@link ImportVerdict#WILL_UPDATE}, and that is all this returned until
+     * step 4 had a screen. Blueprint §4B.3's step-4 table wants more from an
+     * update than the word "update":
+     *
+     * <pre>
+     *   │  3   │ NORTHWIND │ ♻ Will update │ Name, phone │
+     * </pre>
+     *
+     * <p>The Message column names <em>which fields would change</em>, and
+     * without it "38 will update" is not reviewable: a spreadsheet that corrects
+     * six phone numbers and one that rewrites every address in the account look
+     * identical, and the user is being asked to approve one of them. The
+     * comparison itself is schema-agnostic and stays in
+     * {@link ImportValidationEngine} — what only a registration can supply is
+     * the current values.
+     *
      * @param naturalKeyValues normalised by {@link #normaliseKey(String)}
-     * @return the subset that exists, in the same normalised form
+     * @return the subset that exists, keyed in the same normalised form. Each
+     *         value maps <em>this schema's field names</em> to the stored value
+     *         as a string, formatted the way the import would read it — an ISO
+     *         date for a {@link ImportFieldType#DATE}, so a comparison against
+     *         an uploaded cell is meaningful. A field that is null in storage is
+     *         absent from the map, matching {@link ImportRow}'s rule that
+     *         "missing" has one representation.
+     *         <p>An <b>empty</b> map is permitted, and means "it exists, I
+     *         cannot cheaply say what is in it". The row is still
+     *         {@code WILL_UPDATE}; its reason is simply null. That keeps the
+     *         cost of a registration where B-030 put it — a list of columns and
+     *         two short methods
      */
-    Set<String> findExisting(Set<String> naturalKeyValues);
+    Map<String, Map<String, String>> findExisting(Set<String> naturalKeyValues);
 
     /**
      * Insert or update one row, stamping {@code importBatchId} for B-037.
