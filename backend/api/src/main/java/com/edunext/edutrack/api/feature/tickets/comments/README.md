@@ -66,8 +66,39 @@ Writing `1` would be worse than nothing, because a real first iteration is also
   signed download URLs, which lives behind `AttachmentService` in the
   neighbouring package; widening that class's surface is its own change with
   its own review.
-- **`@mention` fan-out** — C-030's. `mentionUserIds` is stored so the column is
-  populated from the first comment; nothing is notified.
+## C-030 · `@mentions`
+
+`CommentMentionParser` → `CommentMentions` → `CommentMentionNotifier`, called
+from `CommentService.create` after the row is saved.
+
+- **The server parses; the request never says who it mentioned.** D-052 settled
+  this for chat and the argument is unchanged: a caller-supplied recipient list
+  is a notification-and-email fan-out anybody can aim at anybody, with no
+  membership check in front of it. **This changes what C-029 did** —
+  `CommentWriteRequest.mentionUserIds` was stored verbatim, which was harmless
+  while nothing read the column and is not harmless now. The field stays on the
+  request because the contract declares it and older clients send it; it is
+  accepted and has no effect.
+- **Project membership is the check.** A handle resolves only against active
+  members of the ticket's project (`project_members`), which is the same table
+  `ScopeResolver` scopes PM and Support by — so a resolved mention is always
+  somebody who can open the ticket the notification links to. Anything else
+  stays plain text, and "no such user" and "not on this project" are
+  deliberately the same answer.
+- **The notification quotes nothing that was said.** C-033 gives an author five
+  minutes to edit and leaves a tombstone on delete; a bell entry carrying the
+  body would be the one copy a correction cannot reach. §4B.6's own example
+  subject carries no preview either.
+- **Email is sent, where D-052 deliberately sent none.** That task's stated
+  blocker was that the preference matrix making mention mail optional did not
+  exist yet — *"an unsuppressible optional mail is worse than a late one"*.
+  D-042 has since landed and the suppression is inside `OutboxEnqueuer.enqueue`,
+  along with D-035's rate limit, so the condition is met. See the note to
+  Stream D below.
+- **No new endpoint and no contract change.** `GET /users?projectId=&q=` already
+  is the type-ahead's data source — the contract says so in as many words, and
+  `ResourceRepository` filters it through the same `project_members` predicate
+  this resolver uses.
 
 ## Two things for other streams
 
@@ -86,6 +117,17 @@ projection is C-019's and the drift predates this task — and the frontend read
 the thread from `GET /comments` instead, which it wants anyway because a thread
 is unbounded and `/full` has no way to page. **C-034 cannot avoid it**:
 interleaving comments into the History tab means reading them from somewhere.
+
+⚠ **Stream D — C-030 enqueues a `MENTIONED` mail, which D-052 deliberately did
+not.** Not a disagreement: D-052's reason was that D-042's preference matrix did
+not exist, and it now does — `OutboxEnqueuer.enqueue` applies both the
+preference (D-042/D-036) and the rate limit (D-035), so this class has nothing
+to remember and a user who has switched mention mail off gets none. **D-037
+still owns §4B.6's fifteen events as a set.** If D-037 wires `MENTIONED` from a
+shared producer, `CommentMentionNotifier`'s `mail.enqueue` call is the one to
+delete rather than to keep alongside it. Nothing in `feature/chat/` was touched;
+`CommentMentionParser` is a deliberate twin of `MentionParser` rather than an
+import, and the two are meant to stay in step.
 
 ⚠ **Stream D — `frontend/src/mocks/` is yours, and the POST handler now
 refuses two things it used to accept**: a non-empty `attachmentIds`, and a body

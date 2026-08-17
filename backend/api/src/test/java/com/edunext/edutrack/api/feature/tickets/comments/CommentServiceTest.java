@@ -22,7 +22,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +39,7 @@ import static org.mockito.Mockito.when;
 class CommentServiceTest {
 
     private static final long TICKET = 347L;
+    private static final long PROJECT = 8L;
     private static final long AUTHOR = 12L;
     private static final Instant POSTED_AT = Instant.parse("2026-08-16T10:15:30Z");
 
@@ -48,8 +51,11 @@ class CommentServiceTest {
     /** Real, not mocked — §3.9's behaviour is the thing being relied on. */
     private final CommentSanitizer sanitizer = new CommentSanitizer();
 
-    private final CommentService service =
-            new CommentService(tickets, comments, rows, people, sanitizer);
+    private final CommentMentions mentions = mock(CommentMentions.class);
+    private final CommentMentionNotifier mentionNotifier = mock(CommentMentionNotifier.class);
+
+    private final CommentService service = new CommentService(
+            tickets, comments, rows, people, sanitizer, mentions, mentionNotifier);
 
     /**
      * The three-argument constructor, deliberately: the two-argument one leaves
@@ -67,11 +73,19 @@ class CommentServiceTest {
     @BeforeEach
     void setUp() {
         ticket = new Ticket();
+        ticket.setId(TICKET);
+        ticket.setProjectId(PROJECT);
+        ticket.setTicketCode("CRM-26-00347");
+        ticket.setTitle("Login page throws on submit");
         ticket.setCurrentCycleNo((short) 2);
         ticket.setCurrentStage("DEVELOPMENT");
         ticket.setCommentCount(7);
 
         when(tickets.require(any(), anyLong())).thenReturn(ticket);
+        // Nobody resolves unless a test says so. The default matters: it is what
+        // makes every pre-existing assertion here run through C-030's new write
+        // path without a mention in sight, which is the common case.
+        when(mentions.resolveProjectMembers(anyLong(), any())).thenReturn(List.of());
         when(people.resolve(any())).thenReturn(CommentUserRefs.Resolved.empty());
         // save() returns what it was given, with the id and timestamp the
         // database would have supplied.
@@ -286,9 +300,8 @@ class CommentServiceTest {
         }
 
         /**
-         * Null rather than {@code []}, so C-030 can tell "nobody was mentioned"
-         * from "mentions were never parsed" when it comes to fan notifications
-         * out.
+         * Null rather than {@code []}, so "nobody was mentioned" and "mentions
+         * were never parsed" stay distinguishable in the data.
          */
         @Test
         void noMentionsMeansANullColumnRatherThanAnEmptyArray() {
@@ -297,13 +310,100 @@ class CommentServiceTest {
 
             assertThat(saved().getMentionedUserIds()).isNull();
         }
+    }
+
+    /**
+     * C-030 · the fan-out, and the one rule that makes it safe.
+     *
+     * <p>These are the assertions that would let somebody quietly re-introduce
+     * a caller-supplied recipient list. D-052 settled that question for chat and
+     * the reasoning is identical here: a request that names its own recipients
+     * is a notification-and-email fan-out with no membership check in front of
+     * it.
+     */
+    @Nested
+    @DisplayName("C-030 · @mentions")
+    class Mentions {
+
+        private final CommentMentions.MentionedUser meera =
+                new CommentMentions.MentionedUser(31L, "meera.s", "Meera S", "meera@edunext.com");
 
         @Test
-        void mentionsAreStoredEvenThoughNothingIsNotifiedYet() {
-            service.create(caller, TICKET,
-                    new CommentDtos.CommentWriteRequest("<p>hi</p>", null, List.of(5L, 6L), null));
+        @DisplayName("the body is what is parsed — the request's own list is not consulted")
+        void theRequestsListIsIgnored() {
+            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+                    "<p>no handles here</p>", null, List.of(999L), null));
 
-            assertThat(saved().getMentionedUserIds()).containsExactly(5L, 6L);
+            // 999 was asked for and is not stored. Anything else would let a
+            // caller aim the fan-out at a user it never named in the body.
+            assertThat(saved().getMentionedUserIds()).isNull();
+            verifyNoInteractions(mentionNotifier);
+        }
+
+        @Test
+        void handlesAreParsedFromTheBodyAndResolvedAgainstTheTicketsProject() {
+            when(mentions.resolveProjectMembers(eq(PROJECT), eq(List.of("meera.s"))))
+                    .thenReturn(List.of(meera));
+
+            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+                    "<p>Can you look at this @meera.s ?</p>", null, null, null));
+
+            assertThat(saved().getMentionedUserIds()).containsExactly(31L);
+        }
+
+        @Test
+        @DisplayName("a handle that is not a project member stays plain text")
+        void anUnresolvedHandleIsNotStoredAndNotNotified() {
+            // The resolver's default answer is "nobody", which is what an
+            // outsider, a leaver and a typo all look like — deliberately
+            // indistinguishable, for the reason A-035 returns 404 not 403.
+            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+                    "<p>ask @someone.else</p>", null, null, null));
+
+            assertThat(saved().getMentionedUserIds()).isNull();
+            verifyNoInteractions(mentionNotifier);
+        }
+
+        /**
+         * The parser's lookbehind, exercised through the service because this is
+         * the case that reaches production: comments quote addresses constantly,
+         * and without the rule every one of them notifies whoever owns that
+         * domain as a username.
+         */
+        @Test
+        void anEmailAddressInTheBodyIsNotAMention() {
+            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+                    "<p>chase this with ops@edunext.com</p>", null, null, null));
+
+            // Never even asked: no candidate survived the parser.
+            verify(mentions).resolveProjectMembers(PROJECT, List.of());
+            verifyNoInteractions(mentionNotifier);
+        }
+
+        @Test
+        @DisplayName("the notifier is handed the saved comment's id, not the ticket's")
+        void notifiesAfterTheRowExists() {
+            when(mentions.resolveProjectMembers(anyLong(), any())).thenReturn(List.of(meera));
+
+            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+                    "<p>@meera.s</p>", null, null, null));
+
+            // 99 is what save() stamps. A notification deep-linking to a comment
+            // that does not exist yet is the failure this ordering prevents.
+            verify(mentionNotifier).mentioned(eq(ticket), eq(99L), eq(AUTHOR), any(), eq(List.of(meera)));
+        }
+
+        /**
+         * §3.9 runs first, so a handle only inside markup was never text a reader
+         * would see. {@code <a href="/x?q=@ravi">} does not survive the sanitiser
+         * as text, and the plain-text projection is what the parser is given.
+         */
+        @Test
+        void theParserSeesThePlainTextProjectionRatherThanTheMarkup() {
+            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+                    "<p><a href=\"https://edunext.test/s?q=@ravi\">search</a></p>", null, null, null));
+
+            verify(mentions).resolveProjectMembers(PROJECT, List.of());
         }
     }
 

@@ -8,6 +8,8 @@ import {
   isRichTextEmpty,
 } from '@/components/ui/rich-text'
 import { cn } from '@/lib/utils'
+import { MentionSuggestions, type MentionKeyboard } from './MentionSuggestions'
+import { useMentionTypeahead } from './useMentionTypeahead'
 
 /**
  * S-20's comment box — C-029, blueprint §4B.5.
@@ -22,8 +24,18 @@ import { cn } from '@/lib/utils'
  * ## What this is not
  *
  * Not the Comments tab — that is `CommentThread`, which renders the stream below
- * it. Not the `@mention` type-ahead (C-030), not the five-minute edit window
- * (C-033).
+ * it. Not the five-minute edit window (C-033).
+ *
+ * ## C-030 · the `@mention` type-ahead
+ *
+ * The composer owns the keyboard and the caret, so it owns the wiring; the
+ * rules live next door. `useMentionTypeahead` reads the selection and decides
+ * whether an `@handle` is open, `MentionSuggestions` fetches and draws the
+ * list, and both are documented where they are. What this file contributes is
+ * the order the keys are claimed in — the list first and only while a token is
+ * open, `Ctrl+Enter` after it — and the fact that a mention never blocks a
+ * post: an unresolved `@ravi` is plain text here and is still parsed by the
+ * server on the way in.
  *
  * ## C-031 · the visibility toggle
  *
@@ -59,6 +71,7 @@ export function CommentBox({
   disabled = false,
   disabledReason,
   clientName,
+  projectId,
 }: {
   /**
    * Resolves when the server has accepted it; rejects and the draft survives.
@@ -81,6 +94,19 @@ export function CommentBox({
    * is one they read past.
    */
   clientName?: string
+  /**
+   * C-030 · the ticket's project, which is the population the `@` type-ahead
+   * offers and the one the server resolves against.
+   *
+   * **Optional, and its absence disables the type-ahead rather than widening
+   * it.** A picker with no project would have to offer the whole company, and
+   * the server would then refuse everyone it is not entitled to notify —
+   * silently, because an unresolved mention is plain text by design. Typing
+   * `@ravi` into a box with no suggestions still posts, and still notifies if
+   * Ravi is on the project: the server parses the body regardless, so what is
+   * lost here is the convenience, never the mention.
+   */
+  projectId?: number
 }) {
   const [body, setBody] = React.useState('')
 
@@ -111,6 +137,23 @@ export function CommentBox({
   const tooLong = body.length > RICH_TEXT_MAX_LENGTH
   const canPost = !empty && !tooLong && !isPosting && !disabled
 
+  // C-030. `enabled` is what keeps the type-ahead inert on a sealed cycle and
+  // on a page with no project: the selection is never read, so no token ever
+  // opens, so `MentionSuggestions` never mounts and its query never runs.
+  const mentionsEnabled = !disabled && !isPosting && projectId != null
+  // Destructured rather than held as `mention.*`: the hook returns a fresh
+  // object every render, so a dependency array naming it would rebuild `submit`
+  // on every keystroke. Each callback inside it is stable.
+  const {
+    containerRef,
+    token: mentionToken,
+    anchor: mentionAnchor,
+    insert: insertMention,
+    dismiss: dismissMentions,
+    sync: syncMentions,
+  } = useMentionTypeahead({ enabled: mentionsEnabled })
+  const suggestions = React.useRef<MentionKeyboard>(null)
+
   const submit = React.useCallback(async () => {
     if (!canPost) return
     const draft = body
@@ -121,6 +164,11 @@ export function CommentBox({
       // one time the network drops, and a comment is often the longest thing
       // anyone types on this page.
       setBody('')
+      // C-030. The token is state, and clearing the text does not clear it —
+      // Ctrl+Enter with the list open would otherwise post and leave a listbox
+      // floating over an empty box, still offering to complete a name that is
+      // no longer on screen.
+      dismissMentions()
       // Back to internal, with the draft that justified the choice. A sticky
       // toggle is how the second comment leaks: the first one was a deliberate
       // client-facing summary, the next is a stack trace, and nothing on screen
@@ -134,7 +182,7 @@ export function CommentBox({
       // a refusal is about the body, and re-picking the audience for text you
       // did not change is a second chance to pick it wrong.
     }
-  }, [body, canPost, clientVisible, onPost])
+  }, [body, canPost, clientVisible, onPost, dismissMentions])
 
   /**
    * §4B.5: "Ctrl/Cmd + Enter to post".
@@ -148,10 +196,34 @@ export function CommentBox({
    * that only works on Windows reads as broken rather than as absent.
    */
   const onKeyDown = (event: React.KeyboardEvent) => {
+    // C-030 first, and only while a token is open. Every key the list claims is
+    // one the editor is otherwise entitled to — ↑/↓ move the caret, Enter
+    // breaks a paragraph, Tab leaves the box — so `handleKey` reports whether
+    // it actually consumed one and everything else falls straight through.
+    if (mentionToken) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        dismissMentions()
+        return
+      }
+      if (suggestions.current?.handleKey(event)) return
+    }
+
     if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return
     event.preventDefault()
     void submit()
   }
+
+  /**
+   * The caret can move without the text changing — an arrow key, a click, a
+   * Home — and each of those can move it into or out of an `@handle`. Listening
+   * on `input` alone would leave the list open over a caret that has walked
+   * away from the token it belongs to.
+   *
+   * `keyup` rather than `keydown`: the caret has not moved yet when `keydown`
+   * fires, so reading the selection there is reading where it used to be.
+   */
+  const onCaretMoved = mentionsEnabled ? syncMentions : undefined
 
   const hintId = React.useId()
   // One name shared by both radios — a `name` collision with another composer on
@@ -181,7 +253,18 @@ export function CommentBox({
           {disabledReason ?? 'Comments cannot be added here.'}
         </p>
       ) : (
-        <div className="flex flex-col gap-2" onKeyDown={onKeyDown}>
+        <div
+          className="flex flex-col gap-2"
+          onKeyDown={onKeyDown}
+          onKeyUp={onCaretMoved}
+          onInput={onCaretMoved}
+          onClick={onCaretMoved}
+          // A blur closes the list. Not `onBlur` on the wrapper alone — picking
+          // an option is a `mousedown` that already prevented the blur, so this
+          // only fires when focus genuinely leaves.
+          onBlur={mentionsEnabled ? dismissMentions : undefined}
+          ref={containerRef}
+        >
           <RichTextEditor
             value={body}
             onChange={setBody}
@@ -197,6 +280,21 @@ export function CommentBox({
             aria-describedby={hintId}
             aria-invalid={tooLong || undefined}
           />
+
+          {/*
+            C-030 · mounted only while an `@handle` is being typed, which is
+            what keeps this component's react-query dependency scoped to the
+            moment it is real. `MentionSuggestions` carries the argument.
+          */}
+          {mentionsEnabled && projectId != null && mentionToken && mentionAnchor && (
+            <MentionSuggestions
+              ref={suggestions}
+              projectId={projectId}
+              query={mentionToken.query}
+              anchor={mentionAnchor}
+              onPick={insertMention}
+            />
+          )}
 
           {postError && (
             // `role="alert"` because the refusal arrives after a button press
@@ -231,9 +329,16 @@ export function CommentBox({
                 and someone pasting a client's own words deserves to read that it
                 is not going back to them rather than infer it.
               */}
-              {clientVisible
-                ? `${clientName} will see this. Ctrl+Enter to post.`
-                : 'Internal to the team. Ctrl+Enter to post.'}
+              {`${
+                clientVisible ? `${clientName} will see this.` : 'Internal to the team.'
+              }${
+                // C-030's affordance, in the same sentence and for the same
+                // reason: `@` opens nothing until it is typed, so a type-ahead
+                // nobody is told about is one nobody uses. Omitted when the
+                // type-ahead is off — on a sealed cycle or a page with no
+                // project — rather than advertising a key that does nothing.
+                mentionsEnabled ? ' Type @ to mention someone.' : ''
+              } Ctrl+Enter to post.`}
             </p>
             <Button size="sm" onClick={() => void submit()} disabled={!canPost}>
               {isPosting ? 'Posting…' : 'Post'}
