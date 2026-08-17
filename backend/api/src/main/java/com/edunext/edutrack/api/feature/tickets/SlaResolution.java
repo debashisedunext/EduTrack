@@ -89,8 +89,14 @@ public record SlaResolution(Source source, Long slaPolicyId, BigDecimal response
      * returns {@code start} unchanged for it, so honouring a zero would give
      * every such ticket a planned close date already in the past and hand
      * Stream D's scanner an immediate breach on a ticket nobody has read yet.
+     *
+     * <p>Public since C-038: a reopened cycle recomputes its planned close date
+     * from the same ladder, so the sub-package that does it asks this question
+     * rather than re-deriving the predicate. Two copies of "is there a target"
+     * would eventually disagree about a zero, which is the case this method
+     * exists to settle.
      */
-    boolean hasTarget() {
+    public boolean hasTarget() {
         return resolutionHrs != null && resolutionHrs.signum() > 0;
     }
 }

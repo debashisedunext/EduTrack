@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.tickets.detail;
 
+import com.edunext.edutrack.api.feature.tickets.TicketWire;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -24,7 +26,7 @@ final class TicketDetailDtos {
      * @param availableActions always null for now — see {@link TicketDetailService}
      */
     record Detail(
-            Ticket ticket,
+            TicketWire.Ticket ticket,
             List<Cycle> cycles,
             Object ribbon,
             List<HistoryEntry> history,
@@ -35,32 +37,16 @@ final class TicketDetailDtos {
             List<String> availableActions) {
     }
 
-    record Ticket(
-            long id,
-            String ticketCode,
-            long projectId,
-            String title,
-            String description,
-            Integer taskTypeId,
-            String level,
-            String originalLevel,
-            String status,
-            String environment,
-            Instant dateReported,
-            Long reportedBy,
-            Long assignedTo,
-            java.math.BigDecimal estimatedEffortHrs,
-            java.math.BigDecimal totalEffortHrs,
-            Instant plannedCloseDate,
-            Instant actualCloseDate,
-            boolean isReopened,
-            int reopenCount,
-            int currentCycleNo,
-            boolean isDelayed,
-            String currentStage,
-            int currentIteration,
-            int reworkCount) {
-    }
+    /*
+     * The `ticket` field's shape is TicketWire.Ticket, one package up.
+     *
+     * A-052 declared it here because the detail page was the only route
+     * answering with a ticket. C-038's `reopenTicket` answers the same schema —
+     * TicketResponse is { data: Ticket } — and so do the six other lifecycle
+     * routes the contract declares, so the record moved to where all of them can
+     * reach it rather than being copied per route. The JSON is unchanged: same
+     * component names, same order, same mapping.
+     */
 
     record Cycle(
             int cycleNo,

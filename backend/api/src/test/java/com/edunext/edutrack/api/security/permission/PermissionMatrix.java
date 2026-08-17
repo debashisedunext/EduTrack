@@ -106,6 +106,26 @@ final class PermissionMatrix {
      */
     static final Set<String> ADMIN_AND_PM = Set.of(ADMIN, PM);
 
+    /**
+     * {@code ticket.reopen} — blueprint §2's "Reopen ticket" row, and the only
+     * three-role set in the file.
+     *
+     * <p>Support is in it and Developer, QA and Deployment are not, which is the
+     * §2 answer and worth stating because it inverts the usual shape here: most
+     * ticket capabilities are held by all six precisely so that scope rather than
+     * authority decides what each role does. Reopening is not work on a ticket, it
+     * is a decision to reverse a sign-off, and §2 gives it to the three roles that
+     * could have granted the sign-off in the first place — the same three, and the
+     * same exclusion, as {@code RESOLVED → CLOSED}.
+     *
+     * <p>Asserted independently of the annotation, per this file's header. The
+     * grant it must agree with is seeded in {@code V20260806_0900} for ADMIN, PM
+     * and SUPPORT_DESK, which {@code V20260807_1030} renamed to SUPPORT — see
+     * {@code RolePermissions}' note on why that rename is load-bearing for
+     * exactly this kind of row.
+     */
+    static final Set<String> ADMIN_PM_AND_SUPPORT = Set.of(ADMIN, PM, RolePermissions.SUPPORT);
+
     // ── request bodies that satisfy their DTO's constraints ──────────────────
     //
     // None of these has to succeed. They have to be *valid*, so that argument
@@ -127,6 +147,18 @@ final class PermissionMatrix {
     /** {@code ChangePasswordRequest}: both fields {@code @ValidPassword}-shaped. */
     private static final String CHANGE_PASSWORD = """
             {"currentPassword":"Correct-Horse-1!","newPassword":"Correct-Horse-2!"}""";
+
+    /**
+     * C-038 · {@code ReopenRequest}: {@code reason} is the only required field and
+     * is {@code @Size(min = 3)}.
+     *
+     * <p>The other four are deliberately omitted rather than filled in, and that
+     * is the stronger fixture: it proves the guard is reached by a body carrying
+     * the bare minimum the contract allows, so the row cannot be passing because
+     * some optional field happened to satisfy a validator.
+     */
+    private static final String REOPEN = """
+            {"reason":"Client reports the defect has recurred in production."}""";
 
     /** {@code TwoFactorRequests.ConfirmRequest}: six digits exactly. */
     private static final String TOTP_CODE = """
@@ -550,6 +582,33 @@ final class PermissionMatrix {
             // removed. Denying the capability would be the wrong tool for that
             // job and would break the roles it is meant to protect.
             everyRole("GET", "/api/v1/tickets/{ticketId}/full"),
+
+            // ── reopen · C-038, and the one ticket route where three roles is
+            //    the whole answer rather than half a rule ────────────────────
+            //
+            // Admin, PM and Support. This file's other ticket rows are all six
+            // with the real restriction one layer down, so a three-role row here
+            // deserves its argument: blueprint §2's "Reopen ticket" grants it to
+            // exactly these three, and workflow_transitions independently seeds
+            // CLOSED → REOPENED for the same three and no others. Two statements
+            // of the same restriction, written months apart, agreeing.
+            //
+            // It is genuinely a capability and not a row rule wearing one.
+            // Whether a Developer may reopen does not depend on which ticket, on
+            // who is assigned, or on the clock — the three things that forced the
+            // comment and attachment rules into their services. So @PreAuthorize
+            // can express all of it, and ReopenService adds nothing about who.
+            //
+            // *Which* tickets is still not this file's question: ScopedTickets
+            // answers 404 for a ticket outside the caller's scope (A-035)
+            // whatever capability they hold.
+            //
+            // Carries a fixture because the handler takes a required
+            // @RequestBody. Without one, argument resolution answers 400 before
+            // @PreAuthorize is consulted and the row would assert nothing —
+            // which is the hole this file's own header describes and was caught
+            // by mis-stating a row and watching the suite stay green.
+            adminPmAndSupport("POST", "/api/v1/tickets/{ticketId}/reopen", REOPEN),
 
             // The list, for the same reason and one more: a Developer who could
             // not call it would have no ticket screen at all. ScopeResolver
@@ -1008,6 +1067,11 @@ final class PermissionMatrix {
 
     private static Entry adminOnly(String method, String pattern, String body) {
         return new Entry(method, pattern, body, ADMIN_ONLY);
+    }
+
+    /** C-038 · {@code ticket.reopen}, the file's only three-role grant. */
+    private static Entry adminPmAndSupport(String method, String pattern, String body) {
+        return new Entry(method, pattern, body, ADMIN_PM_AND_SUPPORT);
     }
 
     private PermissionMatrix() {
