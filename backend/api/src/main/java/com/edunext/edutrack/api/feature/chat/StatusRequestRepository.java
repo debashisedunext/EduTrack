@@ -245,6 +245,29 @@ class StatusRequestRepository {
     }
 
     /**
+     * D-037 · a recipient's real address, for the mandatory status-request mail.
+     *
+     * <p>Looked up rather than derived. A composed {@code user-7@…} would put a
+     * plausible, undeliverable address into {@code email_log}, and every one of
+     * those rows reads as an attempt that failed at the provider — which turns
+     * D-033's delivery proof into noise. Same reasoning as
+     * {@code SlaRepository.emailsOf}.
+     *
+     * <p>Inactive users are excluded, so they keep the bell entry and get no
+     * mail: their address may since have been reassigned to somebody else, and
+     * a status request is not a thing to send to the wrong person.
+     *
+     * @return empty when the user is gone or deactivated — the caller sends no
+     *         mail rather than inventing a destination
+     */
+    Optional<String> activeEmailOf(long userId) {
+        return jdbc.sql("SELECT email FROM users WHERE id = :id AND is_active = 1")
+                .param("id", userId)
+                .query(String.class)
+                .optional();
+    }
+
+    /**
      * The ticket's thread, created if this is the first thing ever said on it.
      *
      * <p>Nothing else in the system creates one. D-050 built the engine and left

@@ -16,6 +16,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -103,6 +104,9 @@ class ChatEngineIT {
     @BeforeEach
     void seed() {
         jdbc.update("DELETE FROM ticket_status_requests");
+        // D-037 queues mail against the ticket, and email_log.ticket_id is a
+        // foreign key — so it clears before tickets do.
+        jdbc.update("DELETE FROM email_log");
         jdbc.update("DELETE FROM notifications");
         jdbc.update("DELETE FROM chat_messages");
         jdbc.update("DELETE FROM chat_participants");
@@ -1251,6 +1255,7 @@ class ChatEngineIT {
 
         @BeforeEach
         void assignAndSetTheChain() {
+            jdbc.update("DELETE FROM email_log");
             jdbc.update("DELETE FROM ticket_status_requests");
 
             anil = insertUser("it_chat_anil", "Anil Shah");
@@ -1285,6 +1290,83 @@ class ChatEngineIT {
 
             assertThat(latestMessageOn(ticketThread).body())
                     .isEqualTo("Client call at four — where are we?");
+        }
+
+        // ─────────────────────────────────── D-037 · the mandatory mail
+
+        @Test
+        @DisplayName("D-037: asking queues the mail §4B.6 marks never-optional")
+        void theAskIsMailed() {
+            statusRequests.ask(ticketId, meera, "any update?");
+
+            List<Map<String, Object>> queued = jdbc.queryForList(
+                    "SELECT * FROM email_log WHERE ticket_id = ?", ticketId);
+
+            // D-036 declared this mail mandatory and nothing sent one until
+            // D-029/D-030 gave it a body to render. A guarantee that no
+            // preference can silence is worth nothing while the send path is
+            // absent, and the absence is invisible from the preference screen.
+            assertThat(queued).hasSize(1);
+            assertThat(queued.getFirst().get("to_user_id")).isEqualTo(ravi);
+            assertThat(queued.getFirst().get("event_code")).isEqualTo("STATUS_REQUESTED");
+        }
+
+        @Test
+        @DisplayName("D-037: the subject leads with the ticket code — D-031")
+        void theSubjectCarriesTheCode() {
+            statusRequests.ask(ticketId, meera, null);
+
+            String subject = jdbc.queryForObject(
+                    "SELECT subject FROM email_log WHERE ticket_id = ?", String.class, ticketId);
+            String code = jdbc.queryForObject(
+                    "SELECT ticket_code FROM tickets WHERE id = ?", String.class, ticketId);
+
+            assertThat(subject).isEqualTo("[" + code + "] Status requested");
+        }
+
+        @Test
+        @DisplayName("D-037: the manager's words stay in the thread, not in the subject")
+        void theQuestionIsNotPutInTheSubject() {
+            statusRequests.ask(ticketId, meera, "Client call at four — where are we?");
+
+            String subject = jdbc.queryForObject(
+                    "SELECT subject FROM email_log WHERE ticket_id = ?", String.class, ticketId);
+
+            // A subject line lands in a preview pane and a search index. What a
+            // manager typed belongs where the conversation is.
+            assertThat(subject).doesNotContain("Client call");
+        }
+
+        @Test
+        @DisplayName("D-037: no preference can silence it")
+        void noPreferenceSilencesIt() {
+            // Written straight to the table, the way an older build or a direct
+            // edit would — the row D-036 exists to defeat.
+            jdbc.update("""
+                    INSERT INTO notification_preferences (user_id, event_code, channel, enabled)
+                    VALUES (?, 'STATUS_REQUESTED', 'EMAIL', 0)
+                    """, ravi);
+
+            statusRequests.ask(ticketId, meera, null);
+
+            assertThat(jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM email_log WHERE ticket_id = ?", Integer.class, ticketId))
+                    .isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("D-037: the answer sends no mail — §11 gives that row a dash")
+        void theAnswerIsNotMailed() {
+            statusRequests.ask(ticketId, meera, null);
+            jdbc.update("DELETE FROM email_log");
+
+            chat.post(statusRequestRepository.ensureTicketThread(ticketId, meera), ravi,
+                    "Deployed to staging this morning.");
+
+            // The asymmetry is the blueprint's. Somebody waiting on an answer is
+            // already looking at the thread.
+            assertThat(jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM email_log", Integer.class)).isZero();
         }
 
         @Test
