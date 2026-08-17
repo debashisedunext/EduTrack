@@ -130,11 +130,36 @@ class ReportCatalogueTest {
     void projectKeyedReportsAreWithheldFromDeliveryRoles() {
         ReportScope ownWork = new ReportScope(true, 8L, List.of(1L));
 
+        // project-health reads daily_ticket_stats and has no per-person form.
+        // Unbuilt today, so it keeps "not built yet" — the point asserted here is
+        // that it is not offered as runnable.
+        assertThat(ReportCatalogue.find("project-health", ownWork).orElseThrow().available()).isFalse();
+    }
+
+    /**
+     * The second half of the same fix, and the more important half.
+     *
+     * <p>Withholding {@code date-wise} from a delivery role was honest and
+     * useless: it left a Developer with eighteen greyed cards when their own
+     * table records what they closed, the effort they logged and what they hold.
+     * The report answers them from {@code resource_daily_stats} instead, with
+     * the columns that are true per person.
+     */
+    @Test
+    @DisplayName("date-wise answers a delivery role from their own table, without a Project filter")
+    void dateWiseAnswersOwnWork() {
+        ReportScope ownWork = new ReportScope(true, 8L, List.of(1L));
+
         ReportDtos.Descriptor dateWise = ReportCatalogue.find(DateWiseReportRunner.KEY, ownWork).orElseThrow();
 
-        assertThat(dateWise.available()).isFalse();
-        assertThat(dateWise.unavailableReason())
-                .contains("about a project's work rather than one person's");
+        assertThat(dateWise.available()).isTrue();
+        assertThat(dateWise.unavailableReason()).isNull();
+        assertThat(dateWise.description()).contains("What you closed each day");
+
+        // resource_daily_stats is keyed (stat_date, user_id) with no project
+        // column, so a Project control is one the runner could not honour.
+        assertThat(dateWise.filters()).doesNotContain(ReportFilterKind.PROJECT);
+        assertThat(dateWise.filters()).contains(ReportFilterKind.DATE_RANGE);
     }
 
     @Test

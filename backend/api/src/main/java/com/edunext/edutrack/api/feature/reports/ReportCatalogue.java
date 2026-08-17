@@ -171,9 +171,33 @@ public final class ReportCatalogue {
      * the two agreed.
      */
     private static final java.util.Set<String> NOT_KEPT_PER_PERSON =
-            java.util.Set.of("date-wise", "project-health", "aging", "sla-breach",
+            java.util.Set.of("project-health", "aging", "sla-breach",
                     "task-type-analysis", "stage-funnel", "stage-cycle-time",
                     "deployment-report", "client-report", "email-delivery-log");
+
+    /**
+     * Reports that answer a delivery role from {@code resource_daily_stats}
+     * instead, with a narrower column set — and so a narrower filter set.
+     *
+     * <p>{@code date-wise} is the one that does today. It was briefly in
+     * {@link #NOT_KEPT_PER_PERSON} above, which was honest and useless: it left
+     * a Developer with eighteen greyed cards and no report at all, when their
+     * own table records what they closed, the effort they logged and what they
+     * are holding. Withholding a question somebody's own data can answer is not
+     * the same as refusing to answer it wrongly.
+     *
+     * <p>The <b>Project filter is dropped</b> for those callers, not merely
+     * ignored. {@code resource_daily_stats} is keyed {@code (stat_date,
+     * user_id)} with no project column — A-051 recorded that limitation and it
+     * is still true — so a Project control there is one the runner cannot
+     * honour, and drawing it would be the "set it and nothing happens" failure
+     * the filter declaration exists to prevent.
+     */
+    private static final java.util.Set<String> ANSWERED_PER_PERSON =
+            java.util.Set.of("date-wise");
+
+    private static final String OWN_WORK_DESCRIPTION =
+            "What you closed each day, the effort you logged, and what you are still holding.";
 
     private static final String NO_PER_PERSON_EQUIVALENT =
             "This report is about a project's work rather than one person's. The figures behind it — "
@@ -198,7 +222,28 @@ public final class ReportCatalogue {
         if (!scope.ownWorkOnly()) {
             return ALL;
         }
-        return ALL.stream().map(d -> answerableForOwnWork(d) ? d : withheld(d)).toList();
+        return ALL.stream().map(ReportCatalogue::forOwnWork).toList();
+    }
+
+    /**
+     * One descriptor as a delivery role sees it: unchanged, re-described, or
+     * withheld.
+     */
+    private static ReportDtos.Descriptor forOwnWork(ReportDtos.Descriptor d) {
+        if (ANSWERED_PER_PERSON.contains(d.key()) && d.available()) {
+            return new ReportDtos.Descriptor(d.key(), d.title(), OWN_WORK_DESCRIPTION, d.category(),
+                    d.chart(), withoutProjectFilter(d.filters()), true, null);
+        }
+        return answerableForOwnWork(d) ? d : withheld(d);
+    }
+
+    /**
+     * The resource-keyed table has no project column, so a Project control on
+     * these reports is one the runner cannot honour. Removed rather than left to
+     * be ignored — the viewer draws exactly what is declared.
+     */
+    private static List<ReportFilterKind> withoutProjectFilter(List<ReportFilterKind> filters) {
+        return filters.stream().filter(f -> f != PROJECT).toList();
     }
 
     /** The descriptor for a key as one caller sees it, or empty — which the controller turns into a 404. */

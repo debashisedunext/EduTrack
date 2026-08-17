@@ -76,13 +76,24 @@ class ReportsIT {
 
     private long mine;
     private long theirs;
+    private long me;
+    private long colleague;
 
     @BeforeEach
     void seed() {
         jdbc.update("DELETE FROM daily_ticket_stats");
+        jdbc.update("DELETE FROM resource_daily_stats");
 
         mine = project("RPTA");
         theirs = project("RPTB");
+
+        // The developer's own row, and a colleague's an order of magnitude
+        // larger. If resource scoping ever broke, "4" would read as "64" —
+        // a number wrong enough to be noticed, which "5" would not be.
+        me = user("rpt.me");
+        colleague = user("rpt.them");
+        resourceStat(D2, me, 2, 4, 1);
+        resourceStat(D2, colleague, 30, 60, 25);
 
         // My project: small and legible. Theirs: an order of magnitude bigger,
         // so a scope failure shows up as a wrong number rather than as a
@@ -105,7 +116,10 @@ class ReportsIT {
     }
 
     private CallerIdentity developer() {
-        return new CallerIdentity(3L, "DEVELOPER", List.of(mine));
+        // The seeded user, not an arbitrary id — the whole point of the
+        // resource-keyed assertions is that the rows returned are this
+        // person's.
+        return new CallerIdentity(me, "DEVELOPER", List.of(mine));
     }
 
     @Nested
@@ -138,13 +152,12 @@ class ReportsIT {
 
             assertThat(mine.scopeNote()).isEqualTo("These reports cover your own work only.");
 
-            // Every report still offered as runnable must be answerable per
-            // person. Today that set is empty, and it must never contain a
-            // report reading a project-keyed table.
+            // Every report offered as runnable must read the resource-keyed
+            // table. date-wise does; the project-keyed ones are withheld.
             assertThat(mine.reports())
                     .filteredOn(ReportDtos.Descriptor::available)
                     .extracting(ReportDtos.Descriptor::key)
-                    .doesNotContain(DateWiseReportRunner.KEY);
+                    .containsExactly(DateWiseReportRunner.KEY);
         }
 
         @Test
@@ -257,8 +270,44 @@ class ReportsIT {
         @Test
         @DisplayName("a delivery role cannot reach a project-keyed report by URL either")
         void deliveryRoleCannotRunItDirectly() {
-            assertThat(service.run(developer(), DateWiseReportRunner.KEY, D1, D3, null, null))
-                    .isEmpty();
+            assertThat(service.run(developer(), "project-health", D1, D3, null, null)).isEmpty();
+        }
+
+        /**
+         * The assertion that would have caught the original defect: a delivery
+         * role's numbers must be their own, not their projects'.
+         */
+        @Test
+        @DisplayName("a delivery role gets their own figures, from the resource-keyed table")
+        void deliveryRoleSeesOwnWork() {
+            ReportService.Rendered rendered = service
+                    .run(developer(), DateWiseReportRunner.KEY, D1, D3, null, null)
+                    .orElseThrow();
+
+            // Different columns, because created and reopened do not exist per
+            // person — a ticket is raised by a reporter and reopened by a manager.
+            assertThat(rendered.report().columns())
+                    .extracting(ReportDtos.Column::key)
+                    .containsExactly("date", "closed", "effortHours", "assignedOpen", "assignedDelayed");
+
+            // The developer's own row: 2 closed and 4 open, not the project's 40.
+            assertThat(rendered.report().rows()).hasSize(1);
+            assertThat(rendered.report().rows().get(0))
+                    .containsEntry("closed", 2L)
+                    .containsEntry("assignedOpen", 4L);
+
+            assertThat(rendered.meta().appliedScope()).isEqualTo("your own work");
+        }
+
+        @Test
+        @DisplayName("one developer's report never contains another's rows")
+        void resourceRowsAreNotShared() {
+            ReportService.Rendered rendered = service
+                    .run(developer(), DateWiseReportRunner.KEY, D1, D3, null, null)
+                    .orElseThrow();
+
+            // The colleague holds 60. If scoping were wrong this would be 64.
+            assertThat(rendered.report().rows().get(0)).containsEntry("assignedOpen", 4L);
         }
     }
 
@@ -327,6 +376,25 @@ class ReportsIT {
         jdbc.update("INSERT INTO projects (project_code, name, status) VALUES (?, ?, 'ACTIVE')",
                 code + SEQ.incrementAndGet(), "Reports IT");
         return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    private long user(String name) {
+        Long roleId = jdbc.queryForObject("SELECT id FROM roles WHERE code = 'DEVELOPER'", Long.class);
+        String u = name + SEQ.incrementAndGet();
+        jdbc.update("""
+                INSERT INTO users (emp_code, username, email, password_hash, full_name, role_id, is_active)
+                VALUES (?, ?, ?, 'x', 'Reports IT', ?, 1)
+                """, u, u, u + "@example.test", roleId);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    private void resourceStat(LocalDate day, long userId, int closed, int assignedOpen, int assignedDelayed) {
+        jdbc.update("""
+                INSERT INTO resource_daily_stats (stat_date, user_id, closed, effort_hours,
+                                                  assigned_open, assigned_critical, assigned_delayed,
+                                                  computed_at)
+                VALUES (?, ?, ?, 6.50, ?, 0, ?, '2026-08-12 06:00:00')
+                """, day, userId, closed, assignedOpen, assignedDelayed);
     }
 
     private void projectStat(LocalDate day, long projectId, int created, int closed, int reopened, int openTotal) {

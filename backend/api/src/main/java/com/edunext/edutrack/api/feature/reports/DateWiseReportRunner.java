@@ -60,6 +60,52 @@ class DateWiseReportRunner implements ReportRunner {
 
     @Override
     public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds) {
+        // Which table can answer this caller — not merely which rows of one.
+        // Same branch DashboardService makes, for the same reason: a
+        // project-keyed table cannot express "assigned to me" however it is
+        // filtered, and answering from it under a "your own work" label is the
+        // defect this branch exists to prevent.
+        return scope.ownWorkOnly() ? ownWork(scope, from, to) : byProject(from, to, projectIds);
+    }
+
+    /**
+     * §2's three delivery roles, from the resource-keyed table.
+     *
+     * <p>Four columns rather than five, and different ones. {@code created} and
+     * {@code reopened} are absent because a ticket is raised by a reporter and
+     * reopened by a manager — neither is the assignee — and net backlog is a
+     * project's stock. What is recorded per person is what they closed, the
+     * effort they logged, and what they are holding.
+     *
+     * <p>Effort is included because it is the figure a person is most often
+     * asked to account for and it costs nothing here — the column is already in
+     * the row being read.
+     */
+    private Result ownWork(ReportScope scope, LocalDate from, LocalDate to) {
+        List<ReportDtos.Column> columns = List.of(
+                new ReportDtos.Column("date", "Date", DATE),
+                new ReportDtos.Column("closed", "Closed", NUMBER),
+                new ReportDtos.Column("effortHours", "Effort", ReportDtos.ColumnType.DURATION),
+                new ReportDtos.Column("assignedOpen", "Still open", NUMBER),
+                new ReportDtos.Column("assignedDelayed", "Delayed", NUMBER));
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (ReportRepository.ResourceDayRow day : repository.dailyResourceFlow(from, to, scope.userId())) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", day.date().toString());
+            row.put("closed", day.closed());
+            row.put("effortHours", day.effortHours());
+            row.put("assignedOpen", day.assignedOpen());
+            row.put("assignedDelayed", day.assignedDelayed());
+            rows.add(row);
+        }
+
+        return new Result(columns, rows,
+                repository.resourceComputedAt(from, to, scope.userId()).orElse(null));
+    }
+
+    /** Admin, PM and Support — the project-keyed table, which is what §7.8 describes. */
+    private Result byProject(LocalDate from, LocalDate to, List<Long> projectIds) {
         List<ReportDtos.Column> columns = List.of(
                 new ReportDtos.Column("date", "Date", DATE),
                 new ReportDtos.Column("created", "Created", NUMBER),

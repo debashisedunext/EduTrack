@@ -2687,6 +2687,74 @@ export const restHandlers = [
     }
     return ok({ key, asOf: new Date().toISOString(), series }, undefined, { headers: { ETag: etag } });
   }),
+  /*
+    A-063 · the report catalogue behind S-27's card grid.
+
+    **Stream A adding a handler in Stream D's file (D-004).** `coverage.test.ts`
+    asserts every contract operation has one and names this directory as where
+    to put it, so the alternative to adding it here is leaving `develop` red —
+    which is what CI did when `listReports` landed without it. Flagged rather
+    than done quietly.
+
+    The seventeen unbuilt reports carry `available: false` deliberately, exactly
+    as the server does: the hub's most common state for the next few sprints is
+    a greyed card carrying its reason, and a mock that showed eighteen working
+    reports would hide the one arrangement worth reviewing.
+
+    `scopeNote` is null here — the mock has no caller identity to narrow by, and
+    inventing one would make the mock disagree with the server for a reason no
+    test could see. The real scoping is asserted in `ReportsIT` against MySQL.
+  */
+  http.get(url('/reports'), () => {
+    const unbuilt = 'This report is not built yet. The hub lists it so you can see it is coming '
+      + 'rather than wonder whether it exists.';
+
+    const declared: [string, string, string, string | null][] = [
+      ['resource-scorecard', 'Resource Performance Scorecard', 'PEOPLE', 'bar'],
+      ['resource-velocity', 'Resource Velocity', 'PEOPLE', 'line'],
+      ['effort-summary', 'Effort Summary', 'PEOPLE', 'stacked-bar'],
+      ['resource-contribution', 'Resource Contribution', 'PEOPLE', 'stacked-bar'],
+      ['project-health', 'Project Health', 'DELIVERY', 'line'],
+      ['aging', 'Aging Report', 'DELIVERY', 'bar'],
+      ['sla-breach', 'Delayed / SLA Breach', 'DELIVERY', 'bar'],
+      ['workload-capacity', 'Workload & Capacity', 'DELIVERY', 'stacked-bar'],
+      ['reopen-analysis', 'Reopen Analysis', 'QUALITY', 'bar'],
+      ['rework-analysis', 'Rework Analysis', 'QUALITY', 'bar'],
+      ['task-type-analysis', 'Task Type Analysis', 'QUALITY', 'donut'],
+      ['stage-funnel', 'Stage Funnel', 'WORKFLOW', 'bar'],
+      ['stage-cycle-time', 'Stage Cycle Time', 'WORKFLOW', 'stacked-bar'],
+      ['deployment-report', 'Deployment Report', 'WORKFLOW', 'bar'],
+      ['client-report', 'Client Report', 'OPERATIONS', 'bar'],
+      ['audit-compliance', 'Audit & Compliance', 'OPERATIONS', null],
+      ['email-delivery-log', 'Email Delivery Log', 'OPERATIONS', null],
+    ];
+
+    return ok({
+      reports: [
+        {
+          key: 'date-wise',
+          title: 'Date-wise Report',
+          description: 'Created against closed and reopened per day, with the net backlog line.',
+          category: 'DELIVERY',
+          chart: 'line',
+          filters: ['DATE_RANGE', 'PROJECT'],
+          available: true,
+          unavailableReason: null,
+        },
+        ...declared.map(([key, title, category, chart]) => ({
+          key,
+          title,
+          description: `${title} — S-27.`,
+          category,
+          chart,
+          filters: ['DATE_RANGE', 'PROJECT'],
+          available: false,
+          unavailableReason: unbuilt,
+        })),
+      ],
+      scopeNote: null,
+    });
+  }),
   http.get(url('/reports/:reportKey'), ({ params, request }) => {
     const db = getDb();
     const q = new URL(request.url).searchParams;
