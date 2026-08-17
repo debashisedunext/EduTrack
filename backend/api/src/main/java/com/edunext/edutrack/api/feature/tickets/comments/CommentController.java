@@ -8,7 +8,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,10 +23,11 @@ import org.springframework.web.bind.annotation.RestController;
  * C-029 · {@code /tickets/{ticketId}/comments}, per
  * {@code contracts/openapi.yaml}.
  *
- * <p>Two of the contract's four operations. {@code editComment} and
- * {@code deleteComment} are C-033's and are left unrouted rather than stubbed —
- * see {@link CommentService}'s note on why an unserved verb should 404 rather
- * than pretend.
+ * <p>All four of the contract's operations, since C-033 added the edit and the
+ * delete. Both had been declared since D-001 with nothing serving them, which is
+ * the state C-028 found for {@code deleteAttachment} and named as a defect: the
+ * generated client has always exported them, so a button wired to one worked
+ * against the mock and did nothing in production.
  *
  * <p>The {@code /api/v1} prefix is spelled out because nothing declares it
  * globally; see {@code PlannedCloseDateController}'s note and the 404s that cost.
@@ -97,5 +100,78 @@ class CommentController {
             @Valid @RequestBody CommentDtos.CommentWriteRequest request) {
 
         return new CommentDtos.CommentResponse(service.create(caller, ticketId, request));
+    }
+
+    /*
+     * C-033 · the same capability as posting, and deliberately not a narrower one.
+     *
+     * Editing your own comment inside five minutes is not a privilege over the
+     * ticket; it is finishing the sentence you were already entitled to write.
+     * Anything scarcer — ticket.assign, an author-specific authority — would be a
+     * second place the author rule is decided, and the annotation cannot express
+     * it in any case: whether the caller wrote *this* comment is a fact about a
+     * row, which is why CommentService owns it and answers 422.
+     *
+     * No If-Match. CONVENTIONS.md asks for one on a PATCH, and the concurrent
+     * edit it protects against cannot happen here: the only person who may edit
+     * is the author, inside five minutes, and two of them racing is one person
+     * with two tabs open. The contract declares no ETag on this resource for the
+     * same reason, and inventing one would mean minting a tag on every comment in
+     * every thread read to guard a collision that has no second party.
+     */
+    @PatchMapping(path = "/{commentId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('ticket.update_progress')")
+    @Operation(operationId = "editComment", summary = "Edit within the five-minute window",
+            description = """
+                    Author only, within five minutes of posting. After that the comment is locked \
+                    and this returns `422`.
+
+                    An edited comment keeps `originalBody` and renders an "edited" marker. \
+                    **No role, including Admin, can silently rewrite a comment** — that is what \
+                    keeps the thread admissible as evidence, and it is why PM and Admin are \
+                    refused here while `deleteComment` allows them.
+
+                    The body is re-sanitised against §3.9 and re-parsed for `@mentions`. Only \
+                    somebody the previous wording did not already name is notified.""")
+    CommentDtos.CommentResponse edit(
+            Authentication caller,
+            @PathVariable long ticketId,
+            @PathVariable long commentId,
+            @Valid @RequestBody CommentDtos.EditCommentRequest request) {
+
+        return new CommentDtos.CommentResponse(service.edit(caller, ticketId, commentId, request));
+    }
+
+    /*
+     * C-033 · also ticket.update_progress, and the widening to PM and Admin is
+     * inside the service rather than here.
+     *
+     * It has to be: "the author, a PM or an Admin" is a rule about a row — who
+     * wrote this particular comment — and @PreAuthorize can only see the caller.
+     * Expressing half of it here (hasAnyAuthority for the supervisory case) and
+     * half in the service would put the rule in two places, which is how the two
+     * eventually disagree. The annotation asks the question it can answer: may
+     * this caller work on tickets at all.
+     */
+    @DeleteMapping(path = "/{commentId}")
+    @PreAuthorize("hasAuthority('ticket.update_progress')")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(operationId = "deleteComment", summary = "Delete a comment, leaving a tombstone",
+            description = """
+                    The row survives with `isDeleted`; the body is cleared, `originalBody` with it. \
+                    Nothing vanishes — the thread keeps "removed by X on date" in place.
+
+                    The author, a PM or an Admin. **Every** removal leaves a tombstone, including \
+                    the author's own and including one made seconds after posting: §4B.5 attaches \
+                    its five minutes to editing and says of deletion only that it leaves a mark. \
+                    Idempotent — deleting a tombstone answers 204.""")
+    void delete(
+            Authentication caller,
+            @PathVariable long ticketId,
+            @PathVariable long commentId) {
+
+        service.delete(caller, ticketId, commentId);
     }
 }

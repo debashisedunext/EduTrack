@@ -154,6 +154,20 @@ final class PermissionMatrix {
     private static final String COMMENT = """
             {"body":"matrix fixture comment"}""";
 
+    /**
+     * C-033 · {@code CommentDtos.EditCommentRequest}, which is {@code body} and
+     * nothing else.
+     *
+     * <p>A separate constant rather than reusing {@link #COMMENT}, even though the
+     * two happen to be structurally compatible today. {@code CommentWriteRequest}
+     * carries three more fields and one of them — {@code attachmentIds} — is
+     * refused outright by {@code CommentService}; if a future edit body ever
+     * accepted more, sharing one fixture would silently start asserting the wrong
+     * DTO's constraints. Same prose-not-markup rule as above, for §3.9's reason.
+     */
+    private static final String EDIT_COMMENT = """
+            {"body":"matrix fixture edit"}""";
+
     /** {@code PreferenceDtos.PreferenceUpdateRequest}: an empty list is valid. */
     private static final String PREFERENCES = """
             {"preferences":[]}""";
@@ -477,6 +491,39 @@ final class PermissionMatrix {
             // has to survive §3.9's sanitiser as well — a body of pure markup is a
             // 400 from CommentService, which would defeat the row just as surely.
             everyRole("POST", "/api/v1/tickets/{ticketId}/comments", COMMENT),
+
+            // ── comments · C-033, §4B.5's immutability row ───────────────────
+            //
+            // Both all six, and both for the reason the DELETE on attachments
+            // above gives: the rule these routes enforce is about a ROW — who
+            // wrote this comment, and how long ago — and a row rule cannot be an
+            // authority. @PreAuthorize can see the caller and not the comment, so
+            // asserting anything narrower here would express half a rule and
+            // leave the other half in the service, where the two would eventually
+            // disagree.
+            //
+            // What each role actually gets is decided one layer down and pinned
+            // by CommentServiceTest:
+            //
+            //   PATCH  the author, inside five minutes. NOBODY else — not PM,
+            //          not Admin. §4B.5: "no role, including Admin, can silently
+            //          rewrite a comment", and an Admin edit cannot be anything
+            //          else, because the thread would still attribute the new
+            //          wording to the original author. 422, since what refuses
+            //          the request is the state of the row rather than the caller.
+            //
+            //   DELETE the author, a PM or an Admin — C-028's widening, for its
+            //          reason: a comment posted client-visible by mistake is a
+            //          disclosure and waiting for its author is not a remedy.
+            //          Their act is never silent; every removal leaves a
+            //          tombstone naming who made it. A Developer reaching this
+            //          route for a colleague's comment gets 403 with the
+            //          capability satisfied.
+            //
+            // So a green row here means "all six may ask", which is exactly what
+            // this file is for, and NOT "all six may edit anyone's comment".
+            everyRole("PATCH", "/api/v1/tickets/{ticketId}/comments/{commentId}", EDIT_COMMENT),
+            everyRole("DELETE", "/api/v1/tickets/{ticketId}/comments/{commentId}"),
 
             // ── ticket detail · every role, because permission is not scope ──
             //

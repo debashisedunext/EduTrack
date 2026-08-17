@@ -142,3 +142,132 @@ sanitiser as 100 000 — against a 65 535-byte column, which truncates mid-entit
 and stores markup that will never parse again. `CommentService` re-applies the
 20 000 bound to the **sanitised** value, which closes it from this side; the
 column is still worth widening.
+
+---
+
+# C-033 · the edit window and the tombstone
+
+Blueprint §4B.5's immutability row: *"editable for 5 minutes; after that the
+comment is locked and shows an 'edited' marker with the original preserved.
+Deletion leaves a tombstone. No role, including Admin, can silently rewrite a
+comment."*
+
+**No migration and no new route.** `edited_at`, `original_body`, `is_deleted`,
+`deleted_by` and `deleted_at` have all been on `ticket_comments` since the A-006
+baseline, whose header names C-029–C-034 as the tasks it was waiting for, and
+`editComment` / `deleteComment` have been in `openapi.yaml` since D-001 with
+nothing serving them — the same state C-028 found for `deleteAttachment` and
+named a defect, since the generated client has always exported both.
+
+## The asymmetry, which is the whole task
+
+Editing and deleting look like one permission and are two.
+
+| | who | window | leaves a mark |
+|---|---|---|---|
+| **Edit** | the author, and **nobody else** | five minutes | "edited", original preserved |
+| **Delete** | the author, a PM or an Admin | **none** | always a tombstone |
+
+**No role widens the edit, Admin included.** The obvious reading of §4B.5 is that
+an Admin edit is fine if it is marked — and the marker cannot carry the fact that
+matters. However the card is labelled, the thread still attributes the words to
+their original author, so "Ravi said X" becoming "Ravi said Y" over an Admin's
+signature is a rewrite of Ravi. The remedies that do work are both open: reply,
+or delete and leave a tombstone naming who removed it.
+
+**Deletion widens to PM and Admin**, following C-028 and for its reason: a comment
+posted client-visible by mistake is a disclosure, and waiting for its author to
+come back from leave is not a remedy.
+
+**Deletion has no window at all**, which is where this deliberately departs from
+C-028. That task derives whether a tombstone is *visible* from the fifteen
+minutes and the actor, because §4B.4 spells out both cases. §4B.5 attaches its
+five minutes to editing and says of deletion only that it leaves a tombstone — so
+every removal here is recorded, including an author's own ten seconds after
+posting. The stricter rule is also the better fit: a mis-pasted screenshot is a
+mistake, a sentence is a statement colleagues have already read.
+
+## Three guards, each verified by breaking it
+
+1. **`original_body` is written on the first edit only.** A second edit
+   overwriting it leaves the *first revision* standing as the "original" and
+   loses what the author actually posted — and it looks entirely fine, because
+   the field is populated and the marker is showing.
+   `preservesTheFirstOriginalNotTheLast` is the only test that goes red.
+
+2. **A tombstone clears `original_body` as well as `body_html`.** This is the
+   trap the task set out to close and the one worth reading twice: a comment
+   edited *before* it was deleted keeps its first wording in the field designed
+   to preserve wording — usually the exact text the author was taking back.
+   Cleared on the write **and** again in `CommentDto.of`, so a row written by a
+   fixture or by hand cannot leak either.
+
+3. **An edit re-notifies only somebody the previous wording did not already
+   name.** Editing re-parses the body, so notifying everyone it names makes
+   post-edit-edit a way to ring the same bell indefinitely. The case that
+   actually reaches production is duller — somebody fixing a typo in a sentence
+   containing a name — and D-035's rate limit catches neither.
+
+## Statuses
+
+`422` for a refused edit and `403` for a refused delete, which is not an
+inconsistency. An edit is refused by the **row** — the window closed, and the
+caller was entitled four minutes ago — and 422 is the status for a well-formed
+request that cannot be applied to the resource as it stands. A deletion is
+refused by **who is asking**, with no clock involved at all, which is what 403
+means. The contract has typed the edit's 422 since D-001; the delete's 403 is
+added here.
+
+Neither weakens A-035. Row scope is settled by `ScopedTickets` before this
+package sees the request, and `CommentRows.find` keys on **both** ids so a
+comment on another ticket is 404 from the same line as one that does not exist.
+By the time either refusal is reachable the caller is looking at the comment in a
+thread they just fetched.
+
+## The thread read now returns tombstones, and C-029's filter is gone
+
+`CommentRows.page` filtered `isDeleted = false`. That was a reasonable default
+while nothing could delete, and it had to go: a tombstone that is never returned
+is not a tombstone, it is a hard delete, and C-034's timeline cannot place a
+comment the thread read refuses to hand it. The domain repository's
+`findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc` still filters and is
+deliberately left alone — it feeds `/full`'s projection, which is Stream A's and
+already drifted from the contract.
+
+## For other streams
+
+⚠ **Stream D — `contracts/openapi.yaml`, additive.** `Comment.deletedBy` and
+`Comment.deletedAt`, mirroring `Attachment`'s pair exactly, plus a `403` on
+`deleteComment` and a longer description on both verbs. Without the two fields a
+tombstone can only read "comment removed", which is the record §4B.5 asked for
+minus the fact that matters. Client regenerated; the diff is those three files
+and nothing else. Same flagged-sign-off precedent C-011, C-012 and C-015 set.
+
+⚠ **Stream D — `frontend/src/mocks/` is yours, and both handlers were looser
+than the server they stand in for.** The PATCH found its row by **comment id
+alone**, so `/tickets/{one-I-can-see}/comments/{one-I-cannot}` edited a comment
+on a ticket the caller has no scope for; it never sanitised, so the mock stored
+markup the real server strips. The DELETE had **no permission check of any
+kind** — anybody could tombstone anybody's comment — plus the same cross-ticket
+hole and no tombstone fields. Both now mirror `CommentService`, the 403
+included: a client that has only ever seen 204 has no reason to handle a
+refusal, and the first person to meet one would have been a user.
+
+⚠ **Stream A — `application.yml` gains `edutrack.comments.edit-window`.** A
+property and not a settings row, for the reason C-028 gave about its own fifteen
+minutes: §4B.4's "all configurable in system settings" is a sentence about the
+attachment *limits*. This is a retention rule, and an operator able to raise it
+to a year could quietly reopen every comment on the product. `PermissionMatrix`
+gains two rows, as the Definition of Done requires.
+
+**The client holds no copy of the five minutes.** `Comment.editableUntil` is
+derived server-side from that property and the countdown renders it, so
+shortening the window cannot leave an author watching a timer the server has
+already stopped honouring — the C-027 failure, where a client-side copy of a
+server cap silently *overrode* it with nothing in any log.
+
+⚠ **Still open, deliberately.** The `COMMENT_EDITED` and `COMMENT_DELETED`
+history rows belong with C-034's timeline, alongside the `ATTACHMENT_ADDED` row
+C-025 left for the same reason: there is still no ticket-history write service.
+`iteration_no` on a comment stays null until C-042 (C-032's dependency), and
+`PLAN.md §3.9`'s `MEDIUMTEXT` is still `TEXT`.

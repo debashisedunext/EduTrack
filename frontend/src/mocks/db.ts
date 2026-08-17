@@ -360,6 +360,19 @@ export interface Comment {
   authorId: number; isClientVisible: boolean; isEdited: boolean; isDeleted: boolean;
   stageCode: string | null; cycleNo: number; iterationNo: number;
   mentionIds: number[]; createdAt: string;
+  /**
+   * C-033 · the tombstone. Both null until the comment is removed, and both
+   * stamped by the same write — a row carrying one without the other is not a
+   * state the server produces. Deliberately the same shape as `Attachment`'s
+   * pair, which the two are meant to be read beside.
+   *
+   * Unlike an attachment there is **no window and no silent case**: §4B.5
+   * attaches its five minutes to editing and says of deletion only that it
+   * leaves a tombstone, so every removal here is recorded — including an
+   * author's own, seconds after posting.
+   */
+  deletedById?: number | null;
+  deletedAt?: string | null;
 }
 export interface Attachment {
   id: number; ticketId: string; fileName: string; contentType: string;

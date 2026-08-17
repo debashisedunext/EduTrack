@@ -312,6 +312,32 @@ edutrack:
       # nothing about the running product would look different.
       fail-open: false
 
+  # C-033 · the comment box. Blueprint §4B.5.
+  comments:
+    # How long after posting the AUTHOR may still change the wording. §4B.5:
+    # "editable for 5 minutes; after that the comment is locked and shows an
+    # 'edited' marker with the original preserved".
+    #
+    # Bounds the edit and nothing else. Deletion has no window — §4B.5 attaches
+    # the five minutes to editing and says of deletion only that it leaves a
+    # tombstone, so every removal is recorded, including an author's own seconds
+    # after posting.
+    #
+    # NOT a settings row, and the omission is deliberate for the reason C-028
+    # gave about its own fifteen minutes: §4B.4's "all configurable in system
+    # settings" is a sentence about the attachment *limits*. This is a retention
+    # rule, and an operator able to raise it to a year could quietly reopen every
+    # comment on the product — the opposite of the sentence beside it in §4B.5.
+    # Overridable at deploy so a test need not wait five minutes; not at runtime
+    # by an administrator.
+    #
+    # The client does not hold its own copy of this number. `Comment.editableUntil`
+    # is derived from it server-side and the countdown renders that, so shortening
+    # it here cannot leave an author watching a timer the server has already
+    # stopped honouring — the C-027 failure, where a client-side copy of a server
+    # cap silently overrode it with nothing in any log.
+    edit-window: ${COMMENT_EDIT_WINDOW:PT5M}
+
   webhooks:
     email:
       # D-034/D-039. The provider webhooks are unauthenticated by necessity —

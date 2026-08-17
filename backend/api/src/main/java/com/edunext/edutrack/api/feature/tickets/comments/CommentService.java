@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.tickets.comments;
 
 import com.edunext.edutrack.api.security.CallerIdentity;
+import com.edunext.edutrack.api.security.permission.RolePermissions;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.common.pagination.Cursor;
 import com.edunext.edutrack.common.pagination.CursorPage;
@@ -8,14 +9,17 @@ import com.edunext.edutrack.common.pagination.PageLimit;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketComment;
 import com.edunext.edutrack.domain.tickets.TicketCommentRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * C-029 · posting and reading a ticket's thread, blueprint §4B.5.
@@ -35,18 +39,35 @@ import java.util.List;
  *       {@link #stamp}.</li>
  * </ol>
  *
- * <h2>What this task does not do</h2>
+ * <h2>C-033 · the two writes that change a comment after it exists</h2>
  *
- * <p>C-029 is the box and the thread. {@code PATCH} and {@code DELETE} are
- * C-033's and are deliberately absent — not stubbed, not routed. The contract
- * has declared them since D-001 and a client calling one today gets a 404 from
- * Spring, which is the honest answer for a verb this server does not serve; C-028
- * is the cautionary tale for the alternative, where a route the contract promised
- * and no server implemented left a delete button that worked against the mock and
- * did nothing in production for three tasks running.
+ * <p>{@link #edit} and {@link #delete}, blueprint §4B.5's immutability row:
+ * <em>"editable for 5 minutes; after that the comment is locked and shows an
+ * 'edited' marker with the original preserved. Deletion leaves a tombstone. No
+ * role, including Admin, can silently rewrite a comment."</em>
  *
- * <p>The one thing that would be invisible later, and so is done now, is the
- * stamp — see {@link #stamp}.
+ * <p>That last sentence is the one the whole task turns on, and it produces an
+ * asymmetry worth stating up front, because it looks like an inconsistency:
+ *
+ * <ul>
+ *   <li><b>Editing is the author's alone</b>, and no role widens it. An Admin
+ *       editing somebody else's comment would leave the thread attributing the
+ *       new wording to the original author — which is the rewrite the sentence
+ *       forbids, marker or no marker.</li>
+ *   <li><b>Deleting widens to PM and Admin</b>, following C-028's identical
+ *       widening for attachments and for the identical reason: a comment posted
+ *       client-visible by mistake is a disclosure, and waiting for its author to
+ *       come back from leave is not a remedy. Their act is never silent, because
+ *       <em>every</em> deletion here leaves a tombstone naming who did it.</li>
+ * </ul>
+ *
+ * <p>Note the second bullet's "every". C-028 derives whether an attachment's
+ * tombstone is <em>visible</em> from the window and the actor, because §4B.4 says
+ * "the uploader may delete within 15 minutes; after that it is a soft delete
+ * leaving a tombstone" — two cases, spelled out. §4B.5 says only "deletion leaves
+ * a tombstone", with the five minutes attached to editing and to nothing else. So
+ * there is no silent branch here and no window on the delete at all, which is
+ * both the simpler rule and the stricter one.
  */
 @Service
 class CommentService {
@@ -58,14 +79,44 @@ class CommentService {
     private final CommentSanitizer sanitizer;
     private final CommentMentions mentions;
     private final CommentMentionNotifier mentionNotifier;
+    private final CommentProperties properties;
+    private final Clock clock;
 
+    /*
+     * @Autowired is required, not decoration. Two constructors means Spring has
+     * no candidate to prefer and fails at startup with "no default constructor
+     * found", which names neither the class's real problem nor this file —
+     * AttachmentService carries the same marker for the same pair of
+     * constructors, and the omission here cost a red PermissionMatrixTest run
+     * before it was spotted.
+     */
+    @Autowired
     CommentService(ScopedTickets tickets,
                    TicketCommentRepository comments,
                    CommentRows rows,
                    CommentUserRefs people,
                    CommentSanitizer sanitizer,
                    CommentMentions mentions,
-                   CommentMentionNotifier mentionNotifier) {
+                   CommentMentionNotifier mentionNotifier,
+                   CommentProperties properties) {
+        this(tickets, comments, rows, people, sanitizer, mentions, mentionNotifier, properties,
+                Clock.systemUTC());
+    }
+
+    /**
+     * The clock is injectable for the same reason {@code AttachmentService}'s is:
+     * §4B.5's window is the rule under test, and a test that proved it by waiting
+     * five minutes would not be run.
+     */
+    CommentService(ScopedTickets tickets,
+                   TicketCommentRepository comments,
+                   CommentRows rows,
+                   CommentUserRefs people,
+                   CommentSanitizer sanitizer,
+                   CommentMentions mentions,
+                   CommentMentionNotifier mentionNotifier,
+                   CommentProperties properties,
+                   Clock clock) {
         this.tickets = tickets;
         this.comments = comments;
         this.rows = rows;
@@ -73,6 +124,8 @@ class CommentService {
         this.sanitizer = sanitizer;
         this.mentions = mentions;
         this.mentionNotifier = mentionNotifier;
+        this.properties = properties;
+        this.clock = clock;
     }
 
     /**
@@ -119,12 +172,18 @@ class CommentService {
             if (row.getMentionedUserIds() != null) {
                 wanted.addAll(row.getMentionedUserIds());
             }
+            // C-033 · the tombstone's actor, folded into the same lookup for the
+            // same reason the mentions were. It is usually the author and almost
+            // always somebody already on the page; a second IN query for the
+            // handful of removals in a thread would be the n+1 this method was
+            // written to avoid, arriving by the back door.
+            wanted.add(row.getDeletedBy());
         }
         CommentUserRefs.Resolved resolved = people.resolve(wanted);
 
         return new CursorPage<>(
                 page.data().stream()
-                        .map(row -> CommentDtos.CommentDto.of(row, resolved.people(), resolved.roles()))
+                        .map(row -> dto(row, resolved))
                         .toList(),
                 page.meta());
     }
@@ -198,7 +257,240 @@ class CommentService {
                     authorRef == null ? null : authorRef.displayName(), mentioned);
         }
 
-        return CommentDtos.CommentDto.of(saved, resolved.people(), resolved.roles());
+        return dto(saved, resolved);
+    }
+
+    /**
+     * C-033 · rewrite a comment inside §4B.5's five minutes.
+     *
+     * <h2>Author only, and this is the one rule no role widens</h2>
+     *
+     * <p>§4B.5: <em>"no role, including Admin, can silently rewrite a comment"</em>.
+     * The obvious reading is that an Admin edit would be allowed if it were
+     * marked — and it is the wrong one, because the marker cannot carry the
+     * information that matters. However the card is labelled, the thread still
+     * attributes the words to their original author, and "Ravi said X" becoming
+     * "Ravi said Y" over an Admin's signature is a rewrite of Ravi whatever badge
+     * sits next to it. The remedies that do work are both open: reply, or delete
+     * and leave a tombstone that names who removed it. So {@link #delete} widens
+     * to PM and Admin and this deliberately does not.
+     *
+     * <h2>What is preserved, and when</h2>
+     *
+     * <p>{@code original_body} is written <b>on the first edit only</b> — the
+     * column's own comment in the baseline migration says so ("preserved on first
+     * edit"), and it is the difference between keeping what the author wrote and
+     * keeping the last thing they tried. A second edit overwriting it would leave
+     * the first revision as the "original" and lose the actual one, which is the
+     * single most useless place to be: the record would look intact and be wrong.
+     * Five minutes is easily enough for three edits.
+     *
+     * <h2>The body goes through everything a new one does</h2>
+     *
+     * <p>Sanitised (PLAN.md §3.9 is about the write path, and an edit is a write),
+     * length-checked against the sanitised value, and re-parsed for mentions. An
+     * edit that reduces to nothing is a 400 and not an empty comment — the same
+     * refusal {@link #create} gives, because the alternative is using the edit
+     * window as a way to blank a comment without leaving the tombstone that
+     * deleting one would.
+     *
+     * @throws CommentNotEditableException 422 — locked, not the author's, or gone
+     */
+    @Transactional
+    CommentDtos.CommentDto edit(Authentication caller,
+                                long ticketId,
+                                long commentId,
+                                CommentDtos.EditCommentRequest request) {
+
+        Ticket ticket = tickets.require(caller, ticketId);
+        TicketComment row = rows.find(ticketId, commentId).orElseThrow(CommentNotFoundException::new);
+
+        long editor = authorId(caller);
+        if (row.isDeleted()) {
+            throw CommentNotEditableException.alreadyDeleted();
+        }
+        if (!Objects.equals(row.getAuthorId(), editor)) {
+            throw CommentNotEditableException.notTheAuthor();
+        }
+        if (!withinEditWindow(row)) {
+            throw CommentNotEditableException.windowClosed();
+        }
+
+        String html = sanitizer.sanitize(request.body());
+        if (html.isEmpty()) {
+            throw InvalidCommentException.emptyBody();
+        }
+        if (html.length() > CommentSanitizer.MAX_LENGTH) {
+            throw InvalidCommentException.tooLong(html.length());
+        }
+
+        String plainText = sanitizer.toPlainText(html);
+        List<CommentMentions.MentionedUser> mentioned = mentioned(ticket, plainText);
+
+        // Only the people the previous wording did NOT already name. An edit is
+        // the one path that can fire the same notification twice, and firing it
+        // is a button anybody can hold down: post "@ravi", edit to "@ravi ", edit
+        // back, and Ravi has three bell entries and three emails for one remark.
+        // D-035's rate limit would eventually catch a determined abuser and would
+        // not catch the ordinary case, which is somebody fixing a typo in a
+        // sentence that happens to contain a name.
+        List<Long> alreadyNotified = row.getMentionedUserIds() == null
+                ? List.of()
+                : row.getMentionedUserIds();
+        List<CommentMentions.MentionedUser> newlyMentioned = mentioned.stream()
+                .filter(person -> !alreadyNotified.contains(person.id()))
+                .toList();
+
+        // Written once and never again — see the javadoc. `getBodyHtml`, not the
+        // request: what is preserved is what is being replaced.
+        if (row.getOriginalBody() == null) {
+            row.setOriginalBody(row.getBodyHtml());
+        }
+        row.setBodyHtml(html);
+        row.setBodyText(plainText);
+        // The stored list is the new one, not the union. It answers "who does this
+        // comment name", which a reader checks against the text in front of them;
+        // a union would leave a chip for somebody the wording no longer mentions.
+        // Whom we have *already told* is a different question, and it is answered
+        // above, before this line overwrites the evidence.
+        row.setMentionedUserIds(mentioned.isEmpty()
+                ? null
+                : mentioned.stream().map(CommentMentions.MentionedUser::id).toList());
+        row.setEditedAt(Instant.now(clock));
+
+        TicketComment saved = comments.save(row);
+        CommentUserRefs.Resolved resolved = people.resolve(mentionedAnd(saved, mentioned));
+
+        if (!newlyMentioned.isEmpty()) {
+            CommentDtos.UserRef editorRef = resolved.people().get(editor);
+            mentionNotifier.mentioned(ticket, saved.getId(), editor,
+                    editorRef == null ? null : editorRef.displayName(), newlyMentioned);
+        }
+
+        return dto(saved, resolved);
+    }
+
+    /**
+     * C-033 · tombstone a comment — §4B.5's "deletion leaves a tombstone".
+     *
+     * <h2>There is no window, and no silent deletion</h2>
+     *
+     * <p>C-028's attachment delete has two outcomes: inside fifteen minutes the
+     * uploader's own removal leaves no visible mark, outside it every removal
+     * does. That is §4B.4's wording, which spells out both cases. §4B.5 does not —
+     * it attaches the five minutes to editing and says of deletion only that it
+     * leaves a tombstone. So every removal here is recorded, including an author
+     * deleting their own comment ten seconds after posting it.
+     *
+     * <p>The stricter rule is also the better fit for what a comment is. A
+     * mis-pasted screenshot is a mistake and a sentence is a statement:
+     * colleagues have read it, it may already have gone to a client, and "Ravi
+     * removed a comment" is exactly the kind of thing §4B.5's immutability row
+     * exists to keep in the record.
+     *
+     * <h2>Who may, and what the row keeps</h2>
+     *
+     * <p>The author, a PM or an Admin — C-028's widening, for its reason: a
+     * comment posted client-visible by mistake is a disclosure, and the person
+     * who can fix it fastest is not always its author. Everyone else gets 403 and
+     * not 404, because the caller is looking at the comment in a thread they just
+     * fetched ({@link CommentDeletionNotPermittedException}).
+     *
+     * <p>The row survives with {@code is_deleted}, {@code deleted_by} and
+     * {@code deleted_at}, and the <b>text goes</b> — both copies of it. The
+     * contract says so ("the body is cleared") and it is what makes the feature
+     * mean anything: a tombstone that still served the words would be a
+     * strikethrough, not a deletion, and the commonest reason to reach for this
+     * button is that the words themselves are the problem. {@code original_body}
+     * is cleared alongside {@code body_html}, which is the trap here — a comment
+     * edited before it was deleted would otherwise keep its first wording in a
+     * field designed to preserve wording, and that first wording is precisely
+     * what the author was trying to take back.
+     *
+     * <h2>Idempotent</h2>
+     *
+     * <p>A second delete of a tombstone is a 204 no-op, following C-028: the
+     * client removes optimistically, a retry after a dropped response is
+     * ordinary, and the caller asked for the comment to be gone and it is gone.
+     * Re-stamping {@code deleted_by} would also let a second caller quietly take
+     * the first one's name off the record.
+     */
+    @Transactional
+    void delete(Authentication caller, long ticketId, long commentId) {
+
+        Ticket ticket = tickets.require(caller, ticketId);
+        TicketComment row = rows.find(ticketId, commentId).orElseThrow(CommentNotFoundException::new);
+
+        if (row.isDeleted()) {
+            return;
+        }
+
+        CallerIdentity identity = CallerIdentity.of(caller).orElseThrow(CommentNotFoundException::new);
+        requireMayDelete(identity, row);
+
+        row.setBodyHtml("");
+        row.setBodyText("");
+        row.setOriginalBody(null);
+        row.setDeleted(true);
+        row.setDeletedBy(identity.userId());
+        row.setDeletedAt(Instant.now(clock));
+        comments.save(row);
+
+        // The other half of the counter C-029 started maintaining. The baseline
+        // migration names both events — "maintained by the service layer on
+        // insert and tombstone" — and a badge that only ever counts up would
+        // drift permanently on the first deletion. Floored at zero rather than
+        // trusted: the counter was a hard zero for every ticket created before
+        // C-029, so a row commented on then and tidied up now would otherwise go
+        // negative and render "-1 comments" on the list.
+        ticket.setCommentCount(Math.max(0, ticket.getCommentCount() - 1));
+    }
+
+    /**
+     * §4B.5's "the uploader may delete" equivalent, widened to the two roles that
+     * supervise the ticket — the same two, and the same argument, as C-028.
+     *
+     * <p>One refusal message rather than C-028's two, because there is no window
+     * to be inside or outside of: a Developer looking at a colleague's comment is
+     * in the same position now as in an hour, and a message implying otherwise
+     * would send them back to try again.
+     */
+    private void requireMayDelete(CallerIdentity identity, TicketComment row) {
+        if (Objects.equals(row.getAuthorId(), identity.userId())) {
+            return;
+        }
+        if (RolePermissions.ADMIN.equals(identity.roleCode())
+                || RolePermissions.PM.equals(identity.roleCode())) {
+            return;
+        }
+        throw new CommentDeletionNotPermittedException();
+    }
+
+    /**
+     * Whether the comment is still inside §4B.5's five minutes, measured from
+     * {@code created_at}.
+     *
+     * <p><b>A row with no {@code createdAt} is outside it.</b> The column is
+     * {@code NOT NULL} with a database default, so this is unreachable for
+     * anything the server inserted — but the safe direction for an unplaceable
+     * row is plainly locked, and the alternative is a fixture-written or
+     * hand-edited comment that is editable for ever.
+     *
+     * <p>The boundary is inclusive: at exactly {@code createdAt + window} the
+     * edit is still allowed. A user who clicks Save as the countdown reaches zero
+     * should not lose their edit to a microsecond, and nothing depends on which
+     * way this rounds.
+     */
+    private boolean withinEditWindow(TicketComment row) {
+        Instant postedAt = row.getCreatedAt();
+        return postedAt != null
+                && !Instant.now(clock).isAfter(postedAt.plus(properties.editWindow()));
+    }
+
+    /** One place where the configured window meets the wire, so the two cannot differ. */
+    private CommentDtos.CommentDto dto(TicketComment row, CommentUserRefs.Resolved resolved) {
+        return CommentDtos.CommentDto.of(row, resolved.people(), resolved.roles(),
+                properties.editWindow());
     }
 
     /**

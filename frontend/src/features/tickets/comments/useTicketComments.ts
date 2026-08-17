@@ -1,7 +1,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { http, newIdempotencyKey, ApiError } from '@/api/http'
-import { getListCommentsQueryKey, useListComments } from '@/api/generated/comments/comments'
+import {
+  getListCommentsQueryKey,
+  useDeleteComment,
+  useEditComment,
+  useListComments,
+} from '@/api/generated/comments/comments'
 import type { Comment } from '@/api/generated/model/comment'
 import type { CommentResponse } from '@/api/generated/model/commentResponse'
 import type { CommentWriteRequest } from '@/api/generated/model/commentWriteRequest'
@@ -57,6 +62,32 @@ export interface UseTicketCommentsResult {
   isPosting: boolean
   /** Why the last post was refused, cleared when the next one is attempted. */
   postError: string | null
+  /**
+   * C-033 · rewrite a comment inside §4B.5's five minutes.
+   *
+   * Rejects rather than swallowing, because the caller has an open editor and
+   * has to decide what to do with the text still in it — see `editError`.
+   */
+  edit: (commentId: number, body: string) => Promise<void>
+  isEditing: boolean
+  /**
+   * Why the last edit was refused. **The draft is not discarded when this is
+   * set**, which is the whole reason `edit` rejects: the three refusals are all
+   * final (locked, not yours, gone) and dropping the user's rewritten paragraph
+   * on the way to telling them so would lose work they cannot get back.
+   */
+  editError: string | null
+  /** C-033 · tombstone a comment. Every removal leaves a mark; there is no silent case. */
+  remove: (commentId: number) => Promise<void>
+  isRemoving: boolean
+  /**
+   * Why the last removal was refused.
+   *
+   * Carried for the reason `useTicketAttachments.removeError` was added in
+   * C-028: a × that can now answer 403 and that silently does nothing invites
+   * exactly one response, which is clicking it again.
+   */
+  removeError: string | null
 }
 
 /**
@@ -116,6 +147,41 @@ export function useTicketComments({
     })
   }
 
+  // C-033. Both use the generated mutations rather than `http` directly — unlike
+  // the post above, neither sends `Idempotency-Key`, so orval's dropped header
+  // parameters cost nothing here. The contract does not put one on either: a
+  // replayed PATCH writes the same body a second time and a replayed DELETE hits
+  // the idempotent tombstone path, so a retry is already safe without a key.
+  const editMutation = useEditComment({
+    mutation: {
+      onSuccess: () => invalidateThread(),
+    },
+  })
+
+  const removeMutation = useDeleteComment({
+    mutation: {
+      onSuccess: () => invalidateThread(),
+    },
+  })
+
+  function invalidateThread() {
+    void queryClient.invalidateQueries({ queryKey: [getListCommentsQueryKey(ticketId)[0]] })
+  }
+
+  const edit = async (commentId: number, body: string) => {
+    await editMutation.mutateAsync({ ticketId, commentId, data: { body } })
+  }
+
+  // The tombstone is not removed from the cache optimistically, and that is
+  // deliberate — it is the one mutation here where the row is *supposed* to stay
+  // on screen. §4B.5's whole point is that the card becomes "removed by X on
+  // date" rather than disappearing, so pulling it out and putting a tombstone
+  // back would be two visual changes for one action, and the intermediate state
+  // would tell the user the wrong thing about what just happened.
+  const remove = async (commentId: number) => {
+    await removeMutation.mutateAsync({ ticketId, commentId })
+  }
+
   return {
     comments: data?.data ?? [],
     isLoading: isPending,
@@ -123,6 +189,16 @@ export function useTicketComments({
     post,
     isPosting: mutation.isPending,
     postError: mutation.isError ? messageFor(mutation.error, 'That comment could not be posted.') : null,
+    edit,
+    isEditing: editMutation.isPending,
+    editError: editMutation.isError
+      ? messageFor(editMutation.error, 'That edit could not be saved.')
+      : null,
+    remove,
+    isRemoving: removeMutation.isPending,
+    removeError: removeMutation.isError
+      ? messageFor(removeMutation.error, 'That comment could not be removed.')
+      : null,
   }
 }
 

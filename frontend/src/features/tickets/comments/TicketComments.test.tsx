@@ -60,8 +60,14 @@ const waitForTicket = () =>
 
 const commentEditor = () => screen.getByRole('textbox', { name: 'Comment' })
 
-function write(html: string) {
-  const box = commentEditor()
+/**
+ * @param label which editor. The composer is "Comment"; C-033's inline editor is
+ *              "Edit comment", and both are on screen at once while a card is
+ *              open — an unqualified `getByRole('textbox')` throws on exactly
+ *              the tests that matter.
+ */
+function write(html: string, label: 'Comment' | 'Edit comment' = 'Comment') {
+  const box = screen.getByRole('textbox', { name: label })
   box.innerHTML = html
   fireEvent.input(box)
 }
@@ -295,5 +301,133 @@ describe('C-031 · posting a client-visible comment', () => {
     const posted = await postedCard('Stack trace was in the retry handler')
     expect(within(posted).queryByText('Client visible')).not.toBeInTheDocument()
     expect(posted.className).toContain('bg-subtle')
+  })
+})
+
+/**
+ * C-033 · §4B.5's immutability row, through the mock server.
+ *
+ * The rules themselves are `commentPermissions.test.ts` (pure, and the only
+ * place the window boundary can be asserted without waiting) and
+ * `CommentServiceTest` (the side that enforces them). What this file adds is the
+ * wiring neither can see: that the affordances reach the right cards, that an
+ * edit round-trips through the server rather than only through local state, and
+ * that a removal leaves something on screen rather than a gap.
+ *
+ * The signed-in user is **Anita, the Admin** (`currentUserId = 1`, set in this
+ * file's `beforeEach`), and the seeded comment is **Priya's**. That pairing is
+ * what makes the asymmetry testable end to end in one fixture: an Admin may
+ * remove Priya's comment and may not edit it.
+ */
+describe('C-033 · the edit window and the tombstone', () => {
+  const priyasCard = async () =>
+    within(await screen.findByRole('list', { name: 'Comments' }))
+      .getAllByRole('listitem')
+      .find((item) => item.textContent?.includes('Reproduced on prod with two Acme accounts'))!
+
+  /**
+   * Waits for the inline editor to close, which happens **only on success** —
+   * `CommentCard.save` keeps it open with the draft intact on a refusal.
+   *
+   * This exists because `postedCard` is not enough here, and the reason is
+   * C-031's trap wearing a new hat. That helper looks for a `<li>` whose text
+   * contains the needle, and while the editor is open the editor is *inside*
+   * that `<li>` — so it matches the draft the user has typed and resolves before
+   * the request has been anywhere near the server. Both of these tests passed
+   * their `postedCard` call and then failed on the assertion after it, which is
+   * the failure reading as "the edit did not save" when the edit had not been
+   * given a chance to.
+   */
+  const editorClosed = () =>
+    waitFor(() =>
+      expect(screen.queryByRole('textbox', { name: 'Edit comment' })).not.toBeInTheDocument(),
+    )
+
+  /**
+   * §4B.5: "no role, including Admin, can silently rewrite a comment". The Admin
+   * is the strongest case available and the button must not be there.
+   */
+  it('offers no Edit on somebody else’s comment, even to an Admin', async () => {
+    renderPage()
+    await waitForTicket()
+    openComments()
+
+    const card = await priyasCard()
+    expect(within(card).queryByRole('button', { name: /^Edit/ })).not.toBeInTheDocument()
+    // …while Remove *is* offered, which is the asymmetry rather than a
+    // permissions bug. Asserted here so the two cannot drift apart unnoticed.
+    expect(within(card).getByRole('button', { name: /Remove/ })).toBeInTheDocument()
+  })
+
+  it('lets the author edit their own comment, and marks it edited', async () => {
+    renderPage()
+    await waitForTicket()
+    openComments()
+    await screen.findByText(/Reproduced on prod with two Acme accounts/)
+
+    write('<p>Deployed the fix at 18:40.</p>')
+    fireEvent.click(screen.getByRole('button', { name: 'Post' }))
+    const mine = await postedCard('Deployed the fix at 18:40')
+
+    fireEvent.click(within(mine).getByRole('button', { name: /^Edit/ }))
+    write('<p>Deployed the fix at 18:55, after a rollback.</p>', 'Edit comment')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await editorClosed()
+
+    const edited = await postedCard('Deployed the fix at 18:55, after a rollback')
+    expect(within(edited).getByText(/edited/)).toBeInTheDocument()
+    // The old wording is gone from the card, not merely hidden behind the new
+    // one — the thread renders `body`, and `originalBody` only on request.
+    expect(within(edited).queryByText(/Deployed the fix at 18:40/)).not.toBeInTheDocument()
+  })
+
+  /**
+   * §4B.5's "with the original preserved". Behind a disclosure rather than
+   * always drawn — but it has to actually be reachable, which is the half a
+   * server-side test cannot show.
+   */
+  it('keeps the original behind a disclosure', async () => {
+    renderPage()
+    await waitForTicket()
+    openComments()
+    await screen.findByText(/Reproduced on prod with two Acme accounts/)
+
+    write('<p>First wording, with a typo.</p>')
+    fireEvent.click(screen.getByRole('button', { name: 'Post' }))
+    const mine = await postedCard('First wording, with a typo')
+
+    fireEvent.click(within(mine).getByRole('button', { name: /^Edit/ }))
+    write('<p>Second wording, corrected.</p>', 'Edit comment')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await editorClosed()
+
+    const edited = await postedCard('Second wording, corrected')
+    expect(within(edited).queryByText(/First wording/)).not.toBeInTheDocument()
+
+    fireEvent.click(within(edited).getByRole('button', { name: /Show what was first posted/ }))
+    await waitFor(() =>
+      expect(within(edited).getByText(/First wording, with a typo/)).toBeInTheDocument(),
+    )
+  })
+
+  /**
+   * The card becomes a tombstone rather than disappearing — that is the whole
+   * of §4B.5's "deletion leaves a tombstone", and a test asserting only that the
+   * text is gone would pass on an implementation that hard-deleted the row.
+   */
+  it('leaves a tombstone naming who removed it', async () => {
+    renderPage()
+    await waitForTicket()
+    openComments()
+
+    const card = await priyasCard()
+    fireEvent.click(within(card).getByRole('button', { name: /Remove/ }))
+
+    await waitFor(() =>
+      expect(screen.queryByText(/Reproduced on prod with two Acme accounts/)).not.toBeInTheDocument(),
+    )
+    // Anita is the signed-in Admin. The name is the point: a bare "comment
+    // removed" is the record §4B.5 asked for minus the fact that matters.
+    expect(await screen.findByText(/Comment removed by Anita/)).toBeInTheDocument()
   })
 })

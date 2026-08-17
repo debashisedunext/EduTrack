@@ -88,6 +88,14 @@ export const listCommentsResponse = zod.object({
   "isEdited": zod.boolean().optional(),
   "isDeleted": zod.boolean().optional().describe('Tombstone; the row survives.'),
   "editableUntil": zod.string().datetime({}).nullish(),
+  "deletedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "deletedAt": zod.string().datetime({}).nullish(),
   "stageCode": zod.string().nullish().describe('Stage at time of writing.'),
   "cycleNo": zod.number().optional(),
   "iterationNo": zod.number().optional(),
@@ -174,7 +182,20 @@ locked and this returns `422`.
 
 An edited comment keeps `originalBody` and renders an "edited" marker.
 **No role, including Admin, can silently rewrite a comment** — that is what
-keeps the thread admissible as evidence.
+keeps the thread admissible as evidence, and it is why PM and Admin are
+refused here while `deleteComment` allows them: however an Admin's edit were
+labelled, the thread would still attribute the new wording to the original
+author. `originalBody` is written on the **first** edit only, so what is
+preserved is what the author actually posted rather than their last attempt.
+
+The body is re-sanitised against PLAN.md §3.9 and re-parsed for `@mentions`.
+Only somebody the previous wording did **not** already name is notified —
+otherwise post, edit, edit is a way to ring the same bell repeatedly.
+
+Visibility is deliberately not editable. Flipping `isClientVisible` in the
+window would be a way to publish an internal note, or to un-publish one the
+client has already had by email while the thread reports otherwise. A
+comment sent to the wrong audience is deleted and rewritten, in the open.
 
  * @summary Edit within the five-minute window
  */
@@ -211,6 +232,14 @@ export const editCommentResponse = zod.object({
   "isEdited": zod.boolean().optional(),
   "isDeleted": zod.boolean().optional().describe('Tombstone; the row survives.'),
   "editableUntil": zod.string().datetime({}).nullish(),
+  "deletedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "deletedAt": zod.string().datetime({}).nullish(),
   "stageCode": zod.string().nullish().describe('Stage at time of writing.'),
   "cycleNo": zod.number().optional(),
   "iterationNo": zod.number().optional(),
@@ -255,7 +284,20 @@ export const editCommentResponse = zod.object({
 })
 
 /**
- * The row survives with `isDeleted`; the body is cleared. Nothing vanishes.
+ * The row survives with `isDeleted`; the body is cleared, and `originalBody`
+with it. Nothing vanishes — the thread keeps "removed by X on date" in place.
+
+**The author, a PM or an Admin.** §4B.5 names no actor, so C-033 follows
+C-028's widening on attachments and for its reason: a comment posted
+client-visible by mistake is a disclosure, and waiting for its author to
+come back is not a remedy. Their act is never silent, because **every**
+removal here leaves a tombstone — including the author's own, and including
+one made seconds after posting. Unlike `deleteAttachment` there is no
+window and no silent branch: §4B.5 attaches its five minutes to editing and
+says of deletion only that it leaves a mark.
+
+Idempotent — deleting a tombstone answers `204`, not `404`.
+
  * @summary Delete a comment, leaving a tombstone
  */
 export const deleteCommentPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
