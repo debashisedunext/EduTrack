@@ -437,15 +437,124 @@ class DashboardWidgetIT {
          * Not an empty series and not a 404. An empty series renders as "no
          * tickets matched", which is a claim about the data and is false.
          */
+        /**
+         * A-062 · {@code aging-buckets} left this list, and that is the whole
+         * visible outcome of the migration. The three that remain are refused
+         * because the question does not apply to an assignee — not because a
+         * column is missing — which is why they are not simply the next task's
+         * schema change.
+         */
         @Test
-        @DisplayName("the four with no resource equivalent say so, rather than drawing an empty chart")
+        @DisplayName("the three with no resource equivalent say so, rather than drawing an empty chart")
         void unanswerableWidgetsSayWhy() {
-            for (String key : List.of("type-donut", "daily-stacked", "priority-bar", "aging-buckets")) {
+            for (String key : List.of("type-donut", "daily-stacked", "priority-bar")) {
                 WidgetDtos.Widget w = widget("DEVELOPER", key, List.of(mine));
 
                 assertThat(w.unavailableReason()).as(key).isNotNull();
                 assertThat(w.series()).as(key).isEmpty();
             }
+        }
+
+        // ── A-062 · widget 12 for a delivery role ────────────────────────────
+
+        /**
+         * The bars are theirs, and the fixture makes borrowing visible: the
+         * colleague's row carries an order of magnitude more in every bucket,
+         * and the project table more again.
+         */
+        @Test
+        @DisplayName("a delivery role's aging chart counts their own open work")
+        void agingAnswersForADeliveryRole() {
+            resourceAging(D3, me, 4, 3, 2, 1);
+            resourceAging(D3, colleague, 40, 30, 20, 10);
+
+            WidgetDtos.Widget w = widget("DEVELOPER", "aging-buckets", List.of(mine, theirs));
+
+            assertThat(w.unavailableReason()).as("A-062 gave this a table to read").isNull();
+            assertThat(w.series().getFirst().points()).extracting(WidgetDtos.Point::y)
+                    .containsExactly(
+                            new java.math.BigDecimal("4"), new java.math.BigDecimal("3"),
+                            new java.math.BigDecimal("2"), new java.math.BigDecimal("1"));
+        }
+
+        /**
+         * The same four labels as the project chart, because they are the same
+         * four columns with the same edges. Two charts sharing labels and drill-
+         * down links but not boundaries would produce figures that never
+         * reconcile and no way to see why.
+         */
+        @Test
+        @DisplayName("the resource bars use the project chart's bucket edges")
+        void agingLabelsAreShared() {
+            resourceAging(D3, me, 4, 3, 2, 1);
+
+            assertThat(widget("DEVELOPER", "aging-buckets", List.of(mine))
+                    .series().getFirst().points())
+                    .extracting(WidgetDtos.Point::x)
+                    .containsExactly(
+                            widget("PM", "aging-buckets", List.of(mine)).series().getFirst()
+                                    .points().stream().map(WidgetDtos.Point::x).toArray(String[]::new));
+        }
+
+        /**
+         * Stock. Three days each holding four tickets aged 0–2 is four tickets,
+         * not twelve — and four bars three times too tall look precisely like
+         * four bars.
+         */
+        @Test
+        @DisplayName("resource aging reads the latest day rather than summing")
+        void resourceAgingIsNotSummed() {
+            for (LocalDate d : List.of(D1, D2, D3)) {
+                resourceAging(d, me, 4, 3, 2, 1);
+            }
+
+            assertThat(widget("DEVELOPER", "aging-buckets", List.of(mine))
+                    .series().getFirst().points().getFirst().y())
+                    .isEqualByComparingTo("4");
+        }
+
+        /**
+         * A person earns a row only on days they held or did something, so their
+         * latest summarised day can sit behind the window's end. The drill-downs
+         * subtract the bucket edges from the day the row was <em>measured</em>;
+         * anchoring on {@code to} would open a list about a different day under
+         * the same bar.
+         */
+        @Test
+        @DisplayName("the aging links are anchored on the measured day and name the assignee")
+        void resourceAgingLinksUseTheMeasuredDay() {
+            jdbc.update("DELETE FROM resource_daily_stats WHERE user_id = ? AND stat_date > ?", me, D2);
+            resourceAging(D2, me, 4, 3, 2, 1);
+
+            List<WidgetDtos.Point> points = widget("DEVELOPER", "aging-buckets", List.of(mine), D1, D3)
+                    .series().getFirst().points();
+
+            assertThat(points.get(1).drillDown())
+                    .as("3–7 days old on D2 — the row's day, not D3")
+                    .contains("reportedFrom=" + D2.minusDays(7))
+                    .contains("reportedTo=" + D2.minusDays(3))
+                    .contains("assigneeId=" + me)
+                    .contains("excludeClosed=true");
+            assertThat(points.get(3).drillDown())
+                    .as("the oldest bucket is open-ended")
+                    .doesNotContain("reportedFrom=");
+        }
+
+        /**
+         * Nothing summarised for this person at all. An empty series renders as
+         * "nothing to show for this filter and date range"; four zero-height
+         * bars would claim they hold no open work, which is a measurement and
+         * one nobody took.
+         */
+        @Test
+        @DisplayName("a delivery role with no summarised day gets an empty series, not four zeroes")
+        void resourceAgingWithNoRow() {
+            jdbc.update("DELETE FROM resource_daily_stats WHERE user_id = ?", me);
+
+            WidgetDtos.Widget w = widget("DEVELOPER", "aging-buckets", List.of(mine));
+
+            assertThat(w.unavailableReason()).isNull();
+            assertThat(w.series().getFirst().points()).isEmpty();
         }
 
         @Test
@@ -818,6 +927,20 @@ class DashboardWidgetIT {
 
     private String nameOfProject(long projectId) {
         return jdbc.queryForObject("SELECT name FROM projects WHERE id = ?", String.class, projectId);
+    }
+
+    /**
+     * A-062 · the four aging counts, set on a row {@link #resourceStat} has
+     * already written — an UPDATE so every existing case keeps seeding exactly
+     * the row it always did.
+     */
+    private void resourceAging(LocalDate day, long userId, int a02, int a37, int a830, int a31) {
+        jdbc.update("""
+                UPDATE resource_daily_stats
+                   SET assigned_aging_0_2 = ?, assigned_aging_3_7 = ?,
+                       assigned_aging_8_30 = ?, assigned_aging_31_plus = ?
+                 WHERE stat_date = ? AND user_id = ?
+                """, a02, a37, a830, a31, day, userId);
     }
 
     private void resourceStat(LocalDate day, long userId, int closed, int assignedOpen,

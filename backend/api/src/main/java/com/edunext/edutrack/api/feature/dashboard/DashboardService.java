@@ -91,22 +91,25 @@ class DashboardService {
         // reads the same one. Stated twice, it drifts — and the way it drifts
         // is a Developer seeing their own cards above a chart of everybody's.
         DashboardScope scope = DashboardScope.of(caller);
-        boolean ownWorkOnly = scope.ownWorkOnly();
+
+        // A-062 · the one place "whose rows, if anybody's" is decided, and it is
+        // DashboardScope's own method rather than a third statement of the rule.
+        // Non-null means resource_daily_stats answers this request:
+        //
+        //   - a delivery role always gets their own id, and ?assigneeId= is
+        //     ignored rather than honoured — answering it would let a Developer
+        //     read a colleague's dashboard by guessing a user id;
+        //   - a PM or Admin may legitimately ask "how is Ravi doing" (§S-05's
+        //     Resource filter), and their own scope still bounds it, because the
+        //     resource table is fed from tickets they can see.
+        Long subject = scope.resourceSubject(assigneeId);
 
         DashboardRepository.Flow flow;
         DashboardRepository.Stock stock;
 
-        if (ownWorkOnly) {
-            // assigneeId is ignored rather than honoured: answering it would let
-            // a Developer read a colleague's dashboard by guessing a user id.
-            flow = summaries.resourceFlow(start, end, caller.userId());
-            stock = summaries.resourceStock(start, end, caller.userId()).orElse(EMPTY_STOCK);
-        } else if (assigneeId != null) {
-            // A PM or Admin may legitimately ask "how is Ravi doing" — §S-05's
-            // Resource filter. Their own scope still bounds it, because the
-            // resource table is fed from tickets they can see.
-            flow = summaries.resourceFlow(start, end, assigneeId);
-            stock = summaries.resourceStock(start, end, assigneeId).orElse(EMPTY_STOCK);
+        if (subject != null) {
+            flow = summaries.resourceFlow(start, end, subject);
+            stock = summaries.resourceStock(start, end, subject).orElse(EMPTY_STOCK);
         } else {
             flow = summaries.projectFlow(start, end, scope.projectIds(), projectId);
             stock = summaries.projectStock(start, end, scope.projectIds(), projectId).orElse(EMPTY_STOCK);
@@ -124,11 +127,10 @@ class DashboardService {
         DashboardRepository.Stock priorStock;
         List<DashboardRepository.Day> series;
 
-        if (ownWorkOnly || assigneeId != null) {
-            long who = ownWorkOnly ? caller.userId() : assigneeId;
-            priorFlow = summaries.resourceFlow(priorStart, priorEnd, who);
-            priorStock = summaries.resourceStock(priorStart, priorEnd, who).orElse(EMPTY_STOCK);
-            series = summaries.resourceSeries(start, end, who);
+        if (subject != null) {
+            priorFlow = summaries.resourceFlow(priorStart, priorEnd, subject);
+            priorStock = summaries.resourceStock(priorStart, priorEnd, subject).orElse(EMPTY_STOCK);
+            series = summaries.resourceSeries(start, end, subject);
         } else {
             priorFlow = summaries.projectFlow(priorStart, priorEnd, scope.projectIds(), projectId);
             priorStock = summaries.projectStock(priorStart, priorEnd, scope.projectIds(), projectId)
@@ -137,6 +139,20 @@ class DashboardService {
         }
 
         Instant asOf = summaries.computedAt(start, end).orElse(null);
+
+        // A-062 · which card set, decided by **which table answered** rather
+        // than by the role. Those are the same thing for a delivery role, and
+        // keying on the table deliberately also catches the case where they are
+        // not: a PM who picks a resource in §S-05's filter is reading
+        // resource_daily_stats too, and was getting the project card set over
+        // it — a "Total tasks created" that could only ever read 0, because
+        // creation is not a fact about an assignee. One decision, made where the
+        // table is chosen, rather than a second role test able to disagree with
+        // the branch above.
+        if (subject != null) {
+            return new DashboardDtos.Summary(asOf,
+                    resourceCards(flow, stock, priorFlow, priorStock, series, subject, start, end));
+        }
         return new DashboardDtos.Summary(asOf,
                 cards(flow, stock, priorFlow, priorStock, series, projectId, start, end));
     }
@@ -230,9 +246,113 @@ class DashboardService {
                         "/tickets?reopenedOnly=true&" + window));
     }
 
+    /**
+     * A-062 · §S-05's developer variant — the same six-card row, for one person.
+     *
+     * <h2>Two of the blueprint's six are replaced, not dropped quietly</h2>
+     *
+     * <p>§S-05 says the developer dashboard shows "widgets 1–6 scoped to
+     * {@code assignee = me}, plus My due today / this week". Two of those six
+     * cannot be scoped that way, and the reason is not a missing column:
+     *
+     * <ul>
+     *   <li><b>Total tasks created</b> — a ticket is raised by a <em>reporter</em>.
+     *       There is no sense in which an assignee created it, which is why
+     *       {@link DashboardRepository#resourceFlow} returns zero rather than
+     *       borrowing the project figure.</li>
+     *   <li><b>Reopened</b> — reopening is done by a manager on a ticket, and
+     *       {@code resource_daily_stats} carries no column for it.</li>
+     * </ul>
+     *
+     * <p>Both were already answering <b>0</b> for every delivery role, on every
+     * window, for ever. That is the failure A-056 argued against for the charts
+     * and it is worse on a KPI card: a chart with no series says "nothing to
+     * show", while a card reading a confident <b>0</b> under "Total tasks
+     * created" is a measurement, and a wrong one. So the two are replaced by the
+     * two figures §S-05 asks for in the same sentence — due today and due this
+     * week — and the row stays six cards wide.
+     *
+     * <p>This is a deviation from a literal reading of §S-05 and it is recorded
+     * in the backlog entry as one. The alternative readings were: show two
+     * permanent zeroes, or show four cards and put the due figures somewhere
+     * else on the screen. The first is dishonest; the second splits one row of
+     * six into two places for no gain.
+     *
+     * <h2>Every link carries {@code assigneeId}, though the guard would anyway</h2>
+     *
+     * <p>{@code ScopeResolver} already forces {@code assigned_to = me} for a
+     * delivery role, so the parameter is redundant for them — and it is not
+     * redundant for the PM reading one resource through §S-05's filter, who is
+     * served by this same card set. One form of link for both, and the URL then
+     * states what the number counts instead of relying on who is holding it.
+     *
+     * @param subject whose rows these are: the caller for a delivery role, the
+     *                filtered resource for a PM or Admin.
+     */
+    private List<DashboardDtos.Card> resourceCards(DashboardRepository.Flow flow,
+                                                   DashboardRepository.Stock stock,
+                                                   DashboardRepository.Flow priorFlow,
+                                                   DashboardRepository.Stock priorStock,
+                                                   List<DashboardRepository.Day> series,
+                                                   long subject, LocalDate from, LocalDate to) {
+        String mine = "/tickets?assigneeId=" + subject;
+
+        // The stock links below carry no reported-date window, unlike the
+        // project cards. A person's open count is whatever was true at the end
+        // of the last summarised day regardless of when those tickets were
+        // raised, so narrowing the list to tickets *reported* in the window
+        // would open four rows under a card reading nine. The project cards can
+        // carry it because a project's figures are summed across the window.
+        //
+        // The day the due figures were actually measured for. Not `to`, and not
+        // today: a card that says "due today" beside a figure computed for last
+        // Friday is two different claims, and the drill-down it opens has to
+        // agree with the figure or the list contradicts the card. Falls back to
+        // `to` only when nothing has been summarised for this person at all, in
+        // which case the figures are zero and AsOfNotice is already saying so.
+        LocalDate measured = summaries.resourceLatestDay(from, to, subject).orElse(to);
+        DashboardRepository.Due due = summaries.resourceDue(from, to, subject).orElse(EMPTY_DUE);
+
+        return List.of(
+                card("open", "Assigned to me, open", stock.openTotal(), priorStock.openTotal(),
+                        sparkline(series, DashboardRepository.Day::openTotal, true),
+                        mine + "&excludeClosed=true"),
+                card("closed", "Closed", flow.closed(), priorFlow.closed(),
+                        sparkline(series, DashboardRepository.Day::closed, false),
+                        mine + "&status=CLOSED&closedFrom=" + from + "&closedTo=" + to),
+                card("critical", "Critical", stock.openCritical(), priorStock.openCritical(),
+                        sparkline(series, DashboardRepository.Day::openCritical, true),
+                        mine + "&level=CRITICAL&excludeClosed=true"),
+                card("delayed", "Delayed", stock.openDelayed(), priorStock.openDelayed(),
+                        sparkline(series, DashboardRepository.Day::openDelayed, true),
+                        mine + "&isDelayed=true&excludeClosed=true"),
+                // No delta and no sparkline on the two due cards, and neither is
+                // an omission. `resource_daily_stats` records due counts per
+                // day, so a series could be drawn — but "how much was due on
+                // each of the last thirty days" is a different quantity from
+                // "how much is due today", and a sparkline under a card is read
+                // as that card's own history. The delta would be worse: it would
+                // compare today's due count with the due count of a day a month
+                // ago, and render the difference as an arrow that looks like
+                // progress.
+                dueCard("dueToday", "Due today", due.dueToday(),
+                        mine + "&excludeClosed=true&dueFrom=" + measured + "&dueTo=" + measured),
+                dueCard("dueThisWeek", "Due in the next 7 days", due.dueNext7(),
+                        mine + "&excludeClosed=true&dueFrom=" + measured
+                                + "&dueTo=" + measured.plusDays(6)));
+    }
+
+    private static final DashboardRepository.Due EMPTY_DUE = new DashboardRepository.Due(0, 0);
+
     private static DashboardDtos.Card card(String key, String label, long value, long prior,
                                            List<BigDecimal> sparkline, String drillDown) {
         return new DashboardDtos.Card(key, label, BigDecimal.valueOf(value),
                 deltaPct(value, prior), sparkline, drillDown);
+    }
+
+    /** A figure with nothing meaningful to compare against — see {@link #resourceCards}. */
+    private static DashboardDtos.Card dueCard(String key, String label, long value, String drillDown) {
+        return new DashboardDtos.Card(key, label, BigDecimal.valueOf(value),
+                null, List.of(), drillDown);
     }
 }

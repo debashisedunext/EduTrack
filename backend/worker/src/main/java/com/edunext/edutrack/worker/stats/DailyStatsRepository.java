@@ -16,8 +16,10 @@ import java.util.Optional;
  * <p>TEAM-PLAN.md §6 reads {@code worker/ → D, all schedulers (A's hash
  * verifier is the exception)}, and this class is neither the hash verifier nor
  * Stream D's. It was built by A-051 and extended by A-056 twice — once for
- * {@code type_counts}, once for {@code assigned_in_progress} below — so the
- * precedent is established in the code and nowhere in the ownership map.
+ * {@code type_counts}, once for {@code assigned_in_progress} below — then by
+ * A-057 for the SLA columns and by A-062 for the resource-keyed aging and due
+ * counts, so the precedent is established in the code and nowhere in the
+ * ownership map.
  * <b>Flagged rather than edited quietly</b>, per CLAUDE.md. The ownership row
  * wants amending to carve out {@code worker/stats/} for Stream A the way the
  * hash verifier already is, or these edits keep arriving unannounced.
@@ -61,6 +63,16 @@ import java.util.Optional;
  *       profile rather than being smuggled in here. <b>Recorded so that
  *       whoever notices a resource chart changing shape retrospectively finds
  *       the reason written down.</b></li>
+ *   <li><b>Not faithful — {@code planned_close_date}.</b> The same shape of
+ *       problem and it has been here since A-051, unnamed until A-062 made it
+ *       visible. Due dates are mutable and carry no history, so the delayed
+ *       columns — and now {@code assigned_due_today} /
+ *       {@code assigned_due_next_7} — recompute a past day against
+ *       <em>today's</em> commitment. Pushing a deadline out therefore repairs
+ *       last week's delayed count as well as this week's. It is worth stating
+ *       because the due columns make it reachable: "how much was due last
+ *       Tuesday" answers with what is due now, and only the columns derived
+ *       from immutable timestamps are safe to read as history.</li>
  * </ul>
  *
  * <h2>"Delayed" is derived, not read from the flag</h2>
@@ -309,7 +321,11 @@ class DailyStatsRepository {
                 INSERT INTO resource_daily_stats (
                     stat_date, user_id, closed, effort_hours,
                     assigned_open, assigned_critical, assigned_delayed,
-                    assigned_in_progress, computed_at)
+                    assigned_in_progress,
+                    assigned_aging_0_2, assigned_aging_3_7,
+                    assigned_aging_8_30, assigned_aging_31_plus,
+                    assigned_due_today, assigned_due_next_7,
+                    computed_at)
                 SELECT :day, u.id,
                     COALESCE(c.closed, 0),
                     COALESCE(e.hours, 0),
@@ -317,6 +333,12 @@ class DailyStatsRepository {
                     COALESCE(a.critical_count, 0),
                     COALESCE(a.delayed_count, 0),
                     COALESCE(a.in_progress_count, 0),
+                    COALESCE(a.aging_0_2, 0),
+                    COALESCE(a.aging_3_7, 0),
+                    COALESCE(a.aging_8_30, 0),
+                    COALESCE(a.aging_31_plus, 0),
+                    COALESCE(a.due_today, 0),
+                    COALESCE(a.due_next_7, 0),
                     :computedAt
                 FROM users u
                 LEFT JOIN (
@@ -358,7 +380,40 @@ class DailyStatsRepository {
                            -- due date vanishes from the bar entirely.
                            SUM(status IN ('IN_PROGRESS', 'REWORK')
                                AND NOT COALESCE(planned_close_date < :dayEnd, FALSE))
-                               AS in_progress_count
+                               AS in_progress_count,
+                           -- A-062 · widget 12 per resource. The same four
+                           -- edges and the same DATEDIFF as the project table's
+                           -- aging columns in refreshTicketStats above, because
+                           -- a Developer and their PM read two charts with the
+                           -- same labels and the same drill-down links; edges
+                           -- that differ by one day between them produce two
+                           -- figures that will not reconcile and no way to see
+                           -- why. Measured at the end of the day, in whole
+                           -- days, against the day being summarised — never
+                           -- against the clock, or recomputing an old day would
+                           -- age every ticket in it to today.
+                           SUM(DATEDIFF(:day, DATE(date_reported)) <= 2) AS aging_0_2,
+                           SUM(DATEDIFF(:day, DATE(date_reported)) BETWEEN 3 AND 7) AS aging_3_7,
+                           SUM(DATEDIFF(:day, DATE(date_reported)) BETWEEN 8 AND 30) AS aging_8_30,
+                           SUM(DATEDIFF(:day, DATE(date_reported)) > 30) AS aging_31_plus,
+                           -- A-062 · "my due today / this week". Due is what is
+                           -- *coming*, so both are bounded below by the start of
+                           -- the day and exclude everything delayed_count above
+                           -- has already counted. A ticket with no
+                           -- planned_close_date is in neither: nothing was
+                           -- committed, so nothing is due.
+                           --
+                           -- >= :dayStart rather than a DATE() equality, so the
+                           -- DATETIME(6) column is compared as a half-open
+                           -- range and the index on it stays usable.
+                           SUM(planned_close_date >= :dayStart
+                               AND planned_close_date < :dayEnd) AS due_today,
+                           -- Seven days *including* today — see the migration
+                           -- header. due_today is a subset of this by
+                           -- construction, which is the containment the two
+                           -- labels claim.
+                           SUM(planned_close_date >= :dayStart
+                               AND planned_close_date < :weekEnd) AS due_next_7
                       FROM tickets
                      WHERE assigned_to IS NOT NULL
                        AND date_reported < :dayEnd
@@ -370,6 +425,12 @@ class DailyStatsRepository {
                 .param("day", day)
                 .param("dayStart", day.atStartOfDay())
                 .param("dayEnd", day.plusDays(1).atStartOfDay())
+                // A-062 · the exclusive upper bound of "today plus six more
+                // days". plusDays(7) rather than plusDays(6), because the
+                // comparison is `<` against the start of a day: a ticket due at
+                // 17:00 on the seventh day is inside the week and `< day+6`
+                // would drop it.
+                .param("weekEnd", day.plusDays(7).atStartOfDay())
                 .param("computedAt", computedAt)
                 .update();
     }

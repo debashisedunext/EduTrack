@@ -335,6 +335,50 @@ class WidgetRepository {
                 .optional();
     }
 
+    /**
+     * A-062 · widget 12 for one person, and the day it was measured for.
+     *
+     * <p>The same four buckets as {@link #stockBreakdown}, from the columns
+     * V20260817_1130 added — deliberately with the project table's edges, so a
+     * Developer's chart and their PM's are two views of one definition rather
+     * than two definitions. The migration header carries that argument.
+     *
+     * <p>{@code measuredOn} is returned alongside the counts because the aging
+     * drill-downs are built by subtracting a bucket's edges from the day the
+     * bar was measured. Deriving that from {@code to} instead would open a list
+     * anchored on a day the figures are not from — over a weekend, off by two —
+     * and the shifted list would look entirely reasonable.
+     *
+     * <p>Stock, so the latest day rather than a sum: adding a fortnight of "how
+     * many were 0–2 days old" counts each ticket once per day it was in the
+     * bucket and yields four bars several times too tall, in the right
+     * proportions.
+     */
+    record ResourceAging(LocalDate measuredOn, long aging02, long aging37,
+                         long aging830, long aging31Plus) {
+    }
+
+    Optional<ResourceAging> resourceAging(LocalDate from, LocalDate to, long userId) {
+        return jdbc.sql("""
+                        SELECT stat_date,
+                               assigned_aging_0_2     AS aging_0_2,
+                               assigned_aging_3_7     AS aging_3_7,
+                               assigned_aging_8_30    AS aging_8_30,
+                               assigned_aging_31_plus AS aging_31_plus
+                          FROM resource_daily_stats
+                         WHERE user_id = :userId
+                           AND stat_date = (
+                                   SELECT MAX(stat_date) FROM resource_daily_stats
+                                    WHERE stat_date BETWEEN :from AND :to AND user_id = :userId)
+                        """)
+                .param("from", from).param("to", to).param("userId", userId)
+                .query((rs, n) -> new ResourceAging(
+                        rs.getObject("stat_date", LocalDate.class),
+                        rs.getLong("aging_0_2"), rs.getLong("aging_3_7"),
+                        rs.getLong("aging_8_30"), rs.getLong("aging_31_plus")))
+                .optional();
+    }
+
     // ── widget 13 · the calendar heatmap's per-day activity ──────────────────
 
     /**
