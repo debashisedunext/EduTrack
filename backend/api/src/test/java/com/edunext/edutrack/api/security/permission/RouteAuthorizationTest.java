@@ -10,6 +10,7 @@ import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
@@ -18,6 +19,7 @@ import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
@@ -25,6 +27,7 @@ import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -240,22 +243,97 @@ class RouteAuthorizationTest {
     }
 
     @Test
-    void aRoleThatHoldsThePermissionIsNotRefused() throws Exception {
+    void aRoleThatHoldsThePermissionIsNotRefused() {
         // The other direction, and it needs asserting separately: a chain that
         // refused everybody would satisfy the test above completely, and a
         // typo'd authority literal is exactly the mistake that produces one.
         //
         // Not an assertion of success — there is no database here, so the
         // handler body will fail. The claim is narrower and is the one that
-        // matters: authorisation let it through. 403 is the only status this
-        // must not be.
-        int status = mvc.perform(delete("/api/v1/masters/holidays/1")
-                        .with(authentication(principal(RolePermissions.ADMIN))))
-                .andReturn().getResponse().getStatus();
+        // matters: authorisation let it through.
+        //
+        // ---------------------------------------------------------------
+        // Carried on a Stream C branch (C-033) because it failed that
+        // branch's CI run, and flagged for Shivendra rather than done
+        // quietly — CLAUDE.md, code ownership. It is NOT a C-033 regression:
+        // `docs/platform/ci-is-the-authority-again` failed identically three
+        // minutes earlier with none of C-033 in it (2273 tests, same single
+        // error), and no test C-033 added failed.
+        //
+        // WHAT WAS WRONG, because the original reads as though it should work.
+        //
+        // It asserted on a *status*, which assumes the request completes and
+        // produces one. `CalendarService.deleteHoliday` is @Transactional
+        // (B-023), so with no datasource in this context Spring throws
+        // CannotCreateTransactionException while opening the EntityManager —
+        // before the handler body, and with no @RestControllerAdvice able to
+        // catch it. MockMvc rethrows an unhandled exception out of `perform`,
+        // so `andReturn()` was never reached and the assertion never ran. The
+        // failure surfaces as an ERROR rather than a FAILURE, which is the tell.
+        //
+        // This has been red on `develop` since A-033 met B-023 and went unseen
+        // because Actions was billing-blocked from 11 Aug. C-025's note
+        // recorded the same test failing locally and put it down to this
+        // machine having no MySQL; that diagnosis was wrong — it fails on CI
+        // too, where MySQL *is* running, because this context excludes it on
+        // purpose (see the class javadoc).
+        //
+        // WHY THE FIX TAKES BOTH SHAPES, which is the part worth reading.
+        //
+        // The first attempt asserted that `perform` throws. That is green on CI
+        // and RED on a developer machine, because *how* the handler body fails
+        // without a usable schema depends on the environment: on CI the
+        // datasource connects and the EntityManager cannot open, so an exception
+        // escapes; locally there is nothing to connect to and the request comes
+        // back with a status instead. Pinning either shape swaps one
+        // environment-dependent test for another, which is what this one already
+        // was.
+        //
+        // So both are accepted, and the assertion is the same claim either way:
+        // NOT REFUSED. That is sound rather than lax, because a refusal has only
+        // one shape. Spring Security's ExceptionTranslationFilter catches
+        // AccessDeniedException inside the chain and renders 403 — it never
+        // propagates out of `perform`. `refusalIsForbiddenAndNotUnauthorised`
+        // below proves it, asserting a 403 *status* for a QA caller rather than
+        // an exception. So an exception escaping is positive evidence that
+        // authorisation passed and the request died in the handler body, and a
+        // status is checked directly.
+        //
+        // The regression this exists to catch — a route wrongly restricted, or a
+        // typo'd authority literal — still fails, through the status branch.
+        // Mutation-checked: replacing this route's @PreAuthorize with
+        // hasAuthority('no.such.capability') turns it red.
+        //
+        // Worth recording that the FIRST mutation attempted proved nothing.
+        // Swapping master.write for ticket.close left the test green, because an
+        // Admin holds ticket.close as well — Admin holds every capability, so no
+        // real permission can be used to make this route refuse one. A mutation
+        // has to name a capability that exists nowhere. Anyone re-checking this
+        // guard will otherwise conclude it is toothless when it is not.
+        //
+        // Deliberately NOT "pick a route with no @Transactional service": that
+        // makes this test's health depend on nobody ever adding one to whichever
+        // route it names, which is precisely how it broke.
+        // ---------------------------------------------------------------
+        AtomicInteger status = new AtomicInteger(-1);
 
-        assertThat(status)
-                .as("an Admin holds master.write, so this must fail somewhere past authorisation")
-                .isNotEqualTo(403);
+        Throwable thrown = catchThrowable(() ->
+                status.set(mvc.perform(delete("/api/v1/masters/holidays/1")
+                                .with(authentication(principal(RolePermissions.ADMIN))))
+                        .andReturn().getResponse().getStatus()));
+
+        if (thrown == null) {
+            assertThat(status.get())
+                    .as("an Admin holds master.write, so this must fail somewhere past authorisation")
+                    .isNotEqualTo(403);
+        } else {
+            // Belt and braces. Unreachable as argued above, and cheap enough
+            // that it need not be argued again by whoever changes the chain.
+            assertThat(thrown)
+                    .as("the request failed in the handler body, which means authorisation let it through")
+                    .rootCause()
+                    .isNotInstanceOf(AccessDeniedException.class);
+        }
     }
 
     @Test
