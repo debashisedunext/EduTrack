@@ -1306,11 +1306,18 @@ paths:
     post:
       tags: [tickets]
       operationId: bulkReassignTickets
-      summary: Reassign many tickets from one resource to another (S-24)
+      summary: Reassign many tickets from one resource to another (S-17, S-24)
       description: |
         **Each ticket gets its own history entry** — a bulk operation that writes
         one summary row destroys the per-ticket audit trail, which is the point of
         having one.
+
+        **PM and Admin only** — see `/tickets/bulk-level` for the matrix that
+        applies to all three bulk actions.
+
+        Two callers, one endpoint: S-24's wizard drives it from a source
+        resource, and S-17's grid drives it from a tick-box selection. The
+        difference is entirely in how `ticketIds` is assembled.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true
@@ -1334,6 +1341,121 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/BulkResultResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
+
+  /tickets/bulk-level:
+    patch:
+      tags: [tickets]
+      operationId: bulkChangeTicketLevel
+      summary: Change the priority level of many tickets (S-17)
+      description: |
+        The bulk half of `PATCH /tickets/{ticketId}/priority`, for S-17's grid
+        selection. One request rather than one per selected row: fifty ticked
+        tickets is fifty round trips, fifty planned-close-date recomputations
+        interleaved with each other, and fifty chances for a partial result
+        nobody can reconstruct afterwards.
+
+        **The per-ticket rules are unchanged and applied per ticket.**
+        `originalLevel` is never overwritten, every accepted change writes its
+        own `LEVEL_CHANGED` history entry, and the planned close date is
+        recomputed against the working calendar for each ticket individually. A
+        bulk call is fifty applications of one rule, not one application to
+        fifty rows.
+
+        `reason` is **mandatory here**, where the single-ticket endpoint only
+        requires it once the ticket is assigned. A selection spanning both
+        assigned and unassigned tickets would otherwise need the caller to know
+        which is which before deciding whether to type one, and the reason is
+        the only record of why fifty levels moved at once.
+
+        ### Permission matrix — all six roles
+
+        | Role | Allowed |
+        |---|---|
+        | Admin | yes, unrestricted |
+        | PM | yes, within their projects |
+        | Support | no — `403` |
+        | Developer | no — `403` |
+        | QA | no — `403` |
+        | Deployment | no — `403` |
+
+        **Refused server-side, not merely hidden.** The grid draws no selection
+        column for the four roles that cannot act, but a request built by hand
+        is refused all the same. Row scoping applies first, so a ticket outside
+        the caller's scope comes back as a per-ticket `Not found` in the result
+        rather than a `403` — no existence leak, same rule as everywhere else.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketIds, level, reason]
+              properties:
+                ticketIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { $ref: '#/components/schemas/TicketId' }
+                level: { $ref: '#/components/schemas/Level' }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Per-ticket outcome; partial success is possible and reported.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /tickets/bulk-close:
+    post:
+      tags: [tickets]
+      operationId: bulkCloseTickets
+      summary: Close many tickets in the current cycle (S-17)
+      description: |
+        The bulk half of `POST /tickets/{ticketId}/close`, for S-17's grid
+        selection. Same permission matrix as `PATCH /tickets/bulk-level`.
+
+        **Each ticket closes as its own transaction** — `actualCloseDate` is
+        stamped, the open stage transition is sealed, and a `CLOSED` history
+        entry is written, per ticket. One ticket refusing does not roll back the
+        others, which is why the result is per-ticket rather than a single
+        status code.
+
+        **A ticket already closed is reported as refused, not silently
+        re-closed.** Re-stamping `actualCloseDate` would move a date that
+        reports already depend on, and sealing an already-sealed transition is
+        exactly the mutation the append-only rule forbids. The caller sees
+        `Already closed` beside that row.
+
+        `resolutionSummary` is shared across the selection by design: a bulk
+        close is one decision about a batch, and offering fifty free-text boxes
+        would produce fifty copies of the same sentence or fifty blanks.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketIds, resolutionSummary]
+              properties:
+                ticketIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { $ref: '#/components/schemas/TicketId' }
+                resolutionSummary: { type: string, minLength: 3, maxLength: 4000 }
+                rootCauseCategory: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: Per-ticket outcome; partial success is possible and reported.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /tickets/{ticketId}:
     parameters: [{ $ref: '#/components/parameters/TicketId' }]
