@@ -7,6 +7,8 @@ import com.edunext.edutrack.domain.notifications.NotificationChannel;
 import com.edunext.edutrack.domain.notifications.NotificationEvent;
 import com.edunext.edutrack.domain.notifications.NotificationPreferences;
 import com.edunext.edutrack.domain.notifications.NotificationWriter;
+import com.edunext.edutrack.domain.outbox.NewMail;
+import com.edunext.edutrack.domain.outbox.OutboxEnqueuer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -23,15 +25,20 @@ import java.util.Map;
  * in the "can be disabled" column — and the answer gets none, which is §11's
  * one dash on the "Reply to status request" row.
  *
- * <p><strong>No mail is sent from here yet, and that is a gap, not a
- * decision.</strong> D-029 and D-030 own the template engine and the body, and
- * there is nothing yet to render a mail with; D-037 wires the fifteen §4B.6
- * events once there is. The same position {@link MentionNotifier} takes, and
- * for the same reason — but recorded more loudly here, because a mention mail
- * is optional and this one is not. What this task <em>can</em> do in advance is
- * make sure the lock is already right when the wiring lands, which is why
- * {@link NotificationEvent#isMandatoryMail()} now covers
- * {@link NotificationEvent.Category#STATUS_REQUEST}.
+ * <p><strong>The ask now sends mail; the answer still does not.</strong> That
+ * asymmetry is the blueprint's, not an oversight: §4B.6 lists "Status requested
+ * by manager" as ❌ never optional, and §11 gives "Reply to status request" a
+ * dash in the email column. Somebody waiting on an answer is already looking at
+ * the thread.
+ *
+ * <p>Wiring it had to wait for D-029 and D-030 — until those landed there was
+ * no template engine and no body to render, and a mandatory mail whose body was
+ * its own subject line is not what §4B.6 asks for. D-036 made the lock correct
+ * in advance ({@link NotificationEvent#isMandatoryMail()} covers
+ * {@link NotificationEvent.Category#STATUS_REQUEST}, and
+ * {@code NotificationPreferences.allows} answers before it reads a row), so
+ * there was never a preference that could silence this once it existed. This is
+ * the first of D-037's fifteen.
  */
 @Component
 class StatusRequestNotifier {
@@ -41,13 +48,19 @@ class StatusRequestNotifier {
     private final NotificationWriter notifications;
     private final RealtimePublisher realtime;
     private final NotificationPreferences preferences;
+    private final StatusRequestRepository people;
+    private final OutboxEnqueuer outbox;
 
     StatusRequestNotifier(NotificationWriter notifications,
                           RealtimePublisher realtime,
-                          NotificationPreferences preferences) {
+                          NotificationPreferences preferences,
+                          StatusRequestRepository people,
+                          OutboxEnqueuer outbox) {
         this.notifications = notifications;
         this.realtime = realtime;
         this.preferences = preferences;
+        this.people = people;
+        this.outbox = outbox;
     }
 
     /** Somebody has been asked for a status. */
@@ -62,6 +75,37 @@ class StatusRequestNotifier {
                 nameOr(managerName, "Your manager") + " asked for a status update",
                 "on ticket " + nameOr(ticketCode, "a ticket you are assigned"),
                 threadId);
+        mailTheAsk(askedOfId, ticketId);
+    }
+
+    /**
+     * §4B.6's {@code [CRM-26-00347] Status requested}, which nobody may turn off.
+     *
+     * <p>The subject is the blueprint's wording and nothing more. A status
+     * request is a manager asking a question in a thread, and putting the
+     * question itself in a subject line would put whatever they typed in front
+     * of a mail client's preview pane and its search index — the thread is
+     * where the conversation belongs. D-031 adds the ticket code at the front.
+     *
+     * <p><strong>A failure here never propagates.</strong> The request row and
+     * the message are already written and are the record; letting the mail path
+     * roll back the ask would lose the thing the manager actually did. Logged at
+     * error for the same reason the bell failure above is — a mandatory alert
+     * that silently never went is precisely what §17 wants provable rather than
+     * deniable.
+     */
+    private void mailTheAsk(long askedOfId, long ticketId) {
+        try {
+            people.activeEmailOf(askedOfId).ifPresent(address -> outbox.enqueue(NewMail.forTicket(
+                    ticketId,
+                    NotificationEvent.STATUS_REQUESTED.name(),
+                    askedOfId,
+                    address,
+                    "Status requested")));
+        } catch (RuntimeException e) {
+            log.error("chat: could not queue the status-request mail for user {} on ticket {}",
+                    askedOfId, ticketId, e);
+        }
     }
 
     /**
