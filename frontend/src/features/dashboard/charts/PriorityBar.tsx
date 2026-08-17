@@ -26,7 +26,7 @@ import { useDrillDown } from './useDrillDown'
  * means the position genuinely carries meaning here.
  */
 export function PriorityBar({ series }: { series: WidgetSeries[] }) {
-  const drillDown = useDrillDown()
+  const drillDown = useDrillDown('Priority')
   const points = series[0]?.points ?? []
 
   return (

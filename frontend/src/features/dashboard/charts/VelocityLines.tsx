@@ -30,7 +30,7 @@ import { useDrillDown } from './useDrillDown'
  * chart being crowded never means somebody is unreachable.
  */
 export function VelocityLines({ series }: { series: WidgetSeries[] }) {
-  const drillDown = useDrillDown()
+  const drillDown = useDrillDown('Resource velocity')
   const rows = mergeByCategory(series)
 
   return (

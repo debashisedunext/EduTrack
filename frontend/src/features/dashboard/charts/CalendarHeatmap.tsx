@@ -53,7 +53,7 @@ function isoWeekday(date: Date): number {
 }
 
 export function CalendarHeatmap({ series }: { series: WidgetSeries[] }) {
-  const drillDown = useDrillDown()
+  const drillDown = useDrillDown('Date-wise activity')
   const points = series[0]?.points ?? []
 
   if (points.length === 0) {

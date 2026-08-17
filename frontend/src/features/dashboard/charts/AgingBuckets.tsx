@@ -27,7 +27,7 @@ import { useDrillDown } from './useDrillDown'
  * Adding `ageFrom`/`ageTo` belongs with A-060 and Divyansh's list.
  */
 export function AgingBuckets({ series }: { series: WidgetSeries[] }) {
-  const drillDown = useDrillDown()
+  const drillDown = useDrillDown('Ticket aging')
   const points = series[0]?.points ?? []
 
   return (

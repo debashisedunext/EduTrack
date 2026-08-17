@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { WidgetFrame } from './WidgetFrame'
+import { useDrillDownStore } from './drillDownStore'
 import { PriorityBar } from './charts/PriorityBar'
 
 /**
@@ -64,6 +65,7 @@ function served(data: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  useDrillDownStore.setState({ drillDown: null, title: '' })
 })
 
 describe('WidgetFrame', () => {
@@ -138,7 +140,16 @@ describe('WidgetFrame', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /^Critical: 1\./ }))
 
-    expect(navigate).toHaveBeenCalledWith('/tickets?level=CRITICAL&excludeClosed=true')
+    // A-061 · the segment now opens §S-06's panel rather than navigating. The
+    // assertion that matters is unchanged in substance — the *server-built*
+    // target is what gets used, never one the client reassembled — so only
+    // where it lands has moved. "Open full list" inside the panel is what
+    // navigates now, and `DrillDownPanel.test.tsx` covers that.
+    expect(useDrillDownStore.getState().drillDown).toBe(
+      '/tickets?level=CRITICAL&excludeClosed=true',
+    )
+    expect(useDrillDownStore.getState().title).toBe('Critical')
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   it('names the value in the legend, so four buttons are not four identical labels', () => {
