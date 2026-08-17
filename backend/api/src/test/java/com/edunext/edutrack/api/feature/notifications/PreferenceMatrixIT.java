@@ -97,7 +97,53 @@ class PreferenceMatrixIT {
     @DisplayName("somebody who has never opened the screen receives everything")
     void absenceMeansEnabled() {
         assertThat(preferences.allows(ravi, "COMMENT_ADDED", NotificationChannel.EMAIL)).isTrue();
-        assertThat(preferences.allows(ravi, "COMMENT_ADDED", NotificationChannel.IN_APP)).isTrue();
+        // D-040 changed which event demonstrates this on IN_APP, not the rule.
+        // It has to be one §11 gives a popup at all: COMMENT_ADDED has a dash in
+        // that column, so there is no toast for an absent preference to leave
+        // enabled, and asserting it here was asserting the wrong thing.
+        assertThat(preferences.allows(ravi, "MENTIONED", NotificationChannel.IN_APP)).isTrue();
+    }
+
+    @Test
+    @DisplayName("§11's dash beats an absent preference — there is no toast to enable")
+    void anEventWithNoPopupIsNotToasted() {
+        // Absence still means enabled; this is the prior question. D-042 asks
+        // "did the user switch it off", and the answer is no — but the event has
+        // no in-app popup in the first place, and a default cannot conjure a
+        // channel the blueprint did not give it.
+        assertThat(NotificationEvent.COMMENT_ADDED.popsUp()).isFalse();
+        assertThat(preferences.allows(ravi, "COMMENT_ADDED", NotificationChannel.IN_APP)).isFalse();
+
+        // The bell is not a preference and is not affected — S-26 still holds
+        // every comment. Only the interrupt is refused.
+    }
+
+    @Test
+    @DisplayName("the screen shows that switch off, rather than lying about it")
+    void theMatrixDoesNotOfferAToastThatCannotHappen() {
+        // The mirror of the mandatory-mail row, which always reads as on
+        // whatever the table says. A switch shown on that the send path ignores
+        // is the same defect pointing the other way.
+        assertThat(rowFor("COMMENT_ADDED").inApp()).isFalse();
+        assertThat(rowFor("MENTIONED").inApp()).isTrue();
+    }
+
+    @Test
+    @DisplayName("turning that switch on is discarded, not stored")
+    void enablingAnImpossibleToastIsDiscarded() {
+        // Discarded rather than rejected, exactly as a locked mail is: the
+        // client posts back the grid it was shown, and failing the whole save
+        // over a switch the user could not usefully have moved punishes them for
+        // our screen. What matters is that no row is written claiming a
+        // preference the send path cannot honour.
+        assertThat(service.save(ravi, request("COMMENT_ADDED", true, null)))
+                .isEqualTo(PreferenceService.SaveOutcome.SAVED);
+
+        assertThat(preferences.overridesFor(ravi))
+                .as("no IN_APP row was stored for an event with no popup")
+                .noneMatch(o -> o.eventCode().equals("COMMENT_ADDED")
+                        && o.channel().equals(NotificationChannel.IN_APP.name()));
+        assertThat(preferences.allows(ravi, "COMMENT_ADDED", NotificationChannel.IN_APP)).isFalse();
     }
 
     @Test
@@ -203,9 +249,12 @@ class PreferenceMatrixIT {
 
     @Test
     void savingOneChannelLeavesTheOtherAlone() {
-        service.save(ravi, request("COMMENT_ADDED", false, null));
+        // MENTIONED since D-040, for the reason given in
+        // channelsDoNotDragEachOtherAround: an event §11 gives no popup reads
+        // false whether or not the save did anything.
+        service.save(ravi, request("MENTIONED", false, null));
 
-        PreferenceDtos.PreferenceRow row = rowFor("COMMENT_ADDED");
+        PreferenceDtos.PreferenceRow row = rowFor("MENTIONED");
         assertThat(row.inApp()).isFalse();
         assertThat(row.email()).isTrue();
     }
@@ -284,12 +333,16 @@ class PreferenceMatrixIT {
     @Test
     @DisplayName("the three channels are independent")
     void channelsDoNotDragEachOtherAround() {
-        service.save(ravi, request("COMMENT_ADDED", false, null, null));
+        // MENTIONED rather than COMMENT_ADDED since D-040: §11 gives the latter
+        // no in-app popup, so its toast reads off whatever is saved, and this
+        // test would have gone on passing while proving nothing about the
+        // channel it names.
+        service.save(ravi, request("MENTIONED", false, null, null));
 
         // Somebody who silenced the toast has not asked to lose push as well.
-        assertThat(rowFor("COMMENT_ADDED").inApp()).isFalse();
-        assertThat(rowFor("COMMENT_ADDED").push()).isTrue();
-        assertThat(rowFor("COMMENT_ADDED").email()).isTrue();
+        assertThat(rowFor("MENTIONED").inApp()).isFalse();
+        assertThat(rowFor("MENTIONED").push()).isTrue();
+        assertThat(rowFor("MENTIONED").email()).isTrue();
     }
 
     @Test
