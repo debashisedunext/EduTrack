@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.tickets.detail;
 
+import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketAttachment;
@@ -125,7 +126,7 @@ class TicketDetailService {
                 : (short) requestedCycle.intValue();
 
         return new TicketDetailDtos.Detail(
-                toTicket(ticket),
+                TicketWire.of(ticket),
                 cycles.findByTicketIdOrderByCycleNoAsc(ticketId).stream().map(this::toCycle).toList(),
                 null,   // ribbon — C-042/C-051, see the class note
                 journal.historyFor(ticketId, cycle).stream().map(this::toHistory).toList(),
@@ -140,16 +141,6 @@ class TicketDetailService {
     }
 
     // ── mapping ──────────────────────────────────────────────────────────────
-
-    private TicketDetailDtos.Ticket toTicket(Ticket t) {
-        return new TicketDetailDtos.Ticket(
-                t.getId(), t.getTicketCode(), t.getProjectId(), t.getTitle(), t.getDescription(),
-                t.getTaskTypeId(), t.getLevel(), t.getOriginalLevel(), t.getStatus(),
-                t.getEnvironment(), t.getDateReported(), t.getReportedBy(), t.getAssignedTo(),
-                t.getEstimatedEffortHrs(), t.getTotalEffortHrs(), t.getPlannedCloseDate(),
-                t.getActualCloseDate(), t.isReopened(), t.getReopenCount(), t.getCurrentCycleNo(),
-                t.isDelayed(), t.getCurrentStage(), t.getCurrentIteration(), t.getReworkCount());
-    }
 
     private TicketDetailDtos.Cycle toCycle(TicketCycle c) {
         return new TicketDetailDtos.Cycle(
