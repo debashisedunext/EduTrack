@@ -216,6 +216,39 @@ added `PROSPECT` and left the predicate alone, so a prospect came back from
 is deleted rather than corrected, because the wrong comparison should not be one
 autocomplete away.
 
+## B-029 · deactivation, and the three things it must do
+
+Blueprint line 523 is one sentence with three clauses: deactivating a client
+with open tickets **warns**, **blocks new tickets**, and **never hides the
+historical ones**. The server owns the third outright.
+
+**Nothing here filters on `clients.status` when reading tickets, and now
+something says so.** `openTicketCounts`, `lastTicketDates` and `TicketListSpecs`
+have always been correct about this — by omission, which is exactly what a later
+change removes without noticing. One `AND c.status = 'ACTIVE'` added to the
+count query, by somebody reasonably assuming a grid should not total closed
+accounts, breaks the clause in silence: no test fails and no screen errors.
+`ClientMasterIT` now asserts it **through** the deactivation — the same figures
+before and after, and the `tickets` rows untouched, which is also what makes
+S-32's bulk Activate a real undo rather than a second write.
+
+**`?isActive=` is a picker's filter, and the contract now says so.** The
+parameter answers "may a ticket be raised against this client", not "should this
+client be visible". S-15's ticket-list client filter was sending `true`, so it
+lost a client from its own dropdown the moment anybody deactivated them —
+stranding every ticket they had ever raised. S-19's create form sends it and
+must. The question that separates the two is "new or historical", never "active
+or not".
+
+**Enforcement of the block is still owed and still cannot be paid here.** It
+belongs on `POST /tickets`, which has no controller — B-028 reached the same
+conclusion about the primary-contact gate one task earlier. Both rules are
+written into `createTicket`'s contract description as a **400 keyed on
+`clientId`**, not a 404, because the client is legitimately visible and it is the
+combination being refused. Until that operation exists,
+`features/clients/ticketEligibility.ts` is the only thing enforcing either gate
+anywhere in the system. **Flagged for Stream C.**
+
 ## Not here yet
 
 Nothing reads `clients.sla_policy_id`. C-012's `PlannedCloseDate` ladder

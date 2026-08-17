@@ -2210,6 +2210,18 @@ paths:
             so a prospect came back from `GET /clients` saying `isActive: true`
             and did not come back from `GET /clients?isActive=true` at all —
             the call §4B.2's ticket-form dropdown makes.
+
+            **B-029 · this is a picker's filter, never a historical view's.**
+            Blueprint line 523 says deactivating a client blocks *new* tickets
+            but "never hides the historical tickets", so `isActive=true` belongs
+            on a list of clients a ticket may be *raised against* and nowhere
+            else. Sending it to populate a filter, a report grouping or a name
+            lookup over tickets that already exist removes a client from that
+            view the moment somebody deactivates them — which is the sentence's
+            second half breaking the third. S-15's ticket-list client filter did
+            exactly this and no longer does; S-19's create form still sends it
+            and must. Same parameter, opposite answers, and the question that
+            separates them is "new or historical" — not "active or not".
         - { name: projectId, in: query, schema: { type: integer, format: int64 } }
         - name: supportPlan
           in: query

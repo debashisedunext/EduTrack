@@ -21,6 +21,8 @@ import { SkillsInput } from '../masters/resources/SkillsInput'
 
 import { ClientContactsTab } from './ClientContactsTab'
 import { ClientProjectsPicker } from './ClientProjectsPicker'
+import { deactivationWarning, type DeactivationCandidate } from './deactivation'
+import { DeactivationWarningDialog } from './DeactivationWarningDialog'
 import { useClient, useCreateClient, useUpdateClient } from './clientQueries'
 import {
   CLIENT_STATUSES,
@@ -76,7 +78,15 @@ import {
  *   rather than faked.
  * - **A delete button.** There is none and there cannot be: tickets, contacts and
  *   project mappings all point at `clients`, and §4B.2 says deactivating must
- *   never hide historical tickets. Going away is the status control on the grid.
+ *   never hide historical tickets. Going away is the status control below.
+ *
+ * <h2>B-029 · the Status select warns before it deactivates</h2>
+ *
+ * B-026 shipped that control with a hint and no confirmation, on the reading
+ * that the warning belonged to S-32's bulk bar where B-025 had put it. It
+ * belongs to *deactivation*, not to a screen: this select reaches `INACTIVE` in
+ * two clicks, and the count it should have been showing was already loaded on
+ * the page. `deactivationWarning` decides; the dialog is S-32's, unchanged.
  */
 export function ClientFormPage() {
   const navigate = useNavigate()
@@ -89,6 +99,20 @@ export function ClientFormPage() {
 
   const [tab, setTab] = React.useState<ClientTab>('Identity')
   const [bannerError, setBannerError] = React.useState<string | null>(null)
+
+  /**
+   * B-029 · the Status select is the second way to deactivate a client, and it
+   * used to be the silent one.
+   *
+   * S-32's bulk bar has warned since B-025. This tab reaches `INACTIVE` in two
+   * clicks and saved without a word — the same consequential act, on a screen
+   * that has *already loaded* `openTicketCount`, with the number on the page
+   * and never shown. Held here until the admin confirms; `save` then sends the
+   * values captured at submit rather than re-reading the form.
+   */
+  const [pendingDeactivation, setPendingDeactivation] =
+    React.useState<readonly DeactivationCandidate[] | null>(null)
+  const [pendingValues, setPendingValues] = React.useState<ClientFormValues | null>(null)
 
   // Every active resource is a candidate account manager. The role is
   // deliberately not filtered — B-016 made the same call for a project manager,
@@ -164,35 +188,49 @@ export function ClientFormPage() {
     setBannerError(unmatched[0] ?? error.problem.detail ?? 'The client was not saved.')
   }
 
+  function save(values: ClientFormValues) {
+    setBannerError(null)
+    setPendingDeactivation(null)
+
+    if (isEdit && clientId != null) {
+      updateClient.mutate(
+        { clientId, data: toWriteRequest(values), etag: loaded?.etag ?? null },
+        {
+          onSuccess: (client) => {
+            toast({ title: `${client.name} saved` })
+            navigate('/masters/clients')
+          },
+          onError: applyServerError,
+        },
+      )
+      return
+    }
+
+    createClient.mutate(toWriteRequest(values), {
+      onSuccess: (client) => {
+        toast({
+          title: `${client.name} created`,
+          description:
+            'Add a primary contact before this client can be chosen on a ticket.',
+        })
+        navigate('/masters/clients')
+      },
+      onError: applyServerError,
+    })
+  }
+
   const onSubmit = form.handleSubmit(
     (values) => {
-      setBannerError(null)
-
-      if (isEdit && clientId != null) {
-        updateClient.mutate(
-          { clientId, data: toWriteRequest(values), etag: loaded?.etag ?? null },
-          {
-            onSuccess: (client) => {
-              toast({ title: `${client.name} saved` })
-              navigate('/masters/clients')
-            },
-            onError: applyServerError,
-          },
-        )
+      const affected = deactivationWarning(loaded?.client ?? null, values.status)
+      if (affected) {
+        // Held rather than saved. `pendingValues` is what the dialog's Confirm
+        // sends — re-reading the form there would take whatever is in it *then*,
+        // and the admin can still see and edit the fields behind a modal.
+        setPendingValues(values)
+        setPendingDeactivation([affected])
         return
       }
-
-      createClient.mutate(toWriteRequest(values), {
-        onSuccess: (client) => {
-          toast({
-            title: `${client.name} created`,
-            description:
-              'Add a primary contact before this client can be chosen on a ticket.',
-          })
-          navigate('/masters/clients')
-        },
-        onError: applyServerError,
-      })
+      save(values)
     },
     // The client-side mirror of the same problem: zod refusing a field on a tab
     // that is not open would show nothing at all.
@@ -676,6 +714,26 @@ export function ClientFormPage() {
           {isSaving ? 'Saving…' : isEdit ? 'Save client' : 'Create client'}
         </Button>
       </div>
+
+      {/*
+        B-029 · blueprint line 523's warning, on the second path that reaches
+        `INACTIVE`. The same component S-32's grid uses — see the argument on
+        `DeactivationWarningDialog` for why it is one and not two.
+
+        Confirm reads `pendingValues`, not the form: the modal is portalled to
+        `document.body` and the fields behind it are still live.
+      */}
+      <DeactivationWarningDialog
+        affected={pendingDeactivation}
+        totalSelected={1}
+        isPending={isSaving}
+        confirmLabel="Save client"
+        onConfirm={() => pendingValues && save(pendingValues)}
+        onCancel={() => {
+          setPendingDeactivation(null)
+          setPendingValues(null)
+        }}
+      />
     </form>
   )
 }

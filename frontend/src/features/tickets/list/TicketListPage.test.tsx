@@ -46,10 +46,17 @@ const TICKET_LINK_HREF = /^\/tickets\/\S+-26-\d+$/
  * counting rows alone would pass while the loading state is still showing.
  */
 async function rowsReady() {
-  await waitFor(() => {
-    const ticketLinks = screen.getAllByRole('link').filter((el) => TICKET_LINK_HREF.test(el.getAttribute('href') ?? ''))
-    expect(ticketLinks.length).toBeGreaterThan(0)
-  })
+  // `timeout: 4000` for the reason `openFilter` below already gives, and this
+  // helper was the one place in the file left on the 1 s default — it is the
+  // first thing almost every test awaits, so it is where a busy full-suite run
+  // surfaces as an unrelated-looking failure. (B-029.)
+  await waitFor(
+    () => {
+      const ticketLinks = screen.getAllByRole('link').filter((el) => TICKET_LINK_HREF.test(el.getAttribute('href') ?? ''))
+      expect(ticketLinks.length).toBeGreaterThan(0)
+    },
+    { timeout: 4000 },
+  )
   return screen.getAllByRole('row')
 }
 
@@ -145,6 +152,54 @@ describe('S-17 Ticket List — C-014', () => {
     await pickFilterOption(/^Project: CRM/, /All project/)
     await waitFor(() => expect(listRequests.at(-1)?.searchParams.has('projectId')).toBe(false), { timeout: 4000 })
     expect(screen.getByRole('button', { name: 'Project' })).toBeInTheDocument()
+  })
+
+  /**
+   * B-029 · blueprint line 523 — deactivating a client "never hides the
+   * historical tickets".
+   *
+   * This filter used to send `?isActive=true`, so a client's name left it the
+   * moment they were deactivated and every ticket they ever raised became
+   * unreachable through the one control that reaches them. Nothing failed
+   * loudly; the dropdown just quietly stopped offering somebody.
+   *
+   * The create form still sends the parameter, and must — that list is a picker
+   * for a ticket that does not exist yet, which is exactly what deactivation
+   * blocks. Same operation, opposite answers, and the question that separates
+   * them is "historical or new".
+   *
+   * Oldco is INACTIVE with three tickets on project 4 (`db.ts`), seeded for
+   * this: before those rows, a page that hid deactivated clients and one that
+   * did not were indistinguishable.
+   */
+  it('offers a deactivated client in the Client filter, and finds their tickets', async () => {
+    renderPage()
+    await rowsReady()
+
+    await openFilter('Client')
+    await waitFor(
+      () => {
+        const options = screen.getAllByRole('option').map((o) => o.textContent ?? '')
+        expect(options.some((o) => /Oldco Industries/.test(o))).toBe(true)
+      },
+      { timeout: 4000 },
+    )
+    fireEvent.click(screen.getByRole('option', { name: /Oldco Industries/ }))
+
+    await waitFor(
+      () => expect(listRequests.at(-1)?.searchParams.get('clientId')).toBe('4'),
+      { timeout: 4000 },
+    )
+    await waitFor(
+      () => {
+        const rows = screen.getAllByRole('row').slice(1)
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) {
+          expect(within(row).getByRole('link').textContent).toMatch(/^ARCH-/)
+        }
+      },
+      { timeout: 4000 },
+    )
   })
 
   it('offers Level options in priority-master order and narrows the grid to the chosen one', async () => {
@@ -276,6 +331,17 @@ async function pickSavedView(name: RegExp | string) {
 }
 
 describe('S-17 Row colour cues — C-016', () => {
+  /**
+   * The 8 s ceiling is B-029's and is a timing budget, not a behaviour change.
+   *
+   * This test renders the grid, opens a popover and waits out a filtered
+   * refetch — about 1.7 s on an idle machine, against vitest's 5 s default. It
+   * had roughly three seconds of headroom, which the whole file shares under
+   * one CPU-bound `vitest run`; adding a fifteenth test to the file spent it,
+   * and the failure surfaced here rather than in the test that caused it. Both
+   * pass in isolation and the assertion never changed. The same reason the
+   * popover helper above already sets `timeout: 4000`.
+   */
   it('gives every Critical row a soft red left border', async () => {
     renderPage()
     await rowsReady()
@@ -291,7 +357,7 @@ describe('S-17 Row colour cues — C-016', () => {
       },
       { timeout: 4000 },
     )
-  })
+  }, 8000)
 
   it('gives a Low row no colour cue — Low is never auto-escalated', async () => {
     renderPage()

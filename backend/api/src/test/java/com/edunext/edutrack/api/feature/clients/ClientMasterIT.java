@@ -241,6 +241,116 @@ class ClientMasterIT {
         assertThat(client.lastTicketDate()).isNull();
     }
 
+    // ------------------------------------------------------------------
+    // B-029 · "never hides the historical tickets"
+    // ------------------------------------------------------------------
+
+    /**
+     * Blueprint line 523's third clause, against a real database.
+     *
+     * <p>The server has always been right about this and <b>nothing said so</b>.
+     * {@code openTicketCounts}, {@code lastTicketDates} and
+     * {@code TicketListSpecs} simply never look at {@code clients.status}, which
+     * is correct by omission — and an omission is exactly what a later change
+     * takes away without noticing. One {@code AND c.status = 'ACTIVE'} added to
+     * the count query, by somebody reasonably assuming a grid should not total
+     * closed accounts, breaks the clause silently: no test fails, no screen
+     * errors, and a client's history quietly stops being counted.
+     *
+     * <p>Asserted <b>through the deactivation</b> rather than against an
+     * already-inactive fixture, because the claim is that the act changes
+     * nothing about the tickets — the same numbers before and after, from the
+     * same reads.
+     */
+    @Test
+    @DisplayName("deactivating a client changes none of its ticket figures")
+    void deactivationDoesNotHideTheTickets() {
+        long clientId = insertClient("ITCL_D", "IT Deactivated", "ACTIVE");
+        long projectId = insertProject("ITPD", "IT Deactivation Host");
+        insertTicket("ITCL-D1", projectId, clientId, "NEW");
+        insertTicket("ITCL-D2", projectId, clientId, "IN_PROGRESS");
+        insertTicket("ITCL-D3", projectId, clientId, "CLOSED");
+
+        ClientDtos.Client before = only(service.list(filterOn("IT Deactivated"), null, 50));
+        assertThat(before.openTicketCount()).isEqualTo(2);
+
+        ClientDtos.Client after = service.setStatus(clientId, false).orElseThrow();
+
+        assertThat(after.isActive()).as("the client itself is closed").isFalse();
+        assertThat(after.status()).isEqualTo("INACTIVE");
+        assertThat(after.openTicketCount())
+                .as("its open tickets are still open, and still counted")
+                .isEqualTo(before.openTicketCount());
+        assertThat(after.lastTicketDate())
+                .as("and it is still the client something was last raised against")
+                .isEqualTo(before.lastTicketDate());
+    }
+
+    /**
+     * The strongest form of the same claim: the deactivation writes nothing to
+     * {@code tickets} at all.
+     *
+     * <p>The figures above could be preserved by a read that compensates. This
+     * asserts there is nothing to compensate for — three rows, three unchanged
+     * statuses, still pointing at the client. It is also what makes the
+     * deactivation reversible, which S-32's bulk Activate depends on.
+     */
+    @Test
+    @DisplayName("deactivating writes nothing to the ticket rows")
+    void deactivationLeavesTheTicketTableAlone() {
+        long clientId = insertClient("ITCL_U", "IT Untouched Tickets", "ACTIVE");
+        long projectId = insertProject("ITPU", "IT Untouched Host");
+        insertTicket("ITCL-U1", projectId, clientId, "NEW");
+        insertTicket("ITCL-U2", projectId, clientId, "CLOSED");
+
+        service.setStatus(clientId, false);
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tickets WHERE client_id = ?", Integer.class, clientId))
+                .isEqualTo(2);
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM tickets WHERE ticket_code = 'ITCL-U1'", String.class))
+                .isEqualTo("NEW");
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM tickets WHERE ticket_code = 'ITCL-U2'", String.class))
+                .isEqualTo("CLOSED");
+    }
+
+    /**
+     * The grid must still be able to reach a deactivated client — to see the
+     * deactivation, and to undo it.
+     *
+     * <p>{@code ?isActive=} is not symmetric and the asymmetry is the point:
+     * {@code true} is {@code status <> 'INACTIVE'} (so prospects are in) and
+     * {@code false} is {@code status = 'INACTIVE'} exactly. B-028 fixed the
+     * first half after B-026 widened the projection and left the predicate
+     * behind; this pins all three readings at once, which is what would have
+     * caught it.
+     *
+     * <p><b>The unfiltered case is the one B-029 cares about.</b> It is what the
+     * S-15 ticket-list client filter reads, and sending {@code isActive=true}
+     * there is precisely how a deactivated client's history stopped being
+     * reachable — the parameter is a picker's filter, never a historical view's.
+     */
+    @Test
+    @DisplayName("a deactivated client is still listed, and only under the right filter")
+    void deactivatedClientsStayVisibleToTheGrid() {
+        long clientId = insertClient("ITCL_V", "IT Visible", "ACTIVE");
+        service.setStatus(clientId, false);
+
+        assertThat(service.list(filterOn("IT Visible"), null, 50).data())
+                .as("unfiltered — what the ticket list's client filter reads")
+                .extracting(ClientDtos.Client::clientCode)
+                .containsExactly("ITCL_V");
+        assertThat(service.list(filterOn("IT Visible", false), null, 50).data())
+                .as("?isActive=false is exactly INACTIVE")
+                .extracting(ClientDtos.Client::clientCode)
+                .containsExactly("ITCL_V");
+        assertThat(service.list(filterOn("IT Visible", true), null, 50).data())
+                .as("?isActive=true is the picker's filter — a closed client is out")
+                .isEmpty();
+    }
+
     /**
      * A client on three projects appears once, with three projects — not three
      * times. The join is an {@code EXISTS} for exactly this reason.
@@ -1087,6 +1197,11 @@ class ClientMasterIT {
 
     private static ClientQueryRepository.Filter filterOn(String q) {
         return new ClientQueryRepository.Filter(q, null, null, null, null);
+    }
+
+    /** B-029 · the same search under an explicit {@code ?isActive=}. */
+    private static ClientQueryRepository.Filter filterOn(String q, boolean isActive) {
+        return new ClientQueryRepository.Filter(q, isActive, null, null, null);
     }
 
     private static ClientDtos.Client only(CursorPage<ClientDtos.Client> page) {

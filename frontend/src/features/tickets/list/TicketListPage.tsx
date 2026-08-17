@@ -125,9 +125,27 @@ export function TicketListPage() {
 
   // Progressively narrowed the same way the create form does — a project
   // filter is exactly the signal that says which clients and members matter.
+  //
+  // **B-029 · `isActive` is deliberately not sent here, and removing it was a
+  // defect fix.** Blueprint line 523: deactivating a client blocks new tickets
+  // but "never hides the historical tickets". This dropdown filters a list of
+  // tickets that already exist — so sending `isActive: true` meant a client's
+  // name vanished from it the moment they were deactivated, and forty
+  // historical tickets became unreachable through the one control that reaches
+  // them. Nothing failed loudly; the filter just quietly stopped offering
+  // somebody.
+  //
+  // The create form is the opposite case and still sends it: that list is a
+  // *picker* for something new, which is exactly what deactivation blocks. Same
+  // parameter, opposite answers, and the question that separates them is
+  // "historical or new" — see `features/clients/ticketEligibility.ts`. Identical
+  // in shape to B-027's `includeInactive` split, which this same page's detail
+  // view got wrong in the same direction.
+  //
+  // Stream B's edit in Stream C's file, one argument wide — the precedent
+  // B-027 and B-028 both set. **Flagged for Stream C.**
   const { data: clientsData } = useListClients({
     projectId: filters.projectId ?? undefined,
-    isActive: true,
     limit: 200,
   })
   const clients = React.useMemo(() => clientsData?.data ?? [], [clientsData])

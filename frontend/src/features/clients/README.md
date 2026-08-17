@@ -162,6 +162,24 @@ always refused. A client-side rule looser than the server's is the worse
 direction of the two: the form says the field is fine and the save comes back
 with an error on it.
 
+**B-029 · one warning, two ways to deactivate, and one rule for the block.**
+`DeactivationWarningDialog` moved out of `ClientBulkStatusBar` because S-33's
+Status select reaches `INACTIVE` in two clicks and used to save without a word —
+the same consequential act as S-32's bulk bar, on a page that had already loaded
+the count it should have been showing. Two dialogs would be two chances to
+describe one consequence differently. The bulk warning also reads every row the
+grid has *seen* rather than the current page: this grid builds a selection
+across pages on purpose, and a client ticked three pages ago went through
+unwarned.
+
+**`ticketEligibility.ts` is where both new-ticket gates live** — B-028's "needs a
+primary contact" and B-029's "not deactivated" — because a second derivation
+beside the first is how a rule ends up with two answers, which is what
+`FieldValidators`, `ProjectRoles` and `PasswordComplexity` all exist to stop and
+what B-028 found happening anyway. `POST /tickets` has no controller, so until
+C-013 mounts it that module is the only enforcement in the system; the
+obligation is stated in `createTicket`'s contract description and flagged.
+
 **`/masters/clients` is the list; `/clients/:clientId` is the 360.** Two
 screens at two paths, kept apart by the prefix exactly as `/masters/projects`
 and `/projects/:id` already are. The 360 is not built; `App.tsx` points it at a

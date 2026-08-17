@@ -213,6 +213,82 @@ describe('editing', () => {
   })
 
   /**
+   * B-029 · blueprint line 523's warning, on the path that did not have one.
+   *
+   * B-026 shipped this Status select with a hint and no confirmation, on the
+   * reading that the warning lived on S-32's bulk bar where B-025 put it. It
+   * belongs to the *act*, not to a screen: two clicks reach `INACTIVE` here,
+   * and the count that should have been shown was already loaded on the page.
+   */
+  it('warns before deactivating a client that has open tickets', async () => {
+    await openEdit(1)
+    const save = screen.getByRole('button', { name: 'Save client' })
+
+    fireEvent.click(screen.getByRole('combobox', { name: /Status/ }))
+    await waitFor(() => fireEvent.click(screen.getByRole('option', { name: 'Inactive' })), SLOW)
+    fireEvent.click(save)
+
+    const dialog = await screen.findByRole('dialog', undefined, SLOW)
+    expect(within(dialog).getByText(/open tickets/i)).toBeInTheDocument()
+    // Held, not saved — the dialog is a confirmation, not a notification.
+    expect(getDb().clients.find((c) => c.id === 1)?.status).toBe('ACTIVE')
+  })
+
+  it('deactivates through the warning', async () => {
+    await openEdit(1)
+    const save = screen.getByRole('button', { name: 'Save client' })
+
+    fireEvent.click(screen.getByRole('combobox', { name: /Status/ }))
+    await waitFor(() => fireEvent.click(screen.getByRole('option', { name: 'Inactive' })), SLOW)
+    fireEvent.click(save)
+
+    const dialog = await screen.findByRole('dialog', undefined, SLOW)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save client' }))
+
+    await waitFor(
+      () => expect(getDb().clients.find((c) => c.id === 1)?.status).toBe('INACTIVE'),
+      SLOW,
+    )
+  })
+
+  /** Cancelling leaves the client exactly as it was, on the form, unsaved. */
+  it('saves nothing when the deactivation warning is cancelled', async () => {
+    await openEdit(1)
+    const save = screen.getByRole('button', { name: 'Save client' })
+
+    fireEvent.click(screen.getByRole('combobox', { name: /Status/ }))
+    await waitFor(() => fireEvent.click(screen.getByRole('option', { name: 'Inactive' })), SLOW)
+    fireEvent.click(save)
+
+    const dialog = await screen.findByRole('dialog', undefined, SLOW)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(getDb().clients.find((c) => c.id === 1)?.status).toBe('ACTIVE')
+  })
+
+  /**
+   * Active ⇄ Prospect is a commercial reclassification, not a deactivation.
+   * Only `INACTIVE` blocks new tickets, so only `INACTIVE` warns — the
+   * companion to `can turn a client into a prospect` above, which would still
+   * have passed had the dialog fired on every status change and been dismissed.
+   */
+  it('does not warn when the status change is not a deactivation', async () => {
+    await openEdit(1)
+    const save = screen.getByRole('button', { name: 'Save client' })
+
+    fireEvent.click(screen.getByRole('combobox', { name: /Status/ }))
+    await waitFor(() => fireEvent.click(screen.getByRole('option', { name: 'Prospect' })), SLOW)
+    fireEvent.click(save)
+
+    await waitFor(
+      () => expect(getDb().clients.find((c) => c.id === 1)?.status).toBe('PROSPECT'),
+      SLOW,
+    )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  /**
    * The domain feeds D-039's inbound-mail matching, which looks up a bare host
    * taken from a sender address. Stored as typed, the two never meet and
    * attribution silently stops working for that client.
