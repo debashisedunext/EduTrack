@@ -2625,6 +2625,16 @@ paths:
         Generated with Apache POI SXSSF, carrying data-validation dropdowns on
         Status and Support Plan plus one filled example row. A template with a
         worked example produces far fewer rejected rows than one with only headers.
+
+        The header row is **exactly** the column names the import matches on —
+        no asterisk on the required ones, no type hints. Decorating them would
+        make the file this API just produced fail to auto-match on `POST
+        /imports/{schema}/upload`. Which columns are required, what the natural
+        key is and what each dropdown accepts are on a second **Instructions**
+        sheet; the data sheet is first, so a caller taking the default sheet
+        gets the one that is filled in.
+
+        `master.write`, like the three operations beside it — B-031.
       responses:
         '200':
           description: The workbook.
@@ -2632,6 +2642,16 @@ paths:
             application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
               schema: { type: string, format: binary }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            No schema is registered under that key. `schema` is a path segment,
+            so an unregistered value makes the resource absent rather than the
+            request malformed — and `users` is that case today, declared in the
+            enum and not registered until B-038.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /imports/{schema}/upload:
     parameters: [{ $ref: '#/components/parameters/ImportSchema' }]
