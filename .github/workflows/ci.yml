@@ -211,6 +211,34 @@ jobs:
         # parallel. Building it here too would double the work and serialise
         # feedback. The `package` job proves the combined artifact.
         run: mvn -B verify -DskipFrontend
+
+      # Maven's failure summary names the module and points at a directory on a
+      # runner that no longer exists — "See .../target/surefire-reports for the
+      # individual test results" — so the one thing a reader needs, *which test
+      # failed*, is the one thing the tail of the log does not carry. The
+      # reports are uploaded as an artifact below, but downloading those needs
+      # credentials, which whoever is reading a red build may not have.
+      #
+      # So print them. Only the reports that actually contain a failure, so a
+      # green-but-noisy run stays quiet and a red one says what broke without
+      # anybody leaving the page.
+      - name: Which tests failed
+        if: failure()
+        working-directory: backend
+        run: |
+          shopt -s nullglob
+          found=0
+          for f in */target/*-reports/*.txt; do
+            if grep -qE '<<< (FAILURE|ERROR)' "$f"; then
+              found=1
+              echo "──────────────────────────────────────────────────────────"
+              echo "$f"
+              echo "──────────────────────────────────────────────────────────"
+              cat "$f"
+            fi
+          done
+          [ "$found" = 1 ] || echo "No surefire/failsafe report contains a failure — \
+          the build broke somewhere other than a test (compilation, a plugin, or the JVM)."
       # v6, not v5, while everything else here sits on its own first Node-24
       # major. upload-artifact@v5 still declares `using: node20`, so pinning it
       # to v5 for the sake of a tidy version column would keep the deprecation
