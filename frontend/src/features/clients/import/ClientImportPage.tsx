@@ -2,15 +2,17 @@ import { useState } from 'react'
 import { AlertCircle, ArrowLeft, Check, Download, FileSpreadsheet, Loader2, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { useValidateImport } from '@/api/generated/imports/imports'
+import { useCommitImport, useValidateImport } from '@/api/generated/imports/imports'
 import type { ImportPreviewResponseData } from '@/api/generated/model'
 import { ApiError } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+import { CommitStep } from './CommitStep'
 import { type ColumnMapping } from './columnMapping'
 import {
   IMPORT_PROBLEM,
+  commitRefusal,
   formatBytes,
   previewRefusal,
   rejectionReason,
@@ -41,18 +43,19 @@ const STEPS = [
 ] as const
 
 /**
- * S-34 Client Import Wizard — steps 1 to 4. B-031, B-032, B-033, B-034.
+ * S-34 Client Import Wizard — all five steps. B-031, B-032, B-033, B-034, B-035.
  *
  * Blueprint §4B.3, and the engine behind it is B-030's schema registry: this
  * screen names clients exactly once, in the route it is mounted at and in the
  * schema it asks for. B-038 registers resources and this page is what it reuses.
  *
- * ## Step 5 is visible and disabled, not hidden
+ * ## Step 5 is where the wizard stops being reversible
  *
- * Hiding it would make the screen look finished and leave the user to discover
- * at the end of step 4 that there is no step 5. Showing it greyed says what is
- * coming, in the order it comes, and the Import button says why it is disabled
- * rather than being mysteriously inert.
+ * Every step before it can be gone back to, because none of them wrote anything.
+ * Once the commit is accepted there is a batch running against the client master
+ * and a Back button would be a lie — so the earlier sections come off the screen
+ * and what is left is the progress and two ways forward. `startOver` is the only
+ * route back, and it starts a genuinely new import rather than resuming this one.
  *
  * ## The uploaded File is held, not just the response
  *
@@ -103,14 +106,20 @@ export function ClientImportPage() {
    * thing this screen could leave on display.
    */
   const [preview, setPreview] = useState<ImportPreviewResponseData | null>(null)
+  /**
+   * The running import, once one has been accepted.
+   *
+   * The point of no return for this screen: while it is set, every earlier step
+   * is gone from the page. It holds the id rather than the whole batch because
+   * everything else about the run is polled — a copy kept here would be a second
+   * answer to "how far has it got", and the stale one would be on screen.
+   */
+  const [batchId, setBatchId] = useState<number | null>(null)
 
   const validate = useValidateImport()
+  const commit = useCommitImport()
 
-  /**
-   * The rail's marker stops at step 4, because step 5 does not exist yet.
-   * Advancing past what works would put it on a step the user cannot reach.
-   */
-  const currentStep = preview ? 3 : mapping ? 2 : staged ? 1 : 0
+  const currentStep = batchId ? 4 : preview ? 3 : mapping ? 2 : staged ? 1 : 0
 
   function send(chosen: File, sheet?: string, replaces?: string) {
     upload.mutate(
@@ -144,8 +153,10 @@ export function ClientImportPage() {
     setStaged(null)
     setRejected(null)
     setMapping(null)
+    setBatchId(null)
     discardPreview()
     upload.reset()
+    commit.reset()
   }
 
   /** Both halves — the answer and the refusal are two states of one request. */
@@ -181,6 +192,34 @@ export function ClientImportPage() {
    */
   function backToMapping() {
     discardPreview()
+    // A refusal about the *commit* is about a mapping the user is on their way
+    // to change. Leaving it up would have them reading a complaint about the
+    // thing they have just gone to fix.
+    commit.reset()
+  }
+
+  /**
+   * Step 5 — start the import.
+   *
+   * The body is the upload and the mapping, not the preview: the server re-runs
+   * the dry run and writes what *it* judges writable. That is deliberate on both
+   * sides — see `ImportCommitService` — and it is why this function has nothing
+   * to send but the same two things step 4 sent.
+   *
+   * `skipRejected` is left off, taking the contract's default of `true`. §4B.3's
+   * offer is "import valid rows only" and that is what this screen does; sending
+   * `false` would be asking the server to refuse the whole file, which is not
+   * what the button says.
+   */
+  function runCommit() {
+    if (!staged?.uploadId || !mapping) return
+    commit.mutate(
+      {
+        schema: 'clients',
+        data: { uploadId: staged.uploadId, sheet: staged.sheet, mapping },
+      },
+      { onSuccess: (response) => setBatchId(response.data.batchId) },
+    )
   }
 
   /**
@@ -240,6 +279,14 @@ export function ClientImportPage() {
         })}
       </ol>
 
+      {/*
+        Once a commit is running, steps 1 to 4 come off the screen entirely
+        rather than being disabled. They describe choices that have already been
+        made and acted on — a greyed-out Upload control next to a running import
+        invites the reading that the file could still be changed.
+      */}
+      {!batchId && (
+        <>
       {/* ── step 1 ─────────────────────────────────────────────────────── */}
       <section
         aria-labelledby="step-1-heading"
@@ -516,10 +563,38 @@ export function ClientImportPage() {
             preview={preview}
             fileName={file?.name ?? staged.fileName ?? 'your file'}
             onBack={backToMapping}
-            // No onCommit: step 5 is B-035, so the button stays disabled and says
-            // why rather than looking broken — the shape the three steps before
-            // it were each left in.
+            onCommit={runCommit}
+            committing={commit.isPending}
           />
+
+          {/*
+            A commit refusal, rendered under the preview that produced it. It
+            belongs here rather than at step 5, because there is no step 5 — the
+            request that would have started one failed, and nothing has been
+            written.
+          */}
+          {commit.isError && <CommitRefusalNotice error={commit.error} />}
+        </section>
+      )}
+        </>
+      )}
+
+      {/* ── step 5 ─────────────────────────────────────────────────────── */}
+      {batchId !== null && (
+        <section
+          aria-labelledby="step-5-heading"
+          className="rounded-card border border-border bg-surface p-5"
+        >
+          <h2 id="step-5-heading" className="text-h3 text-content">
+            Importing
+          </h2>
+          <div className="mt-4">
+            <CommitStep
+              batchId={batchId}
+              fileName={file?.name ?? staged?.fileName ?? 'your file'}
+              onStartAnother={startOver}
+            />
+          </div>
         </section>
       )}
     </div>
@@ -551,6 +626,43 @@ function PreviewRefusalNotice({ error }: { error: unknown }) {
       <span>
         {message}
         {next ? ` ${next}` : ''} Nothing has been written — no client has changed.
+      </span>
+    </p>
+  )
+}
+
+/**
+ * A step-5 refusal — the Import button was pressed and nothing started.
+ *
+ * Separate from `PreviewRefusalNotice` for one word: this one can say
+ * "**nothing has been written**" as a completed fact about a request that was
+ * refused, which is the reassurance a user needs most at the moment they pressed
+ * the only irreversible button on the screen.
+ *
+ * `revalidate` is the remedy the preview step does not have. It means the server
+ * re-judged the file and disagreed with what is on screen — the honest
+ * instruction is to run the preview again, not to press Import harder.
+ */
+function CommitRefusalNotice({ error }: { error: unknown }) {
+  const { message, remedy } = commitRefusal(error)
+  const next =
+    remedy === 'upload'
+      ? 'Choose your file again at step 2.'
+      : remedy === 'mapping'
+        ? 'Correct the mapping at step 3 and run the preview again.'
+        : remedy === 'revalidate'
+          ? 'Go back to mapping and run the preview again to see the current state of the file.'
+          : 'Try again in a moment.'
+
+  return (
+    <p
+      role="alert"
+      className="mt-4 flex items-start gap-2 rounded-control border border-danger bg-surface p-3 text-sm text-danger-text"
+    >
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <span>
+        {message} {next} <strong className="font-medium">Nothing has been written</strong> —
+        no client has changed.
       </span>
     </p>
   )

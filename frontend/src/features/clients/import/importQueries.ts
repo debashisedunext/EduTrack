@@ -306,6 +306,127 @@ export function previewRefusal(error: unknown): PreviewRefusal {
   }
 }
 
+// ── B-035 · step 5 ────────────────────────────────────────────────────────────
+
+/**
+ * The problem `type` URIs step 5 branches on.
+ *
+ * Four of them are step 4's, deliberately — the server refuses a commit with the
+ * same types and in the same order, because an incomplete mapping is not a
+ * different condition for having arrived one step later. Two are this step's
+ * own, and they are two rather than one for the reason all of these are separate:
+ * the remedies are opposite. `nothingToCommit` means go back to your spreadsheet;
+ * `rejectedRowsPresent` means most of the file is fine and you asked for
+ * all-or-nothing.
+ */
+export const COMMIT_PROBLEM = {
+  nothingToCommit: 'import-nothing-to-commit',
+  rejectedRowsPresent: 'import-rejected-rows-present',
+  queueFull: 'import-commit-queue-full',
+} as const
+
+/**
+ * Where a commit refusal sends the user.
+ *
+ * `retry` is a real answer here in a way it was not at step 4: a full commit
+ * queue clears on its own, so pressing the button again in a moment is the
+ * correct advice rather than a shrug.
+ */
+export type CommitRemedy = PreviewRemedy | 'revalidate'
+
+export interface CommitRefusal {
+  message: string
+  remedy: CommitRemedy
+}
+
+/**
+ * A step-5 failure, in words the user can act on.
+ *
+ * Delegates to `previewRefusal` for the four types the two steps share, so the
+ * sentence a user reads about an expired upload is the same sentence whichever
+ * button produced it. Only what is genuinely new to this step is written here.
+ *
+ * `revalidate` is the interesting remedy and the one worth having: the preview
+ * on screen described a file the server has now re-judged, and the honest
+ * instruction is to run the dry run again rather than to press Import harder.
+ */
+export function commitRefusal(error: unknown): CommitRefusal {
+  if (!(error instanceof ApiError)) {
+    return {
+      message: 'The import could not be started. Check your connection and try again.',
+      remedy: 'retry',
+    }
+  }
+
+  const detail = error.problem.detail
+  if (error.is(COMMIT_PROBLEM.nothingToCommit)) {
+    return { message: detail ?? error.problem.title, remedy: 'revalidate' }
+  }
+  if (error.is(COMMIT_PROBLEM.rejectedRowsPresent)) {
+    return { message: detail ?? error.problem.title, remedy: 'revalidate' }
+  }
+  if (error.is(COMMIT_PROBLEM.queueFull)) {
+    return { message: detail ?? error.problem.title, remedy: 'retry' }
+  }
+
+  const shared = previewRefusal(error)
+  return { message: shared.message, remedy: shared.remedy }
+}
+
+/** A run that has stopped moving. Nothing polls past one of these. */
+export const TERMINAL_BATCH_STATUSES = ['COMPLETED', 'FAILED'] as const
+
+export function isTerminal(status: string | undefined): boolean {
+  return status !== undefined && (TERMINAL_BATCH_STATUSES as readonly string[]).includes(status)
+}
+
+/**
+ * How often the progress bar asks.
+ *
+ * Two seconds, which is what the contract's own note on `getImportBatch`
+ * assumes. It is affordable because the route carries an `ETag` and the runner
+ * flushes its counters every fifty rows, so most of these polls transfer a `304`
+ * and no body at all.
+ */
+export const BATCH_POLL_MS = 2000
+
+/**
+ * How long to wait before asking again, or `false` to stop.
+ *
+ * A function rather than a ternary inside the hook so the one decision that
+ * would otherwise ship broken is testable without timers: a run that has
+ * finished must stop being polled, and a component test for that has to either
+ * wait two real seconds or fake the clock underneath MSW. Both are flaky in a
+ * way this is not.
+ *
+ * An unrecognised status keeps polling. A newer deploy writing a state this
+ * build has not heard of must not leave a screen sitting for ever on a run that
+ * was going to finish — the same tolerance `ImportBatchStatus.of` applies
+ * server-side, in the same direction.
+ */
+export function batchPollInterval(status: string | undefined): number | false {
+  return isTerminal(status) ? false : BATCH_POLL_MS
+}
+
+/**
+ * What fraction of the run is done, as a percentage.
+ *
+ * Reads `processed` rather than `created + updated`: the rejected rows were
+ * counted before the job started and are part of the file the user is watching
+ * go through. Leaving them out would leave a bar on a file with six bad rows
+ * permanently short of the end, which reads as a job that stalled.
+ *
+ * Clamped, because a bar past 100% is a rendering fault the user has no way to
+ * interpret — and `total` is 0 on a batch that has not started, where dividing
+ * would produce `NaN` and an empty bar with no width at all.
+ */
+export function progressPercent(processed: number, total: number): number {
+  if (total <= 0) {
+    return 0
+  }
+  return Math.min(100, Math.max(0, Math.round((processed / total) * 100)))
+}
+
 export function formatBytes(bytes: number): string {
   return bytes >= 1024 * 1024
     ? `${(bytes / 1024 / 1024).toFixed(1)} MB`

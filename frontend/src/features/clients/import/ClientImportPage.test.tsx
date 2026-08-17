@@ -551,6 +551,117 @@ describe('the client import wizard, step 4', () => {
   })
 })
 
+/**
+ * B-035 · S-34 step 5, the commit.
+ *
+ * `CommitStep.test.tsx` covers the progress screen itself. What is worth
+ * asserting here is the wiring, and above all the thing that is only true of the
+ * *page*: this is where the wizard stops being reversible, and the earlier steps
+ * have to go.
+ */
+describe('the client import wizard, step 5', () => {
+  async function toPreview() {
+    renderPage()
+    await drop(file('clients.xlsx', 'binary-ish'))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to mapping/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to validation/i }))
+    return await screen.findByRole('heading', { name: /check what the import will do/i })
+  }
+
+  async function toCommit() {
+    await toPreview()
+    fireEvent.click(screen.getByRole('button', { name: /^import \d/i }))
+    return await screen.findByRole('heading', { name: /^importing$/i })
+  }
+
+  it('starts the import and shows the progress in its place', async () => {
+    await toCommit()
+
+    expect(await screen.findByRole('progressbar')).toBeInTheDocument()
+  })
+
+  /**
+   * The one that is only true of the page. Once a batch is running there is no
+   * going back, and a disabled Upload control next to a live import invites the
+   * reading that the file could still be changed — so steps 1 to 4 come off the
+   * screen rather than being greyed.
+   */
+  it('takes the earlier steps off the screen, because they can no longer be undone', async () => {
+    await toCommit()
+
+    expect(screen.queryByRole('button', { name: /download template/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /back to mapping/i })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: /check what the import will do/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('offers a genuinely new import rather than resuming this one', async () => {
+    // The shared mock advances the run a row per poll, which is right for the
+    // app and too slow for one assertion about what happens *after* it ends.
+    // Answering COMPLETED straight away is the shortcut, and the progressive
+    // behaviour it replaces is what `CommitStep.test.tsx` covers directly.
+    server.use(
+      http.get('/api/v1/import-batches/:batchId', ({ params }) =>
+        HttpResponse.json({
+          data: {
+            batchId: Number(params.batchId),
+            entity: 'CLIENT',
+            fileName: 'clients.xlsx',
+            status: 'COMPLETED',
+            processed: 4,
+            total: 4,
+            created: 2,
+            updated: 1,
+            rejected: 1,
+            errorReportUrl: null,
+          },
+        }),
+      ),
+    )
+
+    await toCommit()
+
+    fireEvent.click(await screen.findByRole('button', { name: /import another file/i }))
+
+    // Back at step 2 with nothing staged — the drop zone, not the summary of a
+    // file that has already been imported.
+    expect(await screen.findByText(/drop your spreadsheet here/i)).toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  /**
+   * A refusal at step 5 is the one moment a user most needs telling that nothing
+   * happened: they have just pressed the only irreversible button on the screen.
+   */
+  it('says nothing was written when the commit itself is refused', async () => {
+    server.use(
+      http.post('/api/v1/imports/:schema/commit', () =>
+        HttpResponse.json(
+          {
+            type: 'https://edutrack/errors/import-nothing-to-commit',
+            title: 'Nothing to import',
+            detail: 'No row in this file can be imported.',
+            status: 422,
+          },
+          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    await toPreview()
+    fireEvent.click(screen.getByRole('button', { name: /^import \d/i }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/no row in this file can be imported/i)
+    expect(alert).toHaveTextContent(/nothing has been written/i)
+    // And the preview is still there — the user has somewhere to go back to.
+    expect(
+      screen.getByRole('heading', { name: /check what the import will do/i }),
+    ).toBeInTheDocument()
+  })
+})
+
 describe('step 3’s mapping presets', () => {
   async function toMapping() {
     renderPage()

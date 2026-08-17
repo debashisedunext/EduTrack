@@ -245,6 +245,7 @@ export * from './ifNoneMatchParameter';
 export * from './importBatchResponse';
 export * from './importBatchResponseData';
 export * from './importBatchResponseDataErrorReportUrl';
+export * from './importBatchResponseDataFileName';
 export * from './importBatchResponseDataStatus';
 export * from './importCommitRequest';
 export * from './importCommitRequestMapping';

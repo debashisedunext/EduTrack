@@ -13,6 +13,7 @@ The Excel import engine — screen S-34, blueprint §4B.3.
 | **B-032** Step 2 — upload and parse | `SheetReader` + `XlsxSheetReader`/`CsvSheetReader`, `SheetHeadings`, `ImportFileParser`, `ImportUploadService`, `ImportUploadLimits`, `StagedRow` |
 | **B-033** Step 3 — column mapping | `ImportDtos.SchemaField(s)`, `ImportMappingPresetService`, `ImportMappingPresetRepository`, `UnknownImportFieldException`, `MappingPresetNotFoundException` |
 | **B-034** Step 4 — dry-run preview | `ImportValidationService`, `ImportDtos.{ValidateRequest,RowVerdict,Preview}`, `ImportUploadNotAvailableException`, `IncompleteMappingException`, `UnknownSourceColumnException` |
+| **B-035** Step 5 — commit as a background job | `ImportRequestResolver`, `ImportCommitService`, `ImportCommitRunner`, `ImportCommitConfig`, `ImportBatchService`, `ImportBatchController`, `ImportDtos.{CommitRequest,Batch}`, `NothingToCommitException`, `RejectedRowsPresentException`, `ImportCommitQueueFullException`, `ImportBatchNotFoundException` |
 
 ## The one thing to understand
 
@@ -72,7 +73,7 @@ B-030 is the engine, not the wizard. The five steps plug into it:
 | B-032 | upload, SAX parse | produces `StagedUpload` — ✅ done, though it kept `InMemoryImportStagingStore`; see below |
 | B-033 | column mapping | `HeaderMatcher` → `ImportMapping`; `missingRequired` blocks Next — ✅ done, and it turned out to need **no mapping route at all**; see below |
 | B-034 | dry-run preview | `ImportValidationEngine` → `ImportPreview` — ✅ done, and it widened `findExisting`; see below |
-| B-035 | commit job | `ImportPreview.writable()` → `ImportSchemaDefinition.upsert` |
+| B-035 | commit job | `ImportPreview.writable()` → `ImportSchemaDefinition.upsert` — ✅ done, and it moved step 4's refusals into a shared resolver rather than copying them; see below |
 | B-036 | error report | `ImportRowVerdict` — the rejected rows plus their reason |
 | B-037 | batch traceability | `importBatchId`, stamped on insert only |
 | B-038 | resource import | one new `@Component` under `.schemas` |
@@ -404,13 +405,116 @@ Nothing is discarded. Reading the preview, going back to step 3 and changing one
 column is the ordinary path through this screen, and a route that consumed the
 staging entry would answer "your file expired" to the second attempt.
 
+## B-035 · step 5, and the thing it deliberately does not trust
+
+`POST /imports/{schema}/commit` takes the same upload and mapping step 4 took,
+answers **202 with the batch**, and writes on a pool thread.
+`GET /import-batches/{batchId}` is the progress.
+
+### The preview is re-derived, never accepted
+
+The commit body carries **no verdicts**, and could have. That would have been a
+mistake of the kind that is invisible until it is exploited: the rows written
+would be whatever the caller said they were, and step 4's guarantee would be a
+convention the browser observes rather than a property of the system. Re-running
+the dry run costs one pass over rows already in heap and one existence probe;
+the same file and mapping reach the same judgements, so the set the user
+approved and the set that gets written are the same by construction.
+
+### The four refusals moved out rather than being copied
+
+`ImportRequestResolver` now holds them, and both `ImportValidationService` and
+`ImportCommitService` call it. The alternative was a second copy in the commit
+path — which agrees on the day it is written, and where being wrong writes to
+the client master. The order and the reasons are B-034's, unchanged.
+
+Two refusals are this route's own, and they are two rather than one because the
+remedies are opposite:
+
+| `type` | Cause | What the screen says |
+|---|---|---|
+| `import-nothing-to-commit` | no row is writable | go back to the spreadsheet |
+| `import-rejected-rows-present` | `skipRejected: false` over a file with rejections | import the valid rows only |
+| `import-commit-queue-full` | every commit slot taken — 503 with `Retry-After` | try again in a moment |
+
+**A run that would write nothing is refused, not completed instantly.**
+`import_batches` is B-037's audit trail, and a row saying a file was imported on
+Tuesday when nothing was is a false entry in the record that exists to make bad
+imports traceable. It is also the wrong answer to the person: they pressed
+Import on a screen that had just told them nothing was importable, and a green
+"done" confirms the press rather than the outcome.
+
+**`skipRejected: false` means all-or-nothing, not "write them anyway."** A row
+the engine rejected has no valid value to write, so the permissive reading is
+not an operation this feature can perform.
+
+### Staging is released before the response, not after the run
+
+The job outlives the thirty-minute staging TTL, so it holds its own immutable
+list of rows and never looks the upload up again. Nothing it needs can expire
+underneath it, and the slot is freed for the next admin rather than held for the
+length of a run.
+
+The visible consequence is that committing the same `uploadId` twice answers
+`import-upload-unavailable` — which is the honest refusal for the request that
+would otherwise have written the file twice, and is why the route needs no
+`Idempotency-Key` handling despite declaring the parameter.
+
+### One row, one transaction
+
+`upsert` is `@Transactional` on the registration and is called from a pool
+thread with no ambient transaction, so each row commits on its own. Three
+reasons, and the first is the one that matters:
+
+- **A bad row costs one row.** A file of five hundred where row 314 breaks a
+  constraint no validator declares — a column widened in the master since the
+  registration was written — must not lose the other 499. It is counted rejected
+  and the walk continues, which is why `COMPLETED` is not a claim that nothing
+  failed.
+- **Progress is real.** A run inside one transaction is invisible to every
+  reader until it ends, so the poll would return zeros and then jump.
+- No connection is held for minutes.
+
+The cost is that an interrupted run leaves half the file imported, and that is
+correct here rather than a compromise: the operation is an **upsert on the
+natural key**, so re-running the same file finishes the job instead of
+duplicating what landed. Partial application being safe is the property the
+whole feature is built on.
+
+Counters flush every 50 rows, not per row — otherwise every write to the master
+carries a second write to `import_batches`, to make a bar polled every two
+seconds accurate to a row nobody can read.
+
+### A private pool, and saturation is a refusal
+
+`ImportCommitConfig`, following `AttachmentScanConfig`'s argument against
+`@Async`: a shared executor's bound is whatever somebody else tuned it to.
+
+It diverges on one thing. The attachment scanner saturates to `CallerRunsPolicy`
+and is right to — a scan is seconds. A commit is not. Caller-runs here holds an
+HTTP connection open for up to five thousand upserts, and the response it is
+holding up is the one that tells the browser which batch to poll. So the queue
+aborts, the batch is marked `FAILED` rather than deleted (a refused attempt that
+left no trace is indistinguishable from an attempt nobody made), and the caller
+gets a 503 that says when to come back.
+
+### `processed` is derived
+
+`created + updated + rejected`. There is no `processed_rows` column and there
+should not be — a fourth number holding the sum of three is a fourth number that
+can disagree with them. It reaches `total` exactly when the run is over, which
+is the property the progress bar is built on.
+
 ## Not here yet
 
-No commit — B-035. `/imports/users/*` answers 404 on all five routes until B-038
-registers the second schema, and `ImportTemplateControllerTest`,
-`ImportSchemaFieldsControllerTest`, `ImportMappingPresetControllerTest` and
-`ImportValidateControllerTest` each assert that — so the day the registration
-lands, four tests fail and are deleted.
+No error report — B-036 — so `errorReportUrl` is null on every batch, and the
+step-5 screen's download button is visible and disabled rather than hidden.
+
+`/imports/users/*` answers 404 on all six routes until B-038 registers the second
+schema, and `ImportTemplateControllerTest`, `ImportSchemaFieldsControllerTest`,
+`ImportMappingPresetControllerTest`, `ImportValidateControllerTest` and
+`ImportCommitControllerTest` each assert that — so the day the registration
+lands, five tests fail and are deleted.
 
 ## Tests
 
@@ -435,7 +539,10 @@ lands, four tests fail and are deleted.
 | `ImportMappingPresetServiceTest` | B-033 — the order of the checks, that the unknown-field refusal names every offender at once, and that nothing reaches a query before the schema resolves |
 | `ImportMappingPresetControllerTest` | B-033, the routes — 200 for the upsert, 422 for an undeclared field, 400 for a mapping that maps nothing, 404 for a delete that removed no row, and the 403 on all three verbs |
 | `ImportMappingPresetIT` | B-033 against real MySQL — everything that is a property of the schema rather than of the Java: the unique index behind the upsert, the collation deciding that `CRM export` and `CRM Export` are one preset, and that the delete is really scoped by schema |
-| `ImportValidationServiceTest` | B-034 — the order of the four refusals and why each one is refused rather than previewed, over a real staging store so the expiry is the real expiry |
+| `ImportValidationServiceTest` | B-034 — the order of the four refusals and why each one is refused rather than previewed, over a real staging store so the expiry is the real expiry. Unchanged by B-035 moving them into `ImportRequestResolver`, which is the point: the assertions are about what a caller sees |
+| `ImportCommitServiceTest` | B-035 — that the verdicts are the server's own, that the staging entry is consumed so the same file cannot be committed twice, that a refusal leaves both the file and the database as it found them, and that one row failing at write time costs one row. The executor is same-thread so the counters can be read without waiting; one test uses a real pool to prove the response is genuinely sent first |
+| `ImportCommitControllerTest` | B-035, the route — every refusal's status and `type`. All of them are checked before the first query, which is not a coincidence: a refused commit has to leave the staged file and the database untouched |
+| `ClientImportCommitIT` | B-035 against real MySQL — the whole step. A file with a bad row and a duplicate committed, then the corrected file committed again, ending with three clients rather than five; the batch row and the `import_batch_id` that makes B-037 possible; and the ETag moving with the counters |
 | `ImportValidateControllerTest` | B-034, the route — each refusal's status and `type`, the properties the screen reads off the body, and a genuine 200 with no database (a file whose every row is rejected never reaches the probe, which is also the response an Admin gets from a file full of mistakes) |
 
 `ImportEngineIsolationTest` reads **source, not bytecode**, and says why in its

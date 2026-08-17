@@ -234,4 +234,111 @@ final class ImportDtos {
 
     record PreviewResponse(Preview data) {
     }
+
+    // ── B-035 · step 5 ──────────────────────────────────────────────────────
+
+    /**
+     * The commit body — the same shape {@link ValidateRequest} has, plus one flag.
+     *
+     * <p><b>It carries no verdicts, and that is the security property of this
+     * step.</b> The rows a commit writes are the rows the server's own dry run
+     * judges writable, re-derived from this upload and this mapping. A body that
+     * carried the preview would make them whatever the caller said they were.
+     *
+     * <p>The duplication with {@code ValidateRequest} is deliberate rather than
+     * an oversight. They are two wire contracts that happen to agree today;
+     * folding one into the other would mean {@code skipRejected} appearing on the
+     * dry run — where it means nothing, because nothing is written — and the
+     * generated TypeScript offering it there.
+     *
+     * @param skipRejected boxed, so "the caller did not say" and "the caller said
+     *                     false" are different things. Absent takes the contract's
+     *                     documented default of {@code true}; a primitive would
+     *                     have silently made the all-or-nothing reading the
+     *                     default for every client that omitted it
+     */
+    record CommitRequest(
+            @NotNull UUID uploadId,
+            String sheet,
+            @NotEmpty Map<String, String> mapping,
+            Boolean skipRejected) {
+
+        /** §4B.3's "import valid rows only" is the default. See {@link RejectedRowsPresentException}. */
+        boolean skipRejectedOrDefault() {
+            return skipRejected == null || skipRejected;
+        }
+    }
+
+    /**
+     * {@code ImportBatchResponse.data} — one import run, as the progress bar and
+     * the history panel read it.
+     *
+     * <p>A projection of {@link com.edunext.edutrack.domain.imports.ImportBatch}
+     * rather than the entity serialised, for {@link SchemaField}'s reason two
+     * types over: the entity carries {@code errorReportKey}, an object-storage
+     * key that is an implementation detail of B-036 and not something a browser
+     * should ever see.
+     *
+     * @param processed <b>derived, not stored.</b> There is no
+     *                  {@code processed_rows} column and there should not be: it
+     *                  is the sum of the three counters beside it, and a fourth
+     *                  column holding the same number is a fourth column that can
+     *                  disagree with them. It reaches {@code total} exactly when
+     *                  the run is over
+     * @param errorReportUrl null until B-036 generates one. Null rather than a
+     *                  constructed URL, because a link that 404s is worse than a
+     *                  button that is honestly disabled
+     */
+    record Batch(
+            Long batchId,
+            String entity,
+            String fileName,
+            String status,
+            int processed,
+            int total,
+            int created,
+            int updated,
+            int rejected,
+            String errorReportUrl) {
+
+        static Batch of(com.edunext.edutrack.domain.imports.ImportBatch batch) {
+            int rejected = batch.getRejectedRows();
+            return new Batch(
+                    batch.getId(),
+                    batch.getEntity(),
+                    batch.getFileName(),
+                    batch.getStatus().name(),
+                    batch.getCreatedRows() + batch.getUpdatedRows() + rejected,
+                    batch.getTotalRows(),
+                    batch.getCreatedRows(),
+                    batch.getUpdatedRows(),
+                    rejected,
+                    // B-036. Deliberately not derived from `errorReportKey`
+                    // either: a key exists only once a report has been written,
+                    // and nothing writes one yet.
+                    null);
+        }
+
+        /**
+         * The {@code ETag} the contract promises on the polled read.
+         *
+         * <p>Over the counters and the status — the only things that move — so
+         * the validator changes exactly when the progress bar would. A client
+         * polling every two seconds through a run that is between flushes gets a
+         * 304 and transfers nothing, which is the entire reason the route
+         * declares one.
+         *
+         * <p>Weak by the same argument {@code ClientController.etagOf} records:
+         * a hash is not byte-equality of the representation, and nothing here
+         * takes {@code If-Match}, so there is no lost update for a strong tag to
+         * prevent.
+         */
+        String etag() {
+            return Integer.toHexString(
+                    java.util.Objects.hash(batchId, status, created, updated, rejected, total));
+        }
+    }
+
+    record BatchResponse(Batch data) {
+    }
 }

@@ -76,17 +76,20 @@ class ImportController {
     private final ImportUploadService uploads;
     private final ImportMappingPresetService mappingPresets;
     private final ImportValidationService validation;
+    private final ImportCommitService commits;
 
     ImportController(ImportSchemaRegistry registry,
                      ImportTemplateWriter templates,
                      ImportUploadService uploads,
                      ImportMappingPresetService mappingPresets,
-                     ImportValidationService validation) {
+                     ImportValidationService validation,
+                     ImportCommitService commits) {
         this.registry = registry;
         this.templates = templates;
         this.uploads = uploads;
         this.mappingPresets = mappingPresets;
         this.validation = validation;
+        this.commits = commits;
     }
 
     /**
@@ -316,6 +319,60 @@ class ImportController {
                                         @Valid @RequestBody ImportDtos.ValidateRequest request) {
         return new ImportDtos.PreviewResponse(
                 ImportDtos.Preview.of(validation.validate(schema, request)));
+    }
+
+    /**
+     * Blueprint §4B.3 step 5 — commit. <b>This is the one that writes.</b>
+     *
+     * <p>Four steps of this wizard write nothing whatsoever; this one upserts the
+     * client master in bulk, and the whole design of the four before it exists to
+     * make that acceptable. The rule it is judged on is
+     * {@link ImportSchemaDefinition#upsert}'s: <b>upsert on the natural key,
+     * never a second row</b>. A user who fixes six rejected rows and re-uploads
+     * the file must not end with two copies of the other 494.
+     *
+     * <p><b>202, and the body is the batch rather than the outcome.</b> Five
+     * thousand upserts is not a request-scoped operation, and a client that had
+     * to hold a connection open for it would time out on the ordinary case. What
+     * comes back is the handle: {@code GET /import-batches/{batchId}} is the
+     * progress, and it carries an {@code ETag} so polling it costs almost
+     * nothing between flushes.
+     *
+     * <p><b>The preview is not in the body, deliberately.</b> This takes the same
+     * {@code uploadId} and {@code mapping} step 4 took and re-derives the
+     * verdicts server-side; see {@link ImportCommitService}. A commit that wrote
+     * the rows the caller nominated would make step 4's guarantee a convention
+     * the browser observes rather than a property of the system.
+     *
+     * <p>The same four 422s step 4 answers, in the same order and with the same
+     * {@code type}s — an incomplete mapping is not a different condition for
+     * having arrived one step later, and a screen that handled it at step 4
+     * should not need a second branch here. Two more are reachable only on this
+     * route: nothing writable, and {@code skipRejected: false} over a file with
+     * rejections.
+     *
+     * <p>No {@code Idempotency-Key} is required, though the contract declares the
+     * parameter. Repeating this request is refused by construction rather than by
+     * deduplication: the commit consumes its staging entry, so a replayed
+     * {@code uploadId} answers {@code import-upload-unavailable} rather than
+     * running the file twice.
+     */
+    @PostMapping(path = "/{schema}/commit",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "commitImport",
+            summary = "Commit a validated upload as a background job (S-34 step 5)")
+    ImportDtos.BatchResponse commit(@PathVariable String schema,
+                                    @Valid @RequestBody ImportDtos.CommitRequest request,
+                                    Authentication authentication) {
+
+        Long userId = CallerIdentity.of(authentication)
+                .map(CallerIdentity::userId)
+                .orElse(null);
+
+        return new ImportDtos.BatchResponse(commits.commit(schema, request, userId));
     }
 
     /**

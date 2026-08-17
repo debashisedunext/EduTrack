@@ -276,6 +276,27 @@ export const validateImportResponse = zod.object({
 clients that is the client code. Re-uploading a corrected file must not
 create a second copy of every row.
 
+**The dry run is re-run server-side, and the client's preview is not
+sent.** This request carries an upload id and a mapping — the same two
+things `/validate` takes — never a list of verdicts. The same file and
+the same mapping reach the same judgements, so re-deriving them costs one
+pass over rows already in memory and is what makes "only the rows step 4
+showed you" true rather than asserted by the caller.
+
+**The staged upload is consumed.** The rows are read and mapped before
+the response is sent and the staging entry is released, because the job
+outlives the staging TTL and must not hold an id that can expire beneath
+it. Committing the same `uploadId` twice therefore answers
+`import-upload-unavailable`, which is the honest refusal: the second
+request cannot be served, and it is also the request that would have
+written the file twice.
+
+Answers **202 with the batch**, not the finished counts — a 5,000-row
+commit is not a request-scoped operation. Poll
+`GET /import-batches/{batchId}` for progress.
+
+`master.write`, like every operation on this path.
+
  * @summary Step 5 — commit as a background job
  */
 export const commitImportParams = zod.object({
@@ -290,10 +311,10 @@ export const commitImportBodySkipRejectedDefault = true;
 
 export const commitImportBody = zod.object({
   "uploadId": zod.string().uuid(),
-  "sheet": zod.string().optional(),
+  "sheet": zod.string().optional().describe('A cross-check, not a selector — one upload stages one sheet. Sent and\ndisagreeing means the wizard\'s state and the server\'s have diverged,\nand is refused as `import-upload-unavailable`.\n'),
   "mapping": zod.record(zod.string(), zod.string()),
-  "skipRejected": zod.boolean().default(commitImportBodySkipRejectedDefault)
-})
+  "skipRejected": zod.boolean().default(commitImportBodySkipRejectedDefault).describe('`true` — the default and the wizard\'s own behaviour — writes the rows\nthe dry run judged `WILL_CREATE` or `WILL_UPDATE` and skips the rest,\nwhich is §4B.3\'s \"import valid rows only\".\n\n`false` is \*\*all-or-nothing\*\*: a file with any rejected row or any\nin-file duplicate is refused whole, `import-rejected-rows-present`,\nand nothing is written. It is not \"write them anyway\" — a row the\nengine rejected has no valid value to write.\n')
+}).describe('The same two things `\/validate` takes, for the reason B-033 recorded: the\nmapping is never parked server-side, so both steps carry it. Sending them\nagain is also what lets the server re-derive the verdicts rather than\ntrust a preview the caller assembled.\n')
 
 /**
  * The error report is an `.xlsx` of only the rejected rows with an appended
@@ -303,6 +324,13 @@ as a set.
 
 Polled while a job runs, so it returns an `ETag` — a client checking every
 two seconds should transfer a body only when something actually changed.
+The tag is over the counters and the status, so it changes exactly when
+the progress bar would move.
+
+`master.write`, like the wizard that starts the job. **403 rather than
+404** for a caller without it: the capability is decided before the id is
+looked up, so a Developer cannot tell a real batch id from an invented
+one either way, and there is no existence for a 404 to protect.
 
  * @summary Batch progress and error report
  */
@@ -314,16 +342,22 @@ export const getImportBatchHeader = zod.object({
   "If-None-Match": zod.string().optional()
 })
 
+export const getImportBatchResponseDataFileNameMax = 255;
+
+
+
 export const getImportBatchResponse = zod.object({
   "data": zod.object({
-  "batchId": zod.number().optional(),
-  "status": zod.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED']).optional().describe('The commit job\'s lifecycle, and the only vocabulary\n`import_batches.status` uses. There is no state for the step-4\ndry run because the dry run writes nothing — no batch row\nexists until commit, and it is born `QUEUED`.\n'),
-  "processed": zod.number().optional(),
-  "total": zod.number().optional(),
-  "created": zod.number().optional(),
-  "updated": zod.number().optional(),
-  "rejected": zod.number().optional(),
-  "errorReportUrl": zod.string().nullish().describe('`.xlsx` of rejected rows with an appended Reason column.')
-})
+  "batchId": zod.number().describe('`import_batches.id`. An integer, not a UUID — the contract said\nUUID until B-030 read the baseline DDL.\n'),
+  "entity": zod.string().describe('`CLIENT` or `RESOURCE` — which registration this run was\nvalidated against, and what B-037\'s reversal query keys on.\nDeliberately the stored discriminator rather than the URL segment\n(`clients`): collapsing them would mean renaming a live URL to\nfix a column.\n'),
+  "fileName": zod.string().max(getImportBatchResponseDataFileNameMax).nullish(),
+  "status": zod.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED']).describe('The commit job\'s lifecycle, and the only vocabulary\n`import_batches.status` uses. There is no state for the step-4\ndry run because the dry run writes nothing — no batch row\nexists until commit, and it is born `QUEUED`.\n\n`COMPLETED` is \*\*not\*\* a synonym for \"no rejections\": a run that\nrefused half the file and wrote the rest completed, and its error\nreport is how the user recovers the other half. `FAILED` means\nthe job itself died.\n'),
+  "processed": zod.number().describe('`created + updated + rejected` — derived, not a stored column, so\nit cannot disagree with the three numbers beside it. Reaches\n`total` exactly when the run is over.\n'),
+  "total": zod.number().describe('Every data row of the sheet, rejected ones included.'),
+  "created": zod.number(),
+  "updated": zod.number(),
+  "rejected": zod.number().describe('What the dry run refused, plus anything that failed at write\ntime — a row the preview judged writable can still break a\nconstraint no validator declared, and losing the other 499 to it\nwould be the wrong trade.\n'),
+  "errorReportUrl": zod.string().nullish().describe('`.xlsx` of rejected rows with an appended Reason column. \*\*Null\nuntil B-036\*\* — the generation is that task, and a URL invented\nhere would 404 on the one click this screen offers.\n')
+}).describe('`required` is spelled out so the generated TypeScript stops making\nevery counter optional — a progress bar reading `processed ?? 0`\nrenders 0% for a run that is nearly finished, and the fallback hides\nit. `fileName` and `errorReportUrl` are the two that genuinely may be\nabsent.\n')
 })
 

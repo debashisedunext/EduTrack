@@ -53,6 +53,11 @@ the database rejects mutation independently via triggers and grants.
 dry run because the dry run writes nothing — no batch row
 exists until commit, and it is born `QUEUED`.
 
+`COMPLETED` is **not** a synonym for "no rejections": a run that
+refused half the file and wrote the rest completed, and its error
+report is how the user recovers the other half. `FAILED` means
+the job itself died.
+
  */
 export type ImportBatchResponseDataStatus = typeof ImportBatchResponseDataStatus[keyof typeof ImportBatchResponseDataStatus];
 

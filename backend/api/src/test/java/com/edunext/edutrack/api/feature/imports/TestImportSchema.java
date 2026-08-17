@@ -38,6 +38,23 @@ final class TestImportSchema implements ImportSchemaDefinition {
     final List<Set<String>> probes = new ArrayList<>();
 
     /**
+     * B-035 · every row the commit job wrote, in the order it wrote them.
+     *
+     * <p>Empty unless {@link #writable()} was called, because
+     * {@link #upsert} throws by default and that default is load-bearing: it is
+     * what proves the step-4 dry run never reaches a write. A test double that
+     * quietly accepted the call would turn the strongest guarantee in this
+     * feature into an assertion nobody makes.
+     */
+    final List<ImportRow> written = new ArrayList<>();
+
+    /** Natural keys whose write blows up, so the runner's per-row recovery has something to recover from. */
+    private final Set<String> failing = new LinkedHashSet<>();
+
+    private boolean writable;
+    private Long lastBatchId;
+
+    /**
      * Keys that exist with no current values — the registration that cannot
      * cheaply supply them, which {@link ImportSchemaDefinition#findExisting}
      * permits and whose rows come back with a null reason.
@@ -94,9 +111,45 @@ final class TestImportSchema implements ImportSchemaDefinition {
         return found;
     }
 
+    /**
+     * B-035 · lets the commit job actually write, and records what it wrote.
+     *
+     * <p>Opt-in rather than the default, so every test that has <em>not</em>
+     * asked for it keeps failing loudly the moment something on the dry-run path
+     * reaches a write.
+     */
+    TestImportSchema writable() {
+        this.writable = true;
+        return this;
+    }
+
+    /**
+     * Makes one natural key throw on write — a constraint the validators do not
+     * declare, which is the realistic cause: a column widened in the master since
+     * this registration was written, or a unique index the engine cannot know
+     * about.
+     */
+    TestImportSchema failingOn(String naturalKey) {
+        writable();
+        failing.add(naturalKey);
+        return this;
+    }
+
+    /** The batch id the last write was stamped with — B-037's traceability, checked at its source. */
+    Long lastBatchId() {
+        return lastBatchId;
+    }
+
     @Override
     public void upsert(ImportRow row, Long importBatchId) {
-        throw new AssertionError(
-                "The dry run called upsert(). Step 4 writes nothing — see ImportValidationEngine.");
+        if (!writable) {
+            throw new AssertionError(
+                    "The dry run called upsert(). Step 4 writes nothing — see ImportValidationEngine.");
+        }
+        if (failing.contains(row.get("code"))) {
+            throw new IllegalStateException("simulated constraint violation on " + row.get("code"));
+        }
+        lastBatchId = importBatchId;
+        written.add(row);
     }
 }
