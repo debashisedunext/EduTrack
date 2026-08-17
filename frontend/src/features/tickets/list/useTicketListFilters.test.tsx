@@ -126,3 +126,48 @@ describe('setting two filters at once', () => {
     expect(result.current.filters.level).toBe('HIGH')
   })
 })
+
+/**
+ * A-060 · the reported-date window, which arrives only from a dashboard
+ * deep-link — no control on this screen sets it.
+ *
+ * That is exactly why it needs covering here. Every other filter has a widget
+ * a developer would notice was broken; this one is only ever produced by
+ * another feature, so nothing on the ticket list would look wrong if the hook
+ * silently dropped it — the list would just be wider than the number that was
+ * clicked, which is the failure the whole task exists to close.
+ */
+describe('useTicketListFilters — A-060 reported-date window', () => {
+  it('reads reportedFrom and reportedTo off a drill-down URL', () => {
+    const { result } = renderFiltersHook(
+      '/tickets?reportedFrom=2026-08-10&reportedTo=2026-08-12&excludeClosed=true',
+    )
+
+    expect(result.current.filters.reportedFrom).toBe('2026-08-10')
+    expect(result.current.filters.reportedTo).toBe('2026-08-12')
+    expect(result.current.filters.excludeClosed).toBe(true)
+  })
+
+  it('reads a single-day window, which is what the daily charts emit', () => {
+    const { result } = renderFiltersHook('/tickets?reportedFrom=2026-08-10&reportedTo=2026-08-10')
+
+    expect(result.current.filters.reportedFrom).toBe('2026-08-10')
+    expect(result.current.filters.reportedTo).toBe('2026-08-10')
+  })
+
+  it('reads the open-ended window the oldest aging bucket emits', () => {
+    const { result } = renderFiltersHook('/tickets?excludeClosed=true&reportedTo=2026-07-16')
+
+    expect(result.current.filters.reportedFrom).toBeNull()
+    expect(result.current.filters.reportedTo).toBe('2026-07-16')
+  })
+
+  it('counts and clears like any other filter, so Reset reports it honestly', () => {
+    const { result } = renderFiltersHook('/tickets?reportedFrom=2026-08-10&reportedTo=2026-08-12')
+
+    expect(result.current.activeCount).toBe(2)
+
+    act(() => result.current.resetFilters())
+    expect(result.current.filters).toEqual(EMPTY_FILTERS)
+  })
+})

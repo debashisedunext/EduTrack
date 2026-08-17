@@ -78,12 +78,19 @@ class TicketListController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueTo,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate closedFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate closedTo,
+            // A-060 · the reported-date window. Named for the column it filters,
+            // like the two pairs above it — the dashboard emitted this as bare
+            // `from`/`to` from A-055 onwards, which is both vaguer and, on a
+            // screen that already has `dueFrom` and `closedFrom`, ambiguous
+            // about which date it means.
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportedFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportedTo,
             @RequestParam(required = false) String sort) {
 
         TicketListSpecs.Filters filters = new TicketListSpecs.Filters(
                 q, projectId, clientId, taskTypeId, moduleId, level, status, stage, assigneeId,
                 isDelayed, isClientRaised, reopenedOnly, unassigned, excludeClosed,
-                dueFrom, dueTo, closedFrom, closedTo);
+                dueFrom, dueTo, closedFrom, closedTo, reportedFrom, reportedTo);
 
         CursorPage<TicketListDtos.TicketSummary> page =
                 list.list(caller, filters, sort, cursor, limit);

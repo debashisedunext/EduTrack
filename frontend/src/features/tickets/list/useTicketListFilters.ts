@@ -22,6 +22,16 @@ export interface TicketListFilters {
   excludeClosed: boolean | null
   closedFrom: string | null
   closedTo: string | null
+  /**
+   * A-060 — the reported-date window every dashboard deep-link carries.
+   *
+   * No control in the filter row sets it, unlike every other key here. It is
+   * read from the URL and applied, because a drill-down's whole job is to
+   * arrive with the filter already on; `activeCount` still counts it, so the
+   * Reset button reports and clears it like any other.
+   */
+  reportedFrom: string | null
+  reportedTo: string | null
 }
 
 export const EMPTY_FILTERS: TicketListFilters = {
@@ -41,10 +51,22 @@ export const EMPTY_FILTERS: TicketListFilters = {
   excludeClosed: null,
   closedFrom: null,
   closedTo: null,
+  reportedFrom: null,
+  reportedTo: null,
 }
 
 const NUMERIC_KEYS = ['projectId', 'clientId', 'taskTypeId', 'assigneeId'] as const
-const STRING_KEYS = ['level', 'stage', 'status', 'dueFrom', 'dueTo', 'closedFrom', 'closedTo'] as const
+const STRING_KEYS = [
+  'level',
+  'stage',
+  'status',
+  'dueFrom',
+  'dueTo',
+  'closedFrom',
+  'closedTo',
+  'reportedFrom',
+  'reportedTo',
+] as const
 const BOOLEAN_KEYS = ['isDelayed', 'reopenedOnly', 'unassigned', 'excludeClosed'] as const
 
 function parse(params: URLSearchParams): TicketListFilters {

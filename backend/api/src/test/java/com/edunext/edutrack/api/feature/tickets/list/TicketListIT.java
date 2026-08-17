@@ -124,8 +124,13 @@ class TicketListIT {
     }
 
     private TicketListSpecs.Filters filters(Long projectId) {
+        // A-060 added reportedFrom/reportedTo — the last two. Twenty positional
+        // nulls is a call site that breaks on every new filter and gives no
+        // clue which slot moved; a builder or a `Filters.none()` would fix that
+        // for good. Left alone here deliberately: this is Stream C's file and
+        // A-060's business is the two parameters, not a refactor of it.
         return new TicketListSpecs.Filters(null, projectId, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     private TicketListSpecs.Filters unfiltered() {
@@ -259,7 +264,7 @@ class TicketListIT {
         void levelFilters() {
             TicketListSpecs.Filters high = new TicketListSpecs.Filters(
                     null, mineProject, null, null, null, "HIGH", null, null, null,
-                    null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null);
 
             CursorPage<TicketListDtos.TicketSummary> page =
                     service.list(caller(me, "ADMIN", List.of()), high, null, null, 200);
@@ -280,7 +285,7 @@ class TicketListIT {
 
             TicketListSpecs.Filters unassigned = new TicketListSpecs.Filters(
                     null, mineProject, null, null, null, null, null, null, null,
-                    null, null, null, true, null, null, null, null, null);
+                    null, null, null, true, null, null, null, null, null, null, null);
 
             CursorPage<TicketListDtos.TicketSummary> page =
                     service.list(caller(me, "ADMIN", List.of()), unassigned, null, null, 200);
