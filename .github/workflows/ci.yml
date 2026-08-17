@@ -69,8 +69,33 @@ jobs:
           fetch-depth: 0
       - id: filter
         run: |
-          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || true)
           echo "$FILES"
+
+          # 🔴 An empty diff means "we do not know", never "nothing changed".
+          #
+          # Every filter below is a `grep` over $FILES, so an empty $FILES makes
+          # all of them false and every job skips — and the PR reports green
+          # having tested precisely nothing. That is not hypothetical: on
+          # 17 Aug D-028, a backend change, merged to develop with its backend
+          # job skipped, and the first PR that did run the suite found a
+          # failure that had been sitting there unseen.
+          #
+          # The diff can come back empty for reasons that have nothing to do
+          # with the change: `origin/$base_ref` not resolvable in the checkout,
+          # a base that already contains the commits, a shallow fetch. All of
+          # them are "cannot tell", and the safe answer to "cannot tell" is to
+          # run everything.
+          #
+          # The OTHER fallback further down was meant to be this guard and is
+          # not: it greps $FILES too, so it is also silent when $FILES is empty.
+          if [ -z "$FILES" ]; then
+            echo "::warning::Could not determine changed files — running every job."
+            echo "backend=true"  >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "contract=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           match() { echo "$FILES" | grep -qE "$1" && echo true || echo false; }
 
@@ -82,10 +107,15 @@ jobs:
 
           # Anything outside the four known trees — this workflow, the Makefile,
           # docker-compose.yml, a root pom — could affect any area, so run the
-          # lot. Without this the filter fails OPEN: a PR touching only
-          # .github/workflows/ci.yml matches nothing, every job is skipped, and
-          # the PR goes green having tested precisely nothing. Found by running
-          # this filter over real commits before trusting it.
+          # lot.
+          #
+          # This comment used to claim that without it "the filter fails OPEN".
+          # It does not, and the wording mattered: the filter fails **CLOSED**,
+          # skipping everything, and reading otherwise is part of why the gap
+          # above went unnoticed. This clause only helps when $FILES is
+          # non-empty but matches none of the three areas. When $FILES is empty
+          # it greps nothing, finds nothing, and stays silent — which is what
+          # the guard further up now covers.
           OTHER=$(echo "$FILES" | grep -vE '^(backend/|frontend/|contracts/|docs/)' || true)
           if [ -n "$OTHER" ]; then
             echo "Changed outside the known areas — running everything:"
@@ -181,6 +211,34 @@ jobs:
         # parallel. Building it here too would double the work and serialise
         # feedback. The `package` job proves the combined artifact.
         run: mvn -B verify -DskipFrontend
+
+      # Maven's failure summary names the module and points at a directory on a
+      # runner that no longer exists — "See .../target/surefire-reports for the
+      # individual test results" — so the one thing a reader needs, *which test
+      # failed*, is the one thing the tail of the log does not carry. The
+      # reports are uploaded as an artifact below, but downloading those needs
+      # credentials, which whoever is reading a red build may not have.
+      #
+      # So print them. Only the reports that actually contain a failure, so a
+      # green-but-noisy run stays quiet and a red one says what broke without
+      # anybody leaving the page.
+      - name: Which tests failed
+        if: failure()
+        working-directory: backend
+        run: |
+          shopt -s nullglob
+          found=0
+          for f in */target/*-reports/*.txt; do
+            if grep -qE '<<< (FAILURE|ERROR)' "$f"; then
+              found=1
+              echo "──────────────────────────────────────────────────────────"
+              echo "$f"
+              echo "──────────────────────────────────────────────────────────"
+              cat "$f"
+            fi
+          done
+          [ "$found" = 1 ] || echo "No surefire/failsafe report contains a failure — \
+          the build broke somewhere other than a test (compilation, a plugin, or the JVM)."
       # v6, not v5, while everything else here sits on its own first Node-24
       # major. upload-artifact@v5 still declares `using: node20`, so pinning it
       # to v5 for the sake of a tidy version column would keep the deprecation
