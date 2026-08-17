@@ -50,6 +50,7 @@ export function MappingStep({
   onChange,
   onBack,
   onContinue,
+  continuePending = false,
 }: {
   schema: ImportSchemaKey
   /** The uploaded sheet's headings, in sheet order. */
@@ -59,11 +60,20 @@ export function MappingStep({
   onChange: (mapping: ColumnMapping) => void
   onBack: () => void
   /**
-   * Step 4. Omitted until B-034 exists — and omitted rather than passed as a
-   * no-op, so the button is disabled and says why instead of looking broken. The
-   * same shape B-032 left step 2's own Continue in.
+   * Run the step-4 dry run. B-034 supplies it; it stays optional so a caller
+   * that has no step 4 gets a button that is disabled and says why rather than
+   * one that looks broken — the shape this had while B-034 was unbuilt.
    */
   onContinue?: () => void
+  /**
+   * Whether that dry run is in flight.
+   *
+   * Worth a state of its own rather than an instant transition: the request
+   * parses up to 5,000 rows and probes the client master for every code in them,
+   * so on a real file it is visibly not instant. A button that stays idle
+   * invites a second click, and a second dry run is a second full parse.
+   */
+  continuePending?: boolean
 }) {
   const described = useDescribeImportSchema(schema)
   const fields = described.data?.data.fields ?? []
@@ -193,12 +203,12 @@ export function MappingStep({
       )}
 
       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-        <Button type="button" variant="secondary" onClick={onBack}>
+        <Button type="button" variant="secondary" onClick={onBack} disabled={continuePending}>
           Back to upload
         </Button>
         <Button
           type="button"
-          disabled={!ready || !onContinue}
+          disabled={!ready || !onContinue || continuePending}
           onClick={onContinue}
           title={
             !ready
@@ -208,14 +218,19 @@ export function MappingStep({
                 : 'The dry-run preview arrives with the next step of this screen'
           }
         >
-          Continue to validation
+          {continuePending && (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          )}
+          {continuePending ? 'Checking every row…' : 'Continue to validation'}
         </Button>
-        <p className="text-sm text-content-muted">
-          {!ready
-            ? 'Nothing has been written. No client changes until you have confirmed the preview.'
-            : onContinue
-              ? 'The next step is a dry run — every row’s outcome, with nothing written.'
-              : 'The mapping is complete. The dry-run preview is not available yet, and nothing has been written — no client has changed.'}
+        <p className="text-sm text-content-muted" role={continuePending ? 'status' : undefined}>
+          {continuePending
+            ? `Reading ${rowCount.toLocaleString()} rows and checking each one against the client master. Still nothing written.`
+            : !ready
+              ? 'Nothing has been written. No client changes until you have confirmed the preview.'
+              : onContinue
+                ? 'The next step is a dry run — every row’s outcome, with nothing written.'
+                : 'The mapping is complete. The dry-run preview is not available yet, and nothing has been written — no client has changed.'}
         </p>
       </div>
     </div>

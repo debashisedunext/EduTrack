@@ -75,15 +75,18 @@ class ImportController {
     private final ImportTemplateWriter templates;
     private final ImportUploadService uploads;
     private final ImportMappingPresetService mappingPresets;
+    private final ImportValidationService validation;
 
     ImportController(ImportSchemaRegistry registry,
                      ImportTemplateWriter templates,
                      ImportUploadService uploads,
-                     ImportMappingPresetService mappingPresets) {
+                     ImportMappingPresetService mappingPresets,
+                     ImportValidationService validation) {
         this.registry = registry;
         this.templates = templates;
         this.uploads = uploads;
         this.mappingPresets = mappingPresets;
+        this.validation = validation;
     }
 
     /**
@@ -277,6 +280,42 @@ class ImportController {
             summary = "Delete a saved column mapping")
     void deleteMappingPreset(@PathVariable String schema, @PathVariable long presetId) {
         mappingPresets.delete(schema, presetId);
+    }
+
+    /**
+     * Blueprint §4B.3 step 4 — the dry run. <b>Nothing is written.</b>
+     *
+     * <p>The step the whole wizard is built around: "a silent bulk import that
+     * half-succeeds is worse than no import at all", so the user sees every
+     * row's outcome — will create, will update, duplicate within the file,
+     * rejected and why — before the database has been touched. That guarantee is
+     * enforced rather than documented; see {@link ImportValidationEngine}, which
+     * holds no path to a write.
+     *
+     * <p><b>A POST that changes nothing, and that is not an accident.</b> The
+     * mapping is the request — twenty entries of it — so it cannot be a GET, and
+     * the operation is repeatable by design: the user runs it, reads it, goes
+     * back to step 3, changes one column and runs it again. No
+     * {@code Idempotency-Key} is declared for the same reason the preset save
+     * declares none: repeating this is harmless by construction rather than by
+     * deduplication.
+     *
+     * <p>Four ways to be refused, each a 422 with a {@code type} of its own
+     * because each has a different remedy — the upload expired, a required
+     * column is unmapped, the mapping names a column this sheet lacks, or it
+     * names a field the schema does not declare. {@link ImportValidationService}
+     * carries the order they are checked in and why.
+     */
+    @PostMapping(path = "/{schema}/validate",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "validateImport",
+            summary = "Dry-run a mapped upload and preview every row (S-34 step 4)")
+    ImportDtos.PreviewResponse validate(@PathVariable String schema,
+                                        @Valid @RequestBody ImportDtos.ValidateRequest request) {
+        return new ImportDtos.PreviewResponse(
+                ImportDtos.Preview.of(validation.validate(schema, request)));
     }
 
     /**

@@ -48,6 +48,9 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Target field → source column.
+ * Target field → source column, the same shape and direction step 3's
+presets are stored in. Entries with a blank column are ignored, so
+an untouched `<select>` does not count as a mapping.
+
  */
 export type ImportValidateRequestMapping = {[key: string]: string};

@@ -47,4 +47,18 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * §4B.3's Message column, and it says a different kind of thing per
+verdict. `REJECTED` — the first rule the row broke, in the user's
+words. `DUPLICATE_IN_FILE` — which earlier row won. `WILL_UPDATE` —
+**the fields this row would change**, comma-separated in template
+order, or `No change`; that is what makes "38 will update"
+reviewable rather than alarming. `WILL_CREATE` — null, the em dash
+in the blueprint's mock-up.
+
+Null is also what a `WILL_UPDATE` carries when the registration
+cannot cheaply supply current values, so a client must render the
+absence rather than assume nothing changes.
+
+ */
 export type ImportRowVerdictReason = string | null;
