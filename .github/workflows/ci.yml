@@ -355,14 +355,24 @@ jobs:
             --spring.jpa.properties.hibernate.boot.allow_jdbc_metadata_access=false \
             --server.port=8099 \
             --management.health.redis.enabled=false \
-            --management.health.mail.enabled=false > /tmp/app.log 2>&1 &
+            --management.health.mail.enabled=false \
+            --management.health.db.enabled=false > /tmp/app.log 2>&1 &
           APP=$!
-          # Readiness is `/`, not /actuator/health. Health aggregates the Redis
-          # and mail indicators, which are DOWN here by design — there is no
-          # infrastructure in this job, and there should not be: the question is
-          # whether the jar starts and serves, not whether docker-compose is up.
-          # Those two indicators are disabled above so the health assertion below
-          # is about the application rather than the environment.
+          # Readiness is `/`, not /actuator/health. Health aggregates the Redis,
+          # mail and database indicators, which are DOWN here by design — there
+          # is no infrastructure in this job, and there should not be: the
+          # question is whether the jar starts and serves, not whether
+          # docker-compose is up. Those three indicators are disabled above so
+          # the health assertion below is about the application rather than the
+          # environment.
+          #
+          # `db` joined that list on 17 Aug, the first time this job ran after
+          # the Actions allowance was restored. It had always aggregated into
+          # /actuator/health; the assertion below simply never ran against a
+          # jar carrying a DataSource health indicator and no database, so it
+          # returned 503 the moment it did. The local integration gate never
+          # caught it because it asserts only `/` — and because a developer
+          # running it has docker-compose up, so a real MySQL was answering.
           up=0
           for i in $(seq 1 60); do
             if curl -fsS -o /dev/null http://localhost:8099/; then up=1; break; fi
@@ -384,7 +394,16 @@ jobs:
           check /tickets/CRM-26-00347 200   # a deep link must reach index.html
           check /v3/api-docs/edutrack 200   # springdoc, which D-005 depends on
           check /actuator/health      200
-          check /api/v1/nope          404   # an honest 404, not the HTML shell
+          # The point of this check is that an unknown API path must not be
+          # served the SPA shell — a 200 with index.html would make every
+          # mistyped endpoint look like it worked. It asserted 404 until the
+          # filter chain landed (A-032, A-033): this smoke test calls with no
+          # credentials, and Spring Security now answers before routing, so an
+          # unauthenticated caller gets 401 and never reaches a 404. 401 is the
+          # correct answer here and still proves the shell was not served.
+          #
+          # This is Stream A's surface — flagged for Shivendra's review.
+          check /api/v1/nope          401   # not the HTML shell; auth answers first
           kill $APP 2>/dev/null || true
           if [ $fail -ne 0 ]; then tail -60 /tmp/app.log; exit 1; fi
           echo "✓ the packaged jar starts and serves"
