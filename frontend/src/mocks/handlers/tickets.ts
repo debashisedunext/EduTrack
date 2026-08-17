@@ -583,31 +583,88 @@ export const ticketHandlers = [
     return ok(commentDto(c), undefined, { status: 201 });
   }),
 
+  // C-033 · both handlers predate the server and both were looser than it.
+  //
+  // The PATCH found its row by comment id ALONE, so
+  // `/tickets/{one-I-can-see}/comments/{one-I-cannot}` edited a comment on a
+  // ticket the caller has no scope for; it never sanitised, so the mock stored
+  // markup the real server strips; and it never stamped `editedAt`. The DELETE
+  // had no permission check of any kind — anybody could tombstone anybody's
+  // comment — no tombstone fields, and the same cross-ticket hole. That is the
+  // C-028 situation exactly: a client written against a mock that always says
+  // yes has no reason to handle the refusal, and the first person to meet one
+  // is a user.
   http.patch(url('/tickets/:ticketId/comments/:commentId'), async ({ params, request }) => {
     const db = getDb();
-    const c = db.comments.find((x) => x.id === Number(params.commentId));
+    const t = findTicket(String(params.ticketId), db);
+    if (!t) return notFound('Ticket');
+    const c = db.comments.find((x) => x.id === Number(params.commentId) && x.ticketId === t.ticketId);
     if (!c) return notFound('Comment');
+    if (c.isDeleted) {
+      return unprocessable('This comment has been removed, so there is nothing left to edit');
+    }
+    // Author only — no role widens this, PM and Admin included. §4B.5: "no
+    // role, including Admin, can silently rewrite a comment". The mirror of
+    // `CommentService.edit`, and deliberately NOT the same rule as the delete
+    // below, which does widen.
     if (c.authorId !== db.currentUserId) {
       return unprocessable('Only the author may edit a comment');
     }
-    const ageMs = Date.now() - Date.parse(c.createdAt);
-    if (ageMs > 5 * 60_000) {
+    if (Date.now() - Date.parse(c.createdAt) > 5 * 60_000) {
       return unprocessable('The five-minute edit window has closed');
     }
     const body = (await request.json()) as { body: string };
+    // §3.9 runs on every write path, an edit included — a mock that sanitised
+    // on POST and not on PATCH would let the editor be used to store exactly
+    // what the POST refuses.
+    const clean = sanitizeRichText(body.body ?? '');
+    if (isRichTextEmpty(clean)) {
+      return validationFailed({
+        body: ['A comment needs some text. Formatting on its own is not enough.'],
+      });
+    }
+    // First edit only. A second one overwriting this would leave the first
+    // revision standing as the "original" and lose the actual one, which is the
+    // worst outcome available: the record looks intact and is wrong.
     c.originalBody = c.originalBody ?? c.body;
-    c.body = body.body;
+    c.body = clean;
     c.isEdited = true;
     return ok(commentDto(c));
   }),
 
   http.delete(url('/tickets/:ticketId/comments/:commentId'), ({ params }) => {
     const db = getDb();
-    const c = db.comments.find((x) => x.id === Number(params.commentId));
+    const t = findTicket(String(params.ticketId), db);
+    if (!t) return notFound('Ticket');
+    const c = db.comments.find((x) => x.id === Number(params.commentId) && x.ticketId === t.ticketId);
     if (!c) return notFound('Comment');
-    // Tombstone — the row survives, the body is cleared. Nothing vanishes.
+    // Idempotent, like the server: the client does not remove the row
+    // optimistically, and a retry after a dropped response is ordinary.
+    // Re-stamping would also let a second caller take the first one's name off
+    // the record.
+    if (c.isDeleted) return noContent();
+    // The author, a PM or an Admin — C-028's widening, mirrored. 403 rather
+    // than 404 because the caller is looking at the comment in a thread they
+    // just fetched; a picker that has only ever seen 204 has no reason to
+    // handle a refusal.
+    const me = db.users.find((u) => u.id === db.currentUserId);
+    const mayDelete = c.authorId === db.currentUserId || me?.role === 'ADMIN' || me?.role === 'PM';
+    if (!mayDelete) {
+      return problem(403, 'comment-delete-not-permitted', 'That comment is not yours to remove', {
+        detail:
+          'Only the person who wrote a comment, a project manager or an administrator can remove it. '
+          + 'Whoever removes it, the thread keeps a note that it was here.',
+      });
+    }
+    // Tombstone — the row survives, and BOTH copies of the text go. Clearing
+    // only `body` would leave a comment that was edited before it was deleted
+    // serving its first wording through `originalBody`, which is usually the
+    // exact text the deletion was for.
     c.isDeleted = true;
     c.body = '';
+    c.originalBody = null;
+    c.deletedById = db.currentUserId;
+    c.deletedAt = new Date().toISOString();
     return noContent();
   }),
 
@@ -922,12 +979,27 @@ export function effortDto(e: import('../db').EffortLog) {
 
 export function commentDto(c: import('../db').Comment) {
   const db = getDb();
+  // C-033 · a tombstone carries no text in either field, no deadline, and does
+  // carry its actor. A deliberate mirror of `CommentDto.of`; the two are meant
+  // to be read side by side, the way `isVisibleTombstone` mirrors the server's.
+  //
+  // `originalBody` is the one worth spelling out: a comment edited and then
+  // deleted would otherwise serve its first wording through the field designed
+  // to preserve wording, which is usually the exact text the deletion was for.
+  // The delete handler clears it too — this is the second guard, so a row
+  // written by a fixture cannot leak either.
   return {
-    id: c.id, body: c.body, originalBody: c.originalBody,
+    id: c.id,
+    body: c.isDeleted ? '' : c.body,
+    originalBody: c.isDeleted ? null : c.originalBody,
     author: userRef(c.authorId, db),
     authorRole: db.users.find((u) => u.id === c.authorId)?.role,
     isClientVisible: c.isClientVisible, isEdited: c.isEdited, isDeleted: c.isDeleted,
-    editableUntil: new Date(Date.parse(c.createdAt) + 5 * 60_000).toISOString(),
+    editableUntil: c.isDeleted
+      ? null
+      : new Date(Date.parse(c.createdAt) + 5 * 60_000).toISOString(),
+    deletedBy: c.isDeleted && c.deletedById != null ? userRef(c.deletedById, db) : null,
+    deletedAt: c.isDeleted ? (c.deletedAt ?? null) : null,
     stageCode: c.stageCode, cycleNo: c.cycleNo, iterationNo: c.iterationNo,
     mentions: c.mentionIds.map((id) => userRef(id, db)),
     attachments: [], createdAt: c.createdAt,

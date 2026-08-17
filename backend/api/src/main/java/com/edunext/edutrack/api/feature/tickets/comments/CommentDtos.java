@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -70,14 +71,30 @@ final class CommentDtos {
      *                        it. {@code attachmentIds} on the request is therefore
      *                        <b>rejected rather than silently dropped</b> — see
      *                        {@link CommentWriteRequest#attachmentIds}
-     * @param editableUntil   five minutes after posting, per §4B.5. Sent from
-     *                        C-029 even though nothing enforces it until C-033:
-     *                        it is derived from {@code createdAt} and costs
-     *                        nothing, and a client that has never seen the field
-     *                        is a client that will not render the countdown when
-     *                        the window becomes real
-     * @param originalBody    null until C-033 writes one. The contract types it
-     *                        nullable for exactly this reason
+     * @param editableUntil   five minutes after posting, per §4B.5, and enforced
+     *                        from C-033. Still <b>derived rather than stored</b>:
+     *                        {@code createdAt} plus the configured window, so an
+     *                        operator changing the window at deploy cannot leave
+     *                        a stored deadline disagreeing with the rule the
+     *                        server actually applies. <b>Null on a tombstone</b> —
+     *                        a removed comment has no deadline, and sending one
+     *                        would put a live countdown on a card whose text is
+     *                        already gone
+     * @param originalBody    C-033 · what the author first posted, written once
+     *                        on the first edit and never touched again. Null when
+     *                        the comment has never been edited, <b>and cleared on
+     *                        a tombstone</b>: leaving it would serve the exact
+     *                        text a deletion was meant to remove, through a field
+     *                        whose whole purpose is preserving text
+     * @param deletedBy       C-033 · who tombstoned it. Null unless
+     *                        {@code isDeleted}, and additionally null when that
+     *                        account no longer exists — the client renders
+     *                        "removed on 17 Aug" rather than inventing a name,
+     *                        which is {@code CommentUserRefs}' rule throughout
+     * @param deletedAt       C-033 · when. The other half of "removed by X on
+     *                        date"; both are stamped by one write, so a row
+     *                        carrying one without the other is not a state this
+     *                        server produces
      */
     @Schema(name = "Comment")
     record CommentDto(
@@ -101,8 +118,13 @@ final class CommentDtos {
             boolean isEdited,
             @Schema(description = "Tombstone; the row survives.")
             boolean isDeleted,
-            @Schema(description = "Five minutes after posting (§4B.5). Not enforced until C-033.", nullable = true)
+            @Schema(description = "Five minutes after posting (§4B.5). Null on a tombstone.", nullable = true)
             Instant editableUntil,
+            @Schema(description = "C-033 · who removed it. Null unless `isDeleted`, and null again if that account is gone.",
+                    nullable = true)
+            UserRef deletedBy,
+            @Schema(description = "C-033 · when it was removed. Null unless `isDeleted`.", nullable = true)
+            Instant deletedAt,
             @Schema(description = "Stage at time of writing.", nullable = true)
             String stageCode,
             Integer cycleNo,
@@ -112,20 +134,41 @@ final class CommentDtos {
             List<Object> attachments,
             Instant createdAt) {
 
-        /** §4B.5: "Editable for 5 minutes; after that the comment is locked". */
-        private static final long EDIT_WINDOW_MINUTES = 5;
-
         /**
-         * @param people resolved ids from {@link CommentUserRefs#resolve}, which
-         *               is given every id in the listing at once. A missing id
-         *               yields null rather than a placeholder name
-         * @param roles  role codes by user id, from the same lookup
+         * @param people     resolved ids from {@link CommentUserRefs#resolve},
+         *                   which is given every id in the listing at once. A
+         *                   missing id yields null rather than a placeholder name
+         * @param roles      role codes by user id, from the same lookup
+         * @param editWindow <b>the same {@link CommentProperties#editWindow} the
+         *                   service enforces</b>, passed in rather than a constant
+         *                   here. C-029 held §4B.5's five minutes as a literal,
+         *                   which was correct while nothing enforced anything;
+         *                   from C-033 there are two numbers deciding one rule,
+         *                   and C-027 is the cautionary tale — its client-side
+         *                   copy of a server cap did not disagree with the server
+         *                   so much as silently override it, and the failure was
+         *                   invisible in every log. A deployment that shortens the
+         *                   window would otherwise show every author a countdown
+         *                   running past a deadline the server has already refused
          */
-        static CommentDto of(TicketComment row, Map<Long, UserRef> people, Map<Long, String> roles) {
+        static CommentDto of(TicketComment row,
+                             Map<Long, UserRef> people,
+                             Map<Long, String> roles,
+                             Duration editWindow) {
+            // C-033 · a tombstone carries no text, in either field.
+            //
+            // `bodyHtml` is already emptied by the delete, and `originalBody`
+            // would otherwise be a hole straight through it: a comment posted
+            // client-visible by mistake, edited, and then removed would still
+            // serve its first wording here — the very text the deletion was for,
+            // through the one field designed to preserve text. Cleared on the way
+            // out as well as on the way in, so a row written before this task, or
+            // by a fixture, cannot leak either.
+            boolean tombstoned = row.isDeleted();
             return new CommentDto(
                     row.getId(),
-                    row.getBodyHtml(),
-                    row.getOriginalBody(),
+                    tombstoned ? "" : row.getBodyHtml(),
+                    tombstoned ? null : row.getOriginalBody(),
                     people.get(row.getAuthorId()),
                     roles.get(row.getAuthorId()),
                     // The column is `is_internal` and the contract's field is
@@ -137,10 +180,15 @@ final class CommentDtos {
                     // reading a missing field as "safe to show the client".
                     !row.isInternal(),
                     row.getEditedAt() != null,
-                    row.isDeleted(),
-                    row.getCreatedAt() == null
+                    tombstoned,
+                    // Null on a tombstone: a removed comment has no deadline, and
+                    // a countdown ticking beside "removed by Priya" would invite
+                    // exactly one thing, which the server refuses anyway.
+                    tombstoned || row.getCreatedAt() == null
                             ? null
-                            : row.getCreatedAt().plusSeconds(EDIT_WINDOW_MINUTES * 60),
+                            : row.getCreatedAt().plus(editWindow),
+                    tombstoned ? people.get(row.getDeletedBy()) : null,
+                    tombstoned ? row.getDeletedAt() : null,
                     row.getStageCode(),
                     row.getCycleNo() == null ? null : (int) row.getCycleNo(),
                     row.getIterationNo() == null ? null : (int) row.getIterationNo(),
@@ -216,6 +264,33 @@ final class CommentDtos {
             Boolean isClientVisible,
             List<Long> mentionUserIds,
             List<Long> attachmentIds) {
+    }
+
+    /**
+     * C-033 · {@code editComment}'s body — one field, and the contract says so.
+     *
+     * <p><b>Visibility is deliberately not editable.</b> §4B.5 makes
+     * internal-versus-client-visible a decision taken once, before posting, and
+     * C-031 draws it in a colour nobody can miss for exactly that reason. Letting
+     * a PATCH flip it would make the five-minute window a way to publish an
+     * internal note to a client — or worse, to <em>unpublish</em> one, which the
+     * client has already received by email and which the thread would then
+     * misreport for ever. A comment sent to the wrong audience is deleted and
+     * rewritten, in the open, which is what the tombstone is for.
+     *
+     * <p>Neither is the stamp. Cycle and stage are what the ticket was doing when
+     * the words were written, and an edit does not travel back to change that.
+     *
+     * @param body the new wording, sanitised server-side before it is stored. The
+     *             {@code @Size} bound is over what was <em>sent</em>;
+     *             {@link CommentSanitizer} applies the same bound to what is
+     *             stored, which can be longer — an ampersand is one character in
+     *             and five out
+     */
+    record EditCommentRequest(
+            @NotBlank
+            @Size(max = CommentSanitizer.MAX_LENGTH)
+            String body) {
     }
 
     record CommentResponse(CommentDto data) {

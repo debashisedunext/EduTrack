@@ -1966,7 +1966,20 @@ paths:
 
         An edited comment keeps `originalBody` and renders an "edited" marker.
         **No role, including Admin, can silently rewrite a comment** — that is what
-        keeps the thread admissible as evidence.
+        keeps the thread admissible as evidence, and it is why PM and Admin are
+        refused here while `deleteComment` allows them: however an Admin's edit were
+        labelled, the thread would still attribute the new wording to the original
+        author. `originalBody` is written on the **first** edit only, so what is
+        preserved is what the author actually posted rather than their last attempt.
+
+        The body is re-sanitised against PLAN.md §3.9 and re-parsed for `@mentions`.
+        Only somebody the previous wording did **not** already name is notified —
+        otherwise post, edit, edit is a way to ring the same bell repeatedly.
+
+        Visibility is deliberately not editable. Flipping `isClientVisible` in the
+        window would be a way to publish an internal note, or to un-publish one the
+        client has already had by email while the thread reports otherwise. A
+        comment sent to the wrong audience is deleted and rewritten, in the open.
       requestBody:
         required: true
         content:
@@ -1992,9 +2005,37 @@ paths:
       tags: [comments]
       operationId: deleteComment
       summary: Delete a comment, leaving a tombstone
-      description: The row survives with `isDeleted`; the body is cleared. Nothing vanishes.
+      description: |
+        The row survives with `isDeleted`; the body is cleared, and `originalBody`
+        with it. Nothing vanishes — the thread keeps "removed by X on date" in place.
+
+        **The author, a PM or an Admin.** §4B.5 names no actor, so C-033 follows
+        C-028's widening on attachments and for its reason: a comment posted
+        client-visible by mistake is a disclosure, and waiting for its author to
+        come back is not a remedy. Their act is never silent, because **every**
+        removal here leaves a tombstone — including the author's own, and including
+        one made seconds after posting. Unlike `deleteAttachment` there is no
+        window and no silent branch: §4B.5 attaches its five minutes to editing and
+        says of deletion only that it leaves a mark.
+
+        Idempotent — deleting a tombstone answers `204`, not `404`.
       responses:
         '204': { description: Tombstoned. }
+        # C-033. A caller who may read the comment and may not remove it, which is
+        # a different refusal from the edit's 422: an edit can be refused by the
+        # *row* (the window closed, and the caller was entitled four minutes ago),
+        # a deletion only ever by *who is asking*.
+        #
+        # 403 rather than A-035's 404, on C-028's precedent and its argument: row
+        # scope was settled by ScopeResolver before this route was reached, and
+        # the caller is looking at the comment in a thread they just fetched, so
+        # there is no existence left to conceal. 404 conceals whether a row exists;
+        # 403 concedes that it does and refuses the verb.
+        '403':
+          description: Not the author, and not a PM or Admin.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ────────────────────────────────────────────────────── attachments ────────
@@ -6102,7 +6143,23 @@ components:
         isClientVisible: { type: boolean }
         isEdited: { type: boolean }
         isDeleted: { type: boolean, description: Tombstone; the row survives. }
+        # C-033 · null on a tombstone. A removed comment has no deadline, and the
+        # window is derived from `createdAt` plus the server's configured edit
+        # window rather than stored — a shortened window must not leave an author
+        # watching a countdown the server has already stopped honouring.
         editableUntil: { type: [string, 'null'], format: date-time }
+        # C-033 · the two halves of "removed by X on date", mirroring
+        # `Attachment.deletedBy` / `deletedAt` exactly. Both null unless
+        # `isDeleted`; `deletedBy` is additionally null when the account that
+        # removed it no longer exists, and the client renders the tombstone
+        # without an actor rather than inventing a name.
+        #
+        # A tombstone carries `body: ""` AND `originalBody: null`. Clearing only
+        # the first would leave a comment that was edited before it was deleted
+        # serving its first wording through the one field designed to preserve
+        # wording — which is usually the exact text the deletion was for.
+        deletedBy: { $ref: '#/components/schemas/UserRef' }
+        deletedAt: { type: [string, 'null'], format: date-time }
         stageCode: { type: [string, 'null'], description: Stage at time of writing. }
         cycleNo: { type: integer }
         iterationNo: { type: integer }

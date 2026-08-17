@@ -678,6 +678,14 @@ export const getTicketDetailResponse = zod.object({
   "isEdited": zod.boolean().optional(),
   "isDeleted": zod.boolean().optional().describe('Tombstone; the row survives.'),
   "editableUntil": zod.string().datetime({}).nullish(),
+  "deletedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "deletedAt": zod.string().datetime({}).nullish(),
   "stageCode": zod.string().nullish().describe('Stage at time of writing.'),
   "cycleNo": zod.number().optional(),
   "iterationNo": zod.number().optional(),

@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useGetTicketDetail } from '@/api/generated/tickets/tickets'
 import { useListTaskTypes } from '@/api/generated/masters/masters'
 import { useListClientContacts } from '@/api/generated/clients/clients'
+import { useGetMe } from '@/api/generated/auth/auth'
 import { ApiError } from '@/api/http'
 
 import { Button } from '@/components/ui/button'
@@ -90,6 +91,25 @@ export function TicketDetailPage() {
   const detail = data?.data
   const ticket = detail?.ticket
 
+  /*
+   * C-033 · who is reading, which decides which comment cards offer Edit and
+   * Remove. Both rules are enforced server-side (422 and 403); this only stops
+   * the page offering a button that will be refused.
+   *
+   * `useGetMe` rather than a prop: the page already renders under `RequireAuth`
+   * and the query is cached across the app, so this is a cache read rather than
+   * a request — `TicketListPage` and `SavedViewsMenu` read the same one. Both
+   * fields are undefined for a moment on a cold cache, and `commentPermissions`
+   * treats a null id as "show nothing", which is the safe direction: an
+   * affordance that appears a beat late costs a re-render, one that appears
+   * wrongly is a refusal the user has to interpret.
+   */
+  const { data: meData } = useGetMe()
+  const viewer = React.useMemo(
+    () => ({ id: meData?.data.id ?? null, role: meData?.data.role }),
+    [meData?.data.id, meData?.data.role],
+  )
+
   const { data: taskTypesData } = useListTaskTypes()
   const taskTypeName = React.useMemo(() => {
     if (ticket?.taskTypeId == null) return undefined
@@ -139,12 +159,30 @@ export function TicketDetailPage() {
               comments={comments.comments}
               isLoading={comments.isLoading}
               loadError={comments.loadError}
+              viewer={viewer}
+              onEdit={comments.edit}
+              onDelete={comments.remove}
+              isEditing={comments.isEditing}
+              editError={comments.editError}
+              isRemoving={comments.isRemoving}
+              removeError={comments.removeError}
             />
           ) : (
             <PendingSection title={`${label} tab`} owner={owner} note={note} />
           ),
       })),
-    [comments.comments, comments.isLoading, comments.loadError],
+    [
+      comments.comments,
+      comments.isLoading,
+      comments.loadError,
+      comments.edit,
+      comments.remove,
+      comments.isEditing,
+      comments.editError,
+      comments.isRemoving,
+      comments.removeError,
+      viewer,
+    ],
   )
 
   if (isPending) {

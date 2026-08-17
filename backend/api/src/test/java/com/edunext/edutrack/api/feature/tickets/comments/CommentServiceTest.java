@@ -15,8 +15,13 @@ import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -54,8 +59,30 @@ class CommentServiceTest {
     private final CommentMentions mentions = mock(CommentMentions.class);
     private final CommentMentionNotifier mentionNotifier = mock(CommentMentionNotifier.class);
 
+    private final CommentProperties properties = new CommentProperties(Duration.ofMinutes(5));
+
+    /**
+     * C-033 · a fixed clock, four minutes after {@link #POSTED_AT}, so the edit
+     * window is open by default and a test that wants it shut moves the clock
+     * rather than the fixture. Waiting five real minutes is not a test anybody
+     * runs, which is the whole reason {@code CommentService} takes a
+     * {@code Clock}.
+     */
+    private Clock clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(4)), ZoneOffset.UTC);
+
+    /**
+     * Rebuilt per call rather than held in a field, because {@link #clock} is
+     * reassigned by the tests that stand outside the window and a service built
+     * in a field initialiser would have captured the old one.
+     */
+    private CommentService service() {
+        return new CommentService(tickets, comments, rows, people, sanitizer, mentions,
+                mentionNotifier, properties, clock);
+    }
+
     private final CommentService service = new CommentService(
-            tickets, comments, rows, people, sanitizer, mentions, mentionNotifier);
+            tickets, comments, rows, people, sanitizer, mentions, mentionNotifier, properties,
+            Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(4)), ZoneOffset.UTC));
 
     /**
      * The three-argument constructor, deliberately: the two-argument one leaves
@@ -452,6 +479,363 @@ class CommentServiceTest {
             assertThat(posted.originalBody()).isNull();
             assertThat(posted.editableUntil())
                     .isEqualTo(Instant.parse("2026-08-16T10:20:30Z"));
+        }
+    }
+
+    /**
+     * C-033 · blueprint §4B.5's immutability row.
+     *
+     * <p>Written adversarially rather than as a happy path, because every rule
+     * here fails <em>silently</em> when it is wrong: an edit that overwrites
+     * {@code original_body} a second time still returns 200 and still shows an
+     * "edited" marker, and a tombstone that keeps its text still says "removed".
+     * The three marked as guards were each verified by breaking the guard and
+     * watching them go red.
+     */
+    @Nested
+    @DisplayName("C-033 · the edit window")
+    class EditWindow {
+
+        private TicketComment existing;
+
+        @BeforeEach
+        void postedFourMinutesAgo() {
+            existing = new TicketComment();
+            existing.setId(99L);
+            existing.setTicketId(TICKET);
+            existing.setAuthorId(AUTHOR);
+            existing.setBodyHtml("<p>Root cause is the retry timeout.</p>");
+            existing.setBodyText("Root cause is the retry timeout.");
+            existing.setInternal(true);
+            existing.setCycleNo((short) 2);
+            existing.setStageCode("DEVELOPMENT");
+            ReflectionTestUtils.setField(existing, "createdAt", POSTED_AT);
+            when(rows.find(TICKET, 99L)).thenReturn(Optional.of(existing));
+        }
+
+        private CommentDtos.EditCommentRequest edit(String html) {
+            return new CommentDtos.EditCommentRequest(html);
+        }
+
+        @Test
+        @DisplayName("the author may rewrite inside the window")
+        void theAuthorMayRewriteInsideTheWindow() {
+            CommentDtos.CommentDto result = service()
+                    .edit(caller, TICKET, 99L, edit("<p>Root cause is the connection pool.</p>"));
+
+            assertThat(result.body()).isEqualTo("<p>Root cause is the connection pool.</p>");
+            assertThat(result.isEdited()).isTrue();
+            assertThat(existing.getEditedAt()).isEqualTo(clock.instant());
+        }
+
+        @Test
+        @DisplayName("the original is preserved on the first edit")
+        void preservesTheOriginal() {
+            service().edit(caller, TICKET, 99L, edit("<p>second</p>"));
+
+            assertThat(existing.getOriginalBody())
+                    .isEqualTo("<p>Root cause is the retry timeout.</p>");
+        }
+
+        /**
+         * <b>Guard.</b> A second edit overwriting {@code original_body} would
+         * leave the FIRST REVISION standing as the "original" and lose what the
+         * author actually posted — and it would look entirely fine, because the
+         * field is populated and the marker is showing. Removing the null check
+         * in {@code CommentService.edit} turns exactly this test red and nothing
+         * else in the suite.
+         */
+        @Test
+        @DisplayName("a second edit does not overwrite the original")
+        void preservesTheFirstOriginalNotTheLast() {
+            service().edit(caller, TICKET, 99L, edit("<p>second</p>"));
+            service().edit(caller, TICKET, 99L, edit("<p>third</p>"));
+
+            assertThat(existing.getBodyHtml()).isEqualTo("<p>third</p>");
+            assertThat(existing.getOriginalBody())
+                    .isEqualTo("<p>Root cause is the retry timeout.</p>");
+        }
+
+        @Test
+        @DisplayName("outside five minutes it is locked, for the author too")
+        void locksAfterTheWindow() {
+            clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(5).plusSeconds(1)), ZoneOffset.UTC);
+
+            assertThatThrownBy(() -> service().edit(caller, TICKET, 99L, edit("<p>late</p>")))
+                    .isInstanceOf(CommentNotEditableException.class)
+                    .hasMessageContaining("locked");
+            assertThat(existing.getBodyHtml()).isEqualTo("<p>Root cause is the retry timeout.</p>");
+        }
+
+        @Test
+        @DisplayName("exactly on the deadline is still editable")
+        void theBoundaryIsInclusive() {
+            clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(5)), ZoneOffset.UTC);
+
+            assertThat(service().edit(caller, TICKET, 99L, edit("<p>just in time</p>")).body())
+                    .isEqualTo("<p>just in time</p>");
+        }
+
+        /**
+         * <b>Guard</b>, and the asymmetry with {@link Deletion} that the whole
+         * task turns on. §4B.5: "no role, including Admin, can silently rewrite a
+         * comment". An Admin who could edit would leave the thread attributing
+         * the new wording to Ravi, which is that rewrite however the card is
+         * labelled — so PM and Admin are refused here and allowed on the delete.
+         */
+        @Test
+        @DisplayName("no role, including Admin, may edit somebody else's comment")
+        void noRoleMayRewriteSomebodyElses() {
+            for (String role : List.of("ADMIN", "PM", "DEVELOPER")) {
+                Authentication other = new TestingAuthenticationToken(
+                        new DevPrincipal(999L, "priya", "Priya Nair", role, List.of(), List.of()),
+                        "n/a", "ticket.update_progress");
+
+                assertThatThrownBy(() -> service().edit(other, TICKET, 99L, edit("<p>mine now</p>")))
+                        .as("%s must not be able to rewrite another user's comment", role)
+                        .isInstanceOf(CommentNotEditableException.class);
+            }
+            assertThat(existing.getBodyHtml()).isEqualTo("<p>Root cause is the retry timeout.</p>");
+        }
+
+        @Test
+        @DisplayName("§3.9 runs on the edit, not only on the post")
+        void sanitisesTheEditedBody() {
+            service().edit(caller, TICKET, 99L, edit("<p>ok</p><script>alert(1)</script>"));
+
+            assertThat(existing.getBodyHtml()).doesNotContain("script");
+        }
+
+        /**
+         * An edit that sanitises to nothing is a 400, not an empty comment —
+         * otherwise the window is a way to blank a comment without leaving the
+         * tombstone that deleting one does.
+         */
+        @Test
+        @DisplayName("an edit that reduces to nothing is refused")
+        void refusesAnEditThatSanitisesAway() {
+            assertThatThrownBy(() -> service().edit(caller, TICKET, 99L, edit("<script>x</script>")))
+                    .isInstanceOf(InvalidCommentException.class);
+
+            assertThat(existing.getBodyHtml()).isEqualTo("<p>Root cause is the retry timeout.</p>");
+        }
+
+        /**
+         * <b>Guard</b>, and the one an ordinary implementation gets wrong.
+         * Editing re-parses the body, so re-notifying everyone it names makes
+         * post-edit-edit a way to ring the same bell indefinitely. The case that
+         * actually reaches production is duller: somebody fixing a typo in a
+         * sentence that happens to contain a name, which D-035's rate limit does
+         * not catch either.
+         */
+        @Test
+        @DisplayName("re-notifies only somebody the previous wording did not already name")
+        @SuppressWarnings("unchecked")
+        void notifiesOnlyTheNewlyMentioned() {
+            existing.setMentionedUserIds(List.of(42L));
+            when(mentions.resolveProjectMembers(eq(PROJECT), any())).thenReturn(List.of(
+                    new CommentMentions.MentionedUser(42L, "anil", "Anil Sharma", "anil@x.com"),
+                    new CommentMentions.MentionedUser(77L, "meera", "Meera Rao", "meera@x.com")));
+
+            service().edit(caller, TICKET, 99L, edit("<p>@anil @meera please look</p>"));
+
+            ArgumentCaptor<List<CommentMentions.MentionedUser>> told =
+                    ArgumentCaptor.forClass(List.class);
+            verify(mentionNotifier).mentioned(any(), eq(99L), eq(AUTHOR), any(), told.capture());
+            assertThat(told.getValue()).extracting(CommentMentions.MentionedUser::id)
+                    .containsExactly(77L);
+        }
+
+        @Test
+        @DisplayName("nobody is notified when an edit adds no new name")
+        void doesNotNotifyWhenNothingIsNew() {
+            existing.setMentionedUserIds(List.of(42L));
+            when(mentions.resolveProjectMembers(eq(PROJECT), any())).thenReturn(List.of(
+                    new CommentMentions.MentionedUser(42L, "anil", "Anil Sharma", "anil@x.com")));
+
+            service().edit(caller, TICKET, 99L, edit("<p>@anil please look again</p>"));
+
+            verifyNoInteractions(mentionNotifier);
+        }
+
+        @Test
+        @DisplayName("a comment on another ticket is 404 — the id alone reaches nothing")
+        void anotherTicketsCommentIs404() {
+            when(rows.find(TICKET, 500L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service().edit(caller, TICKET, 500L, edit("<p>x</p>")))
+                    .isInstanceOf(CommentNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("an out-of-scope ticket is 404 before the comment is even looked up")
+        void outOfScopeIs404First() {
+            when(tickets.require(any(), anyLong())).thenThrow(new TicketNotFoundException());
+
+            assertThatThrownBy(() -> service().edit(caller, TICKET, 99L, edit("<p>x</p>")))
+                    .isInstanceOf(TicketNotFoundException.class);
+            verifyNoInteractions(rows);
+        }
+    }
+
+    /**
+     * C-033 · §4B.5's "deletion leaves a tombstone".
+     *
+     * <p>Note what is <b>not</b> tested here, because it does not exist: a
+     * window. C-028's attachment delete has a silent branch inside fifteen
+     * minutes; §4B.5 attaches its five minutes to editing and says of deletion
+     * only that it leaves a mark.
+     */
+    @Nested
+    @DisplayName("C-033 · deletion")
+    class Deletion {
+
+        private TicketComment existing;
+
+        @BeforeEach
+        void anExistingComment() {
+            existing = new TicketComment();
+            existing.setId(99L);
+            existing.setTicketId(TICKET);
+            existing.setAuthorId(AUTHOR);
+            existing.setBodyHtml("<p>The client said the invoice is wrong.</p>");
+            existing.setBodyText("The client said the invoice is wrong.");
+            existing.setInternal(true);
+            ReflectionTestUtils.setField(existing, "createdAt", POSTED_AT);
+            when(rows.find(TICKET, 99L)).thenReturn(Optional.of(existing));
+        }
+
+        private Authentication as(long id, String role) {
+            return new TestingAuthenticationToken(
+                    new DevPrincipal(id, "u" + id, "User " + id, role, List.of(), List.of()),
+                    "n/a", "ticket.update_progress");
+        }
+
+        @Test
+        @DisplayName("the row survives, stamped with who and when")
+        void tombstonesRatherThanDeletes() {
+            service().delete(caller, TICKET, 99L);
+
+            assertThat(existing.isDeleted()).isTrue();
+            assertThat(existing.getDeletedBy()).isEqualTo(AUTHOR);
+            assertThat(existing.getDeletedAt()).isEqualTo(clock.instant());
+        }
+
+        /**
+         * <b>Guard</b>, and the trap this task set out to close. A comment edited
+         * before it was deleted keeps its first wording in {@code original_body},
+         * so clearing only {@code body_html} would serve exactly the text the
+         * author was taking back — through the one field designed to preserve
+         * text. Dropping the {@code setOriginalBody(null)} line turns this red.
+         */
+        @Test
+        @DisplayName("both copies of the text go, the preserved original included")
+        void clearsTheOriginalAsWellAsTheBody() {
+            existing.setOriginalBody("<p>Acme are refusing to pay, escalate to legal.</p>");
+
+            service().delete(caller, TICKET, 99L);
+
+            assertThat(existing.getBodyHtml()).isEmpty();
+            assertThat(existing.getBodyText()).isEmpty();
+            assertThat(existing.getOriginalBody()).isNull();
+        }
+
+        @Test
+        @DisplayName("a PM and an Admin may remove somebody else's")
+        void supervisoryRemovalIsAllowed() {
+            for (String role : List.of("PM", "ADMIN")) {
+                existing.setDeleted(false);
+                service().delete(as(500L, role), TICKET, 99L);
+                assertThat(existing.isDeleted()).as("%s may remove a comment", role).isTrue();
+            }
+        }
+
+        @Test
+        @DisplayName("a Developer may not remove a colleague's, and gets 403 rather than 404")
+        void othersAreRefused() {
+            assertThatThrownBy(() -> service().delete(as(500L, "DEVELOPER"), TICKET, 99L))
+                    .isInstanceOf(CommentDeletionNotPermittedException.class);
+
+            assertThat(existing.isDeleted()).isFalse();
+        }
+
+        /**
+         * No window, unlike an attachment: an author removing their own comment
+         * ten seconds after posting still leaves a mark. A comment is a statement
+         * colleagues have already read, not a mis-pasted screenshot.
+         */
+        @Test
+        @DisplayName("even the author's own removal seconds after posting leaves a tombstone")
+        void everyRemovalIsRecorded() {
+            clock = Clock.fixed(POSTED_AT.plusSeconds(10), ZoneOffset.UTC);
+
+            service().delete(caller, TICKET, 99L);
+
+            assertThat(existing.isDeleted()).isTrue();
+            assertThat(existing.getDeletedBy()).isEqualTo(AUTHOR);
+        }
+
+        @Test
+        @DisplayName("decrements the materialised counter")
+        void movesTheCounter() {
+            service().delete(caller, TICKET, 99L);
+
+            assertThat(ticket.getCommentCount()).isEqualTo(6);
+        }
+
+        /**
+         * The counter was a hard zero for every ticket created before C-029, so
+         * a comment posted then and tidied up now would otherwise render
+         * "-1 comments" on the list.
+         */
+        @Test
+        @DisplayName("the counter floors at zero rather than going negative")
+        void neverGoesNegative() {
+            ticket.setCommentCount(0);
+
+            service().delete(caller, TICKET, 99L);
+
+            assertThat(ticket.getCommentCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("deleting a tombstone is a no-op, not a refusal")
+        void isIdempotent() {
+            existing.setDeleted(true);
+            existing.setDeletedBy(500L);
+
+            service().delete(as(500L, "DEVELOPER"), TICKET, 99L);
+
+            // Not re-stamped: a second caller must not be able to take the first
+            // one's name off the record.
+            assertThat(existing.getDeletedBy()).isEqualTo(500L);
+            assertThat(ticket.getCommentCount()).isEqualTo(7);
+        }
+
+        @Test
+        @DisplayName("an out-of-scope ticket is 404 before the comment is even looked up")
+        void outOfScopeIs404First() {
+            when(tickets.require(any(), anyLong())).thenThrow(new TicketNotFoundException());
+
+            assertThatThrownBy(() -> service().delete(caller, TICKET, 99L))
+                    .isInstanceOf(TicketNotFoundException.class);
+            verifyNoInteractions(rows);
+        }
+
+        @Test
+        @DisplayName("a tombstone serves no text and no edit deadline")
+        void theDtoHidesEverything() {
+            existing.setOriginalBody("<p>secret</p>");
+            service().delete(caller, TICKET, 99L);
+
+            CommentDtos.CommentDto dto = CommentDtos.CommentDto.of(
+                    existing, Map.of(), Map.of(), Duration.ofMinutes(5));
+
+            assertThat(dto.body()).isEmpty();
+            assertThat(dto.originalBody()).isNull();
+            assertThat(dto.editableUntil()).isNull();
+            assertThat(dto.isDeleted()).isTrue();
+            assertThat(dto.deletedAt()).isEqualTo(clock.instant());
         }
     }
 }

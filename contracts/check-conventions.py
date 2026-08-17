@@ -108,6 +108,17 @@ ROWLESS_403 = {
     # that it does and refuses the verb. An out-of-scope ticket is still 404 here,
     # thrown before this refusal is reachable.
     "/tickets/{ticketId}/attachments/{attachmentId}": "row-scoped, but scope has already answered — a 404 here would deny a file the caller can see in the listing they just fetched; §4B.4's rule is about who may remove it, not whether it exists",
+    # C-033, and now the SECOND row-scoped entry. Read the C-028 block above
+    # first; the argument is identical and is not restated here.
+    #
+    # One difference worth recording, because it is why this feature has a 403 on
+    # one verb and not the other. `deleteComment` is refused purely by who is
+    # asking — there is no window on a comment deletion at all — which is what 403
+    # means. `editComment` is refused by the state of the row: the five minutes
+    # have run out, and the caller was entitled to it four minutes ago. That is a
+    # 422, it is what the contract has said since D-001, and it needs no exemption
+    # here.
+    "/tickets/{ticketId}/comments/{commentId}": "row-scoped, but scope has already answered — the caller is looking at the comment in a thread they just fetched, with its author and its text; §4B.5's rule is about who may remove it, not whether it exists. The DELETE is the 403; the PATCH answers 422 because what refuses it is the row's age rather than the caller",
 }
 
 

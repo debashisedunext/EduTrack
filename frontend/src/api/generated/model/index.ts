@@ -160,6 +160,7 @@ export * from './closeRequest';
 export * from './closeRequestActualCloseDate';
 export * from './closeRequestFinalEffortHours';
 export * from './comment';
+export * from './commentDeletedAt';
 export * from './commentEditableUntil';
 export * from './commentListResponse';
 export * from './commentOriginalBody';

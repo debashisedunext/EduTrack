@@ -46,33 +46,5 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { CommentOriginalBody } from './commentOriginalBody';
-import type { UserRef } from './userRef';
-import type { RoleCode } from './roleCode';
-import type { CommentEditableUntil } from './commentEditableUntil';
-import type { CommentDeletedAt } from './commentDeletedAt';
-import type { CommentStageCode } from './commentStageCode';
-import type { Attachment } from './attachment';
 
-export interface Comment {
-  id?: number;
-  body?: string;
-  /** Preserved when edited. */
-  originalBody?: CommentOriginalBody;
-  author?: UserRef;
-  authorRole?: RoleCode;
-  isClientVisible?: boolean;
-  isEdited?: boolean;
-  /** Tombstone; the row survives. */
-  isDeleted?: boolean;
-  editableUntil?: CommentEditableUntil;
-  deletedBy?: UserRef;
-  deletedAt?: CommentDeletedAt;
-  /** Stage at time of writing. */
-  stageCode?: CommentStageCode;
-  cycleNo?: number;
-  iterationNo?: number;
-  mentions?: UserRef[];
-  attachments?: Attachment[];
-  createdAt?: string;
-}
+export type CommentDeletedAt = string | null;
