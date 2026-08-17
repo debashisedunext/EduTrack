@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -158,11 +158,23 @@ describe('MentionSuggestions', () => {
   })
 })
 
-/** The `@handle` an option renders, read from its text rather than its markup. */
+/**
+ * The `@handle` an option renders, read from the element that renders it.
+ *
+ * Not a regexp over the option's `textContent`, which is what this was and
+ * which reported a handle belonging to nobody. An option is three spans —
+ * display name, handle, role code — and `textContent` joins them with nothing
+ * in between, so `Anil Sharma` + `@anil` + `QA` reads as `Anil Sharma@anilQA`
+ * and `/@([A-Za-z0-9._-]+)/` swallows the role chip. It only bites for a
+ * candidate whose role is rendered, which is why the failure looked like the
+ * component picking the wrong person rather than the assertion misreading the
+ * right one.
+ *
+ * `getByText` matches on an element's own direct text children, so this finds
+ * the handle span and never the `<li>` around it.
+ */
 function handleOf(option: HTMLElement): string {
-  const match = /@([A-Za-z0-9._-]+)/.exec(option.textContent ?? '')
-  if (!match) throw new Error(`option renders no handle: ${option.textContent}`)
-  return match[1]
+  return within(option).getByText(/^@/).textContent!.slice(1)
 }
 
 /** Enough of a React keyboard event for the handler under test. */
