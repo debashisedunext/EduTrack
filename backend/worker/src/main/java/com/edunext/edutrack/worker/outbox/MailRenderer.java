@@ -155,8 +155,18 @@ class MailRenderer {
         Context model = new Context();
         model.setVariable("body", body);
         for (MergeTag tag : MergeTag.values()) {
+            // Raw, not escaped. The layout reads these through th:text, which
+            // escapes on output — escaping here as well would double it and
+            // print &amp;amp; to the recipient. The one exception is `body`
+            // above, which is already substituted and escaped and is therefore
+            // the only th:utext in the file.
             model.setVariable(tag.tag(), values.get(tag));
         }
+        // D-030's chip. Resolved in Java so an Admin-added level (S-12) falls
+        // back to something legible rather than to no chip at all.
+        LevelChip chip = LevelChip.of(values.get(MergeTag.LEVEL));
+        model.setVariable("levelBackground", chip.background());
+        model.setVariable("levelText", chip.text());
         try {
             return thymeleaf.process(LAYOUT, model);
         } catch (RuntimeException e) {
