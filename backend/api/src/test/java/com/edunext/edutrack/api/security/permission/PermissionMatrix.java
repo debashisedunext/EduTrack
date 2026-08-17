@@ -659,6 +659,34 @@ final class PermissionMatrix {
             // delivery role, scoped to themselves.
             everyRole("GET", "/api/v1/dashboard/widget/{widgetKey}"),
 
+            // ── reports · A-063, and the dashboard's argument a third time ───
+            //
+            // §2's own matrix grants a reports section to all six roles, in
+            // three different strengths: Admin and PM outright, Support
+            // "Limited", and Developer/QA/Deployment "Own perf.". None of those
+            // three is a capability denial, so none of them is expressed here.
+            //
+            // What separates them is rows, and ReportScope decides it: Admin
+            // unrestricted, PM and Support bounded by their projects, the three
+            // delivery roles bounded to themselves. Denying the capability to a
+            // Developer would remove the section §2 explicitly grants them,
+            // rather than narrowing it to their own performance.
+            //
+            // The catalogue is deliberately identical for everybody, including
+            // the seventeen reports nobody can run yet. Hiding cards per role
+            // would make "not built" and "not permitted" and "does not exist"
+            // one indistinguishable state; the response carries a scopeNote
+            // saying whose rows are coming instead.
+            everyRole("GET", "/api/v1/reports"),
+
+            // The runner. Same reasoning, plus the one thing that is genuinely
+            // withheld: ?resourceId= is ignored for the three delivery roles
+            // rather than honoured, so "Own perf." cannot be widened into a
+            // colleague's scorecard by guessing a user id. That is enforced in
+            // ReportScope and asserted by ReportScopeTest and ReportsIT — not
+            // here, because it is a row rule and this file is about capability.
+            everyRole("GET", "/api/v1/reports/{reportKey}"),
+
             // ── attachment limits · C-027, §4B.4 ────────────────────────────
             // Read open to all six, write to master.write.
             //

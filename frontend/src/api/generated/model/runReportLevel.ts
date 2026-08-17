@@ -46,10 +46,14 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
-}
+export type RunReportLevel = typeof RunReportLevel[keyof typeof RunReportLevel];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const RunReportLevel = {
+  LOW: 'LOW',
+  MEDIUM: 'MEDIUM',
+  HIGH: 'HIGH',
+  CRITICAL: 'CRITICAL',
+} as const;

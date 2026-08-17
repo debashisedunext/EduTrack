@@ -67,13 +67,132 @@ import type {
 
 import type {
   NotFoundResponse,
+  ReportCatalogueResponse,
   ReportResponse,
   ReportScheduleRequest,
   RunReportParams,
+  UnauthorizedResponse,
   ValidationFailedResponse
 } from '.././model';
 
 import { http } from '../../http';
+
+
+
+
+/**
+ * A-063 · what reports exist, so the hub's card grid does not have to
+know. Every descriptor carries its own title, category, chart type and
+**which filters apply to it** — the viewer renders the filter bar from
+this rather than showing all five everywhere, because a resource filter
+on the email-delivery-log is a control that cannot do anything.
+
+**The catalogue is served rather than hardcoded** for the reason
+`/me/notification-preferences` gives for returning the whole event
+catalogue: a client that had to know all eighteen keys would be a second
+copy of the server's vocabulary, and a nineteenth report would silently
+fail to appear.
+
+**Unbuilt reports are listed, not hidden**, with `available: false` and a
+reason. This is A-056's answer to the same shape one screen over: a
+dashboard widget with no table to answer it returns `unavailableReason`
+rather than an empty series, because an empty result is a claim about
+the data and a 404 on a legitimate route reads as a bug. A hub that
+showed only what works would make the other seventeen reports
+indistinguishable from reports that do not exist. The unavailable set
+shrinks as A-066–A-068 land, and it is visible in the meantime.
+
+Scoped like every other read: the catalogue itself is the same for
+everybody, but a delivery role sees `scopeNote` explaining that its rows
+will cover its own work only (§2 — "Own perf.").
+
+ * @summary The report catalogue (S-27)
+ */
+export const listReports = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ReportCatalogueResponse>(
+      {url: `/reports`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListReportsQueryKey = () => {
+    return [
+    `/reports`
+    ] as const;
+    }
+
+    
+export const getListReportsQueryOptions = <TData = Awaited<ReturnType<typeof listReports>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReports>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListReportsQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listReports>>> = ({ signal }) => listReports(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listReports>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListReportsQueryResult = NonNullable<Awaited<ReturnType<typeof listReports>>>
+export type ListReportsQueryError = UnauthorizedResponse
+
+
+export function useListReports<TData = Awaited<ReturnType<typeof listReports>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReports>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listReports>>,
+          TError,
+          Awaited<ReturnType<typeof listReports>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListReports<TData = Awaited<ReturnType<typeof listReports>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReports>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listReports>>,
+          TError,
+          Awaited<ReturnType<typeof listReports>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListReports<TData = Awaited<ReturnType<typeof listReports>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReports>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The report catalogue (S-27)
+ */
+
+export function useListReports<TData = Awaited<ReturnType<typeof listReports>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReports>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListReportsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
 
 
 
@@ -84,6 +203,19 @@ file instead of returning JSON.
 
 Returns an `ETag`. Reports are expensive to compute and are re-run every
 time somebody changes a filter and changes it back.
+
+**Row scope is applied server-side and the request cannot widen it**
+(§2, blueprint line 50): Admin sees everything, PM and Support their own
+projects, and Developer/QA/Deployment their own work only. For those
+three, `?resourceId=` is **ignored rather than honoured** — answering it
+would let a Developer read a colleague's scorecard by guessing a user
+id, and `403` would wrongly imply a grant exists that could be given.
+
+**`404` for a report key that does not exist, and for one that is not
+built yet.** The catalogue is where "exists but unbuilt" is expressed,
+with a reason a person can read; by the time a caller is running a key,
+an unbuilt report has no rows to describe and no columns to name, so
+there is nothing honest to return with a `200`.
 
  * @summary Run a report (S-27)
  */

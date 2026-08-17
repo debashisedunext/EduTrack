@@ -46,10 +46,26 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
+import type { ReportCategory } from './reportCategory';
+import type { ReportDescriptorChart } from './reportDescriptorChart';
+import type { ReportFilterKind } from './reportFilterKind';
+import type { ReportDescriptorUnavailableReason } from './reportDescriptorUnavailableReason';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
+export interface ReportDescriptor {
+  key: string;
+  title: string;
+  /** One line, shown on the card. What question the report answers. */
+  description?: string;
+  category: ReportCategory;
+  /** The visual §7.8 names for this report, or null for a report that is a table only. The viewer shows a chart *and* a table when this is set — never a chart alone, because a chart cannot be read for exact values and this is a reporting screen.
+ */
+  chart?: ReportDescriptorChart;
+  /** Only the filters this report honours. The viewer renders exactly these, so a control the runner would ignore is never drawn.
+ */
+  filters: ReportFilterKind[];
+  /** False for a report declared but not yet built (A-066–A-068). */
+  available: boolean;
+  /** Why it cannot be run yet, in a sentence a user can read. Present exactly when `available` is false. Same contract as the dashboard's widget `unavailableReason` (A-056).
+ */
+  unavailableReason?: ReportDescriptorUnavailableReason;
 }

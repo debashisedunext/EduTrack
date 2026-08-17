@@ -46,10 +46,12 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
+import type { ReportDescriptor } from './reportDescriptor';
+import type { ReportCatalogueResponseDataScopeNote } from './reportCatalogueResponseDataScopeNote';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
-}
+export type ReportCatalogueResponseData = {
+  reports: ReportDescriptor[];
+  /** Set when the caller's rows will be narrower than the whole organisation — "these reports cover your own work only" for a delivery role, or "your projects" for a PM. Null for Admin. Stated once here rather than repeated on every card.
+ */
+  scopeNote?: ReportCatalogueResponseDataScopeNote;
+};

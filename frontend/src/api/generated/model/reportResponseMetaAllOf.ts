@@ -46,10 +46,10 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
+import type { ReportResponseMetaAllOfAppliedScope } from './reportResponseMetaAllOfAppliedScope';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
-}
+export type ReportResponseMetaAllOf = {
+  /** A-063 · what the server actually narrowed the rows to, e.g. "your own work" or "projects 1, 4". Present because a delivery role's `?resourceId=` is ignored silently: without this, a filter that did nothing would be indistinguishable from a filter that matched nothing.
+ */
+  appliedScope?: ReportResponseMetaAllOfAppliedScope;
+};

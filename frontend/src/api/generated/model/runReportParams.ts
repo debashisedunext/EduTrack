@@ -47,6 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { RunReportExport } from './runReportExport';
+import type { RunReportLevel } from './runReportLevel';
 
 export type RunReportParams = {
 export?: RunReportExport;
@@ -54,4 +55,11 @@ projectId?: number;
 clientId?: number;
 from?: string;
 to?: string;
+/**
+ * Ignored for Developer/QA/Deployment, who are always their own subject. Silently, not with a 400 — the client is usually posting back a filter bar it rendered, and the response states the scope that was applied in `meta.appliedScope`.
+
+ */
+resourceId?: number;
+taskTypeId?: number;
+level?: RunReportLevel;
 };

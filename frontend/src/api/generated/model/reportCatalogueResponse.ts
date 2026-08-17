@@ -46,10 +46,10 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
+import type { ReportCatalogueResponseData } from './reportCatalogueResponseData';
+import type { Meta } from './meta';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
+export interface ReportCatalogueResponse {
+  data: ReportCatalogueResponseData;
+  meta?: Meta;
 }

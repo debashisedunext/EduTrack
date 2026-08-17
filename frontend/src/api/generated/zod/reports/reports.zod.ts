@@ -50,11 +50,73 @@ import * as zod from 'zod';
 
 
 /**
+ * A-063 · what reports exist, so the hub's card grid does not have to
+know. Every descriptor carries its own title, category, chart type and
+**which filters apply to it** — the viewer renders the filter bar from
+this rather than showing all five everywhere, because a resource filter
+on the email-delivery-log is a control that cannot do anything.
+
+**The catalogue is served rather than hardcoded** for the reason
+`/me/notification-preferences` gives for returning the whole event
+catalogue: a client that had to know all eighteen keys would be a second
+copy of the server's vocabulary, and a nineteenth report would silently
+fail to appear.
+
+**Unbuilt reports are listed, not hidden**, with `available: false` and a
+reason. This is A-056's answer to the same shape one screen over: a
+dashboard widget with no table to answer it returns `unavailableReason`
+rather than an empty series, because an empty result is a claim about
+the data and a 404 on a legitimate route reads as a bug. A hub that
+showed only what works would make the other seventeen reports
+indistinguishable from reports that do not exist. The unavailable set
+shrinks as A-066–A-068 land, and it is visible in the meantime.
+
+Scoped like every other read: the catalogue itself is the same for
+everybody, but a delivery role sees `scopeNote` explaining that its rows
+will cover its own work only (§2 — "Own perf.").
+
+ * @summary The report catalogue (S-27)
+ */
+export const listReportsResponse = zod.object({
+  "data": zod.object({
+  "reports": zod.array(zod.object({
+  "key": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().optional().describe('One line, shown on the card. What question the report answers.'),
+  "category": zod.enum(['PEOPLE', 'DELIVERY', 'QUALITY', 'WORKFLOW', 'OPERATIONS']).describe('A-063 · the hub groups its cards by this. §7.8 lists eighteen reports in one table; eighteen ungrouped cards is a wall, and the grouping people actually use when asking for a report is by subject.\n'),
+  "chart": zod.union([zod.literal('line'),zod.literal('bar'),zod.literal('stacked-bar'),zod.literal('donut'),zod.literal(null)]).nullish().describe('The visual §7.8 names for this report, or null for a report that is a table only. The viewer shows a chart \*and\* a table when this is set — never a chart alone, because a chart cannot be read for exact values and this is a reporting screen.\n'),
+  "filters": zod.array(zod.enum(['DATE_RANGE', 'PROJECT', 'RESOURCE', 'TASK_TYPE', 'LEVEL', 'CLIENT']).describe('Which controls the viewer draws for a report. §7.8\'s five filters, plus CLIENT, which D-001 already accepted as a query parameter.\n')).describe('Only the filters this report honours. The viewer renders exactly these, so a control the runner would ignore is never drawn.\n'),
+  "available": zod.boolean().describe('False for a report declared but not yet built (A-066–A-068).'),
+  "unavailableReason": zod.string().nullish().describe('Why it cannot be run yet, in a sentence a user can read. Present exactly when `available` is false. Same contract as the dashboard\'s widget `unavailableReason` (A-056).\n')
+})),
+  "scopeNote": zod.string().nullish().describe('Set when the caller\'s rows will be narrower than the whole organisation — \"these reports cover your own work only\" for a delivery role, or \"your projects\" for a PM. Null for Admin. Stated once here rather than repeated on every card.\n')
+}),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+}).optional()
+})
+
+/**
  * Eighteen reports share one parameterised runner. `?export=` streams the
 file instead of returning JSON.
 
 Returns an `ETag`. Reports are expensive to compute and are re-run every
 time somebody changes a filter and changes it back.
+
+**Row scope is applied server-side and the request cannot widen it**
+(§2, blueprint line 50): Admin sees everything, PM and Support their own
+projects, and Developer/QA/Deployment their own work only. For those
+three, `?resourceId=` is **ignored rather than honoured** — answering it
+would let a Developer read a colleague's scorecard by guessing a user
+id, and `403` would wrongly imply a grant exists that could be given.
+
+**`404` for a report key that does not exist, and for one that is not
+built yet.** The catalogue is where "exists but unbuilt" is expressed,
+with a reason a person can read; by the time a caller is running a key,
+an unbuilt report has no rows to describe and no columns to name, so
+there is nothing honest to return with a `200`.
 
  * @summary Run a report (S-27)
  */
@@ -67,7 +129,10 @@ export const runReportQueryParams = zod.object({
   "projectId": zod.number().optional(),
   "clientId": zod.number().optional(),
   "from": zod.string().date().optional(),
-  "to": zod.string().date().optional()
+  "to": zod.string().date().optional(),
+  "resourceId": zod.number().optional().describe('Ignored for Developer\/QA\/Deployment, who are always their own subject. Silently, not with a 400 — the client is usually posting back a filter bar it rendered, and the response states the scope that was applied in `meta.appliedScope`.\n'),
+  "taskTypeId": zod.number().optional(),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional()
 })
 
 export const runReportHeader = zod.object({
@@ -78,9 +143,9 @@ export const runReportResponse = zod.object({
   "data": zod.object({
   "reportKey": zod.string().optional(),
   "columns": zod.array(zod.object({
-  "key": zod.string().optional(),
-  "label": zod.string().optional(),
-  "type": zod.enum(['string', 'number', 'date', 'duration', 'percent']).optional()
+  "key": zod.string(),
+  "label": zod.string(),
+  "type": zod.enum(['string', 'number', 'date', 'duration', 'percent'])
 })).optional(),
   "rows": zod.array(zod.record(zod.string(), zod.unknown())).optional()
 }),
@@ -88,7 +153,9 @@ export const runReportResponse = zod.object({
   "nextCursor": zod.string().nullish(),
   "hasMore": zod.boolean().optional(),
   "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
-}).optional()
+}).and(zod.object({
+  "appliedScope": zod.string().nullish().describe('A-063 · what the server actually narrowed the rows to, e.g. \"your own work\" or \"projects 1, 4\". Present because a delivery role\'s `?resourceId=` is ignored silently: without this, a filter that did nothing would be indistinguishable from a filter that matched nothing.\n')
+})).optional()
 })
 
 /**

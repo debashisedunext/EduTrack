@@ -46,10 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseData } from './reportResponseData';
-import type { ReportResponseMeta } from './reportResponseMeta';
 
-export interface ReportResponse {
-  data: ReportResponseData;
-  meta?: ReportResponseMeta;
-}
+/**
+ * The visual §7.8 names for this report, or null for a report that is a table only. The viewer shows a chart *and* a table when this is set — never a chart alone, because a chart cannot be read for exact values and this is a reporting screen.
+
+ */
+export type ReportDescriptorChart = 'line' | 'bar' | 'stacked-bar' | 'donut' | null;
