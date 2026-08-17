@@ -305,7 +305,14 @@ export const previewPlannedCloseDateResponse = zod.object({
 one summary row destroys the per-ticket audit trail, which is the point of
 having one.
 
- * @summary Reassign many tickets from one resource to another (S-24)
+**PM and Admin only** — see `/tickets/bulk-level` for the matrix that
+applies to all three bulk actions.
+
+Two callers, one endpoint: S-24's wizard drives it from a source
+resource, and S-17's grid drives it from a tick-box selection. The
+difference is entirely in how `ticketIds` is assembled.
+
+ * @summary Reassign many tickets from one resource to another (S-17, S-24)
  */
 export const bulkReassignTicketsHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
@@ -334,6 +341,135 @@ export const bulkReassignTicketsResponse = zod.object({
   "failed": zod.number().optional(),
   "results": zod.array(zod.object({
   "ticketId": zod.string().regex(bulkReassignTicketsResponseDataResultsItemTicketIdRegExp).optional().describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "ok": zod.boolean().optional(),
+  "reason": zod.string().nullish()
+})).optional()
+})
+})
+
+/**
+ * The bulk half of `PATCH /tickets/{ticketId}/priority`, for S-17's grid
+selection. One request rather than one per selected row: fifty ticked
+tickets is fifty round trips, fifty planned-close-date recomputations
+interleaved with each other, and fifty chances for a partial result
+nobody can reconstruct afterwards.
+
+**The per-ticket rules are unchanged and applied per ticket.**
+`originalLevel` is never overwritten, every accepted change writes its
+own `LEVEL_CHANGED` history entry, and the planned close date is
+recomputed against the working calendar for each ticket individually. A
+bulk call is fifty applications of one rule, not one application to
+fifty rows.
+
+`reason` is **mandatory here**, where the single-ticket endpoint only
+requires it once the ticket is assigned. A selection spanning both
+assigned and unassigned tickets would otherwise need the caller to know
+which is which before deciding whether to type one, and the reason is
+the only record of why fifty levels moved at once.
+
+### Permission matrix — all six roles
+
+| Role | Allowed |
+|---|---|
+| Admin | yes, unrestricted |
+| PM | yes, within their projects |
+| Support | no — `403` |
+| Developer | no — `403` |
+| QA | no — `403` |
+| Deployment | no — `403` |
+
+**Refused server-side, not merely hidden.** The grid draws no selection
+column for the four roles that cannot act, but a request built by hand
+is refused all the same. Row scoping applies first, so a ticket outside
+the caller's scope comes back as a per-ticket `Not found` in the result
+rather than a `403` — no existence leak, same rule as everywhere else.
+
+ * @summary Change the priority level of many tickets (S-17)
+ */
+export const bulkChangeTicketLevelHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const bulkChangeTicketLevelBodyTicketIdsItemRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+export const bulkChangeTicketLevelBodyTicketIdsMax = 500;
+
+export const bulkChangeTicketLevelBodyReasonMin = 3;
+export const bulkChangeTicketLevelBodyReasonMax = 500;
+
+
+
+export const bulkChangeTicketLevelBody = zod.object({
+  "ticketIds": zod.array(zod.string().regex(bulkChangeTicketLevelBodyTicketIdsItemRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n')).min(1).max(bulkChangeTicketLevelBodyTicketIdsMax),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "reason": zod.string().min(bulkChangeTicketLevelBodyReasonMin).max(bulkChangeTicketLevelBodyReasonMax)
+})
+
+export const bulkChangeTicketLevelResponseDataResultsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
+
+export const bulkChangeTicketLevelResponse = zod.object({
+  "data": zod.object({
+  "succeeded": zod.number().optional(),
+  "failed": zod.number().optional(),
+  "results": zod.array(zod.object({
+  "ticketId": zod.string().regex(bulkChangeTicketLevelResponseDataResultsItemTicketIdRegExp).optional().describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "ok": zod.boolean().optional(),
+  "reason": zod.string().nullish()
+})).optional()
+})
+})
+
+/**
+ * The bulk half of `POST /tickets/{ticketId}/close`, for S-17's grid
+selection. Same permission matrix as `PATCH /tickets/bulk-level`.
+
+**Each ticket closes as its own transaction** — `actualCloseDate` is
+stamped, the open stage transition is sealed, and a `CLOSED` history
+entry is written, per ticket. One ticket refusing does not roll back the
+others, which is why the result is per-ticket rather than a single
+status code.
+
+**A ticket already closed is reported as refused, not silently
+re-closed.** Re-stamping `actualCloseDate` would move a date that
+reports already depend on, and sealing an already-sealed transition is
+exactly the mutation the append-only rule forbids. The caller sees
+`Already closed` beside that row.
+
+`resolutionSummary` is shared across the selection by design: a bulk
+close is one decision about a batch, and offering fifty free-text boxes
+would produce fifty copies of the same sentence or fifty blanks.
+
+ * @summary Close many tickets in the current cycle (S-17)
+ */
+export const bulkCloseTicketsHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const bulkCloseTicketsBodyTicketIdsItemRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+export const bulkCloseTicketsBodyTicketIdsMax = 500;
+
+export const bulkCloseTicketsBodyResolutionSummaryMin = 3;
+export const bulkCloseTicketsBodyResolutionSummaryMax = 4000;
+
+export const bulkCloseTicketsBodyRootCauseCategoryMax = 100;
+
+
+
+export const bulkCloseTicketsBody = zod.object({
+  "ticketIds": zod.array(zod.string().regex(bulkCloseTicketsBodyTicketIdsItemRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n')).min(1).max(bulkCloseTicketsBodyTicketIdsMax),
+  "resolutionSummary": zod.string().min(bulkCloseTicketsBodyResolutionSummaryMin).max(bulkCloseTicketsBodyResolutionSummaryMax),
+  "rootCauseCategory": zod.string().max(bulkCloseTicketsBodyRootCauseCategoryMax).optional()
+})
+
+export const bulkCloseTicketsResponseDataResultsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
+
+export const bulkCloseTicketsResponse = zod.object({
+  "data": zod.object({
+  "succeeded": zod.number().optional(),
+  "failed": zod.number().optional(),
+  "results": zod.array(zod.object({
+  "ticketId": zod.string().regex(bulkCloseTicketsResponseDataResultsItemTicketIdRegExp).optional().describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "ok": zod.boolean().optional(),
   "reason": zod.string().nullish()
 })).optional()
