@@ -39,6 +39,7 @@ NO_IF_MATCH = {
     "/me/notification-preferences":        "your own settings only, and partial by field so two tabs cannot overwrite each other's untouched switches",
     "/projects/{projectId}/members/{userId}": "two fields on one membership row, both last-write-wins by nature; the tag would have to come from a collection read with no ETag of its own, so the precondition would be machinery around a race whose loser typed a number later and meant it",
     "/clients/{clientId}/contacts/{contactId}": "B-027 — the tag would have to come from listClientContacts, a collection with no ETag of its own, exactly as for a project member. The client this contact hangs off does have one, and a contact write moves it (contactCount and hasPrimaryContact are inside it), so the S-33 form's own precondition still catches a stale editor one level up",
+    "/tickets/bulk-level":                 "C-017 — inherits the single-ticket route's exemption directly above: reason is mandatory and every change writes its own LEVEL_CHANGED entry, so a concurrent change is visible rather than lost. And as with /clients/bulk-status, one If-Match cannot speak for 500 rows, while per-row tags would fail the whole batch because somebody touched one unrelated ticket",
 }
 
 # §6 — bounded by a constraint the product already enforces.
@@ -125,6 +126,22 @@ ROWLESS_403 = {
     # 422, it is what the contract has said since D-001, and it needs no exemption
     # here.
     "/tickets/{ticketId}/comments/{commentId}": "row-scoped, but scope has already answered — the caller is looking at the comment in a thread they just fetched, with its author and its text; §4B.5's rule is about who may remove it, not whether it exists. The DELETE is the 403; the PATCH answers 422 because what refuses it is the row's age rather than the caller",
+    # C-017, and back to the ordinary argument rather than the two row-scoped
+    # concessions above: **no ticket id has been looked at when this fires.**
+    #
+    # §7.5 puts the three bulk actions behind PM and Admin as a *capability*.
+    # The refusal is decided from the caller's role alone, before the body is
+    # read, so there is nothing about which tickets exist for a 404 to conceal —
+    # a Developer gets the identical 403 whether the body names fifty real
+    # tickets or fifty invented ones.
+    #
+    # Row scoping is untouched and still answers 404 in its own way: a PM whose
+    # selection reaches past their projects gets those ids back as per-ticket
+    # `Not found or out of scope` in the 200 result, deliberately
+    # indistinguishable from ids that were never there. The capability is the
+    # 403; the rows are still the 404.
+    "/tickets/bulk-level":                 "PM/Admin capability, decided from the role before any ticket id is read — a Developer sees the same 403 whether the body names real tickets or invented ones. Out-of-scope ids are still concealed, as per-ticket 'Not found or out of scope' inside the 200",
+    "/tickets/bulk-close":                 "same",
 }
 
 

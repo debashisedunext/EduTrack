@@ -11,6 +11,8 @@ import { useListTaskTypes, useListPriorities, useListWorkflowTemplates } from '@
 import { useGetMe } from '@/api/generated/auth/auth'
 import type { Level } from '@/api/generated/model/level'
 import type { StatusCode } from '@/api/generated/model/statusCode'
+import type { BulkResultResponseData } from '@/api/generated/model/bulkResultResponseData'
+import { ApiError, newIdempotencyKey } from '@/api/http'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,6 +37,21 @@ import { SavedViewsMenu } from './SavedViewsMenu'
 import { useTicketListFilters, type TicketListFilters } from './useTicketListFilters'
 import { useListPreferences } from './useListPreferences'
 import { COLUMNS, STATUS_LABEL, rowCueClassName, type ColumnRenderContext } from './columns'
+import {
+  TicketBulkActionBar,
+  BulkReassignDialog,
+  BulkLevelDialog,
+  BulkCloseDialog,
+  BulkResultDialog,
+  type BulkAction,
+} from './bulk/TicketBulkActionBar'
+import {
+  alreadyClosedCount,
+  canBulkAct,
+  closableIds,
+  selectionAfter,
+} from './bulk/bulkActions'
+import { useBulkChangeLevel, useBulkClose, useBulkReassign } from './bulk/useBulkTicketActions'
 
 const PAGE_SIZE = 25
 const SEARCH_DEBOUNCE_MS = 300
@@ -49,17 +66,17 @@ const STATUS_OPTIONS = (Object.keys(STATUS_LABEL) as StatusCode[]).map((value) =
 const DENSITY_ROW_CLASS = { comfortable: 'py-3', compact: 'py-1.5' } as const
 
 /**
- * S-17 Ticket List (All Tickets) — C-014, saved views C-015.
+ * S-17 Ticket List (All Tickets) — C-014, saved views C-015, bulk select C-017.
  *
  * The compact ribbon column the wireframe draws is deliberately not here: see
- * the folder README. Bulk select (C-017) is a separate backlog item and
- * stays out of this screen too.
+ * the folder README.
  */
 export function TicketListPage() {
   const { filters, setFilter, applyFilters, resetFilters, activeCount } = useTicketListFilters()
   const { density, setDensity, visibleColumns, toggleColumn } = useListPreferences()
   const { data: meData } = useGetMe()
   const myUserId = meData?.data.id ?? null
+  const showBulk = canBulkAct(meData?.data.role)
 
   // Cursor pagination has no page numbers to jump to — CONVENTIONS.md is
   // explicit that offset paging over a table under write traffic skips and
@@ -240,6 +257,87 @@ export function TicketListPage() {
   const pageStart = tickets.length === 0 ? 0 : cursorStack.length * PAGE_SIZE + 1
   const pageEnd = pageStart === 0 ? 0 : pageStart + tickets.length - 1
 
+  // ── C-017 · bulk selection ────────────────────────────────────────────────
+  //
+  // Keyed by `ticketId`, the string the API and every route already use, so a
+  // selection is the same thing the request body carries with no mapping step
+  // in between.
+  const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set())
+  const [openAction, setOpenAction] = React.useState<BulkAction | null>(null)
+  const [result, setResult] = React.useState<{ data: BulkResultResponseData; verb: string } | null>(
+    null,
+  )
+  const [actionError, setActionError] = React.useState<string | null>(null)
+
+  const reassign = useBulkReassign()
+  const changeLevel = useBulkChangeLevel()
+  const close = useBulkClose()
+  const isActing = reassign.isPending || changeLevel.isPending || close.isPending
+
+  const pageTicketIds = tickets.map((t) => t.ticketId)
+  const allOnPageSelected =
+    pageTicketIds.length > 0 && pageTicketIds.every((id) => selected.has(id))
+  const someOnPageSelected = pageTicketIds.some((id) => selected.has(id))
+  const closable = closableIds(selected, tickets)
+  const closedInSelection = alreadyClosedCount(selected, tickets)
+
+  // The selection column is drawn only for the roles that can act, so it must
+  // be counted in `colSpan` the same way — an empty-state row that spans one
+  // column too few leaves a stray cell at the end of the table for a PM and
+  // not for a Developer.
+  const gridColumnCount = orderedVisibleColumns.length + (showBulk ? 1 : 0)
+
+  function toggleRow(ticketId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(ticketId)) next.delete(ticketId)
+      else next.add(ticketId)
+      return next
+    })
+  }
+
+  function togglePage() {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      // The header box is "this page", not "everything" — selecting it adds to
+      // a selection that survives paging rather than replacing it. Same rule as
+      // S-07's grid, and the reason `closableIds` treats ids it cannot see as
+      // closable rather than dropping them.
+      if (allOnPageSelected) pageTicketIds.forEach((id) => next.delete(id))
+      else pageTicketIds.forEach((id) => next.add(id))
+      return next
+    })
+  }
+
+  /**
+   * The one place a bulk result is applied, whichever action produced it.
+   *
+   * Succeeded ids leave the selection; refused ids stay ticked, because the
+   * user has something left to do about those and clearing them would hide the
+   * failure the moment the dialog closed.
+   */
+  function applyResult(data: BulkResultResponseData, verb: string) {
+    setSelected((prev) => selectionAfter(prev, data))
+    setOpenAction(null)
+    setActionError(null)
+    setResult({ data, verb })
+  }
+
+  function reportFailure(err: unknown) {
+    setActionError(
+      err instanceof ApiError
+        ? err.problem.detail ?? err.problem.title ?? 'The request was refused.'
+        : err instanceof Error
+          ? err.message
+          : 'Something went wrong. Try again.',
+    )
+  }
+
+  function closeDialog() {
+    setOpenAction(null)
+    setActionError(null)
+  }
+
   return (
     <div className="flex h-full flex-col gap-4 p-6">
       {/* ── header ─────────────────────────────────────────────────────── */}
@@ -358,11 +456,43 @@ export function TicketListPage() {
         )}
       </div>
 
+      {/* ── C-017 · bulk actions, PM and Admin only ────────────────────── */}
+      {showBulk && (
+        <TicketBulkActionBar
+          selectedCount={selected.size}
+          closedInSelection={closedInSelection}
+          isPending={isActing}
+          onOpen={(action) => {
+            setActionError(null)
+            setOpenAction(action)
+          }}
+          onClear={() => setSelected(new Set())}
+        />
+      )}
+
       {/* ── grid ───────────────────────────────────────────────────────── */}
       <TableContainer className="max-h-[calc(100vh-15rem)] flex-1">
         <Table>
           <TableHeader>
             <TableRow>
+              {showBulk && (
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all tickets on this page"
+                    checked={allOnPageSelected}
+                    ref={(node) => {
+                      // Mixed selection is indeterminate, not unchecked: an
+                      // unchecked box beside three ticked rows says the wrong
+                      // thing about what clicking it will do.
+                      if (node) node.indeterminate = someOnPageSelected && !allOnPageSelected
+                    }}
+                    onChange={togglePage}
+                    disabled={pageTicketIds.length === 0}
+                    className="h-4 w-4 cursor-pointer accent-primary"
+                  />
+                </TableHead>
+              )}
               {orderedVisibleColumns.map((column) => (
                 <TableHead
                   key={column.key}
@@ -377,8 +507,8 @@ export function TicketListPage() {
             {isPending ? (
               Array.from({ length: 8 }, (_, i) => (
                 <TableRow key={i}>
-                  {orderedVisibleColumns.map((column) => (
-                    <TableCell key={column.key} className={rowPadding}>
+                  {Array.from({ length: gridColumnCount }, (_, c) => (
+                    <TableCell key={c} className={rowPadding}>
                       <Skeleton className="h-4 w-full max-w-[10rem]" />
                     </TableCell>
                   ))}
@@ -386,7 +516,7 @@ export function TicketListPage() {
               ))
             ) : isError ? (
               <TableRow>
-                <TableCell colSpan={orderedVisibleColumns.length} className="p-0">
+                <TableCell colSpan={gridColumnCount} className="p-0">
                   <EmptyState
                     title="Could not load tickets"
                     description={error instanceof Error ? error.message : 'Something went wrong. Try again.'}
@@ -400,7 +530,7 @@ export function TicketListPage() {
               </TableRow>
             ) : tickets.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={orderedVisibleColumns.length} className="p-0">
+                <TableCell colSpan={gridColumnCount} className="p-0">
                   <EmptyState
                     title="No tickets match these filters"
                     description={
@@ -429,6 +559,19 @@ export function TicketListPage() {
                   aria-busy={isFetching || undefined}
                   className={rowCueClassName(ticket)}
                 >
+                  {showBulk && (
+                    <TableCell className={rowPadding}>
+                      <input
+                        type="checkbox"
+                        // The ID, not the title: two tickets can share a title
+                        // and the accessible name has to identify the row.
+                        aria-label={`Select ${ticket.ticketId}`}
+                        checked={selected.has(ticket.ticketId)}
+                        onChange={() => toggleRow(ticket.ticketId)}
+                        className="h-4 w-4 cursor-pointer accent-primary"
+                      />
+                    </TableCell>
+                  )}
                   {orderedVisibleColumns.map((column) => (
                     <TableCell
                       key={column.key}
@@ -474,6 +617,81 @@ export function TicketListPage() {
           </Button>
         </div>
       </div>
+
+      {/* ── C-017 · the three dialogs and the refusal list ─────────────── */}
+      {openAction === 'reassign' && (
+        <BulkReassignDialog
+          selectedCount={selected.size}
+          members={members}
+          isPending={reassign.isPending}
+          error={actionError}
+          onCancel={closeDialog}
+          onConfirm={({ toUserId, reason }) => {
+            reassign.mutate(
+              {
+                data: { ticketIds: [...selected], toUserId, reason },
+                idempotencyKey: newIdempotencyKey(),
+              },
+              {
+                onSuccess: (response) => applyResult(response.data, 'reassigned'),
+                onError: reportFailure,
+              },
+            )
+          }}
+        />
+      )}
+
+      {openAction === 'level' && (
+        <BulkLevelDialog
+          selectedCount={selected.size}
+          levels={levelOptions.map((l) => l.value)}
+          isPending={changeLevel.isPending}
+          error={actionError}
+          onCancel={closeDialog}
+          onConfirm={({ level, reason }) => {
+            changeLevel.mutate(
+              {
+                data: { ticketIds: [...selected], level, reason },
+                idempotencyKey: newIdempotencyKey(),
+              },
+              {
+                onSuccess: (response) => applyResult(response.data, 'updated'),
+                onError: reportFailure,
+              },
+            )
+          }}
+        />
+      )}
+
+      {openAction === 'close' && (
+        <BulkCloseDialog
+          closableCount={closable.length}
+          alreadyClosed={closedInSelection}
+          isPending={close.isPending}
+          error={actionError}
+          onCancel={closeDialog}
+          onConfirm={({ resolutionSummary, rootCauseCategory }) => {
+            close.mutate(
+              {
+                // `closable`, not the whole selection: the rows already closed
+                // were named in the dialog and are deliberately not sent.
+                data: { ticketIds: closable, resolutionSummary, rootCauseCategory },
+                idempotencyKey: newIdempotencyKey(),
+              },
+              {
+                onSuccess: (response) => applyResult(response.data, 'closed'),
+                onError: reportFailure,
+              },
+            )
+          }}
+        />
+      )}
+
+      <BulkResultDialog
+        result={result?.data ?? null}
+        verb={result?.verb ?? ''}
+        onClose={() => setResult(null)}
+      />
     </div>
   )
 }
