@@ -610,9 +610,14 @@ export const ticketHandlers = [
     if (c.authorId !== db.currentUserId) {
       return unprocessable('Only the author may edit a comment');
     }
-    if (Date.now() - Date.parse(c.createdAt) > 5 * 60_000) {
-      return unprocessable('The five-minute edit window has closed');
-    }
+    // D-14 · no time limit. §4B.5's five minutes were lifted, so there is no
+    // window check here and the mock has none to mirror. The author half of the
+    // rule above is what §4B.5 was actually protecting and it stays.
+    //
+    // The server keeps the enforcement behind `edutrack.comments.edit-window`
+    // for whoever wants the blueprint back; this file has no equivalent, so a
+    // deployment that restores the window is one the mock stops standing in for.
+    // Said here rather than silently: it is the one place the two now differ.
     const body = (await request.json()) as { body: string };
     // §3.9 runs on every write path, an edit included — a mock that sanitised
     // on POST and not on PATCH would let the editor be used to store exactly
@@ -629,6 +634,7 @@ export const ticketHandlers = [
     c.originalBody = c.originalBody ?? c.body;
     c.body = clean;
     c.isEdited = true;
+    c.editedAt = new Date().toISOString();
     return ok(commentDto(c));
   }),
 
@@ -995,9 +1001,13 @@ export function commentDto(c: import('../db').Comment) {
     author: userRef(c.authorId, db),
     authorRole: db.users.find((u) => u.id === c.authorId)?.role,
     isClientVisible: c.isClientVisible, isEdited: c.isEdited, isDeleted: c.isDeleted,
-    editableUntil: c.isDeleted
-      ? null
-      : new Date(Date.parse(c.createdAt) + 5 * 60_000).toISOString(),
+    // D-14 · always null, because there is no deadline. NOT "cannot edit" —
+    // `CommentDto.of` sends the same null for the same reason, and
+    // `canEditComment` reads it that way. A mock that kept inventing a
+    // five-minute deadline would put a countdown on screen and then hide the
+    // Edit button, describing a rule neither side enforces any more.
+    editableUntil: null,
+    editedAt: c.editedAt ?? null,
     deletedBy: c.isDeleted && c.deletedById != null ? userRef(c.deletedById, db) : null,
     deletedAt: c.isDeleted ? (c.deletedAt ?? null) : null,
     stageCode: c.stageCode, cycleNo: c.cycleNo, iterationNo: c.iterationNo,

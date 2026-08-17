@@ -373,6 +373,14 @@ export interface Comment {
    */
   deletedById?: number | null;
   deletedAt?: string | null;
+  /**
+   * D-14 · when it was last rewritten, null if never.
+   *
+   * On the wire since the five-minute window was lifted: "edited" no longer
+   * implies "moments after posting", so without this a reader cannot tell a
+   * typo fixed a minute later from a claim rewritten three months on.
+   */
+  editedAt?: string | null;
 }
 export interface Attachment {
   id: number; ticketId: string; fileName: string; contentType: string;

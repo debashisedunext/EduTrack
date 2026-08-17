@@ -467,21 +467,30 @@ class CommentService {
     }
 
     /**
-     * Whether the comment is still inside §4B.5's five minutes, measured from
-     * {@code created_at}.
+     * Whether the comment may still be rewritten by its author.
      *
-     * <p><b>A row with no {@code createdAt} is outside it.</b> The column is
-     * {@code NOT NULL} with a database default, so this is unreachable for
-     * anything the server inserted — but the safe direction for an unplaceable
-     * row is plainly locked, and the alternative is a fixture-written or
-     * hand-edited comment that is editable for ever.
+     * <p><b>True whenever no window is configured, which is the default</b> —
+     * see {@link CommentProperties}. The edit stays available for as long as the
+     * comment exists, which is the behaviour asked for after the five minutes
+     * proved too short for the case it is actually used in: remembering the
+     * missing half of a root-cause note half an hour later.
      *
-     * <p>The boundary is inclusive: at exactly {@code createdAt + window} the
-     * edit is still allowed. A user who clicks Save as the countdown reaches zero
-     * should not lose their edit to a microsecond, and nothing depends on which
-     * way this rounds.
+     * <p>When a window <em>is</em> configured, it is measured from
+     * {@code created_at} and the boundary is inclusive — at exactly
+     * {@code createdAt + window} the edit is still allowed. A user clicking Save
+     * as the countdown reaches zero should not lose it to a microsecond, and
+     * nothing depends on which way this rounds.
+     *
+     * <p><b>A row with no {@code createdAt} is outside a configured window.</b>
+     * The column is {@code NOT NULL} with a database default, so this is
+     * unreachable for anything the server inserted — but if an operator has
+     * asked for a limit, the safe direction for a row that cannot be placed in
+     * time is the locked one.
      */
     private boolean withinEditWindow(TicketComment row) {
+        if (!properties.hasEditWindow()) {
+            return true;
+        }
         Instant postedAt = row.getCreatedAt();
         return postedAt != null
                 && !Instant.now(clock).isAfter(postedAt.plus(properties.editWindow()));

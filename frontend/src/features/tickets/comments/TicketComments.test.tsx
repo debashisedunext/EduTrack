@@ -344,6 +344,52 @@ describe('C-033 · the edit window and the tombstone', () => {
     )
 
   /**
+   * D-14 · the change itself, through the whole stack.
+   *
+   * Priya's seeded comment is dated **3 August** and today is the 17th — two
+   * weeks past §4B.5's five minutes. Before D-14 this card offered no Edit at
+   * all; the point of the change is that its author still can. Signed in as
+   * Priya rather than the file's default Admin, because editing is the author's
+   * alone and no role widens it.
+   *
+   * A seeded fixture is deliberate rather than posting a fresh comment and
+   * waiting: the age is the assertion, and a test that posts one is testing a
+   * comment that is seconds old, which passed before this change too.
+   */
+  it('D-14 · the author may still edit a comment posted two weeks ago', async () => {
+    getDb().currentUserId = 6 // Priya, who wrote it
+    renderPage()
+    await waitForTicket()
+    openComments()
+
+    const card = await priyasCard()
+    fireEvent.click(within(card).getByRole('button', { name: /^Edit/ }))
+    write('<p>Reproduced on prod — and it needs two Acme accounts, not one.</p>', 'Edit comment')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await editorClosed()
+
+    const edited = await postedCard('it needs two Acme accounts, not one')
+    expect(within(edited).getByText(/edited/)).toBeInTheDocument()
+  })
+
+  /**
+   * The countdown was the visible half of the window. With none configured it
+   * must not appear — a card promising "5 min left" beside a button that never
+   * expires is worse than no hint at all.
+   */
+  it('D-14 · offers Edit with no countdown beside it', async () => {
+    getDb().currentUserId = 6
+    renderPage()
+    await waitForTicket()
+    openComments()
+
+    const card = await priyasCard()
+    const edit = within(card).getByRole('button', { name: /^Edit/ })
+    expect(edit).toBeInTheDocument()
+    expect(edit.textContent).not.toMatch(/min left/)
+  })
+
+  /**
    * §4B.5: "no role, including Admin, can silently rewrite a comment". The Admin
    * is the strongest case available and the button must not be there.
    */

@@ -38,16 +38,28 @@ class CommentNotEditableException extends RuntimeException {
     }
 
     /**
-     * §4B.5's five minutes have run out.
+     * A configured edit window has run out.
      *
-     * <p>The message says the comment is locked rather than telling the caller
-     * to ask an Admin, because <b>no role can unlock it</b>. That is the whole
-     * point of the rule and it is the one refusal in this codebase with no
-     * escalation path — offering one, even implicitly, would be a lie.
+     * <p><b>Unreachable on the default configuration since D-14</b>, which
+     * removed the limit — an author may now edit for as long as the comment
+     * exists. It is kept, and still tested, because the window is a live
+     * property: {@code edutrack.comments.edit-window: PT5M} restores §4B.5
+     * without a code change, and deleting this would mean the restored rule
+     * refused with no message.
+     *
+     * <p>The wording deliberately does not name five minutes. It did while the
+     * five minutes were the rule, and a hard-coded figure in a refusal is
+     * exactly what goes stale when the property behind it moves — a deployment
+     * configured to an hour would tell people about minutes.
+     *
+     * <p>It says the comment is locked rather than telling the caller to ask an
+     * Admin, because <b>no role can unlock it</b>: editing is the author's alone
+     * and no role widens it. Offering an escalation path, even implicitly, would
+     * be a lie.
      */
     static CommentNotEditableException windowClosed() {
         return new CommentNotEditableException(
-                "The five minutes for editing this comment have passed and it is now locked. "
+                "The time limit for editing this comment has passed and it is now locked. "
                         + "Post a follow-up comment instead — that way the thread shows the correction "
                         + "as well as what it corrects.");
     }

@@ -162,6 +162,7 @@ export * from './closeRequestFinalEffortHours';
 export * from './comment';
 export * from './commentDeletedAt';
 export * from './commentEditableUntil';
+export * from './commentEditedAt';
 export * from './commentListResponse';
 export * from './commentOriginalBody';
 export * from './commentResponse';

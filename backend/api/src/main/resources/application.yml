@@ -314,29 +314,41 @@ edutrack:
 
   # C-033 · the comment box. Blueprint §4B.5.
   comments:
-    # How long after posting the AUTHOR may still change the wording. §4B.5:
-    # "editable for 5 minutes; after that the comment is locked and shows an
-    # 'edited' marker with the original preserved".
+    # How long after posting the AUTHOR may still change their own wording.
     #
-    # Bounds the edit and nothing else. Deletion has no window — §4B.5 attaches
-    # the five minutes to editing and says of deletion only that it leaves a
-    # tombstone, so every removal is recorded, including an author's own seconds
-    # after posting.
+    # DELIBERATELY UNSET, which means NO LIMIT — a comment stays editable by its
+    # author for as long as it exists. This is deviation D-14 (PLAN.md §4), taken
+    # on Divyansh's direction after driving the feature by hand.
     #
-    # NOT a settings row, and the omission is deliberate for the reason C-028
-    # gave about its own fifteen minutes: §4B.4's "all configurable in system
-    # settings" is a sentence about the attachment *limits*. This is a retention
-    # rule, and an operator able to raise it to a year could quietly reopen every
-    # comment on the product — the opposite of the sentence beside it in §4B.5.
-    # Overridable at deploy so a test need not wait five minutes; not at runtime
-    # by an administrator.
+    # §4B.5 says "editable for 5 minutes; after that the comment is locked", and
+    # the five minutes lost to one ordinary case: a developer posts a root-cause
+    # note, remembers the missing half thirty minutes later, and can only add a
+    # second card reading "correction to the above". The thread then carries two
+    # fragments to reconcile instead of one accurate note, which is worse for the
+    # reader than the edit would have been.
     #
-    # The client does not hold its own copy of this number. `Comment.editableUntil`
-    # is derived from it server-side and the countdown renders that, so shortening
-    # it here cannot leave an author watching a timer the server has already
-    # stopped honouring — the C-027 failure, where a client-side copy of a server
-    # cap silently overrode it with nothing in any log.
-    edit-window: ${COMMENT_EDIT_WINDOW:PT5M}
+    # What §4B.5 was protecting is untouched, because the clock was never what
+    # protected it. Its actual guarantee is the sentence beside it — "no role,
+    # including Admin, can silently rewrite a comment" — and all of that still
+    # holds: only the author may edit, every edit is stamped (`edited_at`) and
+    # marked on screen, the first wording is preserved in `original_body`, and
+    # deletion still leaves a tombstone naming who removed it. The window only
+    # ever decided WHEN the author lost the ability, never whether the change
+    # was recorded.
+    #
+    # SET IT TO RESTORE THE BLUEPRINT. `edit-window: PT5M` puts §4B.5 back with
+    # no code change, no migration and no release: the enforcement is still here,
+    # still tested, and the client's countdown follows it because
+    # `Comment.editableUntil` is derived from this value server-side rather than
+    # copied into the browser — the C-027 failure, where a client-side copy of a
+    # server cap silently overrode it with nothing in any log.
+    #
+    # Bounds the edit and nothing else. Deletion has never had a window.
+    #
+    # NOT a settings row, for the reason C-028 gave about its own fifteen
+    # minutes: §4B.4's "all configurable in system settings" is a sentence about
+    # the attachment *limits*. Overridable at deploy; not at runtime.
+    edit-window: ${COMMENT_EDIT_WINDOW:}
 
   webhooks:
     email:

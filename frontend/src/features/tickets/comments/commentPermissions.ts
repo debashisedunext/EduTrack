@@ -36,18 +36,25 @@ export interface CommentViewer {
 }
 
 /**
- * §4B.5's edit rule: the author, inside the window, on a comment that still
- * exists.
+ * The edit rule: **the author, for as long as the comment exists.**
  *
- * **No role widens this** — not PM, not Admin. The blueprint's sentence is "no
+ * §4B.5 bounded this at five minutes and that limit was lifted — deviation
+ * **D-14**, `docs/PLAN.md` §4 — after the window lost to one ordinary case: a
+ * developer posts a root-cause note, remembers the missing half thirty minutes
+ * later, and can only add a second card reading "correction to the above",
+ * leaving the thread with two fragments to reconcile instead of one accurate
+ * note.
+ *
+ * **No role widens it** — not PM, not Admin. The blueprint's sentence is "no
  * role, including Admin, can silently rewrite a comment", and an Admin edit
  * cannot be anything else: however the card were labelled, the thread would
- * still attribute the new wording to the original author. `CommentService.edit`
- * enforces the same and `CommentNotEditableException.notTheAuthor` carries the
- * full argument.
+ * still attribute the new wording to the original author. That half of §4B.5 is
+ * untouched by D-14, along with the stamp, the marker, the preserved original
+ * and the tombstone. `CommentService.edit` enforces the same and
+ * `CommentNotEditableException.notTheAuthor` carries the full argument.
  *
  * @param now injected rather than read from the clock, so a test can stand
- *            either side of the deadline without waiting five minutes — the same
+ *            either side of a configured deadline without waiting — the same
  *            reason `CommentService` takes a `Clock`
  */
 export function canEditComment(
@@ -58,13 +65,22 @@ export function canEditComment(
   if (comment.isDeleted) return false
   if (viewer.id == null || comment.author?.id !== viewer.id) return false
 
-  // The server sends null here on a tombstone, and would on a row with no
-  // `createdAt`. Absent means "no window", never "no deadline, so forever" —
-  // the safe reading of a missing bound is the closed one.
-  if (!comment.editableUntil) return false
+  // ⚠ A null `editableUntil` means THERE IS NO DEADLINE, not "cannot edit".
+  //
+  // This line read `return false` until D-14, and was right while the server
+  // always sent a deadline: a missing bound then meant a tombstone or a row
+  // that could not be placed in time, and refusing was the safe direction. With
+  // no window configured the server sends null for *every* comment, so the same
+  // line would hide the Edit button across the entire product — while every
+  // request it declined to make would have succeeded. The tombstone case it was
+  // really covering is handled above, by `isDeleted`.
+  if (!comment.editableUntil) return true
 
   const deadline = Date.parse(comment.editableUntil)
-  if (Number.isNaN(deadline)) return false
+  // An unparseable deadline is treated as no deadline rather than an expired
+  // one. The server decides either way, and refusing here would let a malformed
+  // field silently remove a capability the caller actually has.
+  if (Number.isNaN(deadline)) return true
 
   // Inclusive, matching `CommentService.withinEditWindow`. A user clicking Save
   // as the countdown reaches zero should not lose the edit to a millisecond, and
@@ -95,11 +111,17 @@ export function canDeleteComment(comment: Comment, viewer: CommentViewer): boole
 /**
  * Whole minutes left in the window, or `null` when there is no live one.
  *
+ * **Returns null for every comment on the default configuration**, because
+ * D-14 leaves no window to count down — the card simply offers Edit with no
+ * timer beside it, which is the honest rendering of "for as long as it exists".
+ * The function survives because the window does: restoring
+ * `edutrack.comments.edit-window` brings the countdown back with it.
+ *
  * Minutes and not seconds, deliberately. A second-by-second countdown on a
- * comment somebody is reading is a pressure device, and the precision is
- * false anyway — the request has to reach the server, which applies its own
- * clock. Rounded **up**, so "1 minute left" covers the last 60 seconds rather
- * than reading "0 minutes left" for a window still open.
+ * comment somebody is reading is a pressure device, and the precision is false
+ * anyway — the request has to reach the server, which applies its own clock.
+ * Rounded **up**, so "1 minute left" covers the last 60 seconds rather than
+ * reading "0 minutes left" for a window still open.
  */
 export function editMinutesLeft(comment: Comment, now: Date = new Date()): number | null {
   if (!comment.editableUntil) return null

@@ -677,6 +677,7 @@ export const getTicketDetailResponse = zod.object({
   "isClientVisible": zod.boolean().optional(),
   "isEdited": zod.boolean().optional(),
   "isDeleted": zod.boolean().optional().describe('Tombstone; the row survives.'),
+  "editedAt": zod.string().datetime({}).nullish(),
   "editableUntil": zod.string().datetime({}).nullish(),
   "deletedBy": zod.object({
   "id": zod.number(),
