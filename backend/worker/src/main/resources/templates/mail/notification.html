@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<!--
+  D-029 · the shell every §4B.6 mail is rendered into.
+
+  Deliberately 2004-era HTML. Mail clients are not browsers: Outlook renders
+  with Word's engine, Gmail strips <style> blocks and <head> entirely, and
+  neither supports flexbox or grid. So this is a table, with inline styles, and
+  it should stay that way however wrong it looks next to the app's own markup.
+
+  The Admin owns the wording (B-022's master); this file owns the chrome. That
+  split is why th:utext appears below on `body` — the body has already been
+  substituted and HTML-escaped by MailRenderer, so escaping it a second time
+  here would print &lt;p&gt; to the recipient. Nothing else in this file uses
+  utext, and nothing else should.
+
+  D-030 fills in the level chip, the metadata rows and the reply hint.
+-->
+<html xmlns:th="http://www.thymeleaf.org">
+<body style="margin:0;padding:0;background:#f4f5f7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+         style="background:#f4f5f7;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+               style="width:600px;max-width:100%;background:#ffffff;border:1px solid #dfe3ed;
+                      border-radius:8px;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+                      color:#0b1220;">
+
+          <tr>
+            <td style="padding:20px 24px 8px;border-bottom:1px solid #eceff6;">
+              <span style="font-size:13px;font-weight:600;color:#475069;">EduTrack</span>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:20px 24px;font-size:14px;line-height:1.6;">
+              <div th:utext="${body}">The rendered template body goes here.</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:0 24px 22px;">
+              <!-- Rendered only for ticket mail. A digest has no single ticket
+                   to open, and a button linking to /tickets/ is worse than no
+                   button at all. -->
+              <a th:if="${ticket_url != null and !ticket_url.isEmpty()}"
+                 th:href="${ticket_url}"
+                 style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;
+                        font-size:14px;font-weight:600;padding:10px 18px;border-radius:6px;">
+                Open ticket
+              </a>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:14px 24px;border-top:1px solid #eceff6;font-size:12px;color:#7c859c;">
+              You are receiving this because you are involved in this ticket.
+              Notification settings live in EduTrack under your profile.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -14,11 +14,10 @@ import org.springframework.stereotype.Component;
 /**
  * SMTP transport, active with {@code edutrack.outbox.transport=smtp}.
  *
- * <p>The body is still the subject line. D-029/D-030 replace that with the
- * Thymeleaf render from the notification template master — the level chip,
- * stage, PCD and the primary "Open ticket" button. What is finished here is
- * the envelope: D-031's subject arrives already composed by
- * {@code OutboxEnqueuer}, and D-032's threading headers are set below.
+ * <p>The body comes from {@link MailRenderer} (D-029) — B-022's notification
+ * template with its merge tags substituted, wrapped in the mail layout. D-031's
+ * subject arrives already composed by {@code OutboxEnqueuer}, and D-032's
+ * threading headers are set below.
  */
 @Component
 @ConditionalOnProperty(name = "edutrack.outbox.transport", havingValue = "smtp")
@@ -26,6 +25,7 @@ public class SmtpMailTransport implements MailTransport {
 
     private final JavaMailSender mailSender;
     private final MailThread thread;
+    private final MailRenderer renderer;
 
     /**
      * SMTP refuses a message with no sender, so this cannot be left to the
@@ -37,23 +37,34 @@ public class SmtpMailTransport implements MailTransport {
 
     public SmtpMailTransport(JavaMailSender mailSender,
                              MailThread thread,
+                             MailRenderer renderer,
                              @Value("${edutrack.mail.from:no-reply@edutrack.local}") String from) {
         this.mailSender = mailSender;
         this.thread = thread;
+        this.renderer = renderer;
         this.from = from;
     }
 
     @Override
     public SendOutcome send(OutboxMessage message) {
-        String subject = message.subject() == null ? "" : message.subject();
+        MailContent content = renderer.render(message);
+        String subject = content.subject() == null ? "" : content.subject();
 
         try {
             MimeMessage mail = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mail, false, "UTF-8");
+            // Multipart now: the second argument was false because there was
+            // only ever one plain-text part to write. An HTML body needs a
+            // multipart/alternative so a text-only client still gets something
+            // readable rather than the markup.
+            MimeMessageHelper helper = new MimeMessageHelper(mail, true, "UTF-8");
             helper.setFrom(from);
             helper.setTo(message.toEmail());
             helper.setSubject(subject);
-            helper.setText(subject);
+            // Plain-text alternative first, HTML second — that is the order
+            // MimeMessageHelper expects, and the order RFC 2046 wants on the
+            // wire: least-preferred part first. The subject is a truthful
+            // fallback, being the one-line summary of what happened.
+            helper.setText(subject, content.html());
 
             // D-032. Set before send on purpose: JavaMail's saveChanges()
             // replaces Message-ID with one of its own, and

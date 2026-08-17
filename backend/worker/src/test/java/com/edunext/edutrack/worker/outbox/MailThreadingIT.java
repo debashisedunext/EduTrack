@@ -1,5 +1,16 @@
 package com.edunext.edutrack.worker.outbox;
 
+import com.edunext.edutrack.domain.notifications.NotificationTemplateRepository;
+import org.thymeleaf.spring6.SpringTemplateEngine;
+import org.thymeleaf.templatemode.TemplateMode;
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
+
+import java.util.Optional;
+
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,9 +69,35 @@ class MailThreadingIT {
         sender.setPort(MAILPIT.getMappedPort(SMTP));
 
         transport = new SmtpMailTransport(
-                sender, new MailThread("edutrack.test"), "no-reply@edutrack.test");
+                sender, new MailThread("edutrack.test"), renderer(), "no-reply@edutrack.test");
 
         deleteAllMail();
+    }
+
+    /**
+     * A renderer on its fallback path: no template, no ticket context.
+     *
+     * <p>This IT is about the headers that reach the server, not about D-029's
+     * substitution — {@code MailRendererTest} covers that. Wiring the real
+     * repositories here would make a threading test depend on a seeded
+     * {@code notification_templates} row, and it would fail for a reason with
+     * nothing to do with threading. The fallback still exercises the multipart
+     * envelope, which is the part of D-029 that could break a send.
+     */
+    private static MailRenderer renderer() {
+        NotificationTemplateRepository templates = mock(NotificationTemplateRepository.class);
+        when(templates.findByEventCodeAndChannel(anyString(), anyString())).thenReturn(Optional.empty());
+        MailContextRepository context = mock(MailContextRepository.class);
+        when(context.forTicket(anyLong())).thenReturn(MailContext.empty());
+
+        ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
+        resolver.setPrefix("templates/");
+        resolver.setSuffix(".html");
+        resolver.setTemplateMode(TemplateMode.HTML);
+        SpringTemplateEngine engine = new SpringTemplateEngine();
+        engine.setTemplateResolver(resolver);
+
+        return new MailRenderer(templates, context, engine);
     }
 
     @Test

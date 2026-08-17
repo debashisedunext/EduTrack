@@ -1,11 +1,13 @@
 package com.edunext.edutrack.worker.sla;
 
+import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
 import com.edunext.edutrack.domain.notifications.NewNotification;
 import com.edunext.edutrack.domain.notifications.NotificationEvent;
 import com.edunext.edutrack.domain.notifications.NotificationWriter;
 import com.edunext.edutrack.domain.outbox.NewMail;
 import com.edunext.edutrack.domain.outbox.OutboxEnqueuer;
+import com.edunext.edutrack.domain.tickets.TicketHistory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -36,22 +38,31 @@ class SlaEscalation {
 
     private static final Logger log = LoggerFactory.getLogger(SlaEscalation.class);
 
+    /** D-028 · what an escalation calls itself in {@code ticket_history}. */
+    private static final String LEVEL_CHANGED = "LEVEL_CHANGED";
+
+    /** The level an SLA breach raises a ticket to. Mirrors {@code SlaRepository.ESCALATE}. */
+    private static final String CRITICAL = "CRITICAL";
+
     private final SlaRepository tickets;
     private final WorkingHoursService workingHours;
     private final EscalationPolicies policies;
     private final NotificationWriter notifications;
     private final OutboxEnqueuer outbox;
+    private final TicketJournal journal;
 
     SlaEscalation(SlaRepository tickets,
                   WorkingHoursService workingHours,
                   EscalationPolicies policies,
                   NotificationWriter notifications,
-                  OutboxEnqueuer outbox) {
+                  OutboxEnqueuer outbox,
+                  TicketJournal journal) {
         this.tickets = tickets;
         this.workingHours = workingHours;
         this.policies = policies;
         this.notifications = notifications;
         this.outbox = outbox;
+        this.journal = journal;
     }
 
     /** @return true if this call escalated it and sent the alerts */
@@ -62,6 +73,8 @@ class SlaEscalation {
             // there first. Either way it is not ours to announce.
             return false;
         }
+
+        recordLevelChange(ticket);
 
         // D-027. How far past the date is a duration, so it goes through the
         // working calendar: "overdue by 62 hours" counts a weekend nobody was
@@ -112,6 +125,50 @@ class SlaEscalation {
                     ticket.id(), NotificationEvent.SLA_BREACHED.name(), recipient, address, body));
         }
         return true;
+    }
+
+    /**
+     * D-028 · record the escalation in {@code ticket_history} as {@code SYSTEM}.
+     *
+     * <p><strong>Written for one report: "born critical" versus "became
+     * critical".</strong> The ticket's {@code level} column only ever holds the
+     * current answer, so once a breach raises it to {@code CRITICAL} the fact
+     * that it was raised as {@code LOW} survives in exactly two places —
+     * {@code original_level}, which says what it started as, and this row, which
+     * says when and why it moved. A-070 reads the pair. Without the row the
+     * ticket looks as though it was always critical and nobody can say when that
+     * became true.
+     *
+     * <p><strong>{@code original_level} is not touched here, and that is the
+     * point.</strong> The schema calls it "never mutated"; {@code ESCALATE}
+     * updates {@code level} alone. Writing both would erase the very
+     * distinction this row exists to preserve, and it would do so silently,
+     * because the ticket would still be perfectly self-consistent afterwards.
+     *
+     * <p>The actor is deliberately nobody. The journal enforces that
+     * {@code actor_id NULL} and {@code actor_type SYSTEM} agree, so this cannot
+     * be recorded as a person's decision even by mistake — which matters,
+     * because a human name against an automated escalation is the one shape of
+     * history that reads plausibly and is false.
+     *
+     * <p>Not defended against failure: this runs inside {@code escalate}'s
+     * transaction, and if the journal rejects the entry the flag, the bell
+     * entries and the queued mail must all go back with it. An escalation that
+     * announced itself but left no record is precisely what the append-only
+     * tables exist to prevent.
+     */
+    private void recordLevelChange(SlaRepository.BreachedTicket ticket) {
+        TicketHistory entry = new TicketHistory();
+        entry.setTicketId(ticket.id());
+        entry.setCycleNo(ticket.currentCycleNo());
+        entry.setEventType(LEVEL_CHANGED);
+        entry.setFieldName("level");
+        entry.setOldValue(ticket.level());
+        entry.setNewValue(CRITICAL);
+        entry.setActorType("SYSTEM");
+        entry.setActorId(null);
+        entry.setRemarks("Planned Close Date passed — escalated automatically by the SLA scanner");
+        journal.append(entry);
     }
 
     /**
