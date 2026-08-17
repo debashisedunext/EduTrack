@@ -1,8 +1,9 @@
 import * as PopoverPrimitive from '@radix-ui/react-popover'
-import { KeyRound, LogOut, User } from 'lucide-react'
+import { KeyRound, LogOut, Moon, Sun, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useGetMe } from '@/api/generated/auth/auth'
 import { useSignOut } from '@/features/auth/useSignOut'
+import { useThemeStore } from './theme/themeStore'
 
 function initials(name: string) {
   return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('')
@@ -14,6 +15,8 @@ export function AvatarMenu() {
   const user = me?.data
   const navigate = useNavigate()
   const signOut = useSignOut()
+  const theme = useThemeStore((s) => s.theme)
+  const toggleTheme = useThemeStore((s) => s.toggle)
 
   /*
     A-030. The placeholder this replaces cleared the access token and reloaded
@@ -63,6 +66,21 @@ export function AvatarMenu() {
             label="Change password"
             onClick={() => navigate('/change-password')}
           />
+          {/*
+            D-15 · the theme switch.
+
+            Labelled with the action rather than the state — "Dark mode" beside
+            a moon is ambiguous about whether it reports what is on or offers
+            what it will do, and a menu item is read as a verb. So the label
+            says where the press lands, and `aria-pressed` carries the current
+            state for a screen reader, which the wording alone cannot.
+          */}
+          <MenuItem
+            icon={theme === 'dark' ? Sun : Moon}
+            label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            onClick={toggleTheme}
+            pressed={theme === 'dark'}
+          />
           <MenuItem icon={LogOut} label="Logout" onClick={logout} />
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
@@ -70,11 +88,25 @@ export function AvatarMenu() {
   )
 }
 
-function MenuItem({ icon: Icon, label, onClick }: { icon: typeof User; label: string; onClick?: () => void }) {
+function MenuItem({
+  icon: Icon,
+  label,
+  onClick,
+  pressed,
+}: {
+  icon: typeof User
+  label: string
+  onClick?: () => void
+  /** Omitted for plain actions; set only where the item has an on/off state. */
+  pressed?: boolean
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
+      // Undefined rather than false when absent: `aria-pressed="false"` on
+      // Profile or Logout would announce them as toggle buttons that are off.
+      aria-pressed={pressed}
       className="flex w-full items-center gap-2 rounded-control px-3 py-2 text-left text-sm text-content transition-colors hover:bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       <Icon className="h-4 w-4 text-content-muted" />

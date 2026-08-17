@@ -11,6 +11,21 @@ import tailwindcssAnimate from 'tailwindcss-animate'
  */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  /*
+    D-15 · the dark theme is a class on <html>, not a media query.
+
+    'class' rather than 'media' because the choice is manual (no
+    prefers-color-scheme): a media query would be a second, competing input to
+    one piece of state. `app/theme/themeStore` is the only writer of the class.
+
+    Note that almost nothing in this codebase needs a `dark:` utility. Colour
+    reaches components as `var(--token)`, so redefining the tokens under `.dark`
+    in styles/tokens.css re-themes the app without touching a component. This
+    switch exists for the residue — the handful of places that need a different
+    *value* rather than a different colour, e.g. an overlay opacity — and so
+    that `dark:` works when one of them appears.
+  */
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {

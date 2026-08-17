@@ -4,6 +4,31 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EduTrack</title>
+    <!--
+      D-15 · apply the stored theme before the first paint.
+
+      React runs after the browser has already painted, so a user whose choice
+      is dark would otherwise see a white page for a frame or two on every
+      load. Intermittent by nature and invisible on a fast machine, which is
+      what makes it worth four lines here rather than a bug report later.
+
+      Inline and synchronous on purpose: an external script would be one more
+      round trip before paint, and `defer`/`async` would put it back after it.
+
+      This duplicates two constants from src/app/theme/themeStore.ts — the
+      storage key and the class name. `themeStore.test.ts` reads this file and
+      asserts both still match, so renaming either there fails a test instead
+      of quietly restoring the flash.
+    -->
+    <script>
+      try {
+        if (localStorage.getItem('edutrack-theme') === 'dark') {
+          document.documentElement.classList.add('dark')
+        }
+      } catch (e) {
+        /* storage denied — light theme, which is the default anyway */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

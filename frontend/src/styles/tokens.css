@@ -1,5 +1,33 @@
-/* EduTrack design tokens — blueprint §12.1. Light theme only.
+/* EduTrack design tokens — blueprint §12.1.
    Owner: Stream C (Divyansh) · C-002. Frozen after Sprint 0.
+
+   ⚠️ A DARK THEME NOW EXISTS, AND §12 SAYS "LIGHT THEME ONLY".
+
+   Blueprint §12's heading is literally "UI / UX Design System — Light Theme
+   Only", and CLAUDE.md repeats it. The dark block below is therefore a
+   deliberate deviation, recorded as PLAN.md §4 D-15 rather than made quietly,
+   and it rewrites a file this header calls frozen and assigns to Stream C.
+   **It needs Divyansh's sign-off before it merges.**
+
+   Two things keep the deviation honest:
+
+   1. Light is untouched. Every value in `:root` is the one C-002 measured, to
+      the character. Nothing about the existing theme changes, so no screen
+      that works today can regress — the dark values only apply under a class
+      that is absent unless somebody opts in.
+   2. The dark values are not invented freely. Each is the Tailwind shade one
+      or two steps lighter than its light counterpart, which is where the
+      light palette itself came from: `--success` #10B981 is emerald-500, so
+      its dark form is emerald-400 and its `-text` form emerald-300. That
+      keeps hue relationships — and therefore the chart series order and the
+      level ramp — identical between themes rather than a second palette
+      somebody has to learn.
+
+   D-13's rule survives inverted: the `-text` tokens are still the ones safe
+   for small coloured text (4.5:1), and the bare tokens are still for icons,
+   borders, chart series and large text (3:1). On a dark ground "safe for text"
+   means *lighter*, not darker, which is why the dark `-text` values sit above
+   their base rather than below it. Ratios are stated per group below.
    The blueprint's literal semantic/level hex values pass WCAG AA (3:1) for icons,
    borders, chart series and large text, but NOT the 4.5:1 normal-text threshold —
    use the *-text tokens below for chip/badge labels and any small coloured text.
@@ -72,6 +100,117 @@
   --ribbon-reworked-text: #B45309;
   --ribbon-breached:      #EF4444;
   --ribbon-breached-text: #B91C1C;
+
+  /* Native UI — scrollbars, form controls, the caret. Declared explicitly in
+     both themes rather than left to the browser: without it a dark app renders
+     light scrollbars and a light date picker, which is the give-away that a
+     dark theme was done in CSS only. */
+  color-scheme: light;
+}
+
+/* ── dark theme ────────────────────────────────────────────────────────────
+   Applied by a `dark` class on <html>, per `darkMode: 'class'` in
+   tailwind.config.ts. Set by `app/theme/themeStore` and, before React runs,
+   by the inline script in index.html — see that script for why both.
+
+   NOT `@media (prefers-color-scheme: dark)`. The theme is a manual choice
+   here, so honouring the OS setting as well would give two inputs to one
+   piece of state: the class would say light while the media query said dark,
+   and which won would depend on rule order rather than on anything the user
+   did. One writer, one source of truth.
+
+   Every token in `:root` is redefined below — `tokenParity.test.ts` fails the
+   build if one is missed, because a missing token does not error, it silently
+   inherits the light value and leaves one white card in a dark page.
+   ────────────────────────────────────────────────────────────────────────── */
+.dark {
+  /* Neutrals. Surface is *lighter* than the page, the opposite of the light
+     theme where cards are white on a tinted page — elevation on a dark ground
+     reads as light rather than as shadow, which no box-shadow can fake. Not
+     pure black: #000 with light text produces halation, and it leaves nothing
+     darker to sit behind a modal. */
+  --bg-app:          #0F1117;
+  --bg-surface:      #171A23;
+  --bg-subtle:       #1F2430;
+  --border:          #2E3440;
+
+  /* indigo-400 / indigo-950. The light theme's #4F46E5 (indigo-600) is 8.6:1
+     on white and only 1.9:1 on #171A23 — a primary button nobody could read.
+     `--primary-soft` inverts from a pale tint to a deep one, keeping its job:
+     the background of a selected row or chip. */
+  --primary:         #818CF8;   /* 5.8:1 on --bg-surface */
+  --primary-soft:    #1E1B4B;
+
+  --text-primary:    #E5E7EB;   /* 13.4:1 on --bg-surface */
+  --text-secondary:  #9CA3AF;   /*  6.6:1 on --bg-surface — AA at 14px */
+
+  /* Semantic, one step lighter (500 → 400): icons, borders, large text. */
+  --success:         #34D399;
+  --warning:         #FBBF24;
+  --danger:          #F87171;
+  --info:            #60A5FA;
+
+  /* D-13's text variants, lightened rather than darkened — on a dark ground
+     that is the direction that adds contrast. All clear 4.5:1 on both
+     --bg-surface and the matching -soft background below. */
+  --success-text:    #6EE7B7;
+  --warning-text:    #FCD34D;
+  --danger-text:     #FCA5A5;
+  --info-text:       #93C5FD;
+
+  /* Level ramp — same four hues in the same order, 500 → 400. The order is
+     load-bearing: §12.1 pairs it with icons and text labels, and swapping two
+     hues between themes would make "amber means High" true only in daylight. */
+  --level-low:       #34D399;
+  --level-medium:    #60A5FA;
+  --level-high:      #FBBF24;
+  --level-critical:  #F87171;
+
+  /* Chip backgrounds: the -50 tints become -950. A pale tint on a dark card is
+     a bright block, which is louder than the chip it sits in. */
+  --level-low-soft:      #022C22;
+  --level-medium-soft:   #172554;
+  --level-high-soft:     #451A03;
+  --level-critical-soft: #450A0A;
+
+  --level-low-text:      #6EE7B7;
+  --level-medium-text:   #93C5FD;
+  --level-high-text:     #FCD34D;
+  --level-critical-text: #FCA5A5;
+
+  /* Chart palette — the same eight hues in the same order, 500 → 400, so a
+     series keeps its colour identity across themes. The order is
+     colour-blind-safe by construction in §12.1 and lightening every entry by
+     one step preserves the separation it was chosen for. Series are used by
+     index and never by name, so re-ordering here would silently recolour
+     every chart in the app. */
+  --chart-1: #818CF8;
+  --chart-2: #22D3EE;
+  --chart-3: #34D399;
+  --chart-4: #FBBF24;
+  --chart-5: #F87171;
+  --chart-6: #A78BFA;
+  --chart-7: #F472B6;
+  --chart-8: #2DD4BF;
+
+  /* Ribbon. `--ribbon-pending-bg` was #FFFFFF and becomes --bg-surface's value
+     rather than a tint: pending means "not yet reached", which reads as the
+     card's own background in either theme. */
+  --ribbon-done-fg:      #34D399;
+  --ribbon-done-bg:      #022C22;
+  --ribbon-done-text:    #6EE7B7;
+  --ribbon-current-fg:   #818CF8;
+  --ribbon-current-bg:   #1E1B4B;
+  --ribbon-current-text: #A5B4FC;
+  --ribbon-pending-fg:   #6B7280;
+  --ribbon-pending-bg:   #171A23;
+  --ribbon-pending-text: #9CA3AF;
+  --ribbon-reworked:      #FBBF24;
+  --ribbon-reworked-text: #FCD34D;
+  --ribbon-breached:      #F87171;
+  --ribbon-breached-text: #FCA5A5;
+
+  color-scheme: dark;
 }
 
 html, body, #root { height: 100%; }
