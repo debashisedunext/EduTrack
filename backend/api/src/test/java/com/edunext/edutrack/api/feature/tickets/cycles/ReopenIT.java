@@ -120,8 +120,19 @@ class ReopenIT {
 
         ticketId = insertClosedTicket((short) 1);
         insertCycle(ticketId, (short) 1, new BigDecimal("24.50"));
-        // One real effort log on cycle 1 — the row the headline guarantee is about.
-        insertEffort(ticketId, (short) 1, "24.50");
+        // Cycle 1's 24.50 hours as real effort logs — the rows the headline
+        // guarantee is about.
+        //
+        // Two entries, not one, because `ck_effort_hours` caps a single entry at
+        // 24: it is a per-entry sanity bound (nobody logs 25 hours of one day's
+        // work on one stage), not a bound on a cycle. A cycle total of 24.50 is
+        // entirely ordinary and simply cannot be one row. Split across two work
+        // dates so the fixture is the shape a real effort record has, and so the
+        // logs sum to the cycle figure beside them — a fixture whose parts
+        // disagree undermines the very thing this class asserts, which is that
+        // the effort record survives a reopen untouched.
+        insertEffort(ticketId, (short) 1, "12.00", "2026-08-10");
+        insertEffort(ticketId, (short) 1, "12.50", "2026-08-11");
     }
 
     // ── the transaction ──────────────────────────────────────────────────────
@@ -142,15 +153,15 @@ class ReopenIT {
 
             Map<String, Object> ticket = ticketRow();
             assertThat(ticket.get("status")).isEqualTo("REOPENED");
-            assertThat(ticket.get("current_cycle_no")).isEqualTo((short) 2);
-            assertThat(ticket.get("reopen_count")).isEqualTo((short) 1);
+            assertThat(number(ticket, "current_cycle_no")).isEqualTo(2);
+            assertThat(number(ticket, "reopen_count")).isEqualTo(1);
             assertThat(ticket.get("is_reopened")).isEqualTo(true);
             assertThat(ticket.get("actual_close_date")).isNull();
             assertThat(ticket.get("current_stage")).isEqualTo("TRIAGE");
-            assertThat(ticket.get("current_iteration")).isEqualTo((short) 1);
-            assertThat(ticket.get("rework_count"))
+            assertThat(number(ticket, "current_iteration")).isEqualTo(1);
+            assertThat(number(ticket, "rework_count"))
                     .as("counts backward moves over the ticket's whole life — a new cycle does not reset it")
-                    .isEqualTo((short) 2);
+                    .isEqualTo(2);
 
             assertThat(cycleCount()).isEqualTo(2);
             assertThat(sealed((short) 1)).as("cycle 1 sealed").isTrue();
@@ -202,9 +213,9 @@ class ReopenIT {
             assertThat(entry.get("field_name")).isEqualTo("status");
             assertThat(entry.get("old_value")).isEqualTo("CLOSED");
             assertThat(entry.get("new_value")).isEqualTo("REOPENED");
-            assertThat(entry.get("cycle_no"))
+            assertThat(number(entry, "cycle_no"))
                     .as("stamped with the NEW cycle, so a cycle-2 history filter opens with why cycle 2 exists")
-                    .isEqualTo((short) 2);
+                    .isEqualTo(2);
             assertThat(entry.get("remarks")).isEqualTo(REASON);
             assertThat(entry.get("actor_id")).isEqualTo(userId);
             assertThat(entry.get("actor_type")).isEqualTo("USER");
@@ -239,8 +250,8 @@ class ReopenIT {
             assertThat(chain.get(1).get("prev_hash"))
                     .as("links onto its predecessor's row_hash")
                     .isEqualTo(chain.get(0).get("row_hash"));
-            assertThat(ticketRow().get("current_cycle_no")).isEqualTo((short) 3);
-            assertThat(ticketRow().get("reopen_count")).isEqualTo((short) 2);
+            assertThat(number(ticketRow(), "current_cycle_no")).isEqualTo(3);
+            assertThat(number(ticketRow(), "reopen_count")).isEqualTo(2);
             assertThat(cycleCount()).isEqualTo(3);
         }
     }
@@ -257,8 +268,11 @@ class ReopenIT {
             service.reopen(pm(), ticketId, request());
 
             assertThat(effortLogCount((short) 1))
-                    .as("cycle 1's effort log is still there, uncorrected")
-                    .isEqualTo(1);
+                    .as("cycle 1's effort logs are still there, uncorrected")
+                    // Two, because `ck_effort_hours` caps one entry at 24 hours
+                    // and cycle 1 holds 24.50 — see the fixture. What is being
+                    // asserted is survival, not the count.
+                    .isEqualTo(2);
             assertThat(effortLogCount((short) 2))
                     .as("a reopen logs no effort of its own")
                     .isZero();
@@ -392,7 +406,7 @@ class ReopenIT {
                     .isInstanceOf(TicketNotClosedException.class);
 
             assertThat(cycleCount()).as("no third cycle").isEqualTo(2);
-            assertThat(ticketRow().get("reopen_count")).isEqualTo((short) 1);
+            assertThat(number(ticketRow(), "reopen_count")).isEqualTo(1);
             assertThat(historyCount()).as("no second history entry").isEqualTo(1);
         }
 
@@ -452,12 +466,35 @@ class ReopenIT {
                 """, ticket, cycle, userId, effort);
     }
 
-    private void insertEffort(long ticket, short cycle, String hours) {
+    /**
+     * A whole-number column out of a JDBC row, as an {@code int}.
+     *
+     * <p><b>Not {@code isEqualTo((short) 2)}.</b> These are {@code SMALLINT}
+     * columns and Connector/J answers {@code getObject()} on one with an
+     * {@code Integer}, so an assertion against a boxed {@code Short} fails on the
+     * box while the value is right — {@code expected: 2 (Short) but was: 2
+     * (Integer)}, which reads like a behaviour failure and is not one.
+     *
+     * <p>Comparing as {@code int} also keeps the driver's type mapping out of the
+     * assertion: writing {@code isEqualTo(2)} against the raw object would pass
+     * today and break again if the column widened to {@code INT} or the mapping
+     * changed, for a reason nobody reading it would guess.
+     */
+    private static int number(Map<String, Object> row, String column) {
+        return ((Number) row.get(column)).intValue();
+    }
+
+    /**
+     * One effort entry. {@code hours} must satisfy {@code ck_effort_hours} —
+     * non-zero, positive unless it is a correction, and <b>at most 24</b>, which
+     * is a bound on one entry rather than on a cycle.
+     */
+    private void insertEffort(long ticket, short cycle, String hours, String workDate) {
         jdbc.update("""
                 INSERT INTO ticket_effort_logs (ticket_id, cycle_no, stage_code, iteration_no,
                                                 user_id, work_date, hours)
-                VALUES (?, ?, 'DEV', 1, ?, '2026-08-10', ?)
-                """, ticket, cycle, userId, new BigDecimal(hours));
+                VALUES (?, ?, 'DEV', 1, ?, ?, ?)
+                """, ticket, cycle, userId, workDate, new BigDecimal(hours));
     }
 
     /** Close the ticket again so it can be reopened into a third cycle. */
