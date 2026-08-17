@@ -13,9 +13,9 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 153 of 231 (66%) | 224.5 of 348.8 (64%) |
-| In flight | 2 | 4.0 |
+| In flight | 3 | 6.0 |
 | On the driving chain | 40 | 57.0 |
-| Zero float (no slack at all) | 24 | 39.0 |
+| Zero float (no slack at all) | 23 | 38.0 |
 
 ### By developer
 
@@ -135,7 +135,7 @@ gantt
     section Milestones
     Sprint 0 — weeks 1–2 :done, b0, 2026-08-06, 65d
     M3 — Master data — weeks 3–9 :active, b1, 2026-08-10, -20d
-    Weeks 12–14 — M6 reports :b2, 2026-09-01, 8d
+    Weeks 12–14 — M6 reports :b2, 2026-08-29, 9d
     Weeks 10–11 — join Stream C on the ribbon :b3, 2026-09-25, 13d
 ```
 
@@ -279,27 +279,27 @@ gantt
 |  | `B-027` | client_contacts child grid | 1.5 | `B-026` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
 |  | `B-028` | Validation | 1 | `B-027` | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
 |  | `B-029` | Deactivating a client with open tickets warns and blocks new… | 1 | `B-026` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
-| 🔴 | `B-030` | Import engine as a schema registry — built once, registered twice | 2 | `B-005` | Tue 11 Aug | Tue 11 Aug | 0 | ✅ done |
+| 🔴 | `B-030` | Import engine as a schema registry — built once, registered twice | 2 | `B-005` | Tue 11 Aug | Tue 11 Aug | 1 | ✅ done |
 |  | `B-031` | Step 1 — template download | 1.5 | `B-030` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `B-032` | Step 2 — upload, max 5 MB / 5,000 rows, event-driven SAX parse | 2 | `B-030` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `B-033` | Step 3 | 2 | `B-032` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 | 🔴 | `B-034` | Step 4 — dry-run validation preview | 2.5 | `B-033` | Tue 18 Aug | Tue 18 Aug | 0 | 🔵 in review |
-|  | `B-035` | Step 5 — commit as a background job with progress bar | 2 | `B-034` | Tue 18 Aug | Thu 20 Aug | 0 | ▫️ to do |
-|  | `B-036` | Error report generation | 1 | `B-034` ᶦ | Thu 20 Aug | Fri 21 Aug | 0 | ▫️ to do |
-|  | `B-037` | import_batches traceability | 1 | `B-035` ᶦ | Fri 21 Aug | Sat 22 Aug | 1 | ▫️ to do |
-|  | `B-038` | Resource bulk import — the second registration, not a second build | 1 | `B-035` | Sat 22 Aug | Tue 25 Aug | 2 | ▫️ to do |
-|  | `B-039` | Status/stage/workflow master tab 1 | 2 | `B-003` `C-003` ᶦ | Tue 25 Aug | Thu 27 Aug | 3 | ▫️ to do |
-|  | `B-040` | Tab 2 — stages | 2 | `B-039` | Thu 27 Aug | Sat 29 Aug | 4 | ▫️ to do |
+|  | `B-035` | Step 5 — commit as a background job with progress bar | 2 | `B-034` | Tue 18 Aug | Wed 19 Aug | 0 | 🟡 50% |
+|  | `B-036` | Error report generation | 1 | `B-034` ᶦ | Wed 19 Aug | Thu 20 Aug | 1 | ▫️ to do |
+|  | `B-037` | import_batches traceability | 1 | `B-035` ᶦ | Thu 20 Aug | Fri 21 Aug | 2 | ▫️ to do |
+|  | `B-038` | Resource bulk import — the second registration, not a second build | 1 | `B-035` | Fri 21 Aug | Sat 22 Aug | 3 | ▫️ to do |
+|  | `B-039` | Status/stage/workflow master tab 1 | 2 | `B-003` `C-003` ᶦ | Sat 22 Aug | Wed 26 Aug | 4 | ▫️ to do |
+|  | `B-040` | Tab 2 — stages | 2 | `B-039` | Wed 26 Aug | Fri 28 Aug | 5 | ▫️ to do |
 |  | `B-041` | Tab 3 | 2.5 | `B-040` `B-050` | Tue 29 Sep | Thu 01 Oct | 14 | ▫️ to do |
-| 🔴 | `B-042` | Stages in use may be deprecated, never deleted | 1 | `B-040` | Sat 29 Aug | Tue 01 Sep | 19 | ▫️ to do |
+| 🔴 | `B-042` | Stages in use may be deprecated, never deleted | 1 | `B-040` | Fri 28 Aug | Sat 29 Aug | 20 | ▫️ to do |
 |  | `B-043` | Workflow template designer | 3 | `B-041` `B-042` | Fri 02 Oct | Tue 06 Oct | 14 | ▫️ to do |
 |  | `B-050` | Ribbon segment component — 6 states | 2.5 | `C-003` `C-042` | Fri 25 Sep | Tue 29 Sep | 13 | ▫️ to do |
 |  | `B-051` | Compact dot variant for the ticket list | 1 | `B-050` ᶦ | Wed 07 Oct | Wed 07 Oct | 14 | ▫️ to do |
 |  | `B-052` | Ribbon accessibility | 1.5 | `B-050` ᶦ | Thu 08 Oct | Fri 09 Oct | 14 | ▫️ to do |
 |  | `B-053` | Readability at 8 stages on a laptop | 2 | `B-050` ᶦ | Fri 09 Oct | Tue 13 Oct | 15 | ▫️ to do |
-|  | `B-060` | Client report | 2 | `A-064` `B-029` | Tue 01 Sep | Thu 03 Sep | 20 | ▫️ to do |
-|  | `B-061` | Resource performance scorecard and workload/capacity report | 2 | `A-064` `B-010` | Thu 03 Sep | Sat 05 Sep | 21 | ▫️ to do |
-|  | `B-062` | Export engine integration for all report types | 1.5 | `A-064` | Sat 05 Sep | Tue 08 Sep | 22 | ▫️ to do |
+|  | `B-060` | Client report | 2 | `A-064` `B-029` | Sat 29 Aug | Wed 02 Sep | 21 | ▫️ to do |
+|  | `B-061` | Resource performance scorecard and workload/capacity report | 2 | `A-064` `B-010` | Wed 02 Sep | Fri 04 Sep | 22 | ▫️ to do |
+|  | `B-062` | Export engine integration for all report types | 1.5 | `A-064` | Fri 04 Sep | Sat 05 Sep | 23 | ▫️ to do |
 |  | `B-063` | Timesheet view — stage-aware, a resource's week across all tickets | 2 | `A-064` `C-061` | Wed 09 Sep | Thu 10 Sep | 22 | ▫️ to do |
 | 🔴 | `B-064` | Module master read endpoint | 0.25 | `C-065` | Tue 15 Sep | Tue 15 Sep | 20 | ▫️ to do |
 
