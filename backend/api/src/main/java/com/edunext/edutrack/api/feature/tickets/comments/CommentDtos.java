@@ -71,15 +71,34 @@ final class CommentDtos {
      *                        it. {@code attachmentIds} on the request is therefore
      *                        <b>rejected rather than silently dropped</b> — see
      *                        {@link CommentWriteRequest#attachmentIds}
-     * @param editableUntil   five minutes after posting, per §4B.5, and enforced
-     *                        from C-033. Still <b>derived rather than stored</b>:
+     * @param editableUntil   when the author's edit expires, or <b>null when it
+     *                        never does</b> — which is the default since the five
+     *                        minutes were lifted (D-14). Also null on a
+     *                        tombstone, where there is nothing left to edit.
+     *
+     *                        <p><b>A null therefore does not mean "cannot
+     *                        edit".</b> That is the one dangerous reading of this
+     *                        field and it was the client's rule until D-14: with
+     *                        no limit configured every comment would lose its
+     *                        Edit button. Whether the caller may edit is decided
+     *                        by authorship and {@code isDeleted}; this field only
+     *                        ever adds a deadline on top, and only when one is
+     *                        configured.
+     *
+     *                        <p>Still <b>derived rather than stored</b>:
      *                        {@code createdAt} plus the configured window, so an
-     *                        operator changing the window at deploy cannot leave
-     *                        a stored deadline disagreeing with the rule the
-     *                        server actually applies. <b>Null on a tombstone</b> —
-     *                        a removed comment has no deadline, and sending one
-     *                        would put a live countdown on a card whose text is
-     *                        already gone
+     *                        operator restoring §4B.5's five minutes at deploy
+     *                        cannot leave stored deadlines disagreeing with the
+     *                        rule the server actually applies
+     * @param editedAt        when it was last rewritten, null if never.
+     *                        <b>Added with D-14 and load-bearing because of
+     *                        it</b>: while the window was five minutes, "edited"
+     *                        implied "moments after posting" and the timestamp
+     *                        was noise. With no limit it does not — a reader
+     *                        cannot otherwise tell a typo fixed a minute later
+     *                        from a claim rewritten three months on, and those
+     *                        are very different facts about a record colleagues
+     *                        have acted upon
      * @param originalBody    C-033 · what the author first posted, written once
      *                        on the first edit and never touched again. Null when
      *                        the comment has never been edited, <b>and cleared on
@@ -118,8 +137,14 @@ final class CommentDtos {
             boolean isEdited,
             @Schema(description = "Tombstone; the row survives.")
             boolean isDeleted,
-            @Schema(description = "Five minutes after posting (§4B.5). Null on a tombstone.", nullable = true)
+            @Schema(description = """
+                    When the author's edit expires. **Null means there is no deadline** — the default \
+                    since D-14 lifted §4B.5's five minutes — and null on a tombstone. Never read a \
+                    null as "cannot edit"; authorship and `isDeleted` decide that.""",
+                    nullable = true)
             Instant editableUntil,
+            @Schema(description = "When it was last rewritten. Null if never edited.", nullable = true)
+            Instant editedAt,
             @Schema(description = "C-033 · who removed it. Null unless `isDeleted`, and null again if that account is gone.",
                     nullable = true)
             UserRef deletedBy,
@@ -149,7 +174,13 @@ final class CommentDtos {
          *                   so much as silently override it, and the failure was
          *                   invisible in every log. A deployment that shortens the
          *                   window would otherwise show every author a countdown
-         *                   running past a deadline the server has already refused
+         *                   running past a deadline the server has already refused.
+         *
+         *                   <p><b>Null when no window is configured</b>, which is
+         *                   the default since D-14. The same parameter therefore
+         *                   carries the absence of a limit, so restoring §4B.5's
+         *                   five minutes at deploy moves the client's countdown
+         *                   with it and needs no release
          */
         static CommentDto of(TicketComment row,
                              Map<Long, UserRef> people,
@@ -181,12 +212,17 @@ final class CommentDtos {
                     !row.isInternal(),
                     row.getEditedAt() != null,
                     tombstoned,
-                    // Null on a tombstone: a removed comment has no deadline, and
-                    // a countdown ticking beside "removed by Priya" would invite
-                    // exactly one thing, which the server refuses anyway.
-                    tombstoned || row.getCreatedAt() == null
+                    // Null when there is no deadline at all (D-14's default) and
+                    // null on a tombstone, where a countdown beside "removed by
+                    // Priya" would invite the one thing the server refuses.
+                    tombstoned || editWindow == null || row.getCreatedAt() == null
                             ? null
                             : row.getCreatedAt().plus(editWindow),
+                    // Not cleared on a tombstone, unlike the two body fields.
+                    // "This was edited before it was removed" is part of the
+                    // record rather than part of the content, and it carries no
+                    // text — the whole reason the bodies go is that they do.
+                    row.getEditedAt(),
                     tombstoned ? people.get(row.getDeletedBy()) : null,
                     tombstoned ? row.getDeletedAt() : null,
                     row.getStageCode(),

@@ -254,8 +254,19 @@ export const useCreateComment = <TError = ValidationFailedResponse | NotFoundRes
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * Author only, within five minutes of posting. After that the comment is
-locked and this returns `422`.
+ * **Author only, for as long as the comment exists.** §4B.5 says "editable
+for 5 minutes; after that the comment is locked" and that limit was lifted
+— deviation **D-14** in `docs/PLAN.md` §4. The five minutes lost to one
+ordinary case: a developer posts a root-cause note, remembers the missing
+half thirty minutes later, and can only add a second card reading
+"correction to the above", leaving the thread with two fragments to
+reconcile instead of one accurate note.
+
+The limit is still implemented and still enforced — setting
+`edutrack.comments.edit-window: PT5M` restores §4B.5 with no code change.
+While a window is configured, an expired edit returns `422`; with none,
+`422` is reachable only for a comment that is not yours or has been
+removed.
 
 An edited comment keeps `originalBody` and renders an "edited" marker.
 **No role, including Admin, can silently rewrite a comment** — that is what
@@ -274,7 +285,7 @@ window would be a way to publish an internal note, or to un-publish one the
 client has already had by email while the thread reports otherwise. A
 comment sent to the wrong audience is deleted and rewritten, in the open.
 
- * @summary Edit within the five-minute window
+ * @summary Edit your own comment
  */
 export const editComment = (
     ticketId: string,
@@ -323,7 +334,7 @@ const {mutation: mutationOptions} = options ?
     export type EditCommentMutationError = NotFoundResponse | Problem
 
     /**
- * @summary Edit within the five-minute window
+ * @summary Edit your own comment
  */
 export const useEditComment = <TError = NotFoundResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof editComment>>, TError,{ticketId: string;commentId: number;data: EditCommentBody}, TContext>, }

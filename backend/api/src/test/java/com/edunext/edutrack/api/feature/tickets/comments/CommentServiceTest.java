@@ -59,7 +59,14 @@ class CommentServiceTest {
     private final CommentMentions mentions = mock(CommentMentions.class);
     private final CommentMentionNotifier mentionNotifier = mock(CommentMentionNotifier.class);
 
-    private final CommentProperties properties = new CommentProperties(Duration.ofMinutes(5));
+    /**
+     * D-14 · <b>no edit window, which is the shipped default.</b> The five
+     * minutes are still implemented and are exercised by
+     * {@link EditWindow.WhenAWindowIsConfigured}, which builds its own
+     * properties — so both the behaviour we ship and the behaviour an operator
+     * can restore are covered, and neither is assumed from the other.
+     */
+    private CommentProperties properties = new CommentProperties(null);
 
     /**
      * C-033 · a fixed clock, four minutes after {@link #POSTED_AT}, so the edit
@@ -80,6 +87,11 @@ class CommentServiceTest {
                 mentionNotifier, properties, clock);
     }
 
+    /**
+     * The C-029 and C-030 blocks use this; it reads {@link #properties} and
+     * {@link #clock} at construction, which is fine for them because neither
+     * reassigns either. C-033's blocks call {@link #service()} instead.
+     */
     private final CommentService service = new CommentService(
             tickets, comments, rows, people, sanitizer, mentions, mentionNotifier, properties,
             Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(4)), ZoneOffset.UTC));
@@ -470,15 +482,20 @@ class CommentServiceTest {
         }
 
         @Test
-        @DisplayName("posts as not-edited, not-deleted, with the five-minute window open")
+        @DisplayName("posts as not-edited, not-deleted, and with no edit deadline")
         void carriesSection4B5sEditWindow() {
             CommentDtos.CommentDto posted = service.create(caller, TICKET, body("<p>hi</p>"));
 
             assertThat(posted.isEdited()).isFalse();
             assertThat(posted.isDeleted()).isFalse();
             assertThat(posted.originalBody()).isNull();
-            assertThat(posted.editableUntil())
-                    .isEqualTo(Instant.parse("2026-08-16T10:20:30Z"));
+            assertThat(posted.editedAt()).isNull();
+            // D-14 · asserted null the same way it was asserted at
+            // 10:20:30 before the window was lifted, because the field still
+            // has to be *sent* — a client reading a missing key and a client
+            // reading an explicit null behave differently, and this is the
+            // field whose null a client must not read as "locked".
+            assertThat(posted.editableUntil()).isNull();
         }
     }
 
@@ -556,24 +573,102 @@ class CommentServiceTest {
                     .isEqualTo("<p>Root cause is the retry timeout.</p>");
         }
 
+        /**
+         * D-14 · the change itself, and the case that prompted it.
+         *
+         * <p>Thirty minutes is the scenario Divyansh gave: a developer posts a
+         * root-cause note and remembers the missing half later. Under §4B.5 the
+         * only remedy was a second card reading "correction to the above".
+         */
         @Test
-        @DisplayName("outside five minutes it is locked, for the author too")
-        void locksAfterTheWindow() {
-            clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(5).plusSeconds(1)), ZoneOffset.UTC);
+        @DisplayName("D-14 · half an hour later is still editable")
+        void hasNoTimeLimitByDefault() {
+            clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(30)), ZoneOffset.UTC);
 
-            assertThatThrownBy(() -> service().edit(caller, TICKET, 99L, edit("<p>late</p>")))
-                    .isInstanceOf(CommentNotEditableException.class)
-                    .hasMessageContaining("locked");
-            assertThat(existing.getBodyHtml()).isEqualTo("<p>Root cause is the retry timeout.</p>");
+            assertThat(service().edit(caller, TICKET, 99L, edit("<p>and the retry count was 3</p>")).body())
+                    .isEqualTo("<p>and the retry count was 3</p>");
+        }
+
+        /**
+         * The stronger version of the same claim: "for as long as the comment
+         * exists" is not "for a generously long window". A year is chosen
+         * because any implementation that quietly kept a bound would almost
+         * certainly fail here and might not at thirty minutes.
+         */
+        @Test
+        @DisplayName("D-14 · and so is a year later")
+        void reallyHasNoTimeLimit() {
+            clock = Clock.fixed(POSTED_AT.plus(Duration.ofDays(365)), ZoneOffset.UTC);
+
+            assertThat(service().edit(caller, TICKET, 99L, edit("<p>a year on</p>")).body())
+                    .isEqualTo("<p>a year on</p>");
         }
 
         @Test
-        @DisplayName("exactly on the deadline is still editable")
-        void theBoundaryIsInclusive() {
-            clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(5)), ZoneOffset.UTC);
+        @DisplayName("D-14 · no deadline goes on the wire, and that does not mean locked")
+        void sendsNoDeadline() {
+            CommentDtos.CommentDto edited =
+                    service().edit(caller, TICKET, 99L, edit("<p>rewritten</p>"));
 
-            assertThat(service().edit(caller, TICKET, 99L, edit("<p>just in time</p>")).body())
-                    .isEqualTo("<p>just in time</p>");
+            assertThat(edited.editableUntil()).isNull();
+            assertThat(edited.isEdited()).isTrue();
+            // The field a reader needs once "edited" stops implying "moments
+            // ago". Null on the wire before D-14 put it there.
+            assertThat(edited.editedAt()).isEqualTo(clock.instant());
+        }
+
+        /**
+         * D-14 removed the window from the <b>default configuration</b>, not
+         * from the codebase. §4B.5 is restorable with one property and these
+         * prove it still works — otherwise the enforcement rots untested and
+         * "just set edit-window" becomes advice nobody has checked.
+         */
+        @Nested
+        @DisplayName("when an operator restores §4B.5's window")
+        class WhenAWindowIsConfigured {
+
+            @BeforeEach
+            void fiveMinutes() {
+                properties = new CommentProperties(Duration.ofMinutes(5));
+            }
+
+            @Test
+            @DisplayName("inside it, the author may still rewrite")
+            void insideTheWindow() {
+                clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(4)), ZoneOffset.UTC);
+
+                assertThat(service().edit(caller, TICKET, 99L, edit("<p>in time</p>")).body())
+                        .isEqualTo("<p>in time</p>");
+            }
+
+            @Test
+            @DisplayName("outside it, it is locked — for the author too")
+            void locksAfterTheWindow() {
+                clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(5).plusSeconds(1)), ZoneOffset.UTC);
+
+                assertThatThrownBy(() -> service().edit(caller, TICKET, 99L, edit("<p>late</p>")))
+                        .isInstanceOf(CommentNotEditableException.class)
+                        .hasMessageContaining("locked");
+                assertThat(existing.getBodyHtml()).isEqualTo("<p>Root cause is the retry timeout.</p>");
+            }
+
+            @Test
+            @DisplayName("exactly on the deadline is still editable")
+            void theBoundaryIsInclusive() {
+                clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(5)), ZoneOffset.UTC);
+
+                assertThat(service().edit(caller, TICKET, 99L, edit("<p>just in time</p>")).body())
+                        .isEqualTo("<p>just in time</p>");
+            }
+
+            @Test
+            @DisplayName("and the deadline reaches the client, so the countdown returns with it")
+            void sendsTheDeadline() {
+                clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(1)), ZoneOffset.UTC);
+
+                assertThat(service().edit(caller, TICKET, 99L, edit("<p>x</p>")).editableUntil())
+                        .isEqualTo(POSTED_AT.plus(Duration.ofMinutes(5)));
+            }
         }
 
         /**
@@ -828,6 +923,11 @@ class CommentServiceTest {
             existing.setOriginalBody("<p>secret</p>");
             service().delete(caller, TICKET, 99L);
 
+            // A window is passed DELIBERATELY, though D-14 ships without one:
+            // it is the only configuration in which `editableUntil` could be
+            // non-null, so it is the only one where "a tombstone carries no
+            // deadline" is a real assertion. Passing null here would pass on an
+            // implementation that had never nulled anything.
             CommentDtos.CommentDto dto = CommentDtos.CommentDto.of(
                     existing, Map.of(), Map.of(), Duration.ofMinutes(5));
 

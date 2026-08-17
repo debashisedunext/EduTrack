@@ -40,11 +40,48 @@ function comment(over: Partial<Comment> = {}): Comment {
 }
 
 describe('C-033 · canEditComment', () => {
-  it('lets the author edit inside the window', () => {
+  /**
+   * D-14 · the shipped default. The server sends no `editableUntil` at all when
+   * no window is configured, and every one of these would have returned false
+   * before the change — the Edit button would have vanished from every comment
+   * in the product while every request it declined to make would have worked.
+   */
+  describe('D-14 · with no window configured, which is the default', () => {
+    const noDeadline = () => comment({ editableUntil: null })
+
+    it('lets the author edit thirty minutes later', () => {
+      expect(canEditComment(noDeadline(), { id: ME }, new Date('2026-08-16T10:45:00Z'))).toBe(true)
+    })
+
+    it('lets the author edit a year later', () => {
+      expect(canEditComment(noDeadline(), { id: ME }, new Date('2027-08-16T10:45:00Z'))).toBe(true)
+    })
+
+    it('still refuses somebody else’s comment', () => {
+      expect(canEditComment(noDeadline(), { id: SOMEBODY_ELSE, role: 'ADMIN' }, new Date())).toBe(false)
+    })
+
+    it('still refuses a tombstone', () => {
+      const removed = comment({ isDeleted: true, editableUntil: null })
+      expect(canEditComment(removed, { id: ME }, new Date())).toBe(false)
+    })
+
+    it('treats an unparseable deadline as no deadline, not as an expired one', () => {
+      const malformed = comment({ editableUntil: 'not a date' })
+      expect(canEditComment(malformed, { id: ME }, new Date())).toBe(true)
+    })
+  })
+
+  /**
+   * The window is still implemented and restorable with one property, so the
+   * client half stays covered too — otherwise "just set edit-window" is advice
+   * nobody has checked on this side.
+   */
+  it('lets the author edit inside a configured window', () => {
     expect(canEditComment(comment(), { id: ME }, new Date('2026-08-16T10:19:00Z'))).toBe(true)
   })
 
-  it('closes exactly one millisecond after the deadline', () => {
+  it('closes exactly one millisecond after a configured deadline', () => {
     expect(canEditComment(comment(), { id: ME }, new Date('2026-08-16T10:20:30.001Z'))).toBe(false)
   })
 
@@ -67,15 +104,6 @@ describe('C-033 · canEditComment', () => {
   it('refuses a tombstone', () => {
     const removed = comment({ isDeleted: true, editableUntil: null })
     expect(canEditComment(removed, { id: ME }, new Date('2026-08-16T10:16:00Z'))).toBe(false)
-  })
-
-  /**
-   * A missing bound reads as "no window", never as "no deadline, so forever".
-   * The server sends null on a tombstone and on a row it cannot place, and the
-   * safe reading of an absent bound is the closed one.
-   */
-  it('refuses when there is no deadline on the wire', () => {
-    expect(canEditComment(comment({ editableUntil: null }), { id: ME }, new Date(POSTED))).toBe(false)
   })
 
   it('refuses while the viewer is still loading', () => {
@@ -117,6 +145,10 @@ describe('C-033 · canDeleteComment', () => {
 })
 
 describe('C-033 · editMinutesLeft', () => {
+  it('D-14 · is null when there is no deadline, so no countdown is drawn', () => {
+    expect(editMinutesLeft(comment({ editableUntil: null }), new Date(POSTED))).toBeNull()
+  })
+
   it('rounds up, so the last 60 seconds read as "1" rather than "0"', () => {
     expect(editMinutesLeft(comment(), new Date('2026-08-16T10:20:00Z'))).toBe(1)
   })

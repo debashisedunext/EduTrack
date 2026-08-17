@@ -1959,10 +1959,21 @@ paths:
     patch:
       tags: [comments]
       operationId: editComment
-      summary: Edit within the five-minute window
+      summary: Edit your own comment
       description: |
-        Author only, within five minutes of posting. After that the comment is
-        locked and this returns `422`.
+        **Author only, for as long as the comment exists.** §4B.5 says "editable
+        for 5 minutes; after that the comment is locked" and that limit was lifted
+        — deviation **D-14** in `docs/PLAN.md` §4. The five minutes lost to one
+        ordinary case: a developer posts a root-cause note, remembers the missing
+        half thirty minutes later, and can only add a second card reading
+        "correction to the above", leaving the thread with two fragments to
+        reconcile instead of one accurate note.
+
+        The limit is still implemented and still enforced — setting
+        `edutrack.comments.edit-window: PT5M` restores §4B.5 with no code change.
+        While a window is configured, an expired edit returns `422`; with none,
+        `422` is reachable only for a comment that is not yours or has been
+        removed.
 
         An edited comment keeps `originalBody` and renders an "edited" marker.
         **No role, including Admin, can silently rewrite a comment** — that is what
@@ -1997,7 +2008,7 @@ paths:
               schema: { $ref: '#/components/schemas/CommentResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422':
-          description: Edit window has closed, or the caller is not the author.
+          description: Not the author, already removed, or an edit window is configured and has closed.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -6210,10 +6221,35 @@ components:
         isClientVisible: { type: boolean }
         isEdited: { type: boolean }
         isDeleted: { type: boolean, description: Tombstone; the row survives. }
-        # C-033 · null on a tombstone. A removed comment has no deadline, and the
-        # window is derived from `createdAt` plus the server's configured edit
-        # window rather than stored — a shortened window must not leave an author
-        # watching a countdown the server has already stopped honouring.
+        # C-033 · when it was last rewritten, null if never.
+        #
+        # Load-bearing since D-14. While the window was five minutes, "edited"
+        # implied "moments after posting" and this was noise; with no limit a
+        # reader cannot otherwise tell a typo fixed a minute later from a claim
+        # rewritten three months on, and those are very different facts about a
+        # record colleagues have already acted on.
+        #
+        # NOT cleared on a tombstone, unlike `body` and `originalBody`. That it
+        # was edited before it was removed is part of the record rather than part
+        # of the content, and it carries no text — which is the whole reason the
+        # bodies go.
+        editedAt: { type: [string, 'null'], format: date-time }
+        # C-033 · when the author's edit expires.
+        #
+        # **Null means there is no deadline** — the default since D-14 lifted
+        # §4B.5's five minutes — and null on a tombstone, where there is nothing
+        # left to edit.
+        #
+        # NEVER read a null here as "cannot edit". That is the one dangerous
+        # reading of this field: with no limit configured, a client applying it
+        # would hide the Edit affordance on every comment in the product. Whether
+        # the caller may edit is decided by authorship and `isDeleted`; this only
+        # ever adds a deadline on top, and only when one is configured.
+        #
+        # Derived from `createdAt` plus the server's configured window rather
+        # than stored, so restoring the five minutes at deploy moves every
+        # client's countdown with it and cannot leave a stored deadline
+        # disagreeing with the rule the server applies.
         editableUntil: { type: [string, 'null'], format: date-time }
         # C-033 · the two halves of "removed by X on date", mirroring
         # `Attachment.deletedBy` / `deletedAt` exactly. Both null unless

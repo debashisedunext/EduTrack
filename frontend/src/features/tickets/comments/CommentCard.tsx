@@ -129,10 +129,29 @@ export function CommentCard({
           flag on every typo fix. The original sits behind it rather than
           beside it: the current wording is what the thread is about, and a
           reader wanting the earlier one is looking for it deliberately.
+
+          It carries WHEN since D-14, and that is not decoration. While the
+          window was five minutes, "edited" implied "moments after posting" and
+          a timestamp said nothing. With no limit it implies nothing at all — a
+          typo fixed a minute later and a claim rewritten three months on read
+          identically, and those are very different facts about a note
+          colleagues have already acted on. The date is what makes the marker
+          worth having once the clock is gone.
         */}
         {comment.isEdited && !open && (
           <span className="text-caption text-content-muted">
-            <span aria-hidden="true">·</span> edited
+            <span aria-hidden="true">·</span>{' '}
+            {comment.editedAt ? (
+              <>
+                edited{' '}
+                <time dateTime={comment.editedAt}>{formatPosted(comment.editedAt)}</time>
+              </>
+            ) : (
+              // A comment edited before D-14 put `editedAt` on the wire. The
+              // marker still stands — `isEdited` is the fact — and the bare
+              // word is honest where a guessed date would not be.
+              'edited'
+            )}
           </span>
         )}
 
@@ -212,13 +231,18 @@ export function CommentCard({
               Cancel
             </Button>
             {/*
-              Stated rather than implied. Somebody who opens the editor at four
-              minutes fifty needs to know the deadline is real before they start
+              Shown only when a deadline actually exists. Under D-14's default
+              there is none, and a line promising a limit that is not enforced
+              would be the sort of copy people quote back at you. When a window
+              IS configured it is stated rather than implied: somebody opening
+              the editor with fifty seconds left needs to know before they start
               rewriting a paragraph, not after the server refuses it.
             */}
-            <span className="text-caption text-content-muted">
-              Editable for five minutes after posting.
-            </span>
+            {minutesLeft != null && (
+              <span className="text-caption text-content-muted">
+                {minutesLeft} min left to edit this comment.
+              </span>
+            )}
           </div>
         </div>
       ) : (

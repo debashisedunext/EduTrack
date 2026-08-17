@@ -165,8 +165,14 @@ Editing and deleting look like one permission and are two.
 
 | | who | window | leaves a mark |
 |---|---|---|---|
-| **Edit** | the author, and **nobody else** | five minutes | "edited", original preserved |
+| **Edit** | the author, and **nobody else** | **none** (D-14) | "edited" + when, original preserved |
 | **Delete** | the author, a PM or an Admin | **none** | always a tombstone |
+
+> **D-14 · the five-minute window was lifted.** §4B.5 says "editable for 5
+> minutes; after that the comment is locked". It shipped that way and was changed
+> the same day, on Divyansh's direction, after the feature was driven by hand —
+> see the section at the end of this file. Everything else in the table is
+> unchanged.
 
 **No role widens the edit, Admin included.** The obvious reading of §4B.5 is that
 an Admin edit is fine if it is marked — and the marker cannot carry the fact that
@@ -271,3 +277,80 @@ history rows belong with C-034's timeline, alongside the `ATTACHMENT_ADDED` row
 C-025 left for the same reason: there is still no ticket-history write service.
 `iteration_no` on a comment stays null until C-042 (C-032's dependency), and
 `PLAN.md §3.9`'s `MEDIUMTEXT` is still `TEXT`.
+
+---
+
+## D-14 · the five-minute edit window, and why it is gone
+
+`PLAN.md` §4 carries the deviation. The short version, and the reasoning, because
+this contradicts the blueprint in a row that reads like a security rule.
+
+**The case it lost to.** A developer posts a root-cause note, remembers the
+missing half thirty minutes later, and under §4B.5 can only add a second card
+reading "correction to the above". The thread then carries two fragments a reader
+has to reconcile, instead of one accurate note. That is worse for every future
+reader than the edit would have been, and the edit is what the author wanted.
+
+**What §4B.5 was actually protecting is untouched.** The window looks like the
+guarantee and is not; the guarantee is the sentence beside it — *"no role,
+including Admin, can silently rewrite a comment"*. Every word of that still
+holds:
+
+- only the **author** may edit, and no role widens it — not PM, not Admin;
+- every edit is **stamped** (`edited_at`) and **marked** on the card;
+- the **first wording is preserved** in `original_body` and readable;
+- deletion still leaves a **tombstone** naming who removed it.
+
+The clock only ever decided *when* the author lost the ability. It never decided
+whether the change was recorded, and nothing about the record has changed.
+
+**It is restorable with one property.** `edutrack.comments.edit-window: PT5M`
+puts §4B.5 back — no code change, no migration, no release. The enforcement is
+still in `CommentService.withinEditWindow`, and
+`CommentServiceTest.EditWindow.WhenAWindowIsConfigured` still proves it, so the
+path does not rot while it is unused. The client follows automatically, because
+`Comment.editableUntil` is derived server-side rather than copied into the
+browser — C-027's failure mode, where a client-side copy of a server rule
+silently overrode it.
+
+### The trap this created, and where it was caught
+
+**A null `editableUntil` now means "no deadline", where it used to mean "no
+edit".** `canEditComment` read:
+
+```ts
+if (!comment.editableUntil) return false   // before D-14
+```
+
+which was *correct* while the server always sent a deadline — an absent one then
+meant a tombstone or an unplaceable row, and refusing was the safe direction.
+With no window configured the server sends null for **every** comment, so that
+same line would have hidden the Edit button across the entire product while every
+request it declined to make would have succeeded. The tombstone case it was
+really covering is handled by `isDeleted`, which is what meant it all along.
+Pinned by `commentPermissions.test.ts`'s `with no window configured` block.
+
+### Two costs, stated rather than discovered later
+
+**`original_body` holds only the *first* wording.** Written once, on the first
+edit, and never again — which was right when the window was five minutes and "the
+original" was minutes old. A comment revised four times over three months now
+preserves the current text and the very first version and **loses everything in
+between**. Nothing is silently wrong, but the record is thinner than it looks.
+The fuller answer is a revision table (`ticket_comment_revisions`, one row per
+edit); it is not built, and it is the natural home for a "history" affordance on
+the card.
+
+**`Comment.editedAt` had to go on the wire.** While the window was five minutes,
+"edited" implied "moments after posting" and a timestamp said nothing. With no
+limit it implies nothing at all — a typo fixed a minute later and a claim
+rewritten three months on read identically, and those are very different facts
+about a note colleagues have already acted on. Additive contract change; **Stream
+D sign-off**, alongside `deletedBy`/`deletedAt`.
+
+### One place the mock and the server now differ
+
+`frontend/src/mocks/handlers/tickets.ts` has no window and no way to configure
+one, so a deployment that restores `edit-window` is one `npm run dev` stops
+standing in for. Flagged rather than left to be discovered: everything else in
+that handler mirrors `CommentService` deliberately.
