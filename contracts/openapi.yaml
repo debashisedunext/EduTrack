@@ -1157,6 +1157,12 @@ paths:
         - { name: dueTo, in: query, schema: { type: string, format: date } }
         - { name: closedFrom, in: query, schema: { type: string, format: date }, description: 'Filters on actualCloseDate, inclusive.' }
         - { name: closedTo, in: query, schema: { type: string, format: date }, description: 'Filters on actualCloseDate, inclusive.' }
+        # A-060 · the third date window. Every dashboard card and chart segment
+        # that names a period names it over dateReported, which is what the
+        # summary tables are keyed by — without this pair those deep-links
+        # applied the right filter over all time. ⚠️ contracts/ is Stream D's.
+        - { name: reportedFrom, in: query, schema: { type: string, format: date }, description: 'Filters on dateReported, inclusive.' }
+        - { name: reportedTo, in: query, schema: { type: string, format: date }, description: 'Filters on dateReported, inclusive.' }
         - { name: sort, in: query, schema: { type: string, default: '-createdAt' } }
       responses:
         '200':

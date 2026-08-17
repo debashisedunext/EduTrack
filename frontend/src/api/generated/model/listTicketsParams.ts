@@ -97,5 +97,13 @@ closedFrom?: string;
  * Filters on actualCloseDate, inclusive.
  */
 closedTo?: string;
+/**
+ * Filters on dateReported, inclusive.
+ */
+reportedFrom?: string;
+/**
+ * Filters on dateReported, inclusive.
+ */
+reportedTo?: string;
 sort?: string;
 };

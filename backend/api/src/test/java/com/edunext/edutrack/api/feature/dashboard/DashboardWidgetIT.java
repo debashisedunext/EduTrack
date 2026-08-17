@@ -352,16 +352,60 @@ class DashboardWidgetIT {
          * buckets disagree with a document.
          */
         @Test
-        @DisplayName("aging labels are the schema's edges, and carry no drill-down")
+        @DisplayName("aging labels are the schema's edges")
         void agingLabelsMatchTheColumns() {
             WidgetDtos.Widget w = widget("PM", "aging-buckets", List.of(mine));
 
             assertThat(w.series().getFirst().points())
                     .extracting(WidgetDtos.Point::x)
                     .containsExactly("0–2 days", "3–7 days", "8–30 days", "31+ days");
-            assertThat(w.series().getFirst().points())
-                    .as("the ticket list has no age filter; a link that contradicts the segment is worse than none")
-                    .allSatisfy(p -> assertThat(p.drillDown()).isNull());
+        }
+
+        /**
+         * A-060 · these four were dead links until the reported-date window
+         * existed, and no age filter was needed to revive them: the worker
+         * derives every bucket from {@code DATEDIFF(day, date_reported)}, so an
+         * age range *is* a reported-date range.
+         *
+         * <p>The inversion is what this pins. The older edge of a bucket is the
+         * <em>earlier</em> date, so "3–7 days" reads from {@code D3 - 7} to
+         * {@code D3 - 3}. Getting it backwards produces a link that looks
+         * entirely reasonable and opens the opposite end of the distribution.
+         */
+        @Test
+        @DisplayName("each bucket links to the reported-date window that produced it")
+        void agingBucketsLinkByReportedDate() {
+            WidgetDtos.Widget w = widget("PM", "aging-buckets", List.of(mine), D1, D3);
+            List<WidgetDtos.Point> points = w.series().getFirst().points();
+
+            assertThat(points.get(1).drillDown())
+                    .as("3–7 days old on D3 means reported between D3-7 and D3-3")
+                    .contains("reportedFrom=" + D3.minusDays(7))
+                    .contains("reportedTo=" + D3.minusDays(3))
+                    .contains("excludeClosed=true");
+
+            // The oldest bucket is open-ended: everything reported before D3-31,
+            // with no earlier bound to state.
+            assertThat(points.get(3).drillDown())
+                    .contains("reportedTo=" + D3.minusDays(31))
+                    .doesNotContain("reportedFrom=");
+        }
+
+        /**
+         * Anchored on the day the figures describe, not on the clock. The bar was
+         * measured at the end of `to`; resolving its window against "today" would
+         * open a list that no longer matches the bar that was clicked.
+         */
+        @Test
+        @DisplayName("the age window is anchored to the requested day, not to now")
+        void agingWindowAnchorsOnTheRequestedDay() {
+            String viaD3 = widget("PM", "aging-buckets", List.of(mine), D1, D3)
+                    .series().getFirst().points().getFirst().drillDown();
+            String viaD2 = widget("PM", "aging-buckets", List.of(mine), D1, D2)
+                    .series().getFirst().points().getFirst().drillDown();
+
+            assertThat(viaD3).contains("reportedTo=" + D3);
+            assertThat(viaD2).contains("reportedTo=" + D2);
         }
     }
 

@@ -215,7 +215,8 @@ class WidgetService {
         List<WidgetDtos.Point> reopened = new ArrayList<>(days.size());
 
         for (WidgetRepository.DailyFlow day : days) {
-            String window = "from=" + day.day() + "&to=" + day.day() + projectParam(projectId);
+            String window = "reportedFrom=" + day.day() + "&reportedTo=" + day.day()
+                    + projectParam(projectId);
             String label = day.day().toString();
             created.add(WidgetDtos.Point.of(label, day.created(), "/tickets?" + window));
             closed.add(WidgetDtos.Point.of(label, day.closed(),
@@ -353,18 +354,62 @@ class WidgetService {
         // between two loads of the same day. Labelling them the blueprint's way
         // over the schema's numbers would be the one genuinely dishonest option.
         //
-        // drillDown is null throughout: the ticket list has no age filter, and
-        // §S-05's own drill-down column asks for "age range". Inventing a
-        // parameter the list ignores would give a segment that opens a list
-        // contradicting it, which is worse than a segment that does not open.
+        // A-060 · these four now deep-link, and **no age filter was needed**.
+        //
+        // A-056 left them dead because §S-05 asks to drill into an "age range"
+        // and the list had nothing that expressed one. But age here is not an
+        // independent quantity: the worker derives every bucket from
+        // DATEDIFF(day, date_reported), so "open 3 to 7 days" *is* "still open,
+        // reported between day-7 and day-3". The reported-date window this task
+        // added for the date-scoped cards therefore answers the aging buckets
+        // as well, and a second parameter meaning the same thing in different
+        // units would have been two ways to ask one question — and two places
+        // for the bucket edges to disagree with the worker's.
+        //
+        // Anchored on `to`, the day the figures were computed for, not on
+        // today: the bar was measured at the end of that day, and resolving the
+        // window against a clock that has moved since would open a list that
+        // no longer matches the bar which was clicked.
         List<WidgetDtos.Point> points = List.of(
-                new WidgetDtos.Point("0–2 days", java.math.BigDecimal.valueOf(stock.aging02()), null),
-                new WidgetDtos.Point("3–7 days", java.math.BigDecimal.valueOf(stock.aging37()), null),
-                new WidgetDtos.Point("8–30 days", java.math.BigDecimal.valueOf(stock.aging830()), null),
-                new WidgetDtos.Point("31+ days", java.math.BigDecimal.valueOf(stock.aging31Plus()), null));
+                agingBucket("0–2 days", stock.aging02(), to, 0, 2, projectId),
+                agingBucket("3–7 days", stock.aging37(), to, 3, 7, projectId),
+                agingBucket("8–30 days", stock.aging830(), to, 8, 30, projectId),
+                // The open-ended bucket has no lower bound on the reported date
+                // — "31 days or older" is everything up to day-31, with nothing
+                // on the far side. Passing a `maxDays` of null rather than an
+                // arbitrary large number, so the URL says what it means.
+                agingBucket("31+ days", stock.aging31Plus(), to, 31, null, projectId));
 
         return WidgetDtos.Widget.of("aging-buckets", asOf,
                 List.of(new WidgetDtos.Series("Open by age", points)));
+    }
+
+    /**
+     * One aging bar, with its age range expressed as the reported-date window
+     * that produced it.
+     *
+     * <p>The arithmetic inverts the worker's. It counts a ticket into the
+     * {@code minDays}–{@code maxDays} bucket when
+     * {@code DATEDIFF(asOfDay, DATE(date_reported))} falls in that range, so the
+     * tickets in the bar are exactly those reported between
+     * {@code asOfDay - maxDays} and {@code asOfDay - minDays}. The older edge of
+     * the bucket is the <em>earlier</em> date, which is the inversion worth
+     * reading twice — getting it backwards yields a link that looks right and
+     * opens the opposite end of the distribution.
+     *
+     * @param maxDays null for the open-ended oldest bucket, which has no
+     *                earliest reported date to bound it.
+     */
+    private static WidgetDtos.Point agingBucket(String label, long value, LocalDate asOfDay,
+                                                int minDays, Integer maxDays, Long projectId) {
+        StringBuilder link = new StringBuilder("/tickets?excludeClosed=true");
+        if (maxDays != null) {
+            link.append("&reportedFrom=").append(asOfDay.minusDays(maxDays));
+        }
+        link.append("&reportedTo=").append(asOfDay.minusDays(minDays));
+        link.append(projectParam(projectId));
+
+        return WidgetDtos.Point.of(label, value, link.toString());
     }
 
     // ── widget 13 · calendar heatmap ─────────────────────────────────────────
@@ -405,7 +450,8 @@ class WidgetService {
             points = widgets.dailyFlow(from, to, scope.projectIds(), projectId).stream()
                     .map(day -> WidgetDtos.Point.of(
                             day.day().toString(), day.created(),
-                            "/tickets?from=" + day.day() + "&to=" + day.day() + projectParam(projectId)))
+                            "/tickets?reportedFrom=" + day.day() + "&reportedTo=" + day.day()
+                                    + projectParam(projectId)))
                     .toList();
         }
 
@@ -452,7 +498,7 @@ class WidgetService {
 
         WidgetRepository.SlaCompliance sla = compliance.get();
         long breached = sla.closed() - sla.met();
-        String window = "from=" + from + "&to=" + to + projectParam(projectId);
+        String window = "reportedFrom=" + from + "&reportedTo=" + to + projectParam(projectId);
 
         return WidgetDtos.Widget.of("sla-gauge", asOf, List.of(
                 new WidgetDtos.Series("Met", List.of(WidgetDtos.Point.of(

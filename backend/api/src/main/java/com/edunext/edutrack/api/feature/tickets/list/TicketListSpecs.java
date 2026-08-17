@@ -189,6 +189,14 @@ final class TicketListSpecs {
             before(and, cb, root, "plannedCloseDate", f.dueTo());
             atOrAfter(and, cb, root, "actualCloseDate", f.closedFrom());
             before(and, cb, root, "actualCloseDate", f.closedTo());
+            // A-060 · the third date window, and the one the dashboard has been
+            // emitting since A-055 with nothing here to receive it. Every card
+            // and chart segment that names a period names it over *when the
+            // ticket was raised*, which is what `daily_ticket_stats` is keyed
+            // by — so without this pair a drill-down opened the right filter
+            // over the wrong span: all time, silently.
+            atOrAfter(and, cb, root, "dateReported", f.reportedFrom());
+            before(and, cb, root, "dateReported", f.reportedTo());
 
             return and.isEmpty() ? null : cb.and(and.toArray(Predicate[]::new));
         };
@@ -240,6 +248,8 @@ final class TicketListSpecs {
             LocalDate dueFrom,
             LocalDate dueTo,
             LocalDate closedFrom,
-            LocalDate closedTo) {
+            LocalDate closedTo,
+            LocalDate reportedFrom,
+            LocalDate reportedTo) {
     }
 }

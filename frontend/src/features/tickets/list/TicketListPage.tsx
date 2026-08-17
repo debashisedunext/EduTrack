@@ -222,6 +222,12 @@ export function TicketListPage() {
       excludeClosed: filters.excludeClosed ?? undefined,
       closedFrom: filters.closedFrom ?? undefined,
       closedTo: filters.closedTo ?? undefined,
+      // A-060 · the window every dashboard deep-link names. Read from the URL
+      // like the rest, but with no control in the filter row: nothing on this
+      // screen sets it, and arriving with it already applied is the whole
+      // point of a drill-down.
+      reportedFrom: filters.reportedFrom ?? undefined,
+      reportedTo: filters.reportedTo ?? undefined,
     },
     { query: { placeholderData: keepPreviousData } },
   )
