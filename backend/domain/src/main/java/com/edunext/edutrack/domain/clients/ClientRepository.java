@@ -46,7 +46,16 @@ public interface ClientRepository extends JpaRepository<Client, Long> {
      * against {@code ACME} — and does it through {@code uq_clients_code} rather
      * than scanning, which wrapping the column in a function would prevent.
      * Codes come back in their stored case; the caller re-normalises.
+     *
+     * <p><b>B-034 widened this from a projection of the code to the whole
+     * row</b>, because blueprint §4B.3's step-4 table names the fields an update
+     * would change and that cannot be answered from a list of codes. It costs
+     * the entities rather than one column for the matched subset — bounded by
+     * the 5,000-row import cap and by how many of those codes exist, and the
+     * same order of memory as the staged sheet the caller is already holding.
+     * The caller reads them inside a read-only transaction and keeps only
+     * strings.
      */
-    @Query("select c.clientCode from Client c where c.clientCode in :codes")
-    List<String> findClientCodesIn(@Param("codes") Collection<String> codes);
+    @Query("select c from Client c where c.clientCode in :codes")
+    List<Client> findByClientCodeIn(@Param("codes") Collection<String> codes);
 }

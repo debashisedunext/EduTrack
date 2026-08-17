@@ -216,6 +216,102 @@ class ImportValidationEngineTest {
         }
     }
 
+    /**
+     * B-034 · blueprint §4B.3's Message column for an update — {@code Name,
+     * phone}.
+     *
+     * <p>The rest of this file is about which of four verdicts a row gets. This
+     * nested class is about the sentence next to one of them, and it earns its
+     * place because "will update" without it is a verdict a user cannot act on:
+     * a file correcting six phone numbers and a file overwriting every address
+     * in the account are the same word.
+     */
+    @Nested
+    class ChangedFields {
+
+        @Test
+        @DisplayName("an update names the fields that differ, in template order")
+        void namesTheChangedFields() {
+            TestImportSchema schema = new TestImportSchema()
+                    .holding("NORTHWIND", Map.of(
+                            "name", "Northwind Traders",
+                            "email", "old@example.com",
+                            "status", "ACTIVE"));
+
+            ImportPreview preview = engine.validate(schema, List.of(
+                    row(2, "code", "NORTHWIND",
+                            "name", "Northwind Trading Ltd",
+                            "email", "new@example.com",
+                            "status", "ACTIVE")));
+
+            // Headers, not field names — the user is reading this against their
+            // own spreadsheet. Template order, not the order the row happened to
+            // carry, so the same change reads the same way twice running.
+            assertThat(preview.rows()).singleElement()
+                    .extracting(ImportRowVerdict::reason).isEqualTo("Name, Email");
+        }
+
+        @Test
+        @DisplayName("a field the row does not carry is not a change — the commit leaves it alone")
+        void unmappedAndBlankFieldsAreNotChanges() {
+            // The rule ClientImportSchema#upsert enforces: only fields present
+            // in the row are written. Reporting the absent ones would promise an
+            // erasure the import will not perform, which is the single most
+            // alarming thing this message could get wrong.
+            TestImportSchema schema = new TestImportSchema()
+                    .holding("ACME", Map.of("name", "Acme", "email", "a@example.com"));
+
+            ImportPreview preview = engine.validate(schema, List.of(
+                    row(2, "code", "ACME", "name", "Acme Corporation")));
+
+            assertThat(preview.rows()).singleElement()
+                    .extracting(ImportRowVerdict::reason).isEqualTo("Name");
+        }
+
+        @Test
+        @DisplayName("the natural key is never listed, even when the case differs")
+        void theNaturalKeyIsNeverAChange() {
+            // The collation matched `acme` to `ACME` and the upsert leaves the
+            // stored spelling alone, so listing it would name a change that does
+            // not happen.
+            TestImportSchema schema = new TestImportSchema()
+                    .holding("ACME", Map.of("code", "ACME", "name", "Acme"));
+
+            ImportPreview preview = engine.validate(schema, List.of(
+                    row(2, "code", "acme", "name", "Acme")));
+
+            assertThat(preview.rows()).singleElement()
+                    .extracting(ImportRowVerdict::verdict, ImportRowVerdict::reason)
+                    .containsExactly(ImportVerdict.WILL_UPDATE, "No change");
+        }
+
+        @Test
+        @DisplayName("a value against a field that is currently empty is a change")
+        void fillingAnEmptyFieldIsAChange() {
+            TestImportSchema schema = new TestImportSchema()
+                    .holding("ACME", Map.of("name", "Acme"));
+
+            ImportPreview preview = engine.validate(schema, List.of(
+                    row(2, "code", "ACME", "name", "Acme", "email", "new@example.com")));
+
+            assertThat(preview.rows()).singleElement()
+                    .extracting(ImportRowVerdict::reason).isEqualTo("Email");
+        }
+
+        @Test
+        @DisplayName("a registration that supplies no values gets no message, not 'No change'")
+        void noValuesMeansNoClaim() {
+            // The empty map the SPI permits. "No change" would be a claim
+            // nothing checked, and the row is still an update either way.
+            ImportPreview preview = engine.validate(new TestImportSchema("ACME"), List.of(
+                    row(2, "code", "ACME", "name", "Anything At All")));
+
+            assertThat(preview.rows()).singleElement()
+                    .extracting(ImportRowVerdict::verdict, ImportRowVerdict::reason)
+                    .containsExactly(ImportVerdict.WILL_UPDATE, null);
+        }
+    }
+
     @Test
     @DisplayName("output keeps the file's row order, so it reads against the spreadsheet")
     void preservesRowOrder() {

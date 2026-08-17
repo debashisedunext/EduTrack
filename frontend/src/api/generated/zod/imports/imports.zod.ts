@@ -237,6 +237,13 @@ export const deleteImportMappingPresetParams = zod.object({
 update, duplicate within the file, or rejected with a reason — plus
 summary counts. This is the step that makes a bulk import safe to run.
 
+Idempotent and repeatable: the user may go back to step 3, change one
+column and run it again, so this takes the mapping in its own body
+rather than reading a parked server-side copy. It is a `POST` because
+the body is the mapping, not because anything changes.
+
+`master.write`, like every operation on this path.
+
  * @summary Step 4 — dry run
  */
 export const validateImportParams = zod.object({
@@ -245,22 +252,22 @@ export const validateImportParams = zod.object({
 
 export const validateImportBody = zod.object({
   "uploadId": zod.string().uuid(),
-  "sheet": zod.string().optional(),
-  "mapping": zod.record(zod.string(), zod.string()).describe('Target field → source column.')
+  "sheet": zod.string().optional().describe('Which sheet the caller believes it is validating. Optional, and a\ncross-check rather than a selector — the sheet was chosen at step 2\nand one `uploadId` stages exactly one sheet. Sent, it must agree with\nwhat is staged; a disagreement is `import-upload-unavailable` rather\nthan a silent preview of the other sheet.\n'),
+  "mapping": zod.record(zod.string(), zod.string()).describe('Target field → source column, the same shape and direction step 3\'s\npresets are stored in. Entries with a blank column are ignored, so\nan untouched `<select>` does not count as a mapping.\n')
 })
 
 export const validateImportResponse = zod.object({
   "data": zod.object({
-  "willCreate": zod.number().optional(),
-  "willUpdate": zod.number().optional(),
-  "duplicates": zod.number().optional(),
-  "rejected": zod.number().optional(),
+  "willCreate": zod.number(),
+  "willUpdate": zod.number(),
+  "duplicates": zod.number(),
+  "rejected": zod.number(),
   "rows": zod.array(zod.object({
-  "rowNumber": zod.number().optional(),
-  "verdict": zod.enum(['WILL_CREATE', 'WILL_UPDATE', 'DUPLICATE_IN_FILE', 'REJECTED']).optional(),
-  "reason": zod.string().nullish(),
-  "values": zod.record(zod.string(), zod.unknown()).optional()
-})).optional()
+  "rowNumber": zod.number().describe('The 1-based row in the source sheet, header included, so the first\ndata row is 2 — what Excel\'s own gutter shows. Carried from the\nparse rather than computed from position, because blank rows are\ndropped and a number the user cannot find in their file is worse\nthan no number.\n'),
+  "verdict": zod.enum(['WILL_CREATE', 'WILL_UPDATE', 'DUPLICATE_IN_FILE', 'REJECTED']),
+  "reason": zod.string().nullish().describe('§4B.3\'s Message column, and it says a different kind of thing per\nverdict. `REJECTED` — the first rule the row broke, in the user\'s\nwords. `DUPLICATE_IN_FILE` — which earlier row won. `WILL_UPDATE` —\n\*\*the fields this row would change\*\*, comma-separated in template\norder, or `No change`; that is what makes \"38 will update\"\nreviewable rather than alarming. `WILL_CREATE` — null, the em dash\nin the blueprint\'s mock-up.\n\nNull is also what a `WILL_UPDATE` carries when the registration\ncannot cheaply supply current values, so a client must render the\nabsence rather than assume nothing changes.\n'),
+  "values": zod.record(zod.string(), zod.string()).describe('The row as mapped, keyed by target field name — blank cells absent\nrather than empty. Enough to render the row the user is being asked\nabout without re-reading the file, and enough for B-036\'s error\nreport to re-emit it with a Reason column appended.\n')
+})).describe('Every row, in the file\'s own order — the user reads this against\ntheir spreadsheet. The counts are derived from this list rather\nthan accumulated beside it, so a summary that disagrees with the\ntable below it is not expressible.\n')
 })
 })
 

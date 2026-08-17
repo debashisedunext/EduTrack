@@ -229,6 +229,83 @@ export function rejectionReason(file: File): string | null {
   return null
 }
 
+// ── B-034 · step 4 ────────────────────────────────────────────────────────────
+
+/**
+ * The problem `type` URIs step 4 branches on.
+ *
+ * Four, not one, because each has a different remedy — and that is the whole
+ * reason the server gives them separate types rather than one `import-failed`
+ * (see `ImportExceptionHandler`). Collapsing them here would throw that away and
+ * leave the screen parsing English to decide which button to offer.
+ *
+ * `unknownField` is deliberately B-033's, shared with the preset save: to a user
+ * "this import has no such column" is one condition whichever request surfaced
+ * it.
+ */
+export const PREVIEW_PROBLEM = {
+  uploadUnavailable: 'import-upload-unavailable',
+  incompleteMapping: 'import-incomplete-mapping',
+  unknownColumn: 'import-unknown-column',
+  unknownField: 'import-unknown-field',
+} as const
+
+/**
+ * Which step the user has to go back to in order to fix a refusal.
+ *
+ * The interesting half of the response, and the reason this is a function rather
+ * than a message string: an expired upload is fixed at step 2 and a bad mapping
+ * at step 3, and a screen that says "something went wrong, try again" leaves the
+ * user pressing the same button.
+ */
+export type PreviewRemedy = 'upload' | 'mapping' | 'retry'
+
+export interface PreviewRefusal {
+  message: string
+  remedy: PreviewRemedy
+}
+
+/**
+ * A step-4 failure, in words the user can act on.
+ *
+ * Branches on `problem.type`, never on `title` or `detail` — CONVENTIONS.md §3
+ * makes the type the stable half and the prose the changeable one. `detail` is
+ * still what is shown where the server wrote something specific, because it
+ * names the actual columns; the type decides whether to trust it and where to
+ * send the user next.
+ */
+export function previewRefusal(error: unknown): PreviewRefusal {
+  if (!(error instanceof ApiError)) {
+    return {
+      message: 'The preview could not be run. Check your connection and try again.',
+      remedy: 'retry',
+    }
+  }
+
+  const detail = error.problem.detail
+  if (error.is(PREVIEW_PROBLEM.uploadUnavailable)) {
+    return { message: detail ?? error.problem.title, remedy: 'upload' }
+  }
+  if (
+    error.is(PREVIEW_PROBLEM.incompleteMapping) ||
+    error.is(PREVIEW_PROBLEM.unknownColumn) ||
+    error.is(PREVIEW_PROBLEM.unknownField)
+  ) {
+    return { message: detail ?? error.problem.title, remedy: 'mapping' }
+  }
+  if (error.status === 403) {
+    return {
+      message:
+        'You do not have permission to import clients. Importing is an administrator action.',
+      remedy: 'retry',
+    }
+  }
+  return {
+    message: `The preview could not be run (${error.status}${detail ? ` — ${detail}` : ''}). Nothing has been written.`,
+    remedy: 'retry',
+  }
+}
+
 export function formatBytes(bytes: number): string {
   return bytes >= 1024 * 1024
     ? `${(bytes / 1024 / 1024).toFixed(1)} MB`

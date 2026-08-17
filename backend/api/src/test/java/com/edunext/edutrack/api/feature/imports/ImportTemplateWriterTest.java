@@ -306,7 +306,8 @@ class ImportTemplateWriterTest {
         }
 
         @Override
-        public Set<String> findExisting(Set<String> naturalKeyValues) {
+        public java.util.Map<String, java.util.Map<String, String>> findExisting(
+                Set<String> naturalKeyValues) {
             throw new AssertionError("The template writer read the database.");
         }
 

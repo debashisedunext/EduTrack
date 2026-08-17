@@ -35,7 +35,8 @@ import java.util.Set;
  *       wins, later ones are {@link ImportVerdict#DUPLICATE_IN_FILE} naming the
  *       winner, exactly as blueprint §4B.3's table shows ("Row 2 wins").
  *   <li><b>The file against the table</b> — one batched probe decides
- *       {@link ImportVerdict#WILL_UPDATE} versus {@link ImportVerdict#WILL_CREATE}.
+ *       {@link ImportVerdict#WILL_UPDATE} versus {@link ImportVerdict#WILL_CREATE},
+ *       and for an update names the fields that would change.
  * </ol>
  */
 @Component
@@ -85,7 +86,7 @@ public class ImportValidationEngine {
 
         // Pass 2 — one query for up to 5,000 keys. Asked per row this is 5,000
         // round trips per dry run, and the dry run is the step users repeat.
-        Set<String> existing = schema.findExisting(keysToProbe);
+        Map<String, Map<String, String>> existing = schema.findExisting(keysToProbe);
 
         List<ImportRowVerdict> settled = new ArrayList<>(verdicts.size());
         for (ImportRowVerdict verdict : verdicts) {
@@ -94,12 +95,66 @@ public class ImportValidationEngine {
                 continue;
             }
             String key = schema.normaliseKey(verdict.values().get(keyField));
-            settled.add(existing.contains(key)
-                    ? new ImportRowVerdict(verdict.rowNumber(), ImportVerdict.WILL_UPDATE,
-                            null, verdict.values())
-                    : verdict);
+            Map<String, String> stored = existing.get(key);
+            settled.add(stored == null
+                    ? verdict
+                    : new ImportRowVerdict(verdict.rowNumber(), ImportVerdict.WILL_UPDATE,
+                            changeSummary(verdict.values(), stored, fields, keyField),
+                            verdict.values()));
         }
         return ImportPreview.of(settled);
+    }
+
+    /**
+     * Blueprint §4B.3's Message column for an update — {@code "Name, Phone"}.
+     *
+     * <p>The one thing that makes "38 will update" reviewable. Approving a bulk
+     * import means approving what it changes, and a verdict that says only
+     * <i>update</i> leaves the user to take that on trust: a file correcting six
+     * phone numbers and a file overwriting every address in the account produce
+     * the same word.
+     *
+     * <p><b>Only fields the row actually carries are compared</b>, because those
+     * are the only fields a commit writes — {@link ImportSchemaDefinition#upsert}
+     * leaves a stored value alone where the cell is blank or the column
+     * unmapped. Comparing the absent ones would report an erasure the import
+     * will not perform.
+     *
+     * <p><b>The natural key is excluded.</b> It is how the row was matched, so it
+     * is equal by construction — except in case, where the collation matched
+     * {@code acme} to {@code ACME} and the upsert leaves the stored spelling
+     * alone. Listing it would say a field changes that does not.
+     *
+     * <p>Headers rather than field names, in template order, so the message
+     * names the columns the user is looking at in their own spreadsheet.
+     *
+     * @param stored may be empty — a registration that cannot cheaply supply
+     *               current values. {@code null} is then returned rather than
+     *               "No change", which would be a claim nothing checked
+     */
+    private static String changeSummary(Map<String, String> incoming,
+                                        Map<String, String> stored,
+                                        List<ImportField> fields,
+                                        String keyField) {
+        if (stored.isEmpty()) {
+            return null;
+        }
+
+        List<String> changed = new ArrayList<>();
+        for (ImportField field : fields) {
+            if (field.name().equals(keyField)) {
+                continue;
+            }
+            String value = incoming.get(field.name());
+            if (value != null && !value.equals(stored.get(field.name()))) {
+                changed.add(field.header());
+            }
+        }
+
+        // A row that matches what is stored is still an update — the commit
+        // upserts it — and saying so is worth a word. Silence here reads as a
+        // change nobody could name, which is the more alarming of the two.
+        return changed.isEmpty() ? "No change" : String.join(", ", changed);
     }
 
     /**

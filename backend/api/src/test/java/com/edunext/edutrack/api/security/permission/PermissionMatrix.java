@@ -375,6 +375,24 @@ final class PermissionMatrix {
     private static final String MAPPING_PRESET = """
             {"name":"CRM export","mapping":{"clientCode":"Code"}}""";
 
+    /**
+     * B-034 · {@code ImportDtos.ValidateRequest}.
+     *
+     * <p>{@code uploadId} is {@code @NotNull} and {@code mapping} is
+     * {@code @NotEmpty}, so both have to be here or the request fails validation
+     * before authorisation and every row asserts nothing.
+     *
+     * <p>The id names no staged upload, and that is fine — unlike the preset body
+     * above, an allowed caller does not have to reach a 2xx. It reaches the
+     * handler, which answers 422 (`import-upload-unavailable`), and the suite
+     * counts anything that is not a 403 as having got past the guard. A real
+     * staged upload cannot be arranged from here anyway: staging is per-instance
+     * heap and this context has no upload in it.
+     */
+    private static final String IMPORT_VALIDATE = """
+            {"uploadId":"11111111-2222-3333-4444-555555555555",\
+            "mapping":{"clientCode":"Code"}}""";
+
     /** {@code StatusRequest}: isActive is boxed so omitting it is a 400. */
     private static final String USER_STATUS = """
             {"isActive":false}""";
@@ -1054,6 +1072,17 @@ final class PermissionMatrix {
             adminOnly("GET", "/api/v1/imports/{schema}/mapping-presets"),
             adminOnly("POST", "/api/v1/imports/{schema}/mapping-presets", MAPPING_PRESET),
             adminOnly("DELETE", "/api/v1/imports/{schema}/mapping-presets/{presetId}"),
+
+            // B-034 · step 4, the dry run. Admin's on the same argument as the
+            // four above, with one thing worth stating: this route *writes
+            // nothing*, so the usual "it is a bulk write to the client master"
+            // reasoning does not apply to it directly. What it does is read the
+            // caller's own staged file and report what a commit would do — a
+            // preview of a capability, and a preview of an Admin-only capability
+            // is not a wider one. It also names, for every client code in the
+            // file, whether that client exists and what is currently stored in
+            // it, which is a read of the client master by any other name.
+            adminOnly("POST", "/api/v1/imports/{schema}/validate", IMPORT_VALIDATE),
 
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack

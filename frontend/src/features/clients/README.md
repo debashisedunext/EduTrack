@@ -115,20 +115,22 @@ Two consequences the tests pin:
 - **A delete button.** Tickets, contacts and project mappings all point at
   `clients`. Going away is the status control on the grid.
 
-## What is here (B-031, B-032, B-033 · S-34's first three steps)
+## What is here (B-031…B-034 · S-34's first four steps)
 
 | File | What it is |
 |---|---|
-| `import/ClientImportPage.tsx` | The wizard at `/masters/clients/import` — five steps named, steps 1 to 3 working |
+| `import/ClientImportPage.tsx` | The wizard at `/masters/clients/import` — five steps named, steps 1 to 4 working |
 | `import/UploadDropzone.tsx` | §4B.3's drag-drop and file picker |
-| `import/importQueries.ts` | The template download, the pre-flight check, and the upload |
+| `import/importQueries.ts` | The template download, the pre-flight check, the upload, and step 4's refusals |
 | `import/MappingStep.tsx` | B-033 · step 3's table — one row per column the import accepts |
 | `import/MappingPresets.tsx` | B-033 · §4B.3's saveable presets, and what applying one could not place |
 | `import/columnMapping.ts` | B-033 · step 3's rules as pure functions |
+| `import/ValidationStep.tsx` | B-034 · step 4's summary and per-row table — the dry run |
+| `import/validationPreview.ts` | B-034 · step 4's rules as pure functions |
 
-**Steps 4 and 5 are on screen and disabled, not hidden.** Hiding them would make
-the page look finished and leave the user to find out at the end of step 3 that
-there is no step 4 — and it would drop §4B.3's actual promise, which is that
+**Step 5 is on screen and disabled, not hidden.** Hiding it would make the page
+look finished and leave the user to find out at the end of step 4 that
+there is no step 5 — and it would drop §4B.3's actual promise, which is that
 nothing is written until a per-row preview has been seen. That promise is the
 reason this is a five-step wizard rather than one upload button, and it is worth
 making before somebody starts typing four hundred rows.
@@ -253,6 +255,57 @@ anyway, because `Account Manager` is the live case: `ClientImportSchema`
 deliberately has no column for it (a foreign key, and a spreadsheet carries only a
 name), so somebody who filled it in learns that now rather than after the commit.
 
+### B-034 · step 4 is the screen the wizard exists for
+
+§4B.3 opens with the reason it has five steps rather than one upload button: *"a
+silent bulk import that half-succeeds is worse than no import at all"*. Steps 1
+to 3 are preparation. This is where four hundred rows are shown to somebody and
+they are asked to agree, so everything on it is arranged around making that
+answerable rather than merely visible.
+
+**"Nothing has been written" is stated twice, not implied.** The user cannot
+verify it, the earlier steps have all promised it, and dropping it at the point
+it matters most would read as it having quietly stopped being true. It is also
+the last line of every refusal.
+
+**The number that decides the commit is on none of the four tiles.** Blueprint
+§4B.3's summary is "412 create · 38 update · 6 rejected · 2 duplicates", and step
+5's offer is "import valid rows only" — which is creates *plus* updates.
+Reaching for `willCreate` is the natural mistake and it silently offers to import
+zero rows out of a file of four hundred corrections, so `writableCount` says it
+out loud in its own sentence.
+
+**An update with no change list does not read as "no change".** The server sends
+the fields an update would alter (`Name, Phone`) and `No change` where nothing
+differs — but `null` where the registration could not supply current values, and
+those are three different facts. An em dash for the third would turn a missing
+answer into a reassuring one, so it renders as *changed fields not available*.
+
+**A duplicate is labelled as a duplicate, in words.** Nothing is wrong with the
+row's content, and calling it rejected sends the user looking for a fault that is
+not there. The distinction has to survive into text rather than living only in
+the chip's colour.
+
+**Rows are paged at fifty, never capped.** Every row is in the response — a
+server-side cap would mean a preview that quietly describes part of what the
+commit will write, which is the one thing this step exists to prevent — and the
+filter tabs are what actually get the user to the six bad rows out of four
+hundred. A tab with nothing behind it is disabled rather than hidden, so a clean
+file still says "0 rejected" and two runs stay comparable.
+
+**A stale preview is the worst thing this screen could leave up.** It is a
+statement about one file, one sheet and one mapping; after the user goes back and
+changes a column the numbers are specific, authoritative and about a run that will
+not happen. So going back to mapping drops it, and so does every path that touches
+the upload. A server *refusal* is cleared on the next keystroke in the mapping
+table for the same reason.
+
+**Refusals name the step that fixes them.** The server gives step 4 four problem
+types rather than one precisely because the remedies differ — an expired upload is
+fixed at step 2, a bad mapping at step 3 — and "something went wrong, try again"
+would leave the user pressing the same button on an upload that expired half an
+hour ago.
+
 ## What is not here yet
 
 - **B-028's gate refused by a *server*.** B-028 landed the rest of it: the S-19
@@ -269,12 +322,12 @@ name), so somebody who filled it in learns that now rather than after the commit
 - **B-029** — deactivating blocks *new* tickets. That rule lives on the same
   path, alongside B-028's, and is flagged in the same place; S-32 only warns,
   with the count.
-- **B-034…B-038** — the rest of the Excel wizard. B-031 landed the route, the
+- **B-035…B-038** — the rest of the Excel wizard. B-031 landed the route, the
   step rail and the template download; B-032 the upload, the sheet selector and
   the columns-found summary; B-033 the mapping table, the presets and §4B.3's gate
-  on Next. The dry run and the commit are still to come, and the screen says so
-  where step 3's Continue button is — together with the sentence that matters most
-  at that moment: *the mapping is complete, and nothing has been written*.
+  on Next; B-034 the dry run. The commit is still to come, and the screen says so
+  on step 4's Import button — together with the sentence that matters most at that
+  moment: *nothing has been written, and no client has changed*.
 
 ## Two things that look like inconsistencies and are not
 

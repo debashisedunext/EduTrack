@@ -60,6 +60,23 @@ class ImportExceptionHandler {
     private static final URI VALIDATION_FAILED = URI.create("https://edutrack/errors/validation-failed");
 
     /**
+     * B-034's three, and the split is by <b>remedy</b> rather than by cause.
+     *
+     * <p>All three are 422 and all three mean "the request refers to something
+     * that is not there", so a single type would be defensible on the status
+     * alone. It would also make step 4 parse English to decide between the only
+     * three sentences it can usefully say: upload the file again, map the
+     * missing column, or fix the mapping that names a column your sheet does not
+     * have. Those are three different buttons.
+     */
+    private static final URI UPLOAD_UNAVAILABLE =
+            URI.create("https://edutrack/errors/import-upload-unavailable");
+    private static final URI INCOMPLETE_MAPPING =
+            URI.create("https://edutrack/errors/import-incomplete-mapping");
+    private static final URI UNKNOWN_COLUMN =
+            URI.create("https://edutrack/errors/import-unknown-column");
+
+    /**
      * 404, because {@code schema} is a path segment.
      *
      * <p>An unregistered key does not make the request malformed — it makes the
@@ -244,6 +261,77 @@ class ImportExceptionHandler {
         problem.setProperty("errors", java.util.Map.of("mapping", new String[]{e.getMessage()}));
 
         return problem(HttpStatus.BAD_REQUEST, problem);
+    }
+
+    /**
+     * B-034 · 422 when the staged upload the dry run names is not there.
+     *
+     * <p>Expired, or holding a different sheet — one condition, because the
+     * remedy is one action. {@code stagedSheet} is present only for the second,
+     * and is what lets the screen say which sheet it would have read instead of
+     * only that something disagreed.
+     *
+     * <p>Not a 404: the id is in the body rather than the path, and the path's
+     * own 404 means something else entirely (no such schema). Two 404s with
+     * different remedies on one route is how a client ends up branching on
+     * prose.
+     */
+    @ExceptionHandler(ImportUploadNotAvailableException.class)
+    ResponseEntity<ProblemDetail> handleUploadUnavailable(ImportUploadNotAvailableException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(UPLOAD_UNAVAILABLE);
+        problem.setTitle("Uploaded file is no longer available");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("uploadId", e.uploadId());
+        if (e.stagedSheet() != null) {
+            problem.setProperty("sheet", e.stagedSheet());
+            problem.setProperty("requestedSheet", e.requestedSheet());
+        }
+
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
+    }
+
+    /**
+     * B-034 · 422 when a required column has no column mapped to it.
+     *
+     * <p>Both lists go on the body — the field names for a client that wants to
+     * highlight its own rows, the headers for the sentence it writes. Step 3's
+     * table is keyed by field name and its warning is written in headers, and
+     * deriving one from the other means shipping a copy of the schema to do it.
+     */
+    @ExceptionHandler(IncompleteMappingException.class)
+    ResponseEntity<ProblemDetail> handleIncompleteMapping(IncompleteMappingException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(INCOMPLETE_MAPPING);
+        problem.setTitle("Required columns are not mapped");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("schema", e.schemaKey());
+        problem.setProperty("missingFields", e.missingFields());
+        problem.setProperty("missingHeaders", e.missingHeaders());
+
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
+    }
+
+    /**
+     * B-034 · 422 when the mapping reads a column the sheet does not have.
+     *
+     * <p>The sheet's own headings are on the body for
+     * {@link UnknownImportFieldException}'s reason: the realistic cause is a
+     * preset saved against a renamed export, so the useful response is the list
+     * to choose the right column from, not an instruction to go and compare two
+     * lists by eye.
+     */
+    @ExceptionHandler(UnknownSourceColumnException.class)
+    ResponseEntity<ProblemDetail> handleUnknownColumn(UnknownSourceColumnException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(UNKNOWN_COLUMN);
+        problem.setTitle("Unknown column in the mapping");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("sheet", e.sheet());
+        problem.setProperty("unknownColumns", e.unknownColumns());
+        problem.setProperty("headers", e.headers());
+
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
     }
 
     /** The content type is stated on every one of these, for the reason given above. */
