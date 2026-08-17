@@ -19,6 +19,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -98,17 +99,34 @@ class SlaScannerIT {
     private long projectManager;
     private long projectId;
 
+    /** This test's run number. Ticket codes carry it, because they are unique. */
+    private int run;
+
+    /**
+     * <p><strong>Tickets are retired, not deleted, from D-028 onward.</strong>
+     * An escalation now appends to {@code ticket_history}, A-008's triggers
+     * refuse to delete a history row, and {@code fk_history_ticket} has no
+     * cascade — so {@code DELETE FROM tickets} stops being possible the moment
+     * this fixture escalates anything. That is the immutability guarantee
+     * working, not an obstacle to route around, so nothing here tries to.
+     *
+     * <p>Retiring the previous run's rows is equivalent for what this IT asks.
+     * The scan window is {@code pcd_open < now AND is_delayed = 0}, so a row
+     * flagged delayed is outside it exactly as a deleted row was — while
+     * {@code tickets} itself stays freely writable, being no part of the
+     * append-only set.
+     */
     @BeforeEach
     void seed() {
         jdbc.update("DELETE FROM notifications");
         jdbc.update("DELETE FROM email_log");
-        jdbc.update("DELETE FROM tickets");
+        jdbc.update("UPDATE tickets SET is_delayed = 1 WHERE is_delayed = 0");
 
-        int n = SEQ.incrementAndGet();
-        manager = insertUser("rm" + n, null);
-        assignee = insertUser("dev" + n, manager);
-        projectManager = insertUser("pm" + n, null);
-        projectId = insertProject("P" + n, projectManager);
+        run = SEQ.incrementAndGet();
+        manager = insertUser("rm" + run, null);
+        assignee = insertUser("dev" + run, manager);
+        projectManager = insertUser("pm" + run, null);
+        projectId = insertProject("P" + run, projectManager);
     }
 
     // ------------------------------------------------------------ detection
@@ -160,6 +178,82 @@ class SlaScannerIT {
 
         // Otherwise every fifteen minutes, forever, until somebody closes it.
         assertThat(countNotifications()).isEqualTo(notificationsAfterFirst);
+    }
+
+    // ------------------------------------------------- D-028 · the record of it
+
+    @Test
+    @DisplayName("D-028: the escalation is recorded in history, attributed to nobody")
+    void theEscalationIsRecordedAsSystem() {
+        long id = insertTicket("overdue", NOW.minusSeconds(3600), "HIGH");
+
+        scanner.scanOnce();
+
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT * FROM ticket_history WHERE ticket_id = ? AND event_type = 'LEVEL_CHANGED'", id);
+
+        assertThat(row.get("field_name")).isEqualTo("level");
+        assertThat(row.get("old_value")).isEqualTo("HIGH");
+        assertThat(row.get("new_value")).isEqualTo("CRITICAL");
+
+        // The pair that must agree. A human name against an automated
+        // escalation is the one shape of history that reads plausibly and is
+        // false — nobody decided this, a scanner did.
+        assertThat(row.get("actor_type")).isEqualTo("SYSTEM");
+        assertThat(row.get("actor_id")).isNull();
+
+        // History is read back per cycle, so a row on the wrong one — or on
+        // none — is invisible to the timeline that ought to show it.
+        assertThat(((Number) row.get("cycle_no")).intValue())
+                .isEqualTo(jdbc.queryForObject(
+                        "SELECT current_cycle_no FROM tickets WHERE id = ?", Integer.class, id));
+    }
+
+    @Test
+    @DisplayName("D-028: original_level survives, so \"born critical\" stays distinguishable")
+    void originalLevelSurvivesTheEscalation() {
+        long id = insertTicket("overdue", NOW.minusSeconds(3600), "LOW");
+
+        scanner.scanOnce();
+
+        // The whole point of the column, and the whole point of A-070's report.
+        // Raising both would leave the ticket perfectly self-consistent and the
+        // question permanently unanswerable — which is why this is asserted
+        // rather than left to the ESCALATE statement's comment.
+        assertThat(levelOf(id)).isEqualTo("CRITICAL");
+        assertThat(jdbc.queryForObject(
+                "SELECT original_level FROM tickets WHERE id = ?", String.class, id))
+                .isEqualTo("LOW");
+    }
+
+    @Test
+    @DisplayName("D-028: a ticket escalated once carries exactly one such row")
+    void theHistoryRowIsWrittenOnce() {
+        long id = insertTicket("overdue", NOW.minusSeconds(3600), "HIGH");
+
+        scanner.scanOnce();
+        scanner.scanOnce();
+
+        // The second pass never claims the ticket, so it must never append
+        // either. A history table that grows one row per scan every fifteen
+        // minutes is worse than useless: it is unreadable, and it cannot be
+        // cleaned up afterwards.
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ticket_history WHERE ticket_id = ? AND event_type = 'LEVEL_CHANGED'",
+                Integer.class, id))
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("D-028: a ticket that was never escalated has no level history")
+    void anUnescalatedTicketRecordsNothing() {
+        long id = insertTicket("in-time", NOW.plusSeconds(3600), "HIGH");
+
+        scanner.scanOnce();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ticket_history WHERE ticket_id = ?", Integer.class, id))
+                .isZero();
     }
 
     // ----------------------------------------------------------- who is told
@@ -216,7 +310,11 @@ class SlaScannerIT {
         List<String> subjects = jdbc.queryForList(
                 "SELECT subject FROM email_log WHERE ticket_id = ?", String.class, id);
         assertThat(subjects).hasSize(3);
-        assertThat(subjects).allSatisfy(s -> assertThat(s).startsWith("[overdue]"));
+        // Read the code back rather than repeating the fixture's nickname:
+        // ticket_code carries a run suffix now that rows outlive their test.
+        String code = jdbc.queryForObject(
+                "SELECT ticket_code FROM tickets WHERE id = ?", String.class, id);
+        assertThat(subjects).allSatisfy(s -> assertThat(s).startsWith("[" + code + "]"));
     }
 
     @Test
@@ -320,13 +418,16 @@ class SlaScannerIT {
 
     private long insertTicketOn(long project, String code, Instant plannedClose,
                                 String level, Long assignedTo) {
+        // Suffixed with the run number: ticket_code is unique and rows now
+        // outlive the test that made them, so "overdue" cannot be reused as-is.
+        String uniqueCode = code + "-" + run;
         jdbc.update("""
                 INSERT INTO tickets (ticket_code, project_id, title, task_type_id, level,
                                      original_level, status, current_stage, reported_by,
                                      assigned_to, planned_close_date, date_reported)
                 SELECT ?, ?, ?, MIN(tt.id), ?, ?, 'OPEN', 'DEVELOPMENT', ?, ?, ?, ?
                   FROM task_types tt
-                """, code, project, "SLA fixture " + code, level, level,
+                """, uniqueCode, project, "SLA fixture " + code, level, level,
                 projectManager, assignedTo,
                 java.sql.Timestamp.from(plannedClose),
                 java.sql.Timestamp.from(NOW.minusSeconds(864000)));

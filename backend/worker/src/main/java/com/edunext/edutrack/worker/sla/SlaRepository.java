@@ -29,6 +29,7 @@ class SlaRepository {
      */
     private static final String BREACHED = """
             SELECT t.id, t.ticket_code, t.title, t.level, t.task_type_id AS taskTypeId,
+                   t.current_cycle_no AS currentCycleNo,
                    t.pcd_open AS plannedCloseDate,
                    t.project_id AS projectId, p.name AS projectName,
                    t.assigned_to AS assignedTo, p.manager_id AS projectManagerId,
@@ -125,6 +126,17 @@ class SlaRepository {
             String ticketCode,
             String title,
             String level,
+            /**
+             * D-028 · which cycle the escalation belongs to.
+             *
+             * <p>Read here rather than looked up when the history row is
+             * written, because it must be the cycle the ticket was in when the
+             * breach was detected. History is read back per cycle
+             * ({@code TicketJournal.historyFor(ticketId, cycleNo)}), so a row
+             * carrying the wrong cycle — or none — is invisible to the timeline
+             * that should show it.
+             */
+            short currentCycleNo,
             Integer taskTypeId,
             Timestamp plannedCloseDate,
             long projectId,
