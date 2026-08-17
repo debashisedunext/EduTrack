@@ -3,7 +3,20 @@ import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import { AuthProvider } from './features/auth/AuthProvider'
+import { applyTheme, useThemeStore } from './app/theme/themeStore'
 import './styles/tokens.css'
+
+/*
+  D-15 · normally a no-op: index.html's inline script has already put the class
+  on <html> before this bundle was fetched, which is what avoids a flash of the
+  light theme.
+
+  Kept anyway because the inline script belongs to *that* HTML file, and the app
+  is mounted from more than one page — Storybook builds its own preview shell,
+  and any future host would too. Reconciling here means the document always
+  agrees with the store, whoever served the HTML.
+*/
+applyTheme(useThemeStore.getState().theme)
 
 /**
  * Start the mock API before the app renders.
