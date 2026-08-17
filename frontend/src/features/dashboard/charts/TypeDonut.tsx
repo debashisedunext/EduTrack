@@ -19,7 +19,7 @@ import { useDrillDown } from './useDrillDown'
  * there are no zero-width arcs with legend entries against them.
  */
 export function TypeDonut({ series }: { series: WidgetSeries[] }) {
-  const drillDown = useDrillDown()
+  const drillDown = useDrillDown('Task type')
   const points = series[0]?.points ?? []
 
   return (

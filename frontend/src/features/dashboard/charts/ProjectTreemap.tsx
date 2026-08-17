@@ -72,7 +72,7 @@ function Tile({ x = 0, y = 0, width = 0, height = 0, index = 0, name, value, dri
 }
 
 export function ProjectTreemap({ series }: { series: WidgetSeries[] }) {
-  const drillDown = useDrillDown()
+  const drillDown = useDrillDown('Project distribution')
   const points = series[0]?.points ?? []
 
   const data = points.map((point) => ({

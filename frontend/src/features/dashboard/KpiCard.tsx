@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 import { Sparkline } from './Sparkline'
 import { useCountUp } from './useCountUp'
+import { useDrillDownStore } from './drillDownStore'
 
 /**
  * A-055 · widgets 1–6 of §S-05.
@@ -52,10 +53,33 @@ export function KpiCard({
 }: KpiCardProps) {
   const shown = useCountUp(value)
   const accent = TONE_ACCENT[tone]
+  const openPanel = useDrillDownStore((s) => s.open)
 
   return (
     <Link
       to={drillDown}
+      /**
+       * A-061 · a plain click opens §S-06's panel; anything else still navigates.
+       *
+       * The card stays an anchor. A-055 chose one over a clickable div for three
+       * things a div silently removes — keyboard reach, the announced role, and
+       * open-in-new-tab — and swapping to a button now to get a modal would
+       * trade all three away for it.
+       *
+       * So the modifier and middle-click paths are left alone deliberately:
+       * ctrl/cmd-click, shift-click and middle-click are how people open a
+       * ticket list in a second tab, and intercepting them would break a
+       * browser affordance nobody expects an app to take. Only the unmodified
+       * primary click — the one that means "show me" rather than "take me
+       * there" — is turned into the panel.
+       */
+      onClick={(event) => {
+        if (event.defaultPrevented) return
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+        if (event.button !== 0) return
+        event.preventDefault()
+        openPanel(drillDown, label)
+      }}
       className="rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-4
                  flex flex-col gap-2 transition-shadow hover:shadow-sm
                  focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2

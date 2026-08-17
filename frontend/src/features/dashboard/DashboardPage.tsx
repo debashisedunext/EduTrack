@@ -7,6 +7,7 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 
 import { DashboardDateRange, type DateRange } from './DashboardDateRange'
 import { DashboardWidgets } from './DashboardWidgets'
+import { DrillDownPanel } from './DrillDownPanel'
 import { KpiCard, KpiCardSkeleton } from './KpiCard'
 import { useDashboardFilters } from './useDashboardFilters'
 
@@ -151,6 +152,12 @@ export function DashboardPage() {
           ...(range.to ? { to: range.to } : {}),
         }}
       />
+
+      {/* A-061 · §S-06. Mounted once for the whole screen rather than per
+          widget: it is a single panel showing whichever drill-down was last
+          opened, and twenty mounted dialogs would be twenty focus traps
+          competing for the same Escape key. */}
+      <DrillDownPanel />
     </div>
   )
 }

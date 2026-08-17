@@ -1,5 +1,6 @@
-import { useNavigate } from 'react-router-dom'
 import * as React from 'react'
+
+import { useDrillDownStore } from '../drillDownStore'
 
 /**
  * A-056 · §S-05's rule, applied to chart segments.
@@ -28,16 +29,21 @@ import * as React from 'react'
  * legend beneath it, which is built from real `<button>`s. Click-through on the
  * drawing is a convenience for pointer users, never the only way in.
  */
-export function useDrillDown() {
-  const navigate = useNavigate()
+export function useDrillDown(title?: string) {
+  const open = useDrillDownStore((s) => s.open)
 
   return React.useCallback(
-    (drillDown: string | null | undefined) => {
+    (drillDown: string | null | undefined, label?: string) => {
       if (!drillDown) {
         return
       }
-      navigate(drillDown)
+      // A-061 · the panel, not a navigation. §S-06 asks for the filtered grid
+      // beside the chart rather than instead of it — checking *which* eleven
+      // tickets is a glance, and a full page load costs the reader the place
+      // they were scanning. "Open full list" inside the panel is the
+      // navigation, for when the glance turns out to be a destination.
+      open(drillDown, label ?? title ?? 'Filtered tickets')
     },
-    [navigate],
+    [open, title],
   )
 }

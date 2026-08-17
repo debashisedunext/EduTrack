@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CalendarHeatmap } from './CalendarHeatmap'
 import { ProjectTreemap } from './ProjectTreemap'
 import { SlaGauge } from './SlaGauge'
+import { useDrillDownStore } from '../drillDownStore'
 
 /**
  * A-057 · widgets 13–15.
@@ -25,7 +26,10 @@ vi.mock('react-router-dom', async () => {
 
 const wrap = (ui: React.ReactNode) => render(<MemoryRouter>{ui}</MemoryRouter>)
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  useDrillDownStore.setState({ drillDown: null, title: '' })
+})
 
 describe('CalendarHeatmap', () => {
   const series = [
@@ -77,7 +81,9 @@ describe('CalendarHeatmap', () => {
 
     await userEvent.click(container.querySelectorAll('rect')[2])
 
-    expect(navigate).toHaveBeenCalledWith('/tickets?from=2026-08-14&to=2026-08-14')
+    // A-061 · opens §S-06's panel now, not a navigation. What is asserted is
+    // still that the *day clicked* is the day fetched.
+    expect(useDrillDownStore.getState().drillDown).toBe('/tickets?from=2026-08-14&to=2026-08-14')
   })
 })
 
@@ -115,7 +121,7 @@ describe('SlaGauge', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /^Breached: 4\./ }))
 
-    expect(navigate).toHaveBeenCalledWith('/tickets?isDelayed=true')
+    expect(useDrillDownStore.getState().drillDown).toBe('/tickets?isDelayed=true')
   })
 })
 
@@ -142,7 +148,7 @@ describe('ProjectTreemap', () => {
     expect(within(legend).getAllByRole('button')).toHaveLength(2)
 
     await userEvent.click(within(legend).getByRole('button', { name: /^Apollo: 40\./ }))
-    expect(navigate).toHaveBeenCalledWith('/tickets?projectId=1&excludeClosed=true')
+    expect(useDrillDownStore.getState().drillDown).toBe('/tickets?projectId=1&excludeClosed=true')
   })
 
   it('names each project with its open count in the accessible name', () => {

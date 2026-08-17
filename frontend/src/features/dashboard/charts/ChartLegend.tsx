@@ -23,7 +23,14 @@ export interface ChartLegendEntry {
 
 export interface ChartLegendProps {
   entries: ChartLegendEntry[]
-  onSelect: (drillDown: string | null) => void
+  /**
+   * A-061 · the entry's own label rides along, so §S-06's panel can head itself
+   * with what was actually clicked — "Critical" rather than the widget's name.
+   * The drill-down string alone cannot supply that: it is a filter, and
+   * reverse-engineering a heading from query parameters is how a panel comes to
+   * describe something subtly different from the segment that opened it.
+   */
+  onSelect: (drillDown: string | null, label?: string) => void
   /** Names what the entries are, for the group's accessible name. */
   label: string
 }
@@ -41,7 +48,7 @@ export function ChartLegend({ entries, onSelect, label }: ChartLegendProps) {
           {entry.drillDown ? (
             <button
               type="button"
-              onClick={() => onSelect(entry.drillDown)}
+              onClick={() => onSelect(entry.drillDown, entry.label)}
               className="text-[color:var(--text-secondary)] underline-offset-2 hover:underline
                          focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
                          focus-visible:outline-[color:var(--primary)] rounded-sm"

@@ -32,7 +32,7 @@ import { useDrillDown } from './useDrillDown'
  * direction is not judgement; here, a breach is.
  */
 export function SlaGauge({ series }: { series: WidgetSeries[] }) {
-  const drillDown = useDrillDown()
+  const drillDown = useDrillDown('SLA compliance')
 
   const met = series.find((s) => s.name === 'Met')?.points[0]
   const breached = series.find((s) => s.name === 'Breached')?.points[0]

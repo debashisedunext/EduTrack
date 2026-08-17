@@ -24,7 +24,7 @@ import { mergeByCategory } from './mergeByCategory'
  * sparklines made the same choice for the same reason.
  */
 export function DailyStackedArea({ series }: { series: WidgetSeries[] }) {
-  const drillDown = useDrillDown()
+  const drillDown = useDrillDown('Daily task status')
   const rows = mergeByCategory(series)
 
   return (

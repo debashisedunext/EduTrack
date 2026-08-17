@@ -27,7 +27,7 @@ import { useDrillDown } from './useDrillDown'
  * the axis rather than against a neighbouring segment.
  */
 export function ResourceLoadBar({ series }: { series: WidgetSeries[] }) {
-  const drillDown = useDrillDown()
+  const drillDown = useDrillDown('Resource load')
   const rows = mergeByCategory(series)
 
   return (
