@@ -16,6 +16,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
@@ -330,6 +332,22 @@ class PermissionMatrixTest {
     // ------------------------------------------------------------------
 
     private MockHttpServletRequestBuilder request(Entry entry, String role) {
+        if (PermissionMatrix.MULTIPART.equals(entry.body())) {
+            // B-032 · a route declaring `consumes = multipart/form-data` answers
+            // 415 to a JSON request, and 415 is decided during handler mapping —
+            // before @PreAuthorize. Sent as JSON, all six of its rows would pass
+            // without authorisation having run at all: the same silent-green
+            // failure everyRouteWithARequiredBodyCarriesAFixture catches for
+            // @RequestBody, which cannot see a @RequestPart.
+            //
+            // The part is a valid two-line CSV, so an allowed caller fails past
+            // the guard on something real rather than on a malformed upload.
+            return MockMvcRequestBuilders.multipart(entry.requestPath())
+                    .file(new MockMultipartFile("file", "matrix-fixture.csv", "text/csv",
+                            "Client Code,Name\nACME,Acme Corporation\n".getBytes(StandardCharsets.UTF_8)))
+                    .with(authentication(TestPrincipals.of(authorities, role)));
+        }
+
         MockHttpServletRequestBuilder request =
                 MockMvcRequestBuilders.request(HttpMethod.valueOf(entry.method()), entry.requestPath())
                         .with(authentication(TestPrincipals.of(authorities, role)));

@@ -10,6 +10,7 @@ The Excel import engine — screen S-34, blueprint §4B.3.
 |---|---|
 | **B-030** Import engine as a schema registry | everything below |
 | **B-031** Step 1 — template download | `ImportTemplateWriter`, `ImportController`, `ImportExceptionHandler` |
+| **B-032** Step 2 — upload and parse | `SheetReader` + `XlsxSheetReader`/`CsvSheetReader`, `SheetHeadings`, `ImportFileParser`, `ImportUploadService`, `ImportUploadLimits`, `StagedRow` |
 
 ## The one thing to understand
 
@@ -66,7 +67,7 @@ B-030 is the engine, not the wizard. The five steps plug into it:
 | Task | Step | Uses |
 |---|---|---|
 | B-031 | template download | `ImportField` — `header`, `allowedValues` (the dropdown), `example` |
-| B-032 | upload, SAX parse | produces `StagedUpload`, replaces `InMemoryImportStagingStore` |
+| B-032 | upload, SAX parse | produces `StagedUpload` — ✅ done, though it kept `InMemoryImportStagingStore`; see below |
 | B-033 | column mapping | `HeaderMatcher` → `ImportMapping`; `missingRequired` blocks Next |
 | B-034 | dry-run preview | `ImportValidationEngine` → `ImportPreview` |
 | B-035 | commit job | `ImportPreview.writable()` → `ImportSchemaDefinition.upsert` |
@@ -100,8 +101,18 @@ account manager. Assigned on S-33 after import.
 
 **`InMemoryImportStagingStore` is a stopgap, and single-instance.** PLAN.md §2.2
 puts import artefacts in MinIO/S3 and no object-storage client is wired into this
-backend yet. Two API pods would stage on one and validate on the other. B-032
-replaces it; the seam is named so that replacement is a class, not a refactor.
+backend yet. Two API pods would stage on one and validate on the other. The seam
+is named so that replacement is a class, not a refactor.
+
+> B-030 said B-032 would replace it, and **B-032 did not.** Object storage is a
+> feature of its own — an S3 client, a bucket, a lifecycle policy, credentials in
+> four environments — and folding it into "upload and parse" would have made a
+> step-2 task about infrastructure. What B-032 did instead was avoid making the
+> store carry more: the sheet selector re-posts the file rather than asking the
+> server to keep the original bytes, so staging still holds one sheet's extracted
+> text and nothing else. The single-instance limitation is unchanged and still
+> the strongest argument for doing it — B-036's error report needs somewhere to
+> put a generated file anyway, which is the natural task to introduce the client.
 
 ## B-031 · the first endpoint, and what it fixed in place
 
@@ -139,10 +150,87 @@ Admin-only master data module, and a route whose permission is looser than its
 screen is how a screen acquires a second entrance. The 403 is registered in
 `check-conventions.py`'s `ROWLESS_403`: a blank template is not a row.
 
+## B-032 · step 2, and the four decisions inside it
+
+`POST /imports/{schema}/upload` reads one sheet of one file and stages it.
+Nothing is written: `ImportUploadService` holds no repository, and a user who
+abandons the wizard here leaves a staged copy that expires and no other trace.
+
+**The reader is the event API, and nothing is buffered whole.** `XSSFReader` plus
+`XSSFSheetXMLHandler`, streaming — PLAN.md §2.2's ban on the DOM reader is about
+concurrency, not about any one file, and a bulk-import screen produces exactly
+the load it is about. The wanted sheet is parsed *from the iterator's own
+stream* rather than read into an array first: XML compresses by an order of
+magnitude, so a `.xlsx` well under the 5 MB limit can hold gigabytes of sheet
+XML, and buffering it would turn a file that passed every declared check into an
+out-of-memory error. **The row cap throws from inside the content handler**, so a
+million-row sheet is refused after 5,001 rows rather than after all of them.
+There is a third cap the blueprint does not name — columns — because the other
+two do not bound the work: 16,384 columns × 5,000 rows is eighty million cells
+out of a small file, and the row cap is only reached after each row is built.
+
+**`.xls` is refused, and that is a stated deviation from §4B.3, which lists it.**
+The task line says "event-driven SAX parse", and SAX is an XML API: an `.xls` is
+a binary OLE container of BIFF records with no XML in it at all, so the only
+reader for it is `HSSFWorkbook` — the whole-workbook reader this step exists to
+avoid. The refusal is a 415 that names the fix (Save As `.xlsx`), the picker on
+S-34 does not offer it, and adding it properly is one `HSSFEventFactory`
+implementation of `SheetReader` and nothing else.
+
+**Dates come back ISO whatever the cell is formatted as.** A date typed into
+Excel is formatted `dd/MM/yyyy` across most of the world; left alone it reaches
+step 4 as `01/04/2026` and `FieldValidators.isoDate()` rejects every row of the
+file — over a value the user never typed, in cells that look perfectly correct in
+their own spreadsheet. `XlsxSheetReader.IsoDateFormatter` intercepts the date
+format only; a number stays a number.
+
+**Rows carry their source row number** — `StagedRow`, new in B-032. Blank rows
+are dropped, so position in the list stopped being the row in the sheet, and step
+4 quotes that number back to somebody who is going to go and look at it. Excel
+leaves trailing blanks constantly and a deleted bad row leaves a gap; either one
+would have shifted every number below it.
+
+**Duplicate headings are suffixed, not dropped** — `Email`, `Email (2)`. Rows are
+keyed by heading, so two columns with one name means one of them silently
+disappears before the user ever sees the mapping screen.
+
+### The sheet selector re-posts the file
+
+§4B.3 asks for a selector when a workbook has several sheets. The response lists
+them all and names the one that was read; choosing another re-posts the same file
+with `?sheet=`. The alternative — a "re-read what you staged" route — needs the
+original bytes of every open upload held for the staging TTL, on a store whose
+own javadoc calls itself a stopgap, to save re-sending a file the browser is
+still holding. `?replaces=` releases the superseded staging slot, so browsing a
+four-sheet workbook does not consume four of the twenty.
+
+### The staging ceiling became reachable
+
+`InMemoryImportStagingStore` has refused past its twenty-upload cap since B-030,
+with a message written for a person to read — and nothing called `stage()` until
+B-032, so that refusal had never left the process. It threw a bare
+`IllegalStateException`, which over HTTP is a 500 and a stack trace for a
+condition that is temporary and the caller's to wait out. It is now
+`ImportStagingFullException` and answers **503 with `Retry-After`**. Given a type
+of its own rather than caught as `IllegalStateException` in the advice: one line
+less, and every genuine bug on this path would have become a cheerful "try again
+shortly".
+
+### One seam worth knowing about
+
+§4B.3's 5 MB limit is enforced here and answers a problem document naming it. A
+file over `spring.servlet.multipart.max-file-size` — 10 MB, set for §4B.4's
+attachments and shared by every upload — never reaches the handler: the container
+refuses it while resolving the multipart body, before a handler has been chosen,
+so a `MaxUploadSizeExceededException` handler on `ImportExceptionHandler` could
+not fire. One was written, found unreachable, and removed rather than left in
+looking like coverage. Spring's own problem-details handler (A-020) answers those
+instead, with the framework's wording rather than ours.
+
 ## Not here yet
 
-No upload, mapping, dry run or commit — B-032…B-035. `/imports/users/template`
-answers 404 until B-038 registers the second schema, and
+No mapping, dry run or commit — B-033…B-035. `/imports/users/template` and
+`/imports/users/upload` answer 404 until B-038 registers the second schema, and
 `ImportTemplateControllerTest` asserts that, so the day the registration lands
 one test fails and is deleted.
 
@@ -159,6 +247,12 @@ one test fails and is deleted.
 | `ClientImportUpsertIT` | upsert against real MySQL — re-upload updates, never duplicates |
 | `ImportTemplateWriterTest` | B-031, read back through POI — the header round trip, the dropdowns, the example row, the oversized-enum refusal |
 | `ImportTemplateControllerTest` | B-031, the route — §4B.3's two client-specific promises, the 404 for an unregistered schema, and the 403 a Developer gets |
+| `XlsxSheetReaderTest` | B-032 — multi-sheet selection, ISO dates, blank-row numbering, the row and column caps, and a refusal that reads like a sentence rather than a POI stack trace. Fixtures are written with the DOM model and read with the streaming one, so the assertions are about real files rather than one implementation against itself |
+| `CsvSheetReaderTest` | B-032 — RFC 4180 by hand: the BOM Excel writes and does not mention, a comma inside a quoted address, a line break inside a note, `""` collapsing to one quote |
+| `ImportFileParserTest` | B-032 — which reader runs, and that the `.xls` refusal names the conversion |
+| `ImportUploadServiceTest` | B-032 — the order of the checks, what gets staged, and that `replaces` releases a slot |
+| `ImportUploadControllerTest` | B-032, the route — the response shape, and each refusal arriving as the status and problem document the contract promises |
+| `ImportExceptionHandlerTest` | B-032 — the 503 the route-level suite structurally cannot reach, and that the three file refusals do not share a `type` |
 
 `ImportEngineIsolationTest` reads **source, not bytecode**, and says why in its
 javadoc: ArchUnit 1.3.0 cannot parse Java 25 class files, skips every one of them

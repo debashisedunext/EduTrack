@@ -115,19 +115,72 @@ Two consequences the tests pin:
 - **A delete button.** Tickets, contacts and project mappings all point at
   `clients`. Going away is the status control on the grid.
 
-## What is here (B-031 · S-34's first step)
+## What is here (B-031, B-032 · S-34's first two steps)
 
 | File | What it is |
 |---|---|
-| `import/ClientImportPage.tsx` | The wizard at `/masters/clients/import` — five steps named, step 1 working |
-| `import/importQueries.ts` | The download, the `Content-Disposition` name, and the blob save |
+| `import/ClientImportPage.tsx` | The wizard at `/masters/clients/import` — five steps named, steps 1 and 2 working |
+| `import/UploadDropzone.tsx` | §4B.3's drag-drop and file picker |
+| `import/importQueries.ts` | The template download, the pre-flight check, and the upload |
 
-**Steps 2 to 5 are on screen and disabled, not hidden.** Hiding them would make
-the page look finished and leave the user to find out at the end of step 1 that
-there is no step 2 — and it would drop §4B.3's actual promise, which is that
+**Steps 3 to 5 are on screen and disabled, not hidden.** Hiding them would make
+the page look finished and leave the user to find out at the end of step 2 that
+there is no step 3 — and it would drop §4B.3's actual promise, which is that
 nothing is written until a per-row preview has been seen. That promise is the
 reason this is a five-step wizard rather than one upload button, and it is worth
 making before somebody starts typing four hundred rows.
+
+### B-032 · the drop zone is a label around a real file input
+
+Drag and drop cannot be done from a keyboard and is awkward with a screen reader.
+Building the zone as a `<div>` with handlers means reimplementing focus, Enter,
+Space, the accessible name and the platform file dialog — and reimplementing them
+slightly wrong. A `<label>` wrapping an `<input type="file">` gets all five for
+free, and the drop handlers sit on top of a control that already works without
+them. The input's value is cleared after each pick, so choosing the *same* file
+again still fires `change` — the ordinary way somebody retries after fixing the
+spreadsheet, and a silent no-op without that line.
+
+### The pre-flight refusal is about latency, not security
+
+`rejectionReason` refuses the wrong type or an oversized file before anything is
+sent. The server refuses them too and is the only enforcement that counts; what
+this buys is telling somebody their 40 MB export is too big **without uploading
+40 MB first**. The row limit is deliberately not checked here — rows are not
+knowable without parsing, and guessing from the byte count would refuse a
+large-but-legal file or wave through a small illegal one.
+
+`.xls` is not in the picker's `accept` list, which is the visible half of a
+backend decision documented at length in `feature/imports/README.md`: it is a
+binary container with no XML to stream, so reading it means the whole-workbook
+reader §4B.3's step 2 exists to avoid. The refusal names the conversion.
+
+### The chosen `File` is held, which is what makes the sheet selector work
+
+Choosing another sheet re-posts the same file with `?sheet=`, plus the `uploadId`
+it supersedes so the server releases that staging slot. The alternative — asking
+the server to re-read a copy it kept — means holding the bytes of every open
+upload for the staging TTL, and the browser is already holding this one.
+
+### ⚠ `uploadImportFile` is hand-written because of a defect, not a preference
+
+The same one `features/tickets/attachments/uploadTicketAttachment.ts` documents:
+orval pins `Content-Type: multipart/form-data` on the generated call and
+`api/http.ts` spreads caller headers *after* the branch that deliberately omits a
+content type for a `FormData` body, so the generated header wins — and a
+multipart body without a `boundary` parameter is unparseable. Spring's
+`@RequestPart` answers 400 or 500 for every upload. **Two features now carry the
+same workaround**, which is the argument for the one-line fix in `api/http.ts`
+(Stream D's). `uploadImportFile.test.ts` is the regression guard; delete both
+wrappers on the day that lands.
+
+**The download still does not use the generated `useDownloadImportTemplate`,**
+for two structural reasons rather than a preference. It is a `useQuery`, so it
+would fetch a workbook on mount and again on every window focus — a download is
+an event, not cached state. And `http()` parses a body and drops the `Response`,
+so it cannot return the file *name*; that hook reads `Content-Disposition` off a
+plain `fetch`, exactly as `useClient` reads `ETag` off one. Delete both the day
+`http()` exposes response headers.
 
 **The download does not use the generated `useDownloadImportTemplate`,** for two
 structural reasons rather than a preference. It is a `useQuery`, so it would
@@ -153,10 +206,12 @@ reason. Delete both the day `http()` exposes response headers.
 - **B-029** — deactivating blocks *new* tickets. That rule lives on the same
   path, alongside B-028's, and is flagged in the same place; S-32 only warns,
   with the count.
-- **B-032…B-038** — the rest of the Excel wizard. B-031 landed the route, the
-  step rail and the template download, so the S-32 grid's "Import from Excel" is
-  now a `Link`; upload, mapping, the dry run and the commit are still to come and
-  the screen says so where the Continue button is.
+- **B-033…B-038** — the rest of the Excel wizard. B-031 landed the route, the
+  step rail and the template download; B-032 landed the upload, the sheet
+  selector and the columns-found summary. Mapping, the dry run and the commit are
+  still to come, and the screen says so where the Continue button is — together
+  with the sentence that matters most at that moment: *your file has been read
+  and nothing has been written*.
 
 ## Two things that look like inconsistencies and are not
 

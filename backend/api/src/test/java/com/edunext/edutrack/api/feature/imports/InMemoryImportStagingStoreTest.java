@@ -97,7 +97,7 @@ class InMemoryImportStagingStoreTest {
                 List.of("Sheet1"),
                 "Sheet1",
                 List.of("Client Code", "Name"),
-                List.of(Map.of("Client Code", "ACME", "Name", "Acme Corporation")),
+                List.of(new StagedRow(2, Map.of("Client Code", "ACME", "Name", "Acme Corporation"))),
                 clock.instant());
     }
 

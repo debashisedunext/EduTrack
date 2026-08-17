@@ -76,6 +76,7 @@ import type {
   Problem,
   UnauthorizedResponse,
   UploadImportFileBody,
+  UploadImportFileParams,
   ValidationFailedResponse
 } from '.././model';
 
@@ -194,16 +195,26 @@ export function useDownloadImportTemplate<TData = Awaited<ReturnType<typeof down
 /**
  * Max 5 MB and 5,000 rows. Parsed with the **event-driven SAX reader**, not
 the DOM reader — the DOM reader loads the entire workbook into memory per
-concurrent import and will not survive two users at once.
+concurrent import and will not survive two users at once. The row cap
+aborts the parse rather than trimming afterwards, so a million-row sheet
+is refused after 5,001 rows instead of after all of them.
 
-Returns detected sheets and headers for the mapping step. Nothing is
-written.
+Accepts `.xlsx` and `.csv`. **`.xls` is refused with a 415** naming the
+fix: the Excel 97–2003 format is a binary OLE container with no XML to
+stream, so the only reader for it is the whole-workbook one this
+operation exists to avoid.
+
+Returns detected sheets and headers for the mapping step, plus the
+auto-match B-033 presents as its starting point. `master.write`, like the
+three operations beside it. **Nothing is written** — the upload is staged,
+and no row of the target table is touched before `/commit`.
 
  * @summary Step 2 — upload and parse headers
  */
 export const uploadImportFile = (
     schema: 'clients' | 'users',
     uploadImportFileBody: UploadImportFileBody,
+    params?: UploadImportFileParams,
  signal?: AbortSignal
 ) => {
       
@@ -213,16 +224,17 @@ formData.append(`file`, uploadImportFileBody.file)
       return http<ImportUploadResponse>(
       {url: `/imports/${schema}/upload`, method: 'POST',
       headers: {'Content-Type': 'multipart/form-data', },
-       data: formData, signal
+       data: formData,
+        params, signal
     },
       );
     }
   
 
 
-export const getUploadImportFileMutationOptions = <TError = Problem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImportFile>>, TError,{schema: 'clients' | 'users';data: UploadImportFileBody}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof uploadImportFile>>, TError,{schema: 'clients' | 'users';data: UploadImportFileBody}, TContext> => {
+export const getUploadImportFileMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImportFile>>, TError,{schema: 'clients' | 'users';data: UploadImportFileBody;params?: UploadImportFileParams}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof uploadImportFile>>, TError,{schema: 'clients' | 'users';data: UploadImportFileBody;params?: UploadImportFileParams}, TContext> => {
 
 const mutationKey = ['uploadImportFile'];
 const {mutation: mutationOptions} = options ?
@@ -234,10 +246,10 @@ const {mutation: mutationOptions} = options ?
       
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadImportFile>>, {schema: 'clients' | 'users';data: UploadImportFileBody}> = (props) => {
-          const {schema,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadImportFile>>, {schema: 'clients' | 'users';data: UploadImportFileBody;params?: UploadImportFileParams}> = (props) => {
+          const {schema,data,params} = props ?? {};
 
-          return  uploadImportFile(schema,data,)
+          return  uploadImportFile(schema,data,params,)
         }
 
         
@@ -247,17 +259,17 @@ const {mutation: mutationOptions} = options ?
 
     export type UploadImportFileMutationResult = NonNullable<Awaited<ReturnType<typeof uploadImportFile>>>
     export type UploadImportFileMutationBody = UploadImportFileBody
-    export type UploadImportFileMutationError = Problem
+    export type UploadImportFileMutationError = UnauthorizedResponse | ForbiddenResponse | Problem
 
     /**
  * @summary Step 2 — upload and parse headers
  */
-export const useUploadImportFile = <TError = Problem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImportFile>>, TError,{schema: 'clients' | 'users';data: UploadImportFileBody}, TContext>, }
+export const useUploadImportFile = <TError = UnauthorizedResponse | ForbiddenResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImportFile>>, TError,{schema: 'clients' | 'users';data: UploadImportFileBody;params?: UploadImportFileParams}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof uploadImportFile>>,
         TError,
-        {schema: 'clients' | 'users';data: UploadImportFileBody},
+        {schema: 'clients' | 'users';data: UploadImportFileBody;params?: UploadImportFileParams},
         TContext
       > => {
 

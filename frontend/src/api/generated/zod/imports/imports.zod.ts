@@ -73,15 +73,29 @@ export const downloadImportTemplateParams = zod.object({
 /**
  * Max 5 MB and 5,000 rows. Parsed with the **event-driven SAX reader**, not
 the DOM reader — the DOM reader loads the entire workbook into memory per
-concurrent import and will not survive two users at once.
+concurrent import and will not survive two users at once. The row cap
+aborts the parse rather than trimming afterwards, so a million-row sheet
+is refused after 5,001 rows instead of after all of them.
 
-Returns detected sheets and headers for the mapping step. Nothing is
-written.
+Accepts `.xlsx` and `.csv`. **`.xls` is refused with a 415** naming the
+fix: the Excel 97–2003 format is a binary OLE container with no XML to
+stream, so the only reader for it is the whole-workbook one this
+operation exists to avoid.
+
+Returns detected sheets and headers for the mapping step, plus the
+auto-match B-033 presents as its starting point. `master.write`, like the
+three operations beside it. **Nothing is written** — the upload is staged,
+and no row of the target table is touched before `/commit`.
 
  * @summary Step 2 — upload and parse headers
  */
 export const uploadImportFileParams = zod.object({
   "schema": zod.enum(['clients', 'users']).describe('Which registered schema to import. \*\*One engine, registered twice\*\* —\n`users` is a registration, not a second implementation (B-030, B-038).\nBolting `import` under `\/clients\/…` instead would collide with\n`\/clients\/{clientId}\/…` on any three-segment path.\n')
+})
+
+export const uploadImportFileQueryParams = zod.object({
+  "sheet": zod.string().optional().describe('Which sheet to read. Omitted means the first one, which is what the\ninitial upload sends.\n\nThis is how the multi-sheet selector works: the response lists every\nsheet in the workbook, and choosing a different one re-posts the same\nfile naming it. Re-posting rather than re-reading a staged copy is\ndeliberate — the alternative is holding the raw bytes of every open\nupload for the staging TTL, and the browser already has the file in\nhand.\n'),
+  "replaces": zod.string().uuid().optional().describe('The `uploadId` this upload supersedes, released as this one is staged.\n\nSent by the sheet selector so that flipping between sheets does not\nconsume a staging slot per attempt. Unknown or already-expired ids\nare ignored; this is a courtesy, not a precondition.\n')
 })
 
 export const uploadImportFileBody = zod.object({
@@ -91,8 +105,10 @@ export const uploadImportFileBody = zod.object({
 export const uploadImportFileResponse = zod.object({
   "data": zod.object({
   "uploadId": zod.string().uuid().optional(),
+  "fileName": zod.string().optional().describe('As the browser sent it, stripped of any path. Echoed back so the\nscreen can name the file it is about to import in the words the\nuser recognises, across the four requests the wizard spans.\n'),
   "sheets": zod.array(zod.string()).optional(),
-  "headers": zod.array(zod.string()).optional(),
+  "sheet": zod.string().optional().describe('Which of `sheets` these `headers` and this `rowCount` describe.\nStated rather than assumed to be the first: re-posting with\n`?sheet=` is how the selector works, and a client that inferred\n\"the first one\" would mislabel every subsequent read.\n'),
+  "headers": zod.array(zod.string()).optional().describe('The heading row, in sheet order. A heading repeated in the same\nsheet is suffixed — `Email`, `Email (2)` — because rows are keyed\nby heading and the alternative is one of the two columns silently\ndisappearing before the user ever sees it.\n'),
   "rowCount": zod.number().optional(),
   "suggestedMapping": zod.record(zod.string(), zod.string()).optional().describe('Auto-matched by header; every column stays manually overridable.')
 })
