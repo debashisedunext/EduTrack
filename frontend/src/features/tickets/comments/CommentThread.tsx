@@ -1,7 +1,9 @@
 import type { Comment } from '@/api/generated/model/comment'
+import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { RichTextView } from '@/components/ui/rich-text-view'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 /**
  * The Comments tab's stream — C-029, blueprint §4B.5.
@@ -23,11 +25,25 @@ import { Skeleton } from '@/components/ui/skeleton'
  * none: a reader who sees a stage and no iteration has no way to know the
  * iteration is missing rather than one.
  *
- * Also absent, each to its own task: `@mention` highlighting (C-030), the
- * client-visible colour (C-031), the edited marker and tombstones (C-033).
- * `isClientVisible` is rendered as a plain chip in the meantime, because a
- * comment that is going to the client and looks exactly like one that is not is
- * the mistake §4B.5 exists to prevent — the colour is C-031's, the fact is not.
+ * Also absent, each to its own task: `@mention` highlighting (C-030), the edited
+ * marker and tombstones (C-033).
+ *
+ * ## C-031 · the two backgrounds
+ *
+ * §4B.5 specifies the pair literally — "**Internal note** (grey background, team
+ * only) or **Client visible** (white, appears on the client portal and in the
+ * client email thread)" — and this reads them in that order rather than tinting
+ * only the exception. The internal card was white before this task, which meant
+ * the grey/white distinction the blueprint relies on did not exist at all: every
+ * comment looked like the safe kind.
+ *
+ * White alone is a weak signal for the *un*safe kind, though, so the
+ * client-visible card carries an amber border and an amber chip as well. That
+ * is not a deviation from §4B.5 so much as §12.1's rule applied to it — colour
+ * is never the only signal — and it matches what the composer shows before
+ * posting, so a comment looks in the thread the way it looked when it was
+ * written. Somebody scanning for "what did we actually tell them" finds it
+ * without reading every card.
  */
 export function CommentThread({
   comments,
@@ -75,7 +91,15 @@ export function CommentThread({
     // the thread rather than whichever `<li>` happens to come first in the DOM.
     <ol aria-label="Comments" className="flex flex-col gap-3">
       {comments.map((comment) => (
-        <li key={comment.id} className="rounded-control border border-border bg-surface p-3">
+        <li
+          key={comment.id}
+          className={cn(
+            'rounded-control border p-3',
+            comment.isClientVisible
+              ? 'border-warning bg-surface'
+              : 'border-border bg-subtle',
+          )}
+        >
           <div className="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="text-sm font-medium text-content">
               {/*
@@ -94,10 +118,18 @@ export function CommentThread({
                 {formatPosted(comment.createdAt)}
               </time>
             )}
+            {/*
+              Only the client-visible case is labelled. A matching "Internal"
+              chip on every other card would put a badge on the overwhelming
+              majority of the thread and train the eye to skip the row the one
+              chip that matters lives in — the grey background already carries
+              "internal", and §4B.5 gives it exactly that job.
+            */}
             {comment.isClientVisible && (
-              <span className="rounded-control bg-subtle px-1.5 py-0.5 text-caption text-content-muted">
+              <Chip variant="warning">
+                <span aria-hidden="true">⚠</span>
                 Client visible
-              </span>
+              </Chip>
             )}
           </div>
 
