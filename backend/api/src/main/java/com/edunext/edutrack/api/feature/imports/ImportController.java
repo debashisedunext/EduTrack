@@ -1,18 +1,24 @@
 package com.edunext.edutrack.api.feature.imports;
 
+import com.edunext.edutrack.api.security.CallerIdentity;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -68,13 +74,16 @@ class ImportController {
     private final ImportSchemaRegistry registry;
     private final ImportTemplateWriter templates;
     private final ImportUploadService uploads;
+    private final ImportMappingPresetService mappingPresets;
 
     ImportController(ImportSchemaRegistry registry,
                      ImportTemplateWriter templates,
-                     ImportUploadService uploads) {
+                     ImportUploadService uploads,
+                     ImportMappingPresetService mappingPresets) {
         this.registry = registry;
         this.templates = templates;
         this.uploads = uploads;
+        this.mappingPresets = mappingPresets;
     }
 
     /**
@@ -163,6 +172,111 @@ class ImportController {
                 file.getBytes(),
                 sheet,
                 replaces));
+    }
+
+    /**
+     * Blueprint §4B.3 step 3 — which columns this schema accepts.
+     *
+     * <p><b>Step 3 has no "submit the mapping" route, and this is not it.</b> The
+     * mapping is chosen in the browser out of what step 2 returned and travels
+     * with step 4's {@code /validate} body, which is what the contract has
+     * encoded since B-030. A route to park it on the server would give the wizard
+     * a fifth piece of state to keep in step with the other four, for no gain:
+     * the dry run needs the mapping in its own request regardless, because the
+     * user can go back and change it.
+     *
+     * <p>What the screen genuinely cannot get anywhere else is <em>our</em> side
+     * of the mapping — the field names, their human headings, and above all which
+     * of them are required, since "unmapped required columns block Next" is the
+     * rule this step exists to enforce. None of that is in the upload response,
+     * which describes the user's file.
+     *
+     * <p>The alternative was a copy of {@link ImportField}'s declarations in
+     * TypeScript. That is a second declaration of the schema, which B-030's whole
+     * design exists to prevent, and B-038 would have had to write a third.
+     *
+     * <p>Not folded into the upload response, though it would have saved a route:
+     * this is a property of the schema and that is a property of the file, the
+     * sheet selector re-posts the upload, and a client that wants to say what the
+     * import accepts before a file has been chosen could not.
+     */
+    @GetMapping(path = "/{schema}/fields", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "describeImportSchema",
+            summary = "The columns a schema accepts (S-34 step 3)")
+    ImportDtos.SchemaFieldsResponse fields(@PathVariable String schema) {
+        return new ImportDtos.SchemaFieldsResponse(
+                ImportDtos.SchemaFields.of(registry.resolve(schema)));
+    }
+
+    /**
+     * §4B.3 step 3 — "Mapping presets can be saved and reused for the next
+     * import."
+     *
+     * <p>Org-wide rather than per caller, which is why no identity is read here.
+     * A preset says how another system's export is shaped, and the next person to
+     * run the import needs that whether or not they saved it.
+     */
+    @GetMapping(path = "/{schema}/mapping-presets", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "listImportMappingPresets",
+            summary = "Saved column mappings for a schema (S-34 step 3)")
+    ImportDtos.MappingPresetsResponse mappingPresets(@PathVariable String schema) {
+        return new ImportDtos.MappingPresetsResponse(mappingPresets.list(schema));
+    }
+
+    /**
+     * Save a mapping under a name — <b>200, not 201</b>.
+     *
+     * <p>It is an upsert on {@code (schema, name)}: saving again under a name
+     * that exists replaces that preset, because that is what Save means to
+     * somebody who has just corrected one column. The status follows the
+     * behaviour rather than the verb, and that is also why no
+     * {@code Idempotency-Key} is declared — CONVENTIONS.md §4 asks for one on a
+     * create, and repeating this request is already harmless by construction.
+     *
+     * <p><b>The caller is recorded, best-effort.</b> {@link CallerIdentity}
+     * directly rather than a third hand-copied {@code CurrentUser} — A-034's own
+     * javadoc asks for exactly that. An unidentifiable caller stores a null
+     * {@code created_by}: attribution is on no key, nothing filters on it, and
+     * refusing a legitimate save to protect a column nothing reads would be the
+     * wrong trade.
+     */
+    @PostMapping(path = "/{schema}/mapping-presets",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "saveImportMappingPreset",
+            summary = "Save a column mapping under a name")
+    ImportDtos.MappingPresetResponse saveMappingPreset(
+            @PathVariable String schema,
+            @Valid @RequestBody ImportDtos.SaveMappingPresetRequest request,
+            Authentication authentication) {
+
+        Long userId = CallerIdentity.of(authentication)
+                .map(CallerIdentity::userId)
+                .orElse(null);
+
+        return new ImportDtos.MappingPresetResponse(
+                mappingPresets.save(schema, request, userId));
+    }
+
+    /**
+     * Delete a preset. 204, and a hard delete.
+     *
+     * <p>Nothing references a preset — an import records the mapping it actually
+     * used, never the preset it came from — so a tombstone would preserve nothing
+     * anybody could read. That is the difference between this and §4B.4's
+     * attachments or §4B.5's comments, where the record of the thing having
+     * existed is part of the ticket's history.
+     */
+    @DeleteMapping(path = "/{schema}/mapping-presets/{presetId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "deleteImportMappingPreset",
+            summary = "Delete a saved column mapping")
+    void deleteMappingPreset(@PathVariable String schema, @PathVariable long presetId) {
+        mappingPresets.delete(schema, presetId);
     }
 
     /**

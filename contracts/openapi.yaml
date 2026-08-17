@@ -2806,6 +2806,146 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /imports/{schema}/fields:
+    parameters: [{ $ref: '#/components/parameters/ImportSchema' }]
+    get:
+      tags: [imports]
+      operationId: describeImportSchema
+      summary: The columns a schema accepts (S-34 step 3)
+      description: |
+        The registration's own field declarations, so step 3 can render one row
+        per target field and decide which of them block Next.
+
+        **This exists so the field list is declared once.** Every other step
+        reads `ImportSchemaDefinition.fields()` server-side; without this
+        operation the mapping screen would have to carry its own copy of the
+        same list in TypeScript, and B-038's second registration would have to
+        add a second copy. `required` in particular is not derivable from
+        anything the upload response returns.
+
+        Constant for the life of a deployment — a schema is a class, not data —
+        so a client may cache it for the session. It is not folded into
+        `/upload`'s response because it is a property of the schema rather than
+        of the file, and the sheet selector re-posts that request.
+
+        `master.write`, like every operation on this path.
+      responses:
+        '200':
+          description: The schema's columns, in template order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportSchemaFieldsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            No schema is registered under that key — the same case as the
+            template and upload routes, and `users` until B-038.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /imports/{schema}/mapping-presets:
+    parameters: [{ $ref: '#/components/parameters/ImportSchema' }]
+    get:
+      tags: [imports]
+      operationId: listImportMappingPresets
+      summary: Saved column mappings for a schema (S-34 step 3)
+      description: |
+        §4B.3: "Mapping presets can be saved and reused for the next import."
+
+        Presets are **organisation-wide, not per user.** A preset records how a
+        particular export — a CRM's, a finance system's — lines up with our
+        columns, and that is knowledge the next person to run the import needs
+        whether or not they are the person who saved it. Held per user it would
+        be lost to a change of laptop or of staff, which is the case the feature
+        exists for.
+
+        Ordered by name, so the list reads the same on every visit.
+      responses:
+        '200':
+          description: Every preset saved for this schema.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportMappingPresetsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: No schema is registered under that key.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    post:
+      tags: [imports]
+      operationId: saveImportMappingPreset
+      summary: Save a column mapping under a name
+      description: |
+        **An upsert on `(schema, name)`, so this answers 200 and not 201** — and
+        therefore takes no `Idempotency-Key`. Saving again under a name that
+        exists replaces that preset, because that is what "Save" means to
+        somebody who has just corrected one column: the alternative is five
+        presets called *CRM export* and no way to tell which is current.
+
+        The mapping's keys must be fields this schema declares. A preset is
+        applied weeks after it is saved, against a file nobody is looking at
+        today, so a key that matches nothing is refused here rather than
+        silently dropped when it is next used.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ImportMappingPresetRequest' }
+      responses:
+        '200':
+          description: Saved — created, or the existing preset of that name replaced.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportMappingPresetResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: No schema is registered under that key.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            The mapping names a target field this schema does not declare —
+            usually a preset built against an older version of the registration.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /imports/{schema}/mapping-presets/{presetId}:
+    parameters:
+      - { $ref: '#/components/parameters/ImportSchema' }
+      - name: presetId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [imports]
+      operationId: deleteImportMappingPreset
+      summary: Delete a saved column mapping
+      description: |
+        A hard delete. A preset is a convenience with no history attached to it
+        and nothing referencing it — an import records the mapping it actually
+        used, never the preset it came from — so a tombstone would preserve
+        nothing anybody could use.
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            No such preset under this schema. A preset id belonging to a
+            *different* schema is also absent — the nesting is real, not
+            decorative.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /imports/{schema}/validate:
     parameters: [{ $ref: '#/components/parameters/ImportSchema' }]
     post:
@@ -6836,6 +6976,117 @@ components:
               type: object
               additionalProperties: { type: string }
               description: Auto-matched by header; every column stays manually overridable.
+    ImportSchemaField:
+      type: object
+      required: [name, header, required, type, naturalKey]
+      properties:
+        name:
+          type: string
+          description: |
+            The target field — the key used in every `mapping` object the wizard
+            sends. Stable; the header is the changeable half.
+        header:
+          type: string
+          description: |
+            The human column heading, exactly as the template writes it and
+            exactly what the auto-match compares against. Shown on the mapping
+            screen so the user is matching the words they saw in the template.
+        required:
+          type: boolean
+          description: |
+            A blank cell rejects the row, and an unmapped column of this kind
+            blocks step 3's Next button. Not derivable from anything else the
+            wizard returns, which is most of why this operation exists.
+        naturalKey:
+          type: boolean
+          description: |
+            True for the one field that decides create-versus-update — the
+            client code. Always `required` as well, but worth naming separately:
+            the mapping screen says what mapping it wrong would *do*, and "rows
+            will be matched on this column" is a different warning from "this
+            column cannot be blank".
+        type:
+          type: string
+          enum: [TEXT, EMAIL, DATE, ENUM, INTEGER]
+          description: |
+            `ImportFieldType`, and deliberately a small closed set rather than a
+            type system — it answers what format the template gives the column,
+            what "well-formed" means in the dry run, and how the string becomes a
+            field at commit. Anything more specific is a per-field validator and
+            is not visible here.
+        maxLength:
+          type: integer
+          description: Column width, or 0 for unbounded.
+        allowedValues:
+          type: array
+          items: { type: string }
+          description: |
+            The `ENUM` domain, empty otherwise. The same list the template's
+            data-validation dropdown is built from — one declaration, so the
+            template cannot offer a value the import rejects.
+        example:
+          type: [string, 'null']
+          description: The value the template's worked example row carries.
+    ImportSchemaFieldsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [schema, entity, naturalKey, fields]
+          properties:
+            schema: { type: string }
+            entity:
+              type: string
+              description: '`import_batches.entity` — `CLIENT` or `RESOURCE`.'
+            naturalKey:
+              type: string
+              description: The `name` of the field rows are matched on.
+            fields:
+              type: array
+              items: { $ref: '#/components/schemas/ImportSchemaField' }
+    ImportMappingPreset:
+      type: object
+      required: [presetId, name, mapping]
+      properties:
+        presetId: { type: integer, format: int64 }
+        name: { type: string }
+        mapping:
+          type: object
+          additionalProperties: { type: string }
+          description: Target field → source column, the same shape `/validate` takes.
+        updatedAt: { type: string, format: date-time }
+    ImportMappingPresetsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ImportMappingPreset' }
+    ImportMappingPresetResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ImportMappingPreset' }
+    ImportMappingPresetRequest:
+      type: object
+      required: [name, mapping]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: |
+            What the user will pick it out of a list by. Unique per schema, and
+            saving under a name that exists replaces it.
+        mapping:
+          type: object
+          additionalProperties: { type: string }
+          minProperties: 1
+          description: |
+            Target field → source column. Keys must be fields the schema
+            declares; a key that matches nothing is a 422 rather than a silent
+            drop at the point of use.
     ImportValidateRequest:
       type: object
       required: [uploadId, mapping]

@@ -115,6 +115,124 @@ export const uploadImportFileResponse = zod.object({
 })
 
 /**
+ * The registration's own field declarations, so step 3 can render one row
+per target field and decide which of them block Next.
+
+**This exists so the field list is declared once.** Every other step
+reads `ImportSchemaDefinition.fields()` server-side; without this
+operation the mapping screen would have to carry its own copy of the
+same list in TypeScript, and B-038's second registration would have to
+add a second copy. `required` in particular is not derivable from
+anything the upload response returns.
+
+Constant for the life of a deployment — a schema is a class, not data —
+so a client may cache it for the session. It is not folded into
+`/upload`'s response because it is a property of the schema rather than
+of the file, and the sheet selector re-posts that request.
+
+`master.write`, like every operation on this path.
+
+ * @summary The columns a schema accepts (S-34 step 3)
+ */
+export const describeImportSchemaParams = zod.object({
+  "schema": zod.enum(['clients', 'users']).describe('Which registered schema to import. \*\*One engine, registered twice\*\* —\n`users` is a registration, not a second implementation (B-030, B-038).\nBolting `import` under `\/clients\/…` instead would collide with\n`\/clients\/{clientId}\/…` on any three-segment path.\n')
+})
+
+export const describeImportSchemaResponse = zod.object({
+  "data": zod.object({
+  "schema": zod.string(),
+  "entity": zod.string().describe('`import_batches.entity` — `CLIENT` or `RESOURCE`.'),
+  "naturalKey": zod.string().describe('The `name` of the field rows are matched on.'),
+  "fields": zod.array(zod.object({
+  "name": zod.string().describe('The target field — the key used in every `mapping` object the wizard\nsends. Stable; the header is the changeable half.\n'),
+  "header": zod.string().describe('The human column heading, exactly as the template writes it and\nexactly what the auto-match compares against. Shown on the mapping\nscreen so the user is matching the words they saw in the template.\n'),
+  "required": zod.boolean().describe('A blank cell rejects the row, and an unmapped column of this kind\nblocks step 3\'s Next button. Not derivable from anything else the\nwizard returns, which is most of why this operation exists.\n'),
+  "naturalKey": zod.boolean().describe('True for the one field that decides create-versus-update — the\nclient code. Always `required` as well, but worth naming separately:\nthe mapping screen says what mapping it wrong would \*do\*, and \"rows\nwill be matched on this column\" is a different warning from \"this\ncolumn cannot be blank\".\n'),
+  "type": zod.enum(['TEXT', 'EMAIL', 'DATE', 'ENUM', 'INTEGER']).describe('`ImportFieldType`, and deliberately a small closed set rather than a\ntype system — it answers what format the template gives the column,\nwhat \"well-formed\" means in the dry run, and how the string becomes a\nfield at commit. Anything more specific is a per-field validator and\nis not visible here.\n'),
+  "maxLength": zod.number().optional().describe('Column width, or 0 for unbounded.'),
+  "allowedValues": zod.array(zod.string()).optional().describe('The `ENUM` domain, empty otherwise. The same list the template\'s\ndata-validation dropdown is built from — one declaration, so the\ntemplate cannot offer a value the import rejects.\n'),
+  "example": zod.string().nullish().describe('The value the template\'s worked example row carries.')
+}))
+})
+})
+
+/**
+ * §4B.3: "Mapping presets can be saved and reused for the next import."
+
+Presets are **organisation-wide, not per user.** A preset records how a
+particular export — a CRM's, a finance system's — lines up with our
+columns, and that is knowledge the next person to run the import needs
+whether or not they are the person who saved it. Held per user it would
+be lost to a change of laptop or of staff, which is the case the feature
+exists for.
+
+Ordered by name, so the list reads the same on every visit.
+
+ * @summary Saved column mappings for a schema (S-34 step 3)
+ */
+export const listImportMappingPresetsParams = zod.object({
+  "schema": zod.enum(['clients', 'users']).describe('Which registered schema to import. \*\*One engine, registered twice\*\* —\n`users` is a registration, not a second implementation (B-030, B-038).\nBolting `import` under `\/clients\/…` instead would collide with\n`\/clients\/{clientId}\/…` on any three-segment path.\n')
+})
+
+export const listImportMappingPresetsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "presetId": zod.number(),
+  "name": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe('Target field → source column, the same shape `\/validate` takes.'),
+  "updatedAt": zod.string().datetime({}).optional()
+}))
+})
+
+/**
+ * **An upsert on `(schema, name)`, so this answers 200 and not 201** — and
+therefore takes no `Idempotency-Key`. Saving again under a name that
+exists replaces that preset, because that is what "Save" means to
+somebody who has just corrected one column: the alternative is five
+presets called *CRM export* and no way to tell which is current.
+
+The mapping's keys must be fields this schema declares. A preset is
+applied weeks after it is saved, against a file nobody is looking at
+today, so a key that matches nothing is refused here rather than
+silently dropped when it is next used.
+
+ * @summary Save a column mapping under a name
+ */
+export const saveImportMappingPresetParams = zod.object({
+  "schema": zod.enum(['clients', 'users']).describe('Which registered schema to import. \*\*One engine, registered twice\*\* —\n`users` is a registration, not a second implementation (B-030, B-038).\nBolting `import` under `\/clients\/…` instead would collide with\n`\/clients\/{clientId}\/…` on any three-segment path.\n')
+})
+
+export const saveImportMappingPresetBodyNameMax = 80;
+
+
+
+export const saveImportMappingPresetBody = zod.object({
+  "name": zod.string().min(1).max(saveImportMappingPresetBodyNameMax).describe('What the user will pick it out of a list by. Unique per schema, and\nsaving under a name that exists replaces it.\n'),
+  "mapping": zod.record(zod.string(), zod.string()).describe('Target field → source column. Keys must be fields the schema\ndeclares; a key that matches nothing is a 422 rather than a silent\ndrop at the point of use.\n')
+})
+
+export const saveImportMappingPresetResponse = zod.object({
+  "data": zod.object({
+  "presetId": zod.number(),
+  "name": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe('Target field → source column, the same shape `\/validate` takes.'),
+  "updatedAt": zod.string().datetime({}).optional()
+})
+})
+
+/**
+ * A hard delete. A preset is a convenience with no history attached to it
+and nothing referencing it — an import records the mapping it actually
+used, never the preset it came from — so a tombstone would preserve
+nothing anybody could use.
+
+ * @summary Delete a saved column mapping
+ */
+export const deleteImportMappingPresetParams = zod.object({
+  "schema": zod.enum(['clients', 'users']).describe('Which registered schema to import. \*\*One engine, registered twice\*\* —\n`users` is a registration, not a second implementation (B-030, B-038).\nBolting `import` under `\/clients\/…` instead would collide with\n`\/clients\/{clientId}\/…` on any three-segment path.\n'),
+  "presetId": zod.number()
+})
+
+/**
  * **Nothing is written.** Returns a per-row verdict — will create, will
 update, duplicate within the file, or rejected with a reason — plus
 summary counts. This is the step that makes a bulk import safe to run.

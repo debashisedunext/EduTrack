@@ -507,6 +507,19 @@ export interface Db {
    * request the server would.
    */
   attachmentLimits: { maxFileBytes: number; maxTicketBytes: number; maxFiles: number; ceilingBytes: number };
+  /**
+   * B-033 · S-34 step 3's saved column mappings — `import_mapping_presets`.
+   *
+   * Held here for the calendar's reason: `resetDb()` has to clear them, or a test
+   * that saves a preset leaves it in the picker for the next one. Keyed by schema,
+   * because the real unique key is `(schema_key, name)` and a store keyed only by
+   * name could not show that two schemas may reuse one.
+   *
+   * Empty on purpose. §4B.3's presets are created by a person naming one, so a
+   * seeded organisation has none — and a screen test that found one already there
+   * could not tell "the list renders" from "the list renders what I saved".
+   */
+  mappingPresets: Record<string, { presetId: number; name: string; mapping: Record<string, string>; updatedAt: string }[]>;
 }
 
 export interface Holiday {
@@ -1175,6 +1188,8 @@ export function createDb(): Db {
       maxFiles: 20,
       ceilingBytes: 10 * 1024 * 1024,
     },
+    // B-033 · nobody has saved a mapping yet, which is the honest starting state.
+    mappingPresets: {},
     calendar: {
       week: {
         weeklyOff: [6, 7],

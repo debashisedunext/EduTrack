@@ -6,6 +6,7 @@ import { ApiError } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+import { type ColumnMapping } from './columnMapping'
 import {
   IMPORT_PROBLEM,
   formatBytes,
@@ -14,6 +15,7 @@ import {
   useUploadImportFile,
   type StagedUploadSummary,
 } from './importQueries'
+import { MappingStep } from './MappingStep'
 import { UploadDropzone } from './UploadDropzone'
 
 /**
@@ -35,16 +37,16 @@ const STEPS = [
 ] as const
 
 /**
- * S-34 Client Import Wizard — steps 1 and 2. B-031, B-032.
+ * S-34 Client Import Wizard — steps 1 to 3. B-031, B-032, B-033.
  *
  * Blueprint §4B.3, and the engine behind it is B-030's schema registry: this
  * screen names clients exactly once, in the route it is mounted at and in the
  * schema it asks for. B-038 registers resources and this page is what it reuses.
  *
- * ## Steps 3 to 5 are visible and disabled, not hidden
+ * ## Steps 4 and 5 are visible and disabled, not hidden
  *
  * Hiding them would make the screen look finished and leave the user to discover
- * at the end of step 2 that there is no step 3. Showing them greyed says what is
+ * at the end of step 3 that there is no step 4. Showing them greyed says what is
  * coming, in the order it comes, and the Continue button says why it is disabled
  * rather than being mysteriously inert.
  *
@@ -55,6 +57,15 @@ const STEPS = [
  * can release that staging slot. The alternative — asking the server to re-read a
  * copy it kept — means holding the bytes of every open upload for the staging
  * TTL, and the browser is already holding this one.
+ *
+ * ## The mapping lives here, and goes to the server only at step 4
+ *
+ * B-033 adds no route for it, because the contract never needed one: step 4's
+ * `/validate` and step 5's `/commit` both take `mapping` in their own body, so a
+ * parked copy on the server would be a fifth piece of wizard state to keep in
+ * step with the other four — and the user can go back and change it. What step 3
+ * does read from the server is *our* column list (`/fields`) and the saved
+ * presets, neither of which the browser can know.
  */
 export function ClientImportPage() {
   const download = useDownloadImportTemplate()
@@ -65,13 +76,19 @@ export function ClientImportPage() {
   const [staged, setStaged] = useState<StagedUploadSummary | null>(null)
   /** A refusal this screen made itself, before anything was sent. */
   const [rejected, setRejected] = useState<string | null>(null)
+  /**
+   * Whether the user has moved on to mapping.
+   *
+   * Held separately from `staged` rather than derived from it, so Back to upload
+   * returns to step 2 with the file still staged instead of unwinding the upload.
+   */
+  const [mapping, setMapping] = useState<ColumnMapping | null>(null)
 
   /**
-   * Step 2 becomes current once a file is staged, and does not move on to step 3
-   * — because step 3 does not exist yet. Advancing the rail past what works
-   * would put the marker on a step the user cannot reach.
+   * The rail's marker stops at step 3, because step 4 does not exist yet.
+   * Advancing past what works would put it on a step the user cannot reach.
    */
-  const currentStep = staged ? 1 : 0
+  const currentStep = mapping ? 2 : staged ? 1 : 0
 
   function send(chosen: File, sheet?: string, replaces?: string) {
     upload.mutate(
@@ -84,6 +101,7 @@ export function ClientImportPage() {
     const reason = rejectionReason(chosen)
     setRejected(reason)
     setStaged(null)
+    setMapping(null)
     setFile(reason ? null : chosen)
     if (!reason) {
       send(chosen)
@@ -100,7 +118,22 @@ export function ClientImportPage() {
     setFile(null)
     setStaged(null)
     setRejected(null)
+    setMapping(null)
     upload.reset()
+  }
+
+  /**
+   * Step 3 opens on the server's auto-match, which is the point of it — a file
+   * built from the template arrives fully mapped and the user only confirms.
+   *
+   * Copied into state rather than read from `staged` on every render: from here
+   * on it is the user's mapping, and nothing downstream can tell an override from
+   * an auto-match. `ImportMapping`'s javadoc makes that a deliberate property —
+   * a manual override taking a different path would be a second, less-tested
+   * importer reached only by the users whose files were unusual.
+   */
+  function startMapping() {
+    setMapping({ ...(staged?.suggestedMapping ?? {}) })
   }
 
   return (
@@ -357,26 +390,40 @@ export function ClientImportPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/*
-                Disabled and labelled, rather than absent. Somebody who has just
-                uploaded four hundred rows has to know the mapping step is not
-                there yet — and that nothing they have done has changed a client.
-              */}
-              <Button
-                variant="secondary"
-                disabled
-                title="Column mapping arrives with the next step of this screen"
-              >
+              <Button onClick={startMapping} disabled={mapping !== null}>
                 Continue to mapping
               </Button>
               <p className="text-sm text-content-muted">
-                Mapping is not available yet. Your file has been read and nothing has been
-                written — no client has changed.
+                Your file has been read and nothing has been written — no client has
+                changed.
               </p>
             </div>
           </div>
         )}
       </section>
+
+      {/* ── step 3 ─────────────────────────────────────────────────────── */}
+      {staged && mapping && (
+        <section
+          aria-labelledby="step-3-heading"
+          className="rounded-card border border-border bg-surface p-5"
+        >
+          <h2 id="step-3-heading" className="text-h3 text-content">
+            Map the columns
+          </h2>
+          <MappingStep
+            schema="clients"
+            headers={staged.headers ?? []}
+            rowCount={staged.rowCount ?? 0}
+            mapping={mapping}
+            onChange={setMapping}
+            onBack={() => setMapping(null)}
+            // No onContinue: step 4 is B-034, so the button stays disabled and
+            // says so rather than looking broken. The same shape B-032 left step
+            // 2's own Continue in.
+          />
+        </section>
+      )}
     </div>
   )
 }

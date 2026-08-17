@@ -329,6 +329,20 @@ final class PermissionMatrix {
     private static final String ATTACHMENT_LIMITS = """
             {"maxFileBytes":10485760,"maxTicketBytes":52428800,"maxFiles":20}""";
 
+    /**
+     * B-033 · {@code ImportDtos.SaveMappingPresetRequest}.
+     *
+     * <p>{@code clientCode} rather than a made-up field name: the service refuses
+     * a mapping whose keys are not declared by the schema, and it does so
+     * <em>after</em> {@code @PreAuthorize} — so an invented field would hand the
+     * Admin row a 422 and make it indistinguishable from a route that had refused
+     * the authority. Every one of the six roles must fail or pass on the
+     * permission alone, which means the body has to be one the handler would
+     * otherwise accept.
+     */
+    private static final String MAPPING_PRESET = """
+            {"name":"CRM export","mapping":{"clientCode":"Code"}}""";
+
     /** {@code StatusRequest}: isActive is boxed so omitting it is a 400. */
     private static final String USER_STATUS = """
             {"isActive":false}""";
@@ -937,6 +951,22 @@ final class PermissionMatrix {
             // `everyRouteWithARequiredBodyCarriesAFixture` exists to catch for
             // @RequestBody, which cannot see a @RequestPart.
             adminOnly("POST", "/api/v1/imports/{schema}/upload", MULTIPART),
+
+            // B-033 · step 3. Three routes, one permission, and the read is the
+            // one worth a sentence: /fields returns a schema's column list, which
+            // contains no organisation data whatsoever — it is the shape of a Java
+            // class, the same declarations /template already hands out as a
+            // workbook. So the counter-argument the template row records applies
+            // here in full, and is answered the same way: the only screen that
+            // asks for it is inside §7.4's Admin-only master data module.
+            //
+            // The presets are org-wide master data, Admin-only on every verb
+            // including the list, so a 403 tells a non-Admin exactly what the 401
+            // already did. Both paths are in ROWLESS_403 with that reason.
+            adminOnly("GET", "/api/v1/imports/{schema}/fields"),
+            adminOnly("GET", "/api/v1/imports/{schema}/mapping-presets"),
+            adminOnly("POST", "/api/v1/imports/{schema}/mapping-presets", MAPPING_PRESET),
+            adminOnly("DELETE", "/api/v1/imports/{schema}/mapping-presets/{presetId}"),
 
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack
