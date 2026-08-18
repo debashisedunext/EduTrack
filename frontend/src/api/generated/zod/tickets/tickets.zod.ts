@@ -89,24 +89,12 @@ export const listTicketsQueryParams = zod.object({
 
 export const listTicketsResponseDataItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const listTicketsResponseDataItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const listTicketsResponseDataItemProjectAutoAssignRuleDefault = "MANUAL";export const listTicketsResponseDataItemScreenNameMax = 120;
-
-export const listTicketsResponseDataItemFeatureMax = 120;
-
-export const listTicketsResponseDataItemStepsToGenerateMax = 20000;
-
-
-
-export const listTicketsResponseDataItemPctCompleteMin = 0;
-export const listTicketsResponseDataItemPctCompleteMax = 100;
-
-
+export const listTicketsResponseDataItemProjectAutoAssignRuleDefault = "MANUAL";
 
 export const listTicketsResponse = zod.object({
   "data": zod.array(zod.object({
   "ticketId": zod.string().regex(listTicketsResponseDataItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
-  "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
   "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
@@ -134,10 +122,7 @@ export const listTicketsResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
-  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
-  "screenName": zod.string().max(listTicketsResponseDataItemScreenNameMax).nullish(),
-  "feature": zod.string().max(listTicketsResponseDataItemFeatureMax).nullish(),
-  "stepsToGenerate": zod.string().max(listTicketsResponseDataItemStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
+  "moduleId": zod.number().nullish(),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -156,19 +141,21 @@ export const listTicketsResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "cycleNo": zod.number().min(1).describe('Increments on reopen after closure. Independent of `iterationNo`.'),
-  "iterationNo": zod.number().min(1).optional().describe('Increments on a backward move within the current cycle. Independent of `cycleNo`.'),
+  "cycleNo": zod.number(),
+  "iterationNo": zod.number().optional(),
   "reopenCount": zod.number().optional(),
+  "isReopened": zod.boolean().optional(),
+  "dateReported": zod.string().datetime({}).optional(),
   "plannedCloseDate": zod.string().datetime({}).nullish(),
   "actualCloseDate": zod.string().datetime({}).nullish(),
-  "isDelayed": zod.boolean().optional(),
+  "isDelayed": zod.boolean(),
   "delayedSince": zod.string().datetime({}).nullish(),
-  "totalEffortHrs": zod.number().optional(),
   "estimatedHrs": zod.number().nullish(),
-  "pctComplete": zod.number().min(listTicketsResponseDataItemPctCompleteMin).max(listTicketsResponseDataItemPctCompleteMax).optional(),
-  "createdAt": zod.string().datetime({}).optional(),
-  "updatedAt": zod.string().datetime({}).optional()
-})),
+  "totalEffortHrs": zod.number().optional(),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional(),
+  "createdAt": zod.string().datetime({})
+}).describe('D-061 · one \*\*row\*\* of S-17, not one ticket.\n\n`GET \/tickets` returns this rather than `Ticket`, and the difference is\ndeliberate: the list renders 25 rows at a time, and `description` plus\n`stepsToGenerate` are sanitised HTML that can run to kilobytes each. A\nlist that shipped them would be slower than the request waterfall A-052\nexists to remove, and no column on S-17 displays either. The detail page\nreads `GET \/tickets\/{ticketId}\/full`, which carries everything.\n\n\*\*Every name here is `Ticket`\'s name for the same thing.\*\* This is a\nstrict subset, never a rename — `ticketId` is the ticket code, exactly\nas it is on the path and in the other ~30 operations that take it. A row\nshape with its own vocabulary is what produced the blank ID column on\nS-17: the server answered `ticketCode`\/`assignedTo`, the generated\nclient bound `ticketId`\/`assignee`, and both were internally consistent\nwhile the grid rendered empty cells against a green build. D-062 now\nfails the build on exactly that.\n\nEmbedded refs rather than bare ids, again matching `Ticket`: the grid\nprints \"CRM — Client CRM Platform\" and an assignee\'s name and avatar, so\nids would push a second lookup into every consumer — the list, the S-06\ndrill-down and the CSV export — to save four joins on a 25-row page.\n')),
   "meta": zod.object({
   "nextCursor": zod.string().nullish(),
   "hasMore": zod.boolean().optional(),
