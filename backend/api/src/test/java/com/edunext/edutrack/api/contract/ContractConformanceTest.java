@@ -240,22 +240,41 @@ class ContractConformanceTest {
             JsonNode get = contractPaths.path(path).path("get");
             if (get.isMissingNode()) return;
 
-            Set<String> declared = payloadProperties(contract, get);
+            JsonNode declaredItem = payloadSchema(contract, get);
+            Set<String> declared = propertyNames(declaredItem);
             if (declared.isEmpty()) return;   // no object payload to compare
 
             JsonNode servedGet = servedOperation(served, path);
             if (servedGet == null) return;    // not implemented yet — that is coverage, not drift
 
-            Set<String> actual = payloadProperties(served, servedGet);
+            JsonNode servedItem = payloadSchema(served, servedGet);
+            Set<String> actual = propertyNames(servedItem);
             if (actual.isEmpty()) return;
 
             Set<String> missing = new TreeSet<>(declared); missing.removeAll(actual);
             Set<String> extra   = new TreeSet<>(actual);   extra.removeAll(declared);
-            if (!missing.isEmpty() || !extra.isEmpty()) {
+
+            // Shape, for the fields both sides agree exist. `reportedBy` is the
+            // case this was added for: the server sent the right NAME carrying a
+            // bare id where the contract declares a UserRef, so the grid's
+            // `reportedBy.displayName` was undefined and the column rendered a
+            // dash — with the name check passing, because the name was right.
+            Set<String> shape = new TreeSet<>();
+            for (String shared : new TreeSet<>(declared)) {
+                if (!actual.contains(shared)) continue;
+                String want = kindOf(contract, declaredItem.path("properties").path(shared));
+                String got  = kindOf(served,   servedItem.path("properties").path(shared));
+                if (!"unknown".equals(want) && !"unknown".equals(got) && !want.equals(got)) {
+                    shape.add(shared + " (contract: " + want + ", served: " + got + ")");
+                }
+            }
+
+            if (!missing.isEmpty() || !extra.isEmpty() || !shape.isEmpty()) {
                 if (KNOWN_DRIFT.containsKey("GET " + path)) return;
                 drift.add("GET " + path
                         + (missing.isEmpty() ? "" : "\n      declared but not served: " + missing)
-                        + (extra.isEmpty()   ? "" : "\n      served but not declared: " + extra));
+                        + (extra.isEmpty()   ? "" : "\n      served but not declared: " + extra)
+                        + (shape.isEmpty()   ? "" : "\n      right name, wrong shape:  " + shape));
             }
         });
 
@@ -281,6 +300,63 @@ class ContractConformanceTest {
      * anything that is not an object payload (a 204, a file download, a bare
      * scalar), because there is nothing to compare rather than nothing matching.
      */
+    /**
+     * Object, array or scalar — the coarsest distinction worth making.
+     *
+     * <p>Deliberately not a type check. Declaring {@code int32} and serving
+     * {@code int64}, or {@code date-time} against {@code string}, is noise that
+     * would bury the signal; the failure that reaches a user is a field the
+     * client dereferences — {@code reportedBy.displayName} — arriving as a
+     * number. Object-versus-scalar is exactly that failure and nothing else.
+     *
+     * <p>A nullable union such as {@code type: [string, 'null']} is a scalar,
+     * and {@code $ref} is followed first, so a {@code UserRef} reads as an
+     * object rather than as unknown.
+     */
+    private String kindOf(JsonNode document, JsonNode schema) {
+        JsonNode s = resolve(document, schema);
+        if (s.isMissingNode()) return "unknown";
+
+        // `oneOf: [$ref Thing, null]` is the contract's nullable idiom, and its
+        // kind is Thing's — NOT "object" because a composition keyword is
+        // present. Treating oneOf as object made this check's first run report
+        // `projectRole` on GET /projects/{projectId}/members as object-vs-scalar
+        // drift; the branch is a string enum and the server was right. A guard
+        // that cries wolf is worse than no guard, so the null branches are
+        // dropped and the remaining one decides.
+        for (String composed : new String[]{"oneOf", "anyOf"}) {
+            if (s.has(composed)) {
+                for (JsonNode branch : s.path(composed)) {
+                    JsonNode resolved = resolve(document, branch);
+                    if ("null".equals(resolved.path("type").asText())) continue;
+                    return kindOf(document, resolved);
+                }
+                return "unknown";
+            }
+        }
+        if (s.has("properties") || s.has("allOf")) return "object";
+        JsonNode type = s.path("type");
+        String name = type.isArray()
+                ? java.util.stream.StreamSupport.stream(type.spliterator(), false)
+                        .map(JsonNode::asText).filter(t -> !"null".equals(t)).findFirst().orElse("")
+                : type.asText("");
+        return switch (name) {
+            case "object" -> "object";
+            case "array" -> "array";
+            case "" -> "unknown";
+            default -> "scalar";
+        };
+    }
+
+    /** The property names of an item schema. */
+    private Set<String> propertyNames(JsonNode itemSchema) {
+        JsonNode properties = itemSchema.path("properties");
+        if (!properties.isObject()) return Set.of();
+        Set<String> names = new TreeSet<>();
+        properties.fieldNames().forEachRemaining(names::add);
+        return names;
+    }
+
     private Set<String> payloadProperties(JsonNode document, JsonNode operation) {
         JsonNode schema = resolve(document, operation
                 .path("responses").path("200")
@@ -298,6 +374,18 @@ class ContractConformanceTest {
         Set<String> names = new TreeSet<>();
         properties.fieldNames().forEachRemaining(names::add);
         return names;
+    }
+
+    /** The item schema a 200 carries — see {@link #payloadProperties}. */
+    private JsonNode payloadSchema(JsonNode document, JsonNode operation) {
+        JsonNode schema = resolve(document, operation
+                .path("responses").path("200")
+                .path("content").path("application/json").path("schema"));
+        if (schema.isMissingNode()) return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+        JsonNode data = resolve(document, schema.path("properties").path("data"));
+        if (!data.isMissingNode()) schema = data;
+        if ("array".equals(schema.path("type").asText())) schema = resolve(document, schema.path("items"));
+        return schema;
     }
 
     /**
