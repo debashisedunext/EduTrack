@@ -115,7 +115,12 @@ class ReportCatalogueTest {
                 EffortSummaryRunner.KEY,
                 SlaBreachRunner.KEY,
                 TaskTypeAnalysisRunner.KEY,
-                ReopenAnalysisRunner.KEY);
+                ReopenAnalysisRunner.KEY,
+                ProjectHealthRunner.KEY,
+                AgingReportRunner.KEY,
+                WorkloadCapacityRunner.KEY,
+                StageFunnelRunner.KEY,
+                StageCycleTimeRunner.KEY);
     }
 
     /**

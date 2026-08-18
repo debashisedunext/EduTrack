@@ -50,12 +50,82 @@ class ReportRunnerContractTest {
     }
 
     @Test
-    @DisplayName("seven reports run in total — the six plus A-063's date-wise")
+    @DisplayName("twelve reports run in total — A-063's one, A-066's six, A-067's five")
     void totalAvailable() {
         // Pinned as a count so a report flipped on without a runner, or a runner
         // added without flipping the card, is caught here rather than by a 500.
         assertThat(ReportCatalogue.declared().stream().filter(ReportDtos.Descriptor::available).count())
-                .isEqualTo(7);
+                .isEqualTo(12);
+    }
+
+    /** A-067's five, and the runner constant each must match. */
+    static Stream<org.junit.jupiter.params.provider.Arguments> a067Keys() {
+        return Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of("project-health", ProjectHealthRunner.KEY),
+                org.junit.jupiter.params.provider.Arguments.of("aging", AgingReportRunner.KEY),
+                org.junit.jupiter.params.provider.Arguments.of("workload-capacity", WorkloadCapacityRunner.KEY),
+                org.junit.jupiter.params.provider.Arguments.of("stage-funnel", StageFunnelRunner.KEY),
+                org.junit.jupiter.params.provider.Arguments.of("stage-cycle-time", StageCycleTimeRunner.KEY));
+    }
+
+    @ParameterizedTest(name = "{0} is declared available")
+    @MethodSource("a067Keys")
+    @DisplayName("each of §7.8's reports 8–12 is now offered")
+    void a067AreAvailable(String catalogueKey, String runnerKey) {
+        assertThat(runnerKey).isEqualTo(catalogueKey);
+
+        ReportDtos.Descriptor d = ReportCatalogue.declared().stream()
+                .filter(x -> x.key().equals(catalogueKey))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(d.available()).as("%s should be available", catalogueKey).isTrue();
+        assertThat(d.unavailableReason()).isNull();
+    }
+
+    /**
+     * Workload reads resource_daily_stats, which is keyed (stat_date, user_id)
+     * and has no project column — A-051 recorded that and it still holds. So the
+     * descriptor offers no Project control, for velocity's reason: a filter the
+     * runner cannot honour is worse than one that is absent.
+     */
+    @Test
+    @DisplayName("workload offers no Project filter, because its table has no project column")
+    void workloadHasNoProjectFilter() {
+        ReportDtos.Descriptor d = ReportCatalogue.declared().stream()
+                .filter(x -> x.key().equals(WorkloadCapacityRunner.KEY))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(d.filters()).doesNotContain(ReportFilterKind.PROJECT);
+    }
+
+    /**
+     * Project health and aging read daily_ticket_stats, keyed by project. They
+     * cannot express "assigned to me" however they are filtered, so a delivery
+     * role is told so rather than shown their projects' figures under a note
+     * saying the rows are their own — the defect A-063 shipped and fixed.
+     */
+    @Test
+    @DisplayName("the project-keyed reports stay withheld from a delivery role")
+    void projectKeyedStayWithheld() {
+        ReportScope ownWork = new ReportScope(true, 8L, List.of(1L));
+
+        assertThat(ReportCatalogue.find(ProjectHealthRunner.KEY, ownWork).orElseThrow().available())
+                .isFalse();
+        assertThat(ReportCatalogue.find(AgingReportRunner.KEY, ownWork).orElseThrow().available())
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("the stage reports do answer a delivery role, because they filter by assignee")
+    void stageReportsAnswerDeliveryRoles() {
+        ReportScope ownWork = new ReportScope(true, 8L, List.of(1L));
+
+        assertThat(ReportCatalogue.find(StageFunnelRunner.KEY, ownWork).orElseThrow().available())
+                .isTrue();
+        assertThat(ReportCatalogue.find(StageCycleTimeRunner.KEY, ownWork).orElseThrow().available())
+                .isTrue();
     }
 
     /**

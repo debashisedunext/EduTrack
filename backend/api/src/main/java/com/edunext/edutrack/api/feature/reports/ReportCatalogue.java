@@ -99,18 +99,18 @@ public final class ReportCatalogue {
             new ReportDtos.Descriptor("date-wise", "Date-wise Report",
                     "Created against closed and reopened per day, with the net backlog line.",
                     DELIVERY, "line", List.of(DATE_RANGE, PROJECT), true, null),
-            unbuilt("project-health", "Project Health",
-                    "Open and closed, backlog trend, critical count and team load per project.",
-                    DELIVERY, "line", List.of(DATE_RANGE, PROJECT)),
-            unbuilt("aging", "Aging Report",
-                    "How long open tickets have been open, bucketed.",
-                    DELIVERY, "bar", List.of(DATE_RANGE, PROJECT, LEVEL)),
+            built("project-health", "Project Health",
+                    "Open, critical and delayed now, against what was raised and closed in the window.",
+                    DELIVERY, "bar", List.of(DATE_RANGE, PROJECT)),
+            built("aging", "Aging Report",
+                    "How long open work has been open, bucketed, with the share over thirty days.",
+                    DELIVERY, "bar", List.of(DATE_RANGE, PROJECT)),
             built("sla-breach", "Delayed / SLA Breach",
                     "Every breached ticket, worst first, with how far overdue and its latest remark.",
                     DELIVERY, "bar", List.of(DATE_RANGE, PROJECT, LEVEL, TASK_TYPE)),
-            unbuilt("workload-capacity", "Workload & Capacity",
-                    "Assigned load per person against their working calendar.",
-                    DELIVERY, "stacked-bar", List.of(DATE_RANGE, PROJECT, RESOURCE)),
+            built("workload-capacity", "Workload & Capacity",
+                    "What each person is carrying against the working hours they actually have.",
+                    DELIVERY, "stacked-bar", List.of(DATE_RANGE, RESOURCE)),
 
             // ── QUALITY ─────────────────────────────────────────────────────
             built("reopen-analysis", "Reopen Analysis",
@@ -124,12 +124,12 @@ public final class ReportCatalogue {
                     QUALITY, "donut", List.of(DATE_RANGE, PROJECT)),
 
             // ── WORKFLOW ────────────────────────────────────────────────────
-            unbuilt("stage-funnel", "Stage Funnel",
-                    "How many tickets sit at each ribbon stage, and where they stop.",
+            built("stage-funnel", "Stage Funnel",
+                    "How many tickets entered each stage, and how many are still sitting there.",
                     WORKFLOW, "bar", List.of(DATE_RANGE, PROJECT)),
-            unbuilt("stage-cycle-time", "Stage Cycle Time",
-                    "Average time per stage, split into active work and idle waiting.",
-                    WORKFLOW, "stacked-bar", List.of(DATE_RANGE, PROJECT, TASK_TYPE)),
+            built("stage-cycle-time", "Stage Cycle Time",
+                    "Average time per stage, split into hours worked and hours waiting.",
+                    WORKFLOW, "stacked-bar", List.of(DATE_RANGE, PROJECT)),
             unbuilt("deployment-report", "Deployment Report",
                     "What was deployed, when, by whom, and what came back.",
                     WORKFLOW, "bar", List.of(DATE_RANGE, PROJECT)),
@@ -171,7 +171,7 @@ public final class ReportCatalogue {
      * the two agreed.
      */
     private static final java.util.Set<String> NOT_KEPT_PER_PERSON =
-            java.util.Set.of("project-health", "aging", "stage-funnel", "stage-cycle-time",
+            java.util.Set.of("project-health", "aging",
                     "deployment-report", "client-report", "email-delivery-log");
 
     /**
@@ -193,7 +193,7 @@ public final class ReportCatalogue {
      * the filter declaration exists to prevent.
      */
     private static final java.util.Set<String> ANSWERED_PER_PERSON =
-            java.util.Set.of("date-wise", "resource-velocity");
+            java.util.Set.of("date-wise", "resource-velocity", "workload-capacity");
 
     private static final String OWN_WORK_DESCRIPTION =
             "What you closed each day, the effort you logged, and what you are still holding.";
