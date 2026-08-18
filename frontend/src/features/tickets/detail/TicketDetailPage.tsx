@@ -13,6 +13,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { RichTextView } from '@/components/ui/rich-text-view'
 import { ensureRichText } from '@/components/ui/rich-text'
 
+import { AttachmentsTab } from '../attachments/AttachmentsTab'
+import { useAttachmentsTab } from '../attachments/useAttachmentsTab'
 import { CommentBox } from '../comments/CommentBox'
 import { CommentThread } from '../comments/CommentThread'
 import { useTicketComments } from '../comments/useTicketComments'
@@ -149,6 +151,14 @@ export function TicketDetailPage() {
   */
   const comments = useTicketComments({ ticketId, cycle })
 
+  /*
+    C-060 · fetched only once the tab is open, same rule `useTicketHistory`
+    follows for the History tab: nothing outside this tab needs every cycle's
+    files, and `detail.attachments` above is cycle-scoped for the strip's own
+    at-a-glance purpose.
+  */
+  const attachmentsTab = useAttachmentsTab({ ticketId, enabled: ticketId.length > 0 && activeTab === 'attachments' })
+
   const tabs: DetailTab[] = React.useMemo(
     () =>
       TAB_OWNERS.map(({ id, label, owner, note }) => ({
@@ -168,6 +178,14 @@ export function TicketDetailPage() {
               isRemoving={comments.isRemoving}
               removeError={comments.removeError}
             />
+          ) : id === 'attachments' ? (
+            <AttachmentsTab
+              attachments={attachmentsTab.rows}
+              isLoading={attachmentsTab.isLoading}
+              loadError={attachmentsTab.loadError}
+              clientVisibleOnly={attachmentsTab.clientVisibleOnly}
+              onClientVisibleOnlyChange={attachmentsTab.setClientVisibleOnly}
+            />
           ) : (
             <PendingSection title={`${label} tab`} owner={owner} note={note} />
           ),
@@ -183,6 +201,11 @@ export function TicketDetailPage() {
       comments.isRemoving,
       comments.removeError,
       viewer,
+      attachmentsTab.rows,
+      attachmentsTab.isLoading,
+      attachmentsTab.loadError,
+      attachmentsTab.clientVisibleOnly,
+      attachmentsTab.setClientVisibleOnly,
     ],
   )
 

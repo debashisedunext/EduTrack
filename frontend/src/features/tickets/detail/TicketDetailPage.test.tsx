@@ -235,6 +235,35 @@ describe('S-20 Ticket detail shell — C-019', () => {
     expect(screen.getByRole('tabpanel')).toHaveTextContent(/per-cycle and grand totals/i)
   })
 
+  /**
+   * C-060 · proves the Attachments tab renders the real gallery rather than
+   * the `PendingSection` placeholder every other still-open tab shows.
+   * `db.ts`'s own fixture note explains the split: `gateway-500.png` is the
+   * one hand-seeded row (cycle 1, Intake), and `attachmentsFor` generates five
+   * more onto the ticket's current cycle and stage (cycle 2, Closed) so the
+   * gallery, the lightbox and the "Scanning" placeholder all have something to
+   * render under `npm run dev` too.
+   */
+  it('renders the real Attachments gallery, grouped by cycle and stage, not the pending placeholder', async () => {
+    signInAsAdmin()
+    renderPage(`/tickets/${TICKET}?tab=attachments`)
+    await waitForTicket()
+
+    const panel = screen.getByRole('tabpanel')
+    expect(panel).not.toHaveTextContent(/C-060/)
+
+    // Cycle 2 is the latest and starts open, grouped under the stage the
+    // ticket closed in.
+    expect(await within(panel).findByRole('button', { name: /Cycle 2/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(panel).getByText('Closed')).toBeInTheDocument()
+
+    // Cycle 1 starts collapsed; expanding it reaches the hand-seeded row.
+    const cycle1 = within(panel).getByRole('button', { name: /Cycle 1/ })
+    expect(cycle1).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(cycle1)
+    expect(within(panel).getByText('Intake')).toBeInTheDocument()
+  })
+
   it('moves between tabs with the arrow keys, one tab stop for the whole strip', async () => {
     signInAsAdmin()
     renderPage()
