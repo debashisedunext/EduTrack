@@ -17,6 +17,7 @@ Ticket CRUD, detail, cycles, reopen, comments, attachments, effort. Screens S-17
 | `LevelReasonRequiredException` | C-020 | §4B.1's reason, mandatory once the ticket is assigned |
 | [`attachments/`](attachments/README.md) | C-025 | Attachment security — sniffing, EXIF stripping, AV scan, signed URLs. Its own README |
 | [`effort/`](effort/README.md) | C-035 | Effort logging, append-only, auto-stamped with the ticket's current stage and iteration. Its own README |
+| [`history/`](history/README.md) | C-059 | `GET /tickets/{ticketId}/history` — read only, cycle-grouped, optionally interleaved with comments. Its own README |
 
 There is still **no ticket write service**. `POST /tickets` does not exist on the
 server; the create form runs against D-004's mock. C-013's note records what the

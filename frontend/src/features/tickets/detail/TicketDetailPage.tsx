@@ -16,6 +16,8 @@ import { ensureRichText } from '@/components/ui/rich-text'
 import { CommentBox } from '../comments/CommentBox'
 import { CommentThread } from '../comments/CommentThread'
 import { useTicketComments } from '../comments/useTicketComments'
+import { HistoryTab } from '../history/HistoryTab'
+import { useTicketHistory } from '../history/useTicketHistory'
 
 import { canChangeLevel } from './levelChange'
 import { PendingSection } from './PendingSection'
@@ -29,10 +31,13 @@ const DEFAULT_TAB = 'journey'
 /** Every tab in S-20, each pointing at the task that fills it. */
 const TAB_OWNERS: { id: string; label: string; owner: string; note?: string }[] = [
   { id: 'journey', label: 'Journey', owner: 'C-055', note: 'The stage-by-stage roll-up — every hop, its duration, and the active-versus-idle split.' },
+  // C-059 fills this one too, same reason C-029's comments entry does below:
+  // kept here so the strip's order, labels and ownership stay in one list,
+  // and `content` decides whether a tab renders a `PendingSection` or the
+  // real thing. `note` is now dead for both — HistoryTab and CommentThread
+  // never read it — but removing it would lose the one-line description a
+  // reader gets from this table alone, without opening either component.
   { id: 'history', label: 'History', owner: 'C-059', note: 'Cycle-grouped field changes and handoffs. Append-only: no edit or delete affordance exists for any role.' },
-  // C-029 fills this one. It keeps its entry here so the strip's order, labels
-  // and ownership stay in one list, and `content` below is what decides whether
-  // a tab renders a `PendingSection` or the real thing.
   { id: 'comments', label: 'Comments', owner: 'C-029', note: 'The comment stream, with the always-visible box above it.' },
   { id: 'attachments', label: 'Attachments', owner: 'C-060', note: 'The gallery, grouped by cycle and stage.' },
   { id: 'effort', label: 'Effort', owner: 'C-061', note: 'Every effort line for the selected cycle, with per-cycle and grand totals.' },
@@ -149,6 +154,11 @@ export function TicketDetailPage() {
   */
   const comments = useTicketComments({ ticketId, cycle })
 
+  // C-059 · gated on the tab being open — see `useTicketHistory`'s own note
+  // on why this, unlike the comment box, has nothing else on the page that
+  // needs it fetched early.
+  const history = useTicketHistory({ ticketId, cycle, enabled: activeTab === 'history' })
+
   const tabs: DetailTab[] = React.useMemo(
     () =>
       TAB_OWNERS.map(({ id, label, owner, note }) => ({
@@ -168,6 +178,17 @@ export function TicketDetailPage() {
               isRemoving={comments.isRemoving}
               removeError={comments.removeError}
             />
+          ) : id === 'history' ? (
+            <HistoryTab
+              entries={history.entries}
+              isLoading={history.isLoading}
+              loadError={history.loadError}
+              includeComments={history.includeComments}
+              onIncludeCommentsChange={history.setIncludeComments}
+              hasMore={history.hasMore}
+              isLoadingMore={history.isLoadingMore}
+              onLoadMore={history.loadMore}
+            />
           ) : (
             <PendingSection title={`${label} tab`} owner={owner} note={note} />
           ),
@@ -182,6 +203,14 @@ export function TicketDetailPage() {
       comments.editError,
       comments.isRemoving,
       comments.removeError,
+      history.entries,
+      history.isLoading,
+      history.loadError,
+      history.includeComments,
+      history.setIncludeComments,
+      history.hasMore,
+      history.isLoadingMore,
+      history.loadMore,
       viewer,
     ],
   )
