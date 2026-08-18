@@ -13,11 +13,92 @@ Ticket CRUD, detail, cycles, reopen, comments, attachments, effort. Screens S-17
 | `PlannedCloseDateController`, `PlannedCloseDateDtos` | C-012 | `GET /api/v1/tickets/planned-close-date` |
 | `TicketExceptionHandler` | C-012 | RFC 9457 problems for the ticket routes |
 | `UnknownProjectException`, `UnknownLevelException` | C-011, C-012 | The two failures those routes can produce |
+| `PriorityChangeController`, `PriorityChangeService`, `PriorityChangeDtos` | C-020 | `PATCH /api/v1/tickets/{ticketId}/priority` — §4B.1's level change |
+| `LevelReasonRequiredException` | C-020 | §4B.1's reason, mandatory once the ticket is assigned |
 | [`attachments/`](attachments/README.md) | C-025 | Attachment security — sniffing, EXIF stripping, AV scan, signed URLs. Its own README |
 
 There is still **no ticket write service**. `POST /tickets` does not exist on the
 server; the create form runs against D-004's mock. C-013's note records what the
 save chain still needs and who owns each part.
+
+## C-020 — the level change
+
+### `original_level` is never written here, and that is the whole task
+
+Not "is restored afterwards" — *never written*. There is no `setOriginalLevel`
+call in `PriorityChangeService` and there must not be one. It is set once by the
+create path and is the only column that can answer A-070's "how many were *born*
+critical versus *became* critical". A single overwrite is unrecoverable: the
+ticket then claims it was always Critical, the history row that would have
+contradicted it agrees, and nothing in the system knows the difference.
+
+This is the one route whose *purpose* is to move `level`, so it is the one place
+the rule can be broken by an ordinary-looking line. `PriorityChangeServiceTest`
+asserts it on three paths rather than leaving it to review.
+
+### The clock start is the cycle's, not now — the opposite call from `ReopenService`
+
+`ReopenService` recomputes from the reopen instant and argues that anything else
+leaves the ticket "born breached". This method deliberately does the opposite,
+and the two are consistent:
+
+- a **reopen starts a new cycle**, so its clock genuinely begins at the reopen;
+- a **level change happens inside a cycle whose clock is already running**, and
+  an SLA is "resolve within N hours of being *reported*".
+
+So escalating a three-day-old ticket to a four-hour level produces a planned
+close date **in the past**, and the ticket is breached. That is the true answer —
+it has been open three days and somebody has just decided it should have taken
+four hours. A date measured from now would say it is comfortably on track, which
+is the reading that lets a genuinely late Critical ticket sit quietly in a queue.
+`levelChange.ts` on the frontend is the same function, so the preview the user
+commits against cannot disagree with the row.
+
+### The reason is a row rule, so it is not a Bean Validation annotation
+
+§4B.1 makes the reason mandatory *once the ticket is assigned* — a condition on a
+column the request names by id and does not carry. A `@NotBlank` on the DTO would
+refuse the legitimate triage case, and a cross-field `@AssertTrue` cannot see the
+ticket either. It lives in the service and is still reported as a **400 keyed
+onto `reason`**, so S-20's dialog marks the textarea.
+
+400 and not 422, which is the opposite call from `TicketNotClosedException` one
+package over and is right for the opposite reason: there nothing the caller sent
+was wrong and rewording could not help, here the request is missing a field the
+caller can supply.
+
+### ⚠ Found here — `{ticketId}` is a code, and two routes take a `long`
+
+The contract's `TicketId` is a **ticket code**: `components/schemas/TicketId` is
+`type: string` with the pattern `^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$` and the
+example `CRM-26-00347`, and `Ticket.ticketId` is that same schema. So every
+client puts a code in that path segment — S-20's own URL is
+`/tickets/CRM-26-00347` — and `ScopedTickets` has carried `byCode`/
+`requireByCode` since A-035, described there as "the `CRM-26-00347` form users
+actually type".
+
+**`TicketDetailController.full` (A-052) and `ReopenController.reopen` (C-038)
+both declare `@PathVariable long ticketId`.** Against the real backend that is a
+400 for every request the frontend actually sends. It has not bitten because
+both have only ever been exercised against D-004's mock, which routes on the
+string, and no deviation is recorded for it in PLAN.md §4.
+
+C-020 follows the contract instead — a route that only works when called wrongly
+is not working — and `requireByCode` finally has a caller. **The other two are
+raised, not fixed here:** one is Stream A's route and the other is another task's
+test surface, and changing them quietly on a priority branch is how a 400 becomes
+somebody else's afternoon.
+
+### ⚠ The capability is borrowed
+
+The route asserts `ticket.assign`. §4B.1 grants the level change to Admin, PM and
+Support Desk — three roles, stated as plainly as §2 states its Reopen row — but
+§2 has no "change priority" row, so no permission code exists for it and minting
+one is a migration in Stream A's `db/migration/`. `PriorityChangeController`
+carries the full argument for the borrowing and for why `ticket.reopen` and
+`ticket.close` were the wrong things to reuse. It changes nobody's access today
+and stops being safe the first time an administrator composes a custom role on
+S-09.
 
 ## C-012 — the planned close date
 
