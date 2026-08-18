@@ -35,7 +35,8 @@ class PreBreachScanner {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${edutrack.sla.pre-breach-scan-interval:PT15M}")
+    @Scheduled(fixedDelayString = "${edutrack.sla.pre-breach-scan-interval:PT15M}",
+               initialDelayString = "${edutrack.sla.initial-delay:PT30S}")
     @SchedulerLock(name = "preBreachScanner", lockAtMostFor = "PT14M", lockAtLeastFor = "PT1M")
     public void scan() {
         try {

@@ -40,7 +40,8 @@ class StaleTicketScanner {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${edutrack.sla.stale-scan-interval:PT1H}")
+    @Scheduled(fixedDelayString = "${edutrack.sla.stale-scan-interval:PT1H}",
+               initialDelayString = "${edutrack.sla.initial-delay:PT30S}")
     @SchedulerLock(name = "staleTicketScanner", lockAtMostFor = "PT55M", lockAtLeastFor = "PT1M")
     public void scan() {
         try {

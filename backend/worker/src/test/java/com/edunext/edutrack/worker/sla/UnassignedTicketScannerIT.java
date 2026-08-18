@@ -59,6 +59,20 @@ class UnassignedTicketScannerIT {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {
+        // The seven sla scanners are `@Scheduled(fixedDelay…)`, which fires its
+        // first run the instant the context is up — seven threads scanning
+        // `tickets` while this class's fixture is still writing it. That is a
+        // deadlock reported against the test's own UPDATE, and it cost a re-run
+        // on two integration batches. `SlaScanner` carries the full account.
+        // Pushed past any suite's lifetime; every test here calls scanOnce().
+        registry.add("edutrack.sla.initial-delay", () -> "PT24H");
+        // A-051's stats worker is the other `fixedDelay` that fires at context
+        // startup, and DailyStatsRepository reads and JOINs `tickets` — so it
+        // races this class's fixture exactly as the sla scanners did. A-056 hit
+        // the same thing from the other side ("22 of 25 cases failing in reset()")
+        // and added this switch, applying it only to StatsRefreshIT. Using their
+        // switch rather than editing worker/stats, which is Stream A's.
+        registry.add("edutrack.stats.enabled", () -> "false");
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);

@@ -38,7 +38,8 @@ class PingPongScanner {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${edutrack.sla.ping-pong-scan-interval:PT1H}")
+    @Scheduled(fixedDelayString = "${edutrack.sla.ping-pong-scan-interval:PT1H}",
+               initialDelayString = "${edutrack.sla.initial-delay:PT30S}")
     @SchedulerLock(name = "pingPongScanner", lockAtMostFor = "PT55M", lockAtLeastFor = "PT1M")
     public void scan() {
         try {

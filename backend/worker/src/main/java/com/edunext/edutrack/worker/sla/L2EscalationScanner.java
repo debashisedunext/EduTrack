@@ -41,7 +41,8 @@ class L2EscalationScanner {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${edutrack.sla.l2-scan-interval:PT30M}")
+    @Scheduled(fixedDelayString = "${edutrack.sla.l2-scan-interval:PT30M}",
+               initialDelayString = "${edutrack.sla.initial-delay:PT30S}")
     @SchedulerLock(name = "l2EscalationScanner", lockAtMostFor = "PT28M", lockAtLeastFor = "PT1M")
     public void scan() {
         try {
