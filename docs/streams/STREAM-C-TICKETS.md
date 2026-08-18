@@ -292,7 +292,12 @@ Added 11 Aug 2026 at the client's request; blueprint revision 1.3 (§7.5, §8.2)
 ### Remaining tabs & screens
 - [ ] **C-059** History tab — cycle-grouped, expandable to every field change and handoff. **No edit or delete icon exists for anyone**, and the API rejects it even if the DOM is manipulated.
 - [ ] **C-060** Attachments tab — gallery, filterable by client-visible, grouped by cycle and stage.
-- [ ] **C-061** Effort tab — every log line, sum per cycle + grand total.
+- [x] **C-061** Effort tab — every log line, sum per cycle + grand total.
+  - **No backend, contract or mock change.** `EffortLogController.list` (C-035) already carries `cycle`/`stage`/`iteration` filters and `Cycle.totalEffortHrs` (C-041) is already materialised on `GET /tickets/{id}/full`; this task is the frontend tab over data every other layer already served.
+  - **Fetches every cycle at once by default, but forwards `?cycle=` when the page is scoped to one** — unlike C-060's Attachments tab, which never sends `cycle`. Landing on an earlier, sealed cycle through `TicketSummaryPanel`'s `cycleEffortPath` link narrows the log to just that cycle, the same contract `useTicketHistory` already set.
+  - **Totals are never summed from the fetched rows.** `EffortLogListResponse.meta.cycleTotalHrs` is always the ticket's *current* cycle regardless of any filter — the wrong figure for an arbitrary group this tab renders — so `EffortTab` reads `Cycle.totalEffortHrs` via `ticketSummary.ts`'s existing `cycleEffortHrs`/`totalEffortHrs` instead, the same materialised figures the summary panel's "Logged" row already trusts. This also means a cycle's displayed total is correct even before "Load more" has been pressed.
+  - **Grouped by cycle, most recent open by default** — `HistoryTab`/`AttachmentsTab`'s own convention. Within a cycle, rows stay chronological.
+  - **Correction rows render, not hidden** — negative hours with a `(correction)` caption, `HistoryEntryRow`'s identical treatment, so a reversal reads as a record rather than a bug.
 - [ ] **C-062** Stage Queue / team inbox — "Waiting in QA", "Waiting in Deployment", sorted by time-in-stage descending. The landing page for QA and Deployment. **S-31**
 - [ ] **C-063** Bulk reassignment wizard — source resource → tickets → target → reason → confirm. Each move writes its own history entry. **S-24**
 - [ ] **C-064** Ticket linking — blocks / is blocked by / duplicate of / relates to.

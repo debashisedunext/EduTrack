@@ -232,7 +232,38 @@ describe('S-20 Ticket detail shell — C-019', () => {
 
     fireEvent.click(within(tabs).getByRole('tab', { name: 'Effort' }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('tab=effort'))
-    expect(screen.getByRole('tabpanel')).toHaveTextContent(/per-cycle and grand totals/i)
+    expect(await within(screen.getByRole('tabpanel')).findByText(/Grand total/i)).toBeInTheDocument()
+  })
+
+  /**
+   * C-061 · proves the Effort tab renders the real cycle-grouped log rather
+   * than the `PendingSection` placeholder every other still-open tab shows.
+   * The §14 walkthrough fixture's hops reconcile to 38.0 h total — 24.5 h in
+   * cycle 1 (including the QA rework's extra `DEVELOPMENT`/`QA` pass) and
+   * 13.5 h in cycle 2 — the same figure `STREAM-C-TICKETS.md`'s exit
+   * criterion names.
+   */
+  it('renders the real Effort tab, grouped by cycle with per-cycle and grand totals, not the pending placeholder', async () => {
+    signInAsAdmin()
+    renderPage(`/tickets/${TICKET}?tab=effort`)
+    await waitForTicket()
+
+    const panel = screen.getByRole('tabpanel')
+    expect(panel).not.toHaveTextContent(/C-061/)
+    expect(await within(panel).findByText(/Grand total/i)).toHaveTextContent('38.0 h')
+
+    // Cycle 2 is the latest and starts open, its own total visible on the group header.
+    const cycle2 = within(panel).getByRole('button', { name: /Cycle 2/ })
+    expect(cycle2).toHaveAttribute('aria-expanded', 'true')
+    expect(cycle2).toHaveTextContent('13.5 h')
+    expect(within(panel).getByRole('columnheader', { name: 'Resource' })).toBeInTheDocument()
+
+    // Cycle 1 starts collapsed; expanding it reaches its own total and rows.
+    const cycle1 = within(panel).getByRole('button', { name: /Cycle 1/ })
+    expect(cycle1).toHaveAttribute('aria-expanded', 'false')
+    expect(cycle1).toHaveTextContent('24.5 h')
+    fireEvent.click(cycle1)
+    expect(within(panel).getAllByText('Ravi Kumar').length).toBeGreaterThan(0)
   })
 
   it('moves between tabs with the arrow keys, one tab stop for the whole strip', async () => {
