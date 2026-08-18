@@ -78,7 +78,10 @@ export function KpiCard({
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
         if (event.button !== 0) return
         event.preventDefault()
-        openPanel(drillDown, label)
+        // D-064 · `value`, not `shown`: useCountUp animates towards the
+        // figure, so mid-animation `shown` is a number that was never the
+        // answer to anything. The panel must show what the card means.
+        openPanel(drillDown, label, value)
       }}
       className="rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-4
                  flex flex-col gap-2 transition-shadow hover:shadow-sm

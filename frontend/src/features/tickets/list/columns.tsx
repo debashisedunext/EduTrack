@@ -22,6 +22,7 @@ export type ColumnKey =
   | 'client'
   | 'reportedBy'
   | 'createdAt'
+  | 'actualCloseDate'
 
 export interface ColumnRenderContext {
   /** `Ticket.taskTypeId` names a master row the list payload does not embed — resolved from `/masters/task-types`, fetched once for the filter bar and reused here. */
@@ -165,6 +166,27 @@ export const COLUMNS: ColumnDef[] = [
     widthClassName: 'whitespace-nowrap',
     render: (t) => (t.createdAt ? format(parseISO(t.createdAt), 'd MMM yyyy') : '—'),
   },
+  {
+    // D-063. The fourth of the four dates asked for on 18 Aug; `createdAt` and
+    // `plannedCloseDate` above are two of them, and the "actual start" that was
+    // the third turned out to be the cycle's start — already modelled on
+    // `ticket_cycles`, and not a ticket-level field at all.
+    //
+    // A blank here on a reopened ticket is CORRECT and should not be "fixed":
+    // reopen nulls the ticket's actual close date because the ticket is open
+    // again, and cycle 1's close is preserved on its cycle, where C-053's
+    // selector reads it. The row shows the ticket's state; the cycle view shows
+    // each cycle's.
+    key: 'actualCloseDate',
+    header: 'Closed',
+    widthClassName: 'whitespace-nowrap',
+    render: (t) =>
+      t.actualCloseDate ? (
+        format(parseISO(t.actualCloseDate), 'd MMM yyyy')
+      ) : (
+        <span className="text-content-muted">—</span>
+      ),
+  },
 ]
 
 /**
@@ -179,13 +201,29 @@ export function rowCueClassName(ticket: Ticket): string | undefined {
   return undefined
 }
 
+/**
+ * D-063 · `createdAt` and `actualCloseDate` join the default set.
+ *
+ * Three of the four dates asked for on 18 Aug are now visible without opening
+ * the chooser — created, planned close, actual close — because a column nobody
+ * can find is not a column that was added. The fourth, "actual start", is the
+ * cycle's start and is not a ticket-level field.
+ *
+ * This does spend width, which §S-17 notes is already tight (it is why Module
+ * is chooser-only). Both remain switchable, and anyone who has already opened
+ * the list keeps their own saved selection — `useListPreferences` persists
+ * `visibleColumns`, so this changes the default for a *new* reader, not an
+ * existing one's layout.
+ */
 export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = [
   'ticketId',
   'title',
   'taskType',
   'level',
   'assignee',
+  'createdAt',
   'plannedCloseDate',
+  'actualCloseDate',
   'effort',
   'status',
 ]

@@ -41,7 +41,10 @@ export function PriorityBar({ series }: { series: WidgetSeries[] }) {
             <Bar
               dataKey="y"
               isAnimationActive={false}
-              onClick={(bar: { drillDown?: string | null }) => drillDown(bar?.drillDown)}
+              // D-064 · carry the bar's own height into the panel header.
+              onClick={(bar: { drillDown?: string | null; y?: number }) =>
+                drillDown(bar?.drillDown, undefined, bar?.y)
+              }
             >
               {points.map((point) => (
                 <Cell

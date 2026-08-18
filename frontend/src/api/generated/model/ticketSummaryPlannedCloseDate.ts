@@ -46,10 +46,5 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { TicketSummary } from './ticketSummary';
-import type { Meta } from './meta';
 
-export interface TicketListResponse {
-  data: TicketSummary[];
-  meta?: Meta;
-}
+export type TicketSummaryPlannedCloseDate = string | null;

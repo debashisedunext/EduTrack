@@ -28,12 +28,24 @@ import { useDrillDownStore } from '../drillDownStore'
  * (see `WidgetFrame`) and the accessible path to the same destinations is the
  * legend beneath it, which is built from real `<button>`s. Click-through on the
  * drawing is a convenience for pointer users, never the only way in.
+ *
+ * <h2>The segment's own number goes with it (D-064)</h2>
+ *
+ * The panel heads itself with the figure that was clicked, and a chart has one
+ * per segment — the donut arc says 24, the legend beside it says 24, and the
+ * panel must not then say something else. Passed from the datum rather than
+ * counted from the rows the panel fetches, for the same reason the cards do it:
+ * the contract calls `meta.totalCount` "present only where a count is cheap,
+ * never computed live over tickets".
+ *
+ * Undefined is honest and prints nothing. A segment with no figure — an aging
+ * bucket, which has no drill-down at all — must not have one invented for it.
  */
 export function useDrillDown(title?: string) {
   const open = useDrillDownStore((s) => s.open)
 
   return React.useCallback(
-    (drillDown: string | null | undefined, label?: string) => {
+    (drillDown: string | null | undefined, label?: string, count?: number | null) => {
       if (!drillDown) {
         return
       }
@@ -42,7 +54,7 @@ export function useDrillDown(title?: string) {
       // tickets is a glance, and a full page load costs the reader the place
       // they were scanning. "Open full list" inside the panel is the
       // navigation, for when the glance turns out to be a destination.
-      open(drillDown, label ?? title ?? 'Filtered tickets')
+      open(drillDown, label ?? title ?? 'Filtered tickets', count ?? null)
     },
     [open, title],
   )

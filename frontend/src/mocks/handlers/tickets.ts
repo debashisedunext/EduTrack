@@ -7,7 +7,8 @@ import { isRichTextEmpty, sanitizeRichText } from '@/components/ui/rich-text';
 import { plannedCloseDateFor } from './sla';
 import {
   currentUser, findTicket, noContent, notFound, ok, paginate,
-  problem, scopedTickets, ticketDto, unprocessable, url, userRef, validationFailed,
+  problem, scopedTickets, ticketDto, ticketSummaryDto, unprocessable, url, userRef,
+  validationFailed,
 } from './util';
 
 /** Tickets, comments, attachments, effort, history — everything under /tickets. */
@@ -73,7 +74,8 @@ export const ticketHandlers = [
     });
 
     const { page, meta } = paginate(rows, new URL(request.url));
-    return ok(page.map((t) => ticketDto(t, db)), meta);
+    // D-061 · the list returns TicketSummary; the detail page returns Ticket.
+    return ok(page.map((t) => ticketSummaryDto(t, db)), meta);
   }),
 
   // ── create ────────────────────────────────────────────────────────────────

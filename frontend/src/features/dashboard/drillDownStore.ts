@@ -21,14 +21,34 @@ interface DrillDownStore {
   drillDown: string | null
   /** What was clicked — the card or series name — for the panel's heading. */
   title: string
-  open: (drillDown: string, title: string) => void
+  /**
+   * D-064 · the figure printed on the thing that was clicked, or null when
+   * whatever opened the panel had no single number (a chart legend, say).
+   *
+   * <p><strong>Carried, never counted.</strong> The contract says `totalCount`
+   * is "present only where a count is cheap, never computed live over tickets",
+   * which is CLAUDE.md's no-live-`COUNT(*)`-behind-a-dashboard rule — so this
+   * is the card's own figure, which already came from the pre-aggregated
+   * summary tables, rather than a count of the rows the panel fetched.
+   *
+   * <p><strong>It will not always equal the number of rows below it, and that
+   * is understood.</strong> "Total tasks created" is a flow — raised inside the
+   * window — while "Pending / open" is a stock, open right now whenever raised;
+   * the open card's drill-down applies the reported-date window, so its list is
+   * the intersection. Debashis chose the card's figure on 18 Aug knowing that.
+   * The panel prints the window immediately beneath, so the two read as
+   * different questions rather than as a contradiction.
+   */
+  count: number | null
+  open: (drillDown: string, title: string, count?: number | null) => void
   close: () => void
 }
 
 export const useDrillDownStore = create<DrillDownStore>((set) => ({
   drillDown: null,
   title: '',
-  open: (drillDown, title) => set({ drillDown, title }),
+  count: null,
+  open: (drillDown, title, count = null) => set({ drillDown, title, count }),
   // The title is left standing on close. Radix animates the panel out over
   // ~200ms and clearing it here would blank the heading mid-flight, which reads
   // as a glitch rather than as a dismissal.

@@ -6557,11 +6557,66 @@ components:
       type: object
       required: [data]
       properties: { data: { $ref: '#/components/schemas/Ticket' } }
+    TicketSummary:
+      type: object
+      description: |
+        D-061 · one **row** of S-17, not one ticket.
+
+        `GET /tickets` returns this rather than `Ticket`, and the difference is
+        deliberate: the list renders 25 rows at a time, and `description` plus
+        `stepsToGenerate` are sanitised HTML that can run to kilobytes each. A
+        list that shipped them would be slower than the request waterfall A-052
+        exists to remove, and no column on S-17 displays either. The detail page
+        reads `GET /tickets/{ticketId}/full`, which carries everything.
+
+        **Every name here is `Ticket`'s name for the same thing.** This is a
+        strict subset, never a rename — `ticketId` is the ticket code, exactly
+        as it is on the path and in the other ~30 operations that take it. A row
+        shape with its own vocabulary is what produced the blank ID column on
+        S-17: the server answered `ticketCode`/`assignedTo`, the generated
+        client bound `ticketId`/`assignee`, and both were internally consistent
+        while the grid rendered empty cells against a green build. D-062 now
+        fails the build on exactly that.
+
+        Embedded refs rather than bare ids, again matching `Ticket`: the grid
+        prints "CRM — Client CRM Platform" and an assignee's name and avatar, so
+        ids would push a second lookup into every consumer — the list, the S-06
+        drill-down and the CSV export — to save four joins on a 25-row page.
+      required: [ticketId, title, level, status, cycleNo, isDelayed, createdAt]
+      properties:
+        ticketId: { $ref: '#/components/schemas/TicketId' }
+        title: { type: string }
+        project: { $ref: '#/components/schemas/Project' }
+        client: { $ref: '#/components/schemas/ClientRef' }
+        clientContactId: { type: [integer, 'null'], format: int64 }
+        isClientRaised: { type: boolean }
+        taskTypeId: { type: integer, format: int64 }
+        moduleId: { type: [integer, 'null'], format: int64 }
+        level: { $ref: '#/components/schemas/Level' }
+        originalLevel: { $ref: '#/components/schemas/Level' }
+        status: { $ref: '#/components/schemas/StatusCode' }
+        currentStageCode: { type: [string, 'null'] }
+        assignee: { $ref: '#/components/schemas/UserRef' }
+        reportedBy: { $ref: '#/components/schemas/UserRef' }
+        cycleNo: { type: integer }
+        iterationNo: { type: integer }
+        reopenCount: { type: integer }
+        isReopened: { type: boolean }
+        dateReported: { type: string, format: date-time }
+        plannedCloseDate: { type: [string, 'null'], format: date-time }
+        actualCloseDate: { type: [string, 'null'], format: date-time }
+        isDelayed: { type: boolean }
+        delayedSince: { type: [string, 'null'], format: date-time }
+        estimatedHrs: { type: [number, 'null'], format: double }
+        totalEffortHrs: { type: number, format: double }
+        commentCount: { type: integer }
+        attachmentCount: { type: integer }
+        createdAt: { type: string, format: date-time }
     TicketListResponse:
       type: object
       required: [data]
       properties:
-        data: { type: array, items: { $ref: '#/components/schemas/Ticket' } }
+        data: { type: array, items: { $ref: '#/components/schemas/TicketSummary' } }
         meta: { $ref: '#/components/schemas/Meta' }
     TicketDetailResponse:
       type: object

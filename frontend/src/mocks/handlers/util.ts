@@ -118,6 +118,55 @@ export const clientRef = (id: number | null, db: Db = getDb()) => {
   return c ? { id: c.id, clientCode: c.clientCode, name: c.name } : null;
 };
 
+/**
+ * D-061 · one row of S-17 — the `TicketSummary` schema, not `Ticket`.
+ *
+ * The list returns this and the detail page returns the full record. Kept as a
+ * projection of {@link ticketDto} rather than a second hand-written object, so
+ * a field cannot come to mean one thing here and another there — the mock's
+ * whole job is to be indistinguishable from the server, and two independent
+ * constructions of the same row is how it stops being.
+ *
+ * What is deliberately absent is what a row does not display and a list should
+ * not carry 25 copies of: `description` and `stepsToGenerate` are sanitised
+ * HTML that runs to kilobytes, and `screenName`, `feature`, `pctComplete` and
+ * `updatedAt` have no column on S-17.
+ */
+export function ticketSummaryDto(t: Ticket, db: Db = getDb()) {
+  const full = ticketDto(t, db);
+  const cycle = db.cycles.filter((c) => c.ticketId === t.ticketId);
+  return {
+    ticketId: full.ticketId,
+    title: full.title,
+    project: full.project,
+    client: full.client,
+    clientContactId: full.clientContactId,
+    isClientRaised: full.isClientRaised,
+    taskTypeId: full.taskTypeId,
+    moduleId: full.moduleId,
+    level: full.level,
+    originalLevel: full.originalLevel,
+    status: full.status,
+    currentStageCode: full.currentStageCode,
+    assignee: full.assignee,
+    reportedBy: full.reportedBy,
+    cycleNo: full.cycleNo,
+    iterationNo: full.iterationNo,
+    reopenCount: full.reopenCount,
+    isReopened: cycle.length > 1,
+    dateReported: t.createdAt,
+    plannedCloseDate: full.plannedCloseDate,
+    actualCloseDate: full.actualCloseDate,
+    isDelayed: full.isDelayed,
+    delayedSince: full.delayedSince,
+    estimatedHrs: full.estimatedHrs,
+    totalEffortHrs: full.totalEffortHrs,
+    commentCount: db.comments.filter((c) => c.ticketId === t.ticketId && !c.deletedAt).length,
+    attachmentCount: db.attachments.filter((a) => a.ticketId === t.ticketId && !a.deletedAt).length,
+    createdAt: full.createdAt,
+  };
+}
+
 export function ticketDto(t: Ticket, db: Db = getDb()) {
   const project = db.projects.find((p) => p.id === t.projectId)!;
   const effort = db.effortLogs
