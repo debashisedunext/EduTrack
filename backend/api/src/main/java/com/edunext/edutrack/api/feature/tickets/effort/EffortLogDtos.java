@@ -1,6 +1,8 @@
 package com.edunext.edutrack.api.feature.tickets.effort;
 
+import com.edunext.edutrack.common.pagination.PageMeta;
 import com.edunext.edutrack.domain.tickets.TicketEffortLog;
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
@@ -99,6 +101,15 @@ final class EffortLogDtos {
     }
 
     /**
+     * The contract's {@code EffortLogListResponse.meta} — {@code allOf: [Meta,
+     * {cycleTotalHrs, grandTotalHrs}]}. Composes {@link PageMeta} rather than
+     * restating its two fields: A-053's {@code PaginationRulesTest} refuses a
+     * sixth class that declares its own {@code nextCursor}, on the five-classes,
+     * three-shapes history in that test's own javadoc. {@code @JsonUnwrapped}
+     * flattens {@code page} onto this record's own JSON level, which is what
+     * makes the wire shape match the contract's {@code allOf} despite the nesting
+     * on the Java side.
+     *
      * @param cycleTotalHrs the ticket's <b>current</b> cycle total, independent
      *                      of any {@code cycle}/{@code stage}/{@code iteration}
      *                      filter on the request — the headline figure for
@@ -106,7 +117,7 @@ final class EffortLogDtos {
      *                      slice of the log they happen to be looking at
      * @param grandTotalHrs Σ across every cycle, likewise unfiltered
      */
-    record ListMeta(String nextCursor, boolean hasMore, BigDecimal cycleTotalHrs, BigDecimal grandTotalHrs) {
+    record ListMeta(@JsonUnwrapped PageMeta page, BigDecimal cycleTotalHrs, BigDecimal grandTotalHrs) {
     }
 
     record EffortLogListResponse(List<EffortLogDto> data, ListMeta meta) {

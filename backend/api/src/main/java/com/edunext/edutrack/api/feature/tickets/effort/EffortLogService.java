@@ -183,8 +183,7 @@ class EffortLogService {
         BigDecimal grandTotal = sumWhere(all, e -> true);
 
         return new EffortLogDtos.EffortLogListResponse(data,
-                new EffortLogDtos.ListMeta(page.meta().nextCursor(), page.meta().hasMore(),
-                        cycleTotal, grandTotal));
+                new EffortLogDtos.ListMeta(page.meta(), cycleTotal, grandTotal));
     }
 
     /**
