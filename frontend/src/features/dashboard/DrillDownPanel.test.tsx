@@ -58,7 +58,7 @@ function served(data: unknown, meta: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useDrillDownStore.setState({ drillDown: null, title: '' })
+  useDrillDownStore.setState({ drillDown: null, title: '', count: null })
   served(ROWS)
 })
 
@@ -128,6 +128,55 @@ describe('DrillDownPanel', () => {
     // filter without the heading above it — which makes a bare text query
     // ambiguous rather than wrong.
     expect(within(panel).getByText(/critical · still open/, { selector: 'p' })).toBeInTheDocument()
+  })
+
+  it('D-064 · heads the panel with the number the clicked card printed', async () => {
+    useDrillDownStore.setState({
+      drillDown: '/tickets?level=CRITICAL&excludeClosed=true',
+      title: 'Critical',
+      count: 135,
+    })
+    renderWith(<DrillDownPanel />)
+
+    const panel = await screen.findByRole('dialog')
+    expect(within(panel).getByText(/· 135/, { selector: 'p' })).toBeInTheDocument()
+  })
+
+  it("D-064 · says the number, never that it is the count of the rows shown", async () => {
+    // The wording matters more than it looks. A stock card — "Pending / open" —
+    // counts what is open right now, while its drill-down applies the reported
+    // date window, so the list underneath is the intersection and is a
+    // different size. "135 matching" would be a claim about those rows and
+    // would be false; "· 135" alongside the window the panel already prints
+    // reads as two answers to two questions, which is what they are.
+    useDrillDownStore.setState({
+      drillDown: '/tickets?excludeClosed=true&reportedFrom=2026-07-20&reportedTo=2026-08-18',
+      title: 'Pending / open',
+      count: 135,
+    })
+    renderWith(<DrillDownPanel />)
+
+    const panel = await screen.findByRole('dialog')
+    expect(within(panel).queryByText(/135 matching/)).not.toBeInTheDocument()
+  })
+
+  it('D-064 · leaves the count out entirely when nothing was clicked that had one', async () => {
+    // A chart legend opens the panel with no single figure. Printing a zero, or
+    // falling back to the row count, would invent a number the reader would
+    // reasonably believe.
+    useDrillDownStore.setState({ drillDown: '/tickets?level=CRITICAL', title: 'Task type' })
+    renderWith(<DrillDownPanel />)
+
+    const panel = await screen.findByRole('dialog')
+    expect(within(panel).queryByText(/ · \d/, { selector: 'p' })).not.toBeInTheDocument()
+  })
+
+  it('D-064 · shows each row\'s created date', async () => {
+    useDrillDownStore.setState({ drillDown: '/tickets?level=CRITICAL', title: 'Critical' })
+    renderWith(<DrillDownPanel />)
+
+    const panel = await screen.findByRole('dialog')
+    expect(within(panel).getByRole('columnheader', { name: 'Created' })).toBeInTheDocument()
   })
 
   it('shows the filtered rows', async () => {

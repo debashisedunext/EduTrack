@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
+import { format, parseISO } from 'date-fns'
 
 import { useListTickets } from '@/api/generated/tickets/tickets'
 import { Button } from '@/components/ui/button'
@@ -59,6 +60,7 @@ export function DrillDownPanel() {
   const drillDown = useDrillDownStore((s) => s.drillDown)
   const title = useDrillDownStore((s) => s.title)
   const close = useDrillDownStore((s) => s.close)
+  const cardCount = useDrillDownStore((s) => s.count)
 
   const [exporting, setExporting] = React.useState(false)
 
@@ -76,7 +78,12 @@ export function DrillDownPanel() {
   )
 
   const rows = data?.data ?? []
-  const total = data?.meta?.totalCount
+  // D-064 · the figure the clicked card printed, carried through the store.
+  // `meta.totalCount` is deliberately absent for tickets — the contract calls it
+  // "present only where a count is cheap, never computed live over tickets" —
+  // so it is kept as a fallback for any future list that does supply one
+  // cheaply, and the card's own number wins when there is one.
+  const total = cardCount ?? data?.meta?.totalCount
   const hasMore = data?.meta?.hasMore ?? false
 
   async function exportCsv() {
@@ -115,7 +122,7 @@ export function DrillDownPanel() {
           <SlideOverTitle>{title}</SlideOverTitle>
           <p id="drill-down-description" className="text-xs text-[color:var(--text-secondary)]">
             {drillDown ? describeDrillDown(drillDown) : ''}
-            {total != null && ` · ${total.toLocaleString()} matching`}
+            {total != null && ` · ${total.toLocaleString()}`}
           </p>
         </SlideOverHeader>
 
@@ -148,6 +155,8 @@ export function DrillDownPanel() {
                   <th scope="col" className="py-2 font-medium">Title</th>
                   <th scope="col" className="py-2 font-medium">Level</th>
                   <th scope="col" className="py-2 font-medium">Assignee</th>
+                  {/* D-064 · created by default, as asked on 18 Aug. */}
+                  <th scope="col" className="py-2 font-medium whitespace-nowrap">Created</th>
                 </tr>
               </thead>
               <tbody>
@@ -175,8 +184,11 @@ export function DrillDownPanel() {
                     <td className="py-2 pr-3">
                       <Chip variant={levelVariant(ticket.level)}>{ticket.level}</Chip>
                     </td>
-                    <td className="py-2 text-[color:var(--text-secondary)]">
+                    <td className="py-2 pr-3 text-[color:var(--text-secondary)]">
                       {ticket.assignee?.displayName ?? 'Unassigned'}
+                    </td>
+                    <td className="py-2 whitespace-nowrap text-[color:var(--text-secondary)]">
+                      {ticket.createdAt ? format(parseISO(ticket.createdAt), 'd MMM yyyy') : '—'}
                     </td>
                   </tr>
                 ))}
