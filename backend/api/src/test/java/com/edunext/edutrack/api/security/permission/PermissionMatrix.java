@@ -809,6 +809,20 @@ final class PermissionMatrix {
             // saying whose rows are coming instead.
             everyRole("GET", "/api/v1/reports"),
 
+            // ── resource 360 · A-069, S-28 ──────────────────────────────────
+            //
+            // Every role reaches the route, because §2 grants a Developer their
+            // own profile even while denying them everybody else's — and the
+            // profile is where that "Own perf." lives.
+            //
+            // Who they may look at is a ROW question, not a capability one:
+            // Admin anyone, PM their reportees or their projects' members,
+            // Support their projects' members, delivery roles only themselves.
+            // Profile360Repository.isVisibleTo answers it and the controller
+            // reports a refusal as 404, never 403 — a 403 would confirm the user
+            // id exists and let anyone enumerate the staff list by counting up.
+            everyRole("GET", "/api/v1/users/{userId}/profile-360"),
+
             // The runner. Same reasoning, plus the one thing that is genuinely
             // withheld: ?resourceId= is ignored for the three delivery roles
             // rather than honoured, so "Own perf." cannot be widened into a

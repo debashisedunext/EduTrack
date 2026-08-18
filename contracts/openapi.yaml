@@ -631,6 +631,29 @@ paths:
       tags: [users]
       operationId: getUserProfile360
       summary: Resource 360° profile (S-28)
+      description: |
+        A-069 · the scorecard half of S-28. The screen composes four calls, and
+        this is the one that did not already exist:
+
+        - the open and historical ticket lists come from `GET /tickets`, which
+          already paginates and scopes — "complete historical" is precisely the
+          list that must not be embedded whole;
+        - the effort timeline and velocity chart come from
+          `GET /reports/resource-velocity?resourceId=`, which returns closed and
+          effort per week for one person and so serves both charts.
+
+        **Who may look at whom is blueprint §2's "View team member history" row**:
+        Admin anyone, PM their reportees *or* anybody on their projects, Support
+        anybody on their projects, and the three delivery roles nobody — except
+        themselves, which §2's Reports row grants them as "Own perf.".
+
+        A caller who may not see the subject gets the same `404` as one asking
+        for a user that does not exist. Distinguishing them would let anyone
+        enumerate the staff list by id, which is the existence leak the row-scoping
+        rule closes for tickets, and a person is at least as sensitive.
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
       responses:
         '200':
           description: OK.
@@ -5825,14 +5848,68 @@ components:
       properties:
         data:
           type: object
+          required: [person, from, to, openNow, closedInWindow]
           properties:
-            user: { $ref: '#/components/schemas/User' }
-            openTickets: { type: integer }
-            closedThisMonth: { type: integer }
-            effortHoursThisMonth: { type: number, format: double }
-            slaCompliancePct: { type: number, format: double }
-            reworkRatePct: { type: number, format: double }
-            currentStages: { type: array, items: { type: string } }
+            person: { $ref: '#/components/schemas/Profile360Person' }
+            from:
+              type: string
+              format: date
+              description: >
+                A-069 · the window every figure below covers, except openNow.
+                Stated because the original shape named its fields "thisMonth"
+                and carried no range, which left the screen captioning a period
+                the server had chosen and the client could not name.
+            to: { type: string, format: date }
+            openNow:
+              type: integer
+              description: Open right now — the one current figure, not measured over the window.
+            closedInWindow: { type: integer }
+            effortHours: { type: [number, 'null'], format: double }
+            slaCompliancePct:
+              type: [number, 'null']
+              format: double
+              description: >
+                Against tickets that carried a planned close date, never against
+                everything closed — a ticket with no commitment can neither meet
+                nor breach one. Null when none did, rather than 0, which would
+                read as "nothing was on time".
+            reworkRatePct:
+              type: [number, 'null']
+              format: double
+              description: Closed tickets that had been reopened at least once, over closed. Null when nothing closed.
+            currentStages:
+              type: array
+              description: >
+                How much open work sits at each ribbon stage, busiest first. A
+                count rather than the original list of stage codes: a manager
+                opening this needs to see that eleven of fourteen are stuck in
+                one stage, which a list of names does not say.
+              items: { $ref: '#/components/schemas/Profile360StageLoad' }
+    Profile360Person:
+      type: object
+      required: [id, fullName, role]
+      properties:
+        id: { type: integer, format: int64 }
+        fullName: { type: string }
+        username: { type: string }
+        email: { type: string }
+        role: { type: string }
+        department: { type: [string, 'null'] }
+        designation: { type: [string, 'null'] }
+        active: { type: boolean }
+        joinedOn: { type: [string, 'null'], format: date }
+        managerName:
+          type: [string, 'null']
+          description: >
+            By name, never by id. The screen shows it and does not link to it —
+            a link would be a second profile the viewer may not be entitled to,
+            and resolving that is a permission check a header should not make.
+    Profile360StageLoad:
+      type: object
+      required: [stage, openCount]
+      properties:
+        stage: { type: string }
+        openCount: { type: integer }
 
     # ── projects ──────────────────────────────────────────────────────────
     ProjectRef:
