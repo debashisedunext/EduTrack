@@ -47,6 +47,8 @@
     <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId></dependency>
     <dependency><groupId>software.amazon.awssdk</groupId><artifactId>s3</artifactId></dependency>
     <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></dependency>
+    <!-- A-064 · PDF export. See the parent pom's note on why OpenPDF. -->
+    <dependency><groupId>com.github.librepdf</groupId><artifactId>openpdf</artifactId></dependency>
     <!-- C-029 · PLAN.md §3.9's write-path sanitiser. See the parent pom's note. -->
     <dependency><groupId>org.jsoup</groupId><artifactId>jsoup</artifactId></dependency>
     <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>

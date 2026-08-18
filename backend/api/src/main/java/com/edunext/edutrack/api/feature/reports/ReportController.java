@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.reports;
 
+import com.edunext.edutrack.api.feature.reports.export.ReportExporter;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -41,9 +42,11 @@ import java.time.LocalDate;
 class ReportController {
 
     private final ReportService reports;
+    private final ReportExportService exports;
 
-    ReportController(ReportService reports) {
+    ReportController(ReportService reports, ReportExportService exports) {
         this.reports = reports;
+        this.exports = exports;
     }
 
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
@@ -62,29 +65,61 @@ class ReportController {
     @GetMapping(path = "/{reportKey}", produces = MediaType.APPLICATION_JSON_VALUE)
     @PreAuthorize("isAuthenticated()")
     @Operation(operationId = "runReport", summary = "Run a report (S-27)")
-    ResponseEntity<ReportDtos.ReportResponse> run(
+    ResponseEntity<?> run(
             Authentication caller,
             @PathVariable String reportKey,
             @RequestHeader(name = "If-None-Match", required = false) String ifNoneMatch,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) Long projectId,
-            @RequestParam(required = false) Long resourceId) {
+            @RequestParam(required = false) Long resourceId,
+            @RequestParam(required = false) String export,
+            jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
 
         ReportService.Rendered rendered = reports
                 .run(identity(caller), reportKey, from, to, projectId, resourceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "No report is served for '" + reportKey + "'."));
 
+        /*
+          A-064 · the same rendered report, written as a file.
+
+          Note where this branch sits: *after* the runner has produced the rows,
+          on the identical call a JSON request makes. An export path that
+          assembled its own query would be a second place for ReportScope to be
+          applied, and the one nobody re-checked would be the one that leaked.
+          Here it is not possible to skip it — there is only one run().
+
+          Deliberately not ETag-negotiated. A 304 for a download leaves the
+          browser with nothing to save: the validator matches a response body
+          the client never kept, because a file was handed to the filesystem
+          rather than to a cache. Sending the bytes is the only useful answer.
+        */
+        if (export != null && !export.isBlank()) {
+            ReportExporter.Format format = ReportExporter.Format.of(export)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Unsupported export format '" + export + "'. Use xlsx, csv or pdf."));
+
+            // Written onto the response rather than returned. This handler has
+            // to answer both a JSON body and a file, so its declared type is
+            // ResponseEntity<?> — and Spring picks the streaming handler from
+            // the *declared* type, which with the argument erased never matches.
+            // The first version returned ResponseEntity<StreamingResponseBody>
+            // and produced 500 "Failed to write request" for all three formats
+            // while JSON on the same route kept working. See ReportExportService.
+            exports.writeTo(response, format, reportKey, rendered);
+            return null;
+        }
+
         if (rendered.etag() != null && matches(ifNoneMatch, rendered.etag())) {
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(rendered.etag()).build();
         }
 
-        ResponseEntity.BodyBuilder response = ResponseEntity.ok();
+        ResponseEntity.BodyBuilder json = ResponseEntity.ok();
         if (rendered.etag() != null) {
-            response = response.eTag(rendered.etag());
+            json = json.eTag(rendered.etag());
         }
-        return response.body(new ReportDtos.ReportResponse(rendered.report(), rendered.meta()));
+        return json.body(new ReportDtos.ReportResponse(rendered.report(), rendered.meta()));
     }
 
     private static CallerIdentity identity(Authentication caller) {

@@ -5,6 +5,7 @@ import { useRunReport } from '@/api/generated/reports/reports'
 import { EmptyState } from '@/components/ui/empty-state'
 
 import { ReportChart } from './ReportChart'
+import { ReportExportButtons } from './ReportExportButtons'
 import { ReportFilterBar } from './ReportFilterBar'
 import { ReportTable } from './ReportTable'
 
@@ -102,6 +103,13 @@ export function ReportViewerPage() {
       </header>
 
       <ReportFilterBar filters={descriptor.filters} />
+
+      {/*
+        A-064 · below the filters, because an export is of what the filters
+        currently select — putting it in the header would suggest it exports the
+        report rather than this view of it.
+      */}
+      <ReportExportButtons reportKey={descriptor.key} params={params} />
 
       {/*
         What the server actually narrowed to. Shown because a delivery role's
