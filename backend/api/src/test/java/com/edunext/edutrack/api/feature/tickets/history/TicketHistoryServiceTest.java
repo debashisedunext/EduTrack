@@ -173,6 +173,45 @@ class TicketHistoryServiceTest {
         }
 
         @Test
+        @DisplayName("C-034 · carries the comment's own stamped stage and its visibility, inverted from isInternal")
+        void carriesStageAndVisibility() {
+            TicketComment internal = commentRow(9L, "internal note", Instant.parse("2026-08-06T14:22:00Z"));
+            ReflectionTestUtils.setField(internal, "stageCode", "DEVELOPMENT");
+            ReflectionTestUtils.setField(internal, "isInternal", true);
+            TicketComment clientVisible = commentRow(10L, "client note", Instant.parse("2026-08-14T16:25:00Z"));
+            ReflectionTestUtils.setField(clientVisible, "stageCode", "SIGNOFF");
+            ReflectionTestUtils.setField(clientVisible, "isInternal", false);
+
+            when(journal.historyFor(TICKET, null)).thenReturn(List.of());
+            when(comments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(TICKET))
+                    .thenReturn(List.of(internal, clientVisible));
+
+            TicketHistoryDtos.HistoryListResponse response =
+                    service.list(caller, TICKET_CODE, null, List.of("comments"), null, null);
+
+            assertThat(response.data()).hasSize(2);
+            TicketHistoryDtos.HistoryEntryDto internalDto = response.data().get(0);
+            assertThat(internalDto.stageCode()).isEqualTo("DEVELOPMENT");
+            assertThat(internalDto.isClientVisible()).isFalse();
+
+            TicketHistoryDtos.HistoryEntryDto clientDto = response.data().get(1);
+            assertThat(clientDto.stageCode()).isEqualTo("SIGNOFF");
+            assertThat(clientDto.isClientVisible()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a real history row's isClientVisible is null — visibility is a comment concept only")
+        void historyRowHasNoVisibility() {
+            TicketHistory row = historyRow(501L, "LEVEL_CHANGED", "level", "HIGH", "CRITICAL",
+                    ACTOR, "USER", "SLA breach", Instant.parse("2026-08-13T10:15:00Z"));
+            when(journal.historyFor(TICKET, null)).thenReturn(List.of(row));
+
+            TicketHistoryDtos.HistoryListResponse response = service.list(caller, TICKET_CODE, null, null, null, null);
+
+            assertThat(response.data().get(0).isClientVisible()).isNull();
+        }
+
+        @Test
         @DisplayName("a cycle filter narrows comments the same way it narrows history")
         void cycleFilterAppliesToComments() {
             when(journal.historyFor(TICKET, (short) 2)).thenReturn(List.of());

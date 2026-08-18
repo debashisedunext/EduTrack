@@ -6805,6 +6805,11 @@ components:
         oldValue: { type: [string, 'null'] }
         newValue: { type: [string, 'null'] }
         note: { type: [string, 'null'] }
+        # C-034 · only meaningful on a COMMENTED row (`include=comments`) — null
+        # for every other action. Mirrors Comment.isClientVisible so a reader of
+        # the merged stream sees the same internal/client-visible fact the
+        # Comments tab shows, without having to cross-reference the other list.
+        isClientVisible: { type: [boolean, 'null'] }
         stageCode: { type: [string, 'null'] }
         cycleNo: { type: integer }
         iterationNo: { type: integer }

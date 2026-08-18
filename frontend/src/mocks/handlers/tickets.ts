@@ -579,6 +579,10 @@ export const ticketHandlers = [
           id: 100_000 + c.id, action: 'COMMENTED',
           actor: userRef(c.authorId, db), actorType: 'USER' as const,
           fieldName: null, oldValue: null, newValue: null, note: c.body,
+          // C-034 · the merged stream carries the same internal/client-visible
+          // fact the Comments tab shows, so a reader of the History tab alone
+          // isn't left guessing which of these were internal.
+          isClientVisible: c.isClientVisible,
           stageCode: c.stageCode, cycleNo: c.cycleNo, iterationNo: c.iterationNo,
           isCorrection: false, correctsEntryId: null,
           entryHash: 'sha256:comment', createdAt: c.createdAt,

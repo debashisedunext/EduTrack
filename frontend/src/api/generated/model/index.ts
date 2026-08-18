@@ -228,6 +228,7 @@ export * from './historyEntry';
 export * from './historyEntryActorType';
 export * from './historyEntryCorrectsEntryId';
 export * from './historyEntryFieldName';
+export * from './historyEntryIsClientVisible';
 export * from './historyEntryNewValue';
 export * from './historyEntryNote';
 export * from './historyEntryOldValue';
