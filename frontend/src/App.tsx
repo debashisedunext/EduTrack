@@ -25,6 +25,7 @@ import { NotificationTemplateListPage } from './features/masters/notificationTem
 import { PriorityListPage } from './features/masters/priorities/PriorityListPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
+import { StatusMasterPage } from './features/masters/statuses/StatusMasterPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
 import { TaskTypeListPage } from './features/masters/taskTypes/TaskTypeListPage'
 import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
@@ -136,6 +137,9 @@ export default function App() {
                         <Link to="/masters/task-types">Task types</Link>
                       </Button>
                       <Button asChild variant="secondary">
+                        <Link to="/masters/statuses">Statuses &amp; workflow</Link>
+                      </Button>
+                      <Button asChild variant="secondary">
                         <Link to="/masters/calendar">Working calendar</Link>
                       </Button>
                       <Button asChild variant="secondary">
@@ -194,6 +198,13 @@ export default function App() {
                 so the create and edit forms are dialogs on the grid rather
                 than a page each. There is no `/:id` route to collide with. */}
             <Route path="/masters/task-types" element={<TaskTypeListPage />} />
+            {/*
+              S-13, B-039 builds tab 1. `/masters/statuses` rather than
+              `/masters/workflow`, because the tab an Admin lands on is the status
+              list and B-040/B-041 add tabs to this page rather than routes beside
+              it — a template designer gets its own route (S-30) when B-043 lands.
+            */}
+            <Route path="/masters/statuses" element={<StatusMasterPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
                 fields, so create and edit are dialogs on the grid rather than a
