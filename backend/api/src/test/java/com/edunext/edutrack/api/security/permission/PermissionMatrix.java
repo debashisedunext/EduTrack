@@ -1243,6 +1243,24 @@ final class PermissionMatrix {
             // was minted.
             adminOnly("GET", "/api/v1/import-batches/{batchId}/error-report"),
 
+            // B-037 · the import history — every run identified, so a bad one can
+            // be found again. The same capability as the poll and the wizard:
+            // a list of imports is not more public than the imports themselves,
+            // and S-34 lives inside §7.4's Admin-only master-data module.
+            adminOnly("GET", "/api/v1/import-batches"),
+
+            // B-037 · reversal. THE ONLY ROUTE IN THE PRODUCT THAT DELETES ROWS
+            // FROM THE CLIENT MASTER — B-029 deactivates, everything else
+            // preserves.
+            //
+            // It was worth asking whether that deserves a capability of its own,
+            // and it does not: master.write is what let somebody write 412
+            // clients into the master in one action, and a separate capability
+            // for taking them back would mean an Admin who can cause the damage
+            // cannot undo it. The five non-Admin roles are refused here exactly
+            // as they are refused the commit.
+            adminOnly("POST", "/api/v1/import-batches/{batchId}/reverse"),
+
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack
             // account; the actual gate is the X-Webhook-Signature HMAC inside

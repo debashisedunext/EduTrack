@@ -46,8 +46,13 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ImportBatch } from './importBatch';
 
-export interface ImportBatchResponse {
-  data: ImportBatch;
-}
+export type ListImportBatchesParams = {
+/**
+ * Which registration's runs. Defaults to `CLIENT` because S-34 is the
+screen that has this panel; `RESOURCE` arrives with B-038 and needs
+no change here.
+
+ */
+entity?: string;
+};

@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.imports;
 
+import com.edunext.edutrack.api.security.CallerIdentity;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpHeaders;
@@ -7,10 +8,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -64,10 +68,106 @@ class ImportBatchController {
 
     private final ImportBatchService batches;
     private final ImportErrorReportService reports;
+    private final ImportReversalService reversals;
 
-    ImportBatchController(ImportBatchService batches, ImportErrorReportService reports) {
+    ImportBatchController(ImportBatchService batches,
+                          ImportErrorReportService reports,
+                          ImportReversalService reversals) {
         this.batches = batches;
         this.reports = reports;
+        this.reversals = reversals;
+    }
+
+    /**
+     * B-037 · <b>the import history — blueprint §4B.3's "every import writes an
+     * {@code import_batch} row so a bad import can be identified".</b>
+     *
+     * <p>This route is what makes the word "identified" true of something a
+     * person can reach. Until it existed, a batch id was known only to the
+     * browser tab that started the run: {@code import_batches} recorded every
+     * import faithfully and nothing could list one, so an Admin who closed the
+     * wizard had no way back to the run that had just filled the client master
+     * with the wrong spreadsheet.
+     *
+     * <p><b>Filtered by entity, not by schema key.</b> The query parameter is the
+     * stored discriminator — {@code CLIENT}, {@code RESOURCE} — because that is
+     * what the rows carry and because a run knows which registration wrote it.
+     * {@code ImportSchemaDefinition} keeps the two names apart deliberately, and
+     * accepting the URL segment here would mean translating a public name into a
+     * stored one on a read, which is the collapse that separation prevents.
+     *
+     * <p><b>No ETag, where the poll beside it has one.</b> The poll is asked
+     * every two seconds about a row that changes every fifty; this is opened by
+     * hand and answers something that changes when somebody runs an import. A
+     * validator would be a hash computed on every request to save a response
+     * nobody asks for twice.
+     *
+     * <p>Capped at {@link ImportBatchService#HISTORY_LIMIT} and the cap is on the
+     * response, so a client can tell "these are the recent ones" from "these are
+     * all of them".
+     *
+     * <p>{@code master.write}, like everything else on this path. Registered in
+     * {@code check-conventions.py}'s {@code ROWLESS_403}: a list is not a row, and
+     * the refusal is decided before any row is read.
+     */
+    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "listImportBatches",
+            summary = "Recent import runs for one entity, newest first (S-34)")
+    ImportDtos.BatchListResponse list(
+            @RequestParam(name = "entity", defaultValue = "CLIENT") String entity) {
+
+        return new ImportDtos.BatchListResponse(batches.history(entity));
+    }
+
+    /**
+     * B-037 · <b>reverse one import as a set</b> — blueprint §4B.3's closing
+     * validation rule and §17's mitigation for "Client Excel import silently
+     * corrupts the master".
+     *
+     * <p>Deletes the rows the run <em>created</em>. Not the rows it updated:
+     * {@code import_batch_id} is stamped on insert only and there is no before
+     * image anywhere, so the response carries {@code updatedRowsNotReverted}
+     * rather than letting a count that does not add up imply otherwise. Rows
+     * something else now references — a client that has since been named on a
+     * ticket — come back in {@code retained} with a reason, because failing the
+     * whole reversal over one used client is unhelpful and deleting the ticket's
+     * client is worse.
+     *
+     * <p><b>{@code POST}, not {@code DELETE}.</b> The resource at this path is
+     * the batch, and the batch is emphatically not being deleted — it is the
+     * audit trail, and it survives with four more columns filled in.
+     * {@code DELETE /import-batches/{id}} would be the one reading of this
+     * operation that is actually wrong.
+     *
+     * <p><b>Not idempotent, and refused rather than made so.</b> A second call
+     * answers {@code import-batch-already-reversed} instead of quietly succeeding
+     * with zeroes, because succeeding would overwrite {@code reversed_at} and
+     * both counters with the second run's nothing — a false entry in the table
+     * that exists to make bad imports traceable. See
+     * {@link ImportBatchAlreadyReversedException}.
+     *
+     * <p>{@code master.write}. <b>This is the only route in the product that
+     * deletes rows from the client master</b> — B-029 deactivates and everything
+     * else preserves — and it was worth asking whether it deserved a capability
+     * of its own. It does not: the capability that let somebody write 412 clients
+     * into the master in one action is the capability that lets them take those
+     * same 412 back, and a separate one would mean an Admin who can cause the
+     * damage cannot undo it. Recorded in {@code check-conventions.py}'s
+     * {@code ROWLESS_403} with the poll's reason.
+     */
+    @PostMapping(path = "/{batchId}/reverse", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "reverseImportBatch",
+            summary = "Delete the rows one import created, as a set (S-34)")
+    ImportDtos.ReversalResponse reverse(@PathVariable long batchId,
+                                        Authentication authentication) {
+
+        Long userId = CallerIdentity.of(authentication)
+                .map(CallerIdentity::userId)
+                .orElse(null);
+
+        return new ImportDtos.ReversalResponse(reversals.reverse(batchId, userId));
     }
 
     /**

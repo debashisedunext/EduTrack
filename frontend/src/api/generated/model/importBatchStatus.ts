@@ -46,8 +46,26 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ImportBatch } from './importBatch';
 
-export interface ImportBatchResponse {
-  data: ImportBatch;
-}
+/**
+ * The commit job's lifecycle, and the only vocabulary
+`import_batches.status` uses. There is no state for the step-4
+dry run because the dry run writes nothing — no batch row
+exists until commit, and it is born `QUEUED`.
+
+`COMPLETED` is **not** a synonym for "no rejections": a run that
+refused half the file and wrote the rest completed, and its error
+report is how the user recovers the other half. `FAILED` means
+the job itself died.
+
+ */
+export type ImportBatchStatus = typeof ImportBatchStatus[keyof typeof ImportBatchStatus];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ImportBatchStatus = {
+  QUEUED: 'QUEUED',
+  RUNNING: 'RUNNING',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+} as const;

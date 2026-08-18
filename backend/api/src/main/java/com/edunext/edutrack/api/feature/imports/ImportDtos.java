@@ -310,7 +310,14 @@ final class ImportDtos {
             int created,
             int updated,
             int rejected,
-            String errorReportUrl) {
+            String errorReportUrl,
+            Instant startedAt,
+            Long importedBy,
+            String importedByName,
+            Instant reversedAt,
+            int reversedRows,
+            int retainedRows,
+            boolean reversible) {
 
         /**
          * Where the error report is downloaded from, given a batch that has one.
@@ -333,6 +340,21 @@ final class ImportDtos {
         private static final String ERROR_REPORT_PATH = "/import-batches/%d/error-report";
 
         static Batch of(com.edunext.edutrack.domain.imports.ImportBatch batch) {
+            return of(batch, null);
+        }
+
+        /**
+         * @param importedByName the display name of {@code imported_by}, or
+         *                       {@code null} when it is not being resolved. The
+         *                       polled progress read does not resolve it — the
+         *                       screen showing that bar knows perfectly well who
+         *                       started the run, because they just clicked the
+         *                       button, and a user lookup every two seconds for
+         *                       the length of an import is a query per poll for a
+         *                       string that cannot change. B-037's history panel
+         *                       does resolve it, in one query for the page
+         */
+        static Batch of(com.edunext.edutrack.domain.imports.ImportBatch batch, String importedByName) {
             int rejected = batch.getRejectedRows();
             String reportKey = batch.getErrorReportKey();
             return new Batch(
@@ -347,7 +369,42 @@ final class ImportDtos {
                     rejected,
                     reportKey == null || reportKey.isBlank()
                             ? null
-                            : ERROR_REPORT_PATH.formatted(batch.getId()));
+                            : ERROR_REPORT_PATH.formatted(batch.getId()),
+                    batch.getCreatedAt(),
+                    batch.getImportedBy(),
+                    importedByName,
+                    batch.getReversedAt(),
+                    batch.getReversedRows(),
+                    batch.getRetainedRows(),
+                    reversible(batch));
+        }
+
+        /**
+         * B-037 · whether {@code POST /import-batches/{batchId}/reverse} would be
+         * accepted right now — <b>the button's enabled state, decided by the
+         * server</b>.
+         *
+         * <p>The screen could compute this from {@code status} and
+         * {@code reversedAt}, and that is exactly the reason it is here instead.
+         * The two rules are {@link ImportReversalService}'s refusals, and a copy
+         * in TypeScript is a second statement of them that agrees on the day it
+         * is written — after which a rule added on one side turns into a button
+         * that offers an operation the server refuses, on a screen whose whole
+         * job is destroying rows.
+         *
+         * <p>Note it is deliberately <em>not</em> "and this run created
+         * something". A COMPLETED run that created nothing reverses to "0
+         * deleted", which is an honest and harmless answer; refusing it would
+         * mean the flag also had to encode "created &gt; 0" and the screen would
+         * have to explain a disabled button on a run that looks perfectly
+         * ordinary.
+         */
+        private static boolean reversible(com.edunext.edutrack.domain.imports.ImportBatch batch) {
+            return batch.getReversedAt() == null
+                    && switch (batch.getStatus()) {
+                        case COMPLETED, FAILED -> true;
+                        case QUEUED, RUNNING -> false;
+                    };
         }
 
         /**
@@ -364,6 +421,17 @@ final class ImportDtos {
          * takes {@code If-Match}, so there is no lost update for a strong tag to
          * prevent.
          *
+         * <p><b>B-037's four fields are inputs too</b>, and one of them matters
+         * more than the rest: {@code reversible} is what the Reverse button reads,
+         * so a validator that ignored it would leave a browser holding a cached
+         * response offering to reverse a batch that has already been reversed. The
+         * three fields it is derived from are hashed as well rather than relying on
+         * the derivation, which is the same argument the paragraph below makes about
+         * {@code errorReportUrl}. {@code startedAt} and the two {@code importedBy}
+         * fields are not: they are stamped once at {@code open} and are immutable
+         * for the life of the row, so hashing them would add cost and never change
+         * an answer.
+         *
          * <p><b>{@code errorReportUrl} is one of the inputs since B-036</b>, and
          * leaving it out would have been the defect this whole route exists to
          * avoid. The report appears on the same write as the terminal status, so
@@ -375,10 +443,72 @@ final class ImportDtos {
          */
         String etag() {
             return Integer.toHexString(java.util.Objects.hash(
-                    batchId, status, created, updated, rejected, total, errorReportUrl));
+                    batchId, status, created, updated, rejected, total, errorReportUrl,
+                    reversedAt, reversedRows, retainedRows, reversible));
         }
     }
 
     record BatchResponse(Batch data) {
+    }
+
+    // ── B-037 · traceability and reversal ───────────────────────────────────
+
+    /**
+     * {@code ImportBatchListResponse.data} — the import history panel.
+     *
+     * <p><b>The same {@link Batch} the progress poll returns, in a list.</b> Not
+     * a slimmer "summary" shape, which was the obvious alternative and is wrong
+     * here: the panel shows the counters, the status and the error-report link,
+     * which is every field the single read has, and the one operation it offers
+     * — Reverse — is decided by {@code reversible}, which is on that record for
+     * the reason its own javadoc gives. A second, nearly-identical wire type
+     * would be a second thing to keep in step for no field saved.
+     *
+     * <p>Not paged. The route caps what it returns and says so; see
+     * {@link ImportBatchService#history}. A cursor over a list nobody scrolls
+     * would be {@code Cursor} plumbing for a panel whose useful contents are the
+     * last few runs.
+     */
+    record BatchList(String entity, List<Batch> batches, int limit) {
+    }
+
+    record BatchListResponse(BatchList data) {
+    }
+
+    /**
+     * {@code ImportReversalResponse.data} — what a reversal did.
+     *
+     * <p>The batch is included whole rather than as an id, so the screen that
+     * ran the reversal renders the updated row from the response instead of
+     * re-reading the list. It is the same object with {@code reversedAt} now set
+     * and {@code reversible} now false, which is what disables the button
+     * without the client having to reason about it.
+     *
+     * @param deleted  natural keys removed, in the order the registration found
+     *                 them. Named rather than counted because the count is on
+     *                 {@code batch.reversedRows} already, and what the operator
+     *                 actually asks next is "which ones"
+     * @param retained rows the reversal refused to remove, each with a reason a
+     *                 person can read. <b>An empty list is the ordinary
+     *                 outcome</b>, not a success condition — a non-empty one is
+     *                 not a failure either. See {@link ImportReversal}
+     * @param updatedRowsNotReverted <b>the honest half of the promise.</b> Rows
+     *                 this run <em>updated</em> rather than created, which a
+     *                 reversal does not touch and could not restore: the batch id
+     *                 is stamped on insert only and there is no before image
+     *                 anywhere. Carried explicitly, and never folded into
+     *                 {@code retained}, because it is not a row the reversal
+     *                 declined to delete — it is a row the reversal was never
+     *                 about, and a user who imported 412 and sees "12 deleted"
+     *                 is owed the sentence that explains the other 400
+     */
+    record Reversal(
+            Batch batch,
+            List<String> deleted,
+            List<ImportReversal.Retained> retained,
+            int updatedRowsNotReverted) {
+    }
+
+    record ReversalResponse(Reversal data) {
     }
 }

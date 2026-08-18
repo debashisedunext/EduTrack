@@ -46,8 +46,13 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ImportBatch } from './importBatch';
 
-export interface ImportBatchResponse {
-  data: ImportBatch;
-}
+export type ImportReversalResponseDataRetainedItem = {
+  naturalKey: string;
+  /** Plain language, for the person reading the screen. Never a
+constraint name or a database message — the same call B-036
+made about the error report's Reason column, and for the
+same reason: this text gets pasted into email.
+ */
+  reason: string;
+};

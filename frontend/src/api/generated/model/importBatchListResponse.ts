@@ -46,8 +46,12 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ImportBatch } from './importBatch';
+import type { ImportBatchListResponseData } from './importBatchListResponseData';
 
-export interface ImportBatchResponse {
-  data: ImportBatch;
+export interface ImportBatchListResponse {
+  /** B-037 — the import history panel. Blueprint §4B.3: *"every import
+writes an `import_batch` row so a bad import can be identified and
+reversed as a set."* This is the identification half.
+ */
+  data: ImportBatchListResponseData;
 }

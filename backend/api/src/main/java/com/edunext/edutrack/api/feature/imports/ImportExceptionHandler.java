@@ -104,6 +104,23 @@ class ImportExceptionHandler {
             URI.create("https://edutrack/errors/import-commit-queue-full");
 
     /**
+     * B-037's three, and they are three because the remedies differ.
+     *
+     * <p>{@code import-batch-not-finished} clears itself in a moment and the
+     * screen should wait; {@code import-batch-already-reversed} never clears and
+     * the screen should stop offering the button; {@code import-schema-unavailable}
+     * is not the caller's problem at all and needs an operator. One "cannot
+     * reverse" type would put a Try again on two cases that will refuse forever,
+     * which is the argument B-035 recorded for splitting the two above.
+     */
+    private static final URI BATCH_NOT_FINISHED =
+            URI.create("https://edutrack/errors/import-batch-not-finished");
+    private static final URI BATCH_ALREADY_REVERSED =
+            URI.create("https://edutrack/errors/import-batch-already-reversed");
+    private static final URI SCHEMA_UNAVAILABLE =
+            URI.create("https://edutrack/errors/import-schema-unavailable");
+
+    /**
      * 404, because {@code schema} is a path segment.
      *
      * <p>An unregistered key does not make the request malformed — it makes the
@@ -482,6 +499,68 @@ class ImportExceptionHandler {
                 .header(HttpHeaders.RETRY_AFTER, "30")
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(problem);
+    }
+
+    /**
+     * B-037 · 422 for a reversal asked of a run that is still going.
+     *
+     * <p>{@code status} is on the body so the screen can say <em>which</em> —
+     * "queued" and "running" mean different waits to somebody watching, and the
+     * one thing this refusal must not do is read as a permanent no.
+     */
+    @ExceptionHandler(ImportBatchNotFinishedException.class)
+    ResponseEntity<ProblemDetail> handleBatchNotFinished(ImportBatchNotFinishedException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(BATCH_NOT_FINISHED);
+        problem.setTitle("This import has not finished");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("batchId", e.batchId());
+        problem.setProperty("status", e.status().name());
+
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
+    }
+
+    /**
+     * B-037 · 422 for a second reversal of the same run.
+     *
+     * <p>{@code reversedAt} is on the body because a caller who reaches this has
+     * almost always got a stale history panel open in another tab, and "reversed
+     * at 14:02" is the sentence that explains it without a re-read.
+     *
+     * <p><b>Not answered as a success.</b> The second call would delete nothing —
+     * the rows are gone — so quietly returning 200 would be tempting and would
+     * overwrite the batch's reversal record with the second attempt's zeroes. See
+     * {@link ImportBatchAlreadyReversedException}.
+     */
+    @ExceptionHandler(ImportBatchAlreadyReversedException.class)
+    ResponseEntity<ProblemDetail> handleAlreadyReversed(ImportBatchAlreadyReversedException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(BATCH_ALREADY_REVERSED);
+        problem.setTitle("This import has already been reversed");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("batchId", e.batchId());
+        problem.setProperty("reversedAt", e.reversedAt());
+
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
+    }
+
+    /**
+     * B-037 · 422 when the registration that wrote a run is no longer installed.
+     *
+     * <p>Unreachable in a single-registration build and kept anyway, because the
+     * alternative to refusing is guessing which table to delete from. See
+     * {@link ImportSchemaUnavailableException}.
+     */
+    @ExceptionHandler(ImportSchemaUnavailableException.class)
+    ResponseEntity<ProblemDetail> handleSchemaUnavailable(ImportSchemaUnavailableException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(SCHEMA_UNAVAILABLE);
+        problem.setTitle("This import cannot be reversed here");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("batchId", e.batchId());
+        problem.setProperty("entity", e.entityCode());
+
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
     }
 
     /** The content type is stated on every one of these, for the reason given above. */

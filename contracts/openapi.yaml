@@ -3252,6 +3252,54 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /import-batches:
+    get:
+      tags: [imports]
+      operationId: listImportBatches
+      summary: Recent import runs, newest first (S-34)
+      description: |
+        B-037 — the import history. Blueprint §4B.3's closing validation rule:
+        *"every import writes an `import_batch` row so a bad import can be
+        identified and reversed as a set."* This route is what makes
+        **identified** true of something a person can reach.
+
+        Until it existed a batch id was known only to the browser tab that
+        started the run. `import_batches` recorded every import faithfully and
+        nothing could list one, so an Admin who closed the wizard had no way back
+        to the run that had just filled the client master from the wrong
+        spreadsheet.
+
+        **Filtered by `entity`, the stored discriminator — not by the URL segment
+        a schema is mounted at.** `CLIENT`, not `clients`. The two names are kept
+        apart deliberately (see `ImportSchema` and `ImportBatch.entity`), and
+        translating one into the other on a read is the collapse that separation
+        prevents.
+
+        Capped, and the cap is on the response as `limit`. **No `ETag`**, unlike
+        `getImportBatch` beside it: that one is polled every two seconds through a
+        run, this one is opened by hand and changes when somebody runs an import.
+
+        `master.write`, like everything else on this path. **403 rather than
+        404**: a list is not a row, and the refusal is decided before any row is
+        read.
+      parameters:
+        - name: entity
+          in: query
+          required: false
+          schema: { type: string, default: CLIENT }
+          description: |
+            Which registration's runs. Defaults to `CLIENT` because S-34 is the
+            screen that has this panel; `RESOURCE` arrives with B-038 and needs
+            no change here.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportBatchListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /import-batches/{batchId}:
     parameters: [{ $ref: '#/components/parameters/BatchId' }]
     get:
@@ -3286,6 +3334,82 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /import-batches/{batchId}/reverse:
+    parameters: [{ $ref: '#/components/parameters/BatchId' }]
+    post:
+      tags: [imports]
+      operationId: reverseImportBatch
+      summary: Reverse one import as a set (S-34)
+      description: |
+        B-037 — blueprint §4B.3's closing validation rule and §17's named
+        mitigation for *"Client Excel import silently corrupts the master"*:
+        **a bad import can be identified and reversed as a set.**
+
+        Deletes the rows the run **created**. Rows it *updated* are not touched
+        and could not be restored — `clients.import_batch_id` is stamped on
+        insert only, and there is no before image anywhere — so the response
+        carries `updatedRowsNotReverted` rather than letting a count that does
+        not add up imply otherwise. A client that has since been named on a
+        ticket comes back in `retained` with a reason, because failing the whole
+        reversal over one used client is unhelpful and deleting the ticket's
+        client is worse.
+
+        **`POST`, not `DELETE`.** The resource at this path is the batch, and the
+        batch is emphatically *not* deleted: it is the audit trail, and it
+        survives the reversal with four more columns filled in.
+
+        **Not idempotent, and refused rather than made so.** A second call
+        answers `import-batch-already-reversed`. Succeeding quietly would be
+        tempting — the rows are already gone, so it would delete nothing — and
+        would overwrite `reversedAt` and both counters with the second attempt's
+        zeroes: a false entry in the one table that exists to make bad imports
+        traceable.
+
+        `master.write`. **This is the only route in the product that deletes rows
+        from the client master** — `updateClientStatus` deactivates and everything
+        else preserves — and it does not get a capability of its own: the
+        capability that lets somebody write 412 clients in one action is the
+        capability that lets them take those same 412 back, and splitting them
+        would mean an Admin who can cause the damage cannot undo it. **403 rather
+        than 404** for the reason the poll gives: decided before the id is looked
+        up.
+      responses:
+        '200':
+          description: |
+            Reversed. `retained` may be non-empty — that is an outcome, not a
+            failure, and the batch's own `retainedRows` records it permanently.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportReversalResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: |
+            Three types, and they are three because the remedies differ.
+
+            `import-batch-not-finished` — the job is still walking the file, and
+            reversing under it would have two threads deleting and inserting the
+            same rows. Clears itself in a moment; the screen should wait. Carries
+            `status`.
+
+            `import-batch-already-reversed` — done once already. Never clears; the
+            screen should stop offering the button. Carries `reversedAt`, because
+            a caller who reaches this has almost always got a stale panel open in
+            another tab.
+
+            `import-schema-unavailable` — the registration that wrote this run is
+            not installed in this build, so nothing here knows what to delete.
+            Not the caller's mistake and not fixable by them. Reads still work:
+            an error report already written is a file, and reading a file needs no
+            registration.
+
+            One shared "cannot reverse" type would put a Try again on two cases
+            that will refuse forever.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /import-batches/{batchId}/error-report:
     parameters: [{ $ref: '#/components/parameters/BatchId' }]
@@ -7651,91 +7775,274 @@ components:
       type: object
       required: [data]
       properties:
+        data: { $ref: '#/components/schemas/ImportBatch' }
+
+    ImportBatch:
+      type: object
+      required:
+        [batchId, entity, status, processed, total, created, updated, rejected,
+         reversedRows, retainedRows, reversible]
+      description: |
+        One import run — the progress bar's poll, a row of B-037's history panel
+        and the body of a reversal's response, all the same object.
+
+        **Named rather than inlined since B-037**, which is when it acquired a
+        second and third reader. Three copies of a seventeen-field shape would be
+        three places to keep in step, and the panel needs every field the poll
+        has: it shows the counters, the status, the error-report link and the one
+        operation the run offers.
+
+        `required` is spelled out so the generated TypeScript stops making every
+        counter optional — a progress bar reading `processed ?? 0` renders 0% for
+        a run that is nearly finished, and the fallback hides it. `fileName`,
+        `errorReportUrl`, `importedBy`, `importedByName` and `reversedAt` are the
+        ones that genuinely may be absent.
+      properties:
+        batchId:
+          type: integer
+          format: int64
+          description: |
+            `import_batches.id`. An integer, not a UUID — the contract said
+            UUID until B-030 read the baseline DDL.
+        entity:
+          type: string
+          examples: [CLIENT]
+          description: |
+            `CLIENT` or `RESOURCE` — which registration this run was
+            validated against, and what B-037's reversal query keys on.
+            Deliberately the stored discriminator rather than the URL segment
+            (`clients`): collapsing them would mean renaming a live URL to
+            fix a column.
+        fileName: { type: [string, 'null'], maxLength: 255 }
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETED, FAILED]
+          description: |
+            The commit job's lifecycle, and the only vocabulary
+            `import_batches.status` uses. There is no state for the step-4
+            dry run because the dry run writes nothing — no batch row
+            exists until commit, and it is born `QUEUED`.
+
+            `COMPLETED` is **not** a synonym for "no rejections": a run that
+            refused half the file and wrote the rest completed, and its error
+            report is how the user recovers the other half. `FAILED` means
+            the job itself died.
+        processed:
+          type: integer
+          description: |
+            `created + updated + rejected` — derived, not a stored column, so
+            it cannot disagree with the three numbers beside it. Reaches
+            `total` exactly when the run is over.
+        total:
+          type: integer
+          description: Every data row of the sheet, rejected ones included.
+        created: { type: integer }
+        updated: { type: integer }
+        rejected:
+          type: integer
+          description: |
+            What the dry run refused, plus anything that failed at write
+            time — a row the preview judged writable can still break a
+            constraint no validator declared, and losing the other 499 to it
+            would be the wrong trade.
+        errorReportUrl:
+          type: [string, 'null']
+          examples: ['/import-batches/412/error-report']
+          description: |
+            `.xlsx` of rejected rows with an appended Reason column — B-036.
+
+            **A path relative to the API base** — no `/api/v1` prefix, because
+            the file needs the caller's `Authorization` header and so is
+            composed onto a base by whatever fetches it, exactly as the
+            template path is. **Not an object-store URL.** The
+            file is a verbatim extract of the client master, so it is served
+            through `downloadImportErrorReport` with `master.write` re-checked
+            at the moment of reading, rather than as a presigned URL the way
+            §4B.4 serves attachments. A signed URL is a bearer credential that
+            outlives the screen that minted it, in a browser history and a
+            proxy log.
+
+            **Null exactly when there is nothing to download**: the run has
+            not finished, no row was rejected, or the report could not be
+            stored. A client renders the button disabled rather than hiding
+            it — hiding leaves a user with no account of the rows that did
+            not land.
+
+            It appears on the **same write that makes the status terminal**,
+            never a later one: a client stops polling when it reads
+            `COMPLETED`, so a report stamped afterwards is one nobody is
+            still asking for. The `ETag` covers this field for the same
+            reason.
+        startedAt:
+          type: string
+          format: date-time
+          description: |
+            `import_batches.created_at` — when the run was committed, not when it
+            finished. UTC, like everything else in storage; the user's timezone is
+            applied when it is rendered.
+
+            The history panel's first column, and half of what "a bad import can
+            be identified" means in practice: an Admin knows roughly when they
+            uploaded the wrong file long before they know its batch id.
+        importedBy:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            Who committed the run. Nullable because it is recorded best-effort —
+            a caller the `dev-noauth` profile cannot identify starts a run with no
+            actor rather than being refused one.
+        importedByName:
+          type: [string, 'null']
+          description: |
+            `importedBy` resolved to a display name — `full_name`, falling back to
+            the username.
+
+            **Present on `listImportBatches`, null on `getImportBatch`.** The poll
+            deliberately does not resolve it: the screen watching a progress bar
+            knows perfectly well who started the run, because they just pressed
+            the button, and a user lookup every two seconds for the length of an
+            import is a query per poll for a string that cannot change.
+
+            Null also when the account has since been deleted. The panel then
+            renders the run unattributed, which is the truth, rather than an
+            "Unknown user" placeholder that looks like a person.
+        reversedAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            When this run was reversed as a set — B-037. Null means never, and it
+            is the whole state machine: there is no `REVERSED` status, because
+            `status` records how the *run* ended and a reversal is a later fact
+            about a run that already ended. Collapsing them would lose "completed
+            with 6 rejections" the moment somebody reversed it.
+        reversedRows:
+          type: integer
+          description: |
+            Rows this run **created** that the reversal deleted.
+
+            Never rows it merely updated. `clients.import_batch_id` is stamped on
+            insert only, so a row the run edited is not attributed to it — and
+            there is no before image anywhere, so an update is not something a
+            reversal could undo. `reverseImportBatch` returns
+            `updatedRowsNotReverted` so that limit is stated rather than inferred.
+        retainedRows:
+          type: integer
+          description: |
+            Rows this run created that the reversal could **not** delete, because
+            something else now references them — a client that has since been
+            named on a ticket.
+
+            Kept rather than destroyed: the two ways to force the count to zero
+            are failing the whole reversal because one client got used, or
+            deleting a ticket's client. Stored on the row because it is not
+            derivable afterwards — once the others are gone, an unreversed batch
+            and a fully reversed one both count zero.
+        reversible:
+          type: boolean
+          description: |
+            Whether `reverseImportBatch` would be accepted right now — **the
+            button's enabled state, decided by the server**.
+
+            A client could compute it from `status` and `reversedAt`, and that is
+            exactly why it is here instead: those are the server's two refusals,
+            and a copy in TypeScript is a second statement of them that agrees on
+            the day it is written. A rule added on one side afterwards becomes a
+            button offering an operation the server refuses, on a screen whose job
+            is deleting rows.
+
+            True for a finished, un-reversed run — `COMPLETED` **or** `FAILED`. A
+            failed run is the one most likely to need reversing: it left rows in
+            the master that nobody approved the presence of.
+
+    ImportBatchListResponse:
+      type: object
+      required: [data]
+      properties:
         data:
           type: object
-          required: [batchId, entity, status, processed, total, created, updated, rejected]
+          required: [entity, batches, limit]
           description: |
-            `required` is spelled out so the generated TypeScript stops making
-            every counter optional — a progress bar reading `processed ?? 0`
-            renders 0% for a run that is nearly finished, and the fallback hides
-            it. `fileName` and `errorReportUrl` are the two that genuinely may be
-            absent.
+            B-037 — the import history panel. Blueprint §4B.3: *"every import
+            writes an `import_batch` row so a bad import can be identified and
+            reversed as a set."* This is the identification half.
           properties:
-            batchId:
-              type: integer
-              format: int64
-              description: |
-                `import_batches.id`. An integer, not a UUID — the contract said
-                UUID until B-030 read the baseline DDL.
             entity:
               type: string
               examples: [CLIENT]
+              description: The registration these runs belong to — what was asked for.
+            batches:
+              type: array
+              items: { $ref: '#/components/schemas/ImportBatch' }
               description: |
-                `CLIENT` or `RESOURCE` — which registration this run was
-                validated against, and what B-037's reversal query keys on.
-                Deliberately the stored discriminator rather than the URL segment
-                (`clients`): collapsing them would mean renaming a live URL to
-                fix a column.
-            fileName: { type: [string, 'null'], maxLength: 255 }
-            status:
-              type: string
-              enum: [QUEUED, RUNNING, COMPLETED, FAILED]
+                Newest first. The same object `getImportBatch` returns, not a
+                slimmer summary: the panel shows every counter, the status, the
+                error-report link and `reversible`, which is all of them.
+            limit:
+              type: integer
+              examples: [50]
               description: |
-                The commit job's lifecycle, and the only vocabulary
-                `import_batches.status` uses. There is no state for the step-4
-                dry run because the dry run writes nothing — no batch row
-                exists until commit, and it is born `QUEUED`.
+                How many runs this route returns at most — **stated rather than
+                applied silently**. `import_batches` only grows, and a bounded
+                answer that looks unbounded reads as "these are all of them" when
+                it is not.
 
-                `COMPLETED` is **not** a synonym for "no rejections": a run that
-                refused half the file and wrote the rest completed, and its error
-                report is how the user recovers the other half. `FAILED` means
-                the job itself died.
-            processed:
+    ImportReversalResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [batch, deleted, retained, updatedRowsNotReverted]
+          properties:
+            batch:
+              $ref: '#/components/schemas/ImportBatch'
+              description: |
+                The run, re-read — `reversedAt` now set and `reversible` now
+                false. Returned whole so the panel renders the updated row from
+                this response rather than re-listing.
+            deleted:
+              type: array
+              items: { type: string }
+              examples: [[ACME, NORTHWIND]]
+              description: |
+                Natural keys removed — client codes, not database ids, because
+                the user is going to look them up in the spreadsheet they
+                uploaded. Named rather than only counted: the count is on
+                `batch.reversedRows`, and what an operator asks next is *which
+                ones*.
+            retained:
+              type: array
+              description: |
+                Rows this run created that the reversal refused to remove. **An
+                empty array is the ordinary outcome and a non-empty one is not a
+                failure** — keeping a client that has since been named on a
+                ticket is the correct result, and the two ways to avoid it are
+                failing the whole reversal or destroying the ticket's client.
+              items:
+                type: object
+                required: [naturalKey, reason]
+                properties:
+                  naturalKey: { type: string, examples: [ZENITH] }
+                  reason:
+                    type: string
+                    examples: ['Kept — 3 tickets have been raised against this client since the import.']
+                    description: |
+                      Plain language, for the person reading the screen. Never a
+                      constraint name or a database message — the same call B-036
+                      made about the error report's Reason column, and for the
+                      same reason: this text gets pasted into email.
+            updatedRowsNotReverted:
               type: integer
               description: |
-                `created + updated + rejected` — derived, not a stored column, so
-                it cannot disagree with the three numbers beside it. Reaches
-                `total` exactly when the run is over.
-            total:
-              type: integer
-              description: Every data row of the sheet, rejected ones included.
-            created: { type: integer }
-            updated: { type: integer }
-            rejected:
-              type: integer
-              description: |
-                What the dry run refused, plus anything that failed at write
-                time — a row the preview judged writable can still break a
-                constraint no validator declared, and losing the other 499 to it
-                would be the wrong trade.
-            errorReportUrl:
-              type: [string, 'null']
-              examples: ['/import-batches/412/error-report']
-              description: |
-                `.xlsx` of rejected rows with an appended Reason column — B-036.
+                **The honest half of the promise.** Rows this run *updated*
+                rather than created, which a reversal does not touch and could
+                not restore: `clients.import_batch_id` is stamped on insert only,
+                and there is no before image anywhere.
 
-                **A path relative to the API base** — no `/api/v1` prefix, because
-                the file needs the caller's `Authorization` header and so is
-                composed onto a base by whatever fetches it, exactly as the
-                template path is. **Not an object-store URL.** The
-                file is a verbatim extract of the client master, so it is served
-                through `downloadImportErrorReport` with `master.write` re-checked
-                at the moment of reading, rather than as a presigned URL the way
-                §4B.4 serves attachments. A signed URL is a bearer credential that
-                outlives the screen that minted it, in a browser history and a
-                proxy log.
-
-                **Null exactly when there is nothing to download**: the run has
-                not finished, no row was rejected, or the report could not be
-                stored. A client renders the button disabled rather than hiding
-                it — hiding leaves a user with no account of the rows that did
-                not land.
-
-                It appears on the **same write that makes the status terminal**,
-                never a later one: a client stops polling when it reads
-                `COMPLETED`, so a report stamped afterwards is one nobody is
-                still asking for. The `ETag` covers this field for the same
-                reason.
+                Carried explicitly, and never folded into `retained`, because it
+                is not a row the reversal declined to delete — it is a row the
+                reversal was never about. Somebody who imported 412 rows and sees
+                "12 deleted" is owed the sentence that accounts for the other 400.
 
     # ── masters ───────────────────────────────────────────────────────────
     Permission:
