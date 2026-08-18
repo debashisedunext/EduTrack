@@ -3,7 +3,19 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { format, isPast, parseISO } from 'date-fns'
 import { AlertTriangle } from 'lucide-react'
-import type { Ticket } from '@/api/generated/model/ticket'
+/*
+ * The grid row is a TicketSummary, not a Ticket.
+ *
+ * GET /tickets has always returned flat ids — A-053 chose that over nested
+ * objects because a list is where nesting costs most, one lookup per row across
+ * fifty rows. The contract declared `Ticket` anyway, so this file was typed
+ * against nested `assignee`, `project` and `client` properties the server never
+ * sends: the ID column rendered blank and every row read "Unassigned" on data
+ * that was entirely present.
+ *
+ * `Ticket` is still correct for the detail page, which does return it nested.
+ */
+import type { TicketSummary } from '@/api/generated/model/ticketSummary'
 import type { Level } from '@/api/generated/model/level'
 import type { StatusCode } from '@/api/generated/model/statusCode'
 import { Chip, type ChipProps } from '@/components/ui/chip'
@@ -26,6 +38,22 @@ export type ColumnKey =
 export interface ColumnRenderContext {
   /** `Ticket.taskTypeId` names a master row the list payload does not embed — resolved from `/masters/task-types`, fetched once for the filter bar and reused here. */
   taskTypeNames: Map<number, string>
+  /**
+   * The same pattern for the other three flat ids the list returns.
+   *
+   * A-053 chose flat ids over nested objects on purpose — a list is where
+   * nesting costs most, one lookup per row across fifty rows — and the contract
+   * has caught up with that in `TicketSummary`. What was missing was here: the
+   * grid resolved `taskTypeId` through a map and expected `project`, `client`
+   * and `assignee` to arrive nested, so those three columns read fields the
+   * server never sends. The ID column had the same fault by another name.
+   *
+   * Every map is built from a list the filter bar already fetches, so this adds
+   * no request.
+   */
+  projectNames: Map<number, string>
+  clientNames: Map<number, string>
+  userNames: Map<number, string>
 }
 
 export interface ColumnDef {
@@ -35,7 +63,7 @@ export interface ColumnDef {
   alwaysVisible?: boolean
   align?: 'left' | 'right'
   widthClassName?: string
-  render: (ticket: Ticket, ctx: ColumnRenderContext) => ReactNode
+  render: (ticket: TicketSummary, ctx: ColumnRenderContext) => ReactNode
 }
 
 export const LEVEL_VARIANT: Record<Level, ChipProps['variant']> = {
@@ -73,12 +101,16 @@ export const COLUMNS: ColumnDef[] = [
     header: 'ID',
     alwaysVisible: true,
     widthClassName: 'whitespace-nowrap',
+    // `ticketCode`, not `ticketId`. The contract's TicketId *is* the code —
+    // pattern ^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$ — and the list has always sent
+    // it under its column name. This column was blank because it read a
+    // property that never arrived.
     render: (t) => (
       <Link
-        to={`/tickets/${t.ticketId}`}
+        to={`/tickets/${t.ticketCode}`}
         className="font-mono font-medium text-primary tabular-nums hover:underline"
       >
-        {t.ticketId}
+        {t.ticketCode}
       </Link>
     ),
   },
@@ -107,15 +139,24 @@ export const COLUMNS: ColumnDef[] = [
   {
     key: 'assignee',
     header: 'Assignee',
-    render: (t) =>
-      t.assignee ? (
+    render: (t, ctx) => {
+      // Null assignedTo genuinely means unassigned. Before this fix every row
+      // said so, because the grid read a nested `assignee` the list does not
+      // return — which looked like a data problem and was a contract one.
+      const name = t.assignedTo != null ? ctx.userNames.get(t.assignedTo) : undefined;
+      return t.assignedTo != null ? (
         <div className="flex items-center gap-2 whitespace-nowrap">
-          <AvatarStack people={[{ id: String(t.assignee.id), name: t.assignee.displayName }]} max={1} size="sm" />
-          <span>{t.assignee.displayName}</span>
+          <AvatarStack
+            people={[{ id: String(t.assignedTo), name: name ?? `#${t.assignedTo}` }]}
+            max={1}
+            size="sm"
+          />
+          <span>{name ?? `#${t.assignedTo}`}</span>
         </div>
       ) : (
         <span className="text-content-muted">Unassigned</span>
-      ),
+      );
+    },
   },
   {
     key: 'plannedCloseDate',
@@ -147,17 +188,26 @@ export const COLUMNS: ColumnDef[] = [
   {
     key: 'project',
     header: 'Project',
-    render: (t) => (t.project ? `${t.project.projectCode} — ${t.project.name}` : '—'),
+    // The id falls back to "#4" rather than an em dash when the master list has
+    // not loaded: a dash says "no project", which is never true of a ticket.
+    render: (t, ctx) => ctx.projectNames.get(t.projectId) ?? `#${t.projectId}`,
   },
   {
     key: 'client',
     header: 'Client',
-    render: (t) => (t.client?.name ? t.client.name : <span className="text-content-muted">—</span>),
+    // An em dash here is correct: a ticket may genuinely have no client.
+    render: (t, ctx) =>
+      t.clientId != null ? (
+        (ctx.clientNames.get(t.clientId) ?? `#${t.clientId}`)
+      ) : (
+        <span className="text-content-muted">—</span>
+      ),
   },
   {
     key: 'reportedBy',
     header: 'Reported by',
-    render: (t) => t.reportedBy?.displayName ?? '—',
+    render: (t, ctx) =>
+      t.reportedBy != null ? (ctx.userNames.get(t.reportedBy) ?? `#${t.reportedBy}`) : '—',
   },
   {
     key: 'createdAt',
@@ -173,7 +223,7 @@ export const COLUMNS: ColumnDef[] = [
  * anyway, so this only matters for the gap before that scan runs, or a
  * ticket someone set Critical manually before it was ever late).
  */
-export function rowCueClassName(ticket: Ticket): string | undefined {
+export function rowCueClassName(ticket: TicketSummary): string | undefined {
   if (ticket.level === 'CRITICAL') return 'border-l-4 border-l-level-critical'
   if (ticket.isDelayed) return 'border-l-4 border-l-level-high'
   return undefined

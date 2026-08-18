@@ -67,7 +67,7 @@ export function CommandPalette() {
       setActiveIndex((i) => Math.max(i - 1, 0))
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      select(results[activeIndex]?.ticketId)
+      select(results[activeIndex]?.ticketCode)
     }
   }
 
@@ -115,18 +115,18 @@ export function CommandPalette() {
             )}
             {results.map((t, index) => (
               <li
-                key={t.ticketId}
+                key={t.ticketCode}
                 role="option"
                 aria-selected={index === activeIndex}
                 onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => select(t.ticketId)}
+                onClick={() => select(t.ticketCode)}
                 className={cn(
                   'flex cursor-pointer items-center gap-3 rounded-control px-3 py-2.5 text-sm',
                   index === activeIndex && 'bg-primary-soft',
                 )}
               >
                 <TicketIcon className="h-4 w-4 shrink-0 text-content-muted" />
-                <span className="shrink-0 font-mono text-xs text-content-muted">{t.ticketId}</span>
+                <span className="shrink-0 font-mono text-xs text-content-muted">{t.ticketCode}</span>
                 <span className="flex-1 truncate text-content">{t.title}</span>
                 {t.level && <Chip variant={LEVEL_VARIANT[t.level]}>{t.level}</Chip>}
               </li>

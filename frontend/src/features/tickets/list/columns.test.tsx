@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import type { Ticket } from '@/api/generated/model/ticket'
+import type { TicketSummary } from '@/api/generated/model/ticketSummary'
 import { rowCueClassName } from './columns'
 
-/** Only `level` and `isDelayed` are exercised — the rest is boilerplate to satisfy the type. */
-function ticket(overrides: Partial<Ticket>): Ticket {
+/**
+ * Only `level` and `isDelayed` are exercised — the rest is boilerplate to
+ * satisfy the type.
+ *
+ * A `TicketSummary`, not a `Ticket`: `GET /tickets` returns flat ids and always
+ * has, and this fixture built the nested detail shape — which is why it kept
+ * compiling while the grid rendered a blank ID column against real data.
+ */
+function ticket(overrides: Partial<TicketSummary>): TicketSummary {
   return {
-    ticketId: 'CRM-26-00001',
+    id: 1,
+    ticketCode: 'CRM-26-00001',
     title: 'Fixture ticket',
+    projectId: 1,
     level: 'MEDIUM',
     status: 'NEW',
     cycleNo: 1,

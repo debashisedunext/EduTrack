@@ -159,12 +159,12 @@ export function ResourceProfilePage() {
         ) : (
           <ul className="mb-3 divide-y divide-border rounded-control border border-border bg-surface">
             {tickets.map((t) => (
-              <li key={t.ticketId} className="px-3 py-2 text-sm">
+              <li key={t.ticketCode} className="px-3 py-2 text-sm">
                 <Link
-                  to={ticketPath(t.ticketId)}
+                  to={ticketPath(t.ticketCode)}
                   className="text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
-                  {t.ticketId}
+                  {t.ticketCode}
                 </Link>
                 <span className="ml-2 text-content">{t.title}</span>
                 <span className="ml-2 text-caption text-content-muted">{t.status}</span>

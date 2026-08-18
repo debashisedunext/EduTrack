@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { Ticket } from '@/api/generated/model/ticket'
+import type { TicketSummary } from '@/api/generated/model/ticketSummary'
 import type { BulkResultResponseData } from '@/api/generated/model/bulkResultResponseData'
 
 import {
@@ -12,8 +12,17 @@ import {
   summariseBulkResult,
 } from './bulkActions'
 
-function ticket(ticketId: string, status: Ticket['status']): Ticket {
-  return { ticketId, title: `Ticket ${ticketId}`, level: 'MEDIUM', status, cycleNo: 1 }
+/** A list row, not a detail record — GET /tickets returns flat ids. */
+function ticket(ticketCode: string, status: TicketSummary['status']): TicketSummary {
+  return {
+    id: Number(ticketCode.replace(/\D/g, '').slice(-3)) || 1,
+    ticketCode,
+    title: `Ticket ${ticketCode}`,
+    projectId: 1,
+    level: 'MEDIUM',
+    status,
+    cycleNo: 1,
+  }
 }
 
 describe('canBulkAct', () => {

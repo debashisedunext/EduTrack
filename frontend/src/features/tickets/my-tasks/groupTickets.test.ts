@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Ticket } from '@/api/generated/model/ticket'
+import type { TicketSummary } from '@/api/generated/model/ticketSummary'
 import { groupTickets } from './groupTickets'
 
 // Built with the local-time constructor and converted with `.toISOString()`,
@@ -15,9 +15,13 @@ function localIso(year: number, month: number, day: number, hour = 12, minute = 
   return new Date(year, month, day, hour, minute, 0).toISOString()
 }
 
-function ticket(id: string, plannedCloseDate: string | null): Ticket {
+function ticket(id: string, plannedCloseDate: string | null): TicketSummary {
   return {
-    ticketId: id,
+    // A list row: GET /tickets returns flat ids, so id and projectId are
+    // required and the code is `ticketCode`, not `ticketId`.
+    id: 1,
+    projectId: 1,
+    ticketCode: id,
     title: id,
     level: 'MEDIUM',
     status: 'IN_PROGRESS',
@@ -38,10 +42,10 @@ describe('groupTickets — C-018', () => {
     const groups = groupTickets(tickets, TODAY)
 
     expect(groups.map((g) => g.key)).toEqual(['overdue', 'dueToday', 'thisWeek', 'later'])
-    expect(groups[0].tickets.map((t) => t.ticketId)).toEqual(['OVERDUE-1'])
-    expect(groups[1].tickets.map((t) => t.ticketId)).toEqual(['TODAY-1'])
-    expect(groups[2].tickets.map((t) => t.ticketId)).toEqual(['WEEK-1'])
-    expect(groups[3].tickets.map((t) => t.ticketId)).toEqual(['LATER-1'])
+    expect(groups[0].tickets.map((t) => t.ticketCode)).toEqual(['OVERDUE-1'])
+    expect(groups[1].tickets.map((t) => t.ticketCode)).toEqual(['TODAY-1'])
+    expect(groups[2].tickets.map((t) => t.ticketCode)).toEqual(['WEEK-1'])
+    expect(groups[3].tickets.map((t) => t.ticketCode)).toEqual(['LATER-1'])
   })
 
   it('a due date exactly 7 calendar days out is still This Week, 8 days out is Later', () => {
@@ -49,13 +53,13 @@ describe('groupTickets — C-018', () => {
       [ticket('SEVEN', localIso(2026, 7, 17)), ticket('EIGHT', localIso(2026, 7, 18))],
       TODAY,
     )
-    expect(groups.find((g) => g.key === 'thisWeek')?.tickets.map((t) => t.ticketId)).toEqual(['SEVEN'])
-    expect(groups.find((g) => g.key === 'later')?.tickets.map((t) => t.ticketId)).toEqual(['EIGHT'])
+    expect(groups.find((g) => g.key === 'thisWeek')?.tickets.map((t) => t.ticketCode)).toEqual(['SEVEN'])
+    expect(groups.find((g) => g.key === 'later')?.tickets.map((t) => t.ticketCode)).toEqual(['EIGHT'])
   })
 
   it('a ticket with no planned close date lands in Later rather than being dropped', () => {
     const groups = groupTickets([ticket('NO-PCD', null)], TODAY)
-    expect(groups.find((g) => g.key === 'later')?.tickets.map((t) => t.ticketId)).toEqual(['NO-PCD'])
+    expect(groups.find((g) => g.key === 'later')?.tickets.map((t) => t.ticketCode)).toEqual(['NO-PCD'])
   })
 
   it('a due time later today is Due Today, not Overdue — calendar-day granularity, not exact timestamp', () => {
@@ -63,6 +67,6 @@ describe('groupTickets — C-018', () => {
       [ticket('LATE-TODAY', localIso(2026, 7, 10, 23, 59))],
       new Date(2026, 7, 10, 22, 0, 0),
     )
-    expect(groups.find((g) => g.key === 'dueToday')?.tickets.map((t) => t.ticketId)).toEqual(['LATE-TODAY'])
+    expect(groups.find((g) => g.key === 'dueToday')?.tickets.map((t) => t.ticketCode)).toEqual(['LATE-TODAY'])
   })
 })

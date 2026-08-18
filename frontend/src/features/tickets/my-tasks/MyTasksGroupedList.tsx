@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import type { Ticket } from '@/api/generated/model/ticket'
+import type { TicketSummary } from '@/api/generated/model/ticketSummary'
 import { Chip } from '@/components/ui/chip'
 import { rowCueClassName, LEVEL_VARIANT } from '../list/columns'
 import { titleCase } from '../stageDisplay'
@@ -33,7 +33,7 @@ export function MyTasksGroupedList({ groups }: { groups: TaskGroup[] }) {
           </div>
           <div className="divide-y divide-border overflow-hidden rounded-card border border-border bg-surface">
             {group.tickets.map((ticket) => (
-              <TaskRow key={ticket.ticketId} ticket={ticket} />
+              <TaskRow key={ticket.ticketCode} ticket={ticket} />
             ))}
           </div>
         </section>
@@ -42,16 +42,16 @@ export function MyTasksGroupedList({ groups }: { groups: TaskGroup[] }) {
   )
 }
 
-function TaskRow({ ticket }: { ticket: Ticket }) {
+function TaskRow({ ticket }: { ticket: TicketSummary }) {
   return (
     <div className={cn('flex items-center gap-4 px-4 py-3', rowCueClassName(ticket))}>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            to={`/tickets/${ticket.ticketId}`}
+            to={`/tickets/${ticket.ticketCode}`}
             className="font-mono text-sm font-medium text-primary tabular-nums hover:underline"
           >
-            {ticket.ticketId}
+            {ticket.ticketCode}
           </Link>
           <Chip variant={LEVEL_VARIANT[ticket.level]}>{ticket.level}</Chip>
           {reworkBadge(ticket)}
@@ -60,12 +60,20 @@ function TaskRow({ ticket }: { ticket: Ticket }) {
           {ticket.title}
         </p>
         <p className="mt-1 truncate text-caption text-content-muted">
-          {ticket.project ? `${ticket.project.projectCode} · ` : ''}
-          {ticket.currentStageCode ? `In ${titleCase(ticket.currentStageCode)} · ` : ''}
+          {ticket.currentStage ? `In ${titleCase(ticket.currentStage)} · ` : ''}
           due {dueDateLabel(ticket)} · {(ticket.totalEffortHrs ?? 0).toFixed(1)}h logged
         </p>
       </div>
-      <QuickUpdateTrigger ticket={ticket} />
+      <QuickUpdateTrigger
+        ticket={{
+          // The list row's names, mapped to what the panel asks for.
+          ticketId: ticket.ticketCode,
+          status: ticket.status,
+          title: ticket.title,
+          currentStageCode: ticket.currentStage,
+          iterationNo: ticket.iterationNo,
+        }}
+      />
     </div>
   )
 }

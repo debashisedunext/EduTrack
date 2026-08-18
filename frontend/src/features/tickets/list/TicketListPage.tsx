@@ -183,7 +183,27 @@ export function TicketListPage() {
     () => new Map(taskTypes.filter((t) => t.id != null).map((t) => [t.id as number, t.name ?? `#${t.id}`])),
     [taskTypes],
   )
-  const renderContext: ColumnRenderContext = { taskTypeNames }
+  // Built from the lists the filter bar already fetches, so the grid resolves
+  // every flat id the list returns without a single extra request.
+  const projectNames = React.useMemo(
+    () =>
+      new Map(
+        projects
+          .filter((p) => p.id != null)
+          .map((p) => [p.id as number, p.projectCode ? `${p.projectCode} — ${p.name}` : (p.name ?? `#${p.id}`)]),
+      ),
+    [projects],
+  )
+  const clientNames = React.useMemo(
+    () => new Map(clients.filter((c) => c.id != null).map((c) => [c.id as number, c.name ?? `#${c.id}`])),
+    [clients],
+  )
+  const userNames = React.useMemo(
+    () => new Map(members.filter((m) => m.id != null).map((m) => [m.id as number, m.displayName ?? `#${m.id}`])),
+    [members],
+  )
+
+  const renderContext: ColumnRenderContext = { taskTypeNames, projectNames, clientNames, userNames }
 
   const { data: prioritiesData } = useListPriorities()
   const levelOptions = React.useMemo(
@@ -274,7 +294,7 @@ export function TicketListPage() {
   const close = useBulkClose()
   const isActing = reassign.isPending || changeLevel.isPending || close.isPending
 
-  const pageTicketIds = tickets.map((t) => t.ticketId)
+  const pageTicketIds = tickets.map((t) => t.ticketCode)
   const allOnPageSelected =
     pageTicketIds.length > 0 && pageTicketIds.every((id) => selected.has(id))
   const someOnPageSelected = pageTicketIds.some((id) => selected.has(id))
@@ -555,7 +575,7 @@ export function TicketListPage() {
             ) : (
               tickets.map((ticket) => (
                 <TableRow
-                  key={ticket.ticketId}
+                  key={ticket.ticketCode}
                   aria-busy={isFetching || undefined}
                   className={rowCueClassName(ticket)}
                 >
@@ -565,9 +585,9 @@ export function TicketListPage() {
                         type="checkbox"
                         // The ID, not the title: two tickets can share a title
                         // and the accessible name has to identify the row.
-                        aria-label={`Select ${ticket.ticketId}`}
-                        checked={selected.has(ticket.ticketId)}
-                        onChange={() => toggleRow(ticket.ticketId)}
+                        aria-label={`Select ${ticket.ticketCode}`}
+                        checked={selected.has(ticket.ticketCode)}
+                        onChange={() => toggleRow(ticket.ticketCode)}
                         className="h-4 w-4 cursor-pointer accent-primary"
                       />
                     </TableCell>

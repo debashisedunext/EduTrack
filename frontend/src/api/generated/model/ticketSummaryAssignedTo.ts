@@ -46,10 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { TicketSummary } from './ticketSummary';
-import type { Meta } from './meta';
 
-export interface TicketListResponse {
-  data: TicketSummary[];
-  meta?: Meta;
-}
+/**
+ * Null means unassigned, which the grid renders as such.
+ */
+export type TicketSummaryAssignedTo = number | null;

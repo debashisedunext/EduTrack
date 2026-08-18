@@ -1,14 +1,14 @@
 import { format, isPast, parseISO } from 'date-fns'
-import type { Ticket } from '@/api/generated/model/ticket'
+import type { TicketSummary } from '@/api/generated/model/ticketSummary'
 import { Chip } from '@/components/ui/chip'
 
 /** `d MMM` for a due date, or an em dash if the ticket somehow has none. */
-export function dueDateLabel(ticket: Ticket): string {
+export function dueDateLabel(ticket: TicketSummary): string {
   if (!ticket.plannedCloseDate) return '—'
   return format(parseISO(ticket.plannedCloseDate), 'd MMM')
 }
 
-export function isOverdue(ticket: Ticket): boolean {
+export function isOverdue(ticket: TicketSummary): boolean {
   if (!ticket.plannedCloseDate) return false
   return (
     ticket.isDelayed ?? (isPast(parseISO(ticket.plannedCloseDate)) && ticket.status !== 'CLOSED' && ticket.status !== 'RESOLVED')
@@ -22,7 +22,7 @@ export function isOverdue(ticket: Ticket): boolean {
  * backward move *within* the current cycle — a QA fail bouncing it back to
  * Development — same amber "reworked" convention the ribbon dot uses.
  */
-export function reworkBadge(ticket: Ticket) {
+export function reworkBadge(ticket: TicketSummary) {
   if (ticket.status === 'REOPENED') {
     return (
       <Chip variant="danger">

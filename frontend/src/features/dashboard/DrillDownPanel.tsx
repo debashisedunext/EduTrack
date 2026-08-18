@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useListTickets } from '@/api/generated/tickets/tickets'
+import { useListUsers } from '@/api/generated/users/users'
 import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -67,7 +68,23 @@ export function DrillDownPanel() {
     [drillDown],
   )
 
-  const { data, isPending, isError } = useListTickets(
+    // The list returns a flat `assignedTo` id — A-053's shape, and what the
+  // server has always sent. Resolved here rather than rendered raw: a drill-down
+  // is read by a manager looking for a person, and "#10" is not that person.
+  // The dashboard's Resource filter already fetches this list, so React Query
+  // answers from cache.
+  const { data: usersData } = useListUsers({ isActive: true, limit: 200 })
+  const userNames = React.useMemo(
+    () =>
+      new Map(
+        (usersData?.data ?? [])
+          .filter((u) => u.id != null)
+          .map((u) => [u.id as number, u.displayName ?? `#${u.id}`]),
+      ),
+    [usersData],
+  )
+
+const { data, isPending, isError } = useListTickets(
     { ...(params ?? {}), limit: PREVIEW_LIMIT },
     // `enabled` rather than conditionally calling the hook, which React forbids.
     // Closed means no request at all — a panel nobody opened should not be
@@ -153,7 +170,7 @@ export function DrillDownPanel() {
               <tbody>
                 {rows.map((ticket) => (
                   <tr
-                    key={ticket.ticketId}
+                    key={ticket.ticketCode}
                     className="border-t border-[color:var(--border)] align-top"
                   >
                     <td className="py-2 pr-3 whitespace-nowrap">
@@ -161,14 +178,14 @@ export function DrillDownPanel() {
                         type="button"
                         onClick={() => {
                           close()
-                          navigate(`/tickets/${ticket.ticketId}`)
+                          navigate(`/tickets/${ticket.ticketCode}`)
                         }}
                         className="text-[color:var(--primary)] underline-offset-2 hover:underline
                                    focus-visible:outline focus-visible:outline-2
                                    focus-visible:outline-offset-2
                                    focus-visible:outline-[color:var(--primary)] rounded-sm"
                       >
-                        {ticket.ticketId}
+                        {ticket.ticketCode}
                       </button>
                     </td>
                     <td className="py-2 pr-3">{ticket.title}</td>
@@ -176,7 +193,9 @@ export function DrillDownPanel() {
                       <Chip variant={levelVariant(ticket.level)}>{ticket.level}</Chip>
                     </td>
                     <td className="py-2 text-[color:var(--text-secondary)]">
-                      {ticket.assignee?.displayName ?? 'Unassigned'}
+                      {ticket.assignedTo != null
+                        ? (userNames.get(ticket.assignedTo) ?? `#${ticket.assignedTo}`)
+                        : 'Unassigned'}
                     </td>
                   </tr>
                 ))}

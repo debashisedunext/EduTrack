@@ -1,10 +1,10 @@
 import * as React from 'react'
+import type { StatusCode } from '@/api/generated/model/statusCode'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Zap } from 'lucide-react'
 
 import { newIdempotencyKey, ApiError } from '@/api/http'
-import type { Ticket } from '@/api/generated/model/ticket'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,6 +31,28 @@ import { titleCase } from '../stageDisplay'
 import { useQuickUpdateMutation } from './useQuickUpdateMutation'
 import { emptyQuickUpdateForm, quickUpdateSchema, toQuickUpdateRequest, type QuickUpdateFormValues } from './quickUpdateForm'
 
+/**
+ * The four fields this panel actually needs.
+ *
+ * Opened from the ticket detail (a nested `Ticket`) and from My Tasks (a flat
+ * `TicketSummary`), which do not share a schema — `GET /tickets` returns flat
+ * ids by design (A-053) and the detail returns the full record. Asking for the
+ * fields rather than for a type lets both callers pass what they have without
+ * either screen converting a row it did not fetch.
+ */
+export interface QuickUpdateTarget {
+  ticketId: string
+  title: string
+  status: StatusCode
+  currentStageCode?: string | null
+  iterationNo?: number
+  /**
+   * Absent on a list row — `GET /tickets` does not return it — so the form
+   * opens at nothing rather than at a stale figure. The detail page passes it.
+   */
+  pctComplete?: number | null
+}
+
 const STATUS_OPTIONS = Object.keys(STATUS_LABEL) as (keyof typeof STATUS_LABEL)[]
 
 /**
@@ -43,7 +65,7 @@ export function QuickUpdateTrigger({
   triggerClassName,
   compact,
 }: {
-  ticket: Ticket
+  ticket: QuickUpdateTarget
   triggerClassName?: string
   /** Icon-only, for tight spaces like a Kanban card. Same action, same panel — just no label. */
   compact?: boolean
@@ -70,7 +92,7 @@ export function QuickUpdateTrigger({
   )
 }
 
-function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => void }) {
+function QuickUpdateForm({ ticket, onDone }: { ticket: QuickUpdateTarget; onDone: () => void }) {
   const initial = React.useMemo(() => emptyQuickUpdateForm(ticket), [ticket])
   const {
     control,

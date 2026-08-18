@@ -1,12 +1,12 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns'
-import type { Ticket } from '@/api/generated/model/ticket'
+import type { TicketSummary } from '@/api/generated/model/ticketSummary'
 
 export type TaskGroupKey = 'overdue' | 'dueToday' | 'thisWeek' | 'later'
 
 export interface TaskGroup {
   key: TaskGroupKey
   label: string
-  tickets: Ticket[]
+  tickets: TicketSummary[]
 }
 
 export const GROUP_LABELS: Record<TaskGroupKey, string> = {
@@ -36,15 +36,15 @@ const GROUP_ORDER: TaskGroupKey[] = ['overdue', 'dueToday', 'thisWeek', 'later']
  * SLA computation has run, but a ticket created before that landed, or one
  * whose PCD failed to compute — falls into Later rather than being dropped.
  */
-export function groupTickets(tickets: Ticket[], today: Date = new Date()): TaskGroup[] {
-  const buckets: Record<TaskGroupKey, Ticket[]> = { overdue: [], dueToday: [], thisWeek: [], later: [] }
+export function groupTickets(tickets: TicketSummary[], today: Date = new Date()): TaskGroup[] {
+  const buckets: Record<TaskGroupKey, TicketSummary[]> = { overdue: [], dueToday: [], thisWeek: [], later: [] }
   for (const ticket of tickets) {
     buckets[bucketFor(ticket, today)].push(ticket)
   }
   return GROUP_ORDER.map((key) => ({ key, label: GROUP_LABELS[key], tickets: buckets[key] }))
 }
 
-function bucketFor(ticket: Ticket, today: Date): TaskGroupKey {
+function bucketFor(ticket: TicketSummary, today: Date): TaskGroupKey {
   if (!ticket.plannedCloseDate) return 'later'
   const daysUntilDue = differenceInCalendarDays(parseISO(ticket.plannedCloseDate), today)
   if (daysUntilDue < 0) return 'overdue'

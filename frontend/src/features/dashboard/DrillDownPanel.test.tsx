@@ -29,6 +29,20 @@ vi.mock('@/api/generated/tickets/tickets', () => ({
   listTickets: vi.fn(),
 }))
 
+/*
+  The panel resolves `assignedTo` through the users master, exactly as the
+  ticket grid resolves task types — the list returns flat ids by design (A-053).
+  Stubbed here rather than left to the global mock server so the fixture's id 7
+  has a name this test controls.
+*/
+vi.mock('@/api/generated/users/users', () => ({
+  useListUsers: () => ({
+    data: { data: [{ id: 7, displayName: 'Ravi Kumar' }] },
+    isPending: false,
+    isError: false,
+  }),
+}))
+
 function renderWith(ui: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -38,14 +52,21 @@ function renderWith(ui: React.ReactNode) {
   )
 }
 
+/*
+  List rows, not detail records. GET /tickets returns flat ids — `ticketCode`
+  and `assignedTo` — and this fixture used to build the nested detail shape,
+  which is why the panel rendered a blank ID and "Unassigned" against data that
+  was entirely present. The name is resolved through the users master, as the
+  panel does at runtime.
+*/
 const ROWS = [
   {
-    ticketId: 'CRM-26-00011',
+    ticketCode: 'CRM-26-00011',
     title: 'Payment gateway timeout',
     level: 'CRITICAL',
-    assignee: { displayName: 'Ravi Kumar' },
+    assignedTo: 7,
   },
-  { ticketId: 'CRM-26-00042', title: 'Login fails on Safari', level: 'HIGH', assignee: null },
+  { ticketCode: 'CRM-26-00042', title: 'Login fails on Safari', level: 'HIGH', assignedTo: null },
 ]
 
 function served(data: unknown, meta: Record<string, unknown> = {}) {

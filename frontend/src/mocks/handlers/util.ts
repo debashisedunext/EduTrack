@@ -118,6 +118,58 @@ export const clientRef = (id: number | null, db: Db = getDb()) => {
   return c ? { id: c.id, clientCode: c.clientCode, name: c.name } : null;
 };
 
+/**
+ * One row of `GET /tickets` — the contract's `TicketSummary`.
+ *
+ * **Not `ticketDto`.** The list has always returned flat ids: A-053 chose that
+ * over nested `project`, `client` and `assignee` objects because a list is
+ * where nesting costs most, one lookup per row across fifty rows. The contract
+ * declared `Ticket` for the list anyway, and this mock followed the contract
+ * rather than the server — so every list screen was developed and tested
+ * against a shape the API never sends, and the grid shipped with a blank ID
+ * column and "Unassigned" on every row.
+ *
+ * Mirroring the server is the whole job of a mock. Where the two disagree, the
+ * mock is what makes the disagreement invisible.
+ */
+export function ticketSummaryDto(t: Ticket, db: Db = getDb()) {
+  const effort = db.effortLogs
+    .filter((e) => e.ticketId === t.ticketId)
+    .reduce((sum, e) => sum + e.hours, 0);
+  return {
+    // The mock keys tickets by their code and has no surrogate id, so one is
+    // derived from the code's sequence. Stable for a given ticket, which is all
+    // the bulk actions need it for.
+    id: Number(String(t.ticketId).replace(/\D/g, '').slice(-5)) || 1,
+    ticketCode: t.ticketId,
+    title: t.title,
+    projectId: t.projectId,
+    clientId: t.clientId,
+    isClientRaised: t.isClientRaised,
+    taskTypeId: t.taskTypeId,
+    level: t.level,
+    originalLevel: t.originalLevel,
+    status: t.status,
+    currentStage: t.currentStageCode,
+    assignedTo: t.assigneeId,
+    reportedBy: t.reportedById,
+    cycleNo: t.cycleNo,
+    iterationNo: t.iterationNo,
+    reopenCount: t.reopenCount,
+    isReopened: t.reopenCount > 0,
+    dateReported: t.createdAt,
+    plannedCloseDate: t.plannedCloseDate,
+    actualCloseDate: t.actualCloseDate,
+    isDelayed: t.isDelayed,
+    delayedSince: t.delayedSince,
+    estimatedEffortHrs: t.estimatedHrs,
+    totalEffortHrs: Math.round(effort * 100) / 100,
+    commentCount: db.comments.filter((c) => c.ticketId === t.ticketId && !c.deletedAt).length,
+    attachmentCount: db.attachments.filter((a) => a.ticketId === t.ticketId).length,
+    createdAt: t.createdAt,
+  };
+}
+
 export function ticketDto(t: Ticket, db: Db = getDb()) {
   const project = db.projects.find((p) => p.id === t.projectId)!;
   const effort = db.effortLogs

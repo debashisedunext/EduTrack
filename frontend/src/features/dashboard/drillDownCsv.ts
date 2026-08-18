@@ -1,5 +1,5 @@
 import { listTickets } from '@/api/generated/tickets/tickets'
-import type { ListTicketsParams, Ticket } from '@/api/generated/model'
+import type { ListTicketsParams, TicketSummary } from '@/api/generated/model'
 
 /**
  * A-061 · the modal's CSV export.
@@ -38,14 +38,23 @@ export interface CsvExport {
   truncated: boolean
 }
 
-const COLUMNS: { header: string; value: (t: Ticket) => string }[] = [
-  { header: 'Ticket', value: (t) => t.ticketId ?? '' },
+const COLUMNS: { header: string; value: (t: TicketSummary) => string }[] = [
+  { header: 'Ticket', value: (t) => t.ticketCode ?? '' },
   { header: 'Title', value: (t) => t.title ?? '' },
-  { header: 'Project', value: (t) => t.project?.name ?? '' },
-  { header: 'Client', value: (t) => t.client?.name ?? '' },
+  // Ids, and the headers say so.
+  //
+  // These three read `t.project?.name`, `t.client?.name` and
+  // `t.assignee?.displayName` — nested objects `GET /tickets` has never
+  // returned — so every exported row carried three empty columns. The list
+  // payload is flat by design (A-053), and this exporter pages the API directly
+  // with no master lists to resolve against, so an id under an honest header
+  // beats a blank cell under a misleading one: a spreadsheet can look an id up,
+  // and nobody mistakes it for "no project".
+  { header: 'Project ID', value: (t) => String(t.projectId ?? '') },
+  { header: 'Client ID', value: (t) => String(t.clientId ?? '') },
   { header: 'Level', value: (t) => t.level ?? '' },
   { header: 'Status', value: (t) => t.status ?? '' },
-  { header: 'Assignee', value: (t) => t.assignee?.displayName ?? '' },
+  { header: 'Assignee ID', value: (t) => String(t.assignedTo ?? '') },
   // `createdAt`, not a `dateReported` — the wire model has no such field, and
   // the column it corresponds to (`tickets.date_reported`) is surfaced under
   // this name. Worth the note because the dashboard's own filter *is* called
@@ -69,7 +78,7 @@ function csvField(raw: string): string {
   return `"${value.replace(/"/g, '""')}"`
 }
 
-function toCsv(rows: Ticket[]): string {
+function toCsv(rows: TicketSummary[]): string {
   const header = COLUMNS.map((c) => csvField(c.header)).join(',')
   const body = rows.map((row) => COLUMNS.map((c) => csvField(c.value(row))).join(','))
   // CRLF per RFC 4180, and a BOM so Excel reads the file as UTF-8 rather than
@@ -92,7 +101,7 @@ export async function buildDrillDownCsv(
   label: string,
   today: string,
 ): Promise<CsvExport> {
-  const rows: Ticket[] = []
+  const rows: TicketSummary[] = []
   let cursor: string | undefined
   let truncated = false
 

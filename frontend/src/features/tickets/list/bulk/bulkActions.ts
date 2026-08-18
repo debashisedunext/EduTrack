@@ -1,5 +1,5 @@
 import type { RoleCode } from '@/api/generated/model/roleCode'
-import type { Ticket } from '@/api/generated/model/ticket'
+import type { TicketSummary } from '@/api/generated/model/ticketSummary'
 import type { BulkResultResponseData } from '@/api/generated/model/bulkResultResponseData'
 
 /**
@@ -57,10 +57,10 @@ export function canBulkAct(role: RoleCode | undefined): boolean {
  */
 export function closableIds(
   selected: ReadonlySet<string>,
-  visible: readonly Ticket[],
+  visible: readonly TicketSummary[],
 ): string[] {
   const closedOnScreen = new Set(
-    visible.filter((t) => t.status === 'CLOSED').map((t) => t.ticketId),
+    visible.filter((t) => t.status === 'CLOSED').map((t) => t.ticketCode),
   )
   return [...selected].filter((id) => !closedOnScreen.has(id))
 }
@@ -68,7 +68,7 @@ export function closableIds(
 /** How many of the selection a close would skip — what the dialog warns about. */
 export function alreadyClosedCount(
   selected: ReadonlySet<string>,
-  visible: readonly Ticket[],
+  visible: readonly TicketSummary[],
 ): number {
   return selected.size - closableIds(selected, visible).length
 }

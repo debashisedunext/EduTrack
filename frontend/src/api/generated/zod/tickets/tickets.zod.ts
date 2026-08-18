@@ -87,88 +87,39 @@ export const listTicketsQueryParams = zod.object({
   "sort": zod.string().default(listTicketsQuerySortDefault)
 })
 
-export const listTicketsResponseDataItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
-export const listTicketsResponseDataItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const listTicketsResponseDataItemProjectAutoAssignRuleDefault = "MANUAL";export const listTicketsResponseDataItemScreenNameMax = 120;
-
-export const listTicketsResponseDataItemFeatureMax = 120;
-
-export const listTicketsResponseDataItemStepsToGenerateMax = 20000;
-
-
-
-export const listTicketsResponseDataItemPctCompleteMin = 0;
-export const listTicketsResponseDataItemPctCompleteMax = 100;
-
+export const listTicketsResponseDataItemTicketCodeRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const listTicketsResponse = zod.object({
   "data": zod.array(zod.object({
-  "ticketId": zod.string().regex(listTicketsResponseDataItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "id": zod.number().describe('The surrogate key. Present because bulk actions address rows by it; every user-facing link uses `ticketCode`.\n'),
+  "ticketCode": zod.string().regex(listTicketsResponseDataItemTicketCodeRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
-  "description": zod.string().optional(),
-  "project": zod.object({
-  "id": zod.number(),
-  "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
-  "name": zod.string(),
-  "clientName": zod.string().nullish().describe('The denormalised label from blueprint §8.2 — free text, and the\nfallback for a project with no row in `clients`. The real client link\narrives with B-026; this column is not it.\n'),
-  "projectManager": zod.object({
-  "id": zod.number(),
-  "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
-  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}).optional(),
-  "colourTag": zod.string().regex(listTicketsResponseDataItemProjectColourTagRegExp).nullish(),
-  "startDate": zod.string().date().nullish(),
-  "endDate": zod.string().date().nullish(),
-  "status": zod.enum(['ACTIVE', 'ON_HOLD', 'CLOSED']).optional().describe('Blueprint S-10\'s three states, and the whole vocabulary — the column has\na `CHECK` to that effect since B-016.\n\nThere is no delete. A project that issued ticket IDs cannot be removed\nwithout orphaning them, so `CLOSED` is the retirement path, exactly as\ndeactivation is for a resource.\n'),
-  "isActive": zod.boolean().optional().describe('`status <> \'CLOSED\'`, derived. Kept because five screens have always\nfiltered on it; see `listProjects` for why it is not\n`status = \'ACTIVE\'`.\n'),
-  "autoAssignRule": zod.enum(['ROUND_ROBIN', 'LEAST_LOADED', 'MANUAL']).default(listTicketsResponseDataItemProjectAutoAssignRuleDefault).describe('Who a new ticket goes to when nobody is named. \*\*The Settings tab that\nedits this is B-019\*\*; B-016 stores and returns it so that the field is\nanswered honestly in the meantime — the alternative was returning a\nconstant no client could tell from a stored value.\n')
-}).optional(),
-  "client": zod.object({
-  "id": zod.number().optional(),
-  "clientCode": zod.string().optional(),
-  "name": zod.string().optional()
-}).optional(),
-  "clientContactId": zod.number().nullish(),
+  "projectId": zod.number(),
+  "clientId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
-  "taskTypeId": zod.number().optional(),
-  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
-  "screenName": zod.string().max(listTicketsResponseDataItemScreenNameMax).nullish(),
-  "feature": zod.string().max(listTicketsResponseDataItemFeatureMax).nullish(),
-  "stepsToGenerate": zod.string().max(listTicketsResponseDataItemStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
+  "taskTypeId": zod.number().nullish(),
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
-  "currentStageCode": zod.string().nullish(),
-  "assignee": zod.object({
-  "id": zod.number(),
-  "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
-  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}).optional(),
-  "reportedBy": zod.object({
-  "id": zod.number(),
-  "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
-  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}).optional(),
-  "cycleNo": zod.number().min(1).describe('Increments on reopen after closure. Independent of `iterationNo`.'),
-  "iterationNo": zod.number().min(1).optional().describe('Increments on a backward move within the current cycle. Independent of `cycleNo`.'),
+  "currentStage": zod.string().nullish(),
+  "assignedTo": zod.number().nullish().describe('Null means unassigned, which the grid renders as such.'),
+  "reportedBy": zod.number().nullish(),
+  "cycleNo": zod.number(),
+  "iterationNo": zod.number().optional(),
   "reopenCount": zod.number().optional(),
+  "isReopened": zod.boolean().optional(),
+  "dateReported": zod.string().datetime({}).optional(),
   "plannedCloseDate": zod.string().datetime({}).nullish(),
   "actualCloseDate": zod.string().datetime({}).nullish(),
   "isDelayed": zod.boolean().optional(),
   "delayedSince": zod.string().datetime({}).nullish(),
-  "totalEffortHrs": zod.number().optional(),
-  "estimatedHrs": zod.number().nullish(),
-  "pctComplete": zod.number().min(listTicketsResponseDataItemPctCompleteMin).max(listTicketsResponseDataItemPctCompleteMax).optional(),
-  "createdAt": zod.string().datetime({}).optional(),
-  "updatedAt": zod.string().datetime({}).optional()
-})),
+  "estimatedEffortHrs": zod.number().nullish(),
+  "totalEffortHrs": zod.number().nullish(),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional(),
+  "createdAt": zod.string().datetime({}).optional()
+}).describe('One row of S-17\'s grid. \*\*Not `Ticket`\*\* — the list has never returned\nthat shape, and this schema is the contract catching up with A-053\nrather than a change to the server.\n\nA-053 chose flat ids over nested `project`, `client` and `assignee`\nobjects for a stated reason: a list is where nesting costs most, since\none row becomes one lookup per row and S-17 renders fifty of them. The\nmasters are small and already cached client-side, which is the pattern\n`moduleId` documents on `Ticket` itself — \"resolve the name through\n`GET \/masters\/modules` rather than expecting it inline\".\n\n\*\*Declaring `Ticket` here was a real defect, not a harmless\nimprecision.\*\* The generated client typed the grid against nested\nobjects the server never sends, so the ID column rendered blank, every\nrow read \"Unassigned\", and Project and Client showed an em dash — on a\nscreen whose data was entirely present. Every field the API does send\nrendered correctly, which is what made it look like a data problem\nrather than a contract one.\n\nIt also omits the heavy fields deliberately: description and\nsteps-to-generate belong to the detail page, and shipping sanitised HTML\nper row to render a title would make the list slower than the waterfall\nA-052 exists to remove.\n')),
   "meta": zod.object({
   "nextCursor": zod.string().nullish(),
   "hasMore": zod.boolean().optional(),

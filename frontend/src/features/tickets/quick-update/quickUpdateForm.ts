@@ -10,7 +10,7 @@ import {
 } from '@/api/generated/zod/tickets/tickets.zod'
 import { StatusCode } from '@/api/generated/model/statusCode'
 import type { QuickUpdateRequest } from '@/api/generated/model/quickUpdateRequest'
-import type { Ticket } from '@/api/generated/model/ticket'
+import type { QuickUpdateTarget } from './QuickUpdatePanel'
 
 /**
  * S-21 Quick Update — form state, validation and the mapping onto the wire.
@@ -38,7 +38,7 @@ export interface QuickUpdateFormValues {
   revisedEtaReason: string
 }
 
-export function emptyQuickUpdateForm(ticket: Ticket): QuickUpdateFormValues {
+export function emptyQuickUpdateForm(ticket: QuickUpdateTarget): QuickUpdateFormValues {
   return {
     status: ticket.status,
     effortHours: '',

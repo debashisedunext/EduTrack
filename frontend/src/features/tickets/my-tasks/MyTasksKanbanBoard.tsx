@@ -2,7 +2,8 @@ import * as React from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle } from 'lucide-react'
 import { newIdempotencyKey, ApiError } from '@/api/http'
-import type { Ticket } from '@/api/generated/model/ticket'
+import type { TicketSummary } from '@/api/generated/model/ticketSummary'
+import type { Level } from '@/api/generated/model/level'
 import { StatusCode } from '@/api/generated/model/statusCode'
 import { Chip } from '@/components/ui/chip'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -34,33 +35,33 @@ const BOARD_STATUSES: StatusCode[] = [
  * select performs the identical status change and is the one every user can
  * reach; drag is a faster path layered on top for a mouse, not the only path.
  */
-export function MyTasksKanbanBoard({ tickets }: { tickets: Ticket[] }) {
+export function MyTasksKanbanBoard({ tickets }: { tickets: TicketSummary[] }) {
   const quickUpdate = useQuickUpdateMutation()
   const [dragOverStatus, setDragOverStatus] = React.useState<StatusCode | null>(null)
   const [movingTicketId, setMovingTicketId] = React.useState<string | null>(null)
 
   const byStatus = React.useMemo(() => {
-    const map = new Map<StatusCode, Ticket[]>(BOARD_STATUSES.map((s) => [s, []]))
+    const map = new Map<StatusCode, TicketSummary[]>(BOARD_STATUSES.map((s) => [s, []]))
     for (const ticket of tickets) {
       map.get(ticket.status)?.push(ticket)
     }
     return map
   }, [tickets])
 
-  async function moveTo(ticket: Ticket, status: StatusCode) {
+  async function moveTo(ticket: TicketSummary, status: StatusCode) {
     if (status === ticket.status) return
-    setMovingTicketId(ticket.ticketId)
+    setMovingTicketId(ticket.ticketCode)
     try {
       await quickUpdate.mutateAsync({
-        ticketId: ticket.ticketId,
+        ticketId: ticket.ticketCode,
         data: { status },
         idempotencyKey: newIdempotencyKey(),
       })
-      toast({ variant: 'success', title: `${ticket.ticketId} moved to ${STATUS_LABEL[status]}` })
+      toast({ variant: 'success', title: `${ticket.ticketCode} moved to ${STATUS_LABEL[status]}` })
     } catch (error) {
       toast({
         variant: 'danger',
-        title: `Could not move ${ticket.ticketId}`,
+        title: `Could not move ${ticket.ticketCode}`,
         description: error instanceof ApiError ? error.problem.detail ?? error.message : 'Try again in a moment.',
       })
     } finally {
@@ -86,7 +87,7 @@ export function MyTasksKanbanBoard({ tickets }: { tickets: Ticket[] }) {
               e.preventDefault()
               setDragOverStatus(null)
               const ticketId = e.dataTransfer.getData('text/plain')
-              const ticket = tickets.find((t) => t.ticketId === ticketId)
+              const ticket = tickets.find((t) => t.ticketCode === ticketId)
               if (ticket) void moveTo(ticket, status)
             }}
             className={cn(
@@ -101,9 +102,9 @@ export function MyTasksKanbanBoard({ tickets }: { tickets: Ticket[] }) {
             <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-1">
               {columnTickets.map((ticket) => (
                 <KanbanCard
-                  key={ticket.ticketId}
+                  key={ticket.ticketCode}
                   ticket={ticket}
-                  moving={movingTicketId === ticket.ticketId}
+                  moving={movingTicketId === ticket.ticketCode}
                   onMoveTo={(next) => void moveTo(ticket, next)}
                 />
               ))}
@@ -120,7 +121,7 @@ function KanbanCard({
   moving,
   onMoveTo,
 }: {
-  ticket: Ticket
+  ticket: TicketSummary
   moving: boolean
   onMoveTo: (status: StatusCode) => void
 }) {
@@ -128,7 +129,7 @@ function KanbanCard({
     <div
       draggable
       onDragStart={(e) => {
-        e.dataTransfer.setData('text/plain', ticket.ticketId)
+        e.dataTransfer.setData('text/plain', ticket.ticketCode)
         e.dataTransfer.effectAllowed = 'move'
       }}
       aria-busy={moving || undefined}
@@ -140,12 +141,12 @@ function KanbanCard({
     >
       <div className="flex flex-wrap items-center gap-1.5">
         <Link
-          to={`/tickets/${ticket.ticketId}`}
+          to={`/tickets/${ticket.ticketCode}`}
           className="font-mono text-caption font-medium text-primary tabular-nums hover:underline"
         >
-          {ticket.ticketId}
+          {ticket.ticketCode}
         </Link>
-        <Chip variant={LEVEL_VARIANT[ticket.level]}>{ticket.level}</Chip>
+        <Chip variant={LEVEL_VARIANT[ticket.level as Level]}>{ticket.level}</Chip>
         {reworkBadge(ticket)}
       </div>
       <p className="line-clamp-2 text-sm text-content" title={ticket.title}>
@@ -157,7 +158,7 @@ function KanbanCard({
       </p>
       <div className="flex items-center gap-2">
         <Select value={ticket.status} onValueChange={(value) => onMoveTo(value as StatusCode)}>
-          <SelectTrigger aria-label={`Move ${ticket.ticketId} to a different status`} className="h-8 flex-1 text-caption">
+          <SelectTrigger aria-label={`Move ${ticket.ticketCode} to a different status`} className="h-8 flex-1 text-caption">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -168,7 +169,17 @@ function KanbanCard({
             ))}
           </SelectContent>
         </Select>
-        <QuickUpdateTrigger ticket={ticket} triggerClassName="h-8 px-2" compact />
+        <QuickUpdateTrigger
+          ticket={{
+            ticketId: ticket.ticketCode,
+            title: ticket.title,
+            status: ticket.status,
+            currentStageCode: ticket.currentStage,
+            iterationNo: ticket.iterationNo,
+          }}
+          triggerClassName="h-8 px-2"
+          compact
+        />
       </div>
     </div>
   )

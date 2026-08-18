@@ -255,7 +255,7 @@ describe('row scoping is mirrored, so screens are built against scoped data', ()
   it('a Developer sees only their own tickets', async () => {
     const db = getDb();
     db.currentUserId = 3; // Ravi
-    const list = await get<Envelope<{ ticketId: string }[]>>('/tickets?limit=200');
+    const list = await get<Envelope<{ ticketCode: string }[]>>('/tickets?limit=200');
     const mine = db.tickets.filter((t) => t.assigneeId === 3);
     expect(list.data).toHaveLength(mine.length);
     expect(list.data.length).toBeLessThan(db.tickets.length);
@@ -313,8 +313,8 @@ describe('conventions hold at runtime, not just in the document', () => {
     expect(created.data.originalLevel).toBe('HIGH');
 
     // And it is really in the list, not just echoed back.
-    const list = await get<Envelope<{ ticketId: string }[]>>('/tickets?limit=200');
-    expect(list.data.map((t) => t.ticketId)).toContain(created.data.ticketId);
+    const list = await get<Envelope<{ ticketCode: string }[]>>('/tickets?limit=200');
+    expect(list.data.map((t) => t.ticketCode)).toContain(created.data.ticketId);
   });
 
   it('returns field-keyed 400s that React Hook Form can consume', async () => {
@@ -343,12 +343,13 @@ describe('conventions hold at runtime, not just in the document', () => {
 });
 
 describe('GET /tickets filters — C-015 saved views', () => {
+  /** A row of `GET /tickets` — flat ids, per the contract's TicketSummary. */
   interface TicketRow {
-    ticketId: string;
+    ticketCode: string;
     status: string;
     plannedCloseDate: string;
     actualCloseDate: string | null;
-    assignee: { id: number } | null;
+    assignedTo: number | null;
   }
 
   it('dueFrom/dueTo actually filter plannedCloseDate — declared in the contract since C-014 but never read by the handler until now', async () => {
@@ -362,7 +363,7 @@ describe('GET /tickets filters — C-015 saved views', () => {
     for (const t of list.data) {
       expect(t.plannedCloseDate.slice(0, 10)).toBe(day);
     }
-    expect(list.data.map((t) => t.ticketId)).toContain('CRM-26-00347');
+    expect(list.data.map((t) => t.ticketCode)).toContain('CRM-26-00347');
   });
 
   it('unassigned=true returns only tickets with no assignee', async () => {
@@ -373,8 +374,8 @@ describe('GET /tickets filters — C-015 saved views', () => {
 
     const list = await get<Envelope<TicketRow[]>>('/tickets?unassigned=true&limit=200');
     expect(list.data.length).toBeGreaterThan(0);
-    expect(list.data.every((t) => t.assignee == null)).toBe(true);
-    expect(list.data.map((t) => t.ticketId)).toContain(someTicket.ticketId);
+    expect(list.data.every((t) => t.assignedTo == null)).toBe(true);
+    expect(list.data.map((t) => t.ticketCode)).toContain(someTicket.ticketId);
   });
 
   it('excludeClosed=true drops every CLOSED ticket', async () => {
@@ -390,10 +391,10 @@ describe('GET /tickets filters — C-015 saved views', () => {
     // 13th, so a range that only matches the 14th proves the handler is
     // reading actualCloseDate and not accidentally reusing dueFrom/dueTo.
     const inRange = await get<Envelope<TicketRow[]>>('/tickets?closedFrom=2026-08-14&closedTo=2026-08-14&limit=200');
-    expect(inRange.data.map((t) => t.ticketId)).toContain('CRM-26-00347');
+    expect(inRange.data.map((t) => t.ticketCode)).toContain('CRM-26-00347');
 
     const outOfRange = await get<Envelope<TicketRow[]>>('/tickets?closedFrom=2026-08-01&closedTo=2026-08-01&limit=200');
-    expect(outOfRange.data.map((t) => t.ticketId)).not.toContain('CRM-26-00347');
+    expect(outOfRange.data.map((t) => t.ticketCode)).not.toContain('CRM-26-00347');
   });
 });
 
@@ -447,8 +448,17 @@ describe('push subscriptions', () => {
  */
 describe('where it happened — module, screen, feature, steps', () => {
   interface ModuleRow { id: number; code: string; name: string; seq: number; isActive: boolean }
+  /**
+   * The §7.5 fields, as the *detail* and *create* responses carry them.
+   *
+   * `GET /tickets` returns `TicketSummary` and carries none of them — no
+   * `moduleId`, no `stepsToGenerate`, and its code is `ticketCode`. The tests
+   * below that check seed shape therefore read the store directly, and the one
+   * that checks the module filter proves it by which codes come back.
+   */
   interface TriageRow {
     ticketId: string;
+    ticketCode?: string;
     moduleId: number | null;
     screenName: string | null;
     feature: string | null;
@@ -470,39 +480,44 @@ describe('where it happened — module, screen, feature, steps', () => {
     expect(retired).toBeDefined();
 
     getDb().currentUserId = 1;
-    const tickets = await get<Envelope<TriageRow[]>>('/tickets?limit=200');
     // Filtering inactive rows out of the master would leave this ticket's module
     // cell blank — which is the whole reason the endpoint returns them.
-    expect(tickets.data.some((t) => t.moduleId === retired!.id)).toBe(true);
+    // Asserted against the store, not the list: GET /tickets returns
+    // TicketSummary and has never carried moduleId. What matters here is the
+    // seed — a ticket does point at a retired module — and the endpoint that
+    // must keep returning it is /masters/modules, checked above.
+    expect(getDb().tickets.some((t) => t.moduleId === retired!.id)).toBe(true);
   });
 
   it('every seeded moduleId resolves against the master', async () => {
     getDb().currentUserId = 1;
-    const [modules, tickets] = await Promise.all([
-      get<Envelope<ModuleRow[]>>('/masters/modules'),
-      get<Envelope<TriageRow[]>>('/tickets?limit=200'),
-    ]);
+    const modules = await get<Envelope<ModuleRow[]>>('/masters/modules');
     const known = new Set(modules.data.map((m) => m.id));
-    const orphans = tickets.data.filter((t) => t.moduleId != null && !known.has(t.moduleId));
+    const orphans = getDb().tickets.filter((t) => t.moduleId != null && !known.has(t.moduleId));
     expect(orphans).toEqual([]);
   });
 
   it('leaves some tickets with no module at all — the state of everything raised before the fields existed', async () => {
     getDb().currentUserId = 1;
-    const tickets = await get<Envelope<TriageRow[]>>('/tickets?limit=200');
-    expect(tickets.data.some((t) => t.moduleId == null)).toBe(true);
-    expect(tickets.data.some((t) => t.stepsToGenerate == null)).toBe(true);
+    expect(getDb().tickets.some((t) => t.moduleId == null)).toBe(true);
+    expect(getDb().tickets.some((t) => t.stepsToGenerate == null)).toBe(true);
   });
 
   it('moduleId filters the list, and excludes tickets with no module', async () => {
     getDb().currentUserId = 1;
     const all = await get<Envelope<TriageRow[]>>('/tickets?limit=200');
-    const target = all.data.find((t) => t.moduleId != null)!.moduleId!;
+    const target = getDb().tickets.find((t) => t.moduleId != null)!.moduleId!;
 
     const filtered = await get<Envelope<TriageRow[]>>(`/tickets?moduleId=${target}&limit=200`);
     expect(filtered.data.length).toBeGreaterThan(0);
     expect(filtered.data.length).toBeLessThan(all.data.length);
-    expect(filtered.data.every((t) => t.moduleId === target)).toBe(true);
+
+    // Checked by which tickets came back, since the row shape carries no
+    // moduleId — every returned code must belong to a ticket on that module.
+    const onTarget = new Set(
+      getDb().tickets.filter((t) => t.moduleId === target).map((t) => t.ticketId),
+    );
+    expect(filtered.data.every((t) => onTarget.has(t.ticketCode as string))).toBe(true);
   });
 
   it('round-trips all four fields through create', async () => {

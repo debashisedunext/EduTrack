@@ -6561,8 +6561,71 @@ components:
       type: object
       required: [data]
       properties:
-        data: { type: array, items: { $ref: '#/components/schemas/Ticket' } }
+        data: { type: array, items: { $ref: '#/components/schemas/TicketSummary' } }
         meta: { $ref: '#/components/schemas/Meta' }
+    TicketSummary:
+      type: object
+      description: |
+        One row of S-17's grid. **Not `Ticket`** — the list has never returned
+        that shape, and this schema is the contract catching up with A-053
+        rather than a change to the server.
+
+        A-053 chose flat ids over nested `project`, `client` and `assignee`
+        objects for a stated reason: a list is where nesting costs most, since
+        one row becomes one lookup per row and S-17 renders fifty of them. The
+        masters are small and already cached client-side, which is the pattern
+        `moduleId` documents on `Ticket` itself — "resolve the name through
+        `GET /masters/modules` rather than expecting it inline".
+
+        **Declaring `Ticket` here was a real defect, not a harmless
+        imprecision.** The generated client typed the grid against nested
+        objects the server never sends, so the ID column rendered blank, every
+        row read "Unassigned", and Project and Client showed an em dash — on a
+        screen whose data was entirely present. Every field the API does send
+        rendered correctly, which is what made it look like a data problem
+        rather than a contract one.
+
+        It also omits the heavy fields deliberately: description and
+        steps-to-generate belong to the detail page, and shipping sanitised HTML
+        per row to render a title would make the list slower than the waterfall
+        A-052 exists to remove.
+      required: [id, ticketCode, title, level, status, projectId, cycleNo]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: >
+            The surrogate key. Present because bulk actions address rows by it;
+            every user-facing link uses `ticketCode`.
+        ticketCode: { $ref: '#/components/schemas/TicketId' }
+        title: { type: string }
+        projectId: { type: integer, format: int64 }
+        clientId: { type: [integer, 'null'], format: int64 }
+        isClientRaised: { type: boolean }
+        taskTypeId: { type: [integer, 'null'], format: int64 }
+        level: { $ref: '#/components/schemas/Level' }
+        originalLevel: { $ref: '#/components/schemas/Level' }
+        status: { $ref: '#/components/schemas/StatusCode' }
+        currentStage: { type: [string, 'null'] }
+        assignedTo:
+          type: [integer, 'null']
+          format: int64
+          description: Null means unassigned, which the grid renders as such.
+        reportedBy: { type: [integer, 'null'], format: int64 }
+        cycleNo: { type: integer }
+        iterationNo: { type: integer }
+        reopenCount: { type: integer }
+        isReopened: { type: boolean }
+        dateReported: { type: string, format: date-time }
+        plannedCloseDate: { type: [string, 'null'], format: date-time }
+        actualCloseDate: { type: [string, 'null'], format: date-time }
+        isDelayed: { type: boolean }
+        delayedSince: { type: [string, 'null'], format: date-time }
+        estimatedEffortHrs: { type: [number, 'null'], format: double }
+        totalEffortHrs: { type: [number, 'null'], format: double }
+        commentCount: { type: integer }
+        attachmentCount: { type: integer }
+        createdAt: { type: string, format: date-time }
     TicketDetailResponse:
       type: object
       required: [data]
