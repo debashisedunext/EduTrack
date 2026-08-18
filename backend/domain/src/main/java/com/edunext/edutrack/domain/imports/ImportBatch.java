@@ -22,7 +22,11 @@ import java.time.Instant;
  * register two schemas.
  *
  * <p>The row is also what makes a bad import reversible as a set rather than
- * row by row (B-037): every client written by a run carries this batch id.
+ * row by row (B-037): every client the run <em>created</em> carries this batch
+ * id, and {@link #reversedAt} records that the set was taken back. <b>The batch
+ * row itself is never deleted</b> — it is the audit trail, and a reversal that
+ * removed its own record would leave the master short of rows with nothing
+ * anywhere explaining why.
  *
  * <p>The counters are stamped by the commit step, after the step-4 dry run has
  * already previewed the same outcomes without writing anything.
@@ -78,6 +82,51 @@ public class ImportBatch {
     /** An actor id, kept scalar — see package-info. */
     @Column(name = "imported_by")
     private Long importedBy;
+
+    /**
+     * B-037 · when this run was reversed as a set, or {@code null} for the
+     * ordinary case of a run nobody has undone.
+     *
+     * <p><b>Null is the whole state machine.</b> A boolean beside a timestamp
+     * would be two columns that can disagree, and the one question the service
+     * asks — "has this already been reversed?" — is answered by the presence of
+     * the fact rather than by a flag about it.
+     *
+     * <p>Deliberately not a {@link ImportBatchStatus} value: {@code status}
+     * records how the <em>run</em> ended and reversal is a later fact about a run
+     * that has already ended. See {@code V20260818_1210__import_batch_reversal}
+     * for why collapsing them loses the outcome.
+     */
+    @Column(name = "reversed_at")
+    private Instant reversedAt;
+
+    /** Who reversed it — best-effort and scalar, exactly like {@link #importedBy}. */
+    @Column(name = "reversed_by")
+    private Long reversedBy;
+
+    /**
+     * B-037 · rows this run <em>created</em> that the reversal deleted.
+     *
+     * <p>Never counts rows it merely updated. {@code import_batch_id} is stamped
+     * on insert only, so a client an import edited is not attributed to it — and
+     * there is no before image, so an update is not something a reversal can
+     * undo. The API says so rather than letting "reversed" imply otherwise.
+     */
+    @Column(name = "reversed_rows", nullable = false)
+    private int reversedRows;
+
+    /**
+     * B-037 · rows this run created that the reversal could <b>not</b> delete.
+     *
+     * <p>A client the import created and which has since been named on a ticket:
+     * {@code tickets.client_id} is RESTRICT, and the alternatives to keeping it
+     * are failing the whole reversal because one client got used, or destroying a
+     * ticket's client. Counted here because it is not derivable afterwards —
+     * once the other rows are gone, an unreversed batch and a fully reversed one
+     * both count zero.
+     */
+    @Column(name = "retained_rows", nullable = false)
+    private int retainedRows;
 
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", insertable = false, updatable = false)
@@ -165,6 +214,38 @@ public class ImportBatch {
 
     public void setImportedBy(Long importedBy) {
         this.importedBy = importedBy;
+    }
+
+    public Instant getReversedAt() {
+        return reversedAt;
+    }
+
+    public void setReversedAt(Instant reversedAt) {
+        this.reversedAt = reversedAt;
+    }
+
+    public Long getReversedBy() {
+        return reversedBy;
+    }
+
+    public void setReversedBy(Long reversedBy) {
+        this.reversedBy = reversedBy;
+    }
+
+    public int getReversedRows() {
+        return reversedRows;
+    }
+
+    public void setReversedRows(int reversedRows) {
+        this.reversedRows = reversedRows;
+    }
+
+    public int getRetainedRows() {
+        return retainedRows;
+    }
+
+    public void setRetainedRows(int retainedRows) {
+        this.retainedRows = retainedRows;
     }
 
     public Instant getCreatedAt() {

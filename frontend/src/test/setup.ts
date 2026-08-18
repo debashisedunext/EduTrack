@@ -2,6 +2,7 @@ import '@testing-library/jest-dom';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 import { server } from '../mocks/server';
 import { resetDb } from '../mocks/db';
+import { resetToasts } from '../components/ui/use-toast';
 
 /**
  * Every test runs against the mock API. `onUnhandledRequest: 'error'` is
@@ -21,6 +22,11 @@ afterEach(() => {
   // The mock DB is stateful, so one test's handoff would otherwise leak into
   // the next and produce a failure that only reproduces in a full run.
   resetDb();
+  // The toast store is module-level too — a toast fired in one test otherwise
+  // stays mounted (via any `<Toaster/>` in the next render) and can collide
+  // with a later query for a same-named button. C-040 found this the first
+  // time a dialog's trigger and a toast's dismiss button were both "Close".
+  resetToasts();
 });
 
 afterAll(() => server.close());

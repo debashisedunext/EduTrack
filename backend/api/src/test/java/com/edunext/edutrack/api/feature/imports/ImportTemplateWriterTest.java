@@ -315,5 +315,10 @@ class ImportTemplateWriterTest {
         public void upsert(ImportRow row, Long importBatchId) {
             throw new AssertionError("The template writer wrote to the database.");
         }
+
+        @Override
+        public ImportReversal reverse(long batchId) {
+            throw new AssertionError("The template writer reversed a batch.");
+        }
     }
 }

@@ -68,6 +68,14 @@ public class TicketCycle {
     @Column(name = "resolution_summary", columnDefinition = "text")
     private String resolutionSummary;
 
+    /** C-040 · S-23's "root cause category" — a free label, no master behind it yet. */
+    @Column(name = "root_cause_category", length = 100)
+    private String rootCauseCategory;
+
+    /** C-040 · S-23's "optional client verification request" checkbox. */
+    @Column(name = "client_verification_requested", nullable = false)
+    private boolean clientVerificationRequested;
+
     @Column(name = "is_sealed", nullable = false)
     private boolean isSealed;
 
@@ -169,6 +177,22 @@ public class TicketCycle {
 
     public void setResolutionSummary(String resolutionSummary) {
         this.resolutionSummary = resolutionSummary;
+    }
+
+    public String getRootCauseCategory() {
+        return rootCauseCategory;
+    }
+
+    public void setRootCauseCategory(String rootCauseCategory) {
+        this.rootCauseCategory = rootCauseCategory;
+    }
+
+    public boolean isClientVerificationRequested() {
+        return clientVerificationRequested;
+    }
+
+    public void setClientVerificationRequested(boolean clientVerificationRequested) {
+        this.clientVerificationRequested = clientVerificationRequested;
     }
 
     public boolean isSealed() {

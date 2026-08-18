@@ -46,59 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ImportBatchResponseDataFileName } from './importBatchResponseDataFileName';
-import type { ImportBatchResponseDataStatus } from './importBatchResponseDataStatus';
-import type { ImportBatchResponseDataErrorReportUrl } from './importBatchResponseDataErrorReportUrl';
 
 /**
- * `required` is spelled out so the generated TypeScript stops making
-every counter optional — a progress bar reading `processed ?? 0`
-renders 0% for a run that is nearly finished, and the fallback hides
-it. `fileName` and `errorReportUrl` are the two that genuinely may be
-absent.
-
- */
-export type ImportBatchResponseData = {
-  /** `import_batches.id`. An integer, not a UUID — the contract said
-UUID until B-030 read the baseline DDL.
- */
-  batchId: number;
-  /** `CLIENT` or `RESOURCE` — which registration this run was
-validated against, and what B-037's reversal query keys on.
-Deliberately the stored discriminator rather than the URL segment
-(`clients`): collapsing them would mean renaming a live URL to
-fix a column.
- */
-  entity: string;
-  /** @maxLength 255 */
-  fileName?: ImportBatchResponseDataFileName;
-  /** The commit job's lifecycle, and the only vocabulary
-`import_batches.status` uses. There is no state for the step-4
-dry run because the dry run writes nothing — no batch row
-exists until commit, and it is born `QUEUED`.
-
-`COMPLETED` is **not** a synonym for "no rejections": a run that
-refused half the file and wrote the rest completed, and its error
-report is how the user recovers the other half. `FAILED` means
-the job itself died.
- */
-  status: ImportBatchResponseDataStatus;
-  /** `created + updated + rejected` — derived, not a stored column, so
-it cannot disagree with the three numbers beside it. Reaches
-`total` exactly when the run is over.
- */
-  processed: number;
-  /** Every data row of the sheet, rejected ones included. */
-  total: number;
-  created: number;
-  updated: number;
-  /** What the dry run refused, plus anything that failed at write
-time — a row the preview judged writable can still break a
-constraint no validator declared, and losing the other 499 to it
-would be the wrong trade.
- */
-  rejected: number;
-  /** `.xlsx` of rejected rows with an appended Reason column — B-036.
+ * `.xlsx` of rejected rows with an appended Reason column — B-036.
 
 **A path relative to the API base** — no `/api/v1` prefix, because
 the file needs the caller's `Authorization` header and so is
@@ -122,6 +72,6 @@ never a later one: a client stops polling when it reads
 `COMPLETED`, so a report stamped afterwards is one nobody is
 still asking for. The `ETag` covers this field for the same
 reason.
+
  */
-  errorReportUrl?: ImportBatchResponseDataErrorReportUrl;
-};
+export type ImportBatchErrorReportUrl = string | null;

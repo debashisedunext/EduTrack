@@ -167,6 +167,18 @@ final class PermissionMatrix {
             {"reason":"Client reports the defect has recurred in production."}""";
 
     /**
+     * C-040 · {@code CloseDtos.CloseRequest}: {@code resolutionSummary} is the
+     * only {@code @NotBlank} field, {@code @Size(min = 3)}.
+     *
+     * <p>The other four are omitted deliberately, on {@link #REOPEN}'s own
+     * reasoning: the strongest fixture is the bare minimum the contract
+     * allows, so the row cannot be passing because some optional field
+     * happened to satisfy a validator.
+     */
+    private static final String CLOSE = """
+            {"resolutionSummary":"Root cause identified and the fix deployed to production."}""";
+
+    /**
      * C-020 · {@code PriorityChangeDtos.ChangePriorityRequest}: {@code level} is
      * the only {@code @NotBlank} field.
      *
@@ -724,6 +736,21 @@ final class PermissionMatrix {
             // by mis-stating a row and watching the suite stay green.
             adminPmAndSupport("POST", "/api/v1/tickets/{ticketId}/reopen", REOPEN),
 
+            // ── close · C-040, and the reopen row's mirror image ─────────────
+            //
+            // Admin, PM and Support, on the same evidence reopen's row cites:
+            // blueprint §2's "Close ticket" grants exactly these three, and
+            // workflow_transitions independently seeds RESOLVED -> CLOSED for
+            // the same three and no others (row 12) — G-3, locked. A genuine
+            // capability for the identical reason reopen's is: whether a
+            // Developer may close does not depend on which ticket, who is
+            // assigned, or the clock.
+            //
+            // *Which* tickets is still not this file's question: ScopedTickets
+            // answers 404 for a ticket outside the caller's scope (A-035)
+            // whatever capability they hold.
+            adminPmAndSupport("POST", "/api/v1/tickets/{ticketId}/close", CLOSE),
+
             // ── priority · C-020, §4B.1, and the file's SECOND three-role row ─
             //
             // Admin, PM and Support again, and authored from §4B.1's own
@@ -1242,6 +1269,24 @@ final class PermissionMatrix {
             // at the moment the bytes are read, rather than at the moment a link
             // was minted.
             adminOnly("GET", "/api/v1/import-batches/{batchId}/error-report"),
+
+            // B-037 · the import history — every run identified, so a bad one can
+            // be found again. The same capability as the poll and the wizard:
+            // a list of imports is not more public than the imports themselves,
+            // and S-34 lives inside §7.4's Admin-only master-data module.
+            adminOnly("GET", "/api/v1/import-batches"),
+
+            // B-037 · reversal. THE ONLY ROUTE IN THE PRODUCT THAT DELETES ROWS
+            // FROM THE CLIENT MASTER — B-029 deactivates, everything else
+            // preserves.
+            //
+            // It was worth asking whether that deserves a capability of its own,
+            // and it does not: master.write is what let somebody write 412
+            // clients into the master in one action, and a separate capability
+            // for taking them back would mean an Admin who can cause the damage
+            // cannot undo it. The five non-Admin roles are refused here exactly
+            // as they are refused the commit.
+            adminOnly("POST", "/api/v1/import-batches/{batchId}/reverse"),
 
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack

@@ -46,8 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ImportReversalResponseData } from './importReversalResponseData';
 
-/**
- * @maxLength 255
- */
-export type ImportBatchResponseDataFileName = string | null;
+export interface ImportReversalResponse {
+  data: ImportReversalResponseData;
+}

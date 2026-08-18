@@ -67,15 +67,18 @@ import type {
 
 import type {
   ForbiddenResponse,
+  ImportBatchListResponse,
   ImportBatchResponse,
   ImportCommitRequest,
   ImportMappingPresetRequest,
   ImportMappingPresetResponse,
   ImportMappingPresetsResponse,
   ImportPreviewResponse,
+  ImportReversalResponse,
   ImportSchemaFieldsResponse,
   ImportUploadResponse,
   ImportValidateRequest,
+  ListImportBatchesParams,
   NotFoundResponse,
   Problem,
   UnauthorizedResponse,
@@ -803,6 +806,124 @@ export const useCommitImport = <TError = ValidationFailedResponse | Unauthorized
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * B-037 — the import history. Blueprint §4B.3's closing validation rule:
+*"every import writes an `import_batch` row so a bad import can be
+identified and reversed as a set."* This route is what makes
+**identified** true of something a person can reach.
+
+Until it existed a batch id was known only to the browser tab that
+started the run. `import_batches` recorded every import faithfully and
+nothing could list one, so an Admin who closed the wizard had no way back
+to the run that had just filled the client master from the wrong
+spreadsheet.
+
+**Filtered by `entity`, the stored discriminator — not by the URL segment
+a schema is mounted at.** `CLIENT`, not `clients`. The two names are kept
+apart deliberately (see `ImportSchema` and `ImportBatch.entity`), and
+translating one into the other on a read is the collapse that separation
+prevents.
+
+Capped, and the cap is on the response as `limit`. **No `ETag`**, unlike
+`getImportBatch` beside it: that one is polled every two seconds through a
+run, this one is opened by hand and changes when somebody runs an import.
+
+`master.write`, like everything else on this path. **403 rather than
+404**: a list is not a row, and the refusal is decided before any row is
+read.
+
+ * @summary Recent import runs, newest first (S-34)
+ */
+export const listImportBatches = (
+    params?: ListImportBatchesParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ImportBatchListResponse>(
+      {url: `/import-batches`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListImportBatchesQueryKey = (params?: ListImportBatchesParams,) => {
+    return [
+    `/import-batches`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListImportBatchesQueryOptions = <TData = Awaited<ReturnType<typeof listImportBatches>>, TError = UnauthorizedResponse | ForbiddenResponse>(params?: ListImportBatchesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportBatches>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListImportBatchesQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImportBatches>>> = ({ signal }) => listImportBatches(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listImportBatches>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListImportBatchesQueryResult = NonNullable<Awaited<ReturnType<typeof listImportBatches>>>
+export type ListImportBatchesQueryError = UnauthorizedResponse | ForbiddenResponse
+
+
+export function useListImportBatches<TData = Awaited<ReturnType<typeof listImportBatches>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+ params: undefined |  ListImportBatchesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportBatches>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportBatches>>,
+          TError,
+          Awaited<ReturnType<typeof listImportBatches>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportBatches<TData = Awaited<ReturnType<typeof listImportBatches>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+ params?: ListImportBatchesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportBatches>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportBatches>>,
+          TError,
+          Awaited<ReturnType<typeof listImportBatches>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportBatches<TData = Awaited<ReturnType<typeof listImportBatches>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+ params?: ListImportBatchesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportBatches>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Recent import runs, newest first (S-34)
+ */
+
+export function useListImportBatches<TData = Awaited<ReturnType<typeof listImportBatches>>, TError = UnauthorizedResponse | ForbiddenResponse>(
+ params?: ListImportBatchesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportBatches>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListImportBatchesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
  * `errorReportUrl` points at `downloadImportErrorReport`, an `.xlsx` of only
 the rejected rows with an appended Reason column, so the user fixes and
 re-uploads those rows rather than the whole file. Every import is
@@ -910,6 +1031,101 @@ export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBat
 
 
 /**
+ * B-037 — blueprint §4B.3's closing validation rule and §17's named
+mitigation for *"Client Excel import silently corrupts the master"*:
+**a bad import can be identified and reversed as a set.**
+
+Deletes the rows the run **created**. Rows it *updated* are not touched
+and could not be restored — `clients.import_batch_id` is stamped on
+insert only, and there is no before image anywhere — so the response
+carries `updatedRowsNotReverted` rather than letting a count that does
+not add up imply otherwise. A client that has since been named on a
+ticket comes back in `retained` with a reason, because failing the whole
+reversal over one used client is unhelpful and deleting the ticket's
+client is worse.
+
+**`POST`, not `DELETE`.** The resource at this path is the batch, and the
+batch is emphatically *not* deleted: it is the audit trail, and it
+survives the reversal with four more columns filled in.
+
+**Not idempotent, and refused rather than made so.** A second call
+answers `import-batch-already-reversed`. Succeeding quietly would be
+tempting — the rows are already gone, so it would delete nothing — and
+would overwrite `reversedAt` and both counters with the second attempt's
+zeroes: a false entry in the one table that exists to make bad imports
+traceable.
+
+`master.write`. **This is the only route in the product that deletes rows
+from the client master** — `updateClientStatus` deactivates and everything
+else preserves — and it does not get a capability of its own: the
+capability that lets somebody write 412 clients in one action is the
+capability that lets them take those same 412 back, and splitting them
+would mean an Admin who can cause the damage cannot undo it. **403 rather
+than 404** for the reason the poll gives: decided before the id is looked
+up.
+
+ * @summary Reverse one import as a set (S-34)
+ */
+export const reverseImportBatch = (
+    batchId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ImportReversalResponse>(
+      {url: `/import-batches/${batchId}/reverse`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getReverseImportBatchMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reverseImportBatch>>, TError,{batchId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof reverseImportBatch>>, TError,{batchId: number}, TContext> => {
+
+const mutationKey = ['reverseImportBatch'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reverseImportBatch>>, {batchId: number}> = (props) => {
+          const {batchId} = props ?? {};
+
+          return  reverseImportBatch(batchId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReverseImportBatchMutationResult = NonNullable<Awaited<ReturnType<typeof reverseImportBatch>>>
+    
+    export type ReverseImportBatchMutationError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Reverse one import as a set (S-34)
+ */
+export const useReverseImportBatch = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reverseImportBatch>>, TError,{batchId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reverseImportBatch>>,
+        TError,
+        {batchId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getReverseImportBatchMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * §4B.3's closing promise: "a downloadable error report (.xlsx with a Reason
 column appended) is produced for every rejected row so the user can fix
 and re-upload just those." B-036.

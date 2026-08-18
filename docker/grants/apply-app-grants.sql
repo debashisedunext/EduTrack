@@ -71,9 +71,35 @@ BEGIN
     IF v_done THEN LEAVE grant_loop; END IF;
 
     IF v_table IN ('ticket_history', 'ticket_effort_logs') THEN
-      -- Fully append-only. No UPDATE, no DELETE, for any reason. A
-      -- correction is a new row (A-043).
-      SET v_sql = CONCAT('GRANT SELECT, INSERT ON edutrack.`', v_table,
+      -- Fully append-only — no row is ever changed or removed, for any
+      -- reason. A correction is a new row (A-043). UPDATE is granted
+      -- anyway, and that is not a loosening: trg_hist_no_update and
+      -- trg_effort_no_update (A-008) SIGNAL 45000 on every UPDATE
+      -- unconditionally, with no exception the way
+      -- trg_stage_seal_only carves one out below, so no UPDATE this
+      -- user issues can ever succeed.
+      --
+      -- What the grant actually exists for is TicketJournal's chain-tail
+      -- read (TicketHistoryRepository.findFirstByTicketIdOrderByIdDesc
+      -- and its ticket_effort_logs twin, both @Lock(PESSIMISTIC_WRITE)),
+      -- which is a locking SELECT rather than a real UPDATE — its own
+      -- javadoc explains why a plain SELECT cannot replace it: MySQL's
+      -- REPEATABLE READ would otherwise serve a snapshot pinned before
+      -- the ticket lock is taken, and two concurrent appends would both
+      -- believe they are first (A-045 — "eight parallel appends produced
+      -- eight rows with a NULL prev_hash, a shattering"). Since MySQL
+      -- 8.0.13 a locking read requires the UPDATE privilege whether or
+      -- not the statement is one (error 1142, "SELECT with locking
+      -- clause command denied") — without it, every write through
+      -- TicketJournal.append 500s. Found by running the packaged app
+      -- against this exact grant set rather than only Testcontainers,
+      -- which connects unrestricted (C-040, confirming C-035/C-036's own
+      -- notes on the identical failure).
+      --
+      -- Same split ticket_stage_transitions, chain_anchors and
+      -- attachment_settings already use below: layer 3 permits the
+      -- statement, layer 4 constrains what it may do.
+      SET v_sql = CONCAT('GRANT SELECT, INSERT, UPDATE ON edutrack.`', v_table,
                          '` TO ''edutrack_app''@''%''');
 
     ELSEIF v_table = 'ticket_stage_transitions' THEN

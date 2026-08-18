@@ -46,14 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ImportBatchResponseData } from './importBatchResponseData';
+import type { ImportBatch } from './importBatch';
 
 export interface ImportBatchResponse {
-  /** `required` is spelled out so the generated TypeScript stops making
-every counter optional — a progress bar reading `processed ?? 0`
-renders 0% for a run that is nearly finished, and the fallback hides
-it. `fileName` and `errorReportUrl` are the two that genuinely may be
-absent.
- */
-  data: ImportBatchResponseData;
+  data: ImportBatch;
 }

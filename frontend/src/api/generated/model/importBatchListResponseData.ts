@@ -46,32 +46,26 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ImportBatch } from './importBatch';
 
 /**
- * `.xlsx` of rejected rows with an appended Reason column — B-036.
-
-**A path relative to the API base** — no `/api/v1` prefix, because
-the file needs the caller's `Authorization` header and so is
-composed onto a base by whatever fetches it, exactly as the
-template path is. **Not an object-store URL.** The
-file is a verbatim extract of the client master, so it is served
-through `downloadImportErrorReport` with `master.write` re-checked
-at the moment of reading, rather than as a presigned URL the way
-§4B.4 serves attachments. A signed URL is a bearer credential that
-outlives the screen that minted it, in a browser history and a
-proxy log.
-
-**Null exactly when there is nothing to download**: the run has
-not finished, no row was rejected, or the report could not be
-stored. A client renders the button disabled rather than hiding
-it — hiding leaves a user with no account of the rows that did
-not land.
-
-It appears on the **same write that makes the status terminal**,
-never a later one: a client stops polling when it reads
-`COMPLETED`, so a report stamped afterwards is one nobody is
-still asking for. The `ETag` covers this field for the same
-reason.
+ * B-037 — the import history panel. Blueprint §4B.3: *"every import
+writes an `import_batch` row so a bad import can be identified and
+reversed as a set."* This is the identification half.
 
  */
-export type ImportBatchResponseDataErrorReportUrl = string | null;
+export type ImportBatchListResponseData = {
+  /** The registration these runs belong to — what was asked for. */
+  entity: string;
+  /** Newest first. The same object `getImportBatch` returns, not a
+slimmer summary: the panel shows every counter, the status, the
+error-report link and `reversible`, which is all of them.
+ */
+  batches: ImportBatch[];
+  /** How many runs this route returns at most — **stated rather than
+applied silently**. `import_batches` only grows, and a bounded
+answer that looks unbounded reads as "these are all of them" when
+it is not.
+ */
+  limit: number;
+};

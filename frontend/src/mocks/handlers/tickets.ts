@@ -381,7 +381,12 @@ export const ticketHandlers = [
         // always diverge, and the client's copy is the one that gets it wrong.
         availableActions: [
           ...(canAdvance ? ['handoff', 'rework'] : []),
-          ...(me.role === 'PM' || me.role === 'ADMIN' ? ['skip-stage', 'close', 'reopen', 'priority'] : []),
+          ...(me.role === 'PM' || me.role === 'ADMIN' ? ['skip-stage', 'priority'] : []),
+          // C-040: blueprint §2's "Close ticket" and "Reopen ticket" rows both
+          // grant Admin, PM *and* Support — this mock granted only the first
+          // two, so a Support Desk viewer never saw either button even though
+          // the real backend's workflow_transitions seeds them for all three.
+          ...(me.role === 'PM' || me.role === 'ADMIN' || me.role === 'SUPPORT' ? ['close', 'reopen'] : []),
           'comment', 'effort', 'attach',
         ],
       },
@@ -601,8 +606,19 @@ export const ticketHandlers = [
     const db = getDb();
     const t = findTicket(String(params.ticketId), db);
     if (!t) return notFound('Ticket');
-    if (t.status === 'CLOSED') return unprocessable('Ticket is already closed');
-    const body = (await request.json()) as { resolutionSummary?: string; actualCloseDate?: string };
+    // C-040: matches CloseService — workflow_transitions seeds RESOLVED ->
+    // CLOSED and no other row into CLOSED (G-3), so an IN_PROGRESS or
+    // already-CLOSED ticket is refused the same way the real backend refuses
+    // it, not only the already-closed half of that rule.
+    if (t.status !== 'RESOLVED') {
+      return unprocessable(
+        t.status === 'CLOSED' ? 'Ticket is already closed' : `Ticket is ${t.status}, not RESOLVED`,
+      );
+    }
+    const body = (await request.json()) as {
+      resolutionSummary?: string; actualCloseDate?: string;
+      rootCauseCategory?: string; finalEffortHours?: number; requestClientVerification?: boolean;
+    };
     if (!body.resolutionSummary) return validationFailed({ resolutionSummary: ['must not be blank'] });
 
     const now = body.actualCloseDate ?? new Date().toISOString();
@@ -619,6 +635,15 @@ export const ticketHandlers = [
     }
     const cycle = db.cycles.find((c) => c.ticketId === t.ticketId && c.cycleNo === t.cycleNo);
     if (cycle) { cycle.isSealed = true; cycle.closedAt = now; }
+    db.history.push({
+      id: nextId(db, 'history'), ticketId: t.ticketId, action: 'CLOSED',
+      actorId: db.currentUserId, actorType: 'USER',
+      fieldName: 'status', oldValue: 'RESOLVED', newValue: 'CLOSED',
+      note: body.resolutionSummary, stageCode: t.currentStageCode,
+      cycleNo: t.cycleNo, iterationNo: t.iterationNo,
+      isCorrection: false, correctsEntryId: null,
+      entryHash: `sha256:${nextId(db, 'hash').toString(16)}`, createdAt: now,
+    });
     return ok(ticketDto(t, db));
   }),
 
