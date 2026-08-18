@@ -43,9 +43,11 @@ import java.util.List;
 class TicketListService {
 
     private final ScopedTickets tickets;
+    private final TicketListRefs refs;
 
-    TicketListService(ScopedTickets tickets) {
+    TicketListService(ScopedTickets tickets, TicketListRefs refs) {
         this.tickets = tickets;
+        this.refs = refs;
     }
 
     @Transactional(readOnly = true)
@@ -73,15 +75,38 @@ class TicketListService {
         CursorPage<Ticket> page = CursorPage.of(fetched, limit,
                 t -> new Cursor(TicketListSpecs.sortValueOf(t, key), t.getId()));
 
-        return new CursorPage<>(page.data().stream().map(TicketListService::toSummary).toList(),
-                page.meta());
+        // Resolved once for the page, not once per row: three IN queries for
+        // fifty tickets rather than a hundred and fifty point reads. Only the
+        // rows actually being returned are resolved — `page.data()` has already
+        // dropped the limit+1 probe row, so the extra fetch never costs a lookup.
+        TicketListRefs.Resolved resolved = refs.resolve(page.data());
+
+        return new CursorPage<>(
+                page.data().stream().map(t -> toSummary(t, resolved)).toList(), page.meta());
     }
 
-    static TicketListDtos.TicketSummary toSummary(Ticket t) {
+    /**
+     * Entity to contract shape.
+     *
+     * <p>Takes the page's resolved references rather than a repository, so this
+     * stays a pure mapping and cannot reintroduce a per-row query — the n+1 is
+     * the obvious way to write this, and passing the maps in is what makes the
+     * cheap version the only one available.
+     *
+     * <p>The numeric {@code id} is deliberately not carried. The contract names
+     * one identifier, {@code ticketId}, and it is the human code; a payload
+     * offering both invites consumers to key on the surrogate, which is exactly
+     * what the code exists to avoid being.
+     */
+    static TicketListDtos.TicketSummary toSummary(Ticket t, TicketListRefs.Resolved refs) {
         return new TicketListDtos.TicketSummary(
-                t.getId(), t.getTicketCode(), t.getTitle(), t.getProjectId(), t.getClientId(),
-                t.isClientRaised(), t.getTaskTypeId(), t.getLevel(), t.getOriginalLevel(),
-                t.getStatus(), t.getCurrentStage(), t.getAssignedTo(), t.getReportedBy(),
+                t.getTicketCode(), t.getTitle(),
+                refs.project(t.getProjectId()), refs.client(t.getClientId()),
+                t.getClientContactId(), t.isClientRaised(), t.getTaskTypeId(),
+                // D-060's field, declared on the contract with no column behind it yet.
+                null,
+                t.getLevel(), t.getOriginalLevel(), t.getStatus(), t.getCurrentStage(),
+                refs.person(t.getAssignedTo()), refs.person(t.getReportedBy()),
                 t.getCurrentCycleNo(), t.getCurrentIteration(), t.getReopenCount(), t.isReopened(),
                 t.getDateReported(), t.getPlannedCloseDate(), t.getActualCloseDate(),
                 t.isDelayed(), t.getDelayedSince(), t.getEstimatedEffortHrs(), t.getTotalEffortHrs(),

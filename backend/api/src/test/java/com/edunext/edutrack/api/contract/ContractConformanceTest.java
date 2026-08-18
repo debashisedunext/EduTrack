@@ -215,12 +215,9 @@ class ContractConformanceTest {
      * still fails.
      */
     private static final java.util.Map<String, String> KNOWN_DRIFT = java.util.Map.of(
-            "GET /tickets",
-            "D-061 — the list serves ticketCode/assignedTo where the contract says "
-                    + "ticketId/assignee. The backend rename is Stream C's half and is "
-                    + "written up for Divyansh; the contract half is D-061. This is the "
-                    + "drift that shipped a blank ID column on S-17.",
-
+            // "GET /tickets" was here, and is the reason this test exists. D-061
+            // landed the rename, so the debt is paid and the entry is gone rather
+            // than kept as a comment about a problem that no longer exists.
             "GET /chat/threads/{threadId}/messages",
             "D-053 — `attachments` is declared and not served because chat file share "
                     + "is blocked on C-024/C-025 owning upload, MinIO keys and AV scan. "
