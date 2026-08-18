@@ -97,17 +97,25 @@ class ReportCatalogueTest {
     }
 
     @Test
-    @DisplayName("the date-wise reference report is the one that runs")
-    void oneIsAvailable() {
-        // Not "at least one": this asserts the specific state A-063 ships in,
-        // so that A-066 flipping a report to available without registering a
-        // runner is caught here rather than by a 500 in front of a user.
+    @DisplayName("exactly the seven reports with a runner behind them are offered")
+    void availableSetIsPinned() {
+        // An exact set rather than a count, so both halves of the mistake are
+        // caught: a card flipped on with no runner (a 500 in front of a user)
+        // and a runner added without flipping the card (a report that exists
+        // and is unreachable). A-063 shipped one; A-066 adds six.
         List<String> available = ReportCatalogue.declared().stream()
                 .filter(ReportDtos.Descriptor::available)
                 .map(ReportDtos.Descriptor::key)
                 .collect(Collectors.toList());
 
-        assertThat(available).containsExactly(DateWiseReportRunner.KEY);
+        assertThat(available).containsExactlyInAnyOrder(
+                DateWiseReportRunner.KEY,
+                ResourceScorecardRunner.KEY,
+                ResourceVelocityRunner.KEY,
+                EffortSummaryRunner.KEY,
+                SlaBreachRunner.KEY,
+                TaskTypeAnalysisRunner.KEY,
+                ReopenAnalysisRunner.KEY);
     }
 
     /**
@@ -170,7 +178,7 @@ class ReportCatalogueTest {
         // would mislead a Developer about something they only have to wait for.
         ReportScope ownWork = new ReportScope(true, 8L, List.of(1L));
 
-        ReportDtos.Descriptor scorecard = ReportCatalogue.find("resource-scorecard", ownWork).orElseThrow();
+        ReportDtos.Descriptor scorecard = ReportCatalogue.find("resource-contribution", ownWork).orElseThrow();
 
         assertThat(scorecard.available()).isFalse();
         assertThat(scorecard.unavailableReason()).contains("not built yet");

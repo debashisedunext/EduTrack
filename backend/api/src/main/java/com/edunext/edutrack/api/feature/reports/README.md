@@ -57,11 +57,26 @@ A-066 to A-068 show what the runners actually need, not a premature extraction
 that would be redone when the first report joins `project_members`. `ReportsIT`
 is what keeps this copy honest.
 
+## Which table answers (A-066)
+
+`ReportRepository` reads the summary tables. `TicketReportRepository` aggregates
+`tickets` and `ticket_effort_logs`, because five of §7.8's first six reports ask
+questions no summary table can answer at any grain: average cycle time,
+estimated-versus-actual variance, a per-person reopen rate, and a *list* of
+breached tickets are per-ticket facts.
+
+That is not a relaxation of the dashboard rule. CLAUDE.md and PLAN.md §480 scope
+it to dashboards — a screen that loads unbidden on every login and must paint in
+1.5 seconds — and it stays absolute there. A report is opened deliberately, with
+a date range, by somebody prepared to wait for a figure they intend to quote.
+Every one of those queries is bounded by that range and scoped in SQL rather than
+filtered afterwards.
+
+Velocity is the exception and reads `resource_daily_stats`: A-050 already records
+closed and effort per person per day, and both are flow, so weeks are a sum.
+
 ## Not here yet
 
-- **Export** (`?export=xlsx|csv|pdf`) — declared in the contract, ignored by the
-  controller. A-064.
 - **Scheduling** (`POST /reports/schedule`) — A-065.
-- **Seventeen reports** — A-066, A-067, A-068. `date-wise` is implemented as the
-  reference because it reads `daily_ticket_stats` and so needed no schema of its
-  own; it belongs to A-067, which still owns the rest of its group.
+- **Eleven reports** — A-067 and A-068. Seven run today: `date-wise` (A-063) and
+  §7.8's first six (A-066).
