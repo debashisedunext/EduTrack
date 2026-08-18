@@ -668,6 +668,93 @@ const CLIENT_IMPORT_FIELDS = [
   { name: 'notes', header: 'Notes', required: false, naturalKey: false, type: 'TEXT', maxLength: 0, allowedValues: [], example: 'Renewal due Q1' },
 ];
 
+/**
+ * B-034 · the step-4 preview, built rather than listed.
+ *
+ * **The counts and the rows have to agree**, and a hand-written fixture of four
+ * rows next to `willCreate: 120` does not: the screen shows "All 128" from
+ * `rows.length` and four tabs summing to 128 from the counts, and the two would
+ * contradict each other on the one screen whose whole job is being believable.
+ * The real `ImportPreview` derives its counts from its rows for exactly that
+ * reason, so this derives them too.
+ *
+ * 128 rows, matching what step 2's mock says the Clients sheet holds. That also
+ * gives the fifty-a-row paging something to page.
+ *
+ * Every verdict carries the kind of message its real counterpart does — a
+ * rejection names the rule, a duplicate names the winning row, and an update
+ * names the fields it would change, which is the one this screen is built
+ * around.
+ */
+function clientImportPreview() {
+  const rows: {
+    rowNumber: number;
+    verdict: string;
+    reason: string | null;
+    values: Record<string, string>;
+  }[] = [];
+
+  for (let i = 0; i < 120; i++) {
+    rows.push({
+      rowNumber: rows.length + 2,
+      verdict: 'WILL_CREATE',
+      reason: null,
+      values: { clientCode: `NEWCO${String(i + 1).padStart(3, '0')}`, name: `Newco ${i + 1} Ltd` },
+    });
+  }
+
+  const updates = [
+    ['ACME', 'Acme Retail Limited', 'Name, Phone'],
+    ['NORTHWIND', 'Northwind Traders', 'Name'],
+    ['ZENITH', 'Zenith Systems', 'Support Plan, Primary Email'],
+    // The one that reads oddly and is right: an upsert of a row that matches
+    // what is stored is still an update, and saying "No change" is worth more
+    // than a blank cell the user has to interpret.
+    ['GLOBEX', 'Globex Corporation', 'No change'],
+    // A registration that could not supply current values answers null, which
+    // the screen must render as a stated unknown rather than as "no change".
+    ['INITECH', 'Initech Ltd', null],
+  ] as const;
+  for (const [clientCode, name, reason] of updates) {
+    rows.push({
+      rowNumber: rows.length + 2,
+      verdict: 'WILL_UPDATE',
+      reason,
+      values: { clientCode, name },
+    });
+  }
+
+  rows.push({
+    rowNumber: rows.length + 2,
+    verdict: 'REJECTED',
+    reason: 'Primary Email: Invalid email',
+    values: { clientCode: 'BADCO', primaryEmail: 'not-an-email' },
+  });
+  // Blueprint §4B.3's own row 5: a blank code, so the natural-key column has
+  // nothing to show and renders as "(blank)".
+  rows.push({
+    rowNumber: rows.length + 2,
+    verdict: 'REJECTED',
+    reason: 'Client Code required',
+    values: { name: 'No Code Here' },
+  });
+  rows.push({
+    rowNumber: rows.length + 2,
+    verdict: 'DUPLICATE_IN_FILE',
+    reason: 'Row 2 wins',
+    values: { clientCode: 'NEWCO001', name: 'Newco 1 Ltd (again)' },
+  });
+
+  const count = (verdict: string) => rows.filter((row) => row.verdict === verdict).length;
+  return {
+    willCreate: count('WILL_CREATE'),
+    willUpdate: count('WILL_UPDATE'),
+    duplicates: count('DUPLICATE_IN_FILE'),
+    rejected: count('REJECTED'),
+    rows,
+  };
+}
+
 export const restHandlers = [
   // ── auth ──────────────────────────────────────────────────────────────────
   http.post(url('/auth/login'), async ({ request }) => {
@@ -1852,19 +1939,9 @@ export const restHandlers = [
     saved.splice(at, 1);
     return noContent();
   }),
-  http.post(url('/imports/:schema/validate'), () =>
-    // A dry run writes nothing and shows a per-row verdict. This is the step
-    // that makes a bulk import safe to run at all.
-    ok({
-      willCreate: 120, willUpdate: 5, duplicates: 2, rejected: 1,
-      rows: [
-        { rowNumber: 2, verdict: 'WILL_CREATE', reason: null, values: { clientCode: 'NEWCO', name: 'Newco Ltd' } },
-        { rowNumber: 3, verdict: 'WILL_UPDATE', reason: 'Client code already exists — will be updated', values: { clientCode: 'ACME', name: 'Acme Retail Limited' } },
-        { rowNumber: 7, verdict: 'DUPLICATE_IN_FILE', reason: 'Client code NEWCO appears on row 2', values: { clientCode: 'NEWCO' } },
-        { rowNumber: 9, verdict: 'REJECTED', reason: 'Email is not well-formed', values: { clientCode: 'BADCO', email: 'not-an-email' } },
-      ],
-    }),
-  ),
+  // B-034 · step 4. A dry run writes nothing and shows a per-row verdict — the
+  // step that makes a bulk import safe to run at all.
+  http.post(url('/imports/:schema/validate'), () => ok(clientImportPreview())),
   http.post(url('/imports/:schema/commit'), () =>
     ok({
       batchId: '99999999-8888-7777-6666-555555555555', status: 'RUNNING',

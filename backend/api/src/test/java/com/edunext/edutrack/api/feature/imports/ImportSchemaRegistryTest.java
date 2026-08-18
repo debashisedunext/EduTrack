@@ -136,8 +136,9 @@ class ImportSchemaRegistryTest {
             }
 
             @Override
-            public Set<String> findExisting(Set<String> naturalKeyValues) {
-                return Set.of();
+            public java.util.Map<String, java.util.Map<String, String>> findExisting(
+                    Set<String> naturalKeyValues) {
+                return java.util.Map.of();
             }
 
             @Override

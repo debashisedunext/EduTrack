@@ -1,9 +1,10 @@
 package com.edunext.edutrack.api.feature.imports;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -32,12 +33,32 @@ final class TestImportSchema implements ImportSchemaDefinition {
             ImportField.optional("status", "Status").oneOf("ACTIVE", "INACTIVE"),
             ImportField.optional("notes", "Notes").maxLength(10));
 
-    private final Set<String> existing;
+    private final Map<String, Map<String, String>> existing = new LinkedHashMap<>();
     /** Every set this schema was asked about, so a test can prove the probe was batched. */
     final List<Set<String>> probes = new ArrayList<>();
 
+    /**
+     * Keys that exist with no current values — the registration that cannot
+     * cheaply supply them, which {@link ImportSchemaDefinition#findExisting}
+     * permits and whose rows come back with a null reason.
+     */
     TestImportSchema(String... existingKeys) {
-        this.existing = new HashSet<>(List.of(existingKeys));
+        for (String key : existingKeys) {
+            existing.put(key, Map.of());
+        }
+    }
+
+    /**
+     * One key that exists <em>and</em> says what it holds, so B-034's
+     * changed-field message has something to compare against.
+     *
+     * <p>Chained rather than taken in the constructor: most tests here are about
+     * the verdict matrix and do not care what is stored, and making all of them
+     * pass an empty map to say so would bury the two that do.
+     */
+    TestImportSchema holding(String key, Map<String, String> currentValues) {
+        existing.put(key, Map.copyOf(currentValues));
+        return this;
     }
 
     @Override
@@ -61,10 +82,15 @@ final class TestImportSchema implements ImportSchemaDefinition {
     }
 
     @Override
-    public Set<String> findExisting(Set<String> naturalKeyValues) {
+    public Map<String, Map<String, String>> findExisting(Set<String> naturalKeyValues) {
         probes.add(new LinkedHashSet<>(naturalKeyValues));
-        Set<String> found = new LinkedHashSet<>(naturalKeyValues);
-        found.retainAll(existing);
+        Map<String, Map<String, String>> found = new LinkedHashMap<>();
+        for (String key : naturalKeyValues) {
+            Map<String, String> stored = existing.get(key);
+            if (stored != null) {
+                found.put(key, stored);
+            }
+        }
         return found;
     }
 

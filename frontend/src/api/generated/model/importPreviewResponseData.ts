@@ -49,9 +49,14 @@ the database rejects mutation independently via triggers and grants.
 import type { ImportRowVerdict } from './importRowVerdict';
 
 export type ImportPreviewResponseData = {
-  willCreate?: number;
-  willUpdate?: number;
-  duplicates?: number;
-  rejected?: number;
-  rows?: ImportRowVerdict[];
+  willCreate: number;
+  willUpdate: number;
+  duplicates: number;
+  rejected: number;
+  /** Every row, in the file's own order — the user reads this against
+their spreadsheet. The counts are derived from this list rather
+than accumulated beside it, so a summary that disagrees with the
+table below it is not expressible.
+ */
+  rows: ImportRowVerdict[];
 };

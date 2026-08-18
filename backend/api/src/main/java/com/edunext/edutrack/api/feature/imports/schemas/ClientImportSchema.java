@@ -12,8 +12,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -136,18 +137,81 @@ public class ClientImportSchema implements ImportSchemaDefinition {
                     .validate(FieldValidators.isoDate()),
             ImportField.optional("notes", "Notes").example("Renewal due Q1"));
 
+    /**
+     * The clients these codes name, as the import sees them.
+     *
+     * <p>One query for the whole file, and the values as well as the keys —
+     * B-034's step-4 preview names the fields an update would change, and
+     * {@link ImportSchemaDefinition#findExisting} explains why "will update" on
+     * its own is not enough to approve.
+     *
+     * <p><b>Only the columns this registration declares</b>, formatted the way
+     * the import reads them. A stored null is left out rather than mapped to an
+     * empty string, so an incoming value against an empty field reads as a
+     * change — which it is — and matches {@link ImportRow}'s one representation
+     * of missing. {@code accountManagerId} and {@code slaPolicyId} are not here
+     * for the same reason they are not in {@link #fields()}: a spreadsheet
+     * cannot carry them, so nothing can change them.
+     *
+     * <p>Read-only, and nothing escapes the transaction but strings.
+     */
     @Override
     @Transactional(readOnly = true)
-    public Set<String> findExisting(Set<String> naturalKeyValues) {
-        Set<String> existing = new LinkedHashSet<>();
-        for (String stored : clients.findClientCodesIn(naturalKeyValues)) {
+    public Map<String, Map<String, String>> findExisting(Set<String> naturalKeyValues) {
+        Map<String, Map<String, String>> existing = new LinkedHashMap<>();
+        for (Client stored : clients.findByClientCodeIn(naturalKeyValues)) {
             // Back to the engine's normalised form: MySQL matched these
             // case-insensitively through the ci collation and returned them in
             // whatever case they were stored in, which will not always be the
             // case the file used.
-            existing.add(normaliseKey(stored));
+            existing.put(normaliseKey(stored.getClientCode()), currentValues(stored));
         }
         return existing;
+    }
+
+    /**
+     * One stored client, projected onto this schema's field names.
+     *
+     * <p>Deliberately parallel to {@link #upsert} — every {@code set(...)} there
+     * has a {@code put(...)} here, and a column added to one without the other
+     * is a field the preview silently never reports as changing. The two lists
+     * being adjacent is what makes that visible in review.
+     */
+    private static Map<String, String> currentValues(Client client) {
+        Map<String, String> values = new LinkedHashMap<>();
+        put(values, "name", client.getName());
+        put(values, "shortName", client.getShortName());
+        put(values, "industry", client.getIndustry());
+        put(values, "status", client.getStatus());
+        put(values, "supportPlan", client.getSupportPlan());
+        put(values, "primaryEmail", client.getPrimaryEmail());
+        put(values, "supportEmail", client.getSupportEmail());
+        put(values, "phone", client.getPhone());
+        put(values, "websiteDomain", client.getWebsiteDomain());
+        put(values, "addressLine1", client.getAddressLine1());
+        put(values, "addressLine2", client.getAddressLine2());
+        put(values, "city", client.getCity());
+        put(values, "state", client.getState());
+        put(values, "country", client.getCountry());
+        put(values, "postalCode", client.getPostalCode());
+        put(values, "timezone", client.getTimezone());
+        put(values, "notes", client.getNotes());
+        // ISO, because that is what the DATE column's validator accepts and so
+        // what the uploaded cell has been normalised to by the time it is
+        // compared. `toString()` on a LocalDate is ISO-8601 by definition.
+        put(values, "contractStart", asText(client.getContractStart()));
+        put(values, "contractEnd", asText(client.getContractEnd()));
+        return values;
+    }
+
+    private static void put(Map<String, String> values, String field, String value) {
+        if (value != null && !value.isBlank()) {
+            values.put(field, value);
+        }
+    }
+
+    private static String asText(LocalDate date) {
+        return date == null ? null : date.toString();
     }
 
     /**

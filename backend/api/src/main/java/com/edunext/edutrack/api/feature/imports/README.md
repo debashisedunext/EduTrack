@@ -12,6 +12,7 @@ The Excel import engine — screen S-34, blueprint §4B.3.
 | **B-031** Step 1 — template download | `ImportTemplateWriter`, `ImportController`, `ImportExceptionHandler` |
 | **B-032** Step 2 — upload and parse | `SheetReader` + `XlsxSheetReader`/`CsvSheetReader`, `SheetHeadings`, `ImportFileParser`, `ImportUploadService`, `ImportUploadLimits`, `StagedRow` |
 | **B-033** Step 3 — column mapping | `ImportDtos.SchemaField(s)`, `ImportMappingPresetService`, `ImportMappingPresetRepository`, `UnknownImportFieldException`, `MappingPresetNotFoundException` |
+| **B-034** Step 4 — dry-run preview | `ImportValidationService`, `ImportDtos.{ValidateRequest,RowVerdict,Preview}`, `ImportUploadNotAvailableException`, `IncompleteMappingException`, `UnknownSourceColumnException` |
 
 ## The one thing to understand
 
@@ -31,7 +32,7 @@ previewing, committing, error reporting — is written once and mentions neither
                   ImportSchemaDefinition          ← the only entity-aware surface
                    key / entityCode
                    fields / naturalKey
-                   findExisting  (read-only)
+                   findExisting  (read-only; keys → current values)
                    upsert        (commit only)
                              ▲
               ┌──────────────┴──────────────┐
@@ -70,7 +71,7 @@ B-030 is the engine, not the wizard. The five steps plug into it:
 | B-031 | template download | `ImportField` — `header`, `allowedValues` (the dropdown), `example` |
 | B-032 | upload, SAX parse | produces `StagedUpload` — ✅ done, though it kept `InMemoryImportStagingStore`; see below |
 | B-033 | column mapping | `HeaderMatcher` → `ImportMapping`; `missingRequired` blocks Next — ✅ done, and it turned out to need **no mapping route at all**; see below |
-| B-034 | dry-run preview | `ImportValidationEngine` → `ImportPreview` |
+| B-034 | dry-run preview | `ImportValidationEngine` → `ImportPreview` — ✅ done, and it widened `findExisting`; see below |
 | B-035 | commit job | `ImportPreview.writable()` → `ImportSchemaDefinition.upsert` |
 | B-036 | error report | `ImportRowVerdict` — the rejected rows plus their reason |
 | B-037 | batch traceability | `importBatchId`, stamped on insert only |
@@ -315,19 +316,107 @@ neither: a preset is *the engine's own* record, like `import_batches`, and it na
 no client, user, project or ticket. Nothing on the validate path can reach it,
 because nothing on the validate path holds one.
 
+## B-034 · step 4, and the probe that had to grow
+
+`POST /imports/{schema}/validate` takes a staged upload and a mapping and answers
+a verdict per row. `ImportValidationService` is thin by construction — the engine
+has decided the verdicts since B-030, and what was missing was a way to reach it
+and the refusals that keep a caller from reaching it with a request whose answer
+would be useless.
+
+### `findExisting` now returns the values, not just the keys
+
+Blueprint §4B.3's step-4 table is explicit about the Message column for an
+update:
+
+```
+│  3   │ NORTHWIND │ ♻ Will update │ Name, phone │
+```
+
+It names **which fields would change**, and existence alone cannot answer that.
+So `ImportSchemaDefinition.findExisting` went from `Set<String>` to
+`Map<String, Map<String, String>>` — the same one batched query, now carrying
+each matched row's current values keyed by this schema's own field names.
+Existence is `containsKey`.
+
+Without it, "38 will update" is a verdict nobody can act on: a spreadsheet that
+corrects six phone numbers and one that overwrites every address in the account
+produce the same word, and the user is being asked to approve one of them.
+
+The comparison itself stays in the engine and stays schema-agnostic. Three rules
+in it are worth knowing:
+
+- **Only fields the row carries are compared**, because those are the only fields
+  a commit writes — `upsert` leaves a stored value alone where the cell is blank
+  or the column unmapped. Reporting the rest would promise an erasure that will
+  not happen, which is the most alarming thing this message could get wrong.
+- **The natural key is excluded.** It is how the row was matched, so it is equal
+  by construction — except in case, where the collation matched `acme` to `ACME`
+  and the upsert leaves the stored spelling alone.
+- **An empty map is permitted** and means "it exists, I cannot cheaply say what
+  is in it". The verdict is still `WILL_UPDATE`; the reason is null, and a client
+  must render that as a stated unknown rather than as "nothing changes". That
+  keeps the cost of a registration where B-030 put it.
+
+`ClientImportSchema.currentValues` is deliberately written directly alongside
+`upsert`, one `put` per `set`. A column added to one and not the other is a field
+the preview silently never reports as changing, and adjacency is what makes that
+visible in review.
+
+The cost is that the probe returns entities rather than one column for the
+matched subset — bounded by the 5,000-row cap and the same order of memory as the
+staged sheet already in heap, read inside a read-only transaction, with only
+strings escaping it.
+
+### Four refusals, split by remedy rather than by cause
+
+All four are 422 and all four mean "the request refers to something absent", so
+one type would be defensible on the status. It would also make the screen parse
+English to decide between the only three things it can usefully offer.
+
+| `type` | Cause | What the screen says |
+|---|---|---|
+| `import-upload-unavailable` | the `uploadId` expired, or `sheet` disagrees with what is staged | go back to step 2 |
+| `import-incomplete-mapping` | a required column has no column mapped to it | fix the mapping above |
+| `import-unknown-column` | the mapping reads a heading this sheet does not have | fix the mapping above |
+| `import-unknown-field` | the mapping names a field the schema does not declare | *B-033's own type, reused* |
+
+**Expired and wrong-sheet are one condition on purpose.** They read as two and
+the remedy for both is the same action; two types would let the screen write two
+sentences that both end "upload the file again".
+
+**An incomplete mapping is refused rather than previewed.** Running it produces a
+screen of rejections reading "Name required" — which points at the rows when the
+fault is one dropdown on the previous step, and sends the user looking through a
+spreadsheet at a column that is filled in. With the *natural key* unmapped it is
+worse than noise: nothing can be matched, so the preview would promise to create
+clients that already exist.
+
+**An unknown source column is refused rather than read as blank.** `ImportMapping`
+reads the cell by heading, so a heading the sheet lacks silently yields nothing
+and the field is absent — the commit runs and the Support Email column the user
+carefully mapped was never read. The realistic cause is a preset applied to a
+renamed export, which is why the sheet's own headings go on the problem body.
+
+### The upload survives the dry run
+
+Nothing is discarded. Reading the preview, going back to step 3 and changing one
+column is the ordinary path through this screen, and a route that consumed the
+staging entry would answer "your file expired" to the second attempt.
+
 ## Not here yet
 
-No dry run or commit — B-034, B-035. `/imports/users/*` answers 404 on all four
-routes until B-038 registers the second schema, and
-`ImportTemplateControllerTest`, `ImportSchemaFieldsControllerTest` and
-`ImportMappingPresetControllerTest` each assert that — so the day the registration
-lands, three tests fail and are deleted.
+No commit — B-035. `/imports/users/*` answers 404 on all five routes until B-038
+registers the second schema, and `ImportTemplateControllerTest`,
+`ImportSchemaFieldsControllerTest`, `ImportMappingPresetControllerTest` and
+`ImportValidateControllerTest` each assert that — so the day the registration
+lands, four tests fail and are deleted.
 
 ## Tests
 
 | File | Proves |
 |---|---|
-| `ImportValidationEngineTest` | the verdict matrix, including blueprint §4B.3's worked example row for row |
+| `ImportValidationEngineTest` | the verdict matrix, including blueprint §4B.3's worked example row for row — and, from B-034, the changed-field message next to an update |
 | `ImportSchemaRegistryTest` | resolution, and the boot-time refusals that catch a malformed registration |
 | `FieldValidatorsTest` | §4B.3's validation rules |
 | `HeaderMatcherTest` / `ImportMappingTest` | auto-match, and that it never guesses |
@@ -346,6 +435,8 @@ lands, three tests fail and are deleted.
 | `ImportMappingPresetServiceTest` | B-033 — the order of the checks, that the unknown-field refusal names every offender at once, and that nothing reaches a query before the schema resolves |
 | `ImportMappingPresetControllerTest` | B-033, the routes — 200 for the upsert, 422 for an undeclared field, 400 for a mapping that maps nothing, 404 for a delete that removed no row, and the 403 on all three verbs |
 | `ImportMappingPresetIT` | B-033 against real MySQL — everything that is a property of the schema rather than of the Java: the unique index behind the upsert, the collation deciding that `CRM export` and `CRM Export` are one preset, and that the delete is really scoped by schema |
+| `ImportValidationServiceTest` | B-034 — the order of the four refusals and why each one is refused rather than previewed, over a real staging store so the expiry is the real expiry |
+| `ImportValidateControllerTest` | B-034, the route — each refusal's status and `type`, the properties the screen reads off the body, and a genuine 200 with no database (a file whose every row is rejected never reaches the probe, which is also the response an Admin gets from a file full of mistakes) |
 
 `ImportEngineIsolationTest` reads **source, not bytecode**, and says why in its
 javadoc: ArchUnit 1.3.0 cannot parse Java 25 class files, skips every one of them

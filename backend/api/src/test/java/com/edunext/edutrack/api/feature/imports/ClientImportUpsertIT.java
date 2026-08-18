@@ -165,8 +165,7 @@ class ClientImportUpsertIT {
         commit(engine.validate(schema, List.of(
                 row(2, "ITIMPCASE", "Original Name", "a@example.com"))), first.getId());
 
-        Set<String> existing = schema.findExisting(Set.of("ITIMPCASE"));
-        assertThat(existing).containsExactly("ITIMPCASE");
+        assertThat(schema.findExisting(Set.of("ITIMPCASE"))).containsOnlyKeys("ITIMPCASE");
 
         ImportBatch second = batch();
         ImportPreview preview = engine.validate(schema, List.of(
@@ -246,9 +245,57 @@ class ClientImportUpsertIT {
         }
         probe.add("ITIMPNOTTHERE");
 
-        Set<String> existing = schema.findExisting(probe);
+        java.util.Map<String, java.util.Map<String, String>> existing = schema.findExisting(probe);
 
-        assertThat(existing).hasSize(50).doesNotContain("ITIMPNOTTHERE");
+        assertThat(existing).hasSize(50).doesNotContainKey("ITIMPNOTTHERE");
+        // B-034 · the same one query now carries the current values, which is
+        // what lets step 4 say *what* an update would change. Asserted against
+        // the real column set rather than against a stub, because the mapping
+        // from entity to field name is the half a unit test cannot check.
+        assertThat(existing.get("ITIMPBULK0"))
+                .containsEntry("name", "Bulk 0")
+                .containsEntry("primaryEmail", "bulk0@example.com");
+    }
+
+    /**
+     * The changed-field message, end to end against MySQL — blueprint §4B.3's
+     * {@code ♻ Will update │ Name, phone}.
+     *
+     * <p>Here rather than only in the engine's unit tests because the part that
+     * can silently be wrong is {@code ClientImportSchema.currentValues}: a
+     * column read from the wrong getter, or formatted differently from the way
+     * the import reads it, produces a message that is confidently incorrect. A
+     * stub schema cannot catch that — it agrees with itself by construction.
+     */
+    @Test
+    @DisplayName("an update names the fields it would change, and nothing else")
+    void anUpdateNamesTheFieldsItWouldChange() {
+        commit(engine.validate(schema, List.of(
+                row(2, "ITIMPDIFF", "Original Name", "diff@example.com"))), batch().getId());
+
+        ImportPreview preview = engine.validate(schema, List.of(
+                // Name differs; the email is the same value it already holds, so
+                // it must not be listed. The natural key is excluded by rule.
+                row(2, "ITIMPDIFF", "Renamed Ltd", "diff@example.com")));
+
+        assertThat(preview.rows()).singleElement()
+                .satisfies(verdict -> {
+                    assertThat(verdict.verdict()).isEqualTo(ImportVerdict.WILL_UPDATE);
+                    assertThat(verdict.reason()).isEqualTo("Name");
+                });
+    }
+
+    @Test
+    @DisplayName("an update that changes nothing says so rather than staying silent")
+    void anUpdateThatChangesNothingSaysSo() {
+        commit(engine.validate(schema, List.of(
+                row(2, "ITIMPSAME", "Same Name", "same@example.com"))), batch().getId());
+
+        ImportPreview preview = engine.validate(schema, List.of(
+                row(2, "ITIMPSAME", "Same Name", "same@example.com")));
+
+        assertThat(preview.rows()).singleElement()
+                .extracting(ImportRowVerdict::reason).isEqualTo("No change");
     }
 
     @Test

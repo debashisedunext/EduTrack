@@ -395,17 +395,159 @@ describe('the client import wizard, step 3', () => {
   })
 
   /**
-   * Step 4 is B-034. Disabled and labelled rather than absent, for the reason
-   * B-032 left step 2's Continue in the same state: a button that silently does
-   * nothing is worse than one that says what is missing.
+   * B-034 · the button now runs the dry run rather than explaining why it
+   * cannot. What replaced the old "disabled and says why" assertion is the one
+   * below it: that the run is visibly in flight, because a request that parses
+   * up to 5,000 rows is not instant and an idle-looking button invites a second
+   * click — and a second click is a second full parse.
    */
-  it('leaves validation disabled and says why, rather than doing nothing', async () => {
+  it('runs the dry run when the mapping is complete', async () => {
     await toMapping()
 
     const next = screen.getByRole('button', { name: /continue to validation/i })
-    expect(next).toBeDisabled()
-    expect(next).toHaveAttribute('title', expect.stringContaining('next step'))
-    expect(screen.getByText(/the mapping is complete/i)).toBeInTheDocument()
+    expect(next).toBeEnabled()
+
+    fireEvent.click(next)
+
+    expect(await screen.findByRole('heading', { name: /check what the import will do/i }))
+      .toBeInTheDocument()
+  })
+})
+
+/**
+ * B-034 · S-34 step 4, the dry run.
+ *
+ * `ValidationStep.test.tsx` covers what the preview looks like. What is worth
+ * asserting here is the wiring nobody would notice was wrong until it mattered:
+ * that the preview replaces the mapping step rather than stacking under it, that
+ * going back drops it, and above all that a refusal from the server reaches the
+ * user as the step they have to go back to rather than as a dead button.
+ */
+describe('the client import wizard, step 4', () => {
+  async function toPreview() {
+    renderPage()
+    await drop(file('clients.xlsx', 'binary-ish'))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to mapping/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to validation/i }))
+    return await screen.findByRole('heading', { name: /check what the import will do/i })
+  }
+
+  it('shows the preview instead of the mapping table, not underneath it', async () => {
+    await toPreview()
+
+    expect(screen.queryByRole('combobox', { name: /^client code/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+  })
+
+  /**
+   * The single most dangerous thing this screen could do is leave a preview up
+   * after the mapping it described has changed. The numbers are specific, they
+   * look authoritative, and they describe a run that will not happen.
+   */
+  it('drops the preview on the way back to mapping', async () => {
+    await toPreview()
+
+    fireEvent.click(screen.getByRole('button', { name: /back to mapping/i }))
+
+    expect(await screen.findByRole('combobox', { name: /^client code/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /check what the import will do/i }))
+      .not.toBeInTheDocument()
+  })
+
+  /**
+   * An expired upload is the ordinary failure here — the staging TTL is thirty
+   * minutes and this wizard has five steps. What the user needs is not "try
+   * again", which would have them pressing the same button, but the step that
+   * fixes it.
+   */
+  it('names step 2 when the upload has expired', async () => {
+    server.use(
+      http.post('/api/v1/imports/:schema/validate', () =>
+        HttpResponse.json(
+          {
+            type: 'https://edutrack/errors/import-upload-unavailable',
+            title: 'Uploaded file is no longer available',
+            detail: 'The uploaded file is no longer available — it may have expired.',
+            status: 422,
+          },
+          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    renderPage()
+    await drop(file('clients.xlsx', 'binary-ish'))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to mapping/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to validation/i }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/no longer available/i)
+    expect(alert).toHaveTextContent(/step 2/i)
+    // And the promise is restated at the point the user is most likely to doubt
+    // it: something just failed.
+    expect(alert).toHaveTextContent(/nothing has been written/i)
+  })
+
+  /** A mapping refusal sends them one step back, not two. */
+  it('names the mapping when the server refuses a column this sheet lacks', async () => {
+    server.use(
+      http.post('/api/v1/imports/:schema/validate', () =>
+        HttpResponse.json(
+          {
+            type: 'https://edutrack/errors/import-unknown-column',
+            title: 'Unknown column in the mapping',
+            detail: "The mapping reads column 'Telephone', which the 'Clients' sheet does not have.",
+            status: 422,
+          },
+          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    renderPage()
+    await drop(file('clients.xlsx', 'binary-ish'))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to mapping/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to validation/i }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/Telephone/)
+    expect(alert).toHaveTextContent(/correct the mapping above/i)
+    // The mapping table is still there to correct.
+    expect(screen.getByRole('combobox', { name: /^client code/i })).toBeInTheDocument()
+  })
+
+  /**
+   * A refusal is about one mapping. Touching a `<select>` makes it a complaint
+   * about a mapping that no longer exists, which is worse than no message —
+   * the user reads it, looks at the column they have just fixed, and stops
+   * trusting the screen.
+   */
+  it('clears a stale refusal as soon as the mapping changes', async () => {
+    server.use(
+      http.post('/api/v1/imports/:schema/validate', () =>
+        HttpResponse.json(
+          {
+            type: 'https://edutrack/errors/import-unknown-column',
+            title: 'Unknown column in the mapping',
+            detail: "The mapping reads column 'Telephone'.",
+            status: 422,
+          },
+          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    renderPage()
+    await drop(file('clients.xlsx', 'binary-ish'))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to mapping/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /continue to validation/i }))
+    await screen.findByRole('alert')
+
+    fireEvent.change(screen.getByRole('combobox', { name: /^city/i }), {
+      target: { value: 'Name' },
+    })
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 })
 
