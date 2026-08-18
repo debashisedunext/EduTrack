@@ -34,7 +34,7 @@ interface TileProps {
   name?: string
   value?: number
   drillDown?: string | null
-  onSelect?: (drillDown: string | null) => void
+  onSelect?: (drillDown: string | null, label?: string, count?: number | null) => void
 }
 
 function Tile({ x = 0, y = 0, width = 0, height = 0, index = 0, name, value, drillDown, onSelect }: TileProps) {
@@ -45,7 +45,9 @@ function Tile({ x = 0, y = 0, width = 0, height = 0, index = 0, name, value, dri
   return (
     <g
       style={{ cursor: drillDown ? 'pointer' : 'default' }}
-      onClick={() => onSelect?.(drillDown ?? null)}
+      // D-064 · `value` is the figure already printed inside the tile, so the
+      // panel opens headed with the number the reader clicked.
+      onClick={() => onSelect?.(drillDown ?? null, name, value)}
     >
       <rect
         x={x}

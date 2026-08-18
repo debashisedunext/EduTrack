@@ -30,7 +30,14 @@ export interface ChartLegendProps {
    * reverse-engineering a heading from query parameters is how a panel comes to
    * describe something subtly different from the segment that opened it.
    */
-  onSelect: (drillDown: string | null, label?: string) => void
+  /**
+   * D-064 · the third argument is the entry's own figure, so the panel can head
+   * itself with the number that was clicked. Every chart passes `drillDown`
+   * from `useDrillDown` straight in, so widening it here reaches all nine
+   * legends at once — and the legend is the *accessible* path, since the
+   * drawings are aria-hidden and its buttons are the only keyboard route.
+   */
+  onSelect: (drillDown: string | null, label?: string, count?: number | null) => void
   /** Names what the entries are, for the group's accessible name. */
   label: string
 }
@@ -48,7 +55,7 @@ export function ChartLegend({ entries, onSelect, label }: ChartLegendProps) {
           {entry.drillDown ? (
             <button
               type="button"
-              onClick={() => onSelect(entry.drillDown, entry.label)}
+              onClick={() => onSelect(entry.drillDown, entry.label, entry.value)}
               className="text-[color:var(--text-secondary)] underline-offset-2 hover:underline
                          focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
                          focus-visible:outline-[color:var(--primary)] rounded-sm"

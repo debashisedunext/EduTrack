@@ -82,8 +82,8 @@ export function SlaGauge({ series }: { series: WidgetSeries[] }) {
               innerRadius="60%"
               outerRadius="95%"
               isAnimationActive={false}
-              onClick={(slice: { payload?: { drillDown?: string | null } }) =>
-                drillDown(slice?.payload?.drillDown)
+              onClick={(slice: { payload?: { drillDown?: string | null; y?: number } }) =>
+                drillDown(slice?.payload?.drillDown, undefined, slice?.payload?.y)
               }
             >
               {data.map((segment) => (

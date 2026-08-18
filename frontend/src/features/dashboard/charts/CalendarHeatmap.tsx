@@ -112,7 +112,8 @@ export function CalendarHeatmap({ series }: { series: WidgetSeries[] }) {
             fill="var(--primary)"
             fillOpacity={intensity(point.y, max)}
             style={{ cursor: point.drillDown ? 'pointer' : 'default' }}
-            onClick={() => drillDown(point.drillDown)}
+            // D-064 · the day's own count, the same number the tooltip shows.
+            onClick={() => drillDown(point.drillDown, undefined, point.y)}
           >
             {/* Native SVG tooltip. The canvas is aria-hidden and the hidden
                 table carries every figure, so this is a pointer affordance

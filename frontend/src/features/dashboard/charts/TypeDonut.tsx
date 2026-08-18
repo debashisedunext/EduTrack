@@ -38,8 +38,10 @@ export function TypeDonut({ series }: { series: WidgetSeries[] }) {
               // motion cannot reach inside an SVG animation recharts drives in
               // JavaScript — the tokens' media query only governs CSS.
               isAnimationActive={false}
-              onClick={(slice: { payload?: { drillDown?: string | null } }) =>
-                drillDown(slice?.payload?.drillDown)
+              // D-064 · the arc's own figure, so the panel heads itself with the
+              // number the reader just clicked rather than a different one.
+              onClick={(slice: { payload?: { drillDown?: string | null; y?: number } }) =>
+                drillDown(slice?.payload?.drillDown, undefined, slice?.payload?.y)
               }
             >
               {points.map((point, index) => (
