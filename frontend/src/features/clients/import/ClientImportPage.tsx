@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { AlertCircle, ArrowLeft, Check, Download, FileSpreadsheet, Loader2, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
+import { useValidateImport } from '@/api/generated/imports/imports'
+import type { ImportPreviewResponseData } from '@/api/generated/model'
 import { ApiError } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -10,6 +12,7 @@ import { type ColumnMapping } from './columnMapping'
 import {
   IMPORT_PROBLEM,
   formatBytes,
+  previewRefusal,
   rejectionReason,
   useDownloadImportTemplate,
   useUploadImportFile,
@@ -17,6 +20,7 @@ import {
 } from './importQueries'
 import { MappingStep } from './MappingStep'
 import { UploadDropzone } from './UploadDropzone'
+import { ValidationStep } from './ValidationStep'
 
 /**
  * The five steps of blueprint §4B.3, named on screen from the start.
@@ -37,17 +41,17 @@ const STEPS = [
 ] as const
 
 /**
- * S-34 Client Import Wizard — steps 1 to 3. B-031, B-032, B-033.
+ * S-34 Client Import Wizard — steps 1 to 4. B-031, B-032, B-033, B-034.
  *
  * Blueprint §4B.3, and the engine behind it is B-030's schema registry: this
  * screen names clients exactly once, in the route it is mounted at and in the
  * schema it asks for. B-038 registers resources and this page is what it reuses.
  *
- * ## Steps 4 and 5 are visible and disabled, not hidden
+ * ## Step 5 is visible and disabled, not hidden
  *
- * Hiding them would make the screen look finished and leave the user to discover
- * at the end of step 3 that there is no step 4. Showing them greyed says what is
- * coming, in the order it comes, and the Continue button says why it is disabled
+ * Hiding it would make the screen look finished and leave the user to discover
+ * at the end of step 4 that there is no step 5. Showing it greyed says what is
+ * coming, in the order it comes, and the Import button says why it is disabled
  * rather than being mysteriously inert.
  *
  * ## The uploaded File is held, not just the response
@@ -66,6 +70,14 @@ const STEPS = [
  * step with the other four — and the user can go back and change it. What step 3
  * does read from the server is *our* column list (`/fields`) and the saved
  * presets, neither of which the browser can know.
+ *
+ * ## The preview is cleared whenever anything it described changes
+ *
+ * A preview is a statement about one file, one sheet and one mapping. Leaving a
+ * stale one on screen after the user goes back and changes a column is the worst
+ * failure this screen has available: the numbers are specific, they look
+ * authoritative, and they describe a run that will not happen. So going back to
+ * mapping drops it, and so does every path that touches the upload.
  */
 export function ClientImportPage() {
   const download = useDownloadImportTemplate()
@@ -83,12 +95,22 @@ export function ClientImportPage() {
    * returns to step 2 with the file still staged instead of unwinding the upload.
    */
   const [mapping, setMapping] = useState<ColumnMapping | null>(null)
+  /**
+   * The dry run's answer, once it has one.
+   *
+   * Held rather than read from `validate.data` so that going back to mapping can
+   * drop it in one place — see the note above on why a stale preview is the worst
+   * thing this screen could leave on display.
+   */
+  const [preview, setPreview] = useState<ImportPreviewResponseData | null>(null)
+
+  const validate = useValidateImport()
 
   /**
-   * The rail's marker stops at step 3, because step 4 does not exist yet.
+   * The rail's marker stops at step 4, because step 5 does not exist yet.
    * Advancing past what works would put it on a step the user cannot reach.
    */
-  const currentStep = mapping ? 2 : staged ? 1 : 0
+  const currentStep = preview ? 3 : mapping ? 2 : staged ? 1 : 0
 
   function send(chosen: File, sheet?: string, replaces?: string) {
     upload.mutate(
@@ -102,6 +124,7 @@ export function ClientImportPage() {
     setRejected(reason)
     setStaged(null)
     setMapping(null)
+    discardPreview()
     setFile(reason ? null : chosen)
     if (!reason) {
       send(chosen)
@@ -110,6 +133,8 @@ export function ClientImportPage() {
 
   function chooseSheet(sheet: string) {
     if (file && sheet !== staged?.sheet) {
+      // The preview described the *other* sheet. Nothing about it survives.
+      discardPreview()
       send(file, sheet, staged?.uploadId)
     }
   }
@@ -119,7 +144,43 @@ export function ClientImportPage() {
     setStaged(null)
     setRejected(null)
     setMapping(null)
+    discardPreview()
     upload.reset()
+  }
+
+  /** Both halves — the answer and the refusal are two states of one request. */
+  function discardPreview() {
+    setPreview(null)
+    validate.reset()
+  }
+
+  /**
+   * Step 4 — run the dry run.
+   *
+   * `sheet` travels with it as a cross-check, not a selector: the server refuses
+   * a mismatch rather than previewing the other sheet under this one's heading.
+   * Sending it costs nothing and closes the one way the wizard's state and the
+   * server's can silently diverge.
+   */
+  function runDryRun() {
+    if (!staged?.uploadId || !mapping) return
+    validate.mutate(
+      {
+        schema: 'clients',
+        data: { uploadId: staged.uploadId, sheet: staged.sheet, mapping },
+      },
+      { onSuccess: (response) => setPreview(response.data) },
+    )
+  }
+
+  /**
+   * Back from the preview to the mapping.
+   *
+   * Dropping the preview is the whole point: the user is going back to change a
+   * column, so the numbers on screen are about to stop being true.
+   */
+  function backToMapping() {
+    discardPreview()
   }
 
   /**
@@ -403,7 +464,7 @@ export function ClientImportPage() {
       </section>
 
       {/* ── step 3 ─────────────────────────────────────────────────────── */}
-      {staged && mapping && (
+      {staged && mapping && !preview && (
         <section
           aria-labelledby="step-3-heading"
           className="rounded-card border border-border bg-surface p-5"
@@ -416,15 +477,82 @@ export function ClientImportPage() {
             headers={staged.headers ?? []}
             rowCount={staged.rowCount ?? 0}
             mapping={mapping}
-            onChange={setMapping}
-            onBack={() => setMapping(null)}
-            // No onContinue: step 4 is B-034, so the button stays disabled and
-            // says so rather than looking broken. The same shape B-032 left step
-            // 2's own Continue in.
+            onChange={(next) => {
+              // Any change invalidates a refusal the server made about the
+              // previous mapping — leaving it up would have the user reading a
+              // complaint about the column they have just fixed.
+              validate.reset()
+              setMapping(next)
+            }}
+            onBack={() => {
+              setMapping(null)
+              discardPreview()
+            }}
+            onContinue={runDryRun}
+            continuePending={validate.isPending}
+          />
+
+          {/*
+            The dry run's refusal, rendered here rather than at step 4 — there is
+            no step 4 to render it in, because the request that would have built
+            one failed. Each of them is fixed on this screen or the one before
+            it, which is why the remedy decides the sentence.
+          */}
+          {validate.isError && <PreviewRefusalNotice error={validate.error} />}
+        </section>
+      )}
+
+      {/* ── step 4 ─────────────────────────────────────────────────────── */}
+      {staged && mapping && preview && (
+        <section
+          aria-labelledby="step-4-heading"
+          className="rounded-card border border-border bg-surface p-5"
+        >
+          <h2 id="step-4-heading" className="text-h3 text-content">
+            Check what the import will do
+          </h2>
+          <ValidationStep
+            schema="clients"
+            preview={preview}
+            fileName={file?.name ?? staged.fileName ?? 'your file'}
+            onBack={backToMapping}
+            // No onCommit: step 5 is B-035, so the button stays disabled and says
+            // why rather than looking broken — the shape the three steps before
+            // it were each left in.
           />
         </section>
       )}
     </div>
+  )
+}
+
+/**
+ * A step-4 refusal, with the step that fixes it named.
+ *
+ * The remedy is the part worth rendering. "Something went wrong, try again"
+ * leaves a user pressing the same button on an upload that expired half an hour
+ * ago; "choose your file again at step 2" does not.
+ */
+function PreviewRefusalNotice({ error }: { error: unknown }) {
+  const { message, remedy } = previewRefusal(error)
+  const next =
+    remedy === 'upload'
+      ? 'Choose your file again at step 2.'
+      : remedy === 'mapping'
+        ? 'Correct the mapping above and run the preview again.'
+        : null
+
+  return (
+    <p
+      role="alert"
+      className="mt-4 flex items-start gap-2 rounded-control border border-danger bg-surface p-3 text-sm text-danger-text"
+    >
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <span>
+        {message}
+        {next ? ` ${next}` : ''} Nothing has been written — no client has changed.
+      </span>
+    </p>
   )
 }
 

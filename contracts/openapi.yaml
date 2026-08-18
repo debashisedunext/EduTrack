@@ -2956,6 +2956,13 @@ paths:
         **Nothing is written.** Returns a per-row verdict — will create, will
         update, duplicate within the file, or rejected with a reason — plus
         summary counts. This is the step that makes a bulk import safe to run.
+
+        Idempotent and repeatable: the user may go back to step 3, change one
+        column and run it again, so this takes the mapping in its own body
+        rather than reading a parked server-side copy. It is a `POST` because
+        the body is the mapping, not because anything changes.
+
+        `master.write`, like every operation on this path.
       requestBody:
         required: true
         content:
@@ -2968,6 +2975,43 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ImportPreviewResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            No schema is registered under that key — the same case as the
+            template, upload and fields routes, and `users` until B-038.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            The request is well-formed but refers to something absent, and each
+            `type` carries a different remedy the screen states in its own
+            words:
+
+            - `import-upload-unavailable` — the `uploadId` has expired or is
+              unknown, or `sheet` names a sheet other than the one staged under
+              it. Both mean the wizard's state and the server's disagree, and
+              both are fixed by re-uploading. The staged sheet is on the body as
+              `sheet`.
+            - `import-incomplete-mapping` — a required column is unmapped. Step
+              3 blocks Next on exactly this, and it is enforced here too:
+              unmapped, every row would be rejected for "Name required" and the
+              preview would point at the rows rather than at the mapping. The
+              missing fields are on the body as `missingFields`, with their
+              headers as `missingHeaders`.
+            - `import-unknown-column` — the mapping names a heading this sheet
+              does not have, which is the ordinary outcome of applying a preset
+              saved from a different export. Silently dropping it would import
+              the file with that column unread and nothing said. The offending
+              columns are on the body as `unknownColumns`, the sheet's own
+              headings as `headers`.
+            - `import-unknown-field` — the mapping names a target field the
+              schema does not declare, the same refusal preset saving makes.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /imports/{schema}/commit:
     parameters: [{ $ref: '#/components/parameters/ImportSchema' }]
@@ -7157,30 +7201,77 @@ components:
       required: [uploadId, mapping]
       properties:
         uploadId: { type: string, format: uuid }
-        sheet: { type: string }
+        sheet:
+          type: string
+          description: |
+            Which sheet the caller believes it is validating. Optional, and a
+            cross-check rather than a selector — the sheet was chosen at step 2
+            and one `uploadId` stages exactly one sheet. Sent, it must agree with
+            what is staged; a disagreement is `import-upload-unavailable` rather
+            than a silent preview of the other sheet.
         mapping:
           type: object
           additionalProperties: { type: string }
-          description: Target field → source column.
+          minProperties: 1
+          description: |
+            Target field → source column, the same shape and direction step 3's
+            presets are stored in. Entries with a blank column are ignored, so
+            an untouched `<select>` does not count as a mapping.
     ImportRowVerdict:
       type: object
+      required: [rowNumber, verdict, values]
       properties:
-        rowNumber: { type: integer }
+        rowNumber:
+          type: integer
+          description: |
+            The 1-based row in the source sheet, header included, so the first
+            data row is 2 — what Excel's own gutter shows. Carried from the
+            parse rather than computed from position, because blank rows are
+            dropped and a number the user cannot find in their file is worse
+            than no number.
         verdict: { type: string, enum: [WILL_CREATE, WILL_UPDATE, DUPLICATE_IN_FILE, REJECTED] }
-        reason: { type: [string, 'null'] }
-        values: { type: object, additionalProperties: true }
+        reason:
+          type: [string, 'null']
+          description: |
+            §4B.3's Message column, and it says a different kind of thing per
+            verdict. `REJECTED` — the first rule the row broke, in the user's
+            words. `DUPLICATE_IN_FILE` — which earlier row won. `WILL_UPDATE` —
+            **the fields this row would change**, comma-separated in template
+            order, or `No change`; that is what makes "38 will update"
+            reviewable rather than alarming. `WILL_CREATE` — null, the em dash
+            in the blueprint's mock-up.
+
+            Null is also what a `WILL_UPDATE` carries when the registration
+            cannot cheaply supply current values, so a client must render the
+            absence rather than assume nothing changes.
+        values:
+          type: object
+          additionalProperties: { type: string }
+          description: |
+            The row as mapped, keyed by target field name — blank cells absent
+            rather than empty. Enough to render the row the user is being asked
+            about without re-reading the file, and enough for B-036's error
+            report to re-emit it with a Reason column appended.
     ImportPreviewResponse:
       type: object
       required: [data]
       properties:
         data:
           type: object
+          required: [willCreate, willUpdate, duplicates, rejected, rows]
           properties:
             willCreate: { type: integer }
             willUpdate: { type: integer }
             duplicates: { type: integer }
             rejected: { type: integer }
-            rows: { type: array, items: { $ref: '#/components/schemas/ImportRowVerdict' } }
+            rows:
+              type: array
+              items: { $ref: '#/components/schemas/ImportRowVerdict' }
+              description: |
+                Every row, in the file's own order — the user reads this against
+                their spreadsheet. The counts are derived from this list rather
+                than accumulated beside it, so a summary that disagrees with the
+                table below it is not expressible.
     ImportCommitRequest:
       type: object
       required: [uploadId, mapping]

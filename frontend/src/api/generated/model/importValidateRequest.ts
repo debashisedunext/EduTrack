@@ -50,7 +50,16 @@ import type { ImportValidateRequestMapping } from './importValidateRequestMappin
 
 export interface ImportValidateRequest {
   uploadId: string;
+  /** Which sheet the caller believes it is validating. Optional, and a
+cross-check rather than a selector — the sheet was chosen at step 2
+and one `uploadId` stages exactly one sheet. Sent, it must agree with
+what is staged; a disagreement is `import-upload-unavailable` rather
+than a silent preview of the other sheet.
+ */
   sheet?: string;
-  /** Target field → source column. */
+  /** Target field → source column, the same shape and direction step 3's
+presets are stored in. Entries with a blank column are ignored, so
+an untouched `<select>` does not count as a mapping.
+ */
   mapping: ImportValidateRequestMapping;
 }

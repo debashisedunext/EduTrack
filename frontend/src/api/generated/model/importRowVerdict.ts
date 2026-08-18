@@ -51,8 +51,31 @@ import type { ImportRowVerdictReason } from './importRowVerdictReason';
 import type { ImportRowVerdictValues } from './importRowVerdictValues';
 
 export interface ImportRowVerdict {
-  rowNumber?: number;
-  verdict?: ImportRowVerdictVerdict;
+  /** The 1-based row in the source sheet, header included, so the first
+data row is 2 — what Excel's own gutter shows. Carried from the
+parse rather than computed from position, because blank rows are
+dropped and a number the user cannot find in their file is worse
+than no number.
+ */
+  rowNumber: number;
+  verdict: ImportRowVerdictVerdict;
+  /** §4B.3's Message column, and it says a different kind of thing per
+verdict. `REJECTED` — the first rule the row broke, in the user's
+words. `DUPLICATE_IN_FILE` — which earlier row won. `WILL_UPDATE` —
+**the fields this row would change**, comma-separated in template
+order, or `No change`; that is what makes "38 will update"
+reviewable rather than alarming. `WILL_CREATE` — null, the em dash
+in the blueprint's mock-up.
+
+Null is also what a `WILL_UPDATE` carries when the registration
+cannot cheaply supply current values, so a client must render the
+absence rather than assume nothing changes.
+ */
   reason?: ImportRowVerdictReason;
-  values?: ImportRowVerdictValues;
+  /** The row as mapped, keyed by target field name — blank cells absent
+rather than empty. Enough to render the row the user is being asked
+about without re-reading the file, and enough for B-036's error
+report to re-emit it with a Reason column appended.
+ */
+  values: ImportRowVerdictValues;
 }

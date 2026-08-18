@@ -47,4 +47,11 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type ImportRowVerdictValues = { [key: string]: unknown };
+/**
+ * The row as mapped, keyed by target field name — blank cells absent
+rather than empty. Enough to render the row the user is being asked
+about without re-reading the file, and enough for B-036's error
+report to re-emit it with a Reason column appended.
+
+ */
+export type ImportRowVerdictValues = {[key: string]: string};

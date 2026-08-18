@@ -641,6 +641,13 @@ export const useDeleteImportMappingPreset = <TError = UnauthorizedResponse | For
 update, duplicate within the file, or rejected with a reason — plus
 summary counts. This is the step that makes a bulk import safe to run.
 
+Idempotent and repeatable: the user may go back to step 3, change one
+column and run it again, so this takes the mapping in its own body
+rather than reading a parked server-side copy. It is a `POST` because
+the body is the mapping, not because anything changes.
+
+`master.write`, like every operation on this path.
+
  * @summary Step 4 — dry run
  */
 export const validateImport = (
@@ -660,7 +667,7 @@ export const validateImport = (
   
 
 
-export const getValidateImportMutationOptions = <TError = ValidationFailedResponse,
+export const getValidateImportMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof validateImport>>, TError,{schema: 'clients' | 'users';data: ImportValidateRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof validateImport>>, TError,{schema: 'clients' | 'users';data: ImportValidateRequest}, TContext> => {
 
@@ -687,12 +694,12 @@ const {mutation: mutationOptions} = options ?
 
     export type ValidateImportMutationResult = NonNullable<Awaited<ReturnType<typeof validateImport>>>
     export type ValidateImportMutationBody = ImportValidateRequest
-    export type ValidateImportMutationError = ValidationFailedResponse
+    export type ValidateImportMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | Problem
 
     /**
  * @summary Step 4 — dry run
  */
-export const useValidateImport = <TError = ValidationFailedResponse,
+export const useValidateImport = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof validateImport>>, TError,{schema: 'clients' | 'users';data: ImportValidateRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof validateImport>>,
