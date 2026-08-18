@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.chat;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
@@ -40,6 +41,20 @@ public final class StatusRequestDtos {
      * derive it, while the working figure is the one stamped against the
      * calendar as it stood at the time.
      */
+    /**
+     * D-062 · named explicitly because <strong>springdoc keys
+     * {@code components.schemas} by simple class name</strong>, and three
+     * unrelated records in this codebase are called {@code StatusRequest} —
+     * this one, {@code ResourceDtos.StatusRequest} ({@code isActive},
+     * {@code reason}) and {@code ClientDtos.StatusRequest}. They collapsed into
+     * one published schema and the last registered won, so the served document
+     * described this endpoint with somebody else's two fields.
+     *
+     * <p>Invisible from the committed contract, which is hand-authored, and
+     * invisible to D-005, which compares the client to that contract rather
+     * than to what the server publishes. D-062 is what found it.
+     */
+    @Schema(name = "TicketStatusRequest")
     public record StatusRequest(
             long id,
             String ticketId,

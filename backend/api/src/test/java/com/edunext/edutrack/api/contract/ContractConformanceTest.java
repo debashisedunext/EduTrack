@@ -177,6 +177,160 @@ class ContractConformanceTest {
     // ── reading the two documents ───────────────────────────────────────────
 
     /** The reviewed contract, found by walking up to the repository root. */
+    /**
+     * D-062 · the half that was missing, and the reason a blank column shipped.
+     *
+     * <p>{@link #servedEndpointsAreAllInTheContract()} proves the backend serves
+     * no path the contract does not name. D-005 proves the committed TypeScript
+     * client matches the contract. <strong>Neither has ever looked inside a
+     * response body</strong>, so an endpoint at the right path returning the
+     * wrong field names satisfies both — which is exactly what happened to
+     * {@code GET /tickets}: it answered {@code ticketCode} where the contract
+     * says {@code ticketId} and {@code assignedTo} where it says
+     * {@code assignee}, and the S-17 grid rendered a blank ID column against a
+     * green build.
+     *
+     * <p><strong>Property names only, not types.</strong> The cheap comparison
+     * catches this entire class of drift — a renamed field, a dropped field, a
+     * field added server-side and never declared — and a full structural
+     * validator is a project rather than a test. Names are also the part the
+     * generated client binds to, so a mismatch here is precisely a mismatch the
+     * frontend will read as {@code undefined}.
+     *
+     * <p>Compared against what <em>springdoc</em> serves, which it derives from
+     * the Java DTOs themselves. So this asserts the real shape of the real
+     * response, not a second declaration that could drift in its own right.
+     *
+     * <p>Only {@code GET}. A request body is validated by Bean Validation and
+     * fails loudly at runtime; a response body fails silently, in the browser,
+     * as an empty cell.
+     */
+    /**
+     * Known drift, each with the task that closes it.
+     *
+     * <p><strong>An exemption is a debt, not a decision.</strong> Every entry
+     * names a task, so the list is auditable and shrinks; an entry without one
+     * is how a guard becomes decoration. Deliberately keyed on the exact
+     * operation rather than a prefix, so a *different* drift on the same path
+     * still fails.
+     */
+    private static final java.util.Map<String, String> KNOWN_DRIFT = java.util.Map.of(
+            "GET /tickets",
+            "D-061 — the list serves ticketCode/assignedTo where the contract says "
+                    + "ticketId/assignee. The backend rename is Stream C's half and is "
+                    + "written up for Divyansh; the contract half is D-061. This is the "
+                    + "drift that shipped a blank ID column on S-17.",
+
+            "GET /chat/threads/{threadId}/messages",
+            "D-053 — `attachments` is declared and not served because chat file share "
+                    + "is blocked on C-024/C-025 owning upload, MinIO keys and AV scan. "
+                    + "Declared intent, not a rename: nothing is served under a second "
+                    + "name. Remove this entry when D-053 lands.");
+
+    @Test
+    @DisplayName("every GET returns the property names its contract schema declares")
+    void responseBodiesCarryTheDeclaredPropertyNames() throws IOException {
+        JsonNode contract = readContract();
+        JsonNode served = readServedDocument();
+
+        List<String> drift = new ArrayList<>();
+        JsonNode contractPaths = contract.path("paths");
+
+        contractPaths.fieldNames().forEachRemaining(path -> {
+            JsonNode get = contractPaths.path(path).path("get");
+            if (get.isMissingNode()) return;
+
+            Set<String> declared = payloadProperties(contract, get);
+            if (declared.isEmpty()) return;   // no object payload to compare
+
+            JsonNode servedGet = servedOperation(served, path);
+            if (servedGet == null) return;    // not implemented yet — that is coverage, not drift
+
+            Set<String> actual = payloadProperties(served, servedGet);
+            if (actual.isEmpty()) return;
+
+            Set<String> missing = new TreeSet<>(declared); missing.removeAll(actual);
+            Set<String> extra   = new TreeSet<>(actual);   extra.removeAll(declared);
+            if (!missing.isEmpty() || !extra.isEmpty()) {
+                if (KNOWN_DRIFT.containsKey("GET " + path)) return;
+                drift.add("GET " + path
+                        + (missing.isEmpty() ? "" : "\n      declared but not served: " + missing)
+                        + (extra.isEmpty()   ? "" : "\n      served but not declared: " + extra));
+            }
+        });
+
+        if (!drift.isEmpty()) {
+            fail("""
+                    %d GET response(s) do not carry the property names their contract schema declares.
+
+                    The contract is the agreed shape and the frontend generates from it, so a name
+                    only the server knows reads as `undefined` in the browser — silently, and with a
+                    green build. Fix whichever side is wrong; if the server's shape is the better
+                    one, change the contract and regenerate the client (D-005 will insist).
+
+                    %s""".formatted(drift.size(), String.join("\n\n    ", drift)));
+        }
+    }
+
+    /**
+     * The property names of the payload a 200 carries.
+     *
+     * <p>Descends the {@code { data, meta }} envelope every operation uses, and
+     * through {@code data} being an array, so what comes back is the shape of
+     * one <em>item</em> — which is what a grid row binds to. Returns empty for
+     * anything that is not an object payload (a 204, a file download, a bare
+     * scalar), because there is nothing to compare rather than nothing matching.
+     */
+    private Set<String> payloadProperties(JsonNode document, JsonNode operation) {
+        JsonNode schema = resolve(document, operation
+                .path("responses").path("200")
+                .path("content").path("application/json").path("schema"));
+        if (schema.isMissingNode()) return Set.of();
+
+        JsonNode data = resolve(document, schema.path("properties").path("data"));
+        if (!data.isMissingNode()) schema = data;
+        if ("array".equals(schema.path("type").asText())) {
+            schema = resolve(document, schema.path("items"));
+        }
+
+        JsonNode properties = schema.path("properties");
+        if (!properties.isObject()) return Set.of();
+        Set<String> names = new TreeSet<>();
+        properties.fieldNames().forEachRemaining(names::add);
+        return names;
+    }
+
+    /**
+     * Follow {@code $ref} to the schema it names.
+     *
+     * <p>One hop is enough in practice and a loop would need cycle detection;
+     * a chain of refs resolves on the next level down when this is called again
+     * for {@code data} or {@code items}.
+     */
+    private JsonNode resolve(JsonNode document, JsonNode schema) {
+        if (schema == null || schema.isMissingNode()) return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+        JsonNode ref = schema.path("$ref");
+        if (!ref.isTextual()) return schema;
+        JsonNode at = document;
+        for (String step : ref.asText().replaceFirst("^#/", "").split("/")) {
+            at = at.path(step);
+        }
+        return at;
+    }
+
+    /** The served {@code get} for a contract path, matched on the normalised form. */
+    private JsonNode servedOperation(JsonNode served, String contractPath) {
+        JsonNode paths = served.path("paths");
+        String wanted = normalise(contractPath);
+        List<JsonNode> hit = new ArrayList<>();
+        paths.fieldNames().forEachRemaining(p -> {
+            if (normalise(p).equals(wanted) && paths.path(p).has("get")) {
+                hit.add(paths.path(p).path("get"));
+            }
+        });
+        return hit.isEmpty() ? null : hit.get(0);
+    }
+
     private JsonNode readContract() throws IOException {
         File dir = new File("").getAbsoluteFile();
         for (int i = 0; i < 6 && dir != null; i++, dir = dir.getParentFile()) {
