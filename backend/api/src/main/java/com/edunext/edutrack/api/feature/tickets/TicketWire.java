@@ -40,6 +40,10 @@ public final class TicketWire {
      *                      {@code currentIteration} increments on a backward
      *                      move within a cycle. Two independent counters
      *                      (§4A.2), the most misread pair in the spec
+     * @param pctComplete   C-036 · S-21's slider. Added after A-052 first wrote
+     *                      this record, hence out of the contract's own field
+     *                      order — appending rather than reordering keeps every
+     *                      existing caller's JSON a prefix of its new one
      */
     public record Ticket(
             long id,
@@ -65,7 +69,8 @@ public final class TicketWire {
             boolean isDelayed,
             String currentStage,
             int currentIteration,
-            int reworkCount) {
+            int reworkCount,
+            int pctComplete) {
     }
 
     /** The entity as the contract's {@code Ticket}. */
@@ -76,6 +81,7 @@ public final class TicketWire {
                 t.getEnvironment(), t.getDateReported(), t.getReportedBy(), t.getAssignedTo(),
                 t.getEstimatedEffortHrs(), t.getTotalEffortHrs(), t.getPlannedCloseDate(),
                 t.getActualCloseDate(), t.isReopened(), t.getReopenCount(), t.getCurrentCycleNo(),
-                t.isDelayed(), t.getCurrentStage(), t.getCurrentIteration(), t.getReworkCount());
+                t.isDelayed(), t.getCurrentStage(), t.getCurrentIteration(), t.getReworkCount(),
+                t.getPctComplete());
     }
 }

@@ -232,6 +232,14 @@ final class PermissionMatrix {
     private static final String EFFORT_LOG = """
             {"hours":2,"workDate":"2026-08-15"}""";
 
+    /**
+     * C-036 · {@code QuickUpdateDtos.QuickUpdateRequest}: every field is
+     * optional, so an empty object is already a valid body — the strongest
+     * fixture on {@link #CHANGE_PRIORITY}'s own reasoning, since it proves the
+     * row is not passing because some field happened to satisfy a validator.
+     */
+    private static final String QUICK_UPDATE = "{}";
+
     /** {@code PreferenceDtos.PreferenceUpdateRequest}: an empty list is valid. */
     private static final String PREFERENCES = """
             {"preferences":[]}""";
@@ -670,6 +678,13 @@ final class PermissionMatrix {
             // ticket the caller may not see is 404 (A-035) whatever they hold.
             everyRole("POST", "/api/v1/tickets/{ticketId}/effort", EFFORT_LOG),
             everyRole("GET", "/api/v1/tickets/{ticketId}/effort-logs"),
+
+            // ── quick update · C-036, S-21 ────────────────────────────────────
+            // The same ticket.update_progress as the effort row one line up —
+            // S-21's own status dropdown and effort field are the same
+            // capability as C-035's POST, and QuickUpdateController's own
+            // comment says so. A seventh role without the grant is denied here.
+            everyRole("POST", "/api/v1/tickets/{ticketId}/quick-update", QUICK_UPDATE),
 
             // ── ticket detail · every role, because permission is not scope ──
             //

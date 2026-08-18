@@ -111,6 +111,10 @@ public class Ticket {
     @Column(name = "total_effort_hrs", nullable = false, precision = 8, scale = 2)
     private BigDecimal totalEffortHrs = BigDecimal.ZERO;
 
+    /** 0-100, resource-reported — S-21 Quick Update's slider. */
+    @Column(name = "pct_complete", nullable = false)
+    private short pctComplete;
+
     @Column(name = "planned_close_date")
     private Instant plannedCloseDate;
 
@@ -314,6 +318,14 @@ public class Ticket {
 
     public void setTotalEffortHrs(BigDecimal totalEffortHrs) {
         this.totalEffortHrs = totalEffortHrs;
+    }
+
+    public short getPctComplete() {
+        return pctComplete;
+    }
+
+    public void setPctComplete(short pctComplete) {
+        this.pctComplete = pctComplete;
     }
 
     public Instant getPlannedCloseDate() {
