@@ -100,8 +100,14 @@ describe('S-20 Ticket detail shell — C-019', () => {
     const header = screen.getByRole('banner')
     // `availableActions` is resolved server-side; the client never re-derives it.
     expect(within(header).getByRole('button', { name: 'Close' })).toBeInTheDocument()
-    expect(within(header).getByRole('button', { name: 'Reopen' })).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: /Quick update/ })).toBeEnabled()
+
+    // C-039 · unlike Close (still C-040's placeholder), Reopen is wired —
+    // real button, opening the real dialog rather than the honest-refusal one.
+    const reopenButton = within(header).getByRole('button', { name: 'Reopen' })
+    expect(reopenButton).toBeEnabled()
+    await userEvent.setup().click(reopenButton)
+    expect(await screen.findByRole('dialog', { name: /reopen crm-26-00347/i })).toBeInTheDocument()
   })
 
   it('makes every entity in the summary panel a link to its own screen', async () => {

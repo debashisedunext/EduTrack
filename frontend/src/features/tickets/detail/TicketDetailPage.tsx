@@ -233,7 +233,11 @@ export function TicketDetailPage() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <TicketDetailHeader ticket={ticket} availableActions={detail?.availableActions} />
+      <TicketDetailHeader
+        ticket={ticket}
+        availableActions={detail?.availableActions}
+        onReopened={() => void refetch()}
+      />
 
       <div className="grid flex-1 gap-4 p-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-4">
