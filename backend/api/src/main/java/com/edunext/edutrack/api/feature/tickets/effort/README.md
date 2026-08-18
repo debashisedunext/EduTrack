@@ -2,7 +2,8 @@
 
 Append-only effort logging, auto-stamped with the ticket's current stage,
 iteration and cycle. C-036 (Quick Update) and C-061 (the Effort tab) are its
-consumers; this task is the write path and the paged read they call.
+consumers; this task is the write path and the paged read they call. C-041
+adds the materialised totals both writes now keep current.
 
 ## What is here
 
@@ -87,6 +88,35 @@ than from the ticket's unfiltered log, so a caller combining `?cycle=` with a
 zero against a real total that still reports the current cycle's true figure.
 Not fixed there — `frontend/src/mocks/` is Stream D's — but worth knowing before
 trusting a discrepancy found only under `npm run dev`.
+
+## C-041 · the materialised totals
+
+`ticket_cycles.effort_hrs` and `tickets.total_effort_hrs` have existed since
+the A-006 baseline, and `ReopenService`/`CloseService` already read them —
+`ReopenService`'s own javadoc says "cycle N's effort is never touched" on the
+assumption that `total_effort_hrs` is "already Σ across all cycles". Before
+this task neither claim was true: nothing had ever written either column
+outside `TicketFixtureGenerator`'s hand-computed figure, so every real `POST
+/tickets/{ticketId}/effort` left both at zero. `EffortLogService.refreshTotals`
+closes that — called from both `append` and `correct`, since a reversal is
+itself a signed row through the same append and belongs in the same running
+total.
+
+**The cycle credited is the entry's own (`saved.getCycleNo()`), never the
+ticket's current one.** A correction can reverse an entry on an earlier,
+already-sealed cycle — reopening does not freeze a cycle against correction,
+only against new ordinary entries — and crediting today's cycle instead would
+land the adjustment in the wrong cell, the same class of mistake
+`TicketJournal.requireReversesItsOwnBucket` guards against one layer down.
+`total_effort_hrs` has no such split: every entry moves it the same way
+regardless of cycle.
+
+**No explicit `save()` on either write.** Both `ticket` and the freshly loaded
+`TicketCycle` are entities already managed by this transaction's persistence
+context, and both writes land under the per-ticket lock `TicketJournal.append`
+took inside the same `@Transactional` method (PLAN.md §3.7) — the identical
+dirty-checking pattern `ReopenService` and `CloseService` already use for
+their own `Ticket`/`TicketCycle` mutations.
 
 ## Deliberately absent
 

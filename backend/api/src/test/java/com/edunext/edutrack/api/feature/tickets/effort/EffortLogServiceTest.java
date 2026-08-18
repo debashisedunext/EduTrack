@@ -4,6 +4,8 @@ import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
+import com.edunext.edutrack.domain.tickets.TicketCycle;
+import com.edunext.edutrack.domain.tickets.TicketCycleRepository;
 import com.edunext.edutrack.domain.tickets.TicketEffortLog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,10 +21,12 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyShort;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -62,8 +66,9 @@ class EffortLogServiceTest {
     private final ScopedTickets tickets = mock(ScopedTickets.class);
     private final TicketJournal journal = mock(TicketJournal.class);
     private final EffortLogUserRefs people = mock(EffortLogUserRefs.class);
+    private final TicketCycleRepository cycles = mock(TicketCycleRepository.class);
 
-    private final EffortLogService service = new EffortLogService(tickets, journal, people);
+    private final EffortLogService service = new EffortLogService(tickets, journal, people, cycles);
 
     /**
      * The third argument is load-bearing — {@code PriorityChangeServiceTest}'s
@@ -84,6 +89,12 @@ class EffortLogServiceTest {
         ticket = ticketInDevelopment();
         when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
         when(people.resolve(any())).thenReturn(Map.of());
+        // C-041's refreshTotals looks this up on every append and correction; a
+        // fresh zeroed cycle for whichever cycle_no is asked keeps every test
+        // that does not care about the totals from tripping the "no
+        // ticket_cycles row" guard. Tests that do care override this per cycle.
+        when(cycles.findByTicketIdAndCycleNo(eq(TICKET), anyShort()))
+                .thenAnswer(call -> Optional.of(ticketCycle(call.getArgument(1))));
     }
 
     // ── the stamp — the whole task ────────────────────────────────────────────
@@ -222,6 +233,90 @@ class EffortLogServiceTest {
         }
     }
 
+    // ── C-041 · the materialised totals ─────────────────────────────────────────
+
+    @Nested
+    @DisplayName("the materialised totals")
+    class Totals {
+
+        @Test
+        @DisplayName("an ordinary entry adds its hours to both the cycle and the ticket's grand total")
+        void ordinaryEntryAddsToBothTotals() {
+            ticket.setTotalEffortHrs(new BigDecimal("25.00"));
+            TicketCycle cycle = ticketCycle((short) 1, new BigDecimal("10.00"));
+            when(cycles.findByTicketIdAndCycleNo(TICKET, (short) 1)).thenReturn(Optional.of(cycle));
+            when(journal.append(any(TicketEffortLog.class))).thenAnswer(EffortLogServiceTest::persisted);
+
+            service.log(caller, TICKET_CODE, request(new BigDecimal("2.50"), "2026-08-15", "Retested"));
+
+            assertThat(cycle.getEffortHrs()).isEqualByComparingTo("12.50");
+            assertThat(ticket.getTotalEffortHrs()).isEqualByComparingTo("27.50");
+        }
+
+        @Test
+        @DisplayName("a correction subtracts using the reversal's signed hours, not the caller's")
+        void correctionSubtractsUsingTheReversalsHours() {
+            ticket.setTotalEffortHrs(new BigDecimal("10.00"));
+            TicketCycle cycle = ticketCycle((short) 1, new BigDecimal("10.00"));
+            when(cycles.findByTicketIdAndCycleNo(TICKET, (short) 1)).thenReturn(Optional.of(cycle));
+
+            TicketEffortLog original = existingEntryOn(TICKET, 501L);
+            when(journal.effortFor(TICKET, null)).thenReturn(List.of(original));
+            TicketEffortLog reversal = entryWith(502L, (short) 1, "DEVELOPMENT", new BigDecimal("-4.00"));
+            when(journal.reverseEffort(501L, "wrong stage")).thenReturn(reversal);
+
+            service.log(caller, TICKET_CODE,
+                    new EffortLogDtos.EffortLogRequest(new BigDecimal("99.00"), LocalDate.of(2020, 1, 1),
+                            "wrong stage", true, 501L));
+
+            assertThat(cycle.getEffortHrs()).isEqualByComparingTo("6.00");
+            assertThat(ticket.getTotalEffortHrs()).isEqualByComparingTo("6.00");
+        }
+
+        /**
+         * The ticket has moved on to cycle 2, but the correction reverses an
+         * entry that was logged in cycle 1 — sealed on reopen, but not frozen
+         * against a correction. Crediting cycle 2 (the ticket's current
+         * position) instead of cycle 1 (the entry's own) would land the
+         * adjustment in the wrong cell of the §4A.4 grid, the same class of
+         * mistake {@code TicketJournal.requireReversesItsOwnBucket} guards
+         * against for the entry itself.
+         */
+        @Test
+        @DisplayName("a correction on an earlier, sealed cycle credits that cycle, not the ticket's current one")
+        void correctionCreditsTheEntrysOwnCycle() {
+            ticket.setCurrentCycleNo((short) 2);
+            TicketCycle cycle1 = ticketCycle((short) 1, new BigDecimal("8.00"));
+            TicketCycle cycle2 = ticketCycle((short) 2, new BigDecimal("0.00"));
+            when(cycles.findByTicketIdAndCycleNo(TICKET, (short) 1)).thenReturn(Optional.of(cycle1));
+            when(cycles.findByTicketIdAndCycleNo(TICKET, (short) 2)).thenReturn(Optional.of(cycle2));
+
+            TicketEffortLog original = existingEntryOn(TICKET, 501L);
+            when(journal.effortFor(TICKET, null)).thenReturn(List.of(original));
+            TicketEffortLog reversal = entryWith(502L, (short) 1, "DEVELOPMENT", new BigDecimal("-3.00"));
+            when(journal.reverseEffort(501L, "correcting cycle 1")).thenReturn(reversal);
+
+            service.log(caller, TICKET_CODE,
+                    new EffortLogDtos.EffortLogRequest(new BigDecimal("99.00"), LocalDate.of(2020, 1, 1),
+                            "correcting cycle 1", true, 501L));
+
+            assertThat(cycle1.getEffortHrs()).isEqualByComparingTo("5.00");
+            assertThat(cycle2.getEffortHrs()).isEqualByComparingTo("0.00");
+        }
+
+        @Test
+        @DisplayName("a ticket_cycles row missing for the entry's cycle fails loudly rather than silently skipping the total")
+        void missingCycleRowFailsLoudly() {
+            when(cycles.findByTicketIdAndCycleNo(TICKET, (short) 1)).thenReturn(Optional.empty());
+            when(journal.append(any(TicketEffortLog.class))).thenAnswer(EffortLogServiceTest::persisted);
+
+            assertThatThrownBy(() -> service.log(caller, TICKET_CODE,
+                    request(new BigDecimal("2.00"), "2026-08-15", null)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("ticket_cycles");
+        }
+    }
+
     // ── fixtures ───────────────────────────────────────────────────────────────
 
     private static EffortLogDtos.EffortLogRequest request(BigDecimal hours, String workDate, String note) {
@@ -271,5 +366,17 @@ class EffortLogServiceTest {
         e.setWorkDate(LocalDate.of(2026, 8, 15));
         e.setHours(hours);
         return e;
+    }
+
+    private static TicketCycle ticketCycle(short cycleNo) {
+        return ticketCycle(cycleNo, BigDecimal.ZERO);
+    }
+
+    private static TicketCycle ticketCycle(short cycleNo, BigDecimal effortHrs) {
+        TicketCycle c = new TicketCycle();
+        c.setTicketId(TICKET);
+        c.setCycleNo(cycleNo);
+        c.setEffortHrs(effortHrs);
+        return c;
     }
 }
