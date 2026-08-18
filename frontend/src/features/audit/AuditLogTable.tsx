@@ -1,4 +1,4 @@
-import { Bot, ShieldAlert } from 'lucide-react'
+import { Bot, ShieldAlert, UserX } from 'lucide-react'
 import type { AuditLogEntry } from '@/api/generated/model'
 import {
   Table,
@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 
-import { actionLabel, isRefusal, moduleLabel } from './auditVocabulary'
+import { actionLabel, isRefusal, isUnauthenticatedAttempt, moduleLabel } from './auditVocabulary'
 
 /**
  * A-071 · the grid S-16 describes, and nothing else.
@@ -96,15 +96,35 @@ export function AuditLogTable({ entries }: { entries: AuditLogEntry[] }) {
 }
 
 /**
- * The three states of an actor, all of which are real.
+ * The four states of an actor, all of which are real and none of which may be
+ * rendered as another.
  *
- * <p>No actor means SYSTEM — a scanner or the mail engine. An actor whose
- * account has since been removed arrives with a name the server built from the
- * id, because a row outlives its actor and rendering it as "System" would file
- * somebody's actions under nobody's.
+ * <p><b>A null actor means two different things.</b> On a scanner's row it means
+ * SYSTEM — the nightly verifier or the mail engine, with no human behind it. On
+ * a failed sign-in it means nobody was authenticated, and the server
+ * deliberately never resolved the submitted name to a user id, because A-020's
+ * endpoint does not say whether a name matched an account. Rendering the second
+ * as "System" reads as though the mail engine tried to sign in as `jsmith` —
+ * exactly backwards, on the one screen whose entire job is being precise about
+ * who did what. So the attempted identifier is shown instead, from `detail.new`,
+ * which is the only place it exists.
+ *
+ * <p>An actor whose account has since been removed arrives with a name the
+ * server built from the id, because a row outlives its actor and rendering that
+ * as "System" would file somebody's actions under nobody's.
  */
 function Actor({ entry }: { entry: AuditLogEntry }) {
   if (!entry.actor) {
+    if (isUnauthenticatedAttempt(entry.action)) {
+      const attempted = attemptedIdentifier(entry)
+      return (
+        <span className="inline-flex items-center gap-1.5">
+          <UserX className="h-3.5 w-3.5 shrink-0 text-content-muted" aria-hidden />
+          <span>{attempted ?? 'Unknown'}</span>
+          <span className="text-caption text-content-muted">not signed in</span>
+        </span>
+      )
+    }
     return (
       <span className="inline-flex items-center gap-1.5 text-content-muted">
         <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -120,6 +140,21 @@ function Actor({ entry }: { entry: AuditLogEntry }) {
       )}
     </span>
   )
+}
+
+/**
+ * What was typed into the username box, which the server records in
+ * `detail.new` and resolves nowhere.
+ *
+ * <p>Returns undefined rather than a placeholder when it is missing, so the
+ * caller decides what absence looks like — a row that reached this branch with
+ * no identifier is a server-side gap worth showing as "Unknown" rather than as
+ * a convincing empty name.
+ */
+function attemptedIdentifier(entry: AuditLogEntry): string | undefined {
+  const detail = entry.detail as Record<string, unknown> | undefined
+  const attempted = detail?.new
+  return typeof attempted === 'string' && attempted.length > 0 ? attempted : undefined
 }
 
 /**

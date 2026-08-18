@@ -265,6 +265,24 @@ class AuditInterceptorTest {
         }
 
         /**
+         * Measured rather than argued: one idle browser wrote eight of these in
+         * six minutes on the first run against a real database. A refresh is a
+         * timer, not something somebody did, and the table it would fill has a
+         * DELETE trigger — nothing can ever be pruned from it. The session's
+         * start and end are recorded; its middle is machinery.
+         */
+        @Test
+        @DisplayName("is the token refresh, which fires on a timer forever")
+        void isTheRefreshRoute() {
+            signedInAs(7L);
+
+            interceptor.afterCompletion(
+                    request("POST", "/api/v1/auth/refresh", Map.of()), response(200), handler, null);
+
+            verifyNoInteractions(trail);
+        }
+
+        /**
          * The caller is a mail provider with no EduTrack account, so every row
          * would carry a null actor and read as SYSTEM — which is reserved for
          * our own scanners.

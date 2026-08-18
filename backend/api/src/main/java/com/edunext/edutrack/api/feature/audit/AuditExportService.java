@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * A-071 · "Export only" — the export half.
@@ -54,6 +55,15 @@ class AuditExportService {
             List.of(ReportExporter.Format.XLSX, ReportExporter.Format.CSV);
 
     private static final String TITLE = "Audit log";
+
+    /**
+     * The login outcomes reachable without a session, where a null actor means
+     * "nobody" rather than "a scanner". Mirrors {@code isUnauthenticatedAttempt}
+     * in the frontend's auditVocabulary.ts — two copies, in two languages, of a
+     * four-element list that only grows when a login outcome is added.
+     */
+    private static final Set<String> UNAUTHENTICATED = Set.of(
+            "LOGIN_FAILED", "LOGIN_THROTTLED", "LOGIN_LOCKED_OUT", "LOGIN_2FA_FAILED");
 
     /** The sheet's columns, in the order S-16 lists them. */
     private static final List<ReportDtos.Column> COLUMNS = List.of(
@@ -166,10 +176,34 @@ class AuditExportService {
      * {@code Map.of} rejects a null value with an NPE at the first such row,
      * which is every export.
      */
+    /**
+     * The Who column, and the reason it is not simply the actor's name.
+     *
+     * <p>A null actor means two different things and the sheet must not conflate
+     * them: on a scanner's row it is SYSTEM, and on a failed sign-in it is
+     * nobody — the server deliberately never resolved what was typed, so the
+     * identifier lives in {@code detail.new} and nowhere else. Writing "System"
+     * against a failed login would put a spreadsheet in circulation saying the
+     * mail engine tried to sign in as somebody. The screen makes the same
+     * distinction, in {@code AuditLogTable}; an export that disagreed with the
+     * table above it is the failure the reports README already names.
+     */
+    static String whoFor(AuditDtos.Entry entry) {
+        if (entry.actor() != null) {
+            return entry.actor().displayName();
+        }
+        Object attempted = entry.detail() == null ? null : entry.detail().get("new");
+        if (UNAUTHENTICATED.contains(entry.action()) && attempted instanceof String identifier
+                && !identifier.isBlank()) {
+            return identifier + " (not signed in)";
+        }
+        return "System";
+    }
+
     private static Map<String, Object> asRow(AuditDtos.Entry entry) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("createdAt", entry.createdAt().toString());
-        row.put("actor", entry.actor() == null ? "System" : entry.actor().displayName());
+        row.put("actor", whoFor(entry));
         row.put("role", entry.actor() == null ? null : entry.actor().role());
         row.put("action", entry.action());
         row.put("entityType", entry.entityType());

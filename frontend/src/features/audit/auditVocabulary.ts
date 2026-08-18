@@ -92,3 +92,29 @@ export function isRefusal(action: string | undefined): boolean {
     action === 'LOGIN_2FA_FAILED'
   )
 }
+
+/**
+ * True for the terms where a null actor means "nobody was signed in", as
+ * opposed to "a scanner did this".
+ *
+ * `actor_id` is null on both, and the viewer must not render them the same way.
+ * A failed sign-in shown as *System* reads as though the mail engine tried to
+ * log in as `jsmith` — the opposite of what happened, and on the one screen
+ * where being precise about who did what is the entire point. These four are
+ * the login outcomes that are reachable without a session; `LOGIN_SUCCESS` and
+ * `LOGOUT` always carry their actor.
+ *
+ * The server deliberately does not resolve the submitted identifier to a user
+ * id (A-020: the endpoint never says whether a name matched an account), so the
+ * name is in `detail.new` and nowhere else — which is why the table reads it
+ * from there rather than expecting an actor.
+ */
+export function isUnauthenticatedAttempt(action: string | undefined): boolean {
+  if (!action) return false
+  return (
+    action === 'LOGIN_FAILED' ||
+    action === 'LOGIN_THROTTLED' ||
+    action === 'LOGIN_LOCKED_OUT' ||
+    action === 'LOGIN_2FA_FAILED'
+  )
+}

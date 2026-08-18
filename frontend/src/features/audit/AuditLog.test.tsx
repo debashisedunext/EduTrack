@@ -7,7 +7,7 @@ import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 
 import { AuditLogPage } from './AuditLogPage'
-import { actionLabel, isRefusal, moduleLabel } from './auditVocabulary'
+import { actionLabel, isRefusal, isUnauthenticatedAttempt, moduleLabel } from './auditVocabulary'
 
 /**
  * A-071 · S-16 against the mock server.
@@ -20,9 +20,19 @@ import { actionLabel, isRefusal, moduleLabel } from './auditVocabulary'
  * a "no entries" that is really a permission refusal.
  */
 
+/**
+ * Four rows covering the four actor states, one each, because they are the
+ * thing this screen most easily gets wrong.
+ *
+ * <p>Note that no row is both a deleted user and a failed sign-in: the server
+ * cannot produce one. A failed sign-in has a null actor *by design* — A-020's
+ * endpoint never resolves what was typed — so a fixture giving it a
+ * `displayName` would be asserting against a row that cannot exist, and would
+ * make the "not signed in" rendering untestable while looking like coverage.
+ */
 const ENTRIES = [
   {
-    id: 3,
+    id: 4,
     actor: { id: 7, displayName: 'Ravi Kumar', role: 'ADMIN' },
     action: 'PERMISSIONS_UPDATED',
     entityType: 'masters',
@@ -33,7 +43,7 @@ const ENTRIES = [
     createdAt: '2026-08-18T09:15:00.123456Z',
   },
   {
-    id: 2,
+    id: 3,
     actor: null,
     action: 'CHAIN_VERIFIED',
     entityType: 'tickets',
@@ -44,8 +54,19 @@ const ENTRIES = [
     createdAt: '2026-08-18T03:00:00Z',
   },
   {
-    id: 1,
+    id: 2,
     actor: { id: 12, displayName: 'Deleted user #12', role: null },
+    action: 'TICKETS_CREATED',
+    entityType: 'tickets',
+    entityId: 'CRM-26-00351',
+    ipAddress: '203.0.113.4',
+    userAgent: 'Mozilla/5.0',
+    detail: null,
+    createdAt: '2026-08-18T01:20:00Z',
+  },
+  {
+    id: 1,
+    actor: null,
     action: 'LOGIN_FAILED',
     entityType: 'users',
     entityId: null,
@@ -80,8 +101,8 @@ describe('AuditLogPage', () => {
     renderPage()
 
     const rows = await screen.findAllByRole('row')
-    // Header plus three entries.
-    expect(rows).toHaveLength(4)
+    // Header plus four entries.
+    expect(rows).toHaveLength(5)
     expect(within(rows[1]).getByText('Permissions updated')).toBeInTheDocument()
   })
 
@@ -124,6 +145,28 @@ describe('AuditLogPage', () => {
     renderPage()
 
     expect(await screen.findByText('Deleted user #12')).toBeInTheDocument()
+  })
+
+
+  /**
+   * A null actor means two different things, and this is the pair that must not
+   * collapse. `LOGIN_FAILED` carries no actor because the server refuses to
+   * resolve what was typed — showing it as "System" would say the mail engine
+   * tried to sign in as `jsmith`, which is backwards on the one screen whose
+   * job is being precise about who did what.
+   */
+  it('shows a failed sign-in as the attempted name, not as System', async () => {
+    respondWith(ENTRIES)
+    renderPage()
+
+    const rows = await screen.findAllByRole('row')
+    // rows[0] is the header. rows[4] is the LOGIN_FAILED entry (no actor,
+    // nobody signed in); rows[2] is the actorless scanner row (SYSTEM). The
+    // two must not render the same way.
+    expect(within(rows[4]).getByText('jsmith')).toBeInTheDocument()
+    expect(within(rows[4]).getByText(/not signed in/i)).toBeInTheDocument()
+    expect(within(rows[4]).queryByText('System')).not.toBeInTheDocument()
+    expect(within(rows[2]).getByText('System')).toBeInTheDocument()
   })
 
   it('renders a ticket code as the record, not a blank', async () => {
@@ -186,7 +229,7 @@ describe('AuditLogPage', () => {
               data: [ENTRIES[0]],
               meta: { nextCursor: 'next', hasMore: true },
             })
-          : HttpResponse.json({ data: [ENTRIES[2]], meta: { nextCursor: null, hasMore: false } })
+          : HttpResponse.json({ data: [ENTRIES[3]], meta: { nextCursor: null, hasMore: false } })
       }),
       http.get('*/users', () => HttpResponse.json({ data: [] })),
     )
@@ -264,5 +307,18 @@ describe('the vocabulary', () => {
     expect(isRefusal('LOGIN_SUCCESS')).toBe(false)
     expect(isRefusal('TICKETS_CREATED')).toBe(false)
     expect(isRefusal(undefined)).toBe(false)
+  })
+
+  /**
+   * The narrower predicate: which of the refusals mean nobody was signed in.
+   * ACCESS_DENIED is a refusal and is NOT one of these — it always has an
+   * actor, because @PreAuthorize only refuses somebody who authenticated.
+   */
+  it('separates unauthenticated attempts from refusals that have an actor', () => {
+    expect(isUnauthenticatedAttempt('LOGIN_FAILED')).toBe(true)
+    expect(isUnauthenticatedAttempt('LOGIN_2FA_FAILED')).toBe(true)
+    expect(isUnauthenticatedAttempt('ACCESS_DENIED')).toBe(false)
+    expect(isUnauthenticatedAttempt('LOGIN_SUCCESS')).toBe(false)
+    expect(isUnauthenticatedAttempt('LOGOUT')).toBe(false)
   })
 })

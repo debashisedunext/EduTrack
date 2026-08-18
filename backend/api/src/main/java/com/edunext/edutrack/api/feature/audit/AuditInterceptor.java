@@ -93,6 +93,31 @@ class AuditInterceptor implements HandlerInterceptor {
             "/api/v1/auth/login",
             "/api/v1/auth/logout");
 
+    /**
+     * Mutating routes that are machinery rather than something somebody did.
+     *
+     * <p>{@code POST /auth/refresh} is the whole of it, and it earns the
+     * exclusion by measurement rather than by argument: one idle browser wrote
+     * <b>eight rows in six minutes</b> on the first run against a real
+     * database. It fires on a timer, per session, for as long as anybody is
+     * signed in — into a table whose DELETE trigger means nothing can ever be
+     * pruned from it.
+     *
+     * <p>Nothing is lost by dropping it. A session's start is
+     * {@code LOGIN_SUCCESS} and its end is {@code LOGOUT}; the refreshes in
+     * between say only that the session had not ended yet, which those two
+     * rows already establish between them. Token *reuse* — the event that
+     * actually matters on this route — is A-024's alarm and revokes the whole
+     * family, which is a security event with its own path and not a line in a
+     * scroll of routine activity.
+     *
+     * <p>This is the same judgement the 401 exclusion makes one paragraph up:
+     * a row describing a token lifetime rather than a person is noise, and
+     * noise on an unprunable table is how the entries that matter become
+     * unfindable.
+     */
+    private static final Set<String> NOT_AN_ACTION = Set.of("/api/v1/auth/refresh");
+
     /** Prefixes skipped entirely — see the class javadoc. */
     private static final Set<String> IGNORED_MODULES = Set.of("webhooks");
 
@@ -111,7 +136,8 @@ class AuditInterceptor implements HandlerInterceptor {
             return;
         }
         String pattern = patternOf(request);
-        if (pattern == null || SELF_RECORDED.contains(pattern)) {
+        if (pattern == null || SELF_RECORDED.contains(pattern)
+                || NOT_AN_ACTION.contains(pattern)) {
             return;
         }
         Optional<String> module = AuditActions.moduleFor(pattern);

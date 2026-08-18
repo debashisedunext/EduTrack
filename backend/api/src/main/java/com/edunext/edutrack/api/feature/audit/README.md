@@ -81,6 +81,12 @@ failure, and the route records itself so the interceptor writes nothing either.
   all describing a token lifetime rather than a person. **403 is recorded**: an
   authenticated human was told no, and on a read it is the only trace there is.
 - **Failed mutations** other than 403. A validation error changed nothing.
+- **`POST /auth/refresh`.** Measured, not argued: one idle browser wrote **eight
+  rows in six minutes** on the first run against a real database. It fires on a
+  timer, per session, for as long as anybody is signed in — into a table nothing
+  can be pruned from. `LOGIN_SUCCESS` and `LOGOUT` bracket the session; the
+  refreshes in between only say it had not ended yet. Token *reuse* is A-024's
+  alarm and has its own path.
 - **`/webhooks/**`.** The caller is a mail provider with no account, so every row
   would read as SYSTEM, which is reserved for our own scanners. `email_log`
   already covers it.

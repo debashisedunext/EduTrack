@@ -305,6 +305,44 @@ class AuditServiceTest {
             assertThat(described).contains("actor 7").contains("LOGIN_FAILED").contains("users");
         }
 
+
+        /**
+         * A null actor means two different things and the sheet must not
+         * conflate them. A failed sign-in written as "System" would put a
+         * spreadsheet into circulation saying the mail engine tried to log in
+         * as somebody — and unlike the screen, a file gets forwarded.
+         */
+        @Test
+        void aFailedSignInIsNotAttributedToTheSystem() {
+            AuditDtos.Entry attempt = new AuditDtos.Entry(1L, null, "LOGIN_FAILED", "users",
+                    null, "198.51.100.4", "curl/8",
+                    AuditDtos.detailOf(null, "jsmith"), WHEN);
+
+            assertThat(AuditExportService.whoFor(attempt)).isEqualTo("jsmith (not signed in)");
+        }
+
+        @Test
+        void butAScannerStillIs() {
+            AuditDtos.Entry scanner = new AuditDtos.Entry(1L, null, "CHAIN_VERIFIED", "tickets",
+                    null, null, null, null, WHEN);
+
+            assertThat(AuditExportService.whoFor(scanner)).isEqualTo("System");
+        }
+
+        /**
+         * ACCESS_DENIED is a refusal and always has an actor — {@code
+         * @PreAuthorize} only refuses somebody who authenticated — so it must
+         * not take the "not signed in" branch even though it is a refusal.
+         */
+        @Test
+        void andARefusalWithAnActorIsNamed() {
+            AuditDtos.Entry denied = new AuditDtos.Entry(1L,
+                    new AuditDtos.UserRef(3L, "Neha Sharma", "DEVELOPER"),
+                    "ACCESS_DENIED", "audit_logs", null, null, null, null, WHEN);
+
+            assertThat(AuditExportService.whoFor(denied)).isEqualTo("Neha Sharma");
+        }
+
         /** PDF is offered on reports and deliberately not here. */
         @Test
         void pdfIsNotOffered() {
