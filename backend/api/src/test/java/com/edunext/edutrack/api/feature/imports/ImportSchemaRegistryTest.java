@@ -135,6 +135,12 @@ class ImportSchemaRegistryTest {
                 return naturalKey;
             }
 
+            /** Never reached: every test here fails the registration at construction. */
+            @Override
+            public ImportReversal reverse(long batchId) {
+                throw new AssertionError("A malformed registration was asked to reverse a batch.");
+            }
+
             @Override
             public java.util.Map<String, java.util.Map<String, String>> findExisting(
                     Set<String> naturalKeyValues) {

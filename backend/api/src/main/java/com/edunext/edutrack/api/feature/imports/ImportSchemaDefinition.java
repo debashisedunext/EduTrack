@@ -123,6 +123,49 @@ public interface ImportSchemaDefinition {
     void upsert(ImportRow row, Long importBatchId);
 
     /**
+     * B-037 · <b>take one run back as a set.</b>
+     *
+     * <p>Blueprint §4B.3's closing rule and §17's mitigation: <i>every import
+     * writes an {@code import_batch} row so a bad import can be identified and
+     * reversed as a set.</i> The identification is {@code import_batch_id} on
+     * the row; this is the reversal, and it is on the SPI rather than in the
+     * engine for the reason every other method here is — the engine does not
+     * know what a client is, and B-038 must not have to write a second one.
+     *
+     * <p><b>Only rows this run created.</b> {@link #upsert} stamps the batch id
+     * on insert and never on update, so a row the run merely edited is not
+     * attributed to it. That is not a simplification: there is no before image
+     * anywhere, so an update is not a thing a reversal could undo. An
+     * implementation that widened this to "everything the run touched" would
+     * delete clients that existed before the import and merely had a phone
+     * number corrected by it.
+     *
+     * <p><b>A row something else now references is retained, not destroyed.</b>
+     * The batch is not more important than the work that has happened since:
+     * failing the whole reversal because one client acquired a ticket is
+     * unhelpful, and deleting the ticket's client to get the count to zero is
+     * worse. Retained rows come back named, with a reason a person can read.
+     *
+     * <p>Called once per batch by {@link ImportReversalService}, which has
+     * already refused a run that is still going and a run already reversed — so
+     * an implementation does not re-check either. It runs inside no ambient
+     * transaction; an implementation that deletes many rows should commit them
+     * in units small enough that a surprise reference retains one row rather
+     * than losing the set, exactly as {@link ImportCommitRunner} does on the way
+     * in.
+     *
+     * <p><b>The {@code import_batches} row itself is never deleted</b> — by this
+     * method or by anything else. It is the audit trail, and a reversal that
+     * erased its own record would leave the master short of rows with nothing
+     * anywhere explaining why.
+     *
+     * @param batchId the run to take back
+     * @return what was removed and what was kept. Never null; a run that created
+     *         nothing returns {@link ImportReversal#none()}
+     */
+    ImportReversal reverse(long batchId);
+
+    /**
      * How two spellings of the same key are recognised as one.
      *
      * <p>Applies to duplicate-in-file detection and to the existence probe

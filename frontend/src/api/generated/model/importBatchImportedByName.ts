@@ -46,8 +46,20 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ImportBatch } from './importBatch';
 
-export interface ImportBatchResponse {
-  data: ImportBatch;
-}
+/**
+ * `importedBy` resolved to a display name — `full_name`, falling back to
+the username.
+
+**Present on `listImportBatches`, null on `getImportBatch`.** The poll
+deliberately does not resolve it: the screen watching a progress bar
+knows perfectly well who started the run, because they just pressed
+the button, and a user lookup every two seconds for the length of an
+import is a query per poll for a string that cannot change.
+
+Null also when the account has since been deleted. The panel then
+renders the run unattributed, which is the truth, rather than an
+"Unknown user" placeholder that looks like a person.
+
+ */
+export type ImportBatchImportedByName = string | null;

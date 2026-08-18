@@ -3,15 +3,20 @@ package com.edunext.edutrack.api.feature.imports.schemas;
 import com.edunext.edutrack.api.feature.imports.FieldValidators;
 import com.edunext.edutrack.api.feature.imports.ImportField;
 import com.edunext.edutrack.api.feature.imports.ImportFieldType;
+import com.edunext.edutrack.api.feature.imports.ImportReversal;
 import com.edunext.edutrack.api.feature.imports.ImportRow;
 import com.edunext.edutrack.api.feature.imports.ImportSchemaDefinition;
 import com.edunext.edutrack.domain.clients.Client;
 import com.edunext.edutrack.domain.clients.ClientCodeFormat;
 import com.edunext.edutrack.domain.clients.ClientRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,10 +39,14 @@ import java.util.function.Consumer;
 @Component
 public class ClientImportSchema implements ImportSchemaDefinition {
 
-    private final ClientRepository clients;
+    private static final Logger log = LoggerFactory.getLogger(ClientImportSchema.class);
 
-    ClientImportSchema(ClientRepository clients) {
+    private final ClientRepository clients;
+    private final ClientImportReferences references;
+
+    ClientImportSchema(ClientRepository clients, ClientImportReferences references) {
         this.clients = clients;
+        this.references = references;
     }
 
     /** Matches the contract's {@code ImportSchema} enum — the generated client already calls this path. */
@@ -262,6 +271,94 @@ public class ClientImportSchema implements ImportSchemaDefinition {
         setDate(row, "contractEnd", client::setContractEnd);
 
         clients.save(client);
+    }
+
+    /**
+     * B-037 · every client this run <b>created</b>, deleted as a set.
+     *
+     * <p>Blueprint §4B.3's closing validation rule, and §17's mitigation for
+     * "Client Excel import silently corrupts the master". The identification is
+     * {@code clients.import_batch_id}, stamped by {@link #upsert} on insert only;
+     * this is the reversal it was stamped for, and it is the first reader of
+     * {@code ClientRepository.findByImportBatchId} and of
+     * {@code ix_clients_import_batch}.
+     *
+     * <h2>Created, never merely updated</h2>
+     *
+     * <p>A client the run edited carries some earlier batch's id, or none, so it
+     * is not in this list and is not touched. That is the property that makes the
+     * whole operation safe to offer: a spreadsheet that created 12 clients and
+     * corrected the phone numbers of 400 reverses to "12 deleted", not to 412
+     * clients removed from the master. There is no before image anywhere, so the
+     * 400 could not be restored even if they were in scope — which is the
+     * honest reason the promise is worded "reversed as a set" rather than
+     * "undone".
+     *
+     * <h2>One client, one transaction</h2>
+     *
+     * <p>The same shape {@code ImportCommitRunner} uses on the way in, for the
+     * same reason: a row that cannot be removed costs that row and not the set.
+     * A single transaction over 400 deletes would be rolled back whole by one
+     * client that acquired a ticket while the operator was reading the history
+     * panel — turning the most ordinary partial case into total failure.
+     *
+     * <p>The contacts and the client go in one transaction together, though.
+     * Those two are not independent: a client whose contacts were removed and
+     * whose own delete then failed is a client that has silently lost data with
+     * nothing recording that it happened.
+     *
+     * <h2>Two mechanisms for "cannot delete", on purpose</h2>
+     *
+     * <p>{@link ClientImportReferences#ticketCounts} answers the case that
+     * actually occurs and can say something useful about it — a count the
+     * operator can go and look at. The {@code catch} below is the backstop for
+     * anything else that references {@code clients}, including a foreign key a
+     * future stream adds that this file cannot know about. Only the first can
+     * produce a good sentence; only the second is complete.
+     */
+    @Override
+    public ImportReversal reverse(long batchId) {
+        List<Client> created = clients.findByImportBatchId(batchId);
+        if (created.isEmpty()) {
+            return ImportReversal.none();
+        }
+
+        Map<Long, Long> ticketCounts =
+                references.ticketCounts(created.stream().map(Client::getId).toList());
+
+        List<String> deleted = new ArrayList<>();
+        List<ImportReversal.Retained> retained = new ArrayList<>();
+
+        for (Client client : created) {
+            Long tickets = ticketCounts.get(client.getId());
+            if (tickets != null && tickets > 0) {
+                retained.add(new ImportReversal.Retained(client.getClientCode(),
+                        tickets == 1
+                                ? "Kept — 1 ticket has been raised against this client since the import."
+                                : "Kept — " + tickets + " tickets have been raised against this client"
+                                        + " since the import."));
+                continue;
+            }
+
+            try {
+                references.deleteClientAndContacts(client.getId());
+                deleted.add(client.getClientCode());
+            } catch (DataIntegrityViolationException stillReferenced) {
+                // The backstop, not the expected path. Deliberately vague on the
+                // wire and specific in the log — B-036 made the same call about
+                // the error report's Reason column, and for the same reason: the
+                // exception carries a constraint name, a table name and sometimes
+                // the SQL, and this text is read on a screen and pasted into
+                // email.
+                log.warn("Import batch {} — client {} could not be deleted: {}",
+                        batchId, client.getClientCode(), stillReferenced.toString());
+                retained.add(new ImportReversal.Retained(client.getClientCode(),
+                        "Kept — something created since the import still refers to this client."
+                                + " The detail is in the server log for import #" + batchId + "."));
+            }
+        }
+
+        return new ImportReversal(List.copyOf(deleted), List.copyOf(retained));
     }
 
     private static void set(ImportRow row, String field, Consumer<String> setter) {

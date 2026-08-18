@@ -88,24 +88,61 @@ class ImportEngineIsolationTest {
         assertThat(registrationSources()).isNotEmpty();
     }
 
+    /**
+     * B-037 · the one file allowed to name {@code domain.identity}, and why.
+     *
+     * <p>{@code import_batches.imported_by} and {@code reversed_by} are columns
+     * on the engine's <em>own</em> record of a run — the same reason
+     * {@link #FORBIDDEN_IN_ENGINE} already excludes {@code domain.imports}
+     * wholesale. Turning those ids into a display name for the history panel is
+     * true of every registration and specific to none, so it is engine behaviour
+     * by this test's own definition: there is nothing a {@code ClientImportSchema}
+     * would do differently from B-038's resource registration.
+     *
+     * <p><b>Named per file rather than allowed per package</b>, so the rule still
+     * catches what it is for. An engine class reaching for a {@code User} to
+     * decide what a <em>row</em> means would be the first half of a second
+     * implementation and is still refused; this one reads an actor off the batch
+     * and returns a string.
+     *
+     * <p>The exempted file gets the other two packages checked as normal, and
+     * {@link #engineExemptionsAreLive()} fails if it is ever deleted — a stale
+     * exemption is a rule quietly not enforced against whatever is written next
+     * under that name.
+     */
+    private static final Map<String, String> ENGINE_EXEMPTIONS = Map.of(
+            "ImportBatchUserNames.java", "com.edunext.edutrack.domain.identity");
+
     @Test
     @DisplayName("the engine knows nothing about clients — that belongs in a registration")
     void theEngineDoesNotDependOnAnyBusinessEntity() {
         for (Path source : engineSources()) {
             String body = read(source);
-            FORBIDDEN_IN_ENGINE.forEach((forbiddenPackage, what) ->
-                    assertThat(body)
-                            .as("""
-                                    %s references %s (%s).
+            String exempt = ENGINE_EXEMPTIONS.get(source.getFileName().toString());
 
-                                    The import engine is written once and registered twice \
-                                    (B-030, blueprint §4B.3) — a dependency here is the first \
-                                    half of a second implementation. Put the entity-specific \
-                                    behaviour in an ImportSchemaDefinition under .schemas, \
-                                    where ClientImportSchema already lives and where B-038's \
-                                    resource registration will go.""",
-                                    source.getFileName(), forbiddenPackage, what)
-                            .doesNotContain(forbiddenPackage));
+            FORBIDDEN_IN_ENGINE.forEach((forbiddenPackage, what) -> {
+                if (forbiddenPackage.equals(exempt)) {
+                    return;
+                }
+                assertThat(body)
+                        .as("""
+                                %s references %s (%s).
+
+                                The import engine is written once and registered twice                                 (B-030, blueprint §4B.3) — a dependency here is the first                                 half of a second implementation. Put the entity-specific                                 behaviour in an ImportSchemaDefinition under .schemas,                                 where ClientImportSchema already lives and where B-038's                                 resource registration will go.""",
+                                source.getFileName(), forbiddenPackage, what)
+                        .doesNotContain(forbiddenPackage);
+            });
+        }
+    }
+
+    @Test
+    @DisplayName("every exemption names a file that still exists")
+    void engineExemptionsAreLive() {
+        for (String fileName : ENGINE_EXEMPTIONS.keySet()) {
+            assertThat(engineSources())
+                    .as("%s is exempted from the engine dependency rule but no longer exists",
+                            fileName)
+                    .anyMatch(source -> source.getFileName().toString().equals(fileName));
         }
     }
 
@@ -137,9 +174,22 @@ class ImportEngineIsolationTest {
         // clothes. Anything two registrations need is engine behaviour.
         Pattern otherRegistration = Pattern.compile("\\b(\\w+)ImportSchema\\b");
 
+        // B-037 narrowed this from "every file under .schemas" to "every file that
+        // implements the SPI", so it agrees with registrationsAreWhereTheyAreExpected
+        // below, which already uses that as the definition of a registration.
+        //
+        // The broader reading caught ClientImportReferences — a small query class
+        // the client registration owns, which names ClientImportSchema in its own
+        // javadoc. That is not a registration reusing another registration; it is
+        // a helper naming the one thing it exists for, and refusing it would push
+        // every registration into a single file to stay legal.
         for (Path source : registrationSources()) {
+            String body = read(source);
+            if (!body.contains("implements ImportSchemaDefinition")) {
+                continue;
+            }
             String self = source.getFileName().toString().replace(".java", "");
-            otherRegistration.matcher(read(source)).results()
+            otherRegistration.matcher(body).results()
                     .map(match -> match.group())
                     .filter(referenced -> !referenced.equals(self))
                     .forEach(referenced -> assertThat(referenced)

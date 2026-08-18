@@ -46,8 +46,13 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ImportBatch } from './importBatch';
 
-export interface ImportBatchResponse {
-  data: ImportBatch;
-}
+/**
+ * When this run was reversed as a set — B-037. Null means never, and it
+is the whole state machine: there is no `REVERSED` status, because
+`status` records how the *run* ended and a reversal is a later fact
+about a run that already ended. Collapsing them would lose "completed
+with 6 rejections" the moment somebody reversed it.
+
+ */
+export type ImportBatchReversedAt = string | null;

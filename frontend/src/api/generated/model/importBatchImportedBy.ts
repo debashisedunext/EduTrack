@@ -48,24 +48,9 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * The commit job's lifecycle, and the only vocabulary
-`import_batches.status` uses. There is no state for the step-4
-dry run because the dry run writes nothing — no batch row
-exists until commit, and it is born `QUEUED`.
-
-`COMPLETED` is **not** a synonym for "no rejections": a run that
-refused half the file and wrote the rest completed, and its error
-report is how the user recovers the other half. `FAILED` means
-the job itself died.
+ * Who committed the run. Nullable because it is recorded best-effort —
+a caller the `dev-noauth` profile cannot identify starts a run with no
+actor rather than being refused one.
 
  */
-export type ImportBatchResponseDataStatus = typeof ImportBatchResponseDataStatus[keyof typeof ImportBatchResponseDataStatus];
-
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const ImportBatchResponseDataStatus = {
-  QUEUED: 'QUEUED',
-  RUNNING: 'RUNNING',
-  COMPLETED: 'COMPLETED',
-  FAILED: 'FAILED',
-} as const;
+export type ImportBatchImportedBy = number | null;

@@ -51,8 +51,12 @@ final class TestImportSchema implements ImportSchemaDefinition {
     /** Natural keys whose write blows up, so the runner's per-row recovery has something to recover from. */
     private final Set<String> failing = new LinkedHashSet<>();
 
+    /** B-037 · batch ids this registration was asked to reverse, in order. */
+    final List<Long> reversed = new ArrayList<>();
+
     private boolean writable;
     private Long lastBatchId;
+    private ImportReversal reversal = ImportReversal.none();
 
     /**
      * Keys that exist with no current values — the registration that cannot
@@ -138,6 +142,26 @@ final class TestImportSchema implements ImportSchemaDefinition {
     /** The batch id the last write was stamped with — B-037's traceability, checked at its source. */
     Long lastBatchId() {
         return lastBatchId;
+    }
+
+    /**
+     * What {@link #reverse} will answer.
+     *
+     * <p>Configured rather than computed from {@link #written}, because the
+     * service under test must not be able to derive the answer either: what a
+     * registration deletes and what it keeps is entity knowledge, and a double
+     * that inferred it from the writes would quietly stop testing that the
+     * service takes the registration's word for it.
+     */
+    TestImportSchema reversing(ImportReversal result) {
+        this.reversal = result;
+        return this;
+    }
+
+    @Override
+    public ImportReversal reverse(long batchId) {
+        reversed.add(batchId);
+        return reversal;
     }
 
     @Override
