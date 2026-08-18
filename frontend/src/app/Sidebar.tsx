@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, ListChecks, Ticket, FolderKanban, MessageSquare,
-  BarChart3, Database, Settings, ChevronsLeft, ChevronsRight,
+  BarChart3, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { useGetMe } from '@/api/generated/auth/auth'
 import { useSidebarStore } from './sidebarStore'
@@ -23,6 +23,11 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/masters', label: 'Masters', icon: Database, adminOnly: true },
+  // A-071 · S-16. adminOnly like Masters, and for a stronger reason: `audit.view`
+  // is Admin's alone in §2, so for every other role this link is a 403 waiting to
+  // happen. Hidden rather than disabled — a greyed entry advertises a screen
+  // somebody cannot have, and the server still refuses it either way.
+  { to: '/audit-logs', label: 'Audit log', icon: ScrollText, adminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 

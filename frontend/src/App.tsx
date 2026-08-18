@@ -36,6 +36,7 @@ import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage'
 import { LoginPage } from './features/auth/LoginPage'
 import { RequireAuth } from './features/auth/RequireAuth'
 import { ResetPasswordPage } from './features/auth/ResetPasswordPage'
+import { AuditLogPage } from './features/audit/AuditLogPage'
 import { ReportsHubPage } from './features/reports/ReportsHubPage'
 import { ReportViewerPage } from './features/reports/ReportViewerPage'
 import { ResourceProfilePage } from './features/resources/ResourceProfilePage'
@@ -106,6 +107,16 @@ export default function App() {
             */}
             <Route path="/reports" element={<ReportsHubPage />} />
             <Route path="/reports/:reportKey" element={<ReportViewerPage />} />
+            {/*
+              A-071 · S-16. A top-level path rather than `/masters/audit-logs`:
+              this is not a master anybody edits, and `audit.view` is a
+              different capability from `master.write` — the two screens are
+              reached by different people for different reasons. `RequireAuth`
+              covers signing in; the Admin-only part is enforced by the server,
+              which answers 403, and the page says so rather than pretending the
+              screen does not exist.
+            */}
+            <Route path="/audit-logs" element={<AuditLogPage />} />
             <Route
               path="/masters"
               element={

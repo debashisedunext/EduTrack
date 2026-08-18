@@ -12,6 +12,7 @@ import com.tngtech.archunit.lang.SimpleConditionEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.CrudRepository;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -83,6 +84,22 @@ class AppendOnlyRulesTest {
     /** The three protected tables as they appear in a URL. */
     private static final Pattern PROTECTED_RESOURCE =
             Pattern.compile("(?i).*/(history|effort-logs?|stage-transitions?)(/.*)?");
+
+
+    /**
+     * A-071 · the audit log, as it appears in a URL.
+     *
+     * <p>Kept apart from {@link #PROTECTED_RESOURCE} rather than folded into it,
+     * because the guarantee is genuinely weaker and merging the two would state
+     * otherwise. {@code audit_logs} has four layers — no writer method beyond
+     * {@code AuditTrail.record}, no mutating route, {@code SELECT, INSERT} only
+     * for {@code edutrack_app}, and V20260818_1500's two triggers — but it has
+     * no hash chain, so it lacks the fifth thing the three protected tables
+     * have: a way to detect tampering that defeated the other four. Same rule,
+     * different footing, said in two names rather than one.
+     */
+    private static final Pattern EXPORT_ONLY_RESOURCE =
+            Pattern.compile("(?i).*/audit-logs?(/.*)?");
 
     private static final Set<RequestMethod> MUTATING_VERBS =
             Set.of(RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE);
@@ -259,6 +276,67 @@ class AppendOnlyRulesTest {
                         A-008 trigger will refuse at 3am.""");
 
         rule.check(ProductionClasses.get());
+    }
+
+    /**
+     * A-071 · S-16 is "export only, never editable", and this is what stops the
+     * second half of that sentence quietly becoming untrue.
+     *
+     * <p>Stricter than the rule above in one respect: <b>POST is banned too.</b>
+     * On {@code ticket_history} a POST is the correction mechanism and must stay
+     * — a reversal is a new row. The audit log has no such affordance and must
+     * not grow one: a route that lets a caller submit an audit entry is a route
+     * that lets a caller forge one, with whatever actor, action and timestamp
+     * they choose, and no reader of the table could tell it from a row the
+     * application wrote. Rows reach {@code audit_logs} through
+     * {@code AuditTrail.record} alone, called from inside the application by
+     * code that already knows who the caller is.
+     *
+     * <p>The failure this catches is the reasonable-sounding one: an "annotate
+     * this entry" or "mark reviewed" route added to a screen that shows a wall
+     * of entries and no way to respond to them. The right shape for that is a
+     * new row, not an edit to an old one — and if it is ever built, it belongs
+     * under its own resource, not under this path.
+     */
+    @Test
+    void noRouteOffersToEditTheAuditLog() {
+        ArchRule rule = noMethods()
+                .that().areDeclaredInClassesThat().areAnnotatedWith(RestController.class)
+                .should(writeToTheAuditLog())
+                .because("""
+                        the audit log is export-only. It has no edit, no delete and no \
+                        submit: a route that accepts an entry accepts a forged one, and \
+                        nothing in the table distinguishes it from a row the application \
+                        wrote. AuditTrail.record is the only writer and it takes no \
+                        request.""");
+
+        rule.check(ProductionClasses.get());
+    }
+
+    private static ArchCondition<JavaMethod> writeToTheAuditLog() {
+        return new ArchCondition<>("map a writing verb onto the audit log") {
+            @Override
+            public void check(JavaMethod method, ConditionEvents events) {
+                if (!mutates(method) && !method.isAnnotatedWith(PostMapping.class)
+                        && !declaresVerb(method, RequestMethod.POST)) {
+                    return;
+                }
+                for (String path : fullPathsOf(method)) {
+                    if (EXPORT_ONLY_RESOURCE.matcher(path).matches()) {
+                        events.add(SimpleConditionEvent.satisfied(method,
+                                "%s maps a writing verb onto %s"
+                                        .formatted(method.getFullName(), path)));
+                    }
+                }
+            }
+        };
+    }
+
+    /** {@code @RequestMapping(method = POST)}, the long way of writing it. */
+    private static boolean declaresVerb(JavaMethod method, RequestMethod verb) {
+        return method.tryGetAnnotationOfType(RequestMapping.class)
+                .map(mapping -> List.of(mapping.method()).contains(verb))
+                .orElse(false);
     }
 
     private static ArchCondition<JavaMethod> mutateAnAppendOnlyResource() {
