@@ -12,8 +12,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 160 of 235 (68%) | 238.5 of 352.8 (68%) |
-| In flight | 3 | 6.5 |
+| Complete | 161 of 235 (69%) | 239.5 of 352.8 (68%) |
+| In flight | 2 | 5.5 |
 | On the driving chain | 37 | 52.5 |
 | Zero float (no slack at all) | 37 | 52.5 |
 
@@ -22,7 +22,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
 | **A** | Shivendra | 64 | 52 | 93.0 | 61 | 152% ⚠️ | Fri 16 Oct |
-| **B** | Ayush | 51 | 34 | 84.8 | 61 | 139% ⚠️ | Sat 03 Oct |
+| **B** | Ayush | 51 | 35 | 84.8 | 61 | 139% ⚠️ | Sat 03 Oct |
 | **C** | Divyansh | 67 | 30 | 99.5 | 61 | 163% ⚠️ | Tue 27 Oct |
 | **D** | Debashis | 53 | 44 | 75.5 | 61 | 124% ⚠️ | Fri 16 Oct |
 
@@ -117,7 +117,7 @@ gantt
     section Milestones
     Sprint 0 — weeks 1–2 :done, a0, 2026-08-05, 10d
     M1 — Authentication & the scope guard — weeks :done, a1, 2026-08-07, 8d
-    Hardening — weeks 17–18 :active, a2, 2026-08-12, 16d
+    Hardening — weeks 17–18 :active, a2, 2026-08-12, 15d
     M2 — Immutability core — weeks 8–9 :done, a3, 2026-08-14, 1d
     M6 — Dashboard & reports — weeks 10–16 :active, a4, 2026-08-15, 45d
 ```
@@ -224,23 +224,23 @@ gantt
 |  | `A-056` | Widgets 7–12 | 3 | `A-055` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
 |  | `A-057` | Widgets 13–15 — calendar heatmap, SLA radial gauge, project treemap | 2 | `A-056` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
 |  | `A-058` | Widgets 16–19 — stage funnel, rework/ping-pong, avg time per stage | 2.5 | `A-056` `C-049` | Sat 03 Oct | Wed 07 Oct | 11 | ▫️ to do |
-|  | `A-059` | Widget 20 — client-wise volume. Depends on Stream B's client master | 1 | `A-056` `B-029` | Thu 03 Sep | Thu 03 Sep | 30 | ▫️ to do |
+|  | `A-059` | Widget 20 — client-wise volume. Depends on Stream B's client master | 1 | `A-056` `B-029` | Wed 02 Sep | Wed 02 Sep | 31 | ▫️ to do |
 |  | `A-060` | Every card and chart segment deep-links to a pre-filtered list | 1.5 | `A-056` `C-014` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
 |  | `A-061` | Drill-down modal, slides from the right, CSV export | 1.5 | `A-060` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `A-062` | Developer dashboard variant | 1.5 | `A-055` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
-|  | `A-063` | Reports hub | 2 | `A-051` `C-003` ᶦ | Mon 17 Aug | Tue 18 Aug | 23 | ✅ done |
-|  | `A-064` | Export engine — Excel, CSV, PDF | 2 | `A-063` ᶦ | Tue 18 Aug | Tue 18 Aug | 24 | ✅ done |
-|  | `A-065` | Scheduled report email (daily/weekly/monthly) | 1 | `A-064` `D-029` | Fri 04 Sep | Fri 04 Sep | 30 | ▫️ to do |
-|  | `A-066` | Reports 1–6 | 3 | `A-063` ᶦ | Tue 18 Aug | Tue 18 Aug | 27 | ✅ done |
-|  | `A-067` | Reports 7–12 | 3 | `A-066` ᶦ | Tue 18 Aug | Wed 19 Aug | 28 | 🟡 50% |
+|  | `A-063` | Reports hub | 2 | `A-051` `C-003` ᶦ | Mon 17 Aug | Tue 18 Aug | 24 | ✅ done |
+|  | `A-064` | Export engine — Excel, CSV, PDF | 2 | `A-063` ᶦ | Tue 18 Aug | Tue 18 Aug | 25 | ✅ done |
+|  | `A-065` | Scheduled report email (daily/weekly/monthly) | 1 | `A-064` `D-029` | Thu 03 Sep | Thu 03 Sep | 31 | ▫️ to do |
+|  | `A-066` | Reports 1–6 | 3 | `A-063` ᶦ | Tue 18 Aug | Tue 18 Aug | 28 | ✅ done |
+|  | `A-067` | Reports 7–12 | 3 | `A-066` ᶦ | Tue 18 Aug | Tue 18 Aug | 29 | 🔵 in review |
 |  | `A-068` | Reports 13–18 | 3 | `A-067` `C-058` | Wed 14 Oct | Fri 16 Oct | 7 | ▫️ to do |
-|  | `A-069` | Resource 360° profile | 1.5 | `A-066` `B-010` | Wed 19 Aug | Thu 20 Aug | 29 | ▫️ to do |
-|  | `A-070` | "Born critical vs became critical" report | 1 | `A-066` `D-028` | Sat 05 Sep | Sat 05 Sep | 30 | ▫️ to do |
-|  | `A-071` | Audit Log Viewer | 1.5 | `A-034` ᶦ | Fri 21 Aug | Sat 22 Aug | 29 | ▫️ to do |
-|  | `A-072` | Global search + ticket-ID deep link | 1.5 | `A-009` `C-005` ᶦ | Sat 22 Aug | Tue 25 Aug | 30 | ▫️ to do |
-|  | `A-073` | Performance | 2 | `A-053` `B-007` ᶦ | Wed 26 Aug | Thu 27 Aug | 30 | ▫️ to do |
-|  | `A-074` | Security | 2 | `A-036` ᶦ | Fri 28 Aug | Sat 29 Aug | 30 | ▫️ to do |
-|  | `A-075` | Go-live runbook, deployment, TLS, secrets in vault | 2 | `A-073` `A-074` ᶦ | Tue 01 Sep | Wed 02 Sep | 30 | ▫️ to do |
+|  | `A-069` | Resource 360° profile | 1.5 | `A-066` `B-010` | Tue 18 Aug | Wed 19 Aug | 30 | ▫️ to do |
+|  | `A-070` | "Born critical vs became critical" report | 1 | `A-066` `D-028` | Fri 04 Sep | Fri 04 Sep | 31 | ▫️ to do |
+|  | `A-071` | Audit Log Viewer | 1.5 | `A-034` ᶦ | Thu 20 Aug | Fri 21 Aug | 30 | ▫️ to do |
+|  | `A-072` | Global search + ticket-ID deep link | 1.5 | `A-009` `C-005` ᶦ | Fri 21 Aug | Sat 22 Aug | 31 | ▫️ to do |
+|  | `A-073` | Performance | 2 | `A-053` `B-007` ᶦ | Tue 25 Aug | Wed 26 Aug | 31 | ▫️ to do |
+|  | `A-074` | Security | 2 | `A-036` ᶦ | Thu 27 Aug | Fri 28 Aug | 31 | ▫️ to do |
+|  | `A-075` | Go-live runbook, deployment, TLS, secrets in vault | 2 | `A-073` `A-074` ᶦ | Sat 29 Aug | Tue 01 Sep | 31 | ▫️ to do |
 |  | `A-076` | Login throttle — the half A-021 deferred | 1 | — | Wed 12 Aug | Wed 12 Aug | 54 | ✅ done |
 
 </details>
@@ -252,7 +252,7 @@ gantt
 |---|---|---|---:|---|---|---|---:|---|
 |  | `B-001` | Seed: 6 roles + the full permission matrix from blueprint §2 | 1 | `A-003` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
 |  | `B-002` | Seed: 11 task types | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 55 | ✅ done |
-|  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 12 | ✅ done |
+|  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 14 | ✅ done |
 |  | `B-004` | Seed: 3 workflow templates with their stages — Standard Dev Flow | 1 | `A-005` | Fri 07 Aug | Fri 07 Aug | 41 | ✅ done |
 |  | `B-005` | JPA entities + repositories for the full model, built on A's schema | 3 | `A-006` `A-007` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `B-006` | MapStruct base configuration | 0.5 | `B-005` ᶦ | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
@@ -278,29 +278,29 @@ gantt
 |  | `B-027` | client_contacts child grid | 1.5 | `B-026` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
 |  | `B-028` | Validation | 1 | `B-027` | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
 |  | `B-029` | Deactivating a client with open tickets warns and blocks new… | 1 | `B-026` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
-| 🔴 | `B-030` | Import engine as a schema registry — built once, registered twice | 2 | `B-005` | Tue 11 Aug | Tue 11 Aug | 2 | ✅ done |
+| 🔴 | `B-030` | Import engine as a schema registry — built once, registered twice | 2 | `B-005` | Tue 11 Aug | Tue 11 Aug | 6 | ✅ done |
 |  | `B-031` | Step 1 — template download | 1.5 | `B-030` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `B-032` | Step 2 — upload, max 5 MB / 5,000 rows, event-driven SAX parse | 2 | `B-030` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `B-033` | Step 3 | 2 | `B-032` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 | 🔴 | `B-034` | Step 4 — dry-run validation preview | 2.5 | `B-033` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `B-035` | Step 5 — commit as a background job with progress bar | 2 | `B-034` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
-|  | `B-036` | Error report generation | 1 | `B-034` ᶦ | Tue 18 Aug | Tue 18 Aug | 1 | 🔵 in review |
-|  | `B-037` | import_batches traceability | 1 | `B-035` ᶦ | Tue 18 Aug | Wed 19 Aug | 2 | ▫️ to do |
-|  | `B-038` | Resource bulk import — the second registration, not a second build | 1 | `B-035` | Wed 19 Aug | Thu 20 Aug | 3 | ▫️ to do |
-|  | `B-039` | Status/stage/workflow master tab 1 | 2 | `B-003` `C-003` ᶦ | Thu 20 Aug | Sat 22 Aug | 4 | ▫️ to do |
-|  | `B-040` | Tab 2 — stages | 2 | `B-039` | Sat 22 Aug | Wed 26 Aug | 5 | ▫️ to do |
+|  | `B-036` | Error report generation | 1 | `B-034` ᶦ | Tue 18 Aug | Tue 18 Aug | 50 | ✅ done |
+|  | `B-037` | import_batches traceability | 1 | `B-035` ᶦ | Tue 18 Aug | Tue 18 Aug | 6 | ▫️ to do |
+|  | `B-038` | Resource bulk import — the second registration, not a second build | 1 | `B-035` | Wed 19 Aug | Wed 19 Aug | 6 | ▫️ to do |
+|  | `B-039` | Status/stage/workflow master tab 1 | 2 | `B-003` `C-003` ᶦ | Thu 20 Aug | Fri 21 Aug | 6 | ▫️ to do |
+|  | `B-040` | Tab 2 — stages | 2 | `B-039` | Sat 22 Aug | Tue 25 Aug | 6 | ▫️ to do |
 |  | `B-041` | Tab 3 | 2.5 | `B-040` `B-050` | Sat 19 Sep | Wed 23 Sep | 15 | ▫️ to do |
-| 🔴 | `B-042` | Stages in use may be deprecated, never deleted | 1 | `B-040` | Wed 26 Aug | Thu 27 Aug | 17 | ▫️ to do |
+| 🔴 | `B-042` | Stages in use may be deprecated, never deleted | 1 | `B-040` | Wed 26 Aug | Wed 26 Aug | 19 | ▫️ to do |
 |  | `B-043` | Workflow template designer | 3 | `B-041` `B-042` | Thu 24 Sep | Sat 26 Sep | 15 | ▫️ to do |
 |  | `B-050` | Ribbon segment component — 6 states | 2.5 | `C-003` `C-042` | Thu 17 Sep | Sat 19 Sep | 14 | ▫️ to do |
 |  | `B-051` | Compact dot variant for the ticket list | 1 | `B-050` ᶦ | Tue 29 Sep | Tue 29 Sep | 15 | ▫️ to do |
 |  | `B-052` | Ribbon accessibility | 1.5 | `B-050` ᶦ | Wed 30 Sep | Thu 01 Oct | 15 | ▫️ to do |
 |  | `B-053` | Readability at 8 stages on a laptop | 2 | `B-050` ᶦ | Thu 01 Oct | Sat 03 Oct | 16 | ▫️ to do |
-|  | `B-060` | Client report | 2 | `A-064` `B-029` | Thu 27 Aug | Sat 29 Aug | 18 | ▫️ to do |
-|  | `B-061` | Resource performance scorecard and workload/capacity report | 2 | `A-064` `B-010` | Sat 29 Aug | Wed 02 Sep | 19 | ▫️ to do |
-|  | `B-062` | Export engine integration for all report types | 1.5 | `A-064` | Wed 02 Sep | Thu 03 Sep | 20 | ▫️ to do |
-|  | `B-063` | Timesheet view — stage-aware, a resource's week across all tickets | 2 | `A-064` `C-061` | Fri 04 Sep | Sat 05 Sep | 20 | ▫️ to do |
-| 🔴 | `B-064` | Module master read endpoint | 0.25 | `C-065` | Tue 08 Sep | Tue 08 Sep | 20 | ▫️ to do |
+|  | `B-060` | Client report | 2 | `A-064` `B-029` | Thu 27 Aug | Fri 28 Aug | 19 | ▫️ to do |
+|  | `B-061` | Resource performance scorecard and workload/capacity report | 2 | `A-064` `B-010` | Sat 29 Aug | Tue 01 Sep | 19 | ▫️ to do |
+|  | `B-062` | Export engine integration for all report types | 1.5 | `A-064` | Wed 02 Sep | Thu 03 Sep | 19 | ▫️ to do |
+|  | `B-063` | Timesheet view — stage-aware, a resource's week across all tickets | 2 | `A-064` `C-061` | Thu 03 Sep | Sat 05 Sep | 20 | ▫️ to do |
+| 🔴 | `B-064` | Module master read endpoint | 0.25 | `C-065` | Sat 05 Sep | Sat 05 Sep | 21 | ▫️ to do |
 
 </details>
 
