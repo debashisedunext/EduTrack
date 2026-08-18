@@ -68,7 +68,45 @@ class SlaScanner {
      * people learn to ignore breach mail. A lock held too long only delays the
      * next pass, and a late alert about an already-late ticket costs far less.
      */
-    @Scheduled(fixedDelayString = "${edutrack.sla.scan-interval:PT15M}")
+    /**
+     * <strong>{@code initialDelayString} is load-bearing, not tidiness.</strong>
+     *
+     * <p>{@code fixedDelay} runs its first execution immediately on context
+     * startup. Seven scanners in this package are declared that way, so every
+     * {@code @SpringBootTest(classes = WorkerApplication.class)} used to boot
+     * seven threads that all began scanning {@code tickets} at once — while the
+     * test's own fixture was writing the same rows. The result was a MySQL
+     * deadlock in the test body rather than in any production path, on whichever
+     * scanner lost:
+     *
+     * <pre>
+     * CannotAcquireLockException: UPDATE tickets SET assigned_to = NULL WHERE id = ?
+     *   Deadlock found when trying to get lock
+     * </pre>
+     *
+     * <p>It cost a re-run on two integration batches on 17–18 Aug, both times
+     * delaying somebody else's critical-path PR, and it presents as flakiness
+     * because a shared CI runner loses the race more often than a laptop does.
+     * Raising the intervals does not help: an interval governs the gap
+     * <em>between</em> runs, never the first one.
+     *
+     * <p>Stream A hit the identical shape in {@code worker/stats} — A-056
+     * records 22 of 25 cases failing on {@code DELETE FROM projects} because
+     * "A-051's scheduler is a fixedDelay that fires once at context startup" —
+     * and answered it with a per-test switch. This is the same diagnosis
+     * answered once, in the declaration, so a scanner added later inherits it.
+     *
+     * <p>It is also better in production. Without a delay, every worker replica
+     * restarted by a deploy starts scanning the instant it comes up, together,
+     * before caches or connection pools are warm. Thirty seconds costs nothing
+     * against a fifteen-minute cadence.
+     *
+     * <p>Tests that want the scan call {@link #scanOnce()} directly, which is
+     * unaffected; {@code application.yml} under {@code src/test} pushes the
+     * delay past any suite's lifetime so a slow class cannot race it either.
+     */
+    @Scheduled(fixedDelayString = "${edutrack.sla.scan-interval:PT15M}",
+               initialDelayString = "${edutrack.sla.initial-delay:PT30S}")
     @SchedulerLock(name = "slaScanner", lockAtMostFor = "PT14M", lockAtLeastFor = "PT1M")
     public void scan() {
         try {

@@ -59,6 +59,13 @@ class PingPongScannerIT {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {
+        // The seven sla scanners are `@Scheduled(fixedDelay…)`, which fires its
+        // first run the instant the context is up — seven threads scanning
+        // `tickets` while this class's fixture is still writing it. That is a
+        // deadlock reported against the test's own UPDATE, and it cost a re-run
+        // on two integration batches. `SlaScanner` carries the full account.
+        // Pushed past any suite's lifetime; every test here calls scanOnce().
+        registry.add("edutrack.sla.initial-delay", () -> "PT24H");
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);

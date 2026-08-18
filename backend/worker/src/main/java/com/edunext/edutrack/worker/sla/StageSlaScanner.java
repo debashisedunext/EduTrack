@@ -45,7 +45,8 @@ class StageSlaScanner {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${edutrack.sla.stage-scan-interval:PT15M}")
+    @Scheduled(fixedDelayString = "${edutrack.sla.stage-scan-interval:PT15M}",
+               initialDelayString = "${edutrack.sla.initial-delay:PT30S}")
     @SchedulerLock(name = "stageSlaScanner", lockAtMostFor = "PT14M", lockAtLeastFor = "PT1M")
     public void scan() {
         try {
