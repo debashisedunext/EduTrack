@@ -152,12 +152,17 @@ class ReportsIT {
 
             assertThat(mine.scopeNote()).isEqualTo("These reports cover your own work only.");
 
-            // Every report offered as runnable must read the resource-keyed
-            // table. date-wise does; the project-keyed ones are withheld.
+            // A-066 turned six more on, so this can no longer be a fixed list —
+            // and pinning one would only have to be rewritten by A-067. What
+            // must hold is the rule: nothing offered to a delivery role may read
+            // a project-keyed table, because the note above the grid says the
+            // rows are their own.
             assertThat(mine.reports())
                     .filteredOn(ReportDtos.Descriptor::available)
                     .extracting(ReportDtos.Descriptor::key)
-                    .containsExactly(DateWiseReportRunner.KEY);
+                    .doesNotContain("project-health", "aging", "stage-funnel",
+                            "client-report", "email-delivery-log")
+                    .contains(DateWiseReportRunner.KEY);
         }
 
         @Test
@@ -361,7 +366,10 @@ class ReportsIT {
             // person reads. A runner has no columns to name and no rows to
             // return, so a 200 would have to invent an empty report — which
             // asserts the query ran and found nothing.
-            assertThat(service.run(admin(), "resource-scorecard", D1, D3, null, null)).isEmpty();
+            // resource-contribution, not resource-scorecard — A-066 built that
+            // one, and a test naming a report that keeps changing state is a
+            // test that fails on somebody else's task.
+            assertThat(service.run(admin(), "resource-contribution", D1, D3, null, null)).isEmpty();
         }
     }
 
