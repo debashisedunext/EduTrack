@@ -1,4 +1,4 @@
-# S-17 Ticket List (All Tickets) — C-014, saved views C-015
+# S-17 Ticket List (All Tickets) — C-014, saved views C-015, bulk select C-017
 
 Filters, sticky header, density toggle, column chooser — the base grid
 `STREAM-C-TICKETS.md` scopes to this task. Row-scoped server-side by
@@ -15,6 +15,52 @@ on top of what the API already narrowed.
 | `columns.tsx` | Column definitions, cell renderers, the level/status chip variant maps. |
 | `useListPreferences.ts` | Density and column visibility, persisted to `localStorage`. |
 | `ColumnChooserMenu.tsx` · `DensityToggle.tsx` | The "⚙ Columns" popover and the comfortable/compact toggle. |
+| `bulk/bulkActions.ts` | C-017 — who may act, and which of a selection each action can reach. Pure functions, no React. |
+| `bulk/TicketBulkActionBar.tsx` | The selection bar, the three dialogs, and the refusal list. |
+| `bulk/useBulkTicketActions.ts` | The three mutations, hand-written for the `Idempotency-Key` header orval drops. |
+
+## Bulk select is PM and Admin only, and the grid is not what enforces it
+
+C-017. `canBulkAct` decides whether the checkbox column and the action bar are
+drawn at all — and it is deliberately the *shown*/*allowed* split
+`commentPermissions.ts` documents. The three handlers refuse a Support,
+Developer, QA or Deployment caller with `403` before reading a single ticket
+id, so a request built past a hidden toolbar is refused all the same. Hiding
+the control stops the product offering something that will be refused; it is
+not the rule.
+
+Three consequences worth knowing before changing anything here:
+
+- **A summary history row would be a defect, not an optimisation.** Every
+  action writes one entry *per ticket*. The per-ticket audit trail is the point
+  of having one, and a batch of fifty is fifty entries.
+- **Selection survives paging**, so `closableIds` treats ids it cannot see on
+  screen as closable rather than dropping them. A selection assembled across
+  three pages must not silently shrink because two of those pages have
+  unmounted.
+- **Refused rows stay ticked.** `selectionAfter` releases only what succeeded.
+  Clearing everything would hide the failure the moment the dialog closed, and
+  the grid refetch blends those rows back in unfindably.
+
+The result dialog renders **only when something was refused**. "38 closed" is a
+modal whose whole content the reader already knows; "38 closed, 2 refused" is a
+list somebody has to act on.
+
+### The two new endpoints, and who owns them
+
+Reassign reuses `POST /tickets/bulk-reassign`, which S-24 had already put in
+the contract. Level and close needed `PATCH /tickets/bulk-level` and
+`POST /tickets/bulk-close` — **new paths in Stream D's
+`contracts/openapi.yaml`**, with their MSW handlers and two
+`check-conventions.py` exemptions. Flagged for Stream D rather than done
+quietly; the same one-argument-wide precedent B-027 through B-029 set in the
+other direction inside `TicketListPage.tsx` itself. The existing
+`bulk-reassign` mock gained the PM/Admin guard it did not have.
+
+One request per action, not one per row: fifty ticked tickets would otherwise
+be fifty round trips, fifty interleaved planned-close-date recomputations, and
+a partial result nobody can reconstruct. `/clients/bulk-status` records the
+same reasoning.
 
 ## Filters live in the URL, not component state
 
@@ -217,3 +263,11 @@ streams consume (`components/ui/`, `components/ribbon/`); this stays a
 feature-local component next to `TicketListPage.tsx`, same tier as
 `ColumnChooserMenu.tsx` and `DensityToggle.tsx`, neither of which has a story
 either.
+
+**`bulk/TicketBulkActionBar.tsx` carries the same exemption**, and more
+plainly: the bar hardcodes the three S-17 actions and each dialog is shaped by
+one specific request body. S-07's `BulkStatusBar` is the proof that this does
+not generalise — it batches the same *idea* over resources and shares no props
+with this one. A shared bulk bar would have to be a slot renderer with a
+`children` bag of buttons, which is a `<div className="flex gap-3">` with extra
+steps.

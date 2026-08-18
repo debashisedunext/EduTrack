@@ -68,6 +68,8 @@ import type {
 import type {
   AskTicketStatusBody,
   AssignTicketBody,
+  BulkChangeTicketLevelBody,
+  BulkCloseTicketsBody,
   BulkReassignTicketsBody,
   BulkResultResponse,
   ChangeTicketPriorityBody,
@@ -76,6 +78,7 @@ import type {
   EffortLogRequest,
   EffortLogResponse,
   EmailLogListResponse,
+  ForbiddenResponse,
   GetTicketDetailParams,
   HistoryListResponse,
   ListEffortLogsParams,
@@ -427,7 +430,14 @@ export function usePreviewPlannedCloseDate<TData = Awaited<ReturnType<typeof pre
 one summary row destroys the per-ticket audit trail, which is the point of
 having one.
 
- * @summary Reassign many tickets from one resource to another (S-24)
+**PM and Admin only** — see `/tickets/bulk-level` for the matrix that
+applies to all three bulk actions.
+
+Two callers, one endpoint: S-24's wizard drives it from a source
+resource, and S-17's grid drives it from a tick-box selection. The
+difference is entirely in how `ticketIds` is assembled.
+
+ * @summary Reassign many tickets from one resource to another (S-17, S-24)
  */
 export const bulkReassignTickets = (
     bulkReassignTicketsBody: BulkReassignTicketsBody,
@@ -475,7 +485,7 @@ const {mutation: mutationOptions} = options ?
     export type BulkReassignTicketsMutationError = ValidationFailedResponse
 
     /**
- * @summary Reassign many tickets from one resource to another (S-24)
+ * @summary Reassign many tickets from one resource to another (S-17, S-24)
  */
 export const useBulkReassignTickets = <TError = ValidationFailedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bulkReassignTickets>>, TError,{data: BulkReassignTicketsBody}, TContext>, }
@@ -487,6 +497,188 @@ export const useBulkReassignTickets = <TError = ValidationFailedResponse,
       > => {
 
       const mutationOptions = getBulkReassignTicketsMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The bulk half of `PATCH /tickets/{ticketId}/priority`, for S-17's grid
+selection. One request rather than one per selected row: fifty ticked
+tickets is fifty round trips, fifty planned-close-date recomputations
+interleaved with each other, and fifty chances for a partial result
+nobody can reconstruct afterwards.
+
+**The per-ticket rules are unchanged and applied per ticket.**
+`originalLevel` is never overwritten, every accepted change writes its
+own `LEVEL_CHANGED` history entry, and the planned close date is
+recomputed against the working calendar for each ticket individually. A
+bulk call is fifty applications of one rule, not one application to
+fifty rows.
+
+`reason` is **mandatory here**, where the single-ticket endpoint only
+requires it once the ticket is assigned. A selection spanning both
+assigned and unassigned tickets would otherwise need the caller to know
+which is which before deciding whether to type one, and the reason is
+the only record of why fifty levels moved at once.
+
+### Permission matrix — all six roles
+
+| Role | Allowed |
+|---|---|
+| Admin | yes, unrestricted |
+| PM | yes, within their projects |
+| Support | no — `403` |
+| Developer | no — `403` |
+| QA | no — `403` |
+| Deployment | no — `403` |
+
+**Refused server-side, not merely hidden.** The grid draws no selection
+column for the four roles that cannot act, but a request built by hand
+is refused all the same. Row scoping applies first, so a ticket outside
+the caller's scope comes back as a per-ticket `Not found` in the result
+rather than a `403` — no existence leak, same rule as everywhere else.
+
+ * @summary Change the priority level of many tickets (S-17)
+ */
+export const bulkChangeTicketLevel = (
+    bulkChangeTicketLevelBody: BulkChangeTicketLevelBody,
+ ) => {
+      
+      
+      return http<BulkResultResponse>(
+      {url: `/tickets/bulk-level`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: bulkChangeTicketLevelBody
+    },
+      );
+    }
+  
+
+
+export const getBulkChangeTicketLevelMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bulkChangeTicketLevel>>, TError,{data: BulkChangeTicketLevelBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof bulkChangeTicketLevel>>, TError,{data: BulkChangeTicketLevelBody}, TContext> => {
+
+const mutationKey = ['bulkChangeTicketLevel'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof bulkChangeTicketLevel>>, {data: BulkChangeTicketLevelBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  bulkChangeTicketLevel(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BulkChangeTicketLevelMutationResult = NonNullable<Awaited<ReturnType<typeof bulkChangeTicketLevel>>>
+    export type BulkChangeTicketLevelMutationBody = BulkChangeTicketLevelBody
+    export type BulkChangeTicketLevelMutationError = ValidationFailedResponse | ForbiddenResponse
+
+    /**
+ * @summary Change the priority level of many tickets (S-17)
+ */
+export const useBulkChangeTicketLevel = <TError = ValidationFailedResponse | ForbiddenResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bulkChangeTicketLevel>>, TError,{data: BulkChangeTicketLevelBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof bulkChangeTicketLevel>>,
+        TError,
+        {data: BulkChangeTicketLevelBody},
+        TContext
+      > => {
+
+      const mutationOptions = getBulkChangeTicketLevelMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The bulk half of `POST /tickets/{ticketId}/close`, for S-17's grid
+selection. Same permission matrix as `PATCH /tickets/bulk-level`.
+
+**Each ticket closes as its own transaction** — `actualCloseDate` is
+stamped, the open stage transition is sealed, and a `CLOSED` history
+entry is written, per ticket. One ticket refusing does not roll back the
+others, which is why the result is per-ticket rather than a single
+status code.
+
+**A ticket already closed is reported as refused, not silently
+re-closed.** Re-stamping `actualCloseDate` would move a date that
+reports already depend on, and sealing an already-sealed transition is
+exactly the mutation the append-only rule forbids. The caller sees
+`Already closed` beside that row.
+
+`resolutionSummary` is shared across the selection by design: a bulk
+close is one decision about a batch, and offering fifty free-text boxes
+would produce fifty copies of the same sentence or fifty blanks.
+
+ * @summary Close many tickets in the current cycle (S-17)
+ */
+export const bulkCloseTickets = (
+    bulkCloseTicketsBody: BulkCloseTicketsBody,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<BulkResultResponse>(
+      {url: `/tickets/bulk-close`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: bulkCloseTicketsBody, signal
+    },
+      );
+    }
+  
+
+
+export const getBulkCloseTicketsMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bulkCloseTickets>>, TError,{data: BulkCloseTicketsBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof bulkCloseTickets>>, TError,{data: BulkCloseTicketsBody}, TContext> => {
+
+const mutationKey = ['bulkCloseTickets'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof bulkCloseTickets>>, {data: BulkCloseTicketsBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  bulkCloseTickets(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BulkCloseTicketsMutationResult = NonNullable<Awaited<ReturnType<typeof bulkCloseTickets>>>
+    export type BulkCloseTicketsMutationBody = BulkCloseTicketsBody
+    export type BulkCloseTicketsMutationError = ValidationFailedResponse | ForbiddenResponse
+
+    /**
+ * @summary Close many tickets in the current cycle (S-17)
+ */
+export const useBulkCloseTickets = <TError = ValidationFailedResponse | ForbiddenResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bulkCloseTickets>>, TError,{data: BulkCloseTicketsBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof bulkCloseTickets>>,
+        TError,
+        {data: BulkCloseTicketsBody},
+        TContext
+      > => {
+
+      const mutationOptions = getBulkCloseTicketsMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

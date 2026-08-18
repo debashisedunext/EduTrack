@@ -194,6 +194,8 @@ export const ticketHandlers = [
   // ── bulk reassign ─────────────────────────────────────────────────────────
   http.post(url('/tickets/bulk-reassign'), async ({ request }) => {
     const db = getDb();
+    const refusal = refuseUnlessPmOrAdmin(db);
+    if (refusal) return refusal;
     const body = (await request.json()) as { ticketIds: string[]; toUserId: number; reason: string };
     if (!body.reason || body.reason.trim().length < 3) {
       return validationFailed({ reason: ['must be at least 3 characters'] });
@@ -217,11 +219,113 @@ export const ticketHandlers = [
       });
       return { ticketId: id, ok: true, reason: null };
     });
-    return ok({
-      succeeded: results.filter((r) => r.ok).length,
-      failed: results.filter((r) => !r.ok).length,
-      results,
+    return bulkResult(results);
+  }),
+
+  // ── C-017 · bulk level change, from the S-17 grid selection ───────────────
+  http.patch(url('/tickets/bulk-level'), async ({ request }) => {
+    const db = getDb();
+    const refusal = refuseUnlessPmOrAdmin(db);
+    if (refusal) return refusal;
+    const body = (await request.json()) as { ticketIds: string[]; level: string; reason: string };
+    if (!body.reason || body.reason.trim().length < 3) {
+      return validationFailed({ reason: ['must be at least 3 characters'] });
+    }
+    const results = body.ticketIds.map((id) => {
+      const t = findTicket(id, db);
+      if (!t) return { ticketId: id, ok: false, reason: 'Not found or out of scope' };
+      const previous = t.level;
+      // Already at that level is *not* an error — the caller asked for an end
+      // state and it holds. Writing a LEVEL_CHANGED row from HIGH to HIGH
+      // would be a history entry recording nothing, which is worse than
+      // silence: the History tab is read to find out what actually moved.
+      if (previous === body.level) return { ticketId: id, ok: true, reason: null };
+
+      t.level = body.level as Ticket['level'];
+      // `originalLevel` is deliberately untouched. It is what makes "born
+      // critical versus became critical" reportable, and a bulk path that
+      // overwrote it would erase that distinction fifty rows at a time.
+      // Recomputed per ticket against the working calendar, from that ticket's
+      // own start — not from now, and not one shared date for the batch. A
+      // level change moves the target; it does not restart the clock.
+      t.plannedCloseDate = plannedCloseDateFor(
+        {
+          projectId: t.projectId,
+          taskTypeId: t.taskTypeId,
+          level: t.level,
+          assigneeId: t.assigneeId,
+          from: t.createdAt,
+        },
+        db,
+      ).plannedCloseDate;
+      t.updatedAt = new Date().toISOString();
+      db.history.push({
+        id: nextId(db, 'history'), ticketId: id, action: 'LEVEL_CHANGED',
+        actorId: db.currentUserId, actorType: 'USER',
+        fieldName: 'level', oldValue: previous, newValue: body.level,
+        note: body.reason, stageCode: t.currentStageCode,
+        cycleNo: t.cycleNo, iterationNo: t.iterationNo,
+        isCorrection: false, correctsEntryId: null,
+        entryHash: `sha256:${nextId(db, 'hash').toString(16)}`,
+        createdAt: new Date().toISOString(),
+      });
+      return { ticketId: id, ok: true, reason: null };
     });
+    return bulkResult(results);
+  }),
+
+  // ── C-017 · bulk close, from the S-17 grid selection ──────────────────────
+  http.post(url('/tickets/bulk-close'), async ({ request }) => {
+    const db = getDb();
+    const refusal = refuseUnlessPmOrAdmin(db);
+    if (refusal) return refusal;
+    const body = (await request.json()) as {
+      ticketIds: string[]; resolutionSummary: string; rootCauseCategory?: string;
+    };
+    if (!body.resolutionSummary || body.resolutionSummary.trim().length < 3) {
+      return validationFailed({ resolutionSummary: ['must be at least 3 characters'] });
+    }
+    const now = new Date().toISOString();
+    const results = body.ticketIds.map((id) => {
+      const t = findTicket(id, db);
+      if (!t) return { ticketId: id, ok: false, reason: 'Not found or out of scope' };
+      // Refused rather than re-closed. Re-stamping `actualCloseDate` moves a
+      // date reports already depend on, and re-sealing a sealed transition is
+      // precisely the mutation the append-only rule forbids.
+      if (t.status === 'CLOSED') return { ticketId: id, ok: false, reason: 'Already closed' };
+
+      t.status = 'CLOSED';
+      t.actualCloseDate = now;
+      t.updatedAt = now;
+      // Seal the open transition — the one permitted mutation on that table,
+      // and only from NULL. A row already carrying an `exitedAt` is left alone.
+      const open = db.transitions.find(
+        (tr) => tr.ticketId === id && tr.cycleNo === t.cycleNo && tr.exitedAt === null,
+      );
+      if (open) {
+        open.exitedAt = now;
+        open.durationMins = Math.max(
+          0, Math.round((Date.parse(now) - Date.parse(open.enteredAt)) / 60_000),
+        );
+      }
+      const cycle = db.cycles.find((c) => c.ticketId === id && c.cycleNo === t.cycleNo);
+      if (cycle) {
+        cycle.isSealed = true;
+        cycle.closedAt = now;
+      }
+      db.history.push({
+        id: nextId(db, 'history'), ticketId: id, action: 'CLOSED',
+        actorId: db.currentUserId, actorType: 'USER',
+        fieldName: 'status', oldValue: 'OPEN', newValue: 'CLOSED',
+        note: body.resolutionSummary, stageCode: t.currentStageCode,
+        cycleNo: t.cycleNo, iterationNo: t.iterationNo,
+        isCorrection: false, correctsEntryId: null,
+        entryHash: `sha256:${nextId(db, 'hash').toString(16)}`,
+        createdAt: now,
+      });
+      return { ticketId: id, ok: true, reason: null };
+    });
+    return bulkResult(results);
   }),
 
   // ── detail ────────────────────────────────────────────────────────────────
@@ -320,11 +424,39 @@ export const ticketHandlers = [
     return ok(ticketDto(t, db));
   }),
 
+  /**
+   * C-020 · §4B.1's level change.
+   *
+   * ⚠ **For Stream D — two things this handler did not do, both of which made
+   * the mock disagree with `PriorityChangeService` in ways a client could be
+   * written against.** Same class of gap C-028 found in the delete handler and
+   * C-029 in the comment POST, fixed the same way and flagged rather than done
+   * quietly, because `frontend/src/mocks/` is yours.
+   *
+   * 1. **The planned close date was not recomputed.** §4B.1's whole second half
+   *    is "resolves the SLA policy → recomputes the Planned Close Date", the
+   *    dialog previews exactly that number before committing, and the server
+   *    writes it. Without this the mock moved the chip and left the date beside
+   *    it stale, so `npm run dev` showed a screen production never produces —
+   *    and the preview the user had just read would be contradicted by the panel
+   *    two rows below it the moment they saved.
+   *
+   * 2. **Re-picking the current level was recorded as a change.** The server
+   *    treats it as a no-op precisely because a `HIGH → HIGH` row cannot be
+   *    deleted once written; the mock appended one, so a misclick against the
+   *    mock produced history the real one refuses.
+   */
   http.patch(url('/tickets/:ticketId/priority'), async ({ params, request }) => {
     const db = getDb();
     const t = findTicket(String(params.ticketId), db);
     if (!t) return notFound('Ticket');
     const { level, reason } = (await request.json()) as { level: Ticket['level']; reason?: string };
+
+    // No-op before anything else, including the reason check — re-picking the
+    // selected chip must not be refused for want of a reason for a change that
+    // is not happening.
+    if (level === t.level) return ok(ticketDto(t, db));
+
     if (t.assigneeId && !reason) {
       return validationFailed({ reason: ['is mandatory once the ticket is assigned'] });
     }
@@ -332,6 +464,19 @@ export const ticketHandlers = [
     t.level = level;
     // originalLevel is never overwritten — it is what makes "born critical vs
     // became critical" reportable, and it is the first thing a manager asks.
+
+    // Measured from the current cycle's start, falling back to when the ticket
+    // was raised — NOT from now. An SLA is "resolve within N hours of being
+    // reported", so escalating an old ticket to a short level really does land
+    // in the past and really does mean it is breached. `PriorityChangeService`
+    // and `levelChange.ts` both compute the same instant the same way.
+    const clockStart =
+      db.cycles.find((c) => c.ticketId === t.ticketId && c.cycleNo === t.cycleNo)?.startedAt ?? t.createdAt;
+    t.plannedCloseDate = plannedCloseDateFor(
+      { projectId: t.projectId, taskTypeId: t.taskTypeId, level, assigneeId: t.assigneeId, from: clockStart },
+      db,
+    ).plannedCloseDate;
+
     t.version += 1;
     db.history.push({
       id: nextId(db, 'history'), ticketId: t.ticketId, action: 'LEVEL_CHANGED',
@@ -1025,6 +1170,36 @@ export function commentDto(c: import('../db').Comment) {
  * two differently-configured nodes hand out tags that disagree and fail a
  * precondition nobody violated.
  */
+/**
+ * C-017 · the three bulk actions are **PM and Admin only, refused here**.
+ *
+ * The grid draws no selection column for the other four roles, but that is a
+ * courtesy and not the rule — a request built past the DOM has to be refused,
+ * or the permission is decoration. Same reason `commentPermissions.ts` says its
+ * functions decide what is *shown* and never what is *allowed*.
+ *
+ * `403` rather than `404` because the refusal is about the *capability*, not
+ * about any row: no ticket id has been examined at this point, so nothing about
+ * which tickets exist has leaked. Out-of-scope ids are handled further in, where
+ * `findTicket` narrows through `scopedTickets` and the result reads
+ * `Not found or out of scope` per ticket — that one stays indistinguishable
+ * from a ticket that was never there.
+ */
+function refuseUnlessPmOrAdmin(db: import('../db').Db) {
+  const role = currentUser(db).role;
+  if (role === 'ADMIN' || role === 'PM') return null;
+  return problem(403, 'forbidden', 'Bulk ticket actions are restricted to PM and Admin');
+}
+
+/** The `BulkResultResponse` envelope, counted from the per-ticket outcomes. */
+function bulkResult(results: { ticketId: string; ok: boolean; reason: string | null }[]) {
+  return ok({
+    succeeded: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results,
+  });
+}
+
 const limitsEtag = (db: import('../db').Db) => {
   const { maxFileBytes, maxTicketBytes, maxFiles } = db.attachmentLimits;
   return `"${Math.abs([...JSON.stringify({ maxFileBytes, maxTicketBytes, maxFiles })]

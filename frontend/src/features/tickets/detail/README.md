@@ -8,7 +8,9 @@ contents of the six tabs each belong to their own task and are not here.
 |---|---|
 | `TicketDetailPage.tsx` | The shell — one aggregated fetch, URL-held cycle and tab, loading/404 states, layout. |
 | `TicketDetailHeader.tsx` | ID, level, status, delay and cycle chips, title, and the action bar driven by `availableActions`. |
-| `TicketSummaryPanel.tsx` | S-20's right rail. Read-only in this task. |
+| `TicketSummaryPanel.tsx` | S-20's right rail. Read-only apart from the Level row (C-020). |
+| `TicketLevelControl.tsx` | C-020 · §4B.1's level editor — colour chips, the PCD preview, the conditional reason. |
+| `levelChange.ts` | C-020 · who may change it, when the reason is mandatory, and where the SLA clock starts. |
 | `TicketDetailTabs.tsx` | The tab strip. APG keyboard pattern, `?tab=` in the URL. |
 | `ticketSummary.ts` | The panel's arithmetic, pure and clock-injected. |
 | `entityLinks.ts` | Every destination path, in one place. |
@@ -106,9 +108,84 @@ already carries the information. Fixing the label properly means a new prop on
 a component all four streams consume. That is additive and worth doing, but on
 its own task rather than inside this one.
 
+### C-020 · the Level row is the only editable field, and the dialog is why
+
+§4B.1 asks for "editable directly on the detail page from the summary panel —
+one click, no full-page edit mode", and the first draft was a popover over the
+chip that committed on selection. It was wrong for a reason specific to this
+field: **the change has two required parts.** Picking Critical is half the act;
+saying why is the other half on any assigned ticket, and §4B.1 also insists the
+recomputed date is shown *before the user commits*. A control that commits on
+selection can do neither — it would have to write first and ask afterwards, or
+grow a second step, at which point it is a dialog that opened sideways.
+
+One click on the chip still opens it, no page mode changes, and nothing else on
+the panel becomes editable. **A second editable row should be argued for on its
+own terms rather than inherited from this one.**
+
+### C-020 · the preview measures from the cycle's start, not from now
+
+`usePlannedCloseDate` defaults `from` to now, which is right on the create form
+— a ticket being raised starts its clock now. An existing ticket's clock started
+when it was **reported**, so `slaClockStart` passes the current cycle's start
+date (falling back to `createdAt`) and `PriorityChangeService.slaClockStart` is
+the server's copy of the same function.
+
+The consequence is deliberate: **escalating a three-day-old ticket to a
+four-hour level produces a planned close date in the past, and the dialog shows
+it.** That is not a rendering bug to be clamped to now — it is the user being
+told, before they commit, that the ticket they are about to call Critical is
+already late. Measuring from now would have the dialog and the row it writes
+disagree by however long the ticket has been open, and only the dialog would be
+visible.
+
+### C-020 · no Storybook entry, and where the prefill actually lives
+
+`TicketLevelControl` is S-20-specific — it hardcodes §4B.1's rules, reads a
+`Ticket`, and calls `changeTicketPriority` — so it is not a shared-library
+control and carries the same exemption as `SavedViewsMenu`, `ColumnChooserMenu`
+and `DensityToggle`. The reusable half of it *is* in Storybook already:
+`LevelPicker` draws the colour chips and is imported from `create/` rather than
+redrawn here.
+
+C-020's backlog line also asks for the level to be **"pre-filled from the task
+type default"**, which is the *create form*, not this panel — a ticket that
+already exists has a level, and re-deriving one from its task type would
+overwrite a decision somebody made. `CreateTicketPage` has done it since C-011
+and `CreateTicketPage.test.tsx` pins both halves: the prefill, and that changing
+the task type afterwards must not overwrite a level the user picked themselves.
+
+### ⚠ C-020 · the excluded roles get no button, not a disabled one
+
+§4B.1 gives Developer, QA and Deployment a *request* path — "which raises a
+notification to the PM" — and that path does not exist: it is Stream D's. So the
+Level row renders as the plain chip C-019 drew, with no affordance at all. A
+disabled "Request a change" button would be an invitation with a refusal
+attached, and a live one that silently did nothing would be worse.
+
+The same absence covers a sealed earlier cycle. The write would land on the
+*current* cycle — the server has no notion of "change the level as it was in
+cycle 1" — so offering it there would be offering the wrong act under the right
+label.
+
 ---
 
 ## Open for other streams
+
+### ⚠ Stream A / C-038 — `{ticketId}` is a code, and two backend routes take a `long`
+
+Found by C-020. The contract's `TicketId` is `type: string` matching
+`^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$`, this page's URL is `/tickets/CRM-26-00347`,
+and the generated client sends exactly that — but
+`TicketDetailController.full` (A-052) and `ReopenController.reopen` (C-038) both
+declare `@PathVariable long ticketId`. **Against the real backend that is a 400
+on page load**, hidden so far because both have only run against D-004's mock,
+which routes on the string.
+
+`PATCH /tickets/{ticketId}/priority` follows the contract and is the first caller
+of `ScopedTickets.requireByCode` (unused since A-035). The other two are raised
+rather than changed from this branch. Full argument in
+`backend/api/.../feature/tickets/README.md`.
 
 ### ⚠ Stream D — `contracts/openapi.yaml`: two S-20 fields have nowhere to come from
 
@@ -159,7 +236,6 @@ default user would move ground under every other stream's tests.
 
 | | Task |
 |---|---|
-| Inline priority editing in the panel | C-020 |
 | The ribbon, its segments and its cycle selector | C-051, C-053 |
 | Journey roll-up · History · Comments · Attachments · Effort | C-055, C-059, C-029, C-060, C-061 |
 | Ticket chat tab | Stream D |

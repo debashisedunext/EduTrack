@@ -12,8 +12,10 @@ import { AvatarStack } from '@/components/ui/avatar-stack'
 import { Chip } from '@/components/ui/chip'
 import { cn } from '@/lib/utils'
 
-import { LEVEL_VARIANT, STATUS_LABEL, STATUS_VARIANT } from '../list/columns'
+import { STATUS_LABEL, STATUS_VARIANT } from '../list/columns'
 import { clientPath, cycleEffortPath, projectPath, resourcePath } from './entityLinks'
+import { slaClockStart } from './levelChange'
+import { TicketLevelControl } from './TicketLevelControl'
 import {
   ageInDays,
   assignedBy,
@@ -34,6 +36,15 @@ export interface TicketSummaryPanelProps {
   taskTypeName?: string
   /** Same for `clientContactId`, resolved from `GET /clients/{id}/contacts`. */
   contactName?: string
+  /**
+   * C-020 · whether the Level row offers the §4B.1 editor. False for the three
+   * roles it excludes, while `useGetMe()` is resolving, and on a sealed cycle —
+   * in all three cases the row renders as the plain chip C-019 drew, so nothing
+   * shifts when the answer arrives.
+   */
+  canChangeLevel?: boolean
+  /** C-020 · refetch after a level change; the date and history moved too. */
+  onLevelChanged?: () => void
   /** Injected so the panel renders deterministically under test. */
   now?: Date
 }
@@ -103,10 +114,12 @@ function DateCell({ value, warn }: { value?: string | null; warn?: boolean }) {
 /**
  * S-20's right rail.
  *
- * Read-only in C-019. The one field the blueprint calls inline-editable —
- * Level — is C-020, which owns the dropdown, the mandatory reason and the
- * `LEVEL_CHANGED` history row; it replaces the chip below rather than adding a
- * second place a level can be changed from.
+ * Read-only apart from one field. C-019 drew every row as plain text; C-020
+ * replaced the Level chip with `TicketLevelControl` — the picker, the mandatory
+ * reason and the `LEVEL_CHANGED` row — rather than adding a second place a level
+ * can be changed from. Every other row here is still read-only by design, and a
+ * second editable field should be argued for on its own terms rather than
+ * inherited from this one.
  */
 export function TicketSummaryPanel({
   ticket,
@@ -116,6 +129,8 @@ export function TicketSummaryPanel({
   selectedCycleNo,
   taskTypeName,
   contactName,
+  canChangeLevel = false,
+  onLevelChanged,
   now = new Date(),
 }: TicketSummaryPanelProps) {
   const total = totalEffortHrs(ticket, cycles)
@@ -163,7 +178,18 @@ export function TicketSummaryPanel({
 
         <Row label="Level">
           <span className="flex flex-wrap items-center gap-1.5">
-            <Chip variant={LEVEL_VARIANT[ticket.level]}>{ticket.level}</Chip>
+            <TicketLevelControl
+              ticket={ticket}
+              clockStart={slaClockStart(ticket, cycles)}
+              canEdit={canChangeLevel}
+              onChanged={() => onLevelChanged?.()}
+            />
+            {/*
+              Stays outside the control, and outside the button it draws. It is a
+              statement about `originalLevel` — which no editor can change — and
+              putting it inside the click target would offer "was MEDIUM" as
+              something that could be pressed.
+            */}
             {escalatedFrom && <span className="text-caption text-content-muted">was {escalatedFrom}</span>}
           </span>
         </Row>

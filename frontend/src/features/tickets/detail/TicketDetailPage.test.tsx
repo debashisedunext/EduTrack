@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 
@@ -280,6 +281,58 @@ describe('S-20 Ticket detail shell — C-019', () => {
       const section = screen.getByRole('region', { name: 'Description' })
       expect(within(section).getByText('Reproduced on production.').tagName).toBe('P')
       expect(within(section).getByText('Guest checkout is fine.').tagName).toBe('P')
+    })
+  })
+
+  /**
+   * C-020 · the wiring, against the real mock handler rather than an override.
+   *
+   * `TicketLevelControl.test.tsx` proves the control; these prove the three
+   * props the page has to pass it, each of which fails silently if it is
+   * dropped: `canChangeLevel` (no editor at all), `clockStart` (a preview
+   * measured from the wrong instant) and `onLevelChanged` (a stale panel behind
+   * a saved change).
+   */
+  describe('level — C-020, §4B.1', () => {
+    it('offers the editor to an Admin, and the saved change reaches the panel', async () => {
+      signInAsAdmin()
+      renderPage()
+      await waitForTicket()
+
+      const panel = summary()
+      const before = within(panel).getByText('CRITICAL')
+      expect(before).toBeInTheDocument()
+
+      const user = userEvent.setup()
+      await user.click(within(panel).getByRole('button', { name: /change the level/i }))
+
+      const dialog = await screen.findByRole('dialog')
+      await user.click(await within(dialog).findByRole('radio', { name: 'LOW' }))
+      await user.type(
+        within(dialog).getByLabelText(/reason/i),
+        'Downgraded after the client confirmed the workaround holds.',
+      )
+      await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+      // The refetch is the assertion. Without `onLevelChanged` the request
+      // succeeds and the panel goes on showing CRITICAL, which is the failure
+      // mode a mutation test that only checked the response would miss.
+      await waitFor(() => expect(within(summary()).getByText('LOW')).toBeInTheDocument(), { timeout: 4000 })
+      // `originalLevel` is untouched, so the escalation note survives the
+      // de-escalation — the one direction somebody might expect it to reset.
+      expect(within(summary()).getByText('was HIGH')).toBeInTheDocument()
+    })
+
+    it('offers no editor on a sealed earlier cycle', async () => {
+      signInAsAdmin()
+      renderPage(`/tickets/${TICKET}?cycle=1`)
+      await waitForTicket()
+
+      // The write would land on the *current* cycle — the server has no notion
+      // of "change the level as it was in cycle 1" — so offering it here would
+      // be offering the wrong act under the right label.
+      expect(screen.getByRole('status')).toHaveTextContent(/sealed and read-only/)
+      expect(within(summary()).queryByRole('button', { name: /change the level/i })).not.toBeInTheDocument()
     })
   })
 
