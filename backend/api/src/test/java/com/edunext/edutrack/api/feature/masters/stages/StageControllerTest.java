@@ -6,10 +6,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
@@ -17,6 +15,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
@@ -48,7 +47,7 @@ class StageControllerTest {
     private static StageDtos.StageView view(long id, String code, short seq, int position) {
         return new StageDtos.StageView(id, 1L, code, code, "DEVELOPER",
                 new BigDecimal("4.00"), false, List.of(), "code-2", seq, position,
-                0L, 0L, true);
+                0L, 0L, true, false, null, true);
     }
 
     private String listTag(List<StageDtos.StageView> data) {
@@ -149,7 +148,7 @@ class StageControllerTest {
 
             when(service.find(1L, 30L)).thenReturn(Optional.of(new StageDtos.StageView(
                     30L, 1L, "DEV", "DEV", "DEVELOPER", new BigDecimal("4.00"), false,
-                    List.of(), "code-2", (short) 30, 3, 1L, 0L, false)));
+                    List.of(), "code-2", (short) 30, 3, 1L, 0L, false, false, null, false)));
             String after = controller.stage(1L, 30L).getHeaders().getETag();
 
             assertThat(after).isNotEqualTo(before);
@@ -217,7 +216,8 @@ class StageControllerTest {
             String after = listTag(List.of(
                     view(10L, "INTAKE", (short) 10, 1),
                     new StageDtos.StageView(20L, 1L, "TRIAGE", "Triage & Planning", "PM",
-                            null, false, List.of(), null, (short) 20, 2, 0L, 0L, true)));
+                            null, false, List.of(), null, (short) 20, 2, 0L, 0L, true,
+                            false, null, true)));
 
             assertThat(after).isNotEqualTo(before);
         }
@@ -236,18 +236,102 @@ class StageControllerTest {
     }
 
     // ------------------------------------------------------------------
-    // the absence that is the design
+    // removal — B-042
     // ------------------------------------------------------------------
 
-    @Test
-    @DisplayName("there is no DELETE mapping anywhere on this controller — B-042 owns removal")
-    void noDeleteExists() {
-        for (Method method : StageController.class.getDeclaredMethods()) {
-            assertThat(method.getAnnotation(DeleteMapping.class))
-                    .as("%s must not be a DELETE — §7.4 says stages are deprecated, never "
-                            + "deleted, and the flag that makes that possible is B-042",
-                            method.getName())
-                    .isNull();
+    /**
+     * <b>This test replaced B-040's {@code noDeleteExists}</b>, which asserted no
+     * {@code DELETE} existed anywhere on this controller and named this task as
+     * the one that would take it away. It was doing real work while it lived: the
+     * ribbon's definition table had no rule protecting it, and a delete route
+     * arriving before that rule would have been unreviewable.
+     *
+     * <p>What replaces it is not "a delete exists" — that would assert less than
+     * nothing. It is the shape of the delete, and the guard it cannot be called
+     * without.
+     */
+    @Nested
+    @DisplayName("deprecated, never deleted")
+    class Removal {
+
+        @Test
+        @DisplayName("the DELETE is preconditioned — the guard is both usage counts, and the tag carries them")
+        void deleteRequiresIfMatch() {
+            when(service.find(1L, 30L)).thenReturn(Optional.of(view(30L, "DEV", (short) 30, 3)));
+
+            assertThatThrownBy(() -> controller.delete(1L, 30L, null))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("428");
+
+            verify(service, never()).delete(anyLong(), anyLong());
+        }
+
+        @Test
+        @DisplayName("a stale tag refuses the DELETE with 412 rather than removing the row")
+        void staleTagRefusesTheDelete() {
+            when(service.find(1L, 30L)).thenReturn(Optional.of(view(30L, "DEV", (short) 30, 3)));
+
+            assertThatThrownBy(() -> controller.delete(1L, 30L, "\"deadbeef\""))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("412");
+
+            verify(service, never()).delete(anyLong(), anyLong());
+        }
+
+        @Test
+        @DisplayName("a current tag deletes and answers 204 — the screen refetches, every later position moved")
+        void deleteReturns204() {
+            when(service.find(1L, 30L)).thenReturn(Optional.of(view(30L, "DEV", (short) 30, 3)));
+            String tag = controller.stage(1L, 30L).getHeaders().getETag().replace("\"", "");
+
+            ResponseEntity<Void> response = controller.delete(1L, 30L, tag);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+            verify(service).delete(1L, 30L);
+        }
+
+        @Test
+        @DisplayName("the deprecation setter takes no If-Match — it names a state rather than a delta")
+        void deprecationIsIdempotentAndUnconditioned() {
+            StageDtos.StageView retired = view(30L, "DEV", (short) 30, 3);
+            when(service.find(1L, 30L)).thenReturn(Optional.of(retired));
+            when(service.setDeprecated(1L, 30L, true)).thenReturn(retired);
+
+            ResponseEntity<StageDtos.StageResponse> response =
+                    controller.deprecation(1L, 30L, new StageDtos.StageDeprecation(true));
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getHeaders().getETag()).isNotBlank();
+            verify(service).setDeprecated(1L, 30L, true);
+        }
+
+        @Test
+        @DisplayName("both routes 404 on an unknown stage before the service is asked to write")
+        void unknownStageIs404OnBothRoutes() {
+            when(service.find(1L, 99L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> controller.delete(1L, 99L, "*"))
+                    .isInstanceOf(ResponseStatusException.class);
+            assertThatThrownBy(() ->
+                    controller.deprecation(1L, 99L, new StageDtos.StageDeprecation(true)))
+                    .isInstanceOf(ResponseStatusException.class);
+
+            verify(service, never()).delete(anyLong(), anyLong());
+            verify(service, never()).setDeprecated(anyLong(), anyLong(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("the ETag moves when the stage is retired, so a delete cannot ride a tag read before it")
+        void tagCoversTheDeprecationFlag() {
+            when(service.find(1L, 30L)).thenReturn(Optional.of(view(30L, "DEV", (short) 30, 3)));
+            String live = controller.stage(1L, 30L).getHeaders().getETag();
+
+            when(service.find(1L, 30L)).thenReturn(Optional.of(new StageDtos.StageView(
+                    30L, 1L, "DEV", "DEV", "DEVELOPER", new BigDecimal("4.00"), false,
+                    List.of(), "code-2", (short) 30, 3, 0L, 0L, true,
+                    true, java.time.Instant.parse("2026-08-19T09:00:00Z"), false)));
+
+            assertThat(controller.stage(1L, 30L).getHeaders().getETag()).isNotEqualTo(live);
         }
     }
 

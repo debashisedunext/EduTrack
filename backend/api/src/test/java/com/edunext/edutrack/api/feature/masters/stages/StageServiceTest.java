@@ -38,6 +38,12 @@ import static org.mockito.Mockito.when;
  * columns they claim to, and that the reorder's two passes really do survive
  * {@code uq_workflow_stages_seq} — which is the one assertion here that would
  * pass against any mock whatever the code did.
+ *
+ * <p>B-042 added the two nested classes at the bottom. The one worth reading
+ * first is {@code deprecatesAStageWithOpenTickets}: the obvious guard on that
+ * route is {@code openTicketCount}, and it is exactly wrong — §7.4's clause is
+ * about stages <em>used by live tickets</em>, so refusing there would refuse the
+ * only case the word "deprecated" is in the blueprint to describe.
  */
 class StageServiceTest {
 
@@ -113,6 +119,17 @@ class StageServiceTest {
 
     private void ribbonIs(List<WorkflowStage> ribbon) {
         when(stages.findByTemplateIdOrderBySeqAsc(1L)).thenReturn(ribbon);
+    }
+
+    /** B-042 · retire a row the way the column would hold it — both fields, together. */
+    private static WorkflowStage retired(WorkflowStage stage) {
+        stage.setDeprecated(true);
+        stage.setDeprecatedAt(java.time.Instant.parse("2026-08-19T09:00:00Z"));
+        return stage;
+    }
+
+    private static WorkflowStage byCode(List<WorkflowStage> ribbon, String code) {
+        return ribbon.stream().filter(s -> s.getStageCode().equals(code)).findFirst().orElseThrow();
     }
 
     // ------------------------------------------------------------------
@@ -547,6 +564,226 @@ class StageServiceTest {
 
             assertThatCode(() -> service.reorder(1L, List.of(20L, 10L, 30L, 40L)))
                     .doesNotThrowAnyException();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // deprecation and delete — B-042
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("deprecated, never deleted")
+    class Deprecation {
+
+        @Test
+        @DisplayName("a stage with live tickets standing in it CAN be deprecated — that is the case §7.4 exists for")
+        void deprecatesAStageWithOpenTickets() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            ribbonIs(ribbon);
+            when(usage.forTemplate(1L)).thenReturn(
+                    new StageUsageRepository.Counts(Map.of("QA", 41L), Map.of("QA", 3L)));
+
+            StageDtos.StageView view = service.setDeprecated(1L, 40L, true);
+
+            assertThat(view.isDeprecated()).isTrue();
+            assertThat(view.openTicketCount()).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("deprecating stamps deprecatedAt, and restoring clears it — the CHECK refuses them apart")
+        void flagAndTimestampMoveTogether() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            ribbonIs(ribbon);
+
+            assertThat(service.setDeprecated(1L, 10L, true).deprecatedAt()).isNotNull();
+            assertThat(service.setDeprecated(1L, 10L, false).deprecatedAt()).isNull();
+        }
+
+        @Test
+        @DisplayName("deprecating twice is a no-op rather than a conflict — the setter is idempotent")
+        void repeatedDeprecationIsANoOp() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            ribbonIs(ribbon);
+            java.time.Instant first = service.setDeprecated(1L, 10L, true).deprecatedAt();
+
+            StageDtos.StageView again = service.setDeprecated(1L, 10L, true);
+
+            assertThat(again.isDeprecated()).isTrue();
+            assertThat(again.deprecatedAt()).isEqualTo(first);
+        }
+
+        @Test
+        @DisplayName("the template's last live stage cannot be retired — the workflow would route nothing")
+        void refusesTheLastLiveStage() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            byCode(ribbon, "DEV").setCanReturnTo(new ArrayList<>());
+            byCode(ribbon, "QA").setCanReturnTo(new ArrayList<>());
+            retired(byCode(ribbon, "TRIAGE"));
+            retired(byCode(ribbon, "DEV"));
+            retired(byCode(ribbon, "QA"));
+            ribbonIs(ribbon);
+
+            assertThatThrownBy(() -> service.setDeprecated(1L, 10L, true))
+                    .isInstanceOf(StageService.LastLiveStageException.class)
+                    .hasMessageContaining("last stage on this template that is still live");
+        }
+
+        @Test
+        @DisplayName("a live stage still returning to it refuses the retire, naming the arrow")
+        void refusesWhileSomethingLiveReturnsToIt() {
+            ribbonIs(seededRibbon());
+
+            // QA -> DEV is B-004's own loop-back, so retiring DEV would leave it
+            // pointing at a stage nothing may enter.
+            assertThatThrownBy(() -> service.setDeprecated(1L, 30L, true))
+                    .isInstanceOf(StageService.ReturnTargetDirectionException.class)
+                    .hasMessageContaining("QA")
+                    .hasMessageContaining("DEV");
+        }
+
+        @Test
+        @DisplayName("an arrow FROM an already-deprecated stage does not block the retire — it is not a move anything can make")
+        void ignoresArrowsFromDeprecatedSiblings() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            retired(byCode(ribbon, "QA"));
+            ribbonIs(ribbon);
+
+            assertThatCode(() -> service.setDeprecated(1L, 30L, true)).doesNotThrowAnyException();
+        }
+
+        @Test
+        @DisplayName("restoring is unconditional — nothing was cleared, so nothing has to be guessed at")
+        void restoreIsUnconditional() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            retired(byCode(ribbon, "DEV"));
+            ribbonIs(ribbon);
+
+            assertThat(service.setDeprecated(1L, 30L, false).isDeprecated()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a deprecated stage may not be named as a return target — an arrow into it is an entry")
+        void refusesADeprecatedReturnTarget() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            retired(byCode(ribbon, "TRIAGE"));
+            ribbonIs(ribbon);
+
+            assertThatThrownBy(() -> service.update(1L, 40L,
+                    new StageDtos.StagePatch(null, null, null, null, null,
+                            List.of("TRIAGE"), null)))
+                    .isInstanceOf(StageService.StageValidationException.class)
+                    .hasMessageContaining("deprecated");
+        }
+
+        @Test
+        @DisplayName("isDeprecated reaches the inline vocabulary S-25's stage filter reads")
+        void inlineViewCarriesTheFlag() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            retired(byCode(ribbon, "QA"));
+            ribbonIs(ribbon);
+            when(templates.findAll()).thenReturn(List.of(template));
+            when(usage.stageCounts()).thenReturn(Map.of(1L, 4));
+
+            assertThat(service.templates().get(0).stages())
+                    .filteredOn(StageDtos.InlineStageView::isDeprecated)
+                    .extracting(StageDtos.InlineStageView::stageCode)
+                    .containsExactly("QA");
+        }
+    }
+
+    @Nested
+    @DisplayName("the narrow delete")
+    class Delete {
+
+        @Test
+        @DisplayName("a stage nothing has ever entered is removed — the typo caught the same afternoon")
+        void deletesAnUnusedStage() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            byCode(ribbon, "QA").setCanReturnTo(new ArrayList<>());
+            ribbonIs(ribbon);
+
+            service.delete(1L, 40L);
+
+            verify(stages).delete(byCode(ribbon, "QA"));
+        }
+
+        @Test
+        @DisplayName("history alone refuses it, even with nobody standing in the stage")
+        void refusesOnTransitionsAlone() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            byCode(ribbon, "QA").setCanReturnTo(new ArrayList<>());
+            ribbonIs(ribbon);
+            when(usage.forTemplate(1L)).thenReturn(
+                    new StageUsageRepository.Counts(Map.of("QA", 41L), Map.of()));
+
+            assertThatThrownBy(() -> service.delete(1L, 40L))
+                    .isInstanceOf(StageService.StageInUseException.class)
+                    .hasMessageContaining("Deprecate it instead");
+            verify(stages, never()).delete(any());
+        }
+
+        @Test
+        @DisplayName("an open ticket alone refuses it, even with no history — neither count is a superset")
+        void refusesOnOpenTicketsAlone() {
+            List<WorkflowStage> ribbon = seededRibbon();
+            byCode(ribbon, "QA").setCanReturnTo(new ArrayList<>());
+            ribbonIs(ribbon);
+            when(usage.forTemplate(1L)).thenReturn(
+                    new StageUsageRepository.Counts(Map.of(), Map.of("QA", 2L)));
+
+            assertThatThrownBy(() -> service.delete(1L, 40L))
+                    .isInstanceOf(StageService.StageInUseException.class);
+            verify(stages, never()).delete(any());
+        }
+
+        @Test
+        @DisplayName("an unused stage something still returns to is refused — a delete cannot be looser than a retire")
+        void refusesWhileSomethingReturnsToIt() {
+            ribbonIs(seededRibbon());
+
+            assertThatThrownBy(() -> service.delete(1L, 30L))
+                    .isInstanceOf(StageService.ReturnTargetDirectionException.class);
+            verify(stages, never()).delete(any());
+        }
+
+        @Test
+        @DisplayName("the last live stage is refused even when it is unused")
+        void refusesTheLastLiveStage() {
+            List<WorkflowStage> ribbon = new ArrayList<>();
+            ribbon.add(stage(10L, (short) 10, "INTAKE", "Intake", "SUPPORT", List.of()));
+            ribbonIs(ribbon);
+
+            assertThatThrownBy(() -> service.delete(1L, 10L))
+                    .isInstanceOf(StageService.LastLiveStageException.class);
+            verify(stages, never()).delete(any());
+        }
+
+        @Test
+        @DisplayName("isDeletable is false while a live sibling returns to it, with both counts at zero")
+        void isDeletableAnswersTheWholeRule() {
+            ribbonIs(seededRibbon());
+
+            assertThat(service.list(1L).orElseThrow())
+                    .extracting(StageDtos.StageView::stageCode, StageDtos.StageView::isDeletable)
+                    .containsExactly(
+                            org.assertj.core.api.Assertions.tuple("INTAKE", true),
+                            // TRIAGE and DEV are both named in a live canReturnTo.
+                            org.assertj.core.api.Assertions.tuple("TRIAGE", false),
+                            org.assertj.core.api.Assertions.tuple("DEV", false),
+                            org.assertj.core.api.Assertions.tuple("QA", true));
+        }
+
+        @Test
+        @DisplayName("a used stage is not deletable however the rest of the ribbon looks")
+        void usageAloneClearsIsDeletable() {
+            ribbonIs(seededRibbon());
+            when(usage.forTemplate(1L)).thenReturn(
+                    new StageUsageRepository.Counts(Map.of("QA", 41L), Map.of()));
+
+            assertThat(service.list(1L).orElseThrow())
+                    .filteredOn(v -> v.stageCode().equals("QA"))
+                    .extracting(StageDtos.StageView::isDeletable)
+                    .containsExactly(false);
         }
     }
 

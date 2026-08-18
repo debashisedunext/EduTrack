@@ -102,6 +102,7 @@ import type {
   RolePatchRequest,
   RolePermissionsRequest,
   RoleWriteRequest,
+  StageDeprecationRequest,
   StageListResponse,
   StageOrderRequest,
   StagePatchRequest,
@@ -4220,12 +4221,13 @@ would leave a segment no role on earth can move.
 and always one earlier in the order** — the same backward rule
 `reorderStages` enforces from the other side. Field-keyed `400`.
 
-**There is no delete, and the absence is the design.** §7.4: *"Stages used
-by live tickets can only be deprecated, never deleted — otherwise
-historical ribbons would break."* The deprecation flag and its guard are
-**B-042**; until they land this screen offers no removal at all, rather
-than a delete B-042 would have to take away. A stage added by mistake is
-edited, not removed.
+**Retiring a stage is not this route.** §7.4's *"deprecated, never deleted"*
+is `setStageDeprecation`, a separate setter for the reason
+`/users/{userId}/status` is one: an omitted field here means "leave it
+alone", so a boolean would carry three wire states for a column with two,
+and the one write with a consequence for live tickets would arrive looking
+like a display-name edit. `deleteStage` covers the narrow case §7.4's clause
+does not reach.
 
 `If-Match` is required, not optional; a write without one is refused with
 `428`. Read the current tag from `GET .../stages/{stageId}`.
@@ -4291,6 +4293,209 @@ export const useUpdateStage = <TError = ValidationFailedResponse | UnauthorizedR
       > => {
 
       const mutationOptions = getUpdateStageMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Admin only, and **refused for most of the stages it can be pointed at** —
+B-042. §7.4: *"Stages used by live tickets can only be deprecated, never
+deleted — otherwise historical ribbons would break."* This route serves the
+complement of that clause and nothing more: a stage nothing has ever
+entered, nothing is standing in, no live stage returns to, and which is not
+the template's last live one. A stage added by mistake and caught the same
+afternoon.
+
+**Nothing in the database would have refused this, which is why the rule is
+here.** A-005 made `ticket_stage_transitions.to_stage` and
+`tickets.current_stage` plain `VARCHAR` columns holding the stage *code*,
+deliberately with no foreign key onto `workflow_stages`. So a delete
+cascades nothing and fails nowhere — it just leaves every historical ribbon
+segment pointing at a definition that is gone, and the §4A.7 stuck-in-stage
+scan quietly ceasing to match those rows. The same silent pair that freezes
+`stageCode`, one verb further along.
+
+Refused with `409` and `type: stage-in-use` when either usage count is above
+zero. That document carries both counts **and** `canDeprecate: true`, so the
+screen can offer the correct action rather than only reporting the refusal —
+an Admin told "no" with no alternative concludes the row cannot be removed
+at all. `409` with `type: last-live-stage` when it is the only live stage
+left, and `type: return-target-direction` when a live stage still names it
+in `canReturnTo`, with the pairs on the document.
+
+**`If-Match` is required, which is unusual on a `DELETE` and is the point of
+it here.** The whole guard is that `transitionCount` and `openTicketCount`
+are zero, and both are inside the tag `GET .../stages/{stageId}` emits — so
+a ticket entering the stage while the confirmation dialog is open moves the
+tag and the delete is refused with `412`, rather than performed on evidence
+that stopped being true. A destructive verb whose precondition is a fact
+about other tables is exactly where a lost update is worst: the row is gone,
+and there is nothing left to notice it by.
+
+`seq` is not renumbered. The gap is B-004's spacing doing its job, and
+`reorderStages` closes it on the next drag.
+
+ * @summary Delete an unused stage (S-13 tab 2)
+ */
+export const deleteStage = (
+    templateId: number,
+    stageId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/masters/workflow-templates/${templateId}/stages/${stageId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteStageMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteStage>>, TError,{templateId: number;stageId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteStage>>, TError,{templateId: number;stageId: number}, TContext> => {
+
+const mutationKey = ['deleteStage'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteStage>>, {templateId: number;stageId: number}> = (props) => {
+          const {templateId,stageId} = props ?? {};
+
+          return  deleteStage(templateId,stageId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteStageMutationResult = NonNullable<Awaited<ReturnType<typeof deleteStage>>>
+    
+    export type DeleteStageMutationError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Delete an unused stage (S-13 tab 2)
+ */
+export const useDeleteStage = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteStage>>, TError,{templateId: number;stageId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteStage>>,
+        TError,
+        {templateId: number;stageId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteStageMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Admin only. §7.4's *"can only be deprecated, never deleted"* — B-042, and
+the route that makes retiring a stage possible at all.
+
+A deprecated stage **keeps rendering on every ribbon it is already on** and
+accepts no new entry. That is the whole distinction: the row has to survive,
+because `ticket_stage_transitions` holds its code as text with nothing
+pointing back, so retiring it is a statement about the future rather than a
+removal.
+
+**Open tickets do not refuse this, and that is the case the rule exists
+for.** §7.4's clause is about stages *used by live tickets*, so a guard on
+`openTicketCount` would refuse the only situation the word is in the
+blueprint to describe. Tickets standing in a retired stage keep their
+segment and keep their ordinary way out of it.
+
+Two things are refused, both with `409`, and both are states with no way
+back out:
+
+- **`last-live-stage`** — the template's only remaining live stage. A
+  workflow with nothing live routes no ticket, and no screen would notice.
+- **`return-target-direction`** — a live stage still names this one in
+  `canReturnTo`. That whitelist is a set of moves the transition service
+  will honour, so an arrow into a retired stage is an entry into a stage
+  nothing may enter. The offending pairs travel on the document exactly as
+  `reorderStages` sends them, because the screen highlights both ends of
+  each pair on the ribbon it is already drawing.
+
+**Restoring is unconditional.** Neither guard can be broken by bringing a
+stage back, and unlike B-039's status restore there is nothing to reinstate:
+this retire clears no other row, so nothing has to be guessed at.
+
+**No `If-Match`**, and it is the only write on this screen without one. The
+body names the state it wants rather than a delta, so two Admins racing
+produce whichever state was asked for last — the correct answer rather than
+a lost update. Same exemption as `/users/{userId}/status` and
+`/clients/{clientId}/status`; recorded in `check-conventions.py`. The
+refusals above depend on other rows and are re-read inside the transaction,
+so a stale screen cannot talk the server past them.
+
+ * @summary Deprecate or restore a stage (S-13 tab 2)
+ */
+export const setStageDeprecation = (
+    templateId: number,
+    stageId: number,
+    stageDeprecationRequest: StageDeprecationRequest,
+ ) => {
+      
+      
+      return http<StageResponse>(
+      {url: `/masters/workflow-templates/${templateId}/stages/${stageId}/deprecation`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: stageDeprecationRequest
+    },
+      );
+    }
+  
+
+
+export const getSetStageDeprecationMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStageDeprecation>>, TError,{templateId: number;stageId: number;data: StageDeprecationRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof setStageDeprecation>>, TError,{templateId: number;stageId: number;data: StageDeprecationRequest}, TContext> => {
+
+const mutationKey = ['setStageDeprecation'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setStageDeprecation>>, {templateId: number;stageId: number;data: StageDeprecationRequest}> = (props) => {
+          const {templateId,stageId,data} = props ?? {};
+
+          return  setStageDeprecation(templateId,stageId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetStageDeprecationMutationResult = NonNullable<Awaited<ReturnType<typeof setStageDeprecation>>>
+    export type SetStageDeprecationMutationBody = StageDeprecationRequest
+    export type SetStageDeprecationMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse
+
+    /**
+ * @summary Deprecate or restore a stage (S-13 tab 2)
+ */
+export const useSetStageDeprecation = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStageDeprecation>>, TError,{templateId: number;stageId: number;data: StageDeprecationRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setStageDeprecation>>,
+        TError,
+        {templateId: number;stageId: number;data: StageDeprecationRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSetStageDeprecationMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

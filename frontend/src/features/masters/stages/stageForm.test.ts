@@ -8,6 +8,7 @@ import {
   formToPatch,
   moveStage,
   orderChanged,
+  retireBlockers,
   returnTargetOptions,
   stageFormErrors,
   stageToForm,
@@ -37,6 +38,9 @@ function stage(overrides: Partial<Stage> = {}): Stage {
     transitionCount: 0,
     openTicketCount: 0,
     isCodeEditable: true,
+    isDeprecated: false,
+    deprecatedAt: null,
+    isDeletable: true,
     ...overrides,
   }
 }
@@ -253,5 +257,66 @@ describe('orderChanged', () => {
   it('is false when a row was edited but nothing moved', () => {
     const edited = ribbon.map((s, i) => (i === 2 ? { ...s, displayName: 'Dev' } : s))
     expect(orderChanged(edited, ribbon)).toBe(false)
+  })
+})
+
+/**
+ * B-042 · the screen's copy of the two rules a retire is refused by, and the
+ * picker's copy of the rule a return target is refused by.
+ *
+ * The server enforces all three. These exist so the confirm dialog can name the
+ * stage in the way before the click rather than render a 409 after it — the same
+ * bargain `forwardReturnPaths` makes, and the reason it is worth writing twice.
+ */
+describe('returnTargetOptions and deprecated stages', () => {
+  it('drops a deprecated stage from the picker — the server would refuse the target', () => {
+    const stages = [
+      stage({ id: 1, stageCode: 'INTAKE', position: 1, canReturnTo: [] }),
+      stage({ id: 2, stageCode: 'TRIAGE', position: 2, canReturnTo: [], isDeprecated: true }),
+    ]
+
+    expect(returnTargetOptions(stages, 3).map((s) => s.stageCode)).toEqual(['INTAKE'])
+  })
+
+  it('keeps a deprecated stage this one already returns to, so an unrelated edit cannot clear it', () => {
+    const stages = [
+      stage({ id: 1, stageCode: 'INTAKE', position: 1, canReturnTo: [] }),
+      stage({ id: 2, stageCode: 'TRIAGE', position: 2, canReturnTo: [], isDeprecated: true }),
+    ]
+
+    expect(returnTargetOptions(stages, 3, ['TRIAGE']).map((s) => s.stageCode))
+      .toEqual(['INTAKE', 'TRIAGE'])
+  })
+})
+
+describe('retireBlockers', () => {
+  const live = (code: string, id: number, canReturnTo: string[] = []) =>
+    stage({ id, stageCode: code, displayName: code, position: id, canReturnTo })
+
+  it('names the arrow that would point at a retired stage', () => {
+    const dev = live('DEV', 3)
+    const blocked = retireBlockers(dev, [live('INTAKE', 1), dev, live('QA', 4, ['DEV'])])
+
+    expect(blocked).toEqual({ reason: 'return-target', arrows: ['QA \u2192 DEV'] })
+  })
+
+  it('ignores an arrow from a stage that is itself deprecated — not a move anything can make', () => {
+    const dev = live('DEV', 3)
+    const qa = stage({ id: 4, stageCode: 'QA', position: 4, canReturnTo: ['DEV'], isDeprecated: true })
+
+    expect(retireBlockers(dev, [live('INTAKE', 1), dev, qa])).toBeNull()
+  })
+
+  it('refuses the last live stage — a workflow with nothing live routes no ticket', () => {
+    const intake = live('INTAKE', 1)
+    const retired = stage({ id: 2, stageCode: 'TRIAGE', position: 2, canReturnTo: [], isDeprecated: true })
+
+    expect(retireBlockers(intake, [intake, retired])).toEqual({ reason: 'last-live', arrows: [] })
+  })
+
+  it('allows a retire with open tickets standing in the stage — that is the case §7.4 exists for', () => {
+    const dev = stage({ id: 3, stageCode: 'DEV', position: 3, canReturnTo: [], openTicketCount: 9 })
+
+    expect(retireBlockers(dev, [live('INTAKE', 1), dev, live('QA', 4)])).toBeNull()
   })
 })

@@ -3,10 +3,12 @@ package com.edunext.edutrack.api.feature.masters.stages;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -40,6 +42,19 @@ final class StageDtos {
      * write, and a second copy of it in the form would be a second thing to keep
      * true — the failure mode being a form that greys out a field the server
      * would have accepted, or worse, offers one it will refuse.
+     *
+     * <p><b>{@code isDeletable} is the second such field, and B-042 added it for
+     * the identical reason.</b> The rule behind it is not one count but four
+     * conditions — nothing has ever entered the stage, nothing stands in it now,
+     * no live sibling returns to it, and it is not the template's last live stage
+     * — and three of those are facts about <em>other rows</em>. A client deriving
+     * it from the array it happens to hold would be right until it held a filtered
+     * one.
+     *
+     * <p>{@code isDeprecated} carries no such computation: it is the column.
+     * {@code deprecatedAt} is beside it because "when did we stop using this?" has
+     * no other answer — the last hop into a stage records when it was last
+     * <em>used</em>, which is a different date.
      */
     record StageView(
             long id,
@@ -55,7 +70,10 @@ final class StageDtos {
             int position,
             long transitionCount,
             long openTicketCount,
-            boolean isCodeEditable) {
+            boolean isCodeEditable,
+            boolean isDeprecated,
+            Instant deprecatedAt,
+            boolean isDeletable) {
 
         /**
          * What the {@code ETag} hashes.
@@ -72,7 +90,13 @@ final class StageDtos {
                     String.valueOf(slaHours), String.valueOf(isOptional),
                     String.valueOf(canReturnTo), String.valueOf(icon),
                     String.valueOf(seq), String.valueOf(transitionCount),
-                    String.valueOf(openTicketCount));
+                    String.valueOf(openTicketCount),
+                    // B-042. The DELETE preconditions on this tag and its whole
+                    // guard is that the two counts above are zero — so a stage
+                    // retired, restored or entered while the dialog sits open has
+                    // to lose the race rather than be removed on evidence that
+                    // stopped being true.
+                    String.valueOf(isDeprecated));
         }
     }
 
@@ -104,10 +128,12 @@ final class StageDtos {
      * {@code id}, {@code templateId} and the two usage counts, which are four
      * fields with no meaning to a filter in a response every ticket list reads.
      *
-     * <p>{@code isDeprecated} is {@code false} on every row until <b>B-042</b>
-     * adds the column — which is exactly what it has been since D-001, with
-     * nothing behind it. Serving it as a constant is not new drift; leaving the
-     * field out would have been.
+     * <p><b>{@code isDeprecated} is served from the column as of B-042</b>, and it
+     * had been a hard-coded {@code false} since D-001 with nothing behind it. The
+     * field mattered before the column did: {@code TicketListPage} has skipped
+     * deprecated codes when building S-25's stage filter since C-013, so the
+     * branch was written, shipped and unreachable. This is the task that makes it
+     * do something.
      */
     record InlineStageView(
             String stageCode,
@@ -191,5 +217,21 @@ final class StageDtos {
      * rather than interpreted — see {@link StageService#reorder}.
      */
     record StageOrder(List<Long> stageIds) {
+    }
+
+    /**
+     * Retire a stage, or bring it back — B-042.
+     *
+     * <p><b>Its own route rather than a field on {@link StagePatch}</b>, and the
+     * reason is the patch's own convention: null means "leave it alone" there, so
+     * a boolean would have three states on the wire for a column that has two, and
+     * the one write in this package with a consequence for live tickets would
+     * arrive indistinguishable from a display-name edit. §4B.2's client status and
+     * S-08's user status are both separate setters for the same reason.
+     *
+     * <p>{@code Boolean} rather than {@code boolean} so that an absent field is a
+     * 400 rather than a silent restore. {@code @NotNull} says which.
+     */
+    record StageDeprecation(@NotNull Boolean isDeprecated) {
     }
 }

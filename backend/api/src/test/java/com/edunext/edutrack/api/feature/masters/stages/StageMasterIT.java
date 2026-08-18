@@ -48,6 +48,12 @@ import static org.assertj.core.api.Assertions.tuple;
  *     seq in tens, and every {@code can_return_to} pointing backwards, which is
  *     the rule the screen enforces on every write and has never enforced on the
  *     seed.</li>
+ *   <li><b>B-042 · {@code ck_workflow_stages_deprecation} is enforced.</b> MySQL
+ *     only began enforcing {@code CHECK} at 8.0.16 and parsed-and-ignored it
+ *     before that, so "the constraint is in the migration" and "the constraint
+ *     refuses anything" are two different claims. Nothing in the service can
+ *     produce a row that violates it — which is exactly why it needs asserting
+ *     against the database rather than through the service.</li>
  * </ol>
  *
  * <p>The fixture restores what it changes rather than working on rows of its own,
@@ -128,6 +134,41 @@ class StageMasterIT {
                 """);
         jdbc.update("UPDATE workflow_stages SET display_name = 'Development', "
                 + "owner_role = 'DEVELOPER' WHERE stage_code = 'DEV'");
+
+        // B-042. Both columns, together — ck_workflow_stages_deprecation refuses
+        // the row otherwise, and a retire that leaked into the next test would
+        // change the answer to isDeletable on rows that test never touched.
+        jdbc.update("UPDATE workflow_stages SET is_deprecated = 0, deprecated_at = NULL");
+
+        // B-042, and this was a gap rather than an addition. `aFullReversal
+        // SurvivesTheUniqueKey` nulls every can_return_to on Infra Flow to get an
+        // order the direction rule would otherwise refuse, and nothing here put
+        // them back — so whichever test ran next saw a template with no loop-backs
+        // at all. B-040 never noticed because no assertion of its own depended on
+        // them; B-042's delete does, and read the missing arrow as permission to
+        // remove DEPLOY. That destroyed a seeded stage `restoreSeed` cannot
+        // recreate, and the next test to count Infra Flow's stages failed instead
+        // of the one that caused it.
+        //
+        // Restored from V20260807_1700 verbatim, per template, because the same
+        // code carries different targets on different ribbons: DEPLOY returns to
+        // DEV on Standard Dev Flow and to TRIAGE on Infra Flow, which has no
+        // Development stage at all.
+        jdbc.update("UPDATE workflow_stages SET can_return_to = NULL");
+        restoreReturnTargets("Standard Dev Flow", Map.of(
+                "DEV", "[\"TRIAGE\"]", "QA", "[\"DEV\"]", "DEPLOY", "[\"DEV\"]",
+                "VERIFY", "[\"DEV\"]", "SIGNOFF", "[\"DEV\"]"));
+        restoreReturnTargets("Support Fast-Track", Map.of(
+                "DEV", "[\"TRIAGE\"]", "SIGNOFF", "[\"DEV\"]"));
+        restoreReturnTargets("Infra Flow", Map.of(
+                "DEPLOY", "[\"TRIAGE\"]", "VERIFY", "[\"DEPLOY\"]"));
+    }
+
+    private void restoreReturnTargets(String templateName, Map<String, String> targets) {
+        targets.forEach((code, json) -> jdbc.update(
+                "UPDATE workflow_stages SET can_return_to = ? WHERE stage_code = ? "
+                        + "AND template_id = (SELECT id FROM workflow_templates WHERE name = ?)",
+                json, code, templateName));
     }
 
     // ------------------------------------------------------------------
@@ -454,5 +495,136 @@ class StageMasterIT {
         jdbc.update("DELETE FROM tickets WHERE ticket_code = 'ITS-26-00001'");
         jdbc.update("DELETE FROM projects WHERE project_code = 'ITS'");
         jdbc.update("DELETE FROM users WHERE emp_code = 'IT-STAGE'");
+    }
+
+    // ------------------------------------------------------------------
+    // deprecation — B-042
+    // ------------------------------------------------------------------
+
+    /**
+     * The migration's own guard, asserted rather than assumed.
+     *
+     * <p>MySQL enforces {@code CHECK} from 8.0.16 and silently parsed-and-ignored
+     * it before, which is the behaviour most of the guidance still describes.
+     * PLAN.md §3.1 says we rely on the enforcement; this is the row that proves we
+     * can. Written through raw SQL because no code path in the service can produce
+     * a flag and a timestamp that disagree — the constraint exists for the
+     * migration, the console and whatever comes next.
+     */
+    @Test
+    @DisplayName("the flag and the timestamp cannot disagree — ck_workflow_stages_deprecation is enforced")
+    void deprecationCheckIsEnforced() {
+        assertThatThrownBy(() -> jdbc.update(
+                "UPDATE workflow_stages SET is_deprecated = 1, deprecated_at = NULL "
+                        + "WHERE template_id = ? AND stage_code = 'CLOSED'", standardDevFlow()))
+                .isInstanceOf(DataAccessException.class);
+
+        assertThatThrownBy(() -> jdbc.update(
+                "UPDATE workflow_stages SET is_deprecated = 0, deprecated_at = NOW(6) "
+                        + "WHERE template_id = ? AND stage_code = 'CLOSED'", standardDevFlow()))
+                .isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    @DisplayName("a retire round-trips both columns through the real row")
+    void deprecationPersists() {
+        long template = infraFlow();
+        long closed = service.list(template).orElseThrow().stream()
+                .filter(v -> v.stageCode().equals("CLOSED")).findFirst().orElseThrow().id();
+
+        service.setDeprecated(template, closed, true);
+
+        // Read as Boolean, and that is the connector rather than a preference:
+        // Connector/J maps TINYINT(1) to java.lang.Boolean by default, so the
+        // obvious `((Number) …).intValue()` throws ClassCastException against a
+        // real database and passes against every mock. Asked for explicitly here
+        // so the column's wire type is part of what this test pins.
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT is_deprecated, deprecated_at FROM workflow_stages WHERE id = ?", closed);
+        assertThat(row.get("is_deprecated")).isEqualTo(Boolean.TRUE);
+        assertThat(row.get("deprecated_at")).isNotNull();
+
+        service.setDeprecated(template, closed, false);
+
+        row = jdbc.queryForMap(
+                "SELECT is_deprecated, deprecated_at FROM workflow_stages WHERE id = ?", closed);
+        assertThat(row.get("is_deprecated")).isEqualTo(Boolean.FALSE);
+        assertThat(row.get("deprecated_at")).isNull();
+    }
+
+    /**
+     * B-004's seed obeys the rule this task adds, asserted rather than trusted —
+     * the same call {@code seededReturnTargetsAreAllBackward} makes about the
+     * other half of {@code can_return_to}.
+     *
+     * <p>If any seeded stage arrived deprecated, tab 2 would open showing retired
+     * rows nobody retired, and {@code TicketListPage} would drop those codes from
+     * S-25's filter on the strength of a migration.
+     */
+    @Test
+    @DisplayName("every seeded stage is live — a retired row in the seed would silently shrink S-25's filter")
+    void theSeedIsEntirelyLive() {
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM workflow_stages WHERE is_deprecated = 1", Integer.class))
+                .isZero();
+    }
+
+    /**
+     * The delete against the real table, and the point is what it does <em>not</em>
+     * cascade.
+     *
+     * <p>There is no foreign key from {@code ticket_stage_transitions} onto this
+     * table, so nothing in the database would have refused a delete on a used
+     * stage — which is why the service refuses it and why this asserts the refusal
+     * here rather than only against mocks. What is removed is a stage this test
+     * created, on the one path §7.4 leaves open.
+     */
+    @Test
+    @DisplayName("an unused stage is really removed, and a used one is refused by the service rather than the schema")
+    void deleteReachesTheRowAndStopsAtTheRule() {
+        long template = infraFlow();
+        StageDtos.StageView added = service.create(template, new StageDtos.StageWrite(
+                "SANDBOX", "Sandbox", "PM", new BigDecimal("2.00"), false, null, null));
+
+        service.delete(template, added.id());
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM workflow_stages WHERE id = ?", Integer.class, added.id()))
+                .isZero();
+
+        // And the one the rule protects. V20260807_1700 gives Infra Flow's VERIFY
+        // a loop-back to DEPLOY, so the arrow alone refuses the delete even though
+        // no ticket has ever existed — asserted here rather than assumed, because
+        // this test read a *missing* arrow as permission to destroy a seeded stage
+        // when `restoreSeed` was not putting them back.
+        assertThat(service.list(template).orElseThrow())
+                .filteredOn(v -> v.stageCode().equals("VERIFY"))
+                .flatExtracting(StageDtos.StageView::canReturnTo)
+                .containsExactly("DEPLOY");
+
+        long deploy = service.list(template).orElseThrow().stream()
+                .filter(v -> v.stageCode().equals("DEPLOY")).findFirst().orElseThrow().id();
+        assertThatThrownBy(() -> service.delete(template, deploy))
+                .isInstanceOf(StageService.ReturnTargetDirectionException.class);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM workflow_stages WHERE id = ?", Integer.class, deploy))
+                .isEqualTo(1);
+    }
+
+    /**
+     * The index the migration adds, asserted for existence rather than for a plan.
+     *
+     * <p>A missing index is a migration that ran differently from the one that was
+     * reviewed, and eighteen rows will never show it in a timing.
+     */
+    @Test
+    @DisplayName("ix_workflow_stages_live exists — the live-stages-of-this-template read")
+    void theLiveIndexExists() {
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.statistics "
+                        + "WHERE table_schema = DATABASE() "
+                        + "  AND table_name = 'workflow_stages' "
+                        + "  AND index_name = 'ix_workflow_stages_live'",
+                Integer.class)).isEqualTo(3);
     }
 }

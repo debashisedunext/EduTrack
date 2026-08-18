@@ -367,6 +367,18 @@ final class PermissionMatrix {
             {"stageIds":[1,2,3]}""";
 
     /**
+     * B-042 · {@code StageDeprecationRequest}. One required boolean, and it names
+     * the state rather than toggling it — which is what makes the route idempotent
+     * and is why it is the one write on this screen with no {@code If-Match}.
+     *
+     * <p>{@code true} is deliberate over {@code false}: a matrix entry whose body
+     * is a no-op would measure the permission check and nothing after it, and the
+     * refusals this route can raise all sit on the retiring side.
+     */
+    private static final String STAGE_DEPRECATION = """
+            {"isDeprecated":true}""";
+
+    /**
      * {@code TaskTypeWrite}: code, name, colour and defaultLevel are all
      * required, and the colour must be a {@code #RRGGBB} token.
      */
@@ -1047,15 +1059,27 @@ final class PermissionMatrix {
             // **workflow**, holidays)", and a workflow template's stages are the
             // most literal reading of that word anywhere in the product.
             //
-            // There is no DELETE row because there is no DELETE route, and the
-            // absence is the design rather than a gap: §7.4 says stages in use are
-            // deprecated and never deleted, and the flag that makes that possible
-            // is B-042. `workflow_stages` has no foreign key pointing at it from
-            // `ticket_stage_transitions` — the code travels as text — so a delete
-            // would succeed and take every historical ribbon segment with it.
             adminOnly("POST", "/api/v1/masters/workflow-templates/{templateId}/stages", STAGE),
             adminOnly("PATCH", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}", EMPTY_PATCH),
             adminOnly("PUT", "/api/v1/masters/workflow-templates/{templateId}/stages/order", STAGE_ORDER),
+            // B-042 · §7.4's "deprecated, never deleted", and the two rows that
+            // replaced B-040's note here saying there was no DELETE route.
+            //
+            // There is one now, and it is the narrower half of the pair: it serves
+            // only the complement of §7.4's clause — a stage nothing has entered,
+            // nothing stands in, nothing live returns to, and which is not the
+            // template's last live one. Everything else is the setter, and the 409
+            // says so rather than only saying no.
+            //
+            // The reason the DELETE needed the rule to land first has not changed:
+            // `ticket_stage_transitions` holds the stage code as text with no
+            // foreign key onto `workflow_stages`, so a delete on a used stage would
+            // succeed, cascade nothing, fail nowhere, and take every historical
+            // ribbon segment's meaning with it. Both rows are master.write for the
+            // same §2 reason as the three above — "Master data (task types, SLA,
+            // **workflow**, holidays)".
+            adminOnly("PUT", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}/deprecation", STAGE_DEPRECATION),
+            adminOnly("DELETE", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}"),
 
             // ── task types · S-11 (B-020) ────────────────────────────────────
             // Both reads open to all six, and the argument is §2's rather than

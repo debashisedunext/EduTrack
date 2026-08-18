@@ -52,7 +52,7 @@ class StageBodyValidationTest {
     private static StageDtos.StageView view() {
         return new StageDtos.StageView(30L, 1L, "DEV", "Development", "DEVELOPER",
                 new BigDecimal("4.00"), false, List.of(), "code-2", (short) 30, 3,
-                0L, 0L, true);
+                0L, 0L, true, false, null, true);
     }
 
     @BeforeEach
