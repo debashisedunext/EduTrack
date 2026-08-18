@@ -151,7 +151,8 @@ class TicketListIT {
 
             assertThat(page.data())
                     .isNotEmpty()
-                    .allSatisfy(t -> assertThat(t.assignedTo()).isEqualTo(me));
+                    .allSatisfy(t -> assertThat(t.assignee()).isNotNull()
+                            .extracting(TicketListDtos.UserRef::id).isEqualTo(me));
         }
 
         /**
@@ -195,13 +196,17 @@ class TicketListIT {
         @DisplayName("paging to the end visits every row exactly once")
         void fullTraversalLosesNothing() {
             Authentication admin = caller(me, "ADMIN", List.of());
-            List<Long> seen = new ArrayList<>();
+            // Identity is the ticket code now that D-061 has dropped the
+            // surrogate from the payload. It is unique per row and it is what
+            // the contract actually exposes, so the traversal is asserted on
+            // the same identifier a consumer would deduplicate by.
+            List<String> seen = new ArrayList<>();
             String cursor = null;
 
             for (int guard = 0; guard < 20; guard++) {
                 CursorPage<TicketListDtos.TicketSummary> page =
                         service.list(admin, mine(), null, cursor, 5);
-                page.data().forEach(t -> seen.add(t.id()));
+                page.data().forEach(t -> seen.add(t.ticketId()));
                 if (!page.meta().hasMore()) {
                     break;
                 }
@@ -239,6 +244,87 @@ class TicketListIT {
                     service.list(caller(me, "ADMIN", List.of()), mine(), null, null, 100_000);
 
             assertThat(page.data()).hasSize(12);
+        }
+    }
+
+    // ── the shape the contract declares ──────────────────────────────────────
+
+    @Nested
+    @DisplayName("the row carries the contract's own field names")
+    class Shape {
+
+        /**
+         * D-061 · the defect this task exists to close.
+         *
+         * <p>The list served {@code ticketCode}, {@code assignedTo},
+         * {@code projectId} and {@code clientId}; the contract declares
+         * {@code ticketId}, {@code assignee}, {@code project} and {@code client}.
+         * The frontend generates from the contract, so all four read
+         * {@code undefined} and S-17 rendered four blank columns against a green
+         * build.
+         *
+         * <p>{@code ContractConformanceTest} is what stops the *names* drifting
+         * again. This asserts the other half — that the nested references are
+         * actually populated, since a correctly named field carrying a null
+         * would render just as blank and satisfy a name-only check.
+         */
+        @Test
+        @DisplayName("ticketId is the code, and the refs are resolved rather than left null")
+        void theRowIsRenderable() {
+            CursorPage<TicketListDtos.TicketSummary> page =
+                    service.list(caller(me, "ADMIN", List.of()), unfiltered(), null, null, 50);
+
+            assertThat(page.data()).isNotEmpty();
+
+            // Not asserted against C-011's `{PROJECT_CODE}-{YY}-{NNNNN}` pattern:
+            // this IT mints its own codes, so the pattern would be testing the
+            // fixture rather than the payload. That the generator's output is
+            // well-formed is C-011's own test; what matters here is that the
+            // field is populated and is the code rather than a surrogate.
+            assertThat(page.data())
+                    .as("the ID column reads this, and blank is exactly the bug D-061 closes")
+                    .allSatisfy(t -> assertThat(t.ticketId()).isNotBlank());
+
+            assertThat(page.data())
+                    .as("every ticket has a project, so an unresolved one is a bug rather than a gap")
+                    .allSatisfy(t -> assertThat(t.project()).isNotNull()
+                            .satisfies(p -> {
+                                assertThat(p.projectCode()).isNotBlank();
+                                assertThat(p.name()).isNotBlank();
+                            }));
+
+            assertThat(page.data())
+                    .filteredOn(t -> t.assignee() != null)
+                    .as("an assignee that resolves to an id with no name renders as blank too")
+                    .isNotEmpty()
+                    .allSatisfy(t -> assertThat(t.assignee().displayName()).isNotBlank());
+        }
+
+        /**
+         * The nesting is only affordable because it is batched.
+         *
+         * <p>Not a query-count assertion — those are brittle and hibernate's
+         * statistics are off in this context — but the property that makes the
+         * count constant: one page resolves the same reference once, so fifty
+         * rows sharing a project share the object rather than each fetching it.
+         */
+        @Test
+        @DisplayName("rows sharing a project share one resolved reference")
+        void referencesAreResolvedOncePerPage() {
+            CursorPage<TicketListDtos.TicketSummary> page =
+                    service.list(caller(me, "ADMIN", List.of()), unfiltered(), null, null, 50);
+
+            java.util.Map<Long, java.util.Set<TicketListDtos.Project>> byId = new java.util.HashMap<>();
+            for (TicketListDtos.TicketSummary t : page.data()) {
+                if (t.project() != null) {
+                    byId.computeIfAbsent(t.project().id(), k -> new java.util.HashSet<>()).add(t.project());
+                }
+            }
+
+            assertThat(byId).isNotEmpty();
+            assertThat(byId.values())
+                    .as("two different objects for one project id means a per-row lookup crept back")
+                    .allSatisfy(refs -> assertThat(refs).hasSize(1));
         }
     }
 
@@ -291,7 +377,7 @@ class TicketListIT {
                     service.list(caller(me, "ADMIN", List.of()), unassigned, null, null, 200);
 
             assertThat(page.data()).isNotEmpty()
-                    .allSatisfy(t -> assertThat(t.assignedTo()).isNull());
+                    .allSatisfy(t -> assertThat(t.assignee()).isNull());
         }
     }
 }
