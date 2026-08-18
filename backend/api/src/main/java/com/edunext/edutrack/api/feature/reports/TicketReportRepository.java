@@ -168,7 +168,7 @@ class TicketReportRepository {
                 .param("unscoped", memberOfProjects.isEmpty() ? 1 : 0)
                 .param("projectIds", memberOfProjects.isEmpty() ? List.of(-1L) : memberOfProjects)
                 .query((rs, n) -> new VelocityRow(
-                        rs.getDate("week_start").toLocalDate(),
+                        rs.getObject("week_start", LocalDate.class),
                         rs.getString("full_name"),
                         rs.getLong("closed"),
                         rs.getBigDecimal("effort_hours")))
@@ -407,5 +407,142 @@ class TicketReportRepository {
 
     record ReopenRow(String fullName, String projectName, String taskType,
                      long tickets, long reopens, long reopenedTickets) {
+    }
+    // ── A-067 · reports 11 and 12, from the stage transitions ────────────────
+
+    /**
+     * A-067 report 11 · the stage funnel — "how many tickets sit at each ribbon
+     * stage, and where they stop".
+     *
+     * <p>Read from {@code tickets.current_stage} rather than from
+     * {@code daily_ticket_stats.wip_by_stage}. A-050 declared that column and
+     * left it NULL deliberately — "a point-in-time column cannot be backfilled"
+     * — and A-058, which fills it, has not landed. Every row of it is still NULL
+     * today, so a funnel reading it would draw an empty chart and call it data.
+     *
+     * <p>Two counts per stage, and the difference is the report. {@code sitting}
+     * is how many open tickets are at that stage now; {@code passedThrough} is
+     * how many entered it in the window at all. A stage where those two are
+     * close is a stage work stops at — which is what "where they stop" asks.
+     */
+    List<FunnelRow> stageFunnel(LocalDate from, LocalDate to, List<Long> projectIds,
+                                boolean ownWork, long userId) {
+        return jdbc.sql("""
+                        SELECT s.stage_code,
+                               MIN(s.seq)  AS seq,
+                               MIN(s.display_name) AS display_name,
+                               (SELECT COUNT(*) FROM tickets t
+                                 WHERE t.current_stage = s.stage_code
+                                   AND t.status <> 'CLOSED'
+                                   AND (:unscoped = 1 OR t.project_id IN (:projectIds))
+                                   AND (:ownWork = 0 OR t.assigned_to = :userId)) AS sitting,
+                               (SELECT COUNT(DISTINCT tr.ticket_id)
+                                  FROM ticket_stage_transitions tr
+                                  JOIN tickets t2 ON t2.id = tr.ticket_id
+                                 WHERE tr.to_stage = s.stage_code
+                                   AND tr.entered_at >= :from
+                                   AND tr.entered_at < :toExclusive
+                                   AND (:unscoped = 1 OR t2.project_id IN (:projectIds))
+                                   AND (:ownWork = 0 OR t2.assigned_to = :userId)) AS passed_through
+                          FROM workflow_stages s
+                      GROUP BY s.stage_code
+                      ORDER BY seq, s.stage_code
+                        """)
+                .param("from", from)
+                .param("toExclusive", to.plusDays(1))
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .param("ownWork", ownWork ? 1 : 0)
+                .param("userId", userId)
+                .query((rs, n) -> new FunnelRow(
+                        rs.getString("stage_code"), rs.getString("display_name"),
+                        rs.getLong("sitting"), rs.getLong("passed_through")))
+                .list();
+    }
+
+    record FunnelRow(String stageCode, String displayName, long sitting, long passedThrough) {
+    }
+
+    /**
+     * A-067 report 12 · stage cycle time — "average time per stage, split into
+     * active work and idle waiting".
+     *
+     * <h2>The split is the report, and it is only possible because two tables
+     * agree on a stage code</h2>
+     *
+     * <p>{@code ticket_stage_transitions.duration_mins} is elapsed time: how long
+     * the ticket sat in that stage, weekends included.
+     * {@code ticket_effort_logs.stage_code} is what somebody actually logged
+     * working on it there. <b>Idle is the remainder</b> — time the ticket spent
+     * in a stage with nobody recorded as working on it.
+     *
+     * <p>That is the number §7.8 is after: a stage averaging four days of which
+     * three hours were worked is not slow because the work is hard.
+     *
+     * <h2>Only sealed transitions count</h2>
+     *
+     * <p>{@code exited_at IS NOT NULL}. An unsealed row is a ticket <em>still</em>
+     * in that stage, and its duration is not yet a fact — including it would
+     * average a partial stay against completed ones and pull every figure down,
+     * most for the stages where work is currently piling up. Sealing is the one
+     * mutation A-008 permits on that table, and it is what makes the row final.
+     *
+     * <p>Effort is attributed by {@code stage_code} rather than by transition,
+     * because the effort log holds no transition reference — so a stage entered
+     * twice on a rework loop has its hours counted against the stage rather than
+     * against one visit, making the active share on a reworked stage an upper
+     * bound rather than exact.
+     *
+     * <p>It is aggregated in a <b>derived table carrying the same scope
+     * predicates</b>, not a correlated subquery over ticket ids. The first
+     * version filtered only on stage code and window, so a PM's report summed
+     * effort logged by people on projects they cannot see — wrong numbers, and a
+     * disclosure of activity outside their scope. Found by an integration test
+     * whose fixture happened to leave another test's rows in the table.
+     */
+    List<StageTimeRow> stageCycleTime(LocalDate from, LocalDate to, List<Long> projectIds,
+                                      boolean ownWork, long userId) {
+        return jdbc.sql("""
+                        SELECT v.to_stage AS stage_code,
+                               COUNT(*)   AS visits,
+                               AVG(v.duration_mins) / 60 AS avg_elapsed_hours,
+                               SUM(v.duration_mins) / 60 AS total_elapsed_hours,
+                               COALESCE(MAX(a.active_hours), 0) AS active_hours
+                          FROM ticket_stage_transitions v
+                          JOIN tickets t ON t.id = v.ticket_id
+                          LEFT JOIN (
+                                SELECT e.stage_code, SUM(e.hours) AS active_hours
+                                  FROM ticket_effort_logs e
+                                  JOIN tickets et ON et.id = e.ticket_id
+                                 WHERE e.work_date BETWEEN :from AND :to
+                                   AND (:unscoped = 1 OR et.project_id IN (:projectIds))
+                                   AND (:ownWork = 0 OR et.assigned_to = :userId)
+                              GROUP BY e.stage_code) a ON a.stage_code = v.to_stage
+                         WHERE v.exited_at IS NOT NULL
+                           AND v.entered_at >= :from
+                           AND v.entered_at < :toExclusive
+                           AND (:unscoped = 1 OR t.project_id IN (:projectIds))
+                           AND (:ownWork = 0 OR t.assigned_to = :userId)
+                      GROUP BY v.to_stage
+                      ORDER BY avg_elapsed_hours DESC
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("toExclusive", to.plusDays(1))
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .param("ownWork", ownWork ? 1 : 0)
+                .param("userId", userId)
+                .query((rs, n) -> new StageTimeRow(
+                        rs.getString("stage_code"),
+                        rs.getLong("visits"),
+                        rs.getBigDecimal("avg_elapsed_hours"),
+                        rs.getBigDecimal("total_elapsed_hours"),
+                        rs.getBigDecimal("active_hours")))
+                .list();
+    }
+
+    record StageTimeRow(String stageCode, long visits, BigDecimal avgElapsedHours,
+                        BigDecimal totalElapsedHours, BigDecimal activeHours) {
     }
 }

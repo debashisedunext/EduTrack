@@ -77,7 +77,7 @@ class ReportRepository {
                 // circuited the clause, but it must still bind.
                 .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
                 .query((rs, n) -> new DayRow(
-                        rs.getDate("stat_date").toLocalDate(),
+                        rs.getObject("stat_date", LocalDate.class),
                         rs.getLong("created"),
                         rs.getLong("closed"),
                         rs.getLong("reopened"),
@@ -154,7 +154,7 @@ class ReportRepository {
                 .param("to", to)
                 .param("userId", userId)
                 .query((rs, n) -> new ResourceDayRow(
-                        rs.getDate("stat_date").toLocalDate(),
+                        rs.getObject("stat_date", LocalDate.class),
                         rs.getLong("closed"),
                         rs.getBigDecimal("effort_hours"),
                         rs.getLong("assigned_open"),
@@ -195,5 +195,158 @@ class ReportRepository {
 
     record ResourceDayRow(LocalDate date, long closed, java.math.BigDecimal effortHours,
                           long assignedOpen, long assignedDelayed) {
+    }
+    // ── A-067 · reports 8, 9 and 10, all from the summary tables ─────────────
+
+    /**
+     * A-067 report 8 · project health, one row per project.
+     *
+     * <p>Every column here is already recorded per project per day by A-050, so
+     * this is the shape those tables were built for and needs no {@code tickets}.
+     *
+     * <p><b>Flow is summed over the window; stock is read at its last day.</b>
+     * Created and closed accumulate — a month's total is the sum of its days.
+     * Open, critical and delayed do not: summing "how many were open" across
+     * thirty days gives a backlog thirty times too large that still moves
+     * plausibly, which is the mistake A-050's own migration header warns about.
+     * So the stock columns come from a subquery pinned to the latest summarised
+     * day in range, and the flow columns from a straight SUM.
+     */
+    List<ProjectHealthRow> projectHealth(LocalDate from, LocalDate to, List<Long> projectIds) {
+        return jdbc.sql("""
+                        SELECT p.name AS project_name,
+                               COALESCE(SUM(d.created), 0)  AS created,
+                               COALESCE(SUM(d.closed), 0)   AS closed,
+                               COALESCE(SUM(d.reopened), 0) AS reopened,
+                               (SELECT l.open_total FROM daily_ticket_stats l
+                                 WHERE l.project_id = d.project_id
+                                   AND l.stat_date BETWEEN :from AND :to
+                              ORDER BY l.stat_date DESC LIMIT 1) AS open_total,
+                               (SELECT l.open_critical FROM daily_ticket_stats l
+                                 WHERE l.project_id = d.project_id
+                                   AND l.stat_date BETWEEN :from AND :to
+                              ORDER BY l.stat_date DESC LIMIT 1) AS open_critical,
+                               (SELECT l.open_delayed FROM daily_ticket_stats l
+                                 WHERE l.project_id = d.project_id
+                                   AND l.stat_date BETWEEN :from AND :to
+                              ORDER BY l.stat_date DESC LIMIT 1) AS open_delayed
+                          FROM daily_ticket_stats d
+                          JOIN projects p ON p.id = d.project_id
+                         WHERE d.stat_date BETWEEN :from AND :to
+                           AND (:unscoped = 1 OR d.project_id IN (:projectIds))
+                      GROUP BY d.project_id, p.name
+                      ORDER BY open_total DESC, p.name
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .query((rs, n) -> new ProjectHealthRow(
+                        rs.getString("project_name"),
+                        rs.getLong("created"), rs.getLong("closed"), rs.getLong("reopened"),
+                        rs.getLong("open_total"), rs.getLong("open_critical"),
+                        rs.getLong("open_delayed")))
+                .list();
+    }
+
+    record ProjectHealthRow(String projectName, long created, long closed, long reopened,
+                            long openTotal, long openCritical, long openDelayed) {
+    }
+
+    /**
+     * A-067 report 9 · the aging profile, at the most recent summarised day.
+     *
+     * <p><b>A snapshot, not a range.</b> Aging buckets are stock, and "how long
+     * has open work been open" has one answer — the current one. Summing a
+     * month of daily bucket counts would count the same ticket thirty times and
+     * produce a profile with no meaning, while still drawing a plausible chart.
+     *
+     * <p>The date range therefore chooses <em>which</em> snapshot rather than how
+     * much to add up: the latest day at or before {@code to}. That also answers
+     * on a database where the worker has not run since midnight, which asking
+     * for {@code to} exactly would not.
+     */
+    List<AgingRow> aging(LocalDate from, LocalDate to, List<Long> projectIds) {
+        return jdbc.sql("""
+                        SELECT p.name AS project_name,
+                               d.stat_date,
+                               d.aging_0_2, d.aging_3_7, d.aging_8_30, d.aging_31_plus,
+                               d.open_total
+                          FROM daily_ticket_stats d
+                          JOIN projects p ON p.id = d.project_id
+                         WHERE d.stat_date = (
+                                   SELECT MAX(x.stat_date) FROM daily_ticket_stats x
+                                    WHERE x.project_id = d.project_id
+                                      AND x.stat_date BETWEEN :from AND :to)
+                           AND (:unscoped = 1 OR d.project_id IN (:projectIds))
+                      ORDER BY d.aging_31_plus DESC, p.name
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .query((rs, n) -> new AgingRow(
+                        rs.getString("project_name"),
+                        rs.getObject("stat_date", LocalDate.class),
+                        rs.getLong("aging_0_2"), rs.getLong("aging_3_7"),
+                        rs.getLong("aging_8_30"), rs.getLong("aging_31_plus"),
+                        rs.getLong("open_total")))
+                .list();
+    }
+
+    record AgingRow(String projectName, LocalDate asOf, long bucket0to2, long bucket3to7,
+                    long bucket8to30, long bucket31Plus, long openTotal) {
+    }
+
+    /**
+     * A-067 report 10 · what each person is carrying, at the latest snapshot.
+     *
+     * <p>Stock again, for {@link #aging}'s reason: "how much is assigned to
+     * Ravi" is a question about now. The capacity half — how many working hours
+     * exist for that person over the window — is in no table and is computed by
+     * the runner from B-023's calendar.
+     *
+     * <p>A PM is scoped by project <em>membership</em>, because
+     * {@code resource_daily_stats} has no project column. A-051 recorded that
+     * limitation and it still holds: somebody on three projects appears with
+     * their whole load, not the part belonging to the asking PM.
+     */
+    List<WorkloadRow> workload(LocalDate from, LocalDate to, boolean ownWork, long userId,
+                               List<Long> memberOfProjects) {
+        return jdbc.sql("""
+                        SELECT r.user_id,
+                               u.full_name,
+                               r.assigned_open,
+                               r.assigned_critical,
+                               r.assigned_delayed,
+                               r.assigned_in_progress
+                          FROM resource_daily_stats r
+                          JOIN users u ON u.id = r.user_id
+                         WHERE r.stat_date = (
+                                   SELECT MAX(x.stat_date) FROM resource_daily_stats x
+                                    WHERE x.user_id = r.user_id
+                                      AND x.stat_date BETWEEN :from AND :to)
+                           AND (:ownWork = 0 OR r.user_id = :userId)
+                           AND (:unscoped = 1 OR EXISTS (
+                                   SELECT 1 FROM project_members pm
+                                    WHERE pm.user_id = r.user_id
+                                      AND pm.project_id IN (:projectIds)))
+                      ORDER BY r.assigned_open DESC, u.full_name
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("ownWork", ownWork ? 1 : 0)
+                .param("userId", userId)
+                .param("unscoped", memberOfProjects.isEmpty() ? 1 : 0)
+                .param("projectIds", memberOfProjects.isEmpty() ? List.of(-1L) : memberOfProjects)
+                .query((rs, n) -> new WorkloadRow(
+                        rs.getLong("user_id"), rs.getString("full_name"),
+                        rs.getLong("assigned_open"), rs.getLong("assigned_critical"),
+                        rs.getLong("assigned_delayed"), rs.getLong("assigned_in_progress")))
+                .list();
+    }
+
+    record WorkloadRow(long userId, String fullName, long assignedOpen, long assignedCritical,
+                       long assignedDelayed, long assignedInProgress) {
     }
 }

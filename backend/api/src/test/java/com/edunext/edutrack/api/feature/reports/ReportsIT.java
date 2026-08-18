@@ -160,7 +160,12 @@ class ReportsIT {
             assertThat(mine.reports())
                     .filteredOn(ReportDtos.Descriptor::available)
                     .extracting(ReportDtos.Descriptor::key)
-                    .doesNotContain("project-health", "aging", "stage-funnel",
+                    // The project-keyed set, which is the rule: these read
+                    // daily_ticket_stats and cannot express "assigned to me".
+                    // stage-funnel and stage-cycle-time were here until A-067
+                    // gave them an assignee filter, so they left the list by
+                    // becoming answerable rather than by being excused.
+                    .doesNotContain("project-health", "aging", "deployment-report",
                             "client-report", "email-delivery-log")
                     .contains(DateWiseReportRunner.KEY);
         }
