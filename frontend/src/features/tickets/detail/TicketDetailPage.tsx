@@ -237,6 +237,7 @@ export function TicketDetailPage() {
         ticket={ticket}
         availableActions={detail?.availableActions}
         onReopened={() => void refetch()}
+        onClosed={() => void refetch()}
       />
 
       <div className="grid flex-1 gap-4 p-6 lg:grid-cols-[minmax(0,1fr)_20rem]">

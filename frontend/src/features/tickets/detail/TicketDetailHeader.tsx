@@ -5,17 +5,19 @@ import type { Ticket } from '@/api/generated/model/ticket'
 import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 
+import { CloseDialog } from '../cycles/CloseDialog'
+import { ReopenDialog } from '../cycles/ReopenDialog'
 import { LEVEL_VARIANT, STATUS_LABEL, STATUS_VARIANT } from '../list/columns'
 import { QuickUpdateTrigger } from '../quick-update/QuickUpdatePanel'
-import { ReopenDialog } from '../cycles/ReopenDialog'
 import { delayInDays } from './ticketSummary'
 
 /**
- * Header actions the *server* has said this caller may take, and still
- * awaiting their own dialog. `reopen` is built (C-039) and rendered below
- * through {@link ReopenDialog} rather than from this table — everything still
- * in this list gets the disabled, honestly-labelled placeholder button
- * instead.
+ * Header actions the *server* has said this caller may take. `close` (C-040)
+ * and `reopen` (C-039) are both built and rendered below through
+ * {@link CloseDialog} and {@link ReopenDialog} rather than from this table —
+ * it stays here, empty for now, for the next action that lands without one:
+ * anything still listed gets the disabled, honestly-labelled placeholder
+ * button instead of a phantom affordance.
  *
  * `availableActions` is resolved server-side precisely so the client does not
  * re-derive permissions — two implementations of the same rule always diverge,
@@ -29,9 +31,7 @@ import { delayInDays } from './ticketSummary'
  * the summary panel (C-020). `comment`, `effort` and `attach` are the surfaces
  * below the fold, not header buttons.
  */
-const HEADER_ACTIONS: { action: string; label: string; owner: string }[] = [
-  { action: 'close', label: 'Close', owner: 'C-040' },
-]
+const HEADER_ACTIONS: { action: string; label: string; owner: string }[] = []
 
 export interface TicketDetailHeaderProps {
   ticket: Ticket
@@ -39,9 +39,17 @@ export interface TicketDetailHeaderProps {
   now?: Date
   /** Refetch the detail payload — reopen moves status, cycle and the ribbon. */
   onReopened?: () => void
+  /** Refetch the detail payload — closing moves status, the sealed cycle and the History tab. */
+  onClosed?: () => void
 }
 
-export function TicketDetailHeader({ ticket, availableActions, now = new Date(), onReopened }: TicketDetailHeaderProps) {
+export function TicketDetailHeader({
+  ticket,
+  availableActions,
+  now = new Date(),
+  onReopened,
+  onClosed,
+}: TicketDetailHeaderProps) {
   const lateBy = delayInDays(ticket, now)
   const allowed = new Set(availableActions ?? [])
 
@@ -79,6 +87,7 @@ export function TicketDetailHeader({ ticket, availableActions, now = new Date(),
 
       <div className="flex flex-wrap items-center gap-2">
         <QuickUpdateTrigger ticket={ticket} />
+        {allowed.has('close') && onClosed && <CloseDialog ticket={ticket} onClosed={onClosed} />}
         {allowed.has('reopen') && onReopened && <ReopenDialog ticket={ticket} onReopened={onReopened} />}
         {HEADER_ACTIONS.filter(({ action }) => allowed.has(action)).map(({ action, label, owner }) => (
           <Button

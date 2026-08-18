@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 
+import { http, HttpResponse } from 'msw'
+
 import { server } from '@/mocks/server'
 import { getDb } from '@/mocks/db'
 import { TicketDetailPage } from './TicketDetailPage'
@@ -108,6 +110,33 @@ describe('S-20 Ticket detail shell — C-019', () => {
     expect(reopenButton).toBeEnabled()
     await userEvent.setup().click(reopenButton)
     expect(await screen.findByRole('dialog', { name: /reopen crm-26-00347/i })).toBeInTheDocument()
+  })
+
+  /**
+   * C-040 · proves the header wires the real dialog rather than the
+   * honestly-disabled placeholder — clicking it must open a dialog, not do
+   * nothing, and a successful close must refetch the aggregated payload
+   * rather than patch the cache, on `onLevelChanged`'s own precedent.
+   */
+  it('opens the real close dialog and refetches on a successful close', async () => {
+    server.use(
+      http.post('*/tickets/:ticketId/close', () =>
+        HttpResponse.json({ data: { ticketId: TICKET, status: 'CLOSED' } }),
+      ),
+    )
+    signInAsAdmin()
+    renderPage()
+    await waitForTicket()
+    const user = userEvent.setup()
+
+    await user.click(within(screen.getByRole('banner')).getByRole('button', { name: 'Close' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/seals cycle/i)).toBeInTheDocument()
+
+    await user.type(within(dialog).getByLabelText(/resolution summary/i), 'Fixed and deployed.')
+    await user.click(within(dialog).getByRole('button', { name: 'Close ticket' }))
+
+    await waitFor(() => expect(detailRequests.length).toBeGreaterThan(1))
   })
 
   it('makes every entity in the summary panel a link to its own screen', async () => {
