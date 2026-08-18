@@ -1713,24 +1713,44 @@ class ChatEngineIT {
         @DisplayName("the wait is working minutes, so a weekend is not held against anybody")
         void theWaitIsMeasuredAgainstTheWorkingCalendar() {
             statusRequests.ask(ticketId, meera, null);
-            // Asked at 18:00 IST on Friday 7 Aug — half an hour before the
-            // 18:30 close on the seeded calendar.
+
+            // Asked at 18:00 IST on a Friday — half an hour before the 18:30
+            // close on the seeded calendar — and answered below at wall-clock
+            // now, so the gap between the two is measured against a moving
+            // target. Anchor it to *now* rather than to a literal date: this
+            // was `2026-08-07T12:30:00Z`, the gap grew by a working day every
+            // day the suite was not run, and on 18 Aug it finally crossed the
+            // upper bound at 3603 against 3600 and turned `develop` red for
+            // everybody. A test that expires quietly is worse than no test.
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Kolkata"));
+            java.time.ZonedDateTime asked = now
+                    .with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.FRIDAY))
+                    .withHour(18).withMinute(0).withSecond(0).withNano(0);
+            // At least three days back, so the window always spans the weekend
+            // and closes over at least one whole working day whatever weekday
+            // the suite runs on.
+            while (!asked.plusDays(3).toInstant().isBefore(now.toInstant())) {
+                asked = asked.minusWeeks(1);
+            }
             jdbc.update("UPDATE ticket_status_requests SET requested_at = ? WHERE id = ?",
-                    java.sql.Timestamp.from(java.time.Instant.parse("2026-08-07T12:30:00Z")),
-                    onlyRequest().id());
+                    java.sql.Timestamp.from(asked.toInstant()), onlyRequest().id());
 
             chat.post(ticketThread, ravi, "Sorry — was off over the weekend. Looking now.");
 
-            // Monday morning. Wall clock is over 60 hours; the working answer is
-            // the 30 minutes left on Friday plus whatever of Monday has passed.
-            // Bounded on both sides deliberately: a one-sided "< 600" would
-            // also pass if the calendar returned 0, which is exactly what a
-            // misconfigured calendar with no working days gives — and the test
-            // would then certify the rule while proving nothing.
+            // Bounded on both sides deliberately. A one-sided "< wall clock"
+            // would also pass if the calendar returned 0, which is exactly
+            // what a misconfigured calendar with no working days gives — and
+            // the test would then certify the rule while proving nothing. The
+            // upper bound is the elapsed wall clock itself rather than a
+            // constant: that is the actual claim — nights and the weekend are
+            // not held against anybody — and unlike a constant it cannot go
+            // stale.
+            int wallClockMinutes = (int)
+                    java.time.Duration.between(asked.toInstant(), java.time.Instant.now()).toMinutes();
             assertThat(onlyRequest().responseWorkingMinutes())
                     .isNotNull()
                     .isGreaterThan(0)
-                    .isLessThan(60 * 60);
+                    .isLessThan(wallClockMinutes);
         }
 
         // -------------------------------------------------------- the lists
