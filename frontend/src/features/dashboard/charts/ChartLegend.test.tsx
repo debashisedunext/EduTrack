@@ -25,7 +25,7 @@ describe('D-064 · the legend carries its own number to the panel', () => {
       <ChartLegend
         label="Task type"
         entries={[
-          { label: 'Internal Bug', drillDown: '/tickets?taskTypeId=3', value: 24, color: '#000' },
+          { label: 'Internal Bug', drillDown: '/tickets?taskTypeId=3', value: 24, colour: '#000' },
         ]}
         onSelect={onSelect}
       />,
@@ -43,7 +43,7 @@ describe('D-064 · the legend carries its own number to the panel', () => {
     render(
       <ChartLegend
         label="Task type"
-        entries={[{ label: 'Unmeasured', drillDown: '/tickets?x=1', color: '#000' }]}
+        entries={[{ label: 'Unmeasured', drillDown: '/tickets?x=1', colour: '#000' }]}
         onSelect={onSelect}
       />,
     )
