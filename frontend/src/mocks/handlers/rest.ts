@@ -2040,9 +2040,107 @@ export const restHandlers = [
       updated: 0,
       rejected,
       errorReportUrl: null,
+      // B-037 · a run that has just been queued: it has a start time and an
+      // actor, and it is not reversible, because nothing has finished writing.
+      // `reversible: false` here is the fixture's most load-bearing field —
+      // a mock that sent `true` on a QUEUED batch would let a screen ship with a
+      // Reverse button on a running import.
+      startedAt: new Date().toISOString(),
+      importedBy: 1,
+      importedByName: 'Anita Desai',
+      reversedAt: null,
+      reversedRows: 0,
+      retainedRows: 0,
+      reversible: false,
     };
     db.importBatches[batch.batchId] = batch;
     return ok(batch, undefined, { status: 202 });
+  }),
+  // ── B-037 · traceability and reversal ────────────────────────────────────
+  //
+  // Declared BEFORE `/import-batches/:batchId`, because msw matches in order and
+  // `/import-batches` would otherwise never be reached.
+  http.get(url('/import-batches'), ({ request }) => {
+    const db = getDb();
+    const entity = new URL(request.url).searchParams.get('entity') ?? 'CLIENT';
+    const batches = Object.values(db.importBatches)
+      .filter((batch) => batch.entity === entity)
+      // Newest first, like `ix_import_batches_entity (entity, created_at)` walked
+      // backwards. Sorted rather than relying on insertion order: the seeded runs
+      // and a run committed this session arrive in the object in id order, which
+      // happens to agree today and would stop agreeing the moment anything
+      // back-dates a fixture.
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+
+    // `limit` is on the response, not applied silently — the panel says "showing
+    // the 50 most recent" from this number rather than hardcoding one.
+    return ok({ entity, batches, limit: 50 });
+  }),
+  // B-037 · reverse one run as a set.
+  //
+  // The two refusals are modelled because they are the two the screen branches
+  // on, and the branch is the point: one clears itself and the other never does,
+  // so a mock that answered a single "cannot reverse" would let a Try again ship
+  // on a batch that will refuse forever.
+  http.post(url('/import-batches/:batchId/reverse'), ({ params }) => {
+    const db = getDb();
+    const batchId = Number(params.batchId);
+    const batch = db.importBatches[batchId];
+
+    if (!batch) {
+      return problem(404, 'not-found', 'Import batch not found', {
+        detail: `No import batch ${batchId} exists.`,
+        batchId,
+      });
+    }
+    if (batch.status === 'QUEUED' || batch.status === 'RUNNING') {
+      return problem(422, 'import-batch-not-finished', 'This import has not finished', {
+        detail: `Import #${batchId} is still ${batch.status.toLowerCase()}. A run can only be reversed once it has finished.`,
+        batchId,
+        status: batch.status,
+      });
+    }
+    if (batch.reversedAt) {
+      return problem(422, 'import-batch-already-reversed', 'This import has already been reversed', {
+        detail: `Import #${batchId} has already been reversed. A run can only be reversed once.`,
+        batchId,
+        reversedAt: batch.reversedAt,
+      });
+    }
+
+    // One retained row whenever the run created enough to have one, because a
+    // clean reversal is the case a screen gets right by accident and a partial
+    // one is the case it gets wrong. `retained` is named, not counted — the
+    // dialog deliberately promises no count beforehand, so this list is the only
+    // place a user learns which clients survived.
+    const retained =
+      batch.created > 1
+        ? [
+            {
+              naturalKey: 'NORTHWIND',
+              reason: 'Kept — 3 tickets have been raised against this client since the import.',
+            },
+          ]
+        : [];
+    const deleted = Array.from(
+      { length: Math.max(0, batch.created - retained.length) },
+      (_, index) => `IMP-${batchId}-${String(index + 1).padStart(3, '0')}`,
+    );
+
+    batch.reversedAt = new Date().toISOString();
+    batch.reversedRows = deleted.length;
+    batch.retainedRows = retained.length;
+    batch.reversible = false;
+
+    return ok({
+      batch,
+      deleted,
+      retained,
+      // The honest half of the promise: rows the run UPDATED are not restored,
+      // and the screen says so. Taken from the batch's own counter rather than
+      // invented, so the sentence the user reads matches the row above it.
+      updatedRowsNotReverted: batch.updated,
+    });
   }),
   http.get(url('/import-batches/:batchId'), ({ params, request }) => {
     const db = getDb();
@@ -2080,12 +2178,21 @@ export const restHandlers = [
       // there.
       batch.errorReportUrl =
         batch.rejected > 0 ? `/import-batches/${batch.batchId}/error-report` : null;
+      // B-037 · reversible on the same step that makes the run terminal, and for
+      // the same reason the report key is: a client stops polling the moment it
+      // reads COMPLETED, so a flag flipped on a later poll is a Reverse button
+      // the screen that wanted it has already stopped asking about.
+      batch.reversible = batch.reversedAt === null;
     }
 
     // The ETag is over the counters *and the report URL*, like the real one —
     // otherwise the last poll of a run, where only the URL appears, would be a
     // 304 and the download button would never enable.
-    const etag = `W/"batch-${batch.batchId}-${batch.status}-${batch.processed}-${batch.errorReportUrl ? 'r' : 'x'}"`;
+    // B-037 · `reversible` is in the tag too. The real DTO hashes it because a
+    // validator that does not cover every field of the representation is a 304
+    // that withholds a change — and this is the field a browser would then be
+    // holding a stale `false` for, on the one control that deletes rows.
+    const etag = `W/"batch-${batch.batchId}-${batch.status}-${batch.processed}-${batch.errorReportUrl ? 'r' : 'x'}-${batch.reversible ? 'v' : 'n'}"`;
     if (request.headers.get('If-None-Match') === etag) {
       return new HttpResponse(null, { status: 304, headers: { ETag: etag } });
     }

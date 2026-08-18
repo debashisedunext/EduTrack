@@ -3,8 +3,13 @@ package com.edunext.edutrack.api.feature.imports;
 import com.edunext.edutrack.domain.imports.ImportBatch;
 import com.edunext.edutrack.domain.imports.ImportBatchRepository;
 import com.edunext.edutrack.domain.imports.ImportBatchStatus;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 
 /**
  * B-035 · {@code import_batches}, read and written.
@@ -38,10 +43,31 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class ImportBatchService {
 
-    private final ImportBatchRepository batches;
+    /**
+     * B-037 · how many runs the history panel returns.
+     *
+     * <p>The cap is here rather than on the caller because it is a property of
+     * what the panel is for. {@code import_batches} only grows — a year of a busy
+     * client master is thousands of rows — and "the imports" means the recent
+     * ones by any reading: nobody scrolls back to March to find a batch to
+     * reverse, they reverse the one they just ran and got wrong.
+     *
+     * <p>Fifty rather than ten, because the panel is also the audit trail. An
+     * Admin asking "when did this client appear in the master?" is reading down
+     * the list, not looking at the top of it.
+     *
+     * <p>Reported on the wire as {@code limit} rather than applied silently.
+     * CLAUDE.md's rule about caps is that a bounded answer which looks unbounded
+     * reads as "this is all of them" when it is not.
+     */
+    static final int HISTORY_LIMIT = 50;
 
-    ImportBatchService(ImportBatchRepository batches) {
+    private final ImportBatchRepository batches;
+    private final ImportBatchUserNames userNames;
+
+    ImportBatchService(ImportBatchRepository batches, ImportBatchUserNames userNames) {
         this.batches = batches;
+        this.userNames = userNames;
     }
 
     /**
@@ -134,10 +160,127 @@ class ImportBatchService {
         });
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * <h2>No {@code @Transactional}, since B-037</h2>
+     *
+     * <p>It had one, and {@link ImportMappingPresetService} and
+     * {@link ImportErrorReportService} both record the same removal for the same
+     * two reasons. This is one query, and {@link ImportBatch} has no lazy
+     * association for a longer-lived {@code EntityManager} to resolve —
+     * everything {@link ImportDtos.Batch#of} reads is a scalar on the row.
+     *
+     * <p>What the annotation <em>did</em> do was open an {@code EntityManager}
+     * per call, which puts a live database between these routes and any test of
+     * them. That is not an abstract cost: it is why B-036 removed it from the
+     * error-report read, and why B-037's two route tests could not otherwise
+     * assert the history's shape or a reversal's refusals without MySQL running.
+     *
+     * <p><b>Every write in this class keeps its annotation</b>, including
+     * {@link #markReversed}. Each is a real state change; the argument here is
+     * only about reads that are a single statement and cannot be torn.
+     *
+     * <p>{@link #history} is the one read that is two queries — the page, then
+     * the names — and it drops the annotation too. The pair is not one that can
+     * be inconsistent: a user renamed between them renders under whichever name
+     * they had, and an id that resolves to nothing renders unattributed, which is
+     * a case the DTO already permits and the panel already handles.
+     */
     ImportDtos.Batch find(long batchId) {
         return batches.findById(batchId)
                 .map(ImportDtos.Batch::of)
                 .orElseThrow(() -> new ImportBatchNotFoundException(batchId));
+    }
+
+    /**
+     * B-037 · the entity itself, for the reversal — {@link #find} returns a
+     * projection and a reversal has to read {@code status} and
+     * {@code reversed_at} and then write four columns.
+     *
+     * <p>Package-private and named for its one caller rather than exposed as a
+     * general "get the entity": everything else in this feature reads batches
+     * through the DTO, which is what keeps {@code error_report_key} off the wire.
+     */
+    com.edunext.edutrack.domain.imports.ImportBatch load(long batchId) {
+        return batches.findById(batchId)
+                .orElseThrow(() -> new ImportBatchNotFoundException(batchId));
+    }
+
+    /**
+     * B-037 · the import history for one registered schema — blueprint §4B.3's
+     * "every import writes an {@code import_batch} row so a bad import can be
+     * identified".
+     *
+     * <p>Until this method existed, <b>a batch id was known only to the browser
+     * tab that started the run</b>. Close it and the import was unfindable: there
+     * was no route that listed runs, so "identified" was true of the database and
+     * of nothing a person could reach. {@code findByEntityOrderByCreatedAtDesc}
+     * has been sitting in the repository since B-030 with its javadoc naming this
+     * panel and no caller.
+     *
+     * <p>Per entity rather than across all of them, because the schema registry
+     * is the feature's organising idea and the panel lives on one wizard: a
+     * client Admin looking at S-34 is not asking about resource imports. The
+     * ordering is {@code ix_import_batches_entity (entity, created_at)}, so it is
+     * an index walk rather than a filesort.
+     *
+     * <p>Names are resolved in one query for the page — see
+     * {@link ImportBatchUserNames} — and never on {@link #find}, which is polled
+     * every two seconds for the length of a run.
+     */
+    ImportDtos.BatchList history(String entityCode) {
+        List<com.edunext.edutrack.domain.imports.ImportBatch> rows =
+                batches.findByEntityOrderByCreatedAtDesc(entityCode, PageRequest.of(0, HISTORY_LIMIT));
+
+        Map<Long, String> names = userNames.resolve(
+                rows.stream().map(com.edunext.edutrack.domain.imports.ImportBatch::getImportedBy).toList());
+
+        return new ImportDtos.BatchList(
+                entityCode,
+                rows.stream()
+                        .map(row -> ImportDtos.Batch.of(row, nameOf(names, row.getImportedBy())))
+                        .toList(),
+                HISTORY_LIMIT);
+    }
+
+    /**
+     * {@code imported_by} is nullable and the map is immutable, so the null has
+     * to be handled here rather than by {@code Map#get}.
+     *
+     * <p>{@code Map.of()} throws {@link NullPointerException} on a null key
+     * rather than answering null — which turned "one run started by an
+     * unidentifiable caller" into a 500 on the whole history panel, found by
+     * {@code ClientImportReversalIT} against a real database. A null actor is
+     * ordinary: {@code ImportCommitService} records the caller best-effort, so a
+     * {@code dev-noauth} import legitimately has none.
+     */
+    private static String nameOf(Map<Long, String> names, Long userId) {
+        return userId == null ? null : names.get(userId);
+    }
+
+    /**
+     * B-037 · the reversal's own write — four columns, one transaction, after
+     * the registration has already deleted what it could.
+     *
+     * <p><b>Stamped after the deletes rather than before them.</b> The order
+     * matters on the one path where it can differ: a run that dies partway
+     * through its deletions leaves {@code reversed_at} null, so the batch is
+     * still reversible and running it again finishes the job — the deletes are
+     * idempotent, because a client already gone is simply not in
+     * {@code findByImportBatchId} the second time. Stamping first would mark a
+     * half-reversed batch as done and refuse the retry that would fix it.
+     *
+     * <p>The row is <b>updated, never replaced or removed</b>. It is the audit
+     * trail, and the counters and the error-report key it already holds describe
+     * a run that genuinely happened whatever was later taken back.
+     */
+    @Transactional
+    void markReversed(long batchId, int reversedRows, int retainedRows, Long userId) {
+        batches.findById(batchId).ifPresent(batch -> {
+            batch.setReversedAt(Instant.now());
+            batch.setReversedBy(userId);
+            batch.setReversedRows(reversedRows);
+            batch.setRetainedRows(retainedRows);
+            batches.save(batch);
+        });
     }
 }

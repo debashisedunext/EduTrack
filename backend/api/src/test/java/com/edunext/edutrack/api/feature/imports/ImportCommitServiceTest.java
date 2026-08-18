@@ -611,6 +611,11 @@ class ImportCommitServiceTest {
             this.release = release;
         }
 
+        /** The reversal is not what this double is for; reaching it is a bug in the test. */
+        @Override public ImportReversal reverse(long batchId) {
+            throw new AssertionError("The commit path reversed a batch.");
+        }
+
         @Override public String key() {
             return "widgets";
         }
@@ -656,7 +661,11 @@ class ImportCommitServiceTest {
         private boolean sawRunning;
 
         RecordingBatches() {
-            super(null);
+            // Both collaborators null: this double overrides every method that
+            // would touch either, and a mock of each would be two more things
+            // asserting nothing. B-037 widened the constructor; the argument is
+            // unchanged.
+            super(null, null);
         }
 
         @Override

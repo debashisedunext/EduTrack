@@ -30,7 +30,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ClientImportSchemaValidationTest {
 
-    private static final ClientImportSchema SCHEMA = new ClientImportSchema(null);
+    /**
+     * Both collaborators null: this test reads {@link ClientImportSchema#fields}
+     * and nothing else, and neither is touched on that path. B-037 added the
+     * second argument; the argument for passing nothing is unchanged.
+     */
+    private static final ClientImportSchema SCHEMA = new ClientImportSchema(null, null);
 
     private static Optional<String> validateCode(String value) {
         ImportField code = SCHEMA.fields().stream()

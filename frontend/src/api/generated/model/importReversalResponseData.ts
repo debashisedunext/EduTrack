@@ -47,7 +47,37 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ImportBatch } from './importBatch';
+import type { ImportReversalResponseDataRetainedItem } from './importReversalResponseDataRetainedItem';
 
-export interface ImportBatchResponse {
-  data: ImportBatch;
-}
+export type ImportReversalResponseData = {
+  /** The run, re-read — `reversedAt` now set and `reversible` now
+false. Returned whole so the panel renders the updated row from
+this response rather than re-listing.
+ */
+  batch: ImportBatch;
+  /** Natural keys removed — client codes, not database ids, because
+the user is going to look them up in the spreadsheet they
+uploaded. Named rather than only counted: the count is on
+`batch.reversedRows`, and what an operator asks next is *which
+ones*.
+ */
+  deleted: string[];
+  /** Rows this run created that the reversal refused to remove. **An
+empty array is the ordinary outcome and a non-empty one is not a
+failure** — keeping a client that has since been named on a
+ticket is the correct result, and the two ways to avoid it are
+failing the whole reversal or destroying the ticket's client.
+ */
+  retained: ImportReversalResponseDataRetainedItem[];
+  /** **The honest half of the promise.** Rows this run *updated*
+rather than created, which a reversal does not touch and could
+not restore: `clients.import_batch_id` is stamped on insert only,
+and there is no before image anywhere.
+
+Carried explicitly, and never folded into `retained`, because it
+is not a row the reversal declined to delete — it is a row the
+reversal was never about. Somebody who imported 412 rows and sees
+"12 deleted" is owed the sentence that accounts for the other 400.
+ */
+  updatedRowsNotReverted: number;
+};

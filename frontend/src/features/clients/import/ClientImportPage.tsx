@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 import { CommitStep } from './CommitStep'
+import { ImportHistoryPanel } from './ImportHistoryPanel'
 import { type ColumnMapping } from './columnMapping'
 import {
   IMPORT_PROBLEM,
@@ -597,6 +598,20 @@ export function ClientImportPage() {
           </div>
         </section>
       )}
+
+      {/*
+        ── B-037 · the import history ──────────────────────────────────────
+
+        Below the wizard and visible through every step of it, including step 5
+        — the run being watched by the progress bar above appears in this list as
+        it happens, and is reversible the moment it finishes.
+
+        Deliberately outside the `!batchId` block that hides steps 1 to 4 during a
+        commit. Those come off the screen because they describe choices already
+        acted on; this describes what those choices did, which is exactly what
+        somebody wants while the import runs and immediately after it.
+      */}
+      <ImportHistoryPanel />
     </div>
   )
 }
