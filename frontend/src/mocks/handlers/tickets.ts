@@ -1,6 +1,6 @@
 import { http } from 'msw';
 import { getDb, nextId } from '../db';
-import type { Attachment, Ticket } from '../db';
+import type { Attachment, Ticket, TicketLink } from '../db';
 // C-029 · the client's copy of PLAN.md §3.9's allow-list, so the mock's POST
 // refuses what the real server refuses. See the comment handler.
 import { isRichTextEmpty, sanitizeRichText } from '@/components/ui/rich-text';
@@ -376,6 +376,7 @@ export const ticketHandlers = [
           .filter((a) => a.ticketId === t.ticketId && a.cycleNo === cycle)
           .map(attachmentDto),
         watchers: t.watcherIds.map((id) => userRef(id, db)).filter(Boolean),
+        linkedTickets: ticketLinksFor(t.ticketId, db),
         // Resolved server-side so the client renders buttons from this rather
         // than re-deriving permissions. Two implementations of the same rule
         // always diverge, and the client's copy is the one that gets it wrong.
@@ -393,6 +394,85 @@ export const ticketHandlers = [
       undefined,
       { headers: { ETag: etag } },
     );
+  }),
+
+  // ── links · C-064, blueprint §16 item 17 ────────────────────────────────────
+  // ⚠ frontend/src/mocks/ is Stream D's (D-004) — flagged rather than done
+  // quietly, same as C-015's dueFrom/dueTo fix and C-019's watcher fix in
+  // this same file. Without these two handlers `mock coverage > every
+  // contract operation has a handler` fails the build the moment the client
+  // regenerates with `createTicketLink`/`deleteTicketLink` in it, and
+  // TicketLinksControl has no mock to develop against under `npm run dev`.
+  http.post(url('/tickets/:ticketId/links'), async ({ params, request }) => {
+    const db = getDb();
+    const t = findTicket(String(params.ticketId), db);
+    if (!t) return notFound('Ticket');
+
+    const body = (await request.json()) as { targetTicketId?: string; linkType?: string };
+    const rawType = body.linkType?.trim().toUpperCase();
+    if (!rawType || !SUBMITTABLE_LINK_TYPES.includes(rawType as (typeof SUBMITTABLE_LINK_TYPES)[number])) {
+      // DUPLICATED_BY falls in here too — it is in the wire enum but never a
+      // submittable value, on the real server's own reasoning: it exists only
+      // as a computed label for the far side of a DUPLICATE_OF row.
+      return validationFailed({
+        linkType: [`Unknown link type ${body.linkType ?? ''}`.trim()],
+      });
+    }
+    if (!body.targetTicketId) {
+      return validationFailed({ targetTicketId: ['Required'] });
+    }
+
+    // Scoped, same as the path ticket — a caller must not learn whether a
+    // ticket id outside their scope exists by trying to link to it.
+    const target = findTicket(body.targetTicketId, db);
+    if (!target) return notFound('Ticket');
+
+    if (target.ticketId === t.ticketId) {
+      return validationFailed({ targetTicketId: ['A ticket cannot be linked to itself.'] });
+    }
+
+    const canonical = canonicalizeLink(rawType, t.ticketId, target.ticketId);
+    const duplicate = db.ticketLinks.some(
+      (l) =>
+        l.sourceTicketId === canonical.sourceId &&
+        l.targetTicketId === canonical.targetId &&
+        l.linkType === canonical.linkType,
+    );
+    if (duplicate) {
+      return problem(409, 'ticket-link-conflict', 'Already linked', {
+        detail: 'This relationship already exists.',
+      });
+    }
+
+    const link: TicketLink = {
+      id: nextId(db, 'ticketLinks'),
+      sourceTicketId: canonical.sourceId,
+      targetTicketId: canonical.targetId,
+      linkType: canonical.linkType,
+      createdById: currentUser(db).id,
+      createdAt: new Date().toISOString(),
+    };
+    db.ticketLinks.push(link);
+
+    return ok(linkedTicketDto(link, t.ticketId, db), undefined, { status: 201 });
+  }),
+
+  http.delete(url('/tickets/:ticketId/links/:linkId'), ({ params }) => {
+    const db = getDb();
+    const t = findTicket(String(params.ticketId), db);
+    if (!t) return notFound('Ticket');
+
+    const linkId = Number(params.linkId);
+    const idx = db.ticketLinks.findIndex(
+      (l) => l.id === linkId && (l.sourceTicketId === t.ticketId || l.targetTicketId === t.ticketId),
+    );
+    // Same answer whether the id never existed or names a link touching some
+    // other pair of tickets entirely — a caller must not learn "link 41 is
+    // real, just not yours" by probing ids across tickets.
+    if (idx === -1) return notFound('Link');
+
+    db.ticketLinks.splice(idx, 1);
+    return noContent();
   }),
 
   // ── field updates ─────────────────────────────────────────────────────────
@@ -1135,6 +1215,72 @@ export function statusRequestDto(
     answeredAt: r.answeredAt,
     responseWorkingMinutes: r.responseWorkingMinutes,
   };
+}
+
+// ── links · C-064 ────────────────────────────────────────────────────────────
+
+/**
+ * The four names blueprint §7.5's create-form row and `createTicketLink`
+ * accept. `DUPLICATED_BY` is a fifth value in the wire enum that never
+ * reaches here — see the handler.
+ */
+const SUBMITTABLE_LINK_TYPES = ['BLOCKS', 'BLOCKED_BY', 'DUPLICATE_OF', 'RELATES_TO'] as const;
+
+/** How a stored type reads from the *other* ticket. Mirrors `TicketLinkType.inverse()`. */
+function inverseLinkType(type: string): string {
+  switch (type) {
+    case 'BLOCKS': return 'BLOCKED_BY';
+    case 'BLOCKED_BY': return 'BLOCKS';
+    case 'DUPLICATE_OF': return 'DUPLICATED_BY';
+    case 'DUPLICATED_BY': return 'DUPLICATE_OF';
+    default: return type; // RELATES_TO — symmetric
+  }
+}
+
+/**
+ * One row per relationship. Mirrors `TicketLinkService.canonicalize` on the
+ * real backend: `BLOCKED_BY` is rewritten to the `BLOCKS` row the other
+ * ticket would have written, source and target swapped, and `RELATES_TO` is
+ * ordered by ticket code so either direction of submission lands on the
+ * same row. `DUPLICATE_OF` is genuinely directional and stored as submitted.
+ */
+function canonicalizeLink(type: string, sourceId: string, targetId: string) {
+  if (type === 'BLOCKED_BY') return { linkType: 'BLOCKS', sourceId: targetId, targetId: sourceId };
+  if (type === 'RELATES_TO') {
+    return sourceId <= targetId
+      ? { linkType: 'RELATES_TO', sourceId, targetId }
+      : { linkType: 'RELATES_TO', sourceId: targetId, targetId: sourceId };
+  }
+  return { linkType: type, sourceId, targetId }; // BLOCKS, DUPLICATE_OF
+}
+
+/** The contract's `LinkedTicket`, as it reads from `fromTicketId`'s own side. */
+function linkedTicketDto(link: import('../db').TicketLink, fromTicketId: string, db: import('../db').Db) {
+  const otherId = link.sourceTicketId === fromTicketId ? link.targetTicketId : link.sourceTicketId;
+  // Scoped — a caller must not learn the title or level of a ticket outside
+  // their own scope just because it happens to be linked to one they can see.
+  const other = findTicket(otherId, db);
+  const linkType = link.sourceTicketId === fromTicketId ? link.linkType : inverseLinkType(link.linkType);
+  return {
+    id: link.id,
+    linkType,
+    ticket: other && { ticketId: other.ticketId, title: other.title, level: other.level, status: other.status },
+    createdAt: link.createdAt,
+    createdBy: userRef(link.createdById, db),
+  };
+}
+
+/** Every link touching `ticketId`, for `TicketDetailResponse.linkedTickets`. */
+function ticketLinksFor(ticketId: string, db: import('../db').Db) {
+  return db.ticketLinks
+    .filter((l) => l.sourceTicketId === ticketId || l.targetTicketId === ticketId)
+    .map((l) => linkedTicketDto(l, ticketId, db))
+    // A link to a ticket outside this caller's scope is dropped rather than
+    // shown with a broken reference — `linkedTicketDto`'s `ticket` comes back
+    // undefined for it, same "absence, not refusal" contract `findTicket`
+    // itself keeps.
+    .filter((view) => view.ticket != null)
+    .sort((a, b) => a.id - b.id);
 }
 
 export function historyDto(h: import('../db').HistoryEntry) {

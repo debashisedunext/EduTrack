@@ -46,29 +46,32 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { Ticket } from './ticket';
-import type { Cycle } from './cycle';
-import type { Ribbon } from './ribbon';
-import type { HistoryEntry } from './historyEntry';
-import type { EffortLog } from './effortLog';
-import type { Comment } from './comment';
-import type { Attachment } from './attachment';
-import type { UserRef } from './userRef';
-import type { LinkedTicket } from './linkedTicket';
 
-export type TicketDetailResponseData = {
-  ticket: Ticket;
-  cycles?: Cycle[];
-  ribbon?: Ribbon;
-  history?: HistoryEntry[];
-  effortLogs?: EffortLog[];
-  comments?: Comment[];
-  attachments?: Attachment[];
-  watchers?: UserRef[];
-  linkedTickets?: LinkedTicket[];
-  /** What this caller may do right now, decided server-side. The client
-renders buttons from this rather than re-deriving permissions —
-two implementations of the same rule always diverge.
+/**
+ * C-064. Blueprint §16 item 17 and §7.5's create-form row name four:
+Blocks / Is blocked by / Duplicate of / Relates to — `BLOCKS`,
+`BLOCKED_BY`, `DUPLICATE_OF` and `RELATES_TO` are the only values
+`createTicketLink` accepts.
+
+`DUPLICATED_BY` is a fifth value **`createTicketLink` refuses** —
+`422`, not a type a caller ever picks. It exists only so a
+`linkedTickets` row can be labelled correctly on the *original*
+ticket's side of a `DUPLICATE_OF` link, the way `BLOCKED_BY` labels
+the far side of a `BLOCKS` link. Beyond the blueprint's literal four
+for that reason, flagged here rather than silently added.
+
+`BLOCKS`/`BLOCKED_BY` is one relationship stored once — see
+`createTicketLink`. `RELATES_TO` is symmetric.
+
  */
-  availableActions?: string[];
-};
+export type TicketLinkType = typeof TicketLinkType[keyof typeof TicketLinkType];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const TicketLinkType = {
+  BLOCKS: 'BLOCKS',
+  BLOCKED_BY: 'BLOCKED_BY',
+  DUPLICATE_OF: 'DUPLICATE_OF',
+  RELATES_TO: 'RELATES_TO',
+  DUPLICATED_BY: 'DUPLICATED_BY',
+} as const;

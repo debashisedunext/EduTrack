@@ -332,6 +332,8 @@ export function TicketDetailPage() {
           cycles={detail?.cycles}
           history={detail?.history}
           watchers={detail?.watchers}
+          linkedTickets={detail?.linkedTickets}
+          onLinksChanged={() => void refetch()}
           selectedCycleNo={selectedCycleNo}
           taskTypeName={taskTypeName}
           contactName={contactName}
