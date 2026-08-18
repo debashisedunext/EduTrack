@@ -55,8 +55,25 @@ import java.util.List;
  * maximum, and B-013's test pins both ends. The lower one is the live risk: a
  * policy raised to twenty would leave this generator quietly issuing passwords
  * the organisation's own rules reject.
+ *
+ * <h2>B-038 made this public, and only this</h2>
+ *
+ * <p>The resource import registration creates accounts too, and {@code users.password_hash}
+ * is {@code NOT NULL} — so a bulk import needs the same generator or a second
+ * one. A second one is how two answers to "what is a safe temporary password?"
+ * come to exist, which is the argument {@code FieldValidators} makes about email
+ * addresses and which B-028 proved right the hard way. Everything else in this
+ * package stays package-private; the import writes through its own repository
+ * and touches nothing else here.
+ *
+ * <p><b>The import never returns what this produces.</b> S-08 hands the string
+ * to the admin who created the account; five thousand of them cannot come back
+ * through a progress bar, so a bulk-created resource reaches their account
+ * through {@code POST /auth/forgot-password} instead. The account is still
+ * created with {@code must_change_password}, so the two paths end in the same
+ * place.
  */
-final class TemporaryPasswords {
+public final class TemporaryPasswords {
 
     private static final String UPPER = "ABCDEFGHJKMNPQRSTUVWXYZ";     // no I, no O
     private static final String LOWER = "abcdefghijkmnopqrstuvwxyz";   // no l
@@ -81,7 +98,7 @@ final class TemporaryPasswords {
     /**
      * @return a password that satisfies §10.3 by construction, every time
      */
-    static String generate() {
+    public static String generate() {
         List<Character> chars = new ArrayList<>(LENGTH);
 
         // One of each class first, so the four rules cannot fail. Drawing 16

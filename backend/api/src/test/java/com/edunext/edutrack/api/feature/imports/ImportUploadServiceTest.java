@@ -75,8 +75,12 @@ class ImportUploadServiceTest {
 
     /**
      * Resolved before anything else, so an unregistered schema costs a map lookup
-     * rather than a parse — and answers 404 on a path segment, which is what
-     * {@code /imports/users/upload} is until B-038 registers the second schema.
+     * rather than a parse — and answers 404 on a path segment.
+     *
+     * <p>This runs against a registry holding one invented schema, so it says
+     * nothing about which keys the application registers and did not have to
+     * change when B-038 registered {@code users}. The controller test asserting
+     * the same rule end to end did.
      */
     @Test
     @DisplayName("an unregistered schema is refused before the file is looked at")

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import type { ImportPreviewResponseData, ImportRowVerdict } from '@/api/generated/model'
 
+import { CLIENT_IMPORT } from './importWizard'
 import { ValidationStep } from './ValidationStep'
 import { PREVIEW_PAGE_SIZE } from './validationPreview'
 
@@ -57,6 +58,7 @@ function renderStep(
     <QueryClientProvider client={queryClient}>
       <ValidationStep
         schema="clients"
+        nouns={CLIENT_IMPORT.nouns}
         preview={data}
         fileName="clients.xlsx"
         onBack={props.onBack ?? (() => {})}

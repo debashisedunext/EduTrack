@@ -49,9 +49,11 @@ the database rejects mutation independently via triggers and grants.
 
 export type ListImportBatchesParams = {
 /**
- * Which registration's runs. Defaults to `CLIENT` because S-34 is the
-screen that has this panel; `RESOURCE` arrives with B-038 and needs
-no change here.
+ * Which registration's runs. Defaults to `CLIENT` because S-34 was the
+only screen with this panel when the parameter was added. B-038's
+resource wizard passes `RESOURCE` and needed no change here, which
+is what the default being a default rather than the only value was
+for.
 
  */
 entity?: string;

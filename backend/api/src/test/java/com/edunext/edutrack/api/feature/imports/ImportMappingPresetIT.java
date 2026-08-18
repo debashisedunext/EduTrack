@@ -146,9 +146,10 @@ class ImportMappingPresetIT {
      * Two schemas may use one name, because they are different mappings onto
      * different columns.
      *
-     * <p>{@code users} has no registration until B-038, so no route reaches this —
-     * but the key is composite, and a test that only ever used one schema would
-     * pass just as well if it were not.
+     * <p>Written before B-038 existed, when no route could reach a {@code users}
+     * preset at all — the key is composite, and a test that only ever used one
+     * schema would pass just as well if it were not. The resource registration
+     * has since made both halves reachable, and this assertion did not change.
      */
     @Test
     void theSameNameUnderTwoSchemasIsTwoPresets() {
