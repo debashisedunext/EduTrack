@@ -220,6 +220,18 @@ final class PermissionMatrix {
     private static final String EDIT_COMMENT = """
             {"body":"matrix fixture edit"}""";
 
+    /**
+     * C-035 · {@code EffortLogDtos.EffortLogRequest}: {@code hours} and
+     * {@code workDate} are the only {@code @NotNull} fields. {@code isCorrection}
+     * is omitted, which exercises the ordinary append path rather than the
+     * correction one — the stronger fixture, on {@link #CHANGE_PRIORITY}'s own
+     * reasoning: a correction reads {@code correctsEntryId} and rejects a
+     * missing one before the guard this matrix asserts would even matter, so a
+     * fixture that could trip that 400 would prove nothing about authorisation.
+     */
+    private static final String EFFORT_LOG = """
+            {"hours":2,"workDate":"2026-08-15"}""";
+
     /** {@code PreferenceDtos.PreferenceUpdateRequest}: an empty list is valid. */
     private static final String PREFERENCES = """
             {"preferences":[]}""";
@@ -639,6 +651,25 @@ final class PermissionMatrix {
             // this file is for, and NOT "all six may edit anyone's comment".
             everyRole("PATCH", "/api/v1/tickets/{ticketId}/comments/{commentId}", EDIT_COMMENT),
             everyRole("DELETE", "/api/v1/tickets/{ticketId}/comments/{commentId}"),
+
+            // ── effort · C-035, §4A.4 ────────────────────────────────────────
+            // Both open to all six. The write asserts ticket.update_progress —
+            // "Update status or log effort on an assigned ticket" — which §2's
+            // own row states as a flat ✅ for every role, unlike PriorityChangeController's
+            // borrowed ticket.assign one row up: this capability is not
+            // borrowed, it is the row the route's whole purpose is named after.
+            // A seventh role without that grant would be denied here.
+            //
+            // The read is isAuthenticated() rather than a capability, on
+            // CommentController.list's identical argument: reading a ticket's
+            // own effort log is not a privileged act once ScopedTickets has
+            // already decided the caller may see the ticket at all.
+            //
+            // *Which* tickets is not this file's question either way —
+            // ScopedTickets applies the row scope inside the service, so a
+            // ticket the caller may not see is 404 (A-035) whatever they hold.
+            everyRole("POST", "/api/v1/tickets/{ticketId}/effort", EFFORT_LOG),
+            everyRole("GET", "/api/v1/tickets/{ticketId}/effort-logs"),
 
             // ── ticket detail · every role, because permission is not scope ──
             //
