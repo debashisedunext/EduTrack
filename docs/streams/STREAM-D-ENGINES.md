@@ -118,6 +118,29 @@
 
 ---
 
+## S-05 and S-17 corrections — raised 18 Aug 2026
+
+Four tasks from one screenshot review. **D-061 is the root cause of three of the
+four visible defects** and blocks the other three, because new columns are
+pointless while the payload names are wrong.
+
+Two of these sit in other streams' paths and are recorded here because Debashis
+picked them up, not because Stream D owns them. **Neither starts without its
+owner's sign-off** — said out loud, per TEAM-PLAN.md §6, rather than done
+quietly.
+
+- [ ] **D-061** 🔴 **`GET /tickets` returns a body the contract does not declare** — `TicketListResponse` promises `Ticket[]`; `TicketListDtos.TicketSummary` sends `ticketCode` where the contract says `ticketId`, `assignedTo` (a bare id) where it says `assignee` (a `UserRef`), `currentStage` for `currentStageCode` and `estimatedEffortHrs` for `estimatedHrs`. The frontend generates from the contract, so those four read `undefined` — which is the blank **ID** column on S-17, the blank **Ticket** column in the S-06 drill-down, and "Unassigned" on every row of both. Description, Type, Level and PCD render only because `title`, `taskTypeId`, `level` and `plannedCloseDate` happen to agree on both sides. **The slim DTO is right and is not what changes** — its own javadoc makes the case ("S-17 shows a row, not a record"), and shipping the 58-property `Ticket` per row is what A-052 exists to avoid. What was missed is that the decision never reached the contract. So: declare a `TicketSummary` schema using the contract's existing names, regenerate the client, align the mock handler's `ticketDto`. **The backend record rename is Divyansh's half** (`feature/tickets/list/`) and is written up for him — the contract's names win because `ticketId` is already the path parameter on ~30 other operations, and renaming those to `ticketCode` is the larger change by a wide margin.
+- [ ] **D-062** **Nothing compares a response body to its contract schema, and that is why D-061 shipped.** `ContractConformanceTest` asserts every served endpoint is *in* the contract — paths and verbs. D-005's staleness check proves the committed TypeScript client matches the spec. Both passed while the server returned four wrong field names, because neither ever looks at a response body. Add the missing half: for each `GET` with a declared 2xx schema, assert the DTO's serialised property names are exactly the schema's. Field names only — not types, not values — because the cheap version catches this whole class and a deep validator is a project. **Without this, D-061 is a fix rather than a guarantee**, and the next slim DTO drifts the same way.
+- [ ] **D-063** **S-17 grid — task start and end date columns.** Both go in the column chooser beside `createdAt` and PCD. *Assumption, stated because it was not confirmed:* start = `dateReported` (when the client raised it), end = `actualCloseDate` (when it was actually resolved) — **not** `plannedCloseDate`, which is already the PCD column and would duplicate it. ⚠ **Divyansh's path** (`frontend/src/features/tickets/list/columns.tsx`) — needs C sign-off. Blocked on D-061: a column reading a field the payload does not carry renders blank, which is the defect being fixed.
+- [ ] **D-064** **S-06 drill-down — carry the card's count, and the dates, into the panel.** The count is *already built*: `DrillDownPanel.tsx:118` renders `· N matching` whenever `meta.totalCount` arrives. It never does, and must not start doing — the contract says `totalCount` is "present only where a count is cheap, never computed live over tickets", which is CLAUDE.md's no-live-`COUNT(*)`-for-dashboards rule. The number to show is the **card's own**, which already came from the pre-aggregated summary tables. **The hard part is not the plumbing.** "Total tasks created" is a *flow* (`flow.created()`, raised inside the window) and "Pending / open" is a *stock* (`stock.openTotal()`, open right now) — which is why 135 open against 116 created is correct rather than a bug. But the open card's drill-down link applies `reportedFrom`/`reportedTo` to a stock measure, so its list is "open **and** raised in this window", which is not 135. Printing 135 over a list of a different size is worse than printing nothing, and `DashboardService` already warns about exactly this: *"Two implementations of 'which tickets is this card counting' is how a card comes to disagree with the list it opens, and the user believes the list."* *Recommended, pending Debashis's call:* show the card's figure with an honest qualifier — "135 open · showing those raised 20 Jul – 18 Aug" — so two different questions look different instead of silently contradicting. Also add the start/end columns from D-063 to the panel's rows. ⚠ **Shivendra's path** (`frontend/src/features/dashboard/`, `feature/dashboard/`) — needs A sign-off.
+
+### Open questions on these four
+
+- **D-063** — is start/end `dateReported` → `actualCloseDate`, or something else? Built on the former unless corrected.
+- **D-064** — on a *stock* card, does the panel header show the card's number or the list's own count? They cannot both be right.
+
+---
+
 ## Decisions you own
 
 Answer during M5:
