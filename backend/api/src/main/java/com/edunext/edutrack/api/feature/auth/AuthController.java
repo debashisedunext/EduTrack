@@ -1,5 +1,8 @@
 package com.edunext.edutrack.api.feature.auth;
 
+import com.edunext.edutrack.api.feature.audit.LoginAudit;
+import com.edunext.edutrack.api.security.CallerIdentity;
+import com.edunext.edutrack.api.security.ClientAddress;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.headers.Header;
@@ -16,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -54,6 +58,7 @@ class AuthController {
     private final ResetPasswordService resetPassword;
     private final PasswordResetRateLimiter resetRateLimiter;
     private final LoginRateLimiter loginRateLimiter;
+    private final LoginAudit loginAudit;
 
     AuthController(AuthenticationService authentication,
                    AccessTokenIssuer tokens,
@@ -63,7 +68,8 @@ class AuthController {
                    ForgotPasswordService forgotPassword,
                    ResetPasswordService resetPassword,
                    PasswordResetRateLimiter resetRateLimiter,
-                   LoginRateLimiter loginRateLimiter) {
+                   LoginRateLimiter loginRateLimiter,
+                   LoginAudit loginAudit) {
         this.authentication = authentication;
         this.tokens = tokens;
         this.refreshTokens = refreshTokens;
@@ -73,6 +79,7 @@ class AuthController {
         this.resetPassword = resetPassword;
         this.resetRateLimiter = resetRateLimiter;
         this.loginRateLimiter = loginRateLimiter;
+        this.loginAudit = loginAudit;
     }
 
     @PostMapping(path = "/login", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -184,6 +191,11 @@ class AuthController {
         String clientKey = clientKeyOf(httpRequest);
         loginRateLimiter.checkAndSpend(request.username(), clientKey)
                 .ifPresent(retryAfter -> {
+                    // A-071 · recorded as its own term rather than as a failed
+                    // login. A burst of LOGIN_THROTTLED is the limiter doing its
+                    // job; a burst of LOGIN_FAILED is somebody getting through to
+                    // the KDF. Filed together they would read the same.
+                    loginAudit.throttled(request.username(), httpRequest);
                     throw new TooManyLoginAttemptsException(retryAfter);
                 });
 
@@ -201,12 +213,46 @@ class AuthController {
             // would let every 2FA user inflate their own office's budget each
             // time they signed in.
             loginRateLimiter.recordFailure(request.username(), clientKey);
+            // A-071 · §10.1's "audit log" on the failure branch. The identifier
+            // is recorded and deliberately not resolved to a user id — see
+            // LoginAudit#failed. The row is written before the throw because
+            // AuditTrail runs REQUIRES_NEW; on the caller's transaction it would
+            // be rolled back by this very exception.
+            loginAudit.failed(request.username(), httpRequest);
+            throw e;
+        } catch (AccountLockedException e) {
+            // A-021's 423, reachable only after a correct password. Not counted
+            // by the limiter above, for the reason its comment gives, and worth
+            // its own audit term for the same reason: this one means somebody
+            // holds the credentials.
+            loginAudit.lockedOut(request.username(), httpRequest);
+            throw e;
+        } catch (InvalidTotpCodeException e) {
+            // A-029. Also reachable only after a correct password, and without
+            // this branch it is the one login outcome that leaves no trace at
+            // all: nothing counts it as a failure, and the route records itself
+            // so the interceptor writes nothing either. Somebody grinding six
+            // digits against a password they already have is precisely what an
+            // audit log is opened to find.
+            //
+            // TwoFactorRequiredException is deliberately NOT caught here: being
+            // asked for a code is the middle of an attempt, not an outcome, and
+            // the attempt ends in a row either way.
+            loginAudit.secondFactorFailed(request.username(), httpRequest);
             throw e;
         }
         loginRateLimiter.recordSuccess(request.username(), clientKey);
 
         AccessToken token = tokens.issue(user);
         SessionResponse body = new SessionResponse(Session.issue(user, token));
+
+        // A-071 · blueprint §10.1's `audit: LOGIN_SUCCESS (ip, user-agent)`,
+        // which A-020 deferred to this task by name. Written once the access
+        // token exists, so the row means "a session was issued" rather than "a
+        // password was accepted". The refresh-cookie degradation below does not
+        // change that — the access token is what makes the session, and a login
+        // that lost only its cookie is still a login somebody performed.
+        loginAudit.succeeded(user.id(), httpRequest);
 
         // Empty only when the token store is unreachable. The login still
         // succeeds — see RefreshTokenIssuer#issue for why that degrades rather
@@ -414,9 +460,19 @@ class AuthController {
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
             @Parameter(hidden = true)
             @CookieValue(name = "${edutrack.auth.refresh-token.cookie-name:refresh_token}",
-                    required = false) String refreshToken) {
+                    required = false) String refreshToken,
+            @Parameter(hidden = true) Authentication caller,
+            @Parameter(hidden = true) HttpServletRequest httpRequest) {
 
         logout.logout(authorization, refreshToken);
+
+        // A-071 · recorded after the revocation, so the row states what happened
+        // rather than what was attempted. The caller is authenticated by
+        // @PreAuthorize above, so an unreadable identity here is a bug rather
+        // than an anonymous logout — and the row is skipped rather than filed
+        // against SYSTEM, which is reserved for the scanners.
+        CallerIdentity.of(caller)
+                .ifPresent(identity -> loginAudit.loggedOut(identity.userId(), httpRequest));
 
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, refreshTokens.clearing().toString())
@@ -567,6 +623,11 @@ class AuthController {
     /**
      * The per-source half of the rate limit.
      *
+     * <p>A-071 moved the reading itself into {@link ClientAddress}, because the
+     * audit log records the same address and two copies of this would drift the
+     * first time a proxy hop is added. The reasoning it carried is worth keeping
+     * here, where the limiter is:
+     *
      * <p>{@code X-Forwarded-For}'s <b>first</b> entry is the original client; the
      * rest are proxies that appended themselves. Read only because this
      * application is deployed behind one — and treated as a hint, not as
@@ -578,12 +639,6 @@ class AuthController {
      * unforgeable.
      */
     private static String clientKeyOf(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            int firstComma = forwarded.indexOf(',');
-            return (firstComma < 0 ? forwarded : forwarded.substring(0, firstComma)).trim();
-        }
-        String remote = request.getRemoteAddr();
-        return remote == null ? "unknown" : remote;
+        return ClientAddress.of(request);
     }
 }
