@@ -6,7 +6,13 @@ import type { ImportBatchResponseData } from '@/api/generated/model'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-import { batchPollInterval, isTerminal, progressPercent } from './importQueries'
+import {
+  batchPollInterval,
+  errorReportRefusal,
+  isTerminal,
+  progressPercent,
+  useDownloadImportErrorReport,
+} from './importQueries'
 
 /**
  * S-34 step 5 — the commit, running. B-035, blueprint §4B.3.
@@ -155,33 +161,7 @@ function CommitProgress({
       </ul>
 
       {/* ── the error report · B-036 ────────────────────────────────────── */}
-      {done && batch.rejected > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-control border border-border bg-subtle p-3">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            // Visible and disabled rather than hidden, which is the shape every
-            // step of this wizard has been left in: hiding it would make the
-            // screen look finished and leave the user with no account of the
-            // rows that did not land.
-            disabled={!batch.errorReportUrl}
-            title={
-              batch.errorReportUrl
-                ? undefined
-                : 'The downloadable error report arrives with the next change to this screen'
-            }
-          >
-            <Download className="h-4 w-4" aria-hidden="true" />
-            Download error report
-          </Button>
-          <p className="text-sm text-content-muted">
-            {batch.rejected.toLocaleString()}{' '}
-            {batch.rejected === 1 ? 'row was' : 'rows were'} skipped. The report lists
-            each one with the reason, so you fix and re-upload only those rows.
-          </p>
-        </div>
-      )}
+      {done && batch.rejected > 0 && <ErrorReport batch={batch} />}
 
       {done && (
         <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
@@ -192,6 +172,73 @@ function CommitProgress({
             Import another file
           </Button>
         </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * B-036 · §4B.3's closing promise — "fix and re-upload just those rows".
+ *
+ * ## The button stays visible when there is no report
+ *
+ * Disabled rather than hidden, which is the shape it has had since B-035 and for
+ * the reason recorded then: hiding it makes the screen look finished and leaves
+ * the user with no account of the rows that did not land. What changed is the
+ * sentence beside it — a run whose report could not be stored is a real state
+ * (the object store was unreachable at the end of the run) and says so, rather
+ * than promising a feature that has now shipped.
+ *
+ * ## The download is a mutation, and the failure is rendered
+ *
+ * A download is an event, not cached state — `importQueries` carries the whole
+ * argument. And a fetch that 404s has to say something: the user is looking at a
+ * count of skipped rows they were just told they could recover, so silence here
+ * reads as a broken button.
+ */
+function ErrorReport({ batch }: { batch: ImportBatchResponseData }) {
+  const download = useDownloadImportErrorReport()
+  const url = batch.errorReportUrl
+
+  return (
+    <div className="space-y-2 rounded-control border border-border bg-subtle p-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={!url || download.isPending}
+          title={
+            url
+              ? undefined
+              : 'No error report was produced for this import. Re-upload the file to see the rejected rows again.'
+          }
+          onClick={() => url && download.mutate(url)}
+        >
+          {download.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Download className="h-4 w-4" aria-hidden="true" />
+          )}
+          {download.isPending ? 'Preparing…' : 'Download error report'}
+        </Button>
+        <p className="text-sm text-content-muted">
+          {batch.rejected.toLocaleString()}{' '}
+          {batch.rejected === 1 ? 'row was' : 'rows were'} skipped.{' '}
+          {url
+            ? 'The report lists each one with the reason, so you fix and re-upload only those rows.'
+            : 'The report could not be produced for this run — re-upload the file to see the rejected rows again.'}
+        </p>
+      </div>
+
+      {download.isError && (
+        <p
+          role="alert"
+          className="flex items-start gap-2 text-sm text-danger-text"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{errorReportRefusal(download.error)}</span>
+        </p>
       )}
     </div>
   )

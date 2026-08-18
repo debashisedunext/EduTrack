@@ -52,6 +52,7 @@ class ImportCommitServiceTest {
     private TestImportSchema schema;
     private InMemoryImportStagingStore staging;
     private RecordingBatches batches;
+    private InMemoryImportReportStore reportStore;
     private ImportCommitService service;
 
     @BeforeEach
@@ -60,6 +61,7 @@ class ImportCommitServiceTest {
         staging = new InMemoryImportStagingStore(
                 Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(30), 20);
         batches = new RecordingBatches();
+        reportStore = new InMemoryImportReportStore();
         service = serviceWith(sameThread());
     }
 
@@ -146,7 +148,7 @@ class ImportCommitServiceTest {
             ImportCommitService async = new ImportCommitService(
                     new ImportRequestResolver(new ImportSchemaRegistry(List.of(blocking)), staging),
                     new ImportValidationEngine(), batches,
-                    new ImportCommitRunner(batches), pool,
+                    new ImportCommitRunner(batches, reports()), pool,
                     new ImportCommitConfig.ImportCommitCeiling(8));
 
             UUID uploadId = stage(row(2, "Code", "ACME", "Name", "Acme"));
@@ -342,6 +344,93 @@ class ImportCommitServiceTest {
         assertThat(batches.stored.getStatus()).isEqualTo(ImportBatchStatus.COMPLETED);
     }
 
+    // ── the error report · B-036 ────────────────────────────────────────────
+
+    @Test
+    @DisplayName("the report holds every row the run did not write, in file order")
+    void theReportHoldsEveryUnwrittenRow() throws Exception {
+        // Three ways a row fails to land, and the report is the only place the
+        // user ever sees all three together: the dry run rejected row 4, found
+        // row 5 duplicated within the file, and the database refused row 3 after
+        // the preview had approved it.
+        schema = new TestImportSchema().failingOn("NORTH");
+        service = serviceWith(sameThread());
+
+        UUID uploadId = stage(
+                row(2, "Code", "ACME", "Name", "Acme"),
+                row(3, "Code", "NORTH", "Name", "Northwind"),
+                row(4, "Name", "No code at all"),
+                row(5, "Code", "ACME", "Name", "Acme again"));
+
+        service.commit("widgets", request(uploadId), null);
+
+        assertThat(reportRowNumbers()).containsExactly("3", "4", "5");
+    }
+
+    @Test
+    @DisplayName("the write failure's reason names the import, not the JDBC exception")
+    void aWriteFailureReadsLikeASentence() throws Exception {
+        // The exception message carries a constraint name, a table name and
+        // sometimes the SQL. None of that helps the person reading the
+        // spreadsheet, and all of it is internal detail on its way into a file
+        // that gets emailed around.
+        schema = new TestImportSchema().failingOn("NORTH");
+        service = serviceWith(sameThread());
+
+        service.commit("widgets", request(stage(
+                row(2, "Code", "NORTH", "Name", "Northwind"))), null);
+
+        String reason = reportReasons().getFirst();
+        assertThat(reason).contains("the database refused this row");
+        assertThat(reason).doesNotContain("simulated constraint violation");
+    }
+
+    /**
+     * <b>The ordering the whole feature depends on.</b>
+     *
+     * <p>A client stops polling the instant it reads a terminal status, so a
+     * report stamped in a later write is one the screen that wanted it has
+     * already given up on. Asserted at the seam rather than through the clock:
+     * the key must be present <em>on the same call</em> that sets COMPLETED.
+     */
+    @Test
+    @DisplayName("the report key arrives on the same write that makes the run terminal")
+    void theReportIsWrittenBeforeTheStatusIs() {
+        service.commit("widgets", request(stage(
+                row(2, "Code", "ACME", "Name", "Acme"),
+                row(3, "Name", "No code"))), null);
+
+        assertThat(batches.reportKeyAtFinish).isEqualTo("imports/WIDGET/4242/errors.xlsx");
+        assertThat(batches.statusWhenReportKeyWritten).isEqualTo(ImportBatchStatus.COMPLETED);
+        assertThat(batches.stored.getErrorReportKey()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a run with nothing rejected leaves no report and no key")
+    void aCleanRunHasNoReport() {
+        service.commit("widgets", request(stage(
+                row(2, "Code", "ACME", "Name", "Acme"))), null);
+
+        assertThat(batches.stored.getErrorReportKey()).isNull();
+        assertThat(reportStore.objects()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("an object store that is down costs the report and completes the import")
+    void aStorageFailureDoesNotFailTheRun() {
+        reportStore.failNext();
+
+        service.commit("widgets", request(stage(
+                row(2, "Code", "ACME", "Name", "Acme"),
+                row(3, "Name", "No code"))), null);
+
+        // The rows are written. Failing the batch over a bucket would report the
+        // wrong thing to the user and to whoever reads the import history.
+        assertThat(schema.written).hasSize(1);
+        assertThat(batches.stored.getStatus()).isEqualTo(ImportBatchStatus.COMPLETED);
+        assertThat(batches.stored.getErrorReportKey()).isNull();
+    }
+
     @Test
     @DisplayName("counters are flushed while the run is in progress, not only at the end")
     void flushesProgress() {
@@ -367,9 +456,25 @@ class ImportCommitServiceTest {
                 new ImportRequestResolver(new ImportSchemaRegistry(List.of(schema)), staging),
                 new ImportValidationEngine(),
                 batches,
-                new ImportCommitRunner(batches),
+                new ImportCommitRunner(batches, reports()),
                 executor,
                 new ImportCommitConfig.ImportCommitCeiling(8));
+    }
+
+    /**
+     * B-036 · a real report service over an in-memory store.
+     *
+     * <p>The writer and the service are the real ones, so a commit test walks
+     * the same generation path production does — only the bucket is fake. A
+     * mocked service would leave the one ordering this feature depends on
+     * (the report is written before the status turns terminal) asserted nowhere.
+     */
+    private ImportErrorReportService reports() {
+        return new ImportErrorReportService(
+                new ImportSchemaRegistry(List.of(schema)),
+                new ImportErrorReportWriter(),
+                reportStore,
+                null);
     }
 
     private List<ImportRow> mapped(UUID uploadId) {
@@ -383,6 +488,31 @@ class ImportCommitServiceTest {
                 List.of(SHEET), SHEET, List.of("Code", "Name"), List.of(rows), NOW);
         staging.stage(upload);
         return upload.uploadId();
+    }
+
+    /** The Row column of the stored report, read back through POI. */
+    private List<String> reportColumn(int column) throws Exception {
+        byte[] workbook = reportStore.objects().values().iterator().next();
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook read =
+                     new org.apache.poi.xssf.usermodel.XSSFWorkbook(
+                             new java.io.ByteArrayInputStream(workbook))) {
+            org.apache.poi.ss.usermodel.Sheet sheet = read.getSheetAt(0);
+            List<String> values = new ArrayList<>();
+            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+                org.apache.poi.ss.usermodel.Row row = sheet.getRow(i);
+                int index = column < 0 ? row.getLastCellNum() + column : column;
+                values.add(row.getCell(index).getStringCellValue());
+            }
+            return values;
+        }
+    }
+
+    private List<String> reportRowNumbers() throws Exception {
+        return reportColumn(0);
+    }
+
+    private List<String> reportReasons() throws Exception {
+        return reportColumn(-1);
     }
 
     private static StagedRow row(int number, String... headingsAndCells) {
@@ -555,15 +685,24 @@ class ImportCommitServiceTest {
         }
 
         @Override
-        void finish(long batchId, ImportBatchStatus status, int created, int updated, int rejected) {
+        void finish(long batchId, ImportBatchStatus status, int created, int updated,
+                    int rejected, String errorReportKey) {
+            // B-036 · recorded in the order the real one writes them, so a test
+            // can assert that the report existed by the time the status did.
+            reportKeyAtFinish = errorReportKey;
+            statusWhenReportKeyWritten = status;
             apply(created, updated, rejected);
             stored.setStatus(status);
+            stored.setErrorReportKey(errorReportKey);
         }
 
         @Override
         void fail(long batchId) {
             stored.setStatus(ImportBatchStatus.FAILED);
         }
+
+        String reportKeyAtFinish;
+        ImportBatchStatus statusWhenReportKeyWritten;
 
         private void apply(int created, int updated, int rejected) {
             stored.setCreatedRows(created);

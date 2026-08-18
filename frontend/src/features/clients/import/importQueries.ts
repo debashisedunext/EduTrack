@@ -427,6 +427,104 @@ export function progressPercent(processed: number, total: number): number {
   return Math.min(100, Math.max(0, Math.round((processed / total) * 100)))
 }
 
+// ── B-036 · step 5's error report ─────────────────────────────────────────────
+
+/**
+ * Fetches the error report and hands back the bytes and the name.
+ *
+ * ## Why not the generated `useDownloadImportErrorReport`
+ *
+ * The same two reasons `fetchImportTemplate` gives one screen up, and this is
+ * the second feature to hit them — which is the argument for fixing `http()`
+ * rather than writing a third:
+ *
+ * 1. Orval generates a `useQuery`, and a download is an **event**, not cached
+ *    state. Mounting the step-5 screen would fetch the workbook, and regaining
+ *    window focus would fetch it again.
+ * 2. `http()` parses a body and drops the `Response`, so the generated call
+ *    cannot return the `Content-Disposition` name — and the server names this
+ *    file per batch (`clients-import-errors-412.xlsx`) precisely so two reports
+ *    in a Downloads folder say which import each came from. Reconstructing it
+ *    here would be a second place that has to agree about a string.
+ *
+ * ## It takes the URL off the batch rather than composing one
+ *
+ * `errorReportUrl` is null exactly when there is nothing to download, so a
+ * caller that has one has already been told the report exists. Composing
+ * `/import-batches/${batchId}/error-report` here would work and would move that
+ * decision into the client — where a screen could ask for a report of a run that
+ * has none, and would have to render the 404 that came back.
+ */
+export async function fetchImportErrorReport(
+  errorReportUrl: string,
+  signal?: AbortSignal,
+): Promise<DownloadedTemplate> {
+  const token = getAccessToken()
+  const response = await fetch(`${BASE}${errorReportUrl}`, {
+    signal,
+    credentials: 'include',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await readProblem(response), response)
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: errorReportFilenameFrom(response.headers.get('Content-Disposition')),
+  }
+}
+
+/**
+ * The name out of `Content-Disposition`, or a plain fallback.
+ *
+ * Deliberately **not** `filenameFrom`, whose fallback is the template's name:
+ * a proxy that strips the header would otherwise leave a user with
+ * `clients-import-template.xlsx` in their Downloads folder — the name of a
+ * different file, which is worse than a generic one because it is confidently
+ * wrong. Without the header the batch id is not knowable from here either, so
+ * the fallback says only what this is.
+ */
+export function errorReportFilenameFrom(header: string | null): string {
+  const quoted = header?.match(/filename="([^"]+)"/)
+  const bare = header?.match(/filename=([^;]+)/)
+  const name = quoted?.[1] ?? bare?.[1]?.trim()
+  return name && name.length > 0 ? name : 'import-errors.xlsx'
+}
+
+/** The button's mutation: fetch, then save. Errors surface as `ApiError`. */
+export function useDownloadImportErrorReport() {
+  return useMutation<DownloadedTemplate, ApiError, string>({
+    mutationFn: (errorReportUrl) => fetchImportErrorReport(errorReportUrl),
+    onSuccess: saveBlob,
+  })
+}
+
+/**
+ * What to say when the download fails, in words the user can act on.
+ *
+ * A 404 is the interesting one and the only one worth its own sentence: the
+ * report was there when the batch was read and is not there now, which in
+ * practice means the run was polled at the wrong moment or the object expired.
+ * "Try again" is wrong advice for it, so it does not say that.
+ */
+export function errorReportRefusal(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return 'The error report could not be downloaded. Check your connection and try again.'
+  }
+  if (error.status === 404) {
+    return (
+      error.problem.detail ??
+      'The error report for this import is no longer available. The rows it listed were not imported — re-upload the file to see them again.'
+    )
+  }
+  if (error.status === 403) {
+    return 'You do not have permission to download this import’s error report.'
+  }
+  return `The error report could not be downloaded (${error.status}).`
+}
+
 export function formatBytes(bytes: number): string {
   return bytes >= 1024 * 1024
     ? `${(bytes / 1024 / 1024).toFixed(1)} MB`

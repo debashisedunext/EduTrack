@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -25,9 +26,11 @@ import java.util.Set;
 public class ImportSchemaRegistry {
 
     private final Map<String, ImportSchemaDefinition> byKey;
+    private final Map<String, ImportSchemaDefinition> byEntityCode;
 
     ImportSchemaRegistry(List<ImportSchemaDefinition> registrations) {
         Map<String, ImportSchemaDefinition> map = new LinkedHashMap<>();
+        Map<String, ImportSchemaDefinition> entities = new LinkedHashMap<>();
         for (ImportSchemaDefinition schema : registrations) {
             validate(schema);
             ImportSchemaDefinition clash = map.put(schema.key(), schema);
@@ -36,8 +39,21 @@ public class ImportSchemaRegistry {
                         "Two import schemas registered under '" + schema.key() + "': "
                                 + clash.getClass().getName() + " and " + schema.getClass().getName());
             }
+            ImportSchemaDefinition entityClash = entities.put(schema.entityCode(), schema);
+            if (entityClash != null) {
+                // Same class of boot-time refusal as a duplicate key, and it
+                // became reachable in B-036: an import_batches row stores the
+                // entity code and the error report is resolved back through it,
+                // so two registrations sharing one would make a stored run
+                // ambiguous about which schema wrote it.
+                throw new IllegalStateException(
+                        "Two import schemas registered under entity code '" + schema.entityCode()
+                                + "': " + entityClash.getClass().getName() + " and "
+                                + schema.getClass().getName());
+            }
         }
         this.byKey = Map.copyOf(map);
+        this.byEntityCode = Map.copyOf(entities);
     }
 
     /**
@@ -54,6 +70,26 @@ public class ImportSchemaRegistry {
 
     public Set<String> keys() {
         return byKey.keySet();
+    }
+
+    /**
+     * B-036 · the registration a stored run belongs to — {@code CLIENT} →
+     * {@code ClientImportSchema}.
+     *
+     * <p>Resolution by {@link ImportSchemaDefinition#entityCode()} rather than by
+     * {@link ImportSchemaDefinition#key()} because that is what
+     * {@code import_batches} stores, and the two are deliberately different
+     * things: the key is a URL segment a client depends on, the entity code is a
+     * stored discriminator. Reconstructing one from the other would be the
+     * collapse that separation exists to prevent.
+     *
+     * <p>Empty rather than a throw, because the caller is a batch row read long
+     * after the run: a registration removed from a later release leaves rows
+     * behind, and their reports become unavailable rather than a 500 on a
+     * history screen.
+     */
+    Optional<ImportSchemaDefinition> byEntityCode(String entityCode) {
+        return Optional.ofNullable(entityCode).map(byEntityCode::get);
     }
 
     private static void validate(ImportSchemaDefinition schema) {

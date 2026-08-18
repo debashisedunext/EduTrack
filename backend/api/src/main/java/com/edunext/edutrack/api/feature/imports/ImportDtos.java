@@ -285,9 +285,20 @@ final class ImportDtos {
      *                  column holding the same number is a fourth column that can
      *                  disagree with them. It reaches {@code total} exactly when
      *                  the run is over
-     * @param errorReportUrl null until B-036 generates one. Null rather than a
-     *                  constructed URL, because a link that 404s is worse than a
-     *                  button that is honestly disabled
+     * @param errorReportUrl <b>B-036 — a route, not the storage key and not a
+     *                  signed URL.</b> Null exactly when there is nothing to
+     *                  download: the run is not over, nothing was rejected, or
+     *                  the report could not be stored. Null rather than a
+     *                  constructed URL in those cases, because a link that 404s
+     *                  is worse than a button that is honestly disabled.
+     *                  <p>Relative to the API base, so the client's existing
+     *                  credentials apply to it and {@code master.write} is
+     *                  re-checked when the file is actually read. A presigned
+     *                  object-store URL was the alternative and is what §4B.4
+     *                  hands out for attachments; it is wrong here because this
+     *                  file is a verbatim extract of the client master and a
+     *                  signed URL is a bearer credential that outlives the screen
+     *                  it was minted for
      */
     record Batch(
             Long batchId,
@@ -301,8 +312,29 @@ final class ImportDtos {
             int rejected,
             String errorReportUrl) {
 
+        /**
+         * Where the error report is downloaded from, given a batch that has one.
+         *
+         * <p>Derived from the presence of {@code error_report_key} rather than
+         * from its value: the key is an object-store path, it is an
+         * implementation detail of {@link ImportReportStore}, and putting it on
+         * the wire would make a bucket layout a public contract. A caller needs
+         * to know that a report exists and how to ask for it, which is one bit
+         * and one route.
+         *
+         * <p><b>Relative to the API base, so the {@code /api/v1} prefix is not in
+         * it.</b> The file cannot be fetched as a plain link — it needs the
+         * caller's {@code Authorization} header — so a client is composing this
+         * onto its own base either way, exactly as {@code fetchImportTemplate}
+         * composes the template path. A root-relative {@code /api/v1/…} would
+         * work in the ordinary deployment and point at the wrong origin the
+         * moment the API is served from another one.
+         */
+        private static final String ERROR_REPORT_PATH = "/import-batches/%d/error-report";
+
         static Batch of(com.edunext.edutrack.domain.imports.ImportBatch batch) {
             int rejected = batch.getRejectedRows();
+            String reportKey = batch.getErrorReportKey();
             return new Batch(
                     batch.getId(),
                     batch.getEntity(),
@@ -313,10 +345,9 @@ final class ImportDtos {
                     batch.getCreatedRows(),
                     batch.getUpdatedRows(),
                     rejected,
-                    // B-036. Deliberately not derived from `errorReportKey`
-                    // either: a key exists only once a report has been written,
-                    // and nothing writes one yet.
-                    null);
+                    reportKey == null || reportKey.isBlank()
+                            ? null
+                            : ERROR_REPORT_PATH.formatted(batch.getId()));
         }
 
         /**
@@ -332,10 +363,19 @@ final class ImportDtos {
          * a hash is not byte-equality of the representation, and nothing here
          * takes {@code If-Match}, so there is no lost update for a strong tag to
          * prevent.
+         *
+         * <p><b>{@code errorReportUrl} is one of the inputs since B-036</b>, and
+         * leaving it out would have been the defect this whole route exists to
+         * avoid. The report appears on the same write as the terminal status, so
+         * a tag over the counters alone happens to move with it today — and would
+         * silently stop doing so the first time a run's last flush left the
+         * counters where the final write finds them. A validator that does not
+         * cover every field of the representation is a 304 that withholds a
+         * change.
          */
         String etag() {
-            return Integer.toHexString(
-                    java.util.Objects.hash(batchId, status, created, updated, rejected, total));
+            return Integer.toHexString(java.util.Objects.hash(
+                    batchId, status, created, updated, rejected, total, errorReportUrl));
         }
     }
 

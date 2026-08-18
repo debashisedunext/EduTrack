@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -66,28 +67,41 @@ class ImportCommitRunner {
     static final int FLUSH_EVERY = 50;
 
     private final ImportBatchService batches;
+    private final ImportErrorReportService reports;
 
-    ImportCommitRunner(ImportBatchService batches) {
+    ImportCommitRunner(ImportBatchService batches, ImportErrorReportService reports) {
         this.batches = batches;
+        this.reports = reports;
     }
 
     /**
-     * @param rows     the rows the dry run judged writable, in file order, already
-     *                 mapped and already detached from the staging entry — this
-     *                 runs long after the request that started it, and the
-     *                 staging TTL is thirty minutes
-     * @param rejected what the dry run already refused. Carried in rather than
-     *                 recomputed so the counters this writes and the counts the
-     *                 user approved are the same numbers
+     * @param rows      the rows the dry run judged writable, in file order,
+     *                  already mapped and already detached from the staging entry
+     *                  — this runs long after the request that started it, and
+     *                  the staging TTL is thirty minutes
+     * @param unwritten what the dry run already refused — its rejections and its
+     *                  in-file duplicates, as verdicts rather than as a count.
+     *                  <b>B-036 widened this from an {@code int}</b>: the count is
+     *                  {@code unwritten.size()}, so nothing was lost, and the rows
+     *                  themselves are what the error report is built from. They
+     *                  are carried in rather than recomputed for the reason the
+     *                  count was — the numbers this writes and the numbers the
+     *                  user approved must be the same numbers
      */
     void run(ImportSchemaDefinition definition, long batchId,
-             List<ImportRowVerdict> rows, int rejected) {
+             List<ImportRowVerdict> rows, List<ImportRowVerdict> unwritten) {
 
+        int rejected = unwritten.size();
         int created = 0;
         int updated = 0;
-        int failed = 0;
         int sinceFlush = 0;
         ImportBatchStatus outcome = ImportBatchStatus.COMPLETED;
+
+        // B-036 · the rows that passed the dry run and were still refused by the
+        // database. Kept as verdicts so they join the report beside the rows the
+        // dry run rejected: to somebody fixing a spreadsheet, "this row is not in
+        // the client master" is one fact however it came about.
+        List<ImportRowVerdict> writeFailures = new ArrayList<>();
 
         batches.markRunning(batchId);
 
@@ -105,14 +119,14 @@ class ImportCommitRunner {
                     // their own spreadsheet, and the walk continues. Anything
                     // else here means one row's constraint violation discards
                     // work the user has already approved and watched land.
-                    failed++;
+                    writeFailures.add(writeFailure(verdict, batchId));
                     log.warn("Import batch {} — row {} could not be written: {}",
                             batchId, verdict.rowNumber(), rowFailed.toString());
                 }
 
                 if (++sinceFlush >= FLUSH_EVERY) {
                     sinceFlush = 0;
-                    batches.progress(batchId, created, updated, rejected + failed);
+                    batches.progress(batchId, created, updated, rejected + writeFailures.size());
                 }
             }
 
@@ -127,10 +141,57 @@ class ImportCommitRunner {
             outcome = ImportBatchStatus.FAILED;
         }
 
+        // B-036 · written before the status, never after it. A client stops
+        // polling the moment it reads a terminal status, so a report stamped in a
+        // later transaction is one the screen that wanted it has already given up
+        // on. Generated on the FAILED path too: a run that died still refused rows
+        // the user has to recover, and it lists what is known not to have landed
+        // rather than claiming anything about the rows it never reached.
+        String reportKey = reports.generate(definition, batchId, failures(unwritten, writeFailures));
+
         // Outside the try on purpose: the terminal write is the same call on
         // both paths, so there is one place a status is decided and one place it
         // is stored. Written even for FAILED, so a dead run still reports what it
         // managed rather than the counters from its last multiple of fifty.
-        batches.finish(batchId, outcome, created, updated, rejected + failed);
+        batches.finish(batchId, outcome, created, updated,
+                rejected + writeFailures.size(), reportKey);
+    }
+
+    /**
+     * The report's rows, back in the order of the file they came from.
+     *
+     * <p>Sorted rather than concatenated, because the two lists interleave in the
+     * sheet: the dry run rejected row 5 and the database refused row 6, and a
+     * report listing every dry-run rejection and then every write failure asks
+     * the user to read their spreadsheet twice. The row number is the only order
+     * this file has that means anything.
+     */
+    private static List<ImportRowVerdict> failures(List<ImportRowVerdict> unwritten,
+                                                   List<ImportRowVerdict> writeFailures) {
+        if (writeFailures.isEmpty()) {
+            return unwritten;
+        }
+        List<ImportRowVerdict> all = new ArrayList<>(unwritten.size() + writeFailures.size());
+        all.addAll(unwritten);
+        all.addAll(writeFailures);
+        all.sort(java.util.Comparator.comparingInt(ImportRowVerdict::rowNumber));
+        return all;
+    }
+
+    /**
+     * A row the dry run approved and the database refused, as a verdict.
+     *
+     * <p><b>The exception's message is deliberately not the reason.</b> It is a
+     * JDBC or Hibernate string carrying a constraint name, a table name and
+     * sometimes the SQL — none of it useful to the person reading the
+     * spreadsheet, and all of it internal detail on its way into a file that gets
+     * emailed around. The log line beside this one has the real cause for whoever
+     * can act on it, and the batch id in the cell is what connects the two.
+     */
+    private static ImportRowVerdict writeFailure(ImportRowVerdict verdict, long batchId) {
+        return new ImportRowVerdict(verdict.rowNumber(), ImportVerdict.REJECTED,
+                "Not written — the database refused this row. It passed every check the import"
+                        + " makes, so the detail is in the server log for import #" + batchId + ".",
+                verdict.values());
     }
 }

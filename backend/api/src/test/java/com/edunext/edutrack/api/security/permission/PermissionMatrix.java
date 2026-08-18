@@ -1204,6 +1204,16 @@ final class PermissionMatrix {
             // assignee, project or client for ScopeResolver to answer about.
             adminOnly("GET", "/api/v1/import-batches/{batchId}"),
 
+            // B-036 · the error report — the rejected rows of one run, as .xlsx.
+            //
+            // The same capability as the poll it hangs off, and it needs to be:
+            // this file is a verbatim extract of the client master, not a summary
+            // of one. It is served through the API rather than as a presigned
+            // object-store URL precisely so that master.write is checked here,
+            // at the moment the bytes are read, rather than at the moment a link
+            // was minted.
+            adminOnly("GET", "/api/v1/import-batches/{batchId}/error-report"),
+
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack
             // account; the actual gate is the X-Webhook-Signature HMAC inside

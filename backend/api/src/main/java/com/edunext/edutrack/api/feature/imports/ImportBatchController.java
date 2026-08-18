@@ -58,10 +58,16 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "imports")
 class ImportBatchController {
 
-    private final ImportBatchService batches;
+    /** Matches the contract's response media type, not {@code application/octet-stream}. */
+    private static final String XLSX =
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-    ImportBatchController(ImportBatchService batches) {
+    private final ImportBatchService batches;
+    private final ImportErrorReportService reports;
+
+    ImportBatchController(ImportBatchService batches, ImportErrorReportService reports) {
         this.batches = batches;
+        this.reports = reports;
     }
 
     /**
@@ -85,6 +91,46 @@ class ImportBatchController {
         }
 
         return ResponseEntity.ok().eTag(etag).body(new ImportDtos.BatchResponse(batch));
+    }
+
+    /**
+     * B-036 · blueprint §4B.3 step 5 — <b>the rejected rows, with a Reason
+     * column appended, so the user fixes and re-uploads only those.</b>
+     *
+     * <p>The file is the one {@link ImportErrorReportWriter} wrote while the run
+     * was still going, read back out of the object store. It is not generated
+     * here and could not be: the rows it describes were released with the staging
+     * entry before the job started, which is B-035's design and the reason this
+     * route reads rather than builds.
+     *
+     * <p><b>Streamed through this API rather than redirected to a signed URL.</b>
+     * §4B.4 hands attachments out as short-lived presigned URLs and that is right
+     * for a 50 MB video served repeatedly; this is a small file read once, and it
+     * is a verbatim extract of the client master. Proxying it costs a few hundred
+     * kilobytes and buys a permission check at the moment of reading rather than
+     * at the moment of linking — see {@link ImportReportStore}, which has no
+     * method that can produce a public address at all.
+     *
+     * <p>Two 404s, both with the product's ordinary not-found {@code type}: no
+     * such batch, and a batch with no report. Neither offers the caller a button,
+     * which is why they are not split the way this package's 422s are.
+     *
+     * <p>{@code master.write}, like the poll beside it and the wizard that
+     * started the job. Registered in {@code check-conventions.py}'s
+     * {@code ROWLESS_403} with the same reason as {@code /import-batches/{batchId}}.
+     */
+    @GetMapping(path = "/{batchId}/error-report", produces = XLSX)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "downloadImportErrorReport",
+            summary = "The rejected rows of one import, as .xlsx (S-34 step 5)")
+    ResponseEntity<byte[]> errorReport(@PathVariable long batchId) {
+        ImportErrorReportService.Report report = reports.download(batchId);
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(XLSX))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + report.fileName() + "\"")
+                .body(report.workbook());
     }
 
     /**

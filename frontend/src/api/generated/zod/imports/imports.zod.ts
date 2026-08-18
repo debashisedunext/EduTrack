@@ -317,15 +317,15 @@ export const commitImportBody = zod.object({
 }).describe('The same two things `\/validate` takes, for the reason B-033 recorded: the\nmapping is never parked server-side, so both steps carry it. Sending them\nagain is also what lets the server re-derive the verdicts rather than\ntrust a preview the caller assembled.\n')
 
 /**
- * The error report is an `.xlsx` of only the rejected rows with an appended
-Reason column, so the user fixes and re-uploads those rows rather than the
-whole file. Every import is identified, which makes a bad one reversible
-as a set.
+ * `errorReportUrl` points at `downloadImportErrorReport`, an `.xlsx` of only
+the rejected rows with an appended Reason column, so the user fixes and
+re-uploads those rows rather than the whole file. Every import is
+identified, which makes a bad one reversible as a set.
 
 Polled while a job runs, so it returns an `ETag` — a client checking every
 two seconds should transfer a body only when something actually changed.
-The tag is over the counters and the status, so it changes exactly when
-the progress bar would move.
+The tag is over the counters, the status **and `errorReportUrl`**, so it
+changes exactly when anything the screen renders would.
 
 `master.write`, like the wizard that starts the job. **403 rather than
 404** for a caller without it: the capability is decided before the id is
@@ -357,7 +357,47 @@ export const getImportBatchResponse = zod.object({
   "created": zod.number(),
   "updated": zod.number(),
   "rejected": zod.number().describe('What the dry run refused, plus anything that failed at write\ntime — a row the preview judged writable can still break a\nconstraint no validator declared, and losing the other 499 to it\nwould be the wrong trade.\n'),
-  "errorReportUrl": zod.string().nullish().describe('`.xlsx` of rejected rows with an appended Reason column. \*\*Null\nuntil B-036\*\* — the generation is that task, and a URL invented\nhere would 404 on the one click this screen offers.\n')
+  "errorReportUrl": zod.string().nullish().describe('`.xlsx` of rejected rows with an appended Reason column — B-036.\n\n\*\*A path relative to the API base\*\* — no `\/api\/v1` prefix, because\nthe file needs the caller\'s `Authorization` header and so is\ncomposed onto a base by whatever fetches it, exactly as the\ntemplate path is. \*\*Not an object-store URL.\*\* The\nfile is a verbatim extract of the client master, so it is served\nthrough `downloadImportErrorReport` with `master.write` re-checked\nat the moment of reading, rather than as a presigned URL the way\n§4B.4 serves attachments. A signed URL is a bearer credential that\noutlives the screen that minted it, in a browser history and a\nproxy log.\n\n\*\*Null exactly when there is nothing to download\*\*: the run has\nnot finished, no row was rejected, or the report could not be\nstored. A client renders the button disabled rather than hiding\nit — hiding leaves a user with no account of the rows that did\nnot land.\n\nIt appears on the \*\*same write that makes the status terminal\*\*,\nnever a later one: a client stops polling when it reads\n`COMPLETED`, so a report stamped afterwards is one nobody is\nstill asking for. The `ETag` covers this field for the same\nreason.\n')
 }).describe('`required` is spelled out so the generated TypeScript stops making\nevery counter optional — a progress bar reading `processed ?? 0`\nrenders 0% for a run that is nearly finished, and the fallback hides\nit. `fileName` and `errorReportUrl` are the two that genuinely may be\nabsent.\n')
+})
+
+/**
+ * §4B.3's closing promise: "a downloadable error report (.xlsx with a Reason
+column appended) is produced for every rejected row so the user can fix
+and re-upload just those." B-036.
+
+**Written in the template's shape, not the upload's.** The columns are
+the schema's own headers in template order, plus a leading `Row` and a
+trailing `Reason`. That is what makes "fix and re-upload just those rows"
+literal rather than aspirational: `uploadImportFile` auto-matches every
+column of this file on the way back in, so the corrected rows need no
+remapping and cannot be remapped wrongly. `Row` and `Reason` match no
+declared field, so they are ignored on that re-upload.
+
+The cost, stated because it is real: **columns the caller did not map are
+not in the report**, because they were never read. `Row` is what bridges
+it — it names the row in the sheet they still have.
+
+**Every row the run did not write**, in file order: what the dry run
+rejected, what it found duplicated within the file, and anything that
+broke a database constraint at write time. All three are rows the file
+contained and the master did not receive, which is the only distinction
+that matters to somebody fixing a spreadsheet.
+
+Generated during the run and stored, never generated here — the rows it
+describes are released with the staging entry before the job starts, so
+there is no later moment they exist. Reach it through the batch's
+`errorReportUrl` rather than by composing the path.
+
+`master.write`, like the poll it hangs off. **Served through the API
+rather than as a presigned object-store URL**, unlike §4B.4's
+attachments: this is a verbatim extract of the client master, and a
+signed URL is a bearer credential that outlives the screen it was minted
+for.
+
+ * @summary Step 5 — the rejected rows as .xlsx, with a Reason column
+ */
+export const downloadImportErrorReportParams = zod.object({
+  "batchId": zod.number().describe('`import_batches.id` — a `BIGINT AUTO_INCREMENT`, like every other\nidentifier in this schema. Described as a UUID until B-030, which is\nwhen the engine first had to resolve one against the table.\n')
 })
 

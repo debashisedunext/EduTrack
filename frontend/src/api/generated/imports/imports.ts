@@ -803,15 +803,15 @@ export const useCommitImport = <TError = ValidationFailedResponse | Unauthorized
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * The error report is an `.xlsx` of only the rejected rows with an appended
-Reason column, so the user fixes and re-uploads those rows rather than the
-whole file. Every import is identified, which makes a bad one reversible
-as a set.
+ * `errorReportUrl` points at `downloadImportErrorReport`, an `.xlsx` of only
+the rejected rows with an appended Reason column, so the user fixes and
+re-uploads those rows rather than the whole file. Every import is
+identified, which makes a bad one reversible as a set.
 
 Polled while a job runs, so it returns an `ETag` — a client checking every
 two seconds should transfer a body only when something actually changed.
-The tag is over the counters and the status, so it changes exactly when
-the progress bar would move.
+The tag is over the counters, the status **and `errorReportUrl`**, so it
+changes exactly when anything the screen renders would.
 
 `master.write`, like the wizard that starts the job. **403 rather than
 404** for a caller without it: the capability is decided before the id is
@@ -898,6 +898,132 @@ export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBat
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetImportBatchQueryOptions(batchId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * §4B.3's closing promise: "a downloadable error report (.xlsx with a Reason
+column appended) is produced for every rejected row so the user can fix
+and re-upload just those." B-036.
+
+**Written in the template's shape, not the upload's.** The columns are
+the schema's own headers in template order, plus a leading `Row` and a
+trailing `Reason`. That is what makes "fix and re-upload just those rows"
+literal rather than aspirational: `uploadImportFile` auto-matches every
+column of this file on the way back in, so the corrected rows need no
+remapping and cannot be remapped wrongly. `Row` and `Reason` match no
+declared field, so they are ignored on that re-upload.
+
+The cost, stated because it is real: **columns the caller did not map are
+not in the report**, because they were never read. `Row` is what bridges
+it — it names the row in the sheet they still have.
+
+**Every row the run did not write**, in file order: what the dry run
+rejected, what it found duplicated within the file, and anything that
+broke a database constraint at write time. All three are rows the file
+contained and the master did not receive, which is the only distinction
+that matters to somebody fixing a spreadsheet.
+
+Generated during the run and stored, never generated here — the rows it
+describes are released with the staging entry before the job starts, so
+there is no later moment they exist. Reach it through the batch's
+`errorReportUrl` rather than by composing the path.
+
+`master.write`, like the poll it hangs off. **Served through the API
+rather than as a presigned object-store URL**, unlike §4B.4's
+attachments: this is a verbatim extract of the client master, and a
+signed URL is a bearer credential that outlives the screen it was minted
+for.
+
+ * @summary Step 5 — the rejected rows as .xlsx, with a Reason column
+ */
+export const downloadImportErrorReport = (
+    batchId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<Blob>(
+      {url: `/import-batches/${batchId}/error-report`, method: 'GET',
+        responseType: 'blob', signal
+    },
+      );
+    }
+  
+
+
+
+export const getDownloadImportErrorReportQueryKey = (batchId?: number,) => {
+    return [
+    `/import-batches/${batchId}/error-report`
+    ] as const;
+    }
+
+    
+export const getDownloadImportErrorReportQueryOptions = <TData = Awaited<ReturnType<typeof downloadImportErrorReport>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportErrorReport>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadImportErrorReportQueryKey(batchId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadImportErrorReport>>> = ({ signal }) => downloadImportErrorReport(batchId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(batchId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadImportErrorReport>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DownloadImportErrorReportQueryResult = NonNullable<Awaited<ReturnType<typeof downloadImportErrorReport>>>
+export type DownloadImportErrorReportQueryError = UnauthorizedResponse | ForbiddenResponse | Problem
+
+
+export function useDownloadImportErrorReport<TData = Awaited<ReturnType<typeof downloadImportErrorReport>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ batchId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportErrorReport>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadImportErrorReport>>,
+          TError,
+          Awaited<ReturnType<typeof downloadImportErrorReport>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadImportErrorReport<TData = Awaited<ReturnType<typeof downloadImportErrorReport>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportErrorReport>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadImportErrorReport>>,
+          TError,
+          Awaited<ReturnType<typeof downloadImportErrorReport>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadImportErrorReport<TData = Awaited<ReturnType<typeof downloadImportErrorReport>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportErrorReport>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Step 5 — the rejected rows as .xlsx, with a Reason column
+ */
+
+export function useDownloadImportErrorReport<TData = Awaited<ReturnType<typeof downloadImportErrorReport>>, TError = UnauthorizedResponse | ForbiddenResponse | Problem>(
+ batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadImportErrorReport>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getDownloadImportErrorReportQueryOptions(batchId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

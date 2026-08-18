@@ -669,6 +669,14 @@ const CLIENT_IMPORT_FIELDS = [
 ];
 
 /**
+ * The media type both import downloads carry — the template (B-031) and the
+ * error report (B-036). Named once because a client that branches on it would
+ * be reading a string two handlers had to agree about.
+ */
+const XLSX_MEDIA_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/**
  * B-034 · the step-4 preview, built rather than listed.
  *
  * **The counts and the rows have to agree**, and a hand-written fixture of four
@@ -1801,7 +1809,7 @@ export const restHandlers = [
   http.get(url('/imports/:schema/template'), () =>
     new HttpResponse(new Blob(['mock xlsx template']), {
       headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Type': XLSX_MEDIA_TYPE,
         'Content-Disposition': 'attachment; filename="import-template.xlsx"',
       },
     }),
@@ -2012,15 +2020,67 @@ export const restHandlers = [
       batch.processed = batch.created + batch.updated + batch.rejected;
     } else {
       batch.status = 'COMPLETED';
+      // B-036 · the report appears on the same step that makes the run terminal,
+      // never a later one — the real runner writes the key in the transaction
+      // that sets the status, because a client stops polling the moment it reads
+      // COMPLETED. A mock that stamped it on the next poll would let a screen
+      // ship that never sees a report, and every poll after that one is a 304.
+      //
+      // Null when nothing was rejected: the field says whether there is a report,
+      // and a client composing the path itself would ask for one that is not
+      // there.
+      batch.errorReportUrl =
+        batch.rejected > 0 ? `/import-batches/${batch.batchId}/error-report` : null;
     }
 
-    // The ETag is over the counters, like the real one, so a client polling
-    // between flushes genuinely gets a 304 rather than the same body again.
-    const etag = `W/"batch-${batch.batchId}-${batch.status}-${batch.processed}"`;
+    // The ETag is over the counters *and the report URL*, like the real one —
+    // otherwise the last poll of a run, where only the URL appears, would be a
+    // 304 and the download button would never enable.
+    const etag = `W/"batch-${batch.batchId}-${batch.status}-${batch.processed}-${batch.errorReportUrl ? 'r' : 'x'}"`;
     if (request.headers.get('If-None-Match') === etag) {
       return new HttpResponse(null, { status: 304, headers: { ETag: etag } });
     }
     return ok(batch, undefined, { headers: { ETag: etag } });
+  }),
+  // B-036 · the error report. A real `.xlsx` is not what this needs to be — no
+  // test opens it — but a `Blob` with the server's content type and, above all,
+  // **the server's `Content-Disposition` name** is: that header is the whole
+  // reason `fetchImportErrorReport` exists instead of the generated hook, and a
+  // mock that omitted it would let a screen ship that saves every report under
+  // one name.
+  //
+  // The 404 is modelled too, because it is the one a bookmark hits and the one
+  // the screen has to render: a batch that is real and has no report.
+  http.get(url('/import-batches/:batchId/error-report'), ({ params }) => {
+    const db = getDb();
+    const batchId = Number(params.batchId);
+    const batch = db.importBatches[batchId];
+
+    if (!batch) {
+      return problem(404, 'not-found', 'Import batch not found', {
+        detail: `No import batch ${batchId} exists.`,
+        batchId,
+      });
+    }
+    if (!batch.errorReportUrl) {
+      return problem(404, 'not-found', 'Import error report not available', {
+        detail: `Import batch ${batchId} has no error report to download (status ${batch.status}).`,
+        batchId,
+        status: batch.status,
+      });
+    }
+
+    return new HttpResponse(
+      // Enough bytes to be a file and not enough to pretend to be a workbook.
+      new Blob([`Row,Client Code,Reason\n`], { type: XLSX_MEDIA_TYPE }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': XLSX_MEDIA_TYPE,
+          'Content-Disposition': `attachment; filename="clients-import-errors-${batchId}.xlsx"`,
+        },
+      },
+    );
   }),
 
   // ── browser push · D-045 ──────────────────────────────────────────────────

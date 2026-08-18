@@ -48,9 +48,30 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * `.xlsx` of rejected rows with an appended Reason column. **Null
-until B-036** — the generation is that task, and a URL invented
-here would 404 on the one click this screen offers.
+ * `.xlsx` of rejected rows with an appended Reason column — B-036.
+
+**A path relative to the API base** — no `/api/v1` prefix, because
+the file needs the caller's `Authorization` header and so is
+composed onto a base by whatever fetches it, exactly as the
+template path is. **Not an object-store URL.** The
+file is a verbatim extract of the client master, so it is served
+through `downloadImportErrorReport` with `master.write` re-checked
+at the moment of reading, rather than as a presigned URL the way
+§4B.4 serves attachments. A signed URL is a bearer credential that
+outlives the screen that minted it, in a browser history and a
+proxy log.
+
+**Null exactly when there is nothing to download**: the run has
+not finished, no row was rejected, or the report could not be
+stored. A client renders the button disabled rather than hiding
+it — hiding leaves a user with no account of the rows that did
+not land.
+
+It appears on the **same write that makes the status terminal**,
+never a later one: a client stops polling when it reads
+`COMPLETED`, so a report stamped afterwards is one nobody is
+still asking for. The `ETag` covers this field for the same
+reason.
 
  */
 export type ImportBatchResponseDataErrorReportUrl = string | null;

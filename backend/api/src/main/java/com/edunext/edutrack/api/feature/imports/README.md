@@ -14,6 +14,7 @@ The Excel import engine — screen S-34, blueprint §4B.3.
 | **B-033** Step 3 — column mapping | `ImportDtos.SchemaField(s)`, `ImportMappingPresetService`, `ImportMappingPresetRepository`, `UnknownImportFieldException`, `MappingPresetNotFoundException` |
 | **B-034** Step 4 — dry-run preview | `ImportValidationService`, `ImportDtos.{ValidateRequest,RowVerdict,Preview}`, `ImportUploadNotAvailableException`, `IncompleteMappingException`, `UnknownSourceColumnException` |
 | **B-035** Step 5 — commit as a background job | `ImportRequestResolver`, `ImportCommitService`, `ImportCommitRunner`, `ImportCommitConfig`, `ImportBatchService`, `ImportBatchController`, `ImportDtos.{CommitRequest,Batch}`, `NothingToCommitException`, `RejectedRowsPresentException`, `ImportCommitQueueFullException`, `ImportBatchNotFoundException` |
+| **B-036** Error report generation | `ImportErrorReportWriter`, `ImportErrorReportService`, `ImportReportStore` + `S3ImportReportStore` + `ImportReportStoreConfig`, `ImportErrorReportUnavailableException` |
 
 ## The one thing to understand
 
@@ -74,7 +75,7 @@ B-030 is the engine, not the wizard. The five steps plug into it:
 | B-033 | column mapping | `HeaderMatcher` → `ImportMapping`; `missingRequired` blocks Next — ✅ done, and it turned out to need **no mapping route at all**; see below |
 | B-034 | dry-run preview | `ImportValidationEngine` → `ImportPreview` — ✅ done, and it widened `findExisting`; see below |
 | B-035 | commit job | `ImportPreview.writable()` → `ImportSchemaDefinition.upsert` — ✅ done, and it moved step 4's refusals into a shared resolver rather than copying them; see below |
-| B-036 | error report | `ImportRowVerdict` — the rejected rows plus their reason |
+| B-036 | error report | `ImportRowVerdict` — the rejected rows plus their reason — done, and it is written *during* the run because that is the last moment they exist; see below |
 | B-037 | batch traceability | `importBatchId`, stamped on insert only |
 | B-038 | resource import | one new `@Component` under `.schemas` |
 
@@ -116,6 +117,16 @@ is named so that replacement is a class, not a refactor.
 > text and nothing else. The single-instance limitation is unchanged and still
 > the strongest argument for doing it — B-036's error report needs somewhere to
 > put a generated file anyway, which is the natural task to introduce the client.
+>
+> **B-036 introduced the client and still did not replace this.** C-025 had
+> already wired an `S3Client` for attachments by then, so the error report needed
+> no new infrastructure at all - it needed one bean and a key prefix. Staging is a
+> different problem and unchanged: an upload has a thirty-minute TTL, a
+> twenty-slot ceiling and a sheet selector that re-posts rather than re-reads, and
+> moving it to object storage is a lifecycle policy and a cleanup path rather than
+> a `put`. **The single-instance limitation stands and is still the strongest
+> argument for doing it** - two API pods would stage on one and validate on the
+> other. It is now a smaller job than it was, because the client is there.
 
 ## B-031 · the first endpoint, and what it fixed in place
 
@@ -505,10 +516,138 @@ should not be — a fourth number holding the sum of three is a fourth number th
 can disagree with them. It reaches `total` exactly when the run is over, which
 is the property the progress bar is built on.
 
+## B-036 - the error report, and why it is written mid-run
+
+`GET /import-batches/{batchId}/error-report` hands back the rows the run did not
+write, as an `.xlsx` with a Reason column appended. Section 4B.3's closing
+promise: the user fixes those rows and re-uploads **only** them.
+
+### There is no moment after the run when it could be generated
+
+This is the constraint everything else follows from, and it is B-035's doing
+rather than a limitation discovered here. The staging entry is released *before*
+the job starts, and the preview is re-derived rather than stored - so once
+`ImportCommitRunner` has walked its list, nothing anywhere holds the rejected
+rows. "Generate it on download" was never an option to weigh; the data is gone.
+
+So `ImportCommitService` keeps the non-writable verdicts instead of counting them
+(`unwritten`, which replaced an `int` whose value is now `unwritten.size()`), and
+the runner generates the report at the end of the walk.
+
+### It is written *before* the status turns terminal, never after
+
+A client stops polling the instant it reads `COMPLETED`. A key stamped in a later
+transaction is a report the screen that wanted it has already given up asking
+for - the button would stay disabled on a run that has one.
+
+So the report key travels on `ImportBatchService.finish` rather than in a second
+call after it: one write settles the status, the counters and the report
+together. `ImportDtos.Batch.etag` gained `errorReportUrl` for the same reason - a
+validator that does not cover every field of the representation is a `304` that
+withholds a change.
+
+### Every row the run did not write, not only the rejected ones
+
+Three things end up in it, and they interleave in the sheet, so they are sorted
+back into file order:
+
+| Source | Reason column |
+|---|---|
+| the dry run's rejections | the engine's own sentence, verbatim |
+| in-file duplicates | `Row 2 wins` - nothing is wrong with the row's content |
+| rows the database refused at write time | a sentence naming the import, **never the JDBC message** |
+
+All three are rows the user's file contained and the client master did not
+receive, which is the only distinction that matters to somebody fixing a
+spreadsheet. The write-time failure's reason is deliberately not the exception's
+message: that string carries a constraint name, a table name and sometimes the
+SQL, none of it useful to the reader and all of it internal detail on its way
+into a file that gets emailed around. The log line has the cause; the batch id in
+the cell connects the two.
+
+**One gap, stated because it is real.** A file where *every* row is rejected is
+refused at `/commit` with `import-nothing-to-commit`, so there is no batch and no
+report - the user's account of those rows is the step-4 preview on screen. That
+follows from B-035's refusal being right (a batch claiming to have imported a
+file it never touched is a false entry in B-037's audit trail) and is worth
+knowing before somebody reports it as a bug.
+
+### The report is in the *template's* shape, not the upload's
+
+The columns are `ImportField#header()` in template order, plus a leading `Row`
+and a trailing `Reason`. Not the headings of the file the user sent.
+
+That is what makes "fix and re-upload just those rows" literal: `HeaderMatcher`
+matches every column of this file on the way back in, so the corrected rows need
+no remapping and *cannot* be remapped wrongly. A report echoing the user's own
+headings would look more faithful and would land them back on step 3 with a
+mapping to rebuild - the step this file exists to save them.
+
+The cost is honest: **columns the user did not map are not in the report**,
+because they were never read. `Row` bridges it - it names the row in the sheet
+they still have. `ImportErrorReportWriterTest` pins the round trip (report ->
+`HeaderMatcher` -> nothing missing) and that `Row` and `Reason` normalise onto no
+declared field, rather than pinning the strings.
+
+### Storage, and the file it moved out of Stream C's package
+
+PLAN.md 2.2 puts import error reports in MinIO/S3, and
+`import_batches.error_report_key` has been waiting for one since the baseline.
+The client existed - C-025 built it for section 4B.4's attachments - and
+`AttachmentStorageProperties` said in writing what should happen when a second
+consumer arrived:
+
+> PLAN.md lists three eventual users of the bucket - attachments, avatars and
+> import error reports - so **when the second one arrives this record should move
+> out of this package** rather than being imported across a feature boundary.
+
+B-036 is the second one, so the move is taken:
+`api/storage/ObjectStorageProperties` and `api/storage/ObjectStorageConfig` now
+hold the `S3Client` and `S3Presigner`, and `AttachmentStorageConfig` keeps only
+the bean that is actually about attachments. **This touches
+`feature/tickets/attachments/` - Stream C's directory.** The alternative was a
+second `S3Client` declared here, which does not work: two beans of one type make
+C's own by-type injection ambiguous, so adding an import feature would have
+broken attachments at context startup.
+
+**`errorReportUrl` is a route, not a signed URL**, which is the other place this
+diverges from attachments. Section 4B.4 hands out short-lived presigned URLs and
+is right to for a 50 MB video served repeatedly. This is a small file read once
+and it is a verbatim extract of the client master - a signed URL is a bearer
+credential that outlives the screen that minted it, in a browser history, a chat
+paste and a proxy log. Proxying it costs a few hundred kilobytes and buys
+`master.write` checked at the moment the bytes are read. `ImportReportStore` has
+no method that can produce a public address at all, which is the same structural
+argument `AttachmentStorage`'s javadoc makes about its own interface.
+
+The value is **relative to the API base** - `/import-batches/412/error-report`,
+no `/api/v1`. The file needs an `Authorization` header so it cannot be a plain
+link; a client composes it onto its own base either way, and a root-relative
+`/api/v1/...` would work in the ordinary deployment and point at the wrong origin
+the moment the API is served from another one.
+
+### A report that cannot be stored costs a report, never an import
+
+`ImportErrorReportService.generate` swallows a storage failure and answers null.
+By the time it runs the client master has already been written; failing the run
+would mark a batch `FAILED` that wrote four hundred clients correctly, and would
+tell the user their import broke when what broke was a convenience attached to
+it. Logged at `warn`, because a bucket refusing writes is an operational fact
+somebody has to see.
+
+The step-5 screen was already in the right shape for this - B-035 left the button
+visible and disabled - so a run with no report says so in a sentence instead of
+promising a feature.
+
 ## Not here yet
 
-No error report — B-036 — so `errorReportUrl` is null on every batch, and the
-step-5 screen's download button is visible and disabled rather than hidden.
+**`S3ImportReportStore` is the one class in this package no test exercises.**
+There is no MinIO Testcontainer in this project - C-025's attachment tests mock
+the storage for the same reason - so `ImportErrorReportControllerTest` and
+`ClientImportCommitIT` both substitute `InMemoryImportReportStore` and prove
+everything on either side of it. The class is nine lines of AWS SDK calls.
+Flagged rather than left looking covered; a MinIO container would cover this and
+`S3AttachmentStorage` together, which is the right way round to do it.
 
 `/imports/users/*` answers 404 on all six routes until B-038 registers the second
 schema, and `ImportTemplateControllerTest`, `ImportSchemaFieldsControllerTest`,
@@ -542,7 +681,10 @@ lands, five tests fail and are deleted.
 | `ImportValidationServiceTest` | B-034 — the order of the four refusals and why each one is refused rather than previewed, over a real staging store so the expiry is the real expiry. Unchanged by B-035 moving them into `ImportRequestResolver`, which is the point: the assertions are about what a caller sees |
 | `ImportCommitServiceTest` | B-035 — that the verdicts are the server's own, that the staging entry is consumed so the same file cannot be committed twice, that a refusal leaves both the file and the database as it found them, and that one row failing at write time costs one row. The executor is same-thread so the counters can be read without waiting; one test uses a real pool to prove the response is genuinely sent first |
 | `ImportCommitControllerTest` | B-035, the route — every refusal's status and `type`. All of them are checked before the first query, which is not a coincidence: a refused commit has to leave the staged file and the database untouched |
-| `ClientImportCommitIT` | B-035 against real MySQL — the whole step. A file with a bad row and a duplicate committed, then the corrected file committed again, ending with three clients rather than five; the batch row and the `import_batch_id` that makes B-037 possible; and the ETag moving with the counters |
+| `ClientImportCommitIT` | B-035 and B-036 against real MySQL — the whole step, plus that the report exists by the time the batch reads `COMPLETED`, which is when a polling client stops asking. A file with a bad row and a duplicate committed, then the corrected file committed again, ending with three clients rather than five; the batch row and the `import_batch_id` that makes B-037 possible; and the ETag moving with the counters |
+| `ImportErrorReportWriterTest` | B-036, read back through POI - the columns 4B.3 asks for, the reason quoted verbatim, text cells so a leading zero survives, and above all the round trip: a report a user downloads auto-maps completely when they upload it back |
+| `ImportErrorReportServiceTest` | B-036 - when a report exists, and that an unreachable object store costs the report and never the import |
+| `ImportErrorReportControllerTest` | B-036, the route - the media type Excel needs, the `Content-Disposition` name a client reads rather than reconstructs, both 404s, and the rowless 403 |
 | `ImportValidateControllerTest` | B-034, the route — each refusal's status and `type`, the properties the screen reads off the body, and a genuine 200 with no database (a file whose every row is rejected never reaches the probe, which is also the response an Admin gets from a file full of mistakes) |
 
 `ImportEngineIsolationTest` reads **source, not bytecode**, and says why in its

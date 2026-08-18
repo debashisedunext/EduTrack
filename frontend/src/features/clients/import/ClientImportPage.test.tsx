@@ -7,7 +7,15 @@ import { HttpResponse, http } from 'msw'
 import { server } from '@/mocks/server'
 
 import { ClientImportPage } from './ClientImportPage'
-import { filenameFrom, formatBytes, rejectionReason } from './importQueries'
+import { ApiError } from '@/api/http'
+
+import {
+  errorReportFilenameFrom,
+  errorReportRefusal,
+  filenameFrom,
+  formatBytes,
+  rejectionReason,
+} from './importQueries'
 
 /**
  * B-031 · S-34 step 1, against the mock server.
@@ -848,5 +856,47 @@ describe('the filename', () => {
    */
   it('falls back to the schema name when the header is missing', () => {
     expect(filenameFrom(null, 'clients')).toBe('clients-import-template.xlsx')
+  })
+
+  /**
+   * B-036 · the error report reads the same header through a different function,
+   * and the difference is the fallback.
+   *
+   * `filenameFrom`'s fallback is the *template's* name. Reusing it here would
+   * leave a user whose proxy stripped the header with
+   * `clients-import-template.xlsx` in their Downloads folder — the name of a
+   * different file, which is worse than a generic one because it is confidently
+   * wrong.
+   */
+  it('does not borrow the template’s name when an error report has no header', () => {
+    expect(errorReportFilenameFrom('attachment; filename="clients-import-errors-77.xlsx"'))
+      .toBe('clients-import-errors-77.xlsx')
+    expect(errorReportFilenameFrom(null)).toBe('import-errors.xlsx')
+  })
+})
+
+/**
+ * B-036 · what the step-5 screen says when the download fails.
+ *
+ * The 404 is the one worth its own sentence: the report was there when the batch
+ * was read and is not now, so "try again" is wrong advice and the message does
+ * not offer it. The server's own `detail` is preferred where there is one —
+ * CONVENTIONS.md §3 makes `type` the stable half and the prose the specific one.
+ */
+describe('an error report that will not download', () => {
+  it('prefers the server’s sentence on a 404', () => {
+    const problem = {
+      type: 'https://edutrack/errors/not-found',
+      title: 'Import error report not available',
+      detail: 'Import batch 77 has no error report to download (status COMPLETED).',
+      status: 404,
+    }
+    expect(errorReportRefusal(new ApiError(404, problem, new Response(null, { status: 404 }))))
+      .toBe(problem.detail)
+  })
+
+  it('says something useful when the failure is not an ApiError at all', () => {
+    expect(errorReportRefusal(new TypeError('offline')))
+      .toMatch(/check your connection/i)
   })
 })
