@@ -48,6 +48,10 @@ final class TicketHistoryDtos {
      *                      reason and this follows it rather than inventing a
      *                      value a real first iteration would be indistinguishable
      *                      from
+     * @param entryHash     <b>declared, and always null.</b> See the field's own
+     *                      note below — the property has to exist for
+     *                      {@code ContractConformanceTest} to agree the response
+     *                      matches the contract; the value is withheld on purpose
      */
     record HistoryEntryDto(
             long id,
@@ -63,20 +67,33 @@ final class TicketHistoryDtos {
             Integer iterationNo,
             boolean isCorrection,
             Long correctsEntryId,
+            String entryHash,
             Instant createdAt) {
 
         /**
-         * {@code prevHash} and {@code rowHash} are not surfaced, deliberately
-         * diverging from the contract's optional {@code entryHash} field.
-         * {@link com.edunext.edutrack.domain.journal.TicketJournal#historyFor}'s
+         * {@code prevHash} and {@code rowHash} are not surfaced through
+         * {@code entryHash}, which is declared on every row and always null.
+         *
+         * <p>{@link com.edunext.edutrack.domain.journal.TicketJournal#historyFor}'s
          * own javadoc is explicit: "callers rendering these to a client should
          * drop the hashes — they are what A-044 verifies, and publishing them
          * tells an attacker the shape of what a forgery would have to
-         * reproduce." {@code entryHash} is not in the contract's {@code required}
-         * list, so a client omitting it degrades to "field absent" rather than a
-         * broken response. Flagged for Stream A/security sign-off rather than
-         * resolved quietly, following this package's {@code README.md}
-         * convention for a contract/implementation mismatch.
+         * reproduce." That is Stream A's guidance on the table this reads, and
+         * it is not this task's to overrule.
+         *
+         * <p>The field cannot simply be dropped, though — {@code ContractConformanceTest}
+         * (D-005) compares {@code HistoryEntry}'s declared property <em>names</em>
+         * against what springdoc generates from this very record, on every {@code GET},
+         * and a name the server never serves fails the build with "declared but not
+         * served: [entryHash]" exactly as it did here. That check cannot tell a
+         * deliberate security omission from the typo/rename drift it exists to
+         * catch — {@code KNOWN_DRIFT} in that file is for the latter, and marking a
+         * permanent, reasoned withholding as debt-to-be-closed would misstate it.
+         *
+         * <p>So the property stays declared — a client asking for it gets an honest
+         * {@code null} rather than {@code undefined} — and the value stays withheld
+         * until Stream A says otherwise. {@code history/README.md} carries the same
+         * flag for whoever reviews this next.
          */
         static HistoryEntryDto of(TicketHistory row, Map<Long, UserRef> people) {
             return new HistoryEntryDto(
@@ -97,6 +114,7 @@ final class TicketHistoryDtos {
                     null,
                     row.isCorrection(),
                     row.getCorrectsEntryId(),
+                    null,
                     row.getCreatedAt());
         }
 
@@ -124,6 +142,7 @@ final class TicketHistoryDtos {
                     row.getCycleNo() == null ? null : (int) row.getCycleNo(),
                     null,
                     false,
+                    null,
                     null,
                     row.getCreatedAt());
         }

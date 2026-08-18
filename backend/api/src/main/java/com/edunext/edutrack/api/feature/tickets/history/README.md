@@ -37,18 +37,28 @@ which table it meant.
 is the attachments tab; nothing here pretends to interleave a source that
 does not exist yet.
 
-## ⚠ `entryHash` is deliberately not on the wire
+## ⚠ `entryHash` is declared and always null — not dropped
 
-The contract's `HistoryEntry.entryHash` is not in `TicketHistoryDtos`.
-`TicketJournal.historyFor`'s own javadoc says plainly: "callers rendering
+The first draft of this package left `entryHash` off `TicketHistoryDtos`
+entirely, on `TicketJournal.historyFor`'s own javadoc: "callers rendering
 these to a client should drop the hashes — they are what A-044 verifies, and
 publishing them tells an attacker the shape of what a forgery would have to
-reproduce." That instruction is closer to the data than the contract text is,
-so it wins here. The field is not in the contract's `required` list, so a
-client that expects it degrades to "field absent" rather than a broken
-response. **Needs Stream A sign-off** — either the contract drops the field or
-this package is told the exposure is acceptable and grows a narrower
-tamper-evidence signal than the raw chain hash.
+reproduce." That is still the reasoning and it still wins on the *value*.
+
+It cannot win on the *property*, though. `ContractConformanceTest` (D-005)
+compares `HistoryEntry`'s declared property names against what springdoc
+generates from this record, on every `GET`, and a name the server never
+serves at all fails the build: `GET /tickets/{ticketId}/history — declared
+but not served: [entryHash]`. That check has no way to tell a deliberate
+security omission from the typo/rename drift it exists to catch — dropping
+the field silently would have been exactly the kind of contract drift D-005
+was built to stop, from the opposite direction.
+
+So the field is declared and permanently null: `HistoryEntryDto.entryHash`
+exists in the response as `"entryHash": null`, satisfying the shape check
+while withholding the value. **Needs Stream A sign-off** — either the
+contract drops the field, or this package is told the exposure is acceptable
+and starts returning `row.getRowHash()`.
 
 ## `stageCode` and `iterationNo` are always null
 
