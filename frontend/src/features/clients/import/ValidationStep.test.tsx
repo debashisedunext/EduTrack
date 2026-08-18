@@ -50,7 +50,7 @@ function verdictRow(
 
 function renderStep(
   data: ImportPreviewResponseData = preview(),
-  props: { onBack?: () => void; onCommit?: () => void } = {},
+  props: { onBack?: () => void; onCommit?: () => void; committing?: boolean } = {},
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -61,6 +61,7 @@ function renderStep(
         fileName="clients.xlsx"
         onBack={props.onBack ?? (() => {})}
         onCommit={props.onCommit}
+        committing={props.committing}
       />
     </QueryClientProvider>,
   )
@@ -255,11 +256,11 @@ describe('the way out', () => {
   })
 
   /**
-   * Step 5 is B-035. Disabled and labelled rather than absent, the shape the
-   * three steps before this one were each left in — a button that silently does
-   * nothing is worse than one that says what is missing.
+   * A caller with no commit still gets a button that says what is missing rather
+   * than one that silently does nothing. B-035 gives `ClientImportPage` a real
+   * `onCommit`, but the prop stays optional and this is the shape it leaves.
    */
-  it('leaves committing disabled and says why, rather than doing nothing', () => {
+  it('leaves committing disabled and says why when there is no commit to run', () => {
     renderStep()
 
     const commit = screen.getByRole('button', { name: /import 2 rows/i })
@@ -274,5 +275,27 @@ describe('the way out', () => {
     fireEvent.click(screen.getByRole('button', { name: /import 2 rows/i }))
 
     expect(onCommit).toHaveBeenCalled()
+  })
+
+  /**
+   * B-035 · the one irreversible button on this screen, guarded against a second
+   * press.
+   *
+   * The server refuses the duplicate on its own — the commit consumes its
+   * staging entry — but the user would then see a refusal for something they
+   * were entirely right to expect to work. Both buttons go: Back would leave a
+   * commit in flight against a mapping the screen has stopped showing.
+   */
+  it('disables both buttons while a commit is in flight', () => {
+    renderStep(preview(), { onCommit: vi.fn(), committing: true })
+
+    expect(screen.getByRole('button', { name: /starting/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /back to mapping/i })).toBeDisabled()
+  })
+
+  it('says the import runs in the background, because the user may close the tab', () => {
+    renderStep(preview(), { onCommit: vi.fn() })
+
+    expect(screen.getByText(/runs in the background/i)).toBeInTheDocument()
   })
 })

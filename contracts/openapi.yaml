@@ -3145,6 +3145,27 @@ paths:
         **Upsert on the schema's natural key — update, never duplicate.** For
         clients that is the client code. Re-uploading a corrected file must not
         create a second copy of every row.
+
+        **The dry run is re-run server-side, and the client's preview is not
+        sent.** This request carries an upload id and a mapping — the same two
+        things `/validate` takes — never a list of verdicts. The same file and
+        the same mapping reach the same judgements, so re-deriving them costs one
+        pass over rows already in memory and is what makes "only the rows step 4
+        showed you" true rather than asserted by the caller.
+
+        **The staged upload is consumed.** The rows are read and mapped before
+        the response is sent and the staging entry is released, because the job
+        outlives the staging TTL and must not hold an id that can expire beneath
+        it. Committing the same `uploadId` twice therefore answers
+        `import-upload-unavailable`, which is the honest refusal: the second
+        request cannot be served, and it is also the request that would have
+        written the file twice.
+
+        Answers **202 with the batch**, not the finished counts — a 5,000-row
+        commit is not a request-scoped operation. Poll
+        `GET /import-batches/{batchId}` for progress.
+
+        `master.write`, like every operation on this path.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true
@@ -3153,11 +3174,60 @@ paths:
             schema: { $ref: '#/components/schemas/ImportCommitRequest' }
       responses:
         '202':
-          description: Job started.
+          description: |
+            Job accepted. `status` is `QUEUED` or `RUNNING` and every counter is
+            at its starting value — `total` is every row of the file and
+            `rejected` is what the dry run already refused, so a progress bar
+            starts partly filled on a file with bad rows rather than jumping.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ImportBatchResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            No schema is registered under that key — the same case as the
+            template, upload, fields and validate routes, and `users` until
+            B-038.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            **The four refusals `/validate` declares, in the same order and with
+            the same `type`s** — an incomplete mapping is not a different
+            condition because it arrived one step later, and a screen that
+            handled it at step 4 should not need a second branch for step 5.
+            `import-upload-unavailable`, `import-incomplete-mapping`,
+            `import-unknown-column` and `import-unknown-field`; see
+            `validateImport` for what each carries on its body.
+
+            One is reachable only here: `import-nothing-to-commit`, when no row
+            of the file is writable. A batch that would write nothing is refused
+            rather than accepted and completed instantly, because a run in the
+            history claiming to have imported a file it did not touch is worse
+            than a refusal naming the reason.
+
+            And one is `skipRejected`'s: `import-rejected-rows-present`, when it
+            was sent `false` and the dry run rejected something. Carries
+            `rejected` and `duplicates` counts.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: |
+            Every commit slot is taken — the same temporary, caller-blameless
+            condition `import-staging-full` answers on upload, with the same
+            `Retry-After`. `type` is `import-commit-queue-full`.
+
+            Deliberately **not** run on the request thread instead. A caller-runs
+            fallback would hold an HTTP connection open for five thousand
+            upserts, and the client polling for progress is the one that would
+            time out.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /import-batches/{batchId}:
     parameters: [{ $ref: '#/components/parameters/BatchId' }]
@@ -3173,6 +3243,13 @@ paths:
 
         Polled while a job runs, so it returns an `ETag` — a client checking every
         two seconds should transfer a body only when something actually changed.
+        The tag is over the counters and the status, so it changes exactly when
+        the progress bar would move.
+
+        `master.write`, like the wizard that starts the job. **403 rather than
+        404** for a caller without it: the capability is decided before the id is
+        looked up, so a Developer cannot tell a real batch id from an invented
+        one either way, and there is no existence for a 404 to protect.
       parameters: [{ $ref: '#/components/parameters/IfNoneMatch' }]
       responses:
         '200':
@@ -3183,6 +3260,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ImportBatchResponse' }
         '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ───────────────────────────────────────────────────────── masters ─────────
@@ -7397,19 +7476,62 @@ components:
     ImportCommitRequest:
       type: object
       required: [uploadId, mapping]
+      description: |
+        The same two things `/validate` takes, for the reason B-033 recorded: the
+        mapping is never parked server-side, so both steps carry it. Sending them
+        again is also what lets the server re-derive the verdicts rather than
+        trust a preview the caller assembled.
       properties:
         uploadId: { type: string, format: uuid }
-        sheet: { type: string }
+        sheet:
+          type: string
+          description: |
+            A cross-check, not a selector — one upload stages one sheet. Sent and
+            disagreeing means the wizard's state and the server's have diverged,
+            and is refused as `import-upload-unavailable`.
         mapping: { type: object, additionalProperties: { type: string } }
-        skipRejected: { type: boolean, default: true }
+        skipRejected:
+          type: boolean
+          default: true
+          description: |
+            `true` — the default and the wizard's own behaviour — writes the rows
+            the dry run judged `WILL_CREATE` or `WILL_UPDATE` and skips the rest,
+            which is §4B.3's "import valid rows only".
+
+            `false` is **all-or-nothing**: a file with any rejected row or any
+            in-file duplicate is refused whole, `import-rejected-rows-present`,
+            and nothing is written. It is not "write them anyway" — a row the
+            engine rejected has no valid value to write.
     ImportBatchResponse:
       type: object
       required: [data]
       properties:
         data:
           type: object
+          required: [batchId, entity, status, processed, total, created, updated, rejected]
+          description: |
+            `required` is spelled out so the generated TypeScript stops making
+            every counter optional — a progress bar reading `processed ?? 0`
+            renders 0% for a run that is nearly finished, and the fallback hides
+            it. `fileName` and `errorReportUrl` are the two that genuinely may be
+            absent.
           properties:
-            batchId: { type: integer, format: int64 }
+            batchId:
+              type: integer
+              format: int64
+              description: |
+                `import_batches.id`. An integer, not a UUID — the contract said
+                UUID until B-030 read the baseline DDL.
+            entity:
+              type: string
+              examples: [CLIENT]
+              description: |
+                `CLIENT` or `RESOURCE` — which registration this run was
+                validated against, and what B-037's reversal query keys on.
+                Deliberately the stored discriminator rather than the URL segment
+                (`clients`): collapsing them would mean renaming a live URL to
+                fix a column.
+            fileName: { type: [string, 'null'], maxLength: 255 }
             status:
               type: string
               enum: [QUEUED, RUNNING, COMPLETED, FAILED]
@@ -7418,14 +7540,35 @@ components:
                 `import_batches.status` uses. There is no state for the step-4
                 dry run because the dry run writes nothing — no batch row
                 exists until commit, and it is born `QUEUED`.
-            processed: { type: integer }
-            total: { type: integer }
+
+                `COMPLETED` is **not** a synonym for "no rejections": a run that
+                refused half the file and wrote the rest completed, and its error
+                report is how the user recovers the other half. `FAILED` means
+                the job itself died.
+            processed:
+              type: integer
+              description: |
+                `created + updated + rejected` — derived, not a stored column, so
+                it cannot disagree with the three numbers beside it. Reaches
+                `total` exactly when the run is over.
+            total:
+              type: integer
+              description: Every data row of the sheet, rejected ones included.
             created: { type: integer }
             updated: { type: integer }
-            rejected: { type: integer }
+            rejected:
+              type: integer
+              description: |
+                What the dry run refused, plus anything that failed at write
+                time — a row the preview judged writable can still break a
+                constraint no validator declared, and losing the other 499 to it
+                would be the wrong trade.
             errorReportUrl:
               type: [string, 'null']
-              description: '`.xlsx` of rejected rows with an appended Reason column.'
+              description: |
+                `.xlsx` of rejected rows with an appended Reason column. **Null
+                until B-036** — the generation is that task, and a URL invented
+                here would 404 on the one click this screen offers.
 
     # ── masters ───────────────────────────────────────────────────────────
     Permission:

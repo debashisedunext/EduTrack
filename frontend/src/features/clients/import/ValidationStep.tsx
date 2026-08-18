@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, CircleSlash, Copy, RefreshCw, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, CircleSlash, Copy, Loader2, RefreshCw, ShieldCheck } from 'lucide-react'
 
 import { useDescribeImportSchema } from '@/api/generated/imports/imports'
 import type { ImportPreviewResponseData, ImportRowVerdict } from '@/api/generated/model'
@@ -51,6 +51,7 @@ export function ValidationStep({
   fileName,
   onBack,
   onCommit,
+  committing = false,
 }: {
   schema: ImportSchemaKey
   preview: ImportPreviewResponseData
@@ -58,11 +59,22 @@ export function ValidationStep({
   fileName: string
   onBack: () => void
   /**
-   * Step 5. Omitted until B-035 exists — omitted rather than passed as a no-op,
-   * so the button is disabled and says why instead of looking broken. The same
-   * shape B-032 left step 2's Continue in and B-033 left step 3's.
+   * Step 5 — B-035. Still optional, and still omitted rather than passed as a
+   * no-op where it does not exist: a caller that has no commit gets a disabled
+   * button that says why instead of one that looks broken.
    */
   onCommit?: () => void
+  /**
+   * The commit request is in flight.
+   *
+   * Held here rather than inferred, and it disables the button rather than only
+   * changing its label: this is the one irreversible action in the wizard, and a
+   * second press before the first response lands is a second batch against the
+   * same file. The server refuses the duplicate — it consumes its staging entry
+   * — but the user would see a refusal for something they were right to expect
+   * to work.
+   */
+  committing?: boolean
 }) {
   const [filter, setFilter] = useState<PreviewFilter>('all')
   const [shown, setShown] = useState(PREVIEW_PAGE_SIZE)
@@ -227,12 +239,12 @@ export function ValidationStep({
       )}
 
       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-        <Button type="button" variant="secondary" onClick={onBack}>
+        <Button type="button" variant="secondary" onClick={onBack} disabled={committing}>
           Back to mapping
         </Button>
         <Button
           type="button"
-          disabled={!onCommit || !hasWritableRows(preview)}
+          disabled={!onCommit || !hasWritableRows(preview) || committing}
           onClick={onCommit}
           title={
             !hasWritableRows(preview)
@@ -242,11 +254,14 @@ export function ValidationStep({
                 : 'Committing arrives with the next step of this screen'
           }
         >
-          Import {writable.toLocaleString()} {writable === 1 ? 'row' : 'rows'}
+          {committing && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+          {committing
+            ? 'Starting…'
+            : `Import ${writable.toLocaleString()} ${writable === 1 ? 'row' : 'rows'}`}
         </Button>
         <p className="text-sm text-content-muted">
           {onCommit
-            ? 'Nothing has been written yet. Committing runs in the background and produces an error report for the skipped rows.'
+            ? 'Nothing has been written yet. Importing runs in the background, so you can leave this page — and the rows it skips can be downloaded as an error report.'
             : 'Nothing has been written — no client has changed. Committing arrives with the next step.'}
         </p>
       </div>

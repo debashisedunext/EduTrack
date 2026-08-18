@@ -115,25 +115,68 @@ Two consequences the tests pin:
 - **A delete button.** Tickets, contacts and project mappings all point at
   `clients`. Going away is the status control on the grid.
 
-## What is here (B-031…B-034 · S-34's first four steps)
+## What is here (B-031…B-035 · S-34, all five steps)
 
 | File | What it is |
 |---|---|
-| `import/ClientImportPage.tsx` | The wizard at `/masters/clients/import` — five steps named, steps 1 to 4 working |
+| `import/ClientImportPage.tsx` | The wizard at `/masters/clients/import` — all five steps |
 | `import/UploadDropzone.tsx` | §4B.3's drag-drop and file picker |
-| `import/importQueries.ts` | The template download, the pre-flight check, the upload, and step 4's refusals |
+| `import/importQueries.ts` | The template download, the pre-flight check, the upload, and steps 4 and 5's refusals |
 | `import/MappingStep.tsx` | B-033 · step 3's table — one row per column the import accepts |
 | `import/MappingPresets.tsx` | B-033 · §4B.3's saveable presets, and what applying one could not place |
 | `import/columnMapping.ts` | B-033 · step 3's rules as pure functions |
 | `import/ValidationStep.tsx` | B-034 · step 4's summary and per-row table — the dry run |
 | `import/validationPreview.ts` | B-034 · step 4's rules as pure functions |
+| `import/CommitStep.tsx` | B-035 · step 5's progress bar, counts and terminal states |
 
-**Step 5 is on screen and disabled, not hidden.** Hiding it would make the page
-look finished and leave the user to find out at the end of step 4 that
-there is no step 5 — and it would drop §4B.3's actual promise, which is that
-nothing is written until a per-row preview has been seen. That promise is the
-reason this is a five-step wizard rather than one upload button, and it is worth
-making before somebody starts typing four hundred rows.
+**All five steps were named on the rail from B-031 onwards**, while only the
+first one worked. Hiding the rest would have made the page look finished and
+left the user to find out at the end of step 4 that there was no step 5 — and it
+would have dropped §4B.3's actual promise, which is that nothing is written
+until a per-row preview has been seen. That promise is the reason this is a
+five-step wizard rather than one upload button, and it is worth making before
+somebody starts typing four hundred rows.
+
+### B-035 · step 5 is where the wizard stops being reversible
+
+Every step before it can be gone back to, because none of them wrote anything.
+Once the commit is accepted there is a batch running against the client master,
+and a Back button would be a lie — so steps 1 to 4 come off the screen entirely
+rather than being disabled. A greyed-out Upload control next to a running import
+invites the reading that the file could still be changed.
+
+`startOver` is the only route back and it starts a genuinely new import.
+
+**The Import button is disabled while the request is in flight**, not just
+relabelled. It is the one irreversible action on the screen, and a second press
+before the first response lands is a second batch against the same file. The
+server refuses the duplicate on its own — the commit consumes its staging entry
+— but the user would then be shown a refusal for something they were entirely
+right to expect to work.
+
+**The counts on step 5 are the server's, never the preview's.** They will agree,
+and reading them off the preview would still be wrong: the preview says what a
+commit *would* do and this says what one *did*, and they differ exactly when
+something failed at write time — which is the moment the real number matters
+most.
+
+**The poll stops.** `batchPollInterval` returns `false` on a terminal status, so
+a finished import is not still asking every two seconds an hour later. It is a
+pure function rather than a ternary inside the hook because a component test for
+it has to either wait two real seconds or fake the clock underneath MSW; the
+stop condition is unit-tested and the screen is only checked to be wired to it.
+An unrecognised status keeps polling — a newer deploy writing a state this build
+has not heard of must not strand a screen on a run that was going to finish.
+
+**A failed poll does not become a failed import.** The run continues whatever
+this screen can read, so a 404 or a dropped connection says "it is still
+running, reload to check" — claiming failure would be wrong in the most alarming
+direction available.
+
+**The progress bar counts the rejected rows.** They were refused before the job
+started and they are part of the file the user is watching go through; leaving
+them out would leave a bar on a file with six bad rows permanently short of the
+end, which reads as a job that stalled.
 
 ### B-032 · the drop zone is a label around a real file input
 
@@ -322,12 +365,14 @@ hour ago.
 - **B-029** — deactivating blocks *new* tickets. That rule lives on the same
   path, alongside B-028's, and is flagged in the same place; S-32 only warns,
   with the count.
-- **B-035…B-038** — the rest of the Excel wizard. B-031 landed the route, the
+- **B-036…B-038** — what is left of the Excel wizard. B-031 landed the route, the
   step rail and the template download; B-032 the upload, the sheet selector and
   the columns-found summary; B-033 the mapping table, the presets and §4B.3's gate
-  on Next; B-034 the dry run. The commit is still to come, and the screen says so
-  on step 4's Import button — together with the sentence that matters most at that
-  moment: *nothing has been written, and no client has changed*.
+  on Next; B-034 the dry run; B-035 the commit and its progress bar. **B-036 is
+  the error report**, and until it lands `errorReportUrl` is null on every batch —
+  so step 5's download button is visible and disabled with a title saying why,
+  the shape every step of this wizard has been left in. B-038 registers resources
+  and reuses this whole screen.
 
 ## Two things that look like inconsistencies and are not
 

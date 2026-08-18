@@ -413,6 +413,22 @@ final class PermissionMatrix {
             {"uploadId":"11111111-2222-3333-4444-555555555555",\
             "mapping":{"clientCode":"Code"}}""";
 
+    /**
+     * B-035 · {@code ImportDtos.CommitRequest}.
+     *
+     * <p>The same two constrained fields as the validate body — {@code uploadId}
+     * is {@code @NotNull} and {@code mapping} is {@code @NotEmpty} — so both have
+     * to be here or the request fails validation before authorisation and all six
+     * rows assert nothing.
+     *
+     * <p>{@code skipRejected} is left off deliberately: it is boxed and optional,
+     * and a fixture that sent it would be asserting the shape of a field this
+     * test has no opinion about.
+     */
+    private static final String IMPORT_COMMIT = """
+            {"uploadId":"11111111-2222-3333-4444-555555555555",\
+            "mapping":{"clientCode":"Code"}}""";
+
     /** {@code StatusRequest}: isActive is boxed so omitting it is a 400. */
     private static final String USER_STATUS = """
             {"isActive":false}""";
@@ -1133,6 +1149,29 @@ final class PermissionMatrix {
             // file, whether that client exists and what is currently stored in
             // it, which is a read of the client master by any other name.
             adminOnly("POST", "/api/v1/imports/{schema}/validate", IMPORT_VALIDATE),
+
+            // B-035 · step 5, and the row where the reasoning stops needing an
+            // argument. The four routes above write nothing at all; this one
+            // upserts the client master in bulk, so master.write is the
+            // capability by the plainest possible reading.
+            //
+            // Still a rowless 403: @PreAuthorize is decided before the uploadId
+            // in the body is resolved, so the refusal cannot depend on anything a
+            // 404 would be concealing — and no batch row exists yet to conceal.
+            adminOnly("POST", "/api/v1/imports/{schema}/commit", IMPORT_COMMIT),
+
+            // B-035 · the progress poll, and the only import route not under
+            // /imports/{schema}: a batch outlives the wizard that started it, so
+            // the contract gives it a root of its own rather than a schema
+            // segment already stored on the row.
+            //
+            // Admin's for the same reason the commit is — a run's progress is not
+            // more public than the operation it reports on. This is one of the
+            // few ROWLESS_403 entries where the row genuinely exists, and the
+            // refusal still does not depend on it: the capability is decided
+            // before the id is looked up, and an import batch carries no
+            // assignee, project or client for ScopeResolver to answer about.
+            adminOnly("GET", "/api/v1/import-batches/{batchId}"),
 
             // ── mail webhooks · signature-authenticated, not user-authenticated ──
             // permitAll because the sender is a mail provider with no EduTrack

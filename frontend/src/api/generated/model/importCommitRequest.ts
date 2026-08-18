@@ -48,9 +48,29 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { ImportCommitRequestMapping } from './importCommitRequestMapping';
 
+/**
+ * The same two things `/validate` takes, for the reason B-033 recorded: the
+mapping is never parked server-side, so both steps carry it. Sending them
+again is also what lets the server re-derive the verdicts rather than
+trust a preview the caller assembled.
+
+ */
 export interface ImportCommitRequest {
   uploadId: string;
+  /** A cross-check, not a selector — one upload stages one sheet. Sent and
+disagreeing means the wizard's state and the server's have diverged,
+and is refused as `import-upload-unavailable`.
+ */
   sheet?: string;
   mapping: ImportCommitRequestMapping;
+  /** `true` — the default and the wizard's own behaviour — writes the rows
+the dry run judged `WILL_CREATE` or `WILL_UPDATE` and skips the rest,
+which is §4B.3's "import valid rows only".
+
+`false` is **all-or-nothing**: a file with any rejected row or any
+in-file duplicate is refused whole, `import-rejected-rows-present`,
+and nothing is written. It is not "write them anyway" — a row the
+engine rejected has no valid value to write.
+ */
   skipRejected?: boolean;
 }

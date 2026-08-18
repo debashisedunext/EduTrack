@@ -48,6 +48,9 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * `.xlsx` of rejected rows with an appended Reason column.
+ * `.xlsx` of rejected rows with an appended Reason column. **Null
+until B-036** — the generation is that task, and a URL invented
+here would 404 on the one click this screen offers.
+
  */
 export type ImportBatchResponseDataErrorReportUrl = string | null;

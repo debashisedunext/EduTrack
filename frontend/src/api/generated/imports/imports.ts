@@ -717,6 +717,27 @@ export const useValidateImport = <TError = ValidationFailedResponse | Unauthoriz
 clients that is the client code. Re-uploading a corrected file must not
 create a second copy of every row.
 
+**The dry run is re-run server-side, and the client's preview is not
+sent.** This request carries an upload id and a mapping — the same two
+things `/validate` takes — never a list of verdicts. The same file and
+the same mapping reach the same judgements, so re-deriving them costs one
+pass over rows already in memory and is what makes "only the rows step 4
+showed you" true rather than asserted by the caller.
+
+**The staged upload is consumed.** The rows are read and mapped before
+the response is sent and the staging entry is released, because the job
+outlives the staging TTL and must not hold an id that can expire beneath
+it. Committing the same `uploadId` twice therefore answers
+`import-upload-unavailable`, which is the honest refusal: the second
+request cannot be served, and it is also the request that would have
+written the file twice.
+
+Answers **202 with the batch**, not the finished counts — a 5,000-row
+commit is not a request-scoped operation. Poll
+`GET /import-batches/{batchId}` for progress.
+
+`master.write`, like every operation on this path.
+
  * @summary Step 5 — commit as a background job
  */
 export const commitImport = (
@@ -736,7 +757,7 @@ export const commitImport = (
   
 
 
-export const getCommitImportMutationOptions = <TError = UnauthorizedResponse,
+export const getCommitImportMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitImport>>, TError,{schema: 'clients' | 'users';data: ImportCommitRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof commitImport>>, TError,{schema: 'clients' | 'users';data: ImportCommitRequest}, TContext> => {
 
@@ -763,12 +784,12 @@ const {mutation: mutationOptions} = options ?
 
     export type CommitImportMutationResult = NonNullable<Awaited<ReturnType<typeof commitImport>>>
     export type CommitImportMutationBody = ImportCommitRequest
-    export type CommitImportMutationError = UnauthorizedResponse
+    export type CommitImportMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | Problem
 
     /**
  * @summary Step 5 — commit as a background job
  */
-export const useCommitImport = <TError = UnauthorizedResponse,
+export const useCommitImport = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitImport>>, TError,{schema: 'clients' | 'users';data: ImportCommitRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof commitImport>>,
@@ -789,6 +810,13 @@ as a set.
 
 Polled while a job runs, so it returns an `ETag` — a client checking every
 two seconds should transfer a body only when something actually changed.
+The tag is over the counters and the status, so it changes exactly when
+the progress bar would move.
+
+`master.write`, like the wizard that starts the job. **403 rather than
+404** for a caller without it: the capability is decided before the id is
+looked up, so a Developer cannot tell a real batch id from an invented
+one either way, and there is no existence for a 404 to protect.
 
  * @summary Batch progress and error report
  */
@@ -814,7 +842,7 @@ export const getGetImportBatchQueryKey = (batchId?: number,) => {
     }
 
     
-export const getGetImportBatchQueryOptions = <TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
+export const getGetImportBatchQueryOptions = <TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
@@ -833,10 +861,10 @@ const {query: queryOptions} = options ?? {};
 }
 
 export type GetImportBatchQueryResult = NonNullable<Awaited<ReturnType<typeof getImportBatch>>>
-export type GetImportBatchQueryError = void | NotFoundResponse
+export type GetImportBatchQueryError = void | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse
 
 
-export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(
+export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(
  batchId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getImportBatch>>,
@@ -846,7 +874,7 @@ export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBat
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(
+export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(
  batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getImportBatch>>,
@@ -856,7 +884,7 @@ export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBat
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(
+export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(
  batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -864,7 +892,7 @@ export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBat
  * @summary Batch progress and error report
  */
 
-export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | NotFoundResponse>(
+export function useGetImportBatch<TData = Awaited<ReturnType<typeof getImportBatch>>, TError = void | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>(
  batchId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportBatch>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

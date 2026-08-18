@@ -41,7 +41,12 @@ class ImportValidationServiceTest {
     void setUp() {
         staging = new InMemoryImportStagingStore(Clock.fixed(NOW, java.time.ZoneOffset.UTC),
                 Duration.ofMinutes(30), 20);
-        service = new ImportValidationService(registry, staging, new ImportValidationEngine());
+        // B-035 moved the four refusals into ImportRequestResolver so /commit
+        // could not answer them differently. The assertions below are unchanged:
+        // they are about what the caller sees, and the caller sees the same
+        // exceptions from the same route.
+        service = new ImportValidationService(
+                new ImportRequestResolver(registry, staging), new ImportValidationEngine());
     }
 
     // ── the happy path ──────────────────────────────────────────────────────
@@ -130,10 +135,10 @@ class ImportValidationServiceTest {
             UUID uploadId = stage(List.of("Code"), row(2, "Code", "A"));
 
             // Thirty-one minutes later — a wizard left open over lunch.
-            service = new ImportValidationService(registry,
-                    new InMemoryImportStagingStore(
+            service = new ImportValidationService(
+                    new ImportRequestResolver(registry, new InMemoryImportStagingStore(
                             Clock.fixed(NOW.plus(Duration.ofMinutes(31)), java.time.ZoneOffset.UTC),
-                            Duration.ofMinutes(30), 20),
+                            Duration.ofMinutes(30), 20)),
                     new ImportValidationEngine());
 
             assertThatThrownBy(() -> service.validate("widgets",

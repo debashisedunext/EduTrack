@@ -24,8 +24,14 @@ import java.net.URI;
  * {@code @RestControllerAdvice(assignableTypes = …)} needs a controller class to
  * name, and advice on a controller that does not exist is dead code until it
  * silently is not.
+ *
+ * <p><b>B-035 added the second controller to the list rather than a second
+ * advice.</b> {@link ImportBatchController} serves a different path root and the
+ * same feature; a 404 for an absent batch and a 404 for an absent preset are one
+ * condition to a caller, and two advices would be two places for the package's
+ * problem types to be spelled.
  */
-@RestControllerAdvice(assignableTypes = ImportController.class)
+@RestControllerAdvice(assignableTypes = {ImportController.class, ImportBatchController.class})
 class ImportExceptionHandler {
 
     /** The same {@code type} every other 404 in the product uses. */
@@ -75,6 +81,27 @@ class ImportExceptionHandler {
             URI.create("https://edutrack/errors/import-incomplete-mapping");
     private static final URI UNKNOWN_COLUMN =
             URI.create("https://edutrack/errors/import-unknown-column");
+
+    /**
+     * B-035's three, and the split is by remedy again.
+     *
+     * <p>{@code import-nothing-to-commit} and {@code import-rejected-rows-present}
+     * are both "this file has bad rows" and are not one type, because the
+     * remedies are opposite: the first has no valid rows at all and the user must
+     * go back to their spreadsheet, the second has plenty and the user can simply
+     * stop asking for all-or-nothing. One type would put a "import the valid rows
+     * only" button on a screen where there are none.
+     *
+     * <p>{@code import-commit-queue-full} is the sibling of
+     * {@code import-staging-full}: temporary, blameless and answered 503 with
+     * {@code Retry-After}, not 500.
+     */
+    private static final URI NOTHING_TO_COMMIT =
+            URI.create("https://edutrack/errors/import-nothing-to-commit");
+    private static final URI REJECTED_ROWS_PRESENT =
+            URI.create("https://edutrack/errors/import-rejected-rows-present");
+    private static final URI COMMIT_QUEUE_FULL =
+            URI.create("https://edutrack/errors/import-commit-queue-full");
 
     /**
      * 404, because {@code schema} is a path segment.
@@ -332,6 +359,102 @@ class ImportExceptionHandler {
         problem.setProperty("headers", e.headers());
 
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
+    }
+
+    /**
+     * B-035 · 404 for a batch id that names no run.
+     *
+     * <p>The same {@code type} as the unknown-schema and missing-preset 404s
+     * above, for the reason those two share it: to a caller the addressed
+     * resource is simply absent. The id goes on the body so a screen polling
+     * every two seconds knows which of its polls to stop.
+     */
+    @ExceptionHandler(ImportBatchNotFoundException.class)
+    ResponseEntity<ProblemDetail> handleBatchNotFound(ImportBatchNotFoundException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problem.setType(NOT_FOUND);
+        problem.setTitle("Import batch not found");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("batchId", e.batchId());
+
+        return problem(HttpStatus.NOT_FOUND, problem);
+    }
+
+    /**
+     * B-035 · 422 when a commit would write nothing.
+     *
+     * <p>Refused rather than accepted-and-completed-instantly. A batch row saying
+     * a file was imported when nothing was is a false entry in the audit trail
+     * B-037 is built on, and a green "done" answers the button press rather than
+     * the outcome — on a screen that had just told the user nothing was
+     * importable.
+     *
+     * <p>The counts are on the body so the screen can say <em>why</em> without
+     * re-running the dry run it just ran.
+     */
+    @ExceptionHandler(NothingToCommitException.class)
+    ResponseEntity<ProblemDetail> handleNothingToCommit(NothingToCommitException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(NOTHING_TO_COMMIT);
+        problem.setTitle("Nothing to import");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("schema", e.schemaKey());
+        problem.setProperty("total", e.totalRows());
+        problem.setProperty("rejected", e.rejected());
+        problem.setProperty("duplicates", e.duplicates());
+
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
+    }
+
+    /**
+     * B-035 · 422 for {@code skipRejected: false} over a file with rejections.
+     *
+     * <p>A separate {@code type} from the one above and not a variant of it: the
+     * remedies are opposite. There, no row is importable and the user has to go
+     * back to their spreadsheet; here most rows are fine and the user can simply
+     * import the valid ones. A shared type would put an offer on the screen that
+     * one of the two cases cannot honour.
+     */
+    @ExceptionHandler(RejectedRowsPresentException.class)
+    ResponseEntity<ProblemDetail> handleRejectedRowsPresent(RejectedRowsPresentException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(REJECTED_ROWS_PRESENT);
+        problem.setTitle("The file has rows that cannot be imported");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("schema", e.schemaKey());
+        problem.setProperty("total", e.totalRows());
+        problem.setProperty("rejected", e.rejected());
+        problem.setProperty("duplicates", e.duplicates());
+
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, problem);
+    }
+
+    /**
+     * B-035 · 503 when every commit slot is taken.
+     *
+     * <p>Modelled on {@link #handleStagingFull} one step earlier in the wizard,
+     * down to the thirty seconds: the ceiling clears as running imports finish
+     * rather than on a schedule, so the header is a hint and not a promise.
+     *
+     * <p>{@code batchId} is on the body because the run was opened before it was
+     * refused, and is now {@code FAILED}. The user will find it in the history
+     * and is entitled to know which entry was theirs.
+     */
+    @ExceptionHandler(ImportCommitQueueFullException.class)
+    ResponseEntity<ProblemDetail> handleCommitQueueFull(ImportCommitQueueFullException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.SERVICE_UNAVAILABLE);
+        problem.setType(COMMIT_QUEUE_FULL);
+        problem.setTitle("Too many imports are being committed");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("ceiling", e.ceiling());
+        if (e.batchId() != null) {
+            problem.setProperty("batchId", e.batchId());
+        }
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, "30")
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
     }
 
     /** The content type is stated on every one of these, for the reason given above. */

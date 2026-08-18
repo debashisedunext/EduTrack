@@ -1942,19 +1942,86 @@ export const restHandlers = [
   // B-034 · step 4. A dry run writes nothing and shows a per-row verdict — the
   // step that makes a bulk import safe to run at all.
   http.post(url('/imports/:schema/validate'), () => ok(clientImportPreview())),
-  http.post(url('/imports/:schema/commit'), () =>
-    ok({
-      batchId: '99999999-8888-7777-6666-555555555555', status: 'RUNNING',
-      processed: 0, total: 128, created: 0, updated: 0, rejected: 0, errorReportUrl: null,
-    }, undefined, { status: 202 }),
-  ),
-  http.get(url('/import-batches/:batchId'), () =>
-    ok({
-      batchId: '99999999-8888-7777-6666-555555555555', status: 'COMPLETED',
-      processed: 128, total: 128, created: 120, updated: 5, rejected: 3,
-      errorReportUrl: '/mock-files/import-errors.xlsx',
-    }, undefined, { headers: { ETag: 'W/"batch-complete"' } }),
-  ),
+  // B-035 · step 5. The fixture was rebuilt here for the reason B-034 rebuilt
+  // step 4's, and it had two of the same class of defect:
+  //
+  //   1. `batchId` was a UUID string. `import_batches.id` is a BIGINT and the
+  //      contract has said `integer, int64` since B-030 read the baseline DDL —
+  //      so the generated client's own types reject what this answered, and
+  //      `useGetImportBatch(batchId)` takes a number.
+  //   2. The two handlers disagreed with each other. Commit answered
+  //      `rejected: 0` and the poll answered `rejected: 3` for the same run, and
+  //      the poll answered COMPLETED on its first call — so the progress bar,
+  //      the one control this step exists to show, could never be seen moving.
+  //
+  // It now holds a real batch in the db and advances it a little on every poll,
+  // which is what the real runner's fifty-row flush looks like from the client.
+  http.post(url('/imports/:schema/commit'), async ({ request }) => {
+    const body = (await request.json()) as { mapping?: Record<string, string> };
+
+    // The refusal that is worth having in the mock, because it is the one a
+    // screen gets wrong: the server re-derives the verdicts, so a commit can be
+    // refused for a mapping step 4 accepted.
+    if (!body.mapping || Object.keys(body.mapping).length === 0) {
+      return problem(400, 'validation-failed', 'Import was not started', {
+        detail: 'A commit must carry the column mapping.',
+        errors: { mapping: ['A commit must carry the column mapping.'] },
+      });
+    }
+
+    const db = getDb();
+    const preview = clientImportPreview();
+    const rejected = preview.rejected + preview.duplicates;
+    const batch = {
+      batchId: nextId(db, 'importBatch'),
+      entity: 'CLIENT',
+      fileName: 'clients.xlsx',
+      status: 'QUEUED' as const,
+      processed: rejected,
+      total: preview.rows.length,
+      created: 0,
+      updated: 0,
+      rejected,
+      errorReportUrl: null,
+    };
+    db.importBatches[batch.batchId] = batch;
+    return ok(batch, undefined, { status: 202 });
+  }),
+  http.get(url('/import-batches/:batchId'), ({ params, request }) => {
+    const db = getDb();
+    const batch = db.importBatches[Number(params.batchId)];
+    if (!batch) {
+      return problem(404, 'not-found', 'Import batch not found', {
+        detail: `No import batch ${params.batchId} exists.`,
+        batchId: Number(params.batchId),
+      });
+    }
+
+    // One step of the run per poll. `writable` is what the commit actually
+    // writes, and creates are settled before updates so the two counters move
+    // the way a file ordered by row number would move them.
+    const preview = clientImportPreview();
+    const writable = preview.willCreate + preview.willUpdate;
+    if (batch.created + batch.updated < writable) {
+      batch.status = 'RUNNING';
+      if (batch.created < preview.willCreate) {
+        batch.created += 1;
+      } else {
+        batch.updated += 1;
+      }
+      batch.processed = batch.created + batch.updated + batch.rejected;
+    } else {
+      batch.status = 'COMPLETED';
+    }
+
+    // The ETag is over the counters, like the real one, so a client polling
+    // between flushes genuinely gets a 304 rather than the same body again.
+    const etag = `W/"batch-${batch.batchId}-${batch.status}-${batch.processed}"`;
+    if (request.headers.get('If-None-Match') === etag) {
+      return new HttpResponse(null, { status: 304, headers: { ETag: etag } });
+    }
+    return ok(batch, undefined, { headers: { ETag: etag } });
+  }),
 
   // ── browser push · D-045 ──────────────────────────────────────────────────
   // A real, well-formed VAPID public key shape — 65 base64url bytes — so a

@@ -520,6 +520,33 @@ export interface Db {
    * could not tell "the list renders" from "the list renders what I saved".
    */
   mappingPresets: Record<string, { presetId: number; name: string; mapping: Record<string, string>; updatedAt: string }[]>;
+
+  /**
+   * B-035 · commit runs, keyed by batch id.
+   *
+   * Stateful rather than a constant, because the one control step 5 exists to
+   * show is a progress bar — and a handler that answered COMPLETED to its first
+   * poll would make it impossible to see one move, which is precisely the case
+   * a screen gets wrong. Each poll advances the run by a row.
+   *
+   * Empty on purpose: a batch is created by pressing Import, and a seeded one
+   * would let a test pass that never committed anything.
+   */
+  importBatches: Record<number, ImportBatchRow>;
+}
+
+/** One row of `import_batches`, as `ImportBatchResponse.data` shapes it. */
+export interface ImportBatchRow {
+  batchId: number;
+  entity: string;
+  fileName: string;
+  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  processed: number;
+  total: number;
+  created: number;
+  updated: number;
+  rejected: number;
+  errorReportUrl: string | null;
 }
 
 export interface Holiday {
@@ -1190,6 +1217,8 @@ export function createDb(): Db {
     },
     // B-033 · nobody has saved a mapping yet, which is the honest starting state.
     mappingPresets: {},
+    // B-035 · and nobody has committed one either.
+    importBatches: {},
     calendar: {
       week: {
         weeklyOff: [6, 7],
