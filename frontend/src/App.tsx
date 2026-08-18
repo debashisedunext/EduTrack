@@ -35,6 +35,7 @@ import { RequireAuth } from './features/auth/RequireAuth'
 import { ResetPasswordPage } from './features/auth/ResetPasswordPage'
 import { ReportsHubPage } from './features/reports/ReportsHubPage'
 import { ReportViewerPage } from './features/reports/ReportViewerPage'
+import { ResourceProfilePage } from './features/resources/ResourceProfilePage'
 import { Button } from './components/ui/button'
 
 export default function App() {
@@ -98,7 +99,9 @@ export default function App() {
             */}
             <Route path={PROJECT_ROUTE} element={<ScreenPlaceholder title="Project dashboard" />} />
             <Route path={CLIENT_ROUTE} element={<ScreenPlaceholder title="Client 360" />} />
-            <Route path={RESOURCE_ROUTE} element={<ScreenPlaceholder title="Resource profile" />} />
+            {/* A-069 · S-28. C-019 registered this pattern against a placeholder
+                so every assignee name in the product already linked here. */}
+            <Route path={RESOURCE_ROUTE} element={<ResourceProfilePage />} />
             <Route path="/chat" element={<ScreenPlaceholder title="Chat" />} />
             {/*
               A-063 · the hub and its viewer. The viewer is a nested path rather

@@ -534,54 +534,62 @@ export const setUserStatusBulkResponse = zod.object({
 })
 
 /**
+ * A-069 · the scorecard half of S-28. The screen composes four calls, and
+this is the one that did not already exist:
+
+- the open and historical ticket lists come from `GET /tickets`, which
+  already paginates and scopes — "complete historical" is precisely the
+  list that must not be embedded whole;
+- the effort timeline and velocity chart come from
+  `GET /reports/resource-velocity?resourceId=`, which returns closed and
+  effort per week for one person and so serves both charts.
+
+**Who may look at whom is blueprint §2's "View team member history" row**:
+Admin anyone, PM their reportees *or* anybody on their projects, Support
+anybody on their projects, and the three delivery roles nobody — except
+themselves, which §2's Reports row grants them as "Own perf.".
+
+A caller who may not see the subject gets the same `404` as one asking
+for a user that does not exist. Distinguishing them would let anyone
+enumerate the staff list by id, which is the existence leak the row-scoping
+rule closes for tickets, and a person is at least as sensitive.
+
  * @summary Resource 360° profile (S-28)
  */
 export const getUserProfile360Params = zod.object({
   "userId": zod.number()
 })
 
-export const getUserProfile360ResponseDataUserProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-
+export const getUserProfile360QueryParams = zod.object({
+  "from": zod.string().date().optional(),
+  "to": zod.string().date().optional()
+})
 
 export const getUserProfile360Response = zod.object({
   "data": zod.object({
-  "user": zod.object({
+  "person": zod.object({
   "id": zod.number(),
-  "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
-  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}).and(zod.object({
+  "fullName": zod.string(),
   "username": zod.string().optional(),
-  "email": zod.string().email().optional(),
-  "employeeCode": zod.string().optional(),
+  "email": zod.string().optional(),
+  "role": zod.string(),
   "department": zod.string().nullish(),
   "designation": zod.string().nullish(),
-  "reportingManager": zod.object({
-  "id": zod.number(),
-  "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
-  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}).optional(),
-  "projectIds": zod.array(zod.number()).optional().describe('Retained for callers that only need membership. Prefer\n`projects` — an id cannot be rendered without a second lookup.\n'),
-  "projects": zod.array(zod.object({
-  "id": zod.number(),
-  "projectCode": zod.string(),
-  "name": zod.string(),
-  "colourTag": zod.string().regex(getUserProfile360ResponseDataUserProjectsItemColourTagRegExp).nullish()
-}).describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n')).optional().describe('Resolved server-side so the S-07 grid can print project names\nwithout a second request per row.\n'),
-  "isActive": zod.boolean().optional(),
-  "openTicketCount": zod.number().optional(),
-  "lastLoginAt": zod.string().datetime({}).nullish().describe('UTC, like every stored instant. Null until the first login.'),
-  "createdAt": zod.string().datetime({}).optional()
-})).optional(),
-  "openTickets": zod.number().optional(),
-  "closedThisMonth": zod.number().optional(),
-  "effortHoursThisMonth": zod.number().optional(),
-  "slaCompliancePct": zod.number().optional(),
-  "reworkRatePct": zod.number().optional(),
-  "currentStages": zod.array(zod.string()).optional()
+  "active": zod.boolean().optional(),
+  "joinedOn": zod.string().date().nullish(),
+  "managerName": zod.string().nullish().describe('By name, never by id. The screen shows it and does not link to it — a link would be a second profile the viewer may not be entitled to, and resolving that is a permission check a header should not make.\n')
+}),
+  "from": zod.string().date().describe('A-069 · the window every figure below covers, except openNow. Stated because the original shape named its fields \"thisMonth\" and carried no range, which left the screen captioning a period the server had chosen and the client could not name.\n'),
+  "to": zod.string().date(),
+  "openNow": zod.number().describe('Open right now — the one current figure, not measured over the window.'),
+  "closedInWindow": zod.number(),
+  "effortHours": zod.number().nullish(),
+  "slaCompliancePct": zod.number().nullish().describe('Against tickets that carried a planned close date, never against everything closed — a ticket with no commitment can neither meet nor breach one. Null when none did, rather than 0, which would read as \"nothing was on time\".\n'),
+  "reworkRatePct": zod.number().nullish().describe('Closed tickets that had been reopened at least once, over closed. Null when nothing closed.'),
+  "currentStages": zod.array(zod.object({
+  "stage": zod.string(),
+  "openCount": zod.number()
+})).optional().describe('How much open work sits at each ribbon stage, busiest first. A count rather than the original list of stage codes: a manager opening this needs to see that eleven of fourteen are stuck in one stage, which a list of names does not say.\n')
 })
 })
 

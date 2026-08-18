@@ -46,28 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { Profile360Person } from './profile360Person';
-import type { Profile360ResponseDataEffortHours } from './profile360ResponseDataEffortHours';
-import type { Profile360ResponseDataSlaCompliancePct } from './profile360ResponseDataSlaCompliancePct';
-import type { Profile360ResponseDataReworkRatePct } from './profile360ResponseDataReworkRatePct';
-import type { Profile360StageLoad } from './profile360StageLoad';
 
-export type Profile360ResponseData = {
-  person: Profile360Person;
-  /** A-069 · the window every figure below covers, except openNow. Stated because the original shape named its fields "thisMonth" and carried no range, which left the screen captioning a period the server had chosen and the client could not name.
+/**
+ * Closed tickets that had been reopened at least once, over closed. Null when nothing closed.
  */
-  from: string;
-  to: string;
-  /** Open right now — the one current figure, not measured over the window. */
-  openNow: number;
-  closedInWindow: number;
-  effortHours?: Profile360ResponseDataEffortHours;
-  /** Against tickets that carried a planned close date, never against everything closed — a ticket with no commitment can neither meet nor breach one. Null when none did, rather than 0, which would read as "nothing was on time".
- */
-  slaCompliancePct?: Profile360ResponseDataSlaCompliancePct;
-  /** Closed tickets that had been reopened at least once, over closed. Null when nothing closed. */
-  reworkRatePct?: Profile360ResponseDataReworkRatePct;
-  /** How much open work sits at each ribbon stage, busiest first. A count rather than the original list of stage codes: a manager opening this needs to see that eleven of fourteen are stuck in one stage, which a list of names does not say.
- */
-  currentStages?: Profile360StageLoad[];
-};
+export type Profile360ResponseDataReworkRatePct = number | null;

@@ -70,6 +70,7 @@ import type {
   BulkUserStatusResponse,
   ConflictResponse,
   ExportUsersParams,
+  GetUserProfile360Params,
   ListReporteesParams,
   ListUsersParams,
   NotFoundResponse,
@@ -735,16 +736,38 @@ export const useSetUserStatusBulk = <TError = ValidationFailedResponse | Unautho
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * A-069 · the scorecard half of S-28. The screen composes four calls, and
+this is the one that did not already exist:
+
+- the open and historical ticket lists come from `GET /tickets`, which
+  already paginates and scopes — "complete historical" is precisely the
+  list that must not be embedded whole;
+- the effort timeline and velocity chart come from
+  `GET /reports/resource-velocity?resourceId=`, which returns closed and
+  effort per week for one person and so serves both charts.
+
+**Who may look at whom is blueprint §2's "View team member history" row**:
+Admin anyone, PM their reportees *or* anybody on their projects, Support
+anybody on their projects, and the three delivery roles nobody — except
+themselves, which §2's Reports row grants them as "Own perf.".
+
+A caller who may not see the subject gets the same `404` as one asking
+for a user that does not exist. Distinguishing them would let anyone
+enumerate the staff list by id, which is the existence leak the row-scoping
+rule closes for tickets, and a person is at least as sensitive.
+
  * @summary Resource 360° profile (S-28)
  */
 export const getUserProfile360 = (
     userId: number,
+    params?: GetUserProfile360Params,
  signal?: AbortSignal
 ) => {
       
       
       return http<Profile360Response>(
-      {url: `/users/${userId}/profile-360`, method: 'GET', signal
+      {url: `/users/${userId}/profile-360`, method: 'GET',
+        params, signal
     },
       );
     }
@@ -752,23 +775,25 @@ export const getUserProfile360 = (
 
 
 
-export const getGetUserProfile360QueryKey = (userId?: number,) => {
+export const getGetUserProfile360QueryKey = (userId?: number,
+    params?: GetUserProfile360Params,) => {
     return [
-    `/users/${userId}/profile-360`
+    `/users/${userId}/profile-360`, ...(params ? [params]: [])
     ] as const;
     }
 
     
-export const getGetUserProfile360QueryOptions = <TData = Awaited<ReturnType<typeof getUserProfile360>>, TError = NotFoundResponse>(userId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>>, }
+export const getGetUserProfile360QueryOptions = <TData = Awaited<ReturnType<typeof getUserProfile360>>, TError = NotFoundResponse>(userId: number,
+    params?: GetUserProfile360Params, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetUserProfile360QueryKey(userId);
+  const queryKey =  queryOptions?.queryKey ?? getGetUserProfile360QueryKey(userId,params);
 
   
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUserProfile360>>> = ({ signal }) => getUserProfile360(userId, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUserProfile360>>> = ({ signal }) => getUserProfile360(userId,params, signal);
 
       
 
@@ -782,7 +807,8 @@ export type GetUserProfile360QueryError = NotFoundResponse
 
 
 export function useGetUserProfile360<TData = Awaited<ReturnType<typeof getUserProfile360>>, TError = NotFoundResponse>(
- userId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>> & Pick<
+ userId: number,
+    params: undefined |  GetUserProfile360Params, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getUserProfile360>>,
           TError,
@@ -792,7 +818,8 @@ export function useGetUserProfile360<TData = Awaited<ReturnType<typeof getUserPr
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetUserProfile360<TData = Awaited<ReturnType<typeof getUserProfile360>>, TError = NotFoundResponse>(
- userId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>> & Pick<
+ userId: number,
+    params?: GetUserProfile360Params, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getUserProfile360>>,
           TError,
@@ -802,7 +829,8 @@ export function useGetUserProfile360<TData = Awaited<ReturnType<typeof getUserPr
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetUserProfile360<TData = Awaited<ReturnType<typeof getUserProfile360>>, TError = NotFoundResponse>(
- userId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>>, }
+ userId: number,
+    params?: GetUserProfile360Params, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -810,11 +838,12 @@ export function useGetUserProfile360<TData = Awaited<ReturnType<typeof getUserPr
  */
 
 export function useGetUserProfile360<TData = Awaited<ReturnType<typeof getUserProfile360>>, TError = NotFoundResponse>(
- userId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>>, }
+ userId: number,
+    params?: GetUserProfile360Params, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserProfile360>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetUserProfile360QueryOptions(userId,options)
+  const queryOptions = getGetUserProfile360QueryOptions(userId,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

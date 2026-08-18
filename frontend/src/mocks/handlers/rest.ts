@@ -1038,21 +1038,70 @@ export const restHandlers = [
     u.isActive = isActive;
     return noContent();
   }),
+  /*
+    A-069 · reshaped for S-28. Stream A editing Stream D's mocks directory
+    (D-004) again, for coverage.test.ts's reason: it asserts a handler per
+    contract operation and names this file, so a mock left on the old shape
+    would render a screen the real API cannot produce.
+
+    The previous body returned `user`, `openTickets`, `closedThisMonth` and a
+    bare list of stage codes. The contract now carries the person, the window
+    the figures cover, and a *count* per stage — a manager needs to see that
+    eleven of fourteen are stuck in one stage, which a list of names does not
+    say.
+
+    Rates are computed rather than hardcoded at 87.5 and 12.0. A mock that
+    always reports the same compliance cannot show the null case, and null —
+    nothing closed, so nothing could have been on time — is the state most
+    worth seeing rendered as an em dash rather than 0%.
+  */
   http.get(url('/users/:userId/profile-360'), ({ params }) => {
     const db = getDb();
     const u = db.users.find((x) => x.id === Number(params.userId));
     if (!u) return notFound('User');
+
     const mine = db.tickets.filter((t) => t.assigneeId === u.id);
+    const closed = mine.filter((t) => t.status === 'CLOSED');
+    const committed = closed.filter((t) => t.plannedCloseDate);
+    const onTime = committed.filter(
+      (t) => !t.actualCloseDate || t.actualCloseDate <= (t.plannedCloseDate ?? ""),
+    );
+    const reopened = closed.filter((t) => (t.reopenCount ?? 0) > 0);
+
+    const stages = new Map();
+    for (const t of mine.filter((x) => x.status !== 'CLOSED')) {
+      const key = t.currentStageCode ?? '(none)';
+      stages.set(key, (stages.get(key) ?? 0) + 1);
+    }
+
+    const manager = db.users.find((x) => x.id === u.reportingManagerId);
+    const pct = (n: number, d: number) => (d === 0 ? null : round((n * 100) / d));
+
     return ok({
-      user: userDto(u),
-      openTickets: mine.filter((t) => t.status !== 'CLOSED').length,
-      closedThisMonth: mine.filter((t) => t.status === 'CLOSED').length,
-      effortHoursThisMonth: round(
+      person: {
+        id: u.id,
+        fullName: u.displayName,
+        username: u.username,
+        email: u.email,
+        role: u.role,
+        department: u.department ?? null,
+        designation: u.designation ?? null,
+        active: u.isActive !== false,
+        joinedOn: u.dateOfJoining ?? null,
+        managerName: manager ? manager.displayName : null,
+      },
+      from: '2026-07-19',
+      to: '2026-08-18',
+      openNow: mine.filter((t) => t.status !== 'CLOSED').length,
+      closedInWindow: closed.length,
+      effortHours: round(
         db.effortLogs.filter((e) => e.userId === u.id).reduce((s, e) => s + e.hours, 0),
       ),
-      slaCompliancePct: 87.5,
-      reworkRatePct: 12.0,
-      currentStages: [...new Set(mine.map((t) => t.currentStageCode).filter(Boolean))],
+      slaCompliancePct: pct(onTime.length, committed.length),
+      reworkRatePct: pct(reopened.length, closed.length),
+      currentStages: [...stages.entries()]
+        .map(([stage, openCount]) => ({ stage, openCount }))
+        .sort((a, b) => b.openCount - a.openCount),
     });
   }),
   http.get(url('/users/:userId/reportees'), ({ params, request }) => {
