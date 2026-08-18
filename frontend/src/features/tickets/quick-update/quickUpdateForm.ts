@@ -17,9 +17,15 @@ import type { Ticket } from '@/api/generated/model/ticket'
  *
  * Deliberately narrow, same as the contract's own doc comment on
  * `QuickUpdateRequest`: no ticket ID, reported by, assigned by, date
- * reported, cycle history, ribbon, prior effort logs, project, or level
- * (unless PM — C-037's PM exception has no field to hang it on yet, so it
- * waits for that).
+ * reported, cycle history, ribbon, prior effort logs, or project.
+ *
+ * **Level (unless PM) is not one of these fields** — C-037's PM exception is
+ * real but does not belong here. `level` moves through the same
+ * `PATCH .../priority` the detail page's chip already uses, reusing
+ * `TicketLevelControl` wholesale rather than adding a seventh send-if-touched
+ * field with its own SLA-recompute and mandatory-reason rules duplicated from
+ * `PriorityChangeService`. See `QuickUpdatePanel.tsx` and
+ * `quickUpdatePermissions.ts`.
  *
  * 📎 Attach **is** wired now — C-023 landed the shared picker and this panel is
  * one of §4B.4's listed surfaces. It is not a form *value*, though: files upload
