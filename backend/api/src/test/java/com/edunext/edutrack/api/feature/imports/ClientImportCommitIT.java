@@ -81,6 +81,32 @@ class ClientImportCommitIT {
     @Autowired
     ImportStagingStore staging;
 
+    /**
+     * B-036 · the object store, in memory.
+     *
+     * <p>{@code @Primary} rather than a same-named override, which Boot refuses.
+     * There is no MinIO Testcontainer in this project — C-025's attachment tests
+     * make the same substitution — so what is proved here is everything from the
+     * commit route to the stored key and back out of the download, against real
+     * MySQL. {@code S3ImportReportStore} itself is the one piece this cannot
+     * reach; it is nine lines and it is recorded in the package README.
+     */
+    @org.springframework.boot.test.context.TestConfiguration
+    static class Storage {
+
+        @org.springframework.context.annotation.Bean
+        @org.springframework.context.annotation.Primary
+        ImportReportStore inMemoryImportReportStore() {
+            return new InMemoryImportReportStore();
+        }
+    }
+
+    @Autowired
+    ImportReportStore reportStore;
+
+    @Autowired
+    ImportErrorReportService reports;
+
     @Autowired
     ClientRepository clients;
 
@@ -117,7 +143,10 @@ class ClientImportCommitIT {
         // progress bar jumping at the end.
         assertThat(accepted.total()).isEqualTo(4);
         assertThat(accepted.rejected()).isEqualTo(2);
-        assertThat(accepted.errorReportUrl()).as("B-036 has not written one").isNull();
+        // Null at 202 and correctly so: the report is written by the job, at the
+        // end of the run, because that is the last moment the rejected rows
+        // exist. See theErrorReportIsWrittenAndDownloadable below.
+        assertThat(accepted.errorReportUrl()).as("no report before the job has run").isNull();
 
         ImportDtos.Batch finished = awaitTerminal(accepted.batchId());
 
@@ -193,6 +222,52 @@ class ClientImportCommitIT {
      * failing a legitimate import to protect a column nothing reads would be the
      * wrong way round.
      */
+    /**
+     * B-036 · §4B.3's closing promise, end to end.
+     *
+     * <p>The ordering is the assertion worth having and the one a unit test can
+     * only approximate: by the time the batch reads {@code COMPLETED} — which is
+     * when a polling client stops asking — the report is already there. Written
+     * afterwards, it would be a file nobody comes back for.
+     */
+    @Test
+    @DisplayName("the error report exists by the time the run reads COMPLETED, and downloads")
+    void theErrorReportIsWrittenAndDownloadable() {
+        ImportDtos.Batch accepted = commits.commit("clients", request(stage(
+                row(2, "ITCOMR1", "Reportable Ltd"),
+                row(3, "", "No code — rejected"),
+                row(4, "ITCOMR1", "Duplicate of row 2"))), null);
+
+        ImportDtos.Batch finished = awaitTerminal(accepted.batchId());
+
+        assertThat(finished.status()).isEqualTo("COMPLETED");
+        assertThat(finished.rejected()).isEqualTo(2);
+        // Relative to the API base, so a client composes it onto its own — and
+        // present on the first read that says the run is over.
+        assertThat(finished.errorReportUrl())
+                .isEqualTo("/import-batches/" + accepted.batchId() + "/error-report");
+
+        ImportErrorReportService.Report report = reports.download(accepted.batchId());
+        assertThat(report.fileName())
+                .isEqualTo("clients-import-errors-" + accepted.batchId() + ".xlsx");
+        // A .xlsx is a zip. Its contents are ImportErrorReportWriterTest's.
+        assertThat(report.workbook()).startsWith((byte) 'P', (byte) 'K');
+    }
+
+    @Test
+    @DisplayName("a clean run stores no report, and the download is a 404")
+    void aCleanRunHasNoReport() {
+        ImportDtos.Batch accepted = commits.commit("clients",
+                request(stage(row(2, "ITCOMCLEAN", "Spotless Ltd"))), null);
+
+        assertThat(awaitTerminal(accepted.batchId()).errorReportUrl())
+                .as("nothing was rejected, so there is nothing to download")
+                .isNull();
+
+        assertThatThrownBy(() -> reports.download(accepted.batchId()))
+                .isInstanceOf(ImportErrorReportUnavailableException.class);
+    }
+
     @Test
     @DisplayName("an unidentifiable caller still commits, with no attribution")
     void anAnonymousCallerIsNotRefused() {

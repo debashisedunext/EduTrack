@@ -1,73 +1,32 @@
 package com.edunext.edutrack.api.feature.tickets.attachments;
 
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import com.edunext.edutrack.api.storage.ObjectStorageProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
-import java.net.URI;
-
 /**
- * C-025 · the S3/MinIO clients, built from {@code edutrack.storage}.
+ * C-025 · the attachment half of the object store.
  *
- * <p>Two clients rather than one, because they do different jobs: {@link S3Client}
- * moves bytes and {@link S3Presigner} only computes signatures — it never opens a
- * connection at all, which is why a presigned URL can be minted for an object in
- * a bucket the application cannot currently reach.
+ * <p><b>The clients themselves moved to {@code api/storage/ObjectStorageConfig}
+ * in B-036</b>, which is exactly what {@code AttachmentStorageProperties} asked
+ * for in writing: PLAN.md §2.2 lists three users of the bucket — attachments,
+ * avatars and import error reports — and the record said it should move out of
+ * this package "when the second one arrives" rather than be imported across a
+ * feature boundary. The import error report is the second one.
  *
- * <p><b>Nothing here contacts the network.</b> Both builders resolve credentials
- * and endpoints eagerly from configuration and connect lazily, which is what lets
- * {@code ApplicationSmokeTest} and {@code RouteAuthorizationTest} build the whole
- * context with no MinIO running — the same property {@code docker compose up}
- * being optional for a unit test depends on.
- *
- * <p>Credentials come from properties rather than from the SDK's default provider
- * chain. That is right for MinIO, which has no instance metadata to query, and it
- * keeps a misconfigured production deployment failing at startup on a missing
- * property rather than silently picking up whatever ambient role the host
- * happens to carry.
+ * <p>What is left here is the bean that is genuinely about attachments. Nothing
+ * else changed: {@link AttachmentStorage} is unchanged, {@link S3AttachmentStorage}
+ * is unchanged, and the {@code edutrack.storage} keys are the same keys with the
+ * same defaults.
  */
 @Configuration
-@EnableConfigurationProperties(AttachmentStorageProperties.class)
 class AttachmentStorageConfig {
 
     @Bean
-    S3Client attachmentS3Client(AttachmentStorageProperties properties) {
-        return S3Client.builder()
-                .endpointOverride(URI.create(properties.endpoint()))
-                .region(Region.of(properties.region()))
-                .credentialsProvider(credentials(properties))
-                .serviceConfiguration(S3Configuration.builder()
-                        .pathStyleAccessEnabled(properties.pathStyle())
-                        .build())
-                .build();
-    }
-
-    @Bean
-    S3Presigner attachmentS3Presigner(AttachmentStorageProperties properties) {
-        return S3Presigner.builder()
-                .endpointOverride(URI.create(properties.endpoint()))
-                .region(Region.of(properties.region()))
-                .credentialsProvider(credentials(properties))
-                .serviceConfiguration(S3Configuration.builder()
-                        .pathStyleAccessEnabled(properties.pathStyle())
-                        .build())
-                .build();
-    }
-
-    @Bean
     AttachmentStorage attachmentStorage(S3Client s3, S3Presigner presigner,
-                                        AttachmentStorageProperties properties) {
+                                        ObjectStorageProperties properties) {
         return new S3AttachmentStorage(s3, presigner, properties.bucket());
-    }
-
-    private static StaticCredentialsProvider credentials(AttachmentStorageProperties properties) {
-        return StaticCredentialsProvider.create(
-                AwsBasicCredentials.create(properties.accessKey(), properties.secretKey()));
     }
 }

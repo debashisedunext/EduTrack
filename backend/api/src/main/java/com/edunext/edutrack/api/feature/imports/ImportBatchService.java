@@ -98,15 +98,29 @@ class ImportBatchService {
      * {@link ImportBatchStatus}. A run that refused half the file and wrote the
      * rest completed, and B-036's error report is how the user recovers the
      * other half.
+     *
+     * <p><b>B-036 folded the error report key into this call rather than adding a
+     * second one after it, and the ordering is the reason.</b> A client stops
+     * polling the instant it reads a terminal status, so a key written in a later
+     * transaction is a report the screen that wanted it has already stopped
+     * asking for. One write settles the status, the counters and the report
+     * together, which is also what makes {@code ImportDtos.Batch.etag} — computed
+     * over all of them — move exactly once at the end of a run.
+     *
+     * @param errorReportKey the stored report, or {@code null} for a run with
+     *                       nothing rejected or one whose report could not be
+     *                       stored. Both leave {@code errorReportUrl} null, which
+     *                       is what keeps the download button honestly disabled
      */
     @Transactional
     void finish(long batchId, ImportBatchStatus status,
-                int created, int updated, int rejected) {
+                int created, int updated, int rejected, String errorReportKey) {
         batches.findById(batchId).ifPresent(batch -> {
             batch.setCreatedRows(created);
             batch.setUpdatedRows(updated);
             batch.setRejectedRows(rejected);
             batch.setStatus(status);
+            batch.setErrorReportKey(errorReportKey);
             batches.save(batch);
         });
     }

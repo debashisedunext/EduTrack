@@ -381,6 +381,33 @@ class ImportExceptionHandler {
     }
 
     /**
+     * B-036 · 404 when the batch is real and its error report is not there.
+     *
+     * <p>Shares the {@code type} with the 404 above rather than declaring one,
+     * and that is the exception to this file's own rule about splitting by
+     * remedy: neither absence offers the caller a button. A screen only reaches
+     * this route from a non-null {@code errorReportUrl}, so the realistic caller
+     * is a bookmark or a retry — and to both, "the report is not there" is one
+     * answer however it came to be missing.
+     *
+     * <p>The batch's status goes on the body because it is what makes the
+     * sentence honest: {@code RUNNING} means not yet, {@code COMPLETED} means
+     * there is none, and a client that wants to tell them apart has the batch
+     * itself one route away.
+     */
+    @ExceptionHandler(ImportErrorReportUnavailableException.class)
+    ResponseEntity<ProblemDetail> handleErrorReportUnavailable(ImportErrorReportUnavailableException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problem.setType(NOT_FOUND);
+        problem.setTitle("Import error report not available");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("batchId", e.batchId());
+        problem.setProperty("status", e.status());
+
+        return problem(HttpStatus.NOT_FOUND, problem);
+    }
+
+    /**
      * B-035 · 422 when a commit would write nothing.
      *
      * <p>Refused rather than accepted-and-completed-instantly. A batch row saying

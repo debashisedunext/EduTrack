@@ -105,19 +105,29 @@ class ImportCommitService {
                     preview.rows().size(), preview.rejected(), preview.duplicates());
         }
 
-        int alreadyRejected = preview.rejected() + preview.duplicates();
+        // B-036 · the rows the run will not write, kept rather than counted.
+        // Their count is what the batch opens with — the same number
+        // `preview.rejected() + preview.duplicates()` gave before — and the rows
+        // themselves are what the error report is built from. This is the last
+        // moment they exist: the staging entry is released four lines down and
+        // the preview is never stored, so a report generated any later would have
+        // nothing to describe.
+        List<ImportRowVerdict> unwritten = preview.rows().stream()
+                .filter(row -> !row.isWritable())
+                .toList();
+
         ImportBatch batch = batches.open(
                 resolved.definition().entityCode(),
                 resolved.upload().fileName(),
                 preview.rows().size(),
-                alreadyRejected,
+                unwritten.size(),
                 userId);
 
         // The rows are in hand; the staging entry is not needed by anything
         // downstream and holding it would keep a slot for the length of the run.
         resolver.release(resolved.upload().uploadId());
 
-        submit(resolved.definition(), batch.getId(), writable, alreadyRejected);
+        submit(resolved.definition(), batch.getId(), writable, unwritten);
 
         return ImportDtos.Batch.of(batch);
     }
@@ -131,9 +141,9 @@ class ImportCommitService {
      * being identified is what {@code import_batches} is for.
      */
     private void submit(ImportSchemaDefinition definition, long batchId,
-                        List<ImportRowVerdict> writable, int alreadyRejected) {
+                        List<ImportRowVerdict> writable, List<ImportRowVerdict> unwritten) {
         try {
-            executor.execute(() -> runner.run(definition, batchId, writable, alreadyRejected));
+            executor.execute(() -> runner.run(definition, batchId, writable, unwritten));
         } catch (RejectedExecutionException full) {
             batches.fail(batchId);
             throw new ImportCommitQueueFullException(ceiling.value(), batchId);
