@@ -74,10 +74,10 @@ public final class ReportDtos {
      *             durations are hours rather than millis; sending both as
      *             strings would push those decisions into eighteen renderers.
      */
-    record Column(String key, String label, ColumnType type) {
+    public record Column(String key, String label, ColumnType type) {
     }
 
-    enum ColumnType {
+    public enum ColumnType {
         STRING, NUMBER, DATE, DURATION, PERCENT;
 
         /** The contract spells these lower-case; the enum is Java's convention. */

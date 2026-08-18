@@ -74,6 +74,22 @@
     <awssdk.version>2.29.29</awssdk.version>
     <poi.version>5.3.0</poi.version>
     <!--
+      A-064 · PDF export. PLAN.md §2.2 names Apache POI for Excel and names
+      nothing at all for PDF, so this is a stack decision the plan did not
+      carry — recorded as a new §2.2 row rather than added quietly.
+
+      OpenPDF rather than iText: iText 5 is AGPL and iText 7 is commercially
+      licensed, and neither is a licence to acquire by accident inside a
+      product an organisation will sell. OpenPDF is the LGPL/MPL fork of
+      iText 4, which is the last version under that licence.
+
+      Rather than PDFBox, which is Apache 2.0 and already a sibling of POI:
+      PDFBox positions text by coordinate and has no table primitive, so a
+      report of any width means hand-rolling column layout, wrapping and page
+      breaks. That is the whole job here, and OpenPDF's PdfPTable does it.
+    -->
+    <openpdf.version>2.0.3</openpdf.version>
+    <!--
       C-029: the server-side half of PLAN.md §3.9. Stream C is adding a
       dependency to Stream A's build file, which the working agreement asks be
       said out loud rather than done quietly — flagged for Debashis in the PR.
@@ -158,6 +174,13 @@
         <groupId>org.apache.poi</groupId>
         <artifactId>poi-ooxml</artifactId>
         <version>${poi.version}</version>
+      </dependency>
+
+      <!-- PDF export — A-064. See the version property for why OpenPDF. -->
+      <dependency>
+        <groupId>com.github.librepdf</groupId>
+        <artifactId>openpdf</artifactId>
+        <version>${openpdf.version}</version>
       </dependency>
 
       <!-- Rich-text sanitisation on the write path (PLAN.md §3.9) — C-029 -->

@@ -353,7 +353,11 @@ jobs:
           cache: maven
       - name: Full build — Maven downloads its own Node
         working-directory: backend
-        run: mvn -B package -DskipTests
+        # -DskipFrontend=false: the pom now defaults it to true, so a local
+        # build never deletes a developer's node_modules out from under a
+        # running dev server. This is the one build that must bundle the
+        # frontend, and the step below fails if it did not.
+        run: mvn -B package -DskipTests -DskipFrontend=false
       - name: Verify the frontend is inside the jar
         run: |
           JAR=$(ls backend/api/target/edutrack-api-*.jar | head -1)

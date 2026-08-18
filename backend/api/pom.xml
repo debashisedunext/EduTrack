@@ -47,6 +47,8 @@
     <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId></dependency>
     <dependency><groupId>software.amazon.awssdk</groupId><artifactId>s3</artifactId></dependency>
     <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></dependency>
+    <!-- A-064 · PDF export. See the parent pom's note on why OpenPDF. -->
+    <dependency><groupId>com.github.librepdf</groupId><artifactId>openpdf</artifactId></dependency>
     <!-- C-029 · PLAN.md §3.9's write-path sanitiser. See the parent pom's note. -->
     <dependency><groupId>org.jsoup</groupId><artifactId>jsoup</artifactId></dependency>
     <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
@@ -70,8 +72,32 @@
     <node.version>v22.14.0</node.version>
     <npm.version>10.9.0</npm.version>
     <frontend.dir>${project.basedir}/../../frontend</frontend.dir>
-    <!-- Backend-only build:  ./mvnw verify -DskipFrontend  -->
-    <skipFrontend>false</skipFrontend>
+    <!--
+      Frontend build: OFF by default, opted into explicitly.
+
+      This was `false` — every Maven build ran `npm ci` in ../frontend, and
+      `npm ci` deletes node_modules before it installs. On a developer machine
+      with the Vite dev server running, that destroys the tree the server is
+      reading from: Vite keeps serving HTML while its React plugin fails on
+      missing files, so the page half-loads and the cause is three directories
+      away. It happened five times in one day on 17 Aug, each costing a
+      reinstall and a restart.
+
+      The trigger was never pinned — every Maven command in that session passed
+      -DskipFrontend and the npm logs still show Maven's own npm (from
+      api/target/node) running `ci` in frontend/. Rather than keep guessing at
+      what starts it, this makes it not matter: no local Maven build touches
+      the frontend unless somebody asks for it.
+
+      CI asks for it. `.github/workflows/ci.yml`'s package job passes
+      -DskipFrontend=false, and the step after it fails the build if
+      BOOT-INF/classes/static/index.html is missing from the jar — so a wrong
+      default here is caught loudly rather than shipping a frontend-less jar.
+
+          ./mvnw verify                        # backend only, the common case
+          ./mvnw package -DskipFrontend=false  # the real deployable artifact
+    -->
+    <skipFrontend>true</skipFrontend>
   </properties>
 
   <build>
