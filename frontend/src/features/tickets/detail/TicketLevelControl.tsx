@@ -34,8 +34,14 @@ export interface TicketLevelControlProps {
    * it, so nothing shifts when the answer arrives.
    */
   canEdit: boolean
-  /** Refetch the detail payload — the level, the date and the history all moved. */
-  onChanged: () => void
+  /**
+   * Refetch the detail payload — the level, the date and the history all
+   * moved. The mutation's own ticket is passed too, for a caller with no
+   * detail payload to refetch (C-037's Quick Update panel, which holds a
+   * plain `Ticket` and would otherwise show a stale chip until the panel
+   * itself is closed and reopened) — the detail page's own caller ignores it.
+   */
+  onChanged: (ticket?: Ticket) => void
 }
 
 const DIALOG_ID = 'ticket-level-change'
@@ -147,13 +153,13 @@ export function TicketLevelControl({ ticket, clockStart, canEdit, onChanged }: T
         data: { level, ...(reason.trim() ? { reason: reason.trim() } : {}) },
       },
       {
-        onSuccess: () => {
+        onSuccess: (response) => {
           setOpen(false)
           // The level, the planned close date and the history all moved, and
           // two of the three are rendered elsewhere on this page. Refetching the
           // one aggregated call is what makes them agree; patching the level into
           // the cache would leave a stale date beside a new chip.
-          onChanged()
+          onChanged(response.data)
           toast({
             title: `Level changed to ${level}`,
             description: 'The planned close date has been recalculated.',

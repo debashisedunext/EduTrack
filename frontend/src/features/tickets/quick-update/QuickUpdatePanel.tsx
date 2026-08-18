@@ -1,9 +1,12 @@
 import * as React from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useQueryClient } from '@tanstack/react-query'
 import { Zap } from 'lucide-react'
 
 import { newIdempotencyKey, ApiError } from '@/api/http'
+import { useGetMe } from '@/api/generated/auth/auth'
+import { getListTicketsQueryKey } from '@/api/generated/tickets/tickets'
 import type { Ticket } from '@/api/generated/model/ticket'
 
 import { Button } from '@/components/ui/button'
@@ -28,7 +31,10 @@ import { useAttachmentLimits } from '../attachments/attachmentLimits'
 import { useTicketAttachments } from '../attachments/useTicketAttachments'
 import { STATUS_LABEL } from '../list/columns'
 import { titleCase } from '../stageDisplay'
+import { TicketLevelControl } from '../detail/TicketLevelControl'
+import { slaClockStart } from '../detail/levelChange'
 import { useQuickUpdateMutation } from './useQuickUpdateMutation'
+import { canChangeLevelHere } from './quickUpdatePermissions'
 import { emptyQuickUpdateForm, quickUpdateSchema, toQuickUpdateRequest, type QuickUpdateFormValues } from './quickUpdateForm'
 
 const STATUS_OPTIONS = Object.keys(STATUS_LABEL) as (keyof typeof STATUS_LABEL)[]
@@ -92,6 +98,16 @@ function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => voi
   // effort entry. See `useQuickUpdateMutation`'s own doc comment.
   const idempotencyKey = React.useRef(newIdempotencyKey())
   const quickUpdate = useQuickUpdateMutation()
+
+  // C-037 · the one PM exception to "not exposed here". `TicketLevelControl`
+  // fires its own `PATCH .../priority` — a heavier write than this panel's six
+  // send-if-touched fields, with its own SLA preview and mandatory-reason rule
+  // — so it is reused rather than folded into `toQuickUpdateRequest`, on the
+  // same "one implementation of a rule" argument `PriorityChangeService`'s own
+  // javadoc makes.
+  const { data: meData } = useGetMe()
+  const queryClient = useQueryClient()
+  const [level, setLevel] = React.useState(ticket.level)
 
   // Immediate mode — the ticket exists, so a file goes up the moment it is
   // picked and its ID is on hand by the time Update is pressed. No `existing`:
@@ -242,9 +258,32 @@ function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => voi
           </FormField>
         </div>
 
+        {/*
+          C-037 · PM only, per the blueprint's own exception. Every other
+          role never fetches `TicketLevelControl` into the tree at all,
+          following C-020's "no button at all, not a disabled one" rule —
+          the same false-until-resolved guard `meData` gives us for free.
+        */}
+        {canChangeLevelHere(meData?.data.role) && (
+          <FormField id="qu-level" label="Level">
+            {() => (
+              <TicketLevelControl
+                ticket={{ ...ticket, level }}
+                clockStart={slaClockStart(ticket, undefined)}
+                canEdit
+                onChanged={(updated) => {
+                  if (updated?.level) setLevel(updated.level)
+                  void queryClient.invalidateQueries({ queryKey: getListTicketsQueryKey() })
+                }}
+              />
+            )}
+          </FormField>
+        )}
+
         <p className="text-caption text-content-muted">
           Not editable here: ticket ID, reported by, assigned by, date reported, cycle history, the ribbon, prior
-          effort logs, level and project. Those are append-only or a PM/Admin action elsewhere.
+          effort logs, project{!canChangeLevelHere(meData?.data.role) && ' and level'}. Those are append-only or a
+          PM/Admin action elsewhere.
         </p>
       </SlideOverBody>
 
