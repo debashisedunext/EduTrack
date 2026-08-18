@@ -52,6 +52,7 @@ NO_PAGINATION = {
     "/masters/permissions":              "18 rows, and reference data — a nineteenth arrives by migration, not by a screen",
     "/masters/roles":                    "the six of blueprint §2 plus whatever an Admin adds; the S-09 matrix is unreadable long before it is unpageable",
     "/masters/workflow-templates":       "a handful per project",
+    "/masters/workflow-templates/{templateId}/stages": "B-040 — one template's ribbon. Eight stages on the longest of the three seeded templates, and bounded by the thing the ribbon is for: §17 already names readability at eight segments on a laptop as a risk, so a template long enough to page is a template nobody can render. The tab needs the whole set on one read regardless — canReturnTo is validated against its siblings, and reorderStages sends every id back",
     "/projects/{projectId}/sla-policies": "task types x 4 levels",
     "/clients/{clientId}/contacts":      "a short list per client",
     "/tickets/{ticketId}/attachments":   "capped at 20 per ticket",
@@ -78,6 +79,9 @@ APPEND_ONLY = ("/history", "/effort-logs", "/audit-logs")
 ROWLESS_403 = {
     "/audit-logs":                        "Admin-only regardless of what is in it",
     "/masters/roles":                     "Admin-only screen; there is no row yet on a create",
+    "/masters/workflow-templates/{templateId}/stages": "B-040 — master data is not row-scoped, and every stage is already public through listStages. The create needs master.write; refusing it with 404 would deny the existence of a template the same caller may read",
+    "/masters/workflow-templates/{templateId}/stages/{stageId}": "B-040 — as above. The stage is readable by all six roles, so a 404 on the PATCH would conceal nothing and only make a permission failure look like a missing row",
+    "/masters/workflow-templates/{templateId}/stages/order": "B-040 — as above, and the reorder has no row of its own to hide behind",
     "/masters/roles/{roleId}":            "master data, not row-scoped — every role is already public through listRoles, so a 403 leaks nothing a 404 would hide",
     "/masters/roles/{roleId}/permissions": "same: the role's existence is public, only the write is Admin-only",
     "/masters/priorities":                 "master data, not row-scoped — every active level is already public through listPriorities, and there is no row yet on a create",

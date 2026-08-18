@@ -49,15 +49,20 @@ async function openEditor(name: string) {
 
 describe('the three tabs', () => {
   /**
-   * Present but disabled, not absent. A screen that grows two tabs later is a
-   * screen whose shape nobody could see coming.
+   * Present but disabled, not absent. A screen that grows a tab later is a screen
+   * whose shape nobody could see coming.
+   *
+   * **B-040 filled in tab 2, so this now asserts one disabled tab rather than
+   * two.** The original wording — "tabs 2 and 3 disabled" — was true for exactly
+   * as long as it should have been, which is what a test naming the task that
+   * will change it is for. Tab 2's own behaviour is `StagesTab.test.tsx`.
    */
-  it('shows tabs 2 and 3 disabled, naming the tasks that will build them', async () => {
+  it('shows tab 3 disabled, naming the task that will build it', async () => {
     renderPage()
 
-    const stages = await screen.findByRole('tab', { name: 'Stages' }, SLOW)
-    expect(stages).toBeDisabled()
-    expect(stages).toHaveAttribute('title', expect.stringContaining('B-040'))
+    expect(await screen.findByRole('tab', { name: 'Stages' }, SLOW)).not.toBeDisabled()
+    expect(screen.getByRole('tab', { name: 'Workflow templates' }))
+      .toBeDisabled()
     expect(screen.getByRole('tab', { name: 'Workflow templates' }))
       .toHaveAttribute('title', expect.stringContaining('B-041'))
   })

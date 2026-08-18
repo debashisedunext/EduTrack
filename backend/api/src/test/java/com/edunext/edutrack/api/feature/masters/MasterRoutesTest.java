@@ -49,6 +49,7 @@ class MasterRoutesTest {
             "com.edunext.edutrack.api.feature.masters.roles.RoleController",
             "com.edunext.edutrack.api.feature.masters.priorities.PriorityController",
             "com.edunext.edutrack.api.feature.masters.statuses.StatusController",
+            "com.edunext.edutrack.api.feature.masters.stages.StageController",
             "com.edunext.edutrack.api.feature.masters.tasktypes.TaskTypeController",
             "com.edunext.edutrack.api.feature.masters.notificationtemplates"
                     + ".NotificationTemplateController",
@@ -155,6 +156,28 @@ class MasterRoutesTest {
     void notificationTemplateMasterIsMountedWhereTheContractPutsIt() {
         assertThat(paths(load("com.edunext.edutrack.api.feature.masters.notificationtemplates"
                 + ".NotificationTemplateController").getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/masters");
+    }
+
+    /**
+     * B-040 · S-13 tab 2, and the seventh instance of the pattern above with a
+     * twist the other six did not have.
+     *
+     * <p>{@code listWorkflowTemplates} was declared, mocked and never mounted like
+     * five of them — and the shape it was declared with had also drifted from
+     * A-005's table, so B-040 corrected the contract as well as serving it. That
+     * makes this mount point the one place where the path and the shape were both
+     * unverified until the day the route landed.
+     *
+     * <p>The stage routes are nested beneath it rather than sitting at
+     * {@code /masters/stages}, because {@code workflow_stages.template_id} is
+     * {@code NOT NULL}: there is no stage outside a template to address.
+     */
+    @Test
+    @DisplayName("the stage master is mounted under the workflow templates it belongs to")
+    void stageMasterIsMountedWhereTheContractPutsIt() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.stages.StageController")
+                .getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/masters");
     }
 

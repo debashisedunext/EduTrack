@@ -46,5 +46,38 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { StagePatchRequestSlaHours } from './stagePatchRequestSlaHours';
+import type { StagePatchRequestIcon } from './stagePatchRequestIcon';
 
-export type WorkflowTemplateProjectId = number | null;
+/**
+ * Partial — an omitted field keeps its stored value. **No `seq`**, and
+`stageCode` only so that changing it in use can be refused.
+
+ */
+export interface StagePatchRequest {
+  /**
+   * @minLength 1
+   * @maxLength 20
+   * @pattern ^[A-Z][A-Z0-9_]*$
+   */
+  stageCode?: string;
+  /**
+   * @minLength 1
+   * @maxLength 50
+   */
+  displayName?: string;
+  /**
+   * @minLength 1
+   * @maxLength 20
+   */
+  ownerRole?: string;
+  /**
+   * @minimum 0.01
+   * @maximum 9999.99
+   */
+  slaHours?: StagePatchRequestSlaHours;
+  isOptional?: boolean;
+  canReturnTo?: string[];
+  /** @maxLength 30 */
+  icon?: StagePatchRequestIcon;
+}

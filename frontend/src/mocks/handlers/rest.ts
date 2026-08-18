@@ -3,7 +3,7 @@ import { isWellFormedEmail } from '@/lib/email';
 import { getDb, nextId } from '../db';
 import type {
   Db, Holiday, Level, NotificationChannelCode, NotificationTemplateRow, Priority,
-  ProjectRoleCode, Role, Status, StatusCategory, StatusCode, TaskType, User,
+  ProjectRoleCode, Role, Status, StatusCategory, StatusCode, TaskType, TemplateStage, User,
   WorkflowTransitionRow,
 } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
@@ -195,6 +195,74 @@ function taskTypePrecondition(type: TaskType, ifMatch: string | null) {
   if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== taskTypeEtag(type).replace(/"/g, '')) {
     return problem(412, 'precondition-failed',
       'This task type changed since you read it. Reload and reapply your edit.');
+  }
+  return null;
+}
+
+// ── S-13 tab 2 · the stage master (B-040) ───────────────────────────────────
+
+/** One template's stages, left to right. */
+const ribbon = (templateId: number) =>
+  getDb().templateStages
+    .filter((s) => s.templateId === templateId)
+    .sort((a, b) => a.seq - b.seq);
+
+/**
+ * `position` is computed here rather than stored, exactly as the server computes
+ * it: it is a fact about a stage's neighbours, and storing it would be a second
+ * copy of the order to keep in step with `seq`.
+ *
+ * `isCodeEditable` is derived from the two counts for the same reason — it is the
+ * server's answer to "may I rename this?", and the form reads it rather than
+ * restating the rule.
+ */
+function stageDto(stage: TemplateStage) {
+  const position = ribbon(stage.templateId).findIndex((s) => s.id === stage.id) + 1;
+  return {
+    id: stage.id,
+    templateId: stage.templateId,
+    stageCode: stage.stageCode,
+    displayName: stage.displayName,
+    ownerRole: stage.ownerRole,
+    slaHours: stage.slaHours,
+    isOptional: stage.isOptional,
+    canReturnTo: stage.canReturnTo,
+    icon: stage.icon,
+    seq: stage.seq,
+    position,
+    transitionCount: stage.transitionCount,
+    openTicketCount: stage.openTicketCount,
+    isCodeEditable: stage.transitionCount === 0 && stage.openTicketCount === 0,
+  };
+}
+
+const hash = (value: string) =>
+  `"${Math.abs([...value].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+const stageEtag = (stage: TemplateStage) => hash(JSON.stringify(stageDto(stage)));
+
+/**
+ * The ribbon's tag, over every row's content and not just the order.
+ *
+ * Deliberate, and it matches the server: two Admins editing different stages of
+ * one template would otherwise both hold a valid tag for a reorder about to
+ * discard one of their edits.
+ */
+const ribbonEtag = (stages: TemplateStage[]) =>
+  hash(stages.map((s) => JSON.stringify(stageDto(s))).join('#'));
+
+/**
+ * The mock enforces `If-Match` too. A guard the real backend has and the mock
+ * waves through is a guard the frontend never gets to exercise.
+ */
+function stagePrecondition(ifMatch: string | null, expected: string, what: string) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      `If-Match is required. GET the ${what} first and send back its ETag.`);
+  }
+  if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== expected.replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'Somebody else changed this since you read it. Reload and try again.');
   }
   return null;
 }
@@ -3349,16 +3417,196 @@ export const restHandlers = [
     calendarState().leaves.splice(i, 1);
     return noContent();
   }),
+  // ── S-13 tab 2 · the stage master (B-040) ─────────────────────────────────
+  //
+  // The selector, and it no longer carries stages inline. The stage set is the
+  // unit of edit for the reorder and needs an `ETag` of its own, so two routes
+  // serving the same rows would have meant the reorder preconditioning on a tag
+  // the screen had not read the rows from.
   http.get(url('/masters/workflow-templates'), () =>
-    ok([{
-      id: 1, name: 'Standard Dev Flow', version: 1, projectId: null, taskTypeId: null,
-      isActive: true,
-      stages: getDb().stages.map((s) => ({ ...s, isDeprecated: false })),
-    }]),
+    ok(getDb().workflowTemplates.map((t) => {
+      const stages = ribbon(t.id);
+      return {
+        ...t,
+        stageCount: stages.length,
+        // The vocabulary shape, not the editing one — S-25's stage filter reads
+        // this array and has since C-013. See `InlineStageView` on the server.
+        stages: stages.map((stage, index) => ({
+          stageCode: stage.stageCode,
+          displayName: stage.displayName,
+          sequence: index + 1,
+          ownerRole: stage.ownerRole,
+          icon: stage.icon,
+          stageSlaHrs: stage.slaHours,
+          isOptional: stage.isOptional,
+          canReturnTo: stage.canReturnTo,
+          isDeprecated: false,
+        })),
+      };
+    })),
   ),
+
+  /**
+   * B-041's, untouched by B-040 and left as the stub it has always been.
+   *
+   * Creating a template is the tab-3 operation — it needs the project x task-type
+   * mapping that has no table yet — so there is nothing here to make faithful.
+   * Kept rather than deleted because `mocks.test.ts` requires a handler for every
+   * declared operation, and the alternative is deleting a contract operation
+   * B-041 is going to implement.
+   */
   http.post(url('/masters/workflow-templates'), async ({ request }) =>
-    ok({ id: 2, version: 1, isActive: true, ...(await request.json() as object) },
+    ok({ id: 4, isActive: true, isDefault: false, stageCount: 0, stages: [],
+         ...(await request.json() as object) },
        undefined, { status: 201 }),
+  ),
+
+  http.get(url('/masters/workflow-templates/:templateId/stages'), ({ params }) => {
+    const templateId = Number(params.templateId);
+    if (!getDb().workflowTemplates.some((t) => t.id === templateId)) {
+      return notFound('Workflow template');
+    }
+    const stages = ribbon(templateId);
+    return ok(stages.map(stageDto), undefined, { headers: { ETag: ribbonEtag(stages) } });
+  }),
+
+  http.get(url('/masters/workflow-templates/:templateId/stages/:stageId'), ({ params }) => {
+    const stage = ribbon(Number(params.templateId))
+      .find((s) => s.id === Number(params.stageId));
+    if (!stage) return notFound('Stage');
+    return ok(stageDto(stage), undefined, { headers: { ETag: stageEtag(stage) } });
+  }),
+
+  http.post(url('/masters/workflow-templates/:templateId/stages'), async ({ request, params }) => {
+    const templateId = Number(params.templateId);
+    if (!getDb().workflowTemplates.some((t) => t.id === templateId)) {
+      return notFound('Workflow template');
+    }
+    const body = (await request.json()) as {
+      stageCode: string; displayName: string; ownerRole: string;
+      slaHours?: number | null; isOptional?: boolean;
+      canReturnTo?: string[]; icon?: string | null;
+    };
+    const stages = ribbon(templateId);
+    const code = body.stageCode.trim().toUpperCase();
+
+    if (stages.some((s) => s.stageCode === code)) {
+      // The full sentence the server sends, not a placeholder. A mock answering
+      // "Duplicate" would let the screen ship looking fine and read uselessly
+      // against a real backend.
+      const detail = `${code} is already a stage on this template. `
+        + 'A code is unique within its template.';
+      return problem(409, 'duplicate', 'Duplicate stage code',
+        { detail, errors: { stageCode: [detail] } });
+    }
+
+    const created: TemplateStage = {
+      id: Math.max(0, ...getDb().templateStages.map((s) => s.id)) + 1,
+      templateId,
+      stageCode: code,
+      displayName: body.displayName.trim(),
+      ownerRole: body.ownerRole,
+      slaHours: body.slaHours ?? null,
+      isOptional: body.isOptional ?? false,
+      canReturnTo: body.canReturnTo ?? [],
+      icon: body.icon ?? null,
+      seq: Math.max(0, ...stages.map((s) => s.seq)) + 10,
+      transitionCount: 0,
+      openTicketCount: 0,
+    };
+    getDb().templateStages.push(created);
+    return ok(stageDto(created), undefined, {
+      status: 201, headers: { ETag: stageEtag(created) },
+    });
+  }),
+
+  http.patch(url('/masters/workflow-templates/:templateId/stages/:stageId'),
+    async ({ request, params }) => {
+      const stage = ribbon(Number(params.templateId))
+        .find((s) => s.id === Number(params.stageId));
+      if (!stage) return notFound('Stage');
+
+      const stale = stagePrecondition(request.headers.get('If-Match'), stageEtag(stage), 'stage');
+      if (stale) return stale;
+
+      const body = (await request.json()) as Record<string, unknown>;
+
+      if (typeof body.stageCode === 'string') {
+        const code = body.stageCode.trim().toUpperCase();
+        if (code !== stage.stageCode) {
+          if (stage.transitionCount > 0 || stage.openTicketCount > 0) {
+            const detail = `${stage.stageCode} has been used — ${stage.transitionCount} ribbon `
+              + `segments and ${stage.openTicketCount} tickets standing in it now. The code is `
+              + 'stored as plain text on every one of those rows, so renaming it would leave '
+              + 'their journeys unresolvable and stop the stage-SLA scan matching them, both '
+              + 'without any error. Change the display name instead.';
+            return problem(409, 'immutable-field', 'Stage code cannot be changed', {
+              detail,
+              transitionCount: stage.transitionCount,
+              openTicketCount: stage.openTicketCount,
+              errors: { stageCode: [detail] },
+            });
+          }
+          stage.stageCode = code;
+        }
+      }
+      if (typeof body.displayName === 'string') stage.displayName = body.displayName.trim();
+      if (typeof body.ownerRole === 'string') stage.ownerRole = body.ownerRole;
+      if (body.slaHours !== undefined) stage.slaHours = body.slaHours as number | null;
+      if (typeof body.isOptional === 'boolean') stage.isOptional = body.isOptional;
+      if (Array.isArray(body.canReturnTo)) stage.canReturnTo = body.canReturnTo as string[];
+      if (body.icon !== undefined) stage.icon = body.icon as string | null;
+
+      return ok(stageDto(stage), undefined, { headers: { ETag: stageEtag(stage) } });
+    },
+  ),
+
+  /**
+   * The reorder. Refuses the same three things the server refuses, because each
+   * one is a sentence the screen renders rather than a status code it counts.
+   */
+  http.put(url('/masters/workflow-templates/:templateId/stages/order'),
+    async ({ request, params }) => {
+      const templateId = Number(params.templateId);
+      if (!getDb().workflowTemplates.some((t) => t.id === templateId)) {
+        return notFound('Workflow template');
+      }
+      const stages = ribbon(templateId);
+      const stale = stagePrecondition(
+        request.headers.get('If-Match'), ribbonEtag(stages), 'stage list');
+      if (stale) return stale;
+
+      const { stageIds } = (await request.json()) as { stageIds: number[] };
+      const unique = new Set(stageIds);
+      if (unique.size !== stageIds.length
+          || unique.size !== stages.length
+          || stageIds.some((id) => !stages.some((s) => s.id === id))) {
+        return validationFailed({
+          stageIds: [`Send every stage of this template exactly once — ${stages.length} `
+            + `expected, ${unique.size} given. Moving one stage changes the position of every `
+            + 'stage after it, so a partial list would leave the order ambiguous.'],
+        });
+      }
+
+      const ordered = stageIds.map((id) => stages.find((s) => s.id === id)!);
+      const position = new Map(ordered.map((s, i) => [s.stageCode, i]));
+      const broken = ordered.flatMap((s, i) =>
+        s.canReturnTo
+          .filter((target) => (position.get(target) ?? -1) >= i)
+          .map((target) => `${s.stageCode} \u2192 ${target}`));
+
+      if (broken.length > 0) {
+        const detail = `That order would leave ${broken.join(', ')} pointing forwards. `
+          + 'A return target is a backward target, so clear it first or move the other '
+          + 'stage instead.';
+        return problem(409, 'return-target-direction', 'That order breaks a return path',
+          { detail, pairs: broken, errors: { stageIds: [detail] } });
+      }
+
+      ordered.forEach((stage, index) => { stage.seq = (index + 1) * 10; });
+      const next = ribbon(templateId);
+      return ok(next.map(stageDto), undefined, { headers: { ETag: ribbonEtag(next) } });
+    },
   ),
 
   // ── dashboard & reports ───────────────────────────────────────────────────

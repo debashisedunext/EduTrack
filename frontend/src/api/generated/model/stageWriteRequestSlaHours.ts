@@ -47,7 +47,8 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type ListWorkflowTemplatesParams = {
-projectId?: number;
-taskTypeId?: number;
-};
+/**
+ * @minimum 0.01
+ * @maximum 9999.99
+ */
+export type StageWriteRequestSlaHours = number | null;

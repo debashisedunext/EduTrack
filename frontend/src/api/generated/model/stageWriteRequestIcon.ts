@@ -47,4 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type WorkflowTemplateTaskTypeId = number | null;
+/**
+ * @maxLength 30
+ */
+export type StageWriteRequestIcon = string | null;

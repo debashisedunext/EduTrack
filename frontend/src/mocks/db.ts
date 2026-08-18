@@ -339,6 +339,33 @@ export interface Stage {
   stageCode: string; displayName: string; sequence: number; ownerRole: RoleCode;
   icon: string; stageSlaHrs: number | null; isOptional: boolean; canReturnTo: string[];
 }
+
+/**
+ * B-040 · S-13 tab 2 — one template, and one row of one template's ribbon.
+ *
+ * **Separate from `Stage` above, and the separation is a finding rather than a
+ * preference.** `db.stages` is Stream C's flat ribbon fixture and its codes are
+ * `DEVELOPMENT` and `VERIFICATION`; the database seeds `DEV` and `VERIFY`
+ * (`V20260807_1700`). So the mock and the real backend disagree about the
+ * vocabulary of the ribbon, and a screen tested only against the mock would ship
+ * looking right. Reconciling it means renaming codes that Stream C's reopen
+ * fixture and `ReopenDialog.test.tsx` assert on, which is their file — recorded
+ * in the backlog note instead.
+ *
+ * These rows follow the database, because tab 2 is the screen that edits the
+ * database's rows.
+ */
+export interface WorkflowTemplateRow {
+  id: number; name: string; description: string | null;
+  isDefault: boolean; isActive: boolean;
+}
+export interface TemplateStage {
+  id: number; templateId: number; stageCode: string; displayName: string;
+  ownerRole: string; slaHours: number | null; isOptional: boolean;
+  canReturnTo: string[]; icon: string | null; seq: number;
+  /** What freezes the code. Seeded above zero on one stage so the rule is reachable. */
+  transitionCount: number; openTicketCount: number;
+}
 export interface Ticket {
   ticketId: string; title: string; description: string;
   projectId: number; clientId: number | null; clientContactId: number | null;
@@ -487,6 +514,8 @@ export interface Db {
   taskTypes: TaskType[]; modules: Module[]; priorities: Priority[]; stages: Stage[];
   /** B-039 · S-13 tab 1 — the status vocabulary and the whitelist that governs moves between them. */
   statuses: Status[]; workflowTransitions: WorkflowTransitionRow[];
+  /** B-040 · S-13 tab 2 — the three templates of §4A.9 and their stages. */
+  workflowTemplates: WorkflowTemplateRow[]; templateStages: TemplateStage[];
   /** B-015 · S-09. `roleGrants` is keyed by role id — the matrix, one row per role. */
   permissions: Permission[]; roles: Role[]; roleGrants: Record<number, string[]>;
   /** B-022 · S-15. One row per (event, channel) — the wording of everything sent. */
@@ -1307,6 +1336,52 @@ const STAGES: Stage[] = [
   { stageCode: 'CLOSED', displayName: 'Closed', sequence: 8, ownerRole: 'PM', icon: 'archive', stageSlaHrs: null, isOptional: false, canReturnTo: [] },
 ];
 
+/**
+ * B-040 · the three templates and their stages, matching
+ * `V20260807_1700__seed_workflow_templates_stages.sql` row for row.
+ *
+ * **`DEV` on Standard Dev Flow and `DEV` on Support Fast-Track are two rows, not
+ * one.** That is the whole shape of tab 2 — `workflow_stages.template_id` is
+ * `NOT NULL` — and a mock that shared them would let a screen pass that had
+ * quietly assumed a global stage catalogue.
+ *
+ * `QA` carries usage counts above zero because it is the only way to reach the
+ * frozen-code path from the screen. Every other stage is editable, which is the
+ * ordinary case and the one the create flow lands in.
+ */
+const WORKFLOW_TEMPLATES: WorkflowTemplateRow[] = [
+  { id: 1, name: 'Standard Dev Flow', isDefault: true, isActive: true,
+    description: 'All 8 stages. Production Bug, Change Request, Future Release. Blueprint §4A.9.' },
+  { id: 2, name: 'Support Fast-Track', isDefault: false, isActive: true,
+    description: 'Intake -> Triage -> Development -> Sign-off -> Closed. Blueprint §4A.9.' },
+  { id: 3, name: 'Infra Flow', isDefault: false, isActive: true,
+    description: 'Intake -> Triage -> Deployment -> Verification -> Closed. Blueprint §4A.9.' },
+]
+
+const TEMPLATE_STAGES: TemplateStage[] = [
+  // Standard Dev Flow — §4A.1 verbatim.
+  { id: 1, templateId: 1, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0 },
+  { id: 2, templateId: 1, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0 },
+  { id: 3, templateId: 1, seq: 30, stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', slaHours: null, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'code-2', transitionCount: 0, openTicketCount: 0 },
+  { id: 4, templateId: 1, seq: 40, stageCode: 'QA', displayName: 'QA / Testing', ownerRole: 'QA', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'flask-conical', transitionCount: 41, openTicketCount: 3 },
+  { id: 5, templateId: 1, seq: 50, stageCode: 'DEPLOY', displayName: 'Deployment', ownerRole: 'DEPLOYMENT', slaHours: 4, isOptional: false, canReturnTo: ['DEV'], icon: 'rocket', transitionCount: 0, openTicketCount: 0 },
+  { id: 6, templateId: 1, seq: 60, stageCode: 'VERIFY', displayName: 'Verification', ownerRole: 'DEVELOPER', slaHours: 4, isOptional: false, canReturnTo: ['DEV'], icon: 'check-check', transitionCount: 0, openTicketCount: 0 },
+  { id: 7, templateId: 1, seq: 70, stageCode: 'SIGNOFF', displayName: 'Sign-off', ownerRole: 'PM', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'clipboard-check', transitionCount: 0, openTicketCount: 0 },
+  { id: 8, templateId: 1, seq: 80, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0 },
+  // Support Fast-Track.
+  { id: 9, templateId: 2, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0 },
+  { id: 10, templateId: 2, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0 },
+  { id: 11, templateId: 2, seq: 30, stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', slaHours: null, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'code-2', transitionCount: 0, openTicketCount: 0 },
+  { id: 12, templateId: 2, seq: 40, stageCode: 'SIGNOFF', displayName: 'Sign-off', ownerRole: 'SUPPORT', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'clipboard-check', transitionCount: 0, openTicketCount: 0 },
+  { id: 13, templateId: 2, seq: 50, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'SUPPORT', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0 },
+  // Infra Flow.
+  { id: 14, templateId: 3, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0 },
+  { id: 15, templateId: 3, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0 },
+  { id: 16, templateId: 3, seq: 30, stageCode: 'DEPLOY', displayName: 'Deployment', ownerRole: 'DEPLOYMENT', slaHours: 4, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'rocket', transitionCount: 0, openTicketCount: 0 },
+  { id: 17, templateId: 3, seq: 40, stageCode: 'VERIFY', displayName: 'Verification', ownerRole: 'DEVELOPER', slaHours: 4, isOptional: false, canReturnTo: ['DEPLOY'], icon: 'check-check', transitionCount: 0, openTicketCount: 0 },
+  { id: 18, templateId: 3, seq: 50, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0 },
+]
+
 export function createDb(): Db {
   // Before anything reads `pick` or `int` — see `rewindFixtureRandom`. Without
   // this, two calls to this function produce different fixtures.
@@ -1322,6 +1397,8 @@ export function createDb(): Db {
     priorities: structuredClone(PRIORITIES),
     statuses: structuredClone(STATUSES),
     workflowTransitions: structuredClone(WORKFLOW_TRANSITIONS),
+    workflowTemplates: structuredClone(WORKFLOW_TEMPLATES),
+    templateStages: structuredClone(TEMPLATE_STAGES),
     permissions: structuredClone(PERMISSIONS),
     roles: structuredClone(ROLES),
     notificationTemplates: structuredClone(NOTIFICATION_TEMPLATES),

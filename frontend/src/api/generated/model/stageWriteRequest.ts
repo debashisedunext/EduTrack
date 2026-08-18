@@ -46,27 +46,38 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { RoleCode } from './roleCode';
-import type { WorkflowStageIcon } from './workflowStageIcon';
-import type { WorkflowStageStageSlaHrs } from './workflowStageStageSlaHrs';
+import type { StageWriteRequestSlaHours } from './stageWriteRequestSlaHours';
+import type { StageWriteRequestIcon } from './stageWriteRequestIcon';
 
 /**
- * A stage as it is written into a template by `createWorkflowTemplate`
-(B-041/B-043, still unmounted). **`Stage` is the served shape** — it is
-what `listStages` returns, and it carries the identity and the two usage
-counts this one has no way to know at write time.
+ * **No `seq`.** A new stage is appended to the end; move it with
+`reorderStages`.
 
  */
-export interface WorkflowStage {
-  stageCode?: string;
-  displayName?: string;
-  sequence?: number;
-  ownerRole?: RoleCode;
-  icon?: WorkflowStageIcon;
-  stageSlaHrs?: WorkflowStageStageSlaHrs;
+export interface StageWriteRequest {
+  /**
+   * @minLength 1
+   * @maxLength 20
+   * @pattern ^[A-Z][A-Z0-9_]*$
+   */
+  stageCode: string;
+  /**
+   * @minLength 1
+   * @maxLength 50
+   */
+  displayName: string;
+  /**
+   * @minLength 1
+   * @maxLength 20
+   */
+  ownerRole: string;
+  /**
+   * @minimum 0.01
+   * @maximum 9999.99
+   */
+  slaHours?: StageWriteRequestSlaHours;
   isOptional?: boolean;
-  /** Allowed backward targets. Stored as JSON — MySQL has no array type. */
   canReturnTo?: string[];
-  /** Deprecated, never deleted — historical ribbons depend on it. B-042 adds the column; B-040 does not serve this field. */
-  isDeprecated?: boolean;
+  /** @maxLength 30 */
+  icon?: StageWriteRequestIcon;
 }
