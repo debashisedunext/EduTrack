@@ -19,10 +19,18 @@ import java.util.Optional;
  * harder here. A-073's target is 50,000 tickets, and a date-wise report over a
  * year that counted rows would be the slowest page in the product.
  *
- * <p>Where a future report genuinely needs a fact the summary tables do not
- * carry — the audit log's chain verdict, the email delivery log's states —
- * that report reads its own source table, which is not {@code tickets} either.
- * The one thing no report may do is aggregate {@code tickets} live.
+ * <p>Where a report needs a fact these tables do not carry, it reads its own
+ * source table instead — {@link TicketReportRepository} for the ticket-level
+ * ones, and the audit log or the delivery log for reports still to come.
+ *
+ * <p><b>A-066 corrected this class's original claim</b> that "the one thing no
+ * report may do is aggregate {@code tickets} live". That over-stated the rule.
+ * CLAUDE.md and PLAN.md §480 scope it to <em>dashboards</em>, for a reason
+ * specific to them: a dashboard loads unbidden on every login and must paint in
+ * 1.5 seconds. Five of §7.8's first six reports cannot be answered from a
+ * summary table at any grain, and read {@code tickets} through
+ * {@link TicketReportRepository} — bounded by the requested range and scoped in
+ * SQL. The dashboard rule itself is unchanged and still absolute.
  */
 @Repository
 class ReportRepository {

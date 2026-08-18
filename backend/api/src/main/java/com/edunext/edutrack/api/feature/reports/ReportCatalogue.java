@@ -82,14 +82,14 @@ public final class ReportCatalogue {
     private static final List<ReportDtos.Descriptor> ALL = List.of(
 
             // ── PEOPLE ──────────────────────────────────────────────────────
-            unbuilt("resource-scorecard", "Resource Performance Scorecard",
-                    "Assigned, closed, on-time %, cycle time, effort and reopen rate per person.",
+            built("resource-scorecard", "Resource Performance Scorecard",
+                    "Closed, on-time %, cycle time, effort, variance, reopen rate and utilisation per person.",
                     PEOPLE, "bar", List.of(DATE_RANGE, PROJECT, RESOURCE)),
-            unbuilt("resource-velocity", "Resource Velocity",
-                    "Tickets and effort-hours closed per week, with a 4-week rolling average.",
-                    PEOPLE, "line", List.of(DATE_RANGE, PROJECT, RESOURCE)),
-            unbuilt("effort-summary", "Effort Summary",
-                    "Effort by resource, project and task type, with drill-down to the logs.",
+            built("resource-velocity", "Resource Velocity",
+                    "Tickets closed per week per person, or one person in detail with a 4-week average.",
+                    PEOPLE, "line", List.of(DATE_RANGE, RESOURCE)),
+            built("effort-summary", "Effort Summary",
+                    "Hours logged by resource, project and task type, and how many tickets they covered.",
                     PEOPLE, "stacked-bar", List.of(DATE_RANGE, PROJECT, RESOURCE, TASK_TYPE)),
             unbuilt("resource-contribution", "Resource Contribution",
                     "Who moved each ticket, rolled up across the stages they owned.",
@@ -105,23 +105,23 @@ public final class ReportCatalogue {
             unbuilt("aging", "Aging Report",
                     "How long open tickets have been open, bucketed.",
                     DELIVERY, "bar", List.of(DATE_RANGE, PROJECT, LEVEL)),
-            unbuilt("sla-breach", "Delayed / SLA Breach",
-                    "Every breach, how far overdue, escalation level and stated reason.",
+            built("sla-breach", "Delayed / SLA Breach",
+                    "Every breached ticket, worst first, with how far overdue and its latest remark.",
                     DELIVERY, "bar", List.of(DATE_RANGE, PROJECT, LEVEL, TASK_TYPE)),
             unbuilt("workload-capacity", "Workload & Capacity",
                     "Assigned load per person against their working calendar.",
                     DELIVERY, "stacked-bar", List.of(DATE_RANGE, PROJECT, RESOURCE)),
 
             // ── QUALITY ─────────────────────────────────────────────────────
-            unbuilt("reopen-analysis", "Reopen Analysis",
-                    "Reopen counts by resource, project and type — the clearest quality signal.",
-                    QUALITY, "bar", List.of(DATE_RANGE, PROJECT, RESOURCE, TASK_TYPE)),
+            built("reopen-analysis", "Reopen Analysis",
+                    "Where reopens cluster, by resource, project and task type together.",
+                    QUALITY, "bar", List.of(DATE_RANGE, PROJECT, RESOURCE)),
             unbuilt("rework-analysis", "Rework Analysis",
                     "Where tickets bounce backwards, and how often the same pair repeats it.",
                     QUALITY, "bar", List.of(DATE_RANGE, PROJECT, RESOURCE)),
-            unbuilt("task-type-analysis", "Task Type Analysis",
-                    "Volume and average resolution time per type — what is eating the team.",
-                    QUALITY, "donut", List.of(DATE_RANGE, PROJECT, TASK_TYPE)),
+            built("task-type-analysis", "Task Type Analysis",
+                    "Volume raised against average resolution time per type — what is eating the team.",
+                    QUALITY, "donut", List.of(DATE_RANGE, PROJECT)),
 
             // ── WORKFLOW ────────────────────────────────────────────────────
             unbuilt("stage-funnel", "Stage Funnel",
@@ -171,8 +171,7 @@ public final class ReportCatalogue {
      * the two agreed.
      */
     private static final java.util.Set<String> NOT_KEPT_PER_PERSON =
-            java.util.Set.of("project-health", "aging", "sla-breach",
-                    "task-type-analysis", "stage-funnel", "stage-cycle-time",
+            java.util.Set.of("project-health", "aging", "stage-funnel", "stage-cycle-time",
                     "deployment-report", "client-report", "email-delivery-log");
 
     /**
@@ -194,7 +193,7 @@ public final class ReportCatalogue {
      * the filter declaration exists to prevent.
      */
     private static final java.util.Set<String> ANSWERED_PER_PERSON =
-            java.util.Set.of("date-wise");
+            java.util.Set.of("date-wise", "resource-velocity");
 
     private static final String OWN_WORK_DESCRIPTION =
             "What you closed each day, the effort you logged, and what you are still holding.";
@@ -269,6 +268,12 @@ public final class ReportCatalogue {
         }
         return new ReportDtos.Descriptor(d.key(), d.title(), d.description(), d.category(),
                 d.chart(), d.filters(), false, NO_PER_PERSON_EQUIVALENT);
+    }
+
+    private static ReportDtos.Descriptor built(String key, String title, String description,
+                                               ReportCategory category, String chart,
+                                               List<ReportFilterKind> filters) {
+        return new ReportDtos.Descriptor(key, title, description, category, chart, filters, true, null);
     }
 
     private static ReportDtos.Descriptor unbuilt(String key, String title, String description,
