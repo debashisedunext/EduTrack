@@ -444,7 +444,10 @@ describe('the client import wizard, step 4', () => {
     await toPreview()
 
     expect(screen.queryByRole('combobox', { name: /^client code/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('table')).toBeInTheDocument()
+    // Named rather than "the table": B-037 put the import history below the
+    // wizard, so the page has two. An unqualified getByRole would now pass on
+    // whichever it found first, which is not what this test is about.
+    expect(screen.getByRole('table', { name: /every row of your file/i })).toBeInTheDocument()
   })
 
   /**

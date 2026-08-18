@@ -2,7 +2,7 @@ import { AlertCircle, CheckCircle2, Download, Loader2, XCircle } from 'lucide-re
 import { Link } from 'react-router-dom'
 
 import { useGetImportBatch } from '@/api/generated/imports/imports'
-import type { ImportBatchResponseData } from '@/api/generated/model'
+import type { ImportBatch } from '@/api/generated/model'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -91,7 +91,7 @@ function CommitProgress({
   fileName,
   onStartAnother,
 }: {
-  batch: ImportBatchResponseData
+  batch: ImportBatch
   fileName: string
   onStartAnother: () => void
 }) {
@@ -196,7 +196,7 @@ function CommitProgress({
  * count of skipped rows they were just told they could recover, so silence here
  * reads as a broken button.
  */
-function ErrorReport({ batch }: { batch: ImportBatchResponseData }) {
+function ErrorReport({ batch }: { batch: ImportBatch }) {
   const download = useDownloadImportErrorReport()
   const url = batch.errorReportUrl
 
@@ -252,7 +252,7 @@ function ErrorReport({ batch }: { batch: ImportBatchResponseData }) {
  * and the distinction is the one this screen must not blur. A run that rejected
  * half a file completed; a run that died did not.
  */
-function headline(batch: ImportBatchResponseData, fileName: string): string {
+function headline(batch: ImportBatch, fileName: string): string {
   const written = batch.created + batch.updated
 
   switch (batch.status) {

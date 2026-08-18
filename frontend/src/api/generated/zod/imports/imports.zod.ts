@@ -317,6 +317,70 @@ export const commitImportBody = zod.object({
 }).describe('The same two things `\/validate` takes, for the reason B-033 recorded: the\nmapping is never parked server-side, so both steps carry it. Sending them\nagain is also what lets the server re-derive the verdicts rather than\ntrust a preview the caller assembled.\n')
 
 /**
+ * B-037 — the import history. Blueprint §4B.3's closing validation rule:
+*"every import writes an `import_batch` row so a bad import can be
+identified and reversed as a set."* This route is what makes
+**identified** true of something a person can reach.
+
+Until it existed a batch id was known only to the browser tab that
+started the run. `import_batches` recorded every import faithfully and
+nothing could list one, so an Admin who closed the wizard had no way back
+to the run that had just filled the client master from the wrong
+spreadsheet.
+
+**Filtered by `entity`, the stored discriminator — not by the URL segment
+a schema is mounted at.** `CLIENT`, not `clients`. The two names are kept
+apart deliberately (see `ImportSchema` and `ImportBatch.entity`), and
+translating one into the other on a read is the collapse that separation
+prevents.
+
+Capped, and the cap is on the response as `limit`. **No `ETag`**, unlike
+`getImportBatch` beside it: that one is polled every two seconds through a
+run, this one is opened by hand and changes when somebody runs an import.
+
+`master.write`, like everything else on this path. **403 rather than
+404**: a list is not a row, and the refusal is decided before any row is
+read.
+
+ * @summary Recent import runs, newest first (S-34)
+ */
+export const listImportBatchesQueryEntityDefault = "CLIENT";
+
+export const listImportBatchesQueryParams = zod.object({
+  "entity": zod.string().default(listImportBatchesQueryEntityDefault).describe('Which registration\'s runs. Defaults to `CLIENT` because S-34 is the\nscreen that has this panel; `RESOURCE` arrives with B-038 and needs\nno change here.\n')
+})
+
+export const listImportBatchesResponseDataBatchesItemFileNameMax = 255;
+
+
+
+export const listImportBatchesResponse = zod.object({
+  "data": zod.object({
+  "entity": zod.string().describe('The registration these runs belong to — what was asked for.'),
+  "batches": zod.array(zod.object({
+  "batchId": zod.number().describe('`import_batches.id`. An integer, not a UUID — the contract said\nUUID until B-030 read the baseline DDL.\n'),
+  "entity": zod.string().describe('`CLIENT` or `RESOURCE` — which registration this run was\nvalidated against, and what B-037\'s reversal query keys on.\nDeliberately the stored discriminator rather than the URL segment\n(`clients`): collapsing them would mean renaming a live URL to\nfix a column.\n'),
+  "fileName": zod.string().max(listImportBatchesResponseDataBatchesItemFileNameMax).nullish(),
+  "status": zod.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED']).describe('The commit job\'s lifecycle, and the only vocabulary\n`import_batches.status` uses. There is no state for the step-4\ndry run because the dry run writes nothing — no batch row\nexists until commit, and it is born `QUEUED`.\n\n`COMPLETED` is \*\*not\*\* a synonym for \"no rejections\": a run that\nrefused half the file and wrote the rest completed, and its error\nreport is how the user recovers the other half. `FAILED` means\nthe job itself died.\n'),
+  "processed": zod.number().describe('`created + updated + rejected` — derived, not a stored column, so\nit cannot disagree with the three numbers beside it. Reaches\n`total` exactly when the run is over.\n'),
+  "total": zod.number().describe('Every data row of the sheet, rejected ones included.'),
+  "created": zod.number(),
+  "updated": zod.number(),
+  "rejected": zod.number().describe('What the dry run refused, plus anything that failed at write\ntime — a row the preview judged writable can still break a\nconstraint no validator declared, and losing the other 499 to it\nwould be the wrong trade.\n'),
+  "errorReportUrl": zod.string().nullish().describe('`.xlsx` of rejected rows with an appended Reason column — B-036.\n\n\*\*A path relative to the API base\*\* — no `\/api\/v1` prefix, because\nthe file needs the caller\'s `Authorization` header and so is\ncomposed onto a base by whatever fetches it, exactly as the\ntemplate path is. \*\*Not an object-store URL.\*\* The\nfile is a verbatim extract of the client master, so it is served\nthrough `downloadImportErrorReport` with `master.write` re-checked\nat the moment of reading, rather than as a presigned URL the way\n§4B.4 serves attachments. A signed URL is a bearer credential that\noutlives the screen that minted it, in a browser history and a\nproxy log.\n\n\*\*Null exactly when there is nothing to download\*\*: the run has\nnot finished, no row was rejected, or the report could not be\nstored. A client renders the button disabled rather than hiding\nit — hiding leaves a user with no account of the rows that did\nnot land.\n\nIt appears on the \*\*same write that makes the status terminal\*\*,\nnever a later one: a client stops polling when it reads\n`COMPLETED`, so a report stamped afterwards is one nobody is\nstill asking for. The `ETag` covers this field for the same\nreason.\n'),
+  "startedAt": zod.string().datetime({}).optional().describe('`import_batches.created_at` — when the run was committed, not when it\nfinished. UTC, like everything else in storage; the user\'s timezone is\napplied when it is rendered.\n\nThe history panel\'s first column, and half of what \"a bad import can\nbe identified\" means in practice: an Admin knows roughly when they\nuploaded the wrong file long before they know its batch id.\n'),
+  "importedBy": zod.number().nullish().describe('Who committed the run. Nullable because it is recorded best-effort —\na caller the `dev-noauth` profile cannot identify starts a run with no\nactor rather than being refused one.\n'),
+  "importedByName": zod.string().nullish().describe('`importedBy` resolved to a display name — `full_name`, falling back to\nthe username.\n\n\*\*Present on `listImportBatches`, null on `getImportBatch`.\*\* The poll\ndeliberately does not resolve it: the screen watching a progress bar\nknows perfectly well who started the run, because they just pressed\nthe button, and a user lookup every two seconds for the length of an\nimport is a query per poll for a string that cannot change.\n\nNull also when the account has since been deleted. The panel then\nrenders the run unattributed, which is the truth, rather than an\n\"Unknown user\" placeholder that looks like a person.\n'),
+  "reversedAt": zod.string().datetime({}).nullish().describe('When this run was reversed as a set — B-037. Null means never, and it\nis the whole state machine: there is no `REVERSED` status, because\n`status` records how the \*run\* ended and a reversal is a later fact\nabout a run that already ended. Collapsing them would lose \"completed\nwith 6 rejections\" the moment somebody reversed it.\n'),
+  "reversedRows": zod.number().describe('Rows this run \*\*created\*\* that the reversal deleted.\n\nNever rows it merely updated. `clients.import_batch_id` is stamped on\ninsert only, so a row the run edited is not attributed to it — and\nthere is no before image anywhere, so an update is not something a\nreversal could undo. `reverseImportBatch` returns\n`updatedRowsNotReverted` so that limit is stated rather than inferred.\n'),
+  "retainedRows": zod.number().describe('Rows this run created that the reversal could \*\*not\*\* delete, because\nsomething else now references them — a client that has since been\nnamed on a ticket.\n\nKept rather than destroyed: the two ways to force the count to zero\nare failing the whole reversal because one client got used, or\ndeleting a ticket\'s client. Stored on the row because it is not\nderivable afterwards — once the others are gone, an unreversed batch\nand a fully reversed one both count zero.\n'),
+  "reversible": zod.boolean().describe('Whether `reverseImportBatch` would be accepted right now — \*\*the\nbutton\'s enabled state, decided by the server\*\*.\n\nA client could compute it from `status` and `reversedAt`, and that is\nexactly why it is here instead: those are the server\'s two refusals,\nand a copy in TypeScript is a second statement of them that agrees on\nthe day it is written. A rule added on one side afterwards becomes a\nbutton offering an operation the server refuses, on a screen whose job\nis deleting rows.\n\nTrue for a finished, un-reversed run — `COMPLETED` \*\*or\*\* `FAILED`. A\nfailed run is the one most likely to need reversing: it left rows in\nthe master that nobody approved the presence of.\n')
+}).describe('One import run — the progress bar\'s poll, a row of B-037\'s history panel\nand the body of a reversal\'s response, all the same object.\n\n\*\*Named rather than inlined since B-037\*\*, which is when it acquired a\nsecond and third reader. Three copies of a seventeen-field shape would be\nthree places to keep in step, and the panel needs every field the poll\nhas: it shows the counters, the status, the error-report link and the one\noperation the run offers.\n\n`required` is spelled out so the generated TypeScript stops making every\ncounter optional — a progress bar reading `processed ?? 0` renders 0% for\na run that is nearly finished, and the fallback hides it. `fileName`,\n`errorReportUrl`, `importedBy`, `importedByName` and `reversedAt` are the\nones that genuinely may be absent.\n')).describe('Newest first. The same object `getImportBatch` returns, not a\nslimmer summary: the panel shows every counter, the status, the\nerror-report link and `reversible`, which is all of them.\n'),
+  "limit": zod.number().describe('How many runs this route returns at most — \*\*stated rather than\napplied silently\*\*. `import_batches` only grows, and a bounded\nanswer that looks unbounded reads as \"these are all of them\" when\nit is not.\n')
+}).describe('B-037 — the import history panel. Blueprint §4B.3: \*\"every import\nwrites an `import_batch` row so a bad import can be identified and\nreversed as a set.\"\* This is the identification half.\n')
+})
+
+/**
  * `errorReportUrl` points at `downloadImportErrorReport`, an `.xlsx` of only
 the rejected rows with an appended Reason column, so the user fixes and
 re-uploads those rows rather than the whole file. Every import is
@@ -357,8 +421,89 @@ export const getImportBatchResponse = zod.object({
   "created": zod.number(),
   "updated": zod.number(),
   "rejected": zod.number().describe('What the dry run refused, plus anything that failed at write\ntime — a row the preview judged writable can still break a\nconstraint no validator declared, and losing the other 499 to it\nwould be the wrong trade.\n'),
-  "errorReportUrl": zod.string().nullish().describe('`.xlsx` of rejected rows with an appended Reason column — B-036.\n\n\*\*A path relative to the API base\*\* — no `\/api\/v1` prefix, because\nthe file needs the caller\'s `Authorization` header and so is\ncomposed onto a base by whatever fetches it, exactly as the\ntemplate path is. \*\*Not an object-store URL.\*\* The\nfile is a verbatim extract of the client master, so it is served\nthrough `downloadImportErrorReport` with `master.write` re-checked\nat the moment of reading, rather than as a presigned URL the way\n§4B.4 serves attachments. A signed URL is a bearer credential that\noutlives the screen that minted it, in a browser history and a\nproxy log.\n\n\*\*Null exactly when there is nothing to download\*\*: the run has\nnot finished, no row was rejected, or the report could not be\nstored. A client renders the button disabled rather than hiding\nit — hiding leaves a user with no account of the rows that did\nnot land.\n\nIt appears on the \*\*same write that makes the status terminal\*\*,\nnever a later one: a client stops polling when it reads\n`COMPLETED`, so a report stamped afterwards is one nobody is\nstill asking for. The `ETag` covers this field for the same\nreason.\n')
-}).describe('`required` is spelled out so the generated TypeScript stops making\nevery counter optional — a progress bar reading `processed ?? 0`\nrenders 0% for a run that is nearly finished, and the fallback hides\nit. `fileName` and `errorReportUrl` are the two that genuinely may be\nabsent.\n')
+  "errorReportUrl": zod.string().nullish().describe('`.xlsx` of rejected rows with an appended Reason column — B-036.\n\n\*\*A path relative to the API base\*\* — no `\/api\/v1` prefix, because\nthe file needs the caller\'s `Authorization` header and so is\ncomposed onto a base by whatever fetches it, exactly as the\ntemplate path is. \*\*Not an object-store URL.\*\* The\nfile is a verbatim extract of the client master, so it is served\nthrough `downloadImportErrorReport` with `master.write` re-checked\nat the moment of reading, rather than as a presigned URL the way\n§4B.4 serves attachments. A signed URL is a bearer credential that\noutlives the screen that minted it, in a browser history and a\nproxy log.\n\n\*\*Null exactly when there is nothing to download\*\*: the run has\nnot finished, no row was rejected, or the report could not be\nstored. A client renders the button disabled rather than hiding\nit — hiding leaves a user with no account of the rows that did\nnot land.\n\nIt appears on the \*\*same write that makes the status terminal\*\*,\nnever a later one: a client stops polling when it reads\n`COMPLETED`, so a report stamped afterwards is one nobody is\nstill asking for. The `ETag` covers this field for the same\nreason.\n'),
+  "startedAt": zod.string().datetime({}).optional().describe('`import_batches.created_at` — when the run was committed, not when it\nfinished. UTC, like everything else in storage; the user\'s timezone is\napplied when it is rendered.\n\nThe history panel\'s first column, and half of what \"a bad import can\nbe identified\" means in practice: an Admin knows roughly when they\nuploaded the wrong file long before they know its batch id.\n'),
+  "importedBy": zod.number().nullish().describe('Who committed the run. Nullable because it is recorded best-effort —\na caller the `dev-noauth` profile cannot identify starts a run with no\nactor rather than being refused one.\n'),
+  "importedByName": zod.string().nullish().describe('`importedBy` resolved to a display name — `full_name`, falling back to\nthe username.\n\n\*\*Present on `listImportBatches`, null on `getImportBatch`.\*\* The poll\ndeliberately does not resolve it: the screen watching a progress bar\nknows perfectly well who started the run, because they just pressed\nthe button, and a user lookup every two seconds for the length of an\nimport is a query per poll for a string that cannot change.\n\nNull also when the account has since been deleted. The panel then\nrenders the run unattributed, which is the truth, rather than an\n\"Unknown user\" placeholder that looks like a person.\n'),
+  "reversedAt": zod.string().datetime({}).nullish().describe('When this run was reversed as a set — B-037. Null means never, and it\nis the whole state machine: there is no `REVERSED` status, because\n`status` records how the \*run\* ended and a reversal is a later fact\nabout a run that already ended. Collapsing them would lose \"completed\nwith 6 rejections\" the moment somebody reversed it.\n'),
+  "reversedRows": zod.number().describe('Rows this run \*\*created\*\* that the reversal deleted.\n\nNever rows it merely updated. `clients.import_batch_id` is stamped on\ninsert only, so a row the run edited is not attributed to it — and\nthere is no before image anywhere, so an update is not something a\nreversal could undo. `reverseImportBatch` returns\n`updatedRowsNotReverted` so that limit is stated rather than inferred.\n'),
+  "retainedRows": zod.number().describe('Rows this run created that the reversal could \*\*not\*\* delete, because\nsomething else now references them — a client that has since been\nnamed on a ticket.\n\nKept rather than destroyed: the two ways to force the count to zero\nare failing the whole reversal because one client got used, or\ndeleting a ticket\'s client. Stored on the row because it is not\nderivable afterwards — once the others are gone, an unreversed batch\nand a fully reversed one both count zero.\n'),
+  "reversible": zod.boolean().describe('Whether `reverseImportBatch` would be accepted right now — \*\*the\nbutton\'s enabled state, decided by the server\*\*.\n\nA client could compute it from `status` and `reversedAt`, and that is\nexactly why it is here instead: those are the server\'s two refusals,\nand a copy in TypeScript is a second statement of them that agrees on\nthe day it is written. A rule added on one side afterwards becomes a\nbutton offering an operation the server refuses, on a screen whose job\nis deleting rows.\n\nTrue for a finished, un-reversed run — `COMPLETED` \*\*or\*\* `FAILED`. A\nfailed run is the one most likely to need reversing: it left rows in\nthe master that nobody approved the presence of.\n')
+}).describe('One import run — the progress bar\'s poll, a row of B-037\'s history panel\nand the body of a reversal\'s response, all the same object.\n\n\*\*Named rather than inlined since B-037\*\*, which is when it acquired a\nsecond and third reader. Three copies of a seventeen-field shape would be\nthree places to keep in step, and the panel needs every field the poll\nhas: it shows the counters, the status, the error-report link and the one\noperation the run offers.\n\n`required` is spelled out so the generated TypeScript stops making every\ncounter optional — a progress bar reading `processed ?? 0` renders 0% for\na run that is nearly finished, and the fallback hides it. `fileName`,\n`errorReportUrl`, `importedBy`, `importedByName` and `reversedAt` are the\nones that genuinely may be absent.\n')
+})
+
+/**
+ * B-037 — blueprint §4B.3's closing validation rule and §17's named
+mitigation for *"Client Excel import silently corrupts the master"*:
+**a bad import can be identified and reversed as a set.**
+
+Deletes the rows the run **created**. Rows it *updated* are not touched
+and could not be restored — `clients.import_batch_id` is stamped on
+insert only, and there is no before image anywhere — so the response
+carries `updatedRowsNotReverted` rather than letting a count that does
+not add up imply otherwise. A client that has since been named on a
+ticket comes back in `retained` with a reason, because failing the whole
+reversal over one used client is unhelpful and deleting the ticket's
+client is worse.
+
+**`POST`, not `DELETE`.** The resource at this path is the batch, and the
+batch is emphatically *not* deleted: it is the audit trail, and it
+survives the reversal with four more columns filled in.
+
+**Not idempotent, and refused rather than made so.** A second call
+answers `import-batch-already-reversed`. Succeeding quietly would be
+tempting — the rows are already gone, so it would delete nothing — and
+would overwrite `reversedAt` and both counters with the second attempt's
+zeroes: a false entry in the one table that exists to make bad imports
+traceable.
+
+`master.write`. **This is the only route in the product that deletes rows
+from the client master** — `updateClientStatus` deactivates and everything
+else preserves — and it does not get a capability of its own: the
+capability that lets somebody write 412 clients in one action is the
+capability that lets them take those same 412 back, and splitting them
+would mean an Admin who can cause the damage cannot undo it. **403 rather
+than 404** for the reason the poll gives: decided before the id is looked
+up.
+
+ * @summary Reverse one import as a set (S-34)
+ */
+export const reverseImportBatchParams = zod.object({
+  "batchId": zod.number().describe('`import_batches.id` — a `BIGINT AUTO_INCREMENT`, like every other\nidentifier in this schema. Described as a UUID until B-030, which is\nwhen the engine first had to resolve one against the table.\n')
+})
+
+export const reverseImportBatchResponseDataBatchFileNameMax = 255;
+
+
+
+export const reverseImportBatchResponse = zod.object({
+  "data": zod.object({
+  "batch": zod.object({
+  "batchId": zod.number().describe('`import_batches.id`. An integer, not a UUID — the contract said\nUUID until B-030 read the baseline DDL.\n'),
+  "entity": zod.string().describe('`CLIENT` or `RESOURCE` — which registration this run was\nvalidated against, and what B-037\'s reversal query keys on.\nDeliberately the stored discriminator rather than the URL segment\n(`clients`): collapsing them would mean renaming a live URL to\nfix a column.\n'),
+  "fileName": zod.string().max(reverseImportBatchResponseDataBatchFileNameMax).nullish(),
+  "status": zod.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED']).describe('The commit job\'s lifecycle, and the only vocabulary\n`import_batches.status` uses. There is no state for the step-4\ndry run because the dry run writes nothing — no batch row\nexists until commit, and it is born `QUEUED`.\n\n`COMPLETED` is \*\*not\*\* a synonym for \"no rejections\": a run that\nrefused half the file and wrote the rest completed, and its error\nreport is how the user recovers the other half. `FAILED` means\nthe job itself died.\n'),
+  "processed": zod.number().describe('`created + updated + rejected` — derived, not a stored column, so\nit cannot disagree with the three numbers beside it. Reaches\n`total` exactly when the run is over.\n'),
+  "total": zod.number().describe('Every data row of the sheet, rejected ones included.'),
+  "created": zod.number(),
+  "updated": zod.number(),
+  "rejected": zod.number().describe('What the dry run refused, plus anything that failed at write\ntime — a row the preview judged writable can still break a\nconstraint no validator declared, and losing the other 499 to it\nwould be the wrong trade.\n'),
+  "errorReportUrl": zod.string().nullish().describe('`.xlsx` of rejected rows with an appended Reason column — B-036.\n\n\*\*A path relative to the API base\*\* — no `\/api\/v1` prefix, because\nthe file needs the caller\'s `Authorization` header and so is\ncomposed onto a base by whatever fetches it, exactly as the\ntemplate path is. \*\*Not an object-store URL.\*\* The\nfile is a verbatim extract of the client master, so it is served\nthrough `downloadImportErrorReport` with `master.write` re-checked\nat the moment of reading, rather than as a presigned URL the way\n§4B.4 serves attachments. A signed URL is a bearer credential that\noutlives the screen that minted it, in a browser history and a\nproxy log.\n\n\*\*Null exactly when there is nothing to download\*\*: the run has\nnot finished, no row was rejected, or the report could not be\nstored. A client renders the button disabled rather than hiding\nit — hiding leaves a user with no account of the rows that did\nnot land.\n\nIt appears on the \*\*same write that makes the status terminal\*\*,\nnever a later one: a client stops polling when it reads\n`COMPLETED`, so a report stamped afterwards is one nobody is\nstill asking for. The `ETag` covers this field for the same\nreason.\n'),
+  "startedAt": zod.string().datetime({}).optional().describe('`import_batches.created_at` — when the run was committed, not when it\nfinished. UTC, like everything else in storage; the user\'s timezone is\napplied when it is rendered.\n\nThe history panel\'s first column, and half of what \"a bad import can\nbe identified\" means in practice: an Admin knows roughly when they\nuploaded the wrong file long before they know its batch id.\n'),
+  "importedBy": zod.number().nullish().describe('Who committed the run. Nullable because it is recorded best-effort —\na caller the `dev-noauth` profile cannot identify starts a run with no\nactor rather than being refused one.\n'),
+  "importedByName": zod.string().nullish().describe('`importedBy` resolved to a display name — `full_name`, falling back to\nthe username.\n\n\*\*Present on `listImportBatches`, null on `getImportBatch`.\*\* The poll\ndeliberately does not resolve it: the screen watching a progress bar\nknows perfectly well who started the run, because they just pressed\nthe button, and a user lookup every two seconds for the length of an\nimport is a query per poll for a string that cannot change.\n\nNull also when the account has since been deleted. The panel then\nrenders the run unattributed, which is the truth, rather than an\n\"Unknown user\" placeholder that looks like a person.\n'),
+  "reversedAt": zod.string().datetime({}).nullish().describe('When this run was reversed as a set — B-037. Null means never, and it\nis the whole state machine: there is no `REVERSED` status, because\n`status` records how the \*run\* ended and a reversal is a later fact\nabout a run that already ended. Collapsing them would lose \"completed\nwith 6 rejections\" the moment somebody reversed it.\n'),
+  "reversedRows": zod.number().describe('Rows this run \*\*created\*\* that the reversal deleted.\n\nNever rows it merely updated. `clients.import_batch_id` is stamped on\ninsert only, so a row the run edited is not attributed to it — and\nthere is no before image anywhere, so an update is not something a\nreversal could undo. `reverseImportBatch` returns\n`updatedRowsNotReverted` so that limit is stated rather than inferred.\n'),
+  "retainedRows": zod.number().describe('Rows this run created that the reversal could \*\*not\*\* delete, because\nsomething else now references them — a client that has since been\nnamed on a ticket.\n\nKept rather than destroyed: the two ways to force the count to zero\nare failing the whole reversal because one client got used, or\ndeleting a ticket\'s client. Stored on the row because it is not\nderivable afterwards — once the others are gone, an unreversed batch\nand a fully reversed one both count zero.\n'),
+  "reversible": zod.boolean().describe('Whether `reverseImportBatch` would be accepted right now — \*\*the\nbutton\'s enabled state, decided by the server\*\*.\n\nA client could compute it from `status` and `reversedAt`, and that is\nexactly why it is here instead: those are the server\'s two refusals,\nand a copy in TypeScript is a second statement of them that agrees on\nthe day it is written. A rule added on one side afterwards becomes a\nbutton offering an operation the server refuses, on a screen whose job\nis deleting rows.\n\nTrue for a finished, un-reversed run — `COMPLETED` \*\*or\*\* `FAILED`. A\nfailed run is the one most likely to need reversing: it left rows in\nthe master that nobody approved the presence of.\n')
+}).describe('One import run — the progress bar\'s poll, a row of B-037\'s history panel\nand the body of a reversal\'s response, all the same object.\n\n\*\*Named rather than inlined since B-037\*\*, which is when it acquired a\nsecond and third reader. Three copies of a seventeen-field shape would be\nthree places to keep in step, and the panel needs every field the poll\nhas: it shows the counters, the status, the error-report link and the one\noperation the run offers.\n\n`required` is spelled out so the generated TypeScript stops making every\ncounter optional — a progress bar reading `processed ?? 0` renders 0% for\na run that is nearly finished, and the fallback hides it. `fileName`,\n`errorReportUrl`, `importedBy`, `importedByName` and `reversedAt` are the\nones that genuinely may be absent.\n'),
+  "deleted": zod.array(zod.string()).describe('Natural keys removed — client codes, not database ids, because\nthe user is going to look them up in the spreadsheet they\nuploaded. Named rather than only counted: the count is on\n`batch.reversedRows`, and what an operator asks next is \*which\nones\*.\n'),
+  "retained": zod.array(zod.object({
+  "naturalKey": zod.string(),
+  "reason": zod.string().describe('Plain language, for the person reading the screen. Never a\nconstraint name or a database message — the same call B-036\nmade about the error report\'s Reason column, and for the\nsame reason: this text gets pasted into email.\n')
+})).describe('Rows this run created that the reversal refused to remove. \*\*An\nempty array is the ordinary outcome and a non-empty one is not a\nfailure\*\* — keeping a client that has since been named on a\nticket is the correct result, and the two ways to avoid it are\nfailing the whole reversal or destroying the ticket\'s client.\n'),
+  "updatedRowsNotReverted": zod.number().describe('\*\*The honest half of the promise.\*\* Rows this run \*updated\*\nrather than created, which a reversal does not touch and could\nnot restore: `clients.import_batch_id` is stamped on insert only,\nand there is no before image anywhere.\n\nCarried explicitly, and never folded into `retained`, because it\nis not a row the reversal declined to delete — it is a row the\nreversal was never about. Somebody who imported 412 rows and sees\n\"12 deleted\" is owed the sentence that accounts for the other 400.\n')
+})
 })
 
 /**

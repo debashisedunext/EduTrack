@@ -529,13 +529,21 @@ export interface Db {
    * poll would make it impossible to see one move, which is precisely the case
    * a screen gets wrong. Each poll advances the run by a row.
    *
-   * Empty on purpose: a batch is created by pressing Import, and a seeded one
-   * would let a test pass that never committed anything.
+   * **Seeded since B-037, where it was empty on purpose before.** The old reason
+   * was the progress bar: a batch is created by pressing Import, and a seeded one
+   * would let a step-5 test pass that never committed anything. That still holds
+   * for the runs the poll advances, and nothing here is one of those.
+   *
+   * The history panel inverts the argument. Its whole point is showing runs from
+   * *before* this session — an empty history can only be seen by importing first,
+   * and a reversal could not be exercised at all without running an import,
+   * waiting for it to finish and only then reversing. So two finished runs are
+   * seeded and every new batch is still created by pressing Import.
    */
   importBatches: Record<number, ImportBatchRow>;
 }
 
-/** One row of `import_batches`, as `ImportBatchResponse.data` shapes it. */
+/** One row of `import_batches`, as the contract's `ImportBatch` shapes it. */
 export interface ImportBatchRow {
   batchId: number;
   entity: string;
@@ -547,6 +555,26 @@ export interface ImportBatchRow {
   updated: number;
   rejected: number;
   errorReportUrl: string | null;
+  /** B-037 · provenance — the history panel's first three columns. */
+  startedAt: string;
+  importedBy: number | null;
+  importedByName: string | null;
+  /**
+   * B-037 · reversal. `reversedAt` is the whole state machine, exactly as on the
+   * real row: there is no `REVERSED` status, because `status` records how the
+   * *run* ended and a reversal is a later fact about a run that already ended.
+   */
+  reversedAt: string | null;
+  reversedRows: number;
+  retainedRows: number;
+  /**
+   * The server decides whether the Reverse button is enabled, and the mock has
+   * to as well — a mock that always sent `true` would let a screen ship that
+   * offers to reverse a running import. Kept as a stored field rather than
+   * derived on read for the same reason the real DTO computes it server-side:
+   * one place decides, and the client never re-derives it.
+   */
+  reversible: boolean;
 }
 
 export interface Holiday {
@@ -1239,7 +1267,77 @@ export function createDb(): Db {
   };
   seedWalkthrough(db);
   seedFiller(db);
+  seedImportBatches(db);
   return db;
+}
+
+/**
+ * B-037 · two finished imports, so the history panel has something to be.
+ *
+ * The ids are taken from the same sequence every other batch uses, so a run
+ * committed during a session lands *after* these rather than colliding with
+ * them — the panel is newest-first, and a seeded row appearing above a run the
+ * user just started would be the one thing this fixture must not do.
+ *
+ * The two are deliberately different runs:
+ *
+ *   - **#1 has been reversed already.** It is what the disabled Reverse button
+ *     and the "Reversed — 40 deleted, 2 kept" line render from, and it carries a
+ *     non-zero `retainedRows`, because a partial reversal is the outcome most
+ *     likely to be got wrong and least likely to be seen by hand.
+ *   - **#2 completed with rejections and is reversible.** It is the one a
+ *     reversal is exercised against, and it has an error report, so the panel's
+ *     rejected-count download is reachable without committing anything.
+ *
+ * Neither is QUEUED or RUNNING: those belong to a batch the poll is advancing,
+ * and one sitting here permanently would be a progress bar that never moves.
+ */
+function seedImportBatches(db: Db) {
+  const rows: ImportBatchRow[] = [
+    {
+      batchId: nextId(db, 'importBatch'),
+      entity: 'CLIENT',
+      fileName: 'clients-q1-onboarding.xlsx',
+      status: 'COMPLETED',
+      processed: 44,
+      total: 44,
+      created: 42,
+      updated: 2,
+      rejected: 0,
+      errorReportUrl: null,
+      startedAt: '2026-08-11T06:14:00.000Z',
+      importedBy: 1,
+      importedByName: 'Anita Desai',
+      reversedAt: '2026-08-11T07:02:00.000Z',
+      reversedRows: 40,
+      // Two of the forty-two had tickets raised against them in the 48 minutes
+      // between the import and the reversal, so they were kept.
+      retainedRows: 2,
+      reversible: false,
+    },
+    {
+      batchId: nextId(db, 'importBatch'),
+      entity: 'CLIENT',
+      fileName: 'clients-august.xlsx',
+      status: 'COMPLETED',
+      processed: 31,
+      total: 31,
+      created: 24,
+      updated: 4,
+      rejected: 3,
+      errorReportUrl: '/import-batches/2/error-report',
+      startedAt: '2026-08-17T11:48:00.000Z',
+      importedBy: 1,
+      importedByName: 'Anita Desai',
+      reversedAt: null,
+      reversedRows: 0,
+      retainedRows: 0,
+      reversible: true,
+    },
+  ];
+  for (const row of rows) {
+    db.importBatches[row.batchId] = row;
+  }
 }
 
 /**

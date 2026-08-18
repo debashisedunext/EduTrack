@@ -39,3 +39,16 @@ export function useToast() {
   const dismiss = useToastStore((s) => s.dismiss)
   return { toasts, dismiss }
 }
+
+/**
+ * Test-only. The store is module-level so a toast fired in one test survives
+ * into the next `render()` in the same file — `resetDb`'s own reason,
+ * `src/test/setup.ts` calls this beside it in the global `afterEach` for the
+ * same one. Without it, a later test querying a button whose accessible name
+ * happens to collide with a still-mounted toast's dismiss button (both named
+ * "Close" is the case that found this) gets an ambiguous-match failure that
+ * has nothing to do with what it is testing.
+ */
+export function resetToasts() {
+  useToastStore.setState({ toasts: [] })
+}
