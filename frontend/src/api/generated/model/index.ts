@@ -67,6 +67,8 @@ export * from './auditLogEntryUserAgent';
 export * from './auditLogListResponse';
 export * from './autoAssignRule';
 export * from './bounceEmailWebhookBody';
+export * from './bulkChangeTicketLevelBody';
+export * from './bulkCloseTicketsBody';
 export * from './bulkReassignTicketsBody';
 export * from './bulkResultResponse';
 export * from './bulkResultResponseData';
