@@ -934,4 +934,40 @@ class TicketJournalTest {
                     .isEqualTo(hashedWhenAppended);
         }
     }
+
+    /**
+     * C-042 · {@link TicketJournal#openHopFor} — a plain pass-through onto
+     * {@code findByCurrentTicketId}, tested anyway because it is Stream C's
+     * only sanctioned way to see the number the transition service counts
+     * {@code seqNo} and {@code iterationNo} up from.
+     */
+    @Nested
+    @DisplayName("openHopFor")
+    class OpenHopFor {
+
+        @Test
+        @DisplayName("returns the open hop, unchanged")
+        void returnsTheOpenHop() {
+            TicketStageTransition open = hop();
+            when(transitions.findByCurrentTicketId(TICKET)).thenReturn(Optional.of(open));
+
+            assertThat(journal.openHopFor(TICKET)).contains(open);
+        }
+
+        @Test
+        @DisplayName("empty when the ticket has no open hop")
+        void emptyWhenNoOpenHop() {
+            when(transitions.findByCurrentTicketId(TICKET)).thenReturn(Optional.empty());
+
+            assertThat(journal.openHopFor(TICKET)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("rejects a null ticket id rather than delegating it")
+        void rejectsNullTicketId() {
+            assertThatThrownBy(() -> journal.openHopFor(null))
+                    .isInstanceOf(AppendRejectedException.class);
+            verifyNoInteractions(transitions);
+        }
+    }
 }
