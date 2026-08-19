@@ -47,6 +47,7 @@ export function AttachmentGallery({
   items,
   tombstones,
   onRemove,
+  uploaderNames,
   className,
 }: {
   items: readonly AttachmentItem[]
@@ -64,6 +65,16 @@ export function AttachmentGallery({
    * assert that the caller may remove anything. A refusal comes back as a 403.
    */
   onRemove?: (id: string) => void
+  /**
+   * C-060 · the Attachments tab's "documents as rows with size **and
+   * uploader**" — this strip has never needed it, so it stays optional and
+   * unread by `TicketAttachmentsSection`'s call site. Keyed by `item.id`
+   * rather than folded into `AttachmentItem` itself, which lives in
+   * `components/ui/` and is consumed by three other streams — adding a field
+   * only this feature populates would be exactly the kind of shared-surface
+   * change `useTicketAttachments`'s own note on `tombstones` argues against.
+   */
+  uploaderNames?: Readonly<Record<string, string>>
   className?: string
 }) {
   const [expanded, setExpanded] = React.useState(false)
@@ -110,9 +121,9 @@ export function AttachmentGallery({
           // whole tile rather than only of itself, which would be a 20px target.
           <li key={item.id} className="group relative">
             {isPreviewableImage(item.contentType) ? (
-              <ImageTile item={item} onOpen={() => openLightboxAt(item)} />
+              <ImageTile item={item} uploader={uploaderNames?.[item.id]} onOpen={() => openLightboxAt(item)} />
             ) : (
-              <FileChip item={item} />
+              <FileChip item={item} uploader={uploaderNames?.[item.id]} />
             )}
 
             {onRemove && (
@@ -225,12 +236,12 @@ function Tombstone({ row }: { row: Attachment }) {
  * is explicit that a file is not visible until the scan passes, and there is
  * nothing behind a click on it either way.
  */
-function ImageTile({ item, onOpen }: { item: AttachmentItem; onOpen: () => void }) {
+function ImageTile({ item, uploader, onOpen }: { item: AttachmentItem; uploader?: string; onOpen: () => void }) {
   // `attachmentPreviewSource` is what handles the null-thumbnail cases — a WebP,
   // an image already smaller than the reduction box, one the server could not
   // decode — by falling back to the full file rather than to an icon.
   const preview = item.status === 'ready' ? attachmentPreviewSource(item) : undefined
-  const label = `${item.name}, ${formatFileSize(item.sizeBytes)}${statusSuffix(item)}`
+  const label = `${item.name}, ${formatFileSize(item.sizeBytes)}${uploader ? `, uploaded by ${uploader}` : ''}${statusSuffix(item)}`
 
   if (!preview) {
     return (
@@ -271,8 +282,8 @@ function ImageTile({ item, onOpen }: { item: AttachmentItem; onOpen: () => void 
 }
 
 /** Everything that is not a picture: a name, a size, and what state it is in. */
-function FileChip({ item }: { item: AttachmentItem }) {
-  const label = `${item.name}, ${formatFileSize(item.sizeBytes)}${statusSuffix(item)}`
+function FileChip({ item, uploader }: { item: AttachmentItem; uploader?: string }) {
+  const label = `${item.name}, ${formatFileSize(item.sizeBytes)}${uploader ? `, uploaded by ${uploader}` : ''}${statusSuffix(item)}`
 
   const inner = (
     <>
@@ -281,6 +292,7 @@ function FileChip({ item }: { item: AttachmentItem }) {
         <span className="block max-w-[14rem] truncate text-sm text-content">{item.name}</span>
         <span className="block text-caption text-content-muted">
           {formatFileSize(item.sizeBytes)}
+          {uploader ? ` · ${uploader}` : ''}
           {item.status === 'failed' && item.error ? ` · ${item.error}` : ''}
         </span>
       </span>

@@ -13,6 +13,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { RichTextView } from '@/components/ui/rich-text-view'
 import { ensureRichText } from '@/components/ui/rich-text'
 
+import { AttachmentsTab } from '../attachments/AttachmentsTab'
+import { useAttachmentsTab } from '../attachments/useAttachmentsTab'
 import { CommentBox } from '../comments/CommentBox'
 import { CommentThread } from '../comments/CommentThread'
 import { useTicketComments } from '../comments/useTicketComments'
@@ -158,6 +160,13 @@ export function TicketDetailPage() {
   // on why this, unlike the comment box, has nothing else on the page that
   // needs it fetched early.
   const history = useTicketHistory({ ticketId, cycle, enabled: activeTab === 'history' })
+  /*
+    C-060 · fetched only once the tab is open, same rule `useTicketHistory`
+    follows for the History tab: nothing outside this tab needs every cycle's
+    files, and `detail.attachments` above is cycle-scoped for the strip's own
+    at-a-glance purpose.
+  */
+  const attachmentsTab = useAttachmentsTab({ ticketId, enabled: ticketId.length > 0 && activeTab === 'attachments' })
 
   const tabs: DetailTab[] = React.useMemo(
     () =>
@@ -189,6 +198,14 @@ export function TicketDetailPage() {
               isLoadingMore={history.isLoadingMore}
               onLoadMore={history.loadMore}
             />
+          ) : id === 'attachments' ? (
+            <AttachmentsTab
+              attachments={attachmentsTab.rows}
+              isLoading={attachmentsTab.isLoading}
+              loadError={attachmentsTab.loadError}
+              clientVisibleOnly={attachmentsTab.clientVisibleOnly}
+              onClientVisibleOnlyChange={attachmentsTab.setClientVisibleOnly}
+            />
           ) : (
             <PendingSection title={`${label} tab`} owner={owner} note={note} />
           ),
@@ -212,6 +229,11 @@ export function TicketDetailPage() {
       history.isLoadingMore,
       history.loadMore,
       viewer,
+      attachmentsTab.rows,
+      attachmentsTab.isLoading,
+      attachmentsTab.loadError,
+      attachmentsTab.clientVisibleOnly,
+      attachmentsTab.setClientVisibleOnly,
     ],
   )
 
