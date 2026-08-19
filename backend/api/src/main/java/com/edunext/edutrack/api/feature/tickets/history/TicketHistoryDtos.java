@@ -38,10 +38,21 @@ final class TicketHistoryDtos {
      *                      auto-escalation or a scanner, not a person
      * @param note          {@code ticket_history.remarks}, or the comment body for
      *                      a synthesised {@code COMMENTED} row
-     * @param stageCode     <b>always null today.</b> A handoff's stage lives on
-     *                      {@code ticket_stage_transitions}, which C-042 has not
-     *                      built, and no {@code ticket_history} row carries a
-     *                      stage of its own either
+     * @param isClientVisible <b>C-034.</b> Null for every real {@code ticket_history}
+     *                      row — visibility is a comment concept, not a field-change
+     *                      one. Set from {@code !TicketComment.isInternal()} on a
+     *                      {@code COMMENTED} row, mirroring {@code CommentDto}'s own
+     *                      inversion, so the merged stream carries the same
+     *                      internal/client-visible fact the Comments tab shows
+     * @param stageCode     Null for a real {@code ticket_history} row — a handoff's
+     *                      stage lives on {@code ticket_stage_transitions}, which
+     *                      C-042 has not built. <b>Not null on a {@code COMMENTED}
+     *                      row</b>: unlike a history event, {@code ticket_comments}
+     *                      stamps its own {@code stage_code} at write time
+     *                      (frozen so a comment written during QA still reads as
+     *                      QA after the ribbon moves on) and the mock has read it
+     *                      onto the interleaved row since C-059 — this was the one
+     *                      place the real endpoint still disagreed with its own mock
      * @param iterationNo   <b>always null today</b>, for the same reason as
      *                      {@code stageCode} — {@code CommentDtos.CommentDto}
      *                      documents the identical absence for the identical
@@ -62,6 +73,7 @@ final class TicketHistoryDtos {
             String oldValue,
             String newValue,
             String note,
+            Boolean isClientVisible,
             String stageCode,
             Integer cycleNo,
             Integer iterationNo,
@@ -110,6 +122,7 @@ final class TicketHistoryDtos {
                     row.getNewValue(),
                     row.getRemarks(),
                     null,
+                    null,
                     row.getCycleNo() == null ? null : (int) row.getCycleNo(),
                     null,
                     row.isCorrection(),
@@ -138,7 +151,8 @@ final class TicketHistoryDtos {
                     null,
                     null,
                     row.getBodyText(),
-                    null,
+                    !row.isInternal(),
+                    row.getStageCode(),
                     row.getCycleNo() == null ? null : (int) row.getCycleNo(),
                     null,
                     false,

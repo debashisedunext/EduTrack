@@ -11,8 +11,10 @@ import {
 } from 'lucide-react'
 
 import type { HistoryEntry } from '@/api/generated/model/historyEntry'
+import { Chip } from '@/components/ui/chip'
 import { cn } from '@/lib/utils'
 
+import { titleCase } from '../stageDisplay'
 import { describeHistoryEntry } from './historyEntryText'
 
 const ICON_BY_ACTION: Record<string, LucideIcon> = {
@@ -35,6 +37,14 @@ const ICON_BY_ACTION: Record<string, LucideIcon> = {
  * a quoted, indented treatment — the one row in the stream that is prose
  * someone wrote rather than a fact the server recorded about a field.
  *
+ * C-034 · a comment row also carries its own stamped stage and its
+ * visibility, both dropped by the offset-`id` merge C-059 shipped. `§4B.5`'s
+ * "two backgrounds are now both drawn" rule (`CommentCard`'s own) applies
+ * here too: the quoted body's left border turns amber and a `Client visible`
+ * chip appears for a client-visible comment, so a reader of the *merged*
+ * stream sees the same leak-risk signal the Comments tab shows, rather than
+ * every row reading as the safe kind by default.
+ *
  * No edit or delete affordance is drawn here, and none ever will be — the
  * component has nothing to call even if it wanted one. `TicketHistoryController`
  * registers no `PUT`/`PATCH`/`DELETE` for this path (CLAUDE.md's append-only
@@ -50,7 +60,12 @@ export function HistoryEntryRow({ entry }: { entry: HistoryEntry }) {
       <Icon aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-content-muted" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         {isComment ? (
-          <p className="whitespace-pre-wrap border-l-2 border-border pl-2 text-body text-content">
+          <p
+            className={cn(
+              'whitespace-pre-wrap border-l-2 pl-2 text-body text-content',
+              entry.isClientVisible ? 'border-warning' : 'border-border',
+            )}
+          >
             {entry.note}
           </p>
         ) : (
@@ -59,8 +74,17 @@ export function HistoryEntryRow({ entry }: { entry: HistoryEntry }) {
             {entry.isCorrection && <span className="ml-1 text-caption">(correction)</span>}
           </p>
         )}
-        <p className="text-caption text-content-muted">
-          {actorLabel(entry)} · {formatWhen(entry.createdAt)}
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-content-muted">
+          <span>
+            {actorLabel(entry)}
+            {isComment && entry.stageCode ? ` · ${titleCase(entry.stageCode)}` : ''} · {formatWhen(entry.createdAt)}
+          </span>
+          {isComment && entry.isClientVisible && (
+            <Chip variant="warning">
+              <span aria-hidden="true">⚠</span>
+              Client visible
+            </Chip>
+          )}
         </p>
       </div>
     </li>
