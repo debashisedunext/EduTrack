@@ -1534,6 +1534,67 @@ paths:
         '304': { description: Not modified. }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /tickets/{ticketId}/links:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [tickets]
+      operationId: createTicketLink
+      summary: Link this ticket to another (blueprint §16 item 17, §7.5's create-form row)
+      description: |
+        `linkType` reads **from this ticket to the target**: `BLOCKS` means this
+        ticket blocks the target, `DUPLICATE_OF` means this ticket is a duplicate
+        of the target. `BLOCKS`/`BLOCKED_BY` is one relationship stored once —
+        picking `BLOCKED_BY` here writes the identical row `BLOCKS` would write
+        from the target's side, so the two can never fall out of sync. Reading a
+        ticket's own linked-tickets panel (`GET .../full`) resolves both
+        directions, labelling each with the type as it reads from *that*
+        ticket — a `BLOCKS` row shows as "Is blocked by" on the target.
+
+        `RELATES_TO` is symmetric; `DUPLICATE_OF` is not — its inverse renders
+        as `DUPLICATED_BY` on the other ticket, which is never a submittable
+        `linkType` here.
+
+        **`400`, not `422`, for both a self-link and a `DUPLICATED_BY`
+        submission** — CONVENTIONS.md's own distinction: nothing about the
+        ticket's *state* refuses either, and resending with a different
+        `targetTicketId` or `linkType` succeeds. The target ticket is
+        resolved through the caller's own row scope, so a target outside it
+        is `404`, identical to one that does not exist (§10.2's
+        no-existence-leak rule).
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTicketLinkRequest' }
+      responses:
+        '201':
+          description: Linked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LinkedTicketResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /tickets/{ticketId}/links/{linkId}:
+    parameters:
+      - { $ref: '#/components/parameters/TicketId' }
+      - { name: linkId, in: path, required: true, schema: { type: integer, format: int64 } }
+    delete:
+      tags: [tickets]
+      operationId: deleteTicketLink
+      summary: Remove a link
+      description: |
+        Either side of the relationship may remove it — `ticket_links` is
+        ordinary mutable data, not one of CLAUDE.md's three append-only
+        tables. `linkId` must name a row touching this ticket on either end;
+        one that does not is `404`, the same answer as one that never
+        existed.
+      responses:
+        '204': { description: Removed. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /tickets/{ticketId}/assign:
     parameters: [{ $ref: '#/components/parameters/TicketId' }]
     post:
@@ -2844,8 +2905,9 @@ paths:
           description: |
             No schema is registered under that key. `schema` is a path segment,
             so an unregistered value makes the resource absent rather than the
-            request malformed — and `users` is that case today, declared in the
-            enum and not registered until B-038.
+            request malformed. `users` was that case until B-038 registered it;
+            both values the enum declares now resolve, so this answers a key the
+            enum does not carry at all.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -2915,7 +2977,7 @@ paths:
         '404':
           description: |
             No schema is registered under that key — the same case as the
-            template route, and `users` until B-038.
+            template route.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -2985,7 +3047,7 @@ paths:
         '404':
           description: |
             No schema is registered under that key — the same case as the
-            template and upload routes, and `users` until B-038.
+            template and upload routes.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3125,7 +3187,7 @@ paths:
         '404':
           description: |
             No schema is registered under that key — the same case as the
-            template, upload and fields routes, and `users` until B-038.
+            template, upload and fields routes.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3211,8 +3273,7 @@ paths:
         '404':
           description: |
             No schema is registered under that key — the same case as the
-            template, upload, fields and validate routes, and `users` until
-            B-038.
+            template, upload, fields and validate routes.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3288,9 +3349,11 @@ paths:
           required: false
           schema: { type: string, default: CLIENT }
           description: |
-            Which registration's runs. Defaults to `CLIENT` because S-34 is the
-            screen that has this panel; `RESOURCE` arrives with B-038 and needs
-            no change here.
+            Which registration's runs. Defaults to `CLIENT` because S-34 was the
+            only screen with this panel when the parameter was added. B-038's
+            resource wizard passes `RESOURCE` and needed no change here, which
+            is what the default being a default rather than the only value was
+            for.
       responses:
         '200':
           description: OK.
@@ -7527,6 +7590,7 @@ components:
             comments: { type: array, items: { $ref: '#/components/schemas/Comment' } }
             attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
             watchers: { type: array, items: { $ref: '#/components/schemas/UserRef' } }
+            linkedTickets: { type: array, items: { $ref: '#/components/schemas/LinkedTicket' } }
             availableActions:
               type: array
               items: { type: string }
@@ -7534,6 +7598,58 @@ components:
                 What this caller may do right now, decided server-side. The client
                 renders buttons from this rather than re-deriving permissions —
                 two implementations of the same rule always diverge.
+    TicketLinkType:
+      type: string
+      description: |
+        C-064. Blueprint §16 item 17 and §7.5's create-form row name four:
+        Blocks / Is blocked by / Duplicate of / Relates to — `BLOCKS`,
+        `BLOCKED_BY`, `DUPLICATE_OF` and `RELATES_TO` are the only values
+        `createTicketLink` accepts.
+
+        `DUPLICATED_BY` is a fifth value **`createTicketLink` refuses** —
+        `422`, not a type a caller ever picks. It exists only so a
+        `linkedTickets` row can be labelled correctly on the *original*
+        ticket's side of a `DUPLICATE_OF` link, the way `BLOCKED_BY` labels
+        the far side of a `BLOCKS` link. Beyond the blueprint's literal four
+        for that reason, flagged here rather than silently added.
+
+        `BLOCKS`/`BLOCKED_BY` is one relationship stored once — see
+        `createTicketLink`. `RELATES_TO` is symmetric.
+      enum: [BLOCKS, BLOCKED_BY, DUPLICATE_OF, RELATES_TO, DUPLICATED_BY]
+    TicketRef:
+      type: object
+      description: The linked ticket's own identity, enough to render a chip without a second fetch.
+      required: [ticketId, title, level, status]
+      properties:
+        ticketId: { $ref: '#/components/schemas/TicketId' }
+        title: { type: string }
+        level: { $ref: '#/components/schemas/Level' }
+        status: { $ref: '#/components/schemas/StatusCode' }
+    LinkedTicket:
+      type: object
+      required: [id, linkType, ticket]
+      properties:
+        id: { type: integer, format: int64 }
+        linkType:
+          $ref: '#/components/schemas/TicketLinkType'
+          description: |
+            As it reads **from the ticket this row is embedded under** — not
+            necessarily the type the row was created with. A link created as
+            `BLOCKS` from ticket A reads `BLOCKED_BY` inside ticket B's
+            `linkedTickets`.
+        ticket: { $ref: '#/components/schemas/TicketRef' }
+        createdAt: { type: string, format: date-time }
+        createdBy: { $ref: '#/components/schemas/UserRef' }
+    CreateTicketLinkRequest:
+      type: object
+      required: [targetTicketId, linkType]
+      properties:
+        targetTicketId: { $ref: '#/components/schemas/TicketId' }
+        linkType: { $ref: '#/components/schemas/TicketLinkType' }
+    LinkedTicketResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/LinkedTicket' } }
     Cycle:
       type: object
       properties:
@@ -7574,6 +7690,11 @@ components:
         oldValue: { type: [string, 'null'] }
         newValue: { type: [string, 'null'] }
         note: { type: [string, 'null'] }
+        # C-034 · only meaningful on a COMMENTED row (`include=comments`) — null
+        # for every other action. Mirrors Comment.isClientVisible so a reader of
+        # the merged stream sees the same internal/client-visible fact the
+        # Comments tab shows, without having to cross-reference the other list.
+        isClientVisible: { type: [boolean, 'null'] }
         stageCode: { type: [string, 'null'] }
         cycleNo: { type: integer }
         iterationNo: { type: integer }

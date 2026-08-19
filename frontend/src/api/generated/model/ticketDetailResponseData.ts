@@ -54,6 +54,7 @@ import type { EffortLog } from './effortLog';
 import type { Comment } from './comment';
 import type { Attachment } from './attachment';
 import type { UserRef } from './userRef';
+import type { LinkedTicket } from './linkedTicket';
 
 export type TicketDetailResponseData = {
   ticket: Ticket;
@@ -64,6 +65,7 @@ export type TicketDetailResponseData = {
   comments?: Comment[];
   attachments?: Attachment[];
   watchers?: UserRef[];
+  linkedTickets?: LinkedTicket[];
   /** What this caller may do right now, decided server-side. The client
 renders buttons from this rather than re-deriving permissions —
 two implementations of the same rule always diverge.

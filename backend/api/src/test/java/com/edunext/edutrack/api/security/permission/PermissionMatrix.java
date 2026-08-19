@@ -252,6 +252,15 @@ final class PermissionMatrix {
      */
     private static final String QUICK_UPDATE = "{}";
 
+    /**
+     * C-064 · {@code TicketLinkDtos.CreateLinkRequest}: both fields
+     * {@code @NotBlank}. The target names no ticket that has to exist for
+     * this file's purpose — these suites run without a database, so the row
+     * asserts the guard and never reaches {@code ScopedTickets}.
+     */
+    private static final String CREATE_TICKET_LINK = """
+            {"targetTicketId":"CRM-26-00001","linkType":"RELATES_TO"}""";
+
     /** {@code PreferenceDtos.PreferenceUpdateRequest}: an empty list is valid. */
     private static final String PREFERENCES = """
             {"preferences":[]}""";
@@ -751,12 +760,38 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/tickets/{ticketId}/effort", EFFORT_LOG),
             everyRole("GET", "/api/v1/tickets/{ticketId}/effort-logs"),
 
+            // ── history · C-059, §7/§4B.5 ────────────────────────────────────
+            // isAuthenticated() rather than a capability, on the identical
+            // argument as the effort-log and comment reads one and forty lines
+            // up: reading a ticket's own history is not a privileged act once
+            // ScopedTickets has already decided the caller may see the ticket
+            // at all. *Which* tickets is not this file's question — a ticket
+            // outside the caller's scope is 404 (A-035) whatever they hold.
+            everyRole("GET", "/api/v1/tickets/{ticketId}/history"),
+
             // ── quick update · C-036, S-21 ────────────────────────────────────
             // The same ticket.update_progress as the effort row one line up —
             // S-21's own status dropdown and effort field are the same
             // capability as C-035's POST, and QuickUpdateController's own
             // comment says so. A seventh role without the grant is denied here.
             everyRole("POST", "/api/v1/tickets/{ticketId}/quick-update", QUICK_UPDATE),
+
+            // ── links · C-064, blueprint §16 item 17 ──────────────────────────
+            // Both ticket.update_progress, all six, on the attachments and
+            // comments rows' own reasoning one section up: noting that a
+            // ticket blocks, duplicates or relates to another is part of
+            // working it, not a decision about it, and the unlink needs no
+            // "uploader, or a PM" row rule the way attachment deletion does —
+            // ticket_links is ordinary mutable data, not one of CLAUDE.md's
+            // three append-only tables, so either side of a relationship may
+            // remove it and TicketLinkService still writes who did.
+            //
+            // *Which* tickets is not this file's question on either end:
+            // ScopedTickets applies the caller's row scope to the path ticket
+            // and to the submitted target independently, so either one
+            // outside the caller's scope answers 404 (A-035).
+            everyRole("POST", "/api/v1/tickets/{ticketId}/links", CREATE_TICKET_LINK),
+            everyRole("DELETE", "/api/v1/tickets/{ticketId}/links/{linkId}"),
 
             // ── ticket detail · every role, because permission is not scope ──
             //

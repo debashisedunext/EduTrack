@@ -130,15 +130,15 @@ class ImportSchemaFieldsControllerTest {
     }
 
     /**
-     * The same 404 the template and upload routes answer, and for the same reason:
-     * {@code users} is declared in the contract's enum and not registered until
-     * B-038. <b>Delete this when that registration lands</b> — like the assertion
-     * in {@code ImportTemplateControllerTest}, its failing is the right amount of
-     * ceremony for "the second schema now exists".
+     * The same 404 the template and upload routes answer, and for the same
+     * reason. <b>Repointed by B-038</b>: this named {@code users} until the
+     * resource registration landed and made it a 200. See
+     * {@code ImportTemplateControllerTest} for why the assertion survived the key
+     * that prompted it.
      */
     @Test
     void anUnregisteredSchemaIsNotFound() throws Exception {
-        mvc.perform(get("/api/v1/imports/users/fields").with(admin()))
+        mvc.perform(get("/api/v1/imports/widgets/fields").with(admin()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Unknown import schema"));
     }

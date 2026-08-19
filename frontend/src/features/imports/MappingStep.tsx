@@ -14,6 +14,7 @@ import {
   type ColumnMapping,
 } from './columnMapping'
 import { type ImportSchemaKey } from './importQueries'
+import { type ImportNouns } from './importWizard'
 import { MappingPresets } from './MappingPresets'
 
 /**
@@ -44,6 +45,7 @@ import { MappingPresets } from './MappingPresets'
  */
 export function MappingStep({
   schema,
+  nouns,
   headers,
   rowCount,
   mapping,
@@ -53,6 +55,8 @@ export function MappingStep({
   continuePending = false,
 }: {
   schema: ImportSchemaKey
+  /** B-038 · what this registration calls the thing being imported. */
+  nouns: ImportNouns
   /** The uploaded sheet's headings, in sheet order. */
   headers: string[]
   rowCount: number
@@ -225,12 +229,12 @@ export function MappingStep({
         </Button>
         <p className="text-sm text-content-muted" role={continuePending ? 'status' : undefined}>
           {continuePending
-            ? `Reading ${rowCount.toLocaleString()} rows and checking each one against the client master. Still nothing written.`
+            ? `Reading ${rowCount.toLocaleString()} rows and checking each one against the ${nouns.one} master. Still nothing written.`
             : !ready
-              ? 'Nothing has been written. No client changes until you have confirmed the preview.'
+              ? `Nothing has been written. No ${nouns.one} changes until you have confirmed the preview.`
               : onContinue
                 ? 'The next step is a dry run — every row’s outcome, with nothing written.'
-                : 'The mapping is complete. The dry-run preview is not available yet, and nothing has been written — no client has changed.'}
+                : `The mapping is complete. The dry-run preview is not available yet, and nothing has been written — no ${nouns.one} has changed.`}
         </p>
       </div>
     </div>
@@ -278,7 +282,7 @@ function MappingRow({
           The natural key gets its own line rather than sharing the required
           asterisk. "Rows are matched on this column" is a different fact from
           "this column cannot be blank", and it is the one that decides whether
-          the import creates four hundred clients or updates them.
+          the import creates four hundred rows or updates them.
         */}
         {field.naturalKey && (
           <span className="mt-0.5 flex items-center gap-1 text-xs text-content-muted">

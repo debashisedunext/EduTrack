@@ -347,7 +347,7 @@ read.
 export const listImportBatchesQueryEntityDefault = "CLIENT";
 
 export const listImportBatchesQueryParams = zod.object({
-  "entity": zod.string().default(listImportBatchesQueryEntityDefault).describe('Which registration\'s runs. Defaults to `CLIENT` because S-34 is the\nscreen that has this panel; `RESOURCE` arrives with B-038 and needs\nno change here.\n')
+  "entity": zod.string().default(listImportBatchesQueryEntityDefault).describe('Which registration\'s runs. Defaults to `CLIENT` because S-34 was the\nonly screen with this panel when the parameter was added. B-038\'s\nresource wizard passes `RESOURCE` and needed no change here, which\nis what the default being a default rather than the only value was\nfor.\n')
 })
 
 export const listImportBatchesResponseDataBatchesItemFileNameMax = 255;

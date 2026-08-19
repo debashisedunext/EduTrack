@@ -406,6 +406,21 @@ export interface Cycle {
   ticketId: string; cycleNo: number; isSealed: boolean;
   startedAt: string; closedAt: string | null; reason: string | null;
 }
+/**
+ * C-064 · a relationship between two tickets, blueprint §16 item 17.
+ *
+ * One row per relationship, stored **canonical** — see `canonicalizeLink` in
+ * `handlers/tickets.ts`, which mirrors `TicketLinkService.canonicalize` on the
+ * real backend so "A blocks B" and "B is blocked by A" always land on the
+ * same row rather than depending on which ticket the caller described it
+ * from. `linkType` is one of `BLOCKS | DUPLICATE_OF | RELATES_TO` in this
+ * store — `BLOCKED_BY` is a submittable direction that never survives
+ * canonicalisation, so it is never a *stored* value here either.
+ */
+export interface TicketLink {
+  id: number; sourceTicketId: string; targetTicketId: string; linkType: string;
+  createdById: number | null; createdAt: string;
+}
 export interface Transition {
   id: number; ticketId: string; cycleNo: number; iterationNo: number;
   stageCode: string; ownerId: number | null; ownerRole: RoleCode;
@@ -535,7 +550,7 @@ export interface Db {
   pushSubscriptions: PushSubscription[];
   tickets: Ticket[]; cycles: Cycle[]; transitions: Transition[];
   effortLogs: EffortLog[]; history: HistoryEntry[]; comments: Comment[];
-  attachments: Attachment[]; notifications: Notification[];
+  attachments: Attachment[]; ticketLinks: TicketLink[]; notifications: Notification[];
   notificationPreferences: NotificationPreference[];
   emailLog: EmailLogEntry[]; chatThreads: ChatThread[]; chatMessages: ChatMessage[];
   statusRequests: StatusRequest[];
@@ -1420,7 +1435,7 @@ export function createDb(): Db {
     projectTaskTypes: structuredClone(PROJECT_TASK_TYPES),
     pushSubscriptions: [],
     tickets: [], cycles: [], transitions: [], effortLogs: [], history: [],
-    comments: [], attachments: [], notifications: [], notificationPreferences: [], emailLog: [],
+    comments: [], attachments: [], ticketLinks: [], notifications: [], notificationPreferences: [], emailLog: [],
     chatThreads: [], chatMessages: [], statusRequests: [],
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
     seq: {},
@@ -1481,6 +1496,12 @@ export function createDb(): Db {
  *
  * Neither is QUEUED or RUNNING: those belong to a batch the poll is advancing,
  * and one sitting here permanently would be a progress bar that never moves.
+ *
+ * **B-038 adds a third, under `RESOURCE`.** The panel filters on `entity`, and a
+ * fixture with only CLIENT runs cannot tell a working filter from a broken one:
+ * both render the same empty resource history and the same two client rows. It
+ * is reversible and has no error report, so the resource wizard opens on a run
+ * somebody can actually press Reverse on.
  */
 function seedImportBatches(db: Db) {
   const rows: ImportBatchRow[] = [
@@ -1517,6 +1538,25 @@ function seedImportBatches(db: Db) {
       rejected: 3,
       errorReportUrl: '/import-batches/2/error-report',
       startedAt: '2026-08-17T11:48:00.000Z',
+      importedBy: 1,
+      importedByName: 'Anita Desai',
+      reversedAt: null,
+      reversedRows: 0,
+      retainedRows: 0,
+      reversible: true,
+    },
+    {
+      batchId: nextId(db, 'importBatch'),
+      entity: 'RESOURCE',
+      fileName: 'joiners-august.xlsx',
+      status: 'COMPLETED',
+      processed: 18,
+      total: 18,
+      created: 16,
+      updated: 2,
+      rejected: 0,
+      errorReportUrl: null,
+      startedAt: '2026-08-18T05:30:00.000Z',
       importedBy: 1,
       importedByName: 'Anita Desai',
       reversedAt: null,
