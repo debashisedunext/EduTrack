@@ -815,6 +815,16 @@ final class PermissionMatrix {
             // job and would break the roles it is meant to protect.
             everyRole("GET", "/api/v1/tickets/{ticketId}/full"),
 
+            /*
+             * C-058 · the §4A.4 roll-up. Every role, on the same reasoning the
+             * effort-log and history listings above carry: reading a ticket's own
+             * journey is not a privileged act once ScopedTickets has decided the
+             * caller may see the ticket. §2 gives no role a "view journey" row to
+             * withhold, and the row scope — which tickets, not which columns — is
+             * A-034's question, already answered before this one is asked.
+             */
+            everyRole("GET", "/api/v1/tickets/{ticketId}/journey"),
+
             // ── reopen · C-038, and the one ticket route where three roles is
             //    the whole answer rather than half a rule ────────────────────
             //
