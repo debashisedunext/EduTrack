@@ -52,7 +52,7 @@ class ReportExporterTest {
 
     private static byte[] export(ReportExporter exporter, List<Map<String, Object>> rows) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        exporter.write(out, "Date-wise Report", "your projects", COLUMNS, rows);
+        exporter.write(out, "Date-wise Report", "your projects", COLUMNS, ExportRows.of(rows));
         return out.toByteArray();
     }
 
@@ -192,7 +192,8 @@ class ReportExporterTest {
 
             // Excel forbids / \ * ? [ ] in a sheet name and caps it at 31 chars.
             // One of the eighteen report titles contains a slash.
-            exporter.write(out, "Delayed / SLA Breach", "the whole organisation", COLUMNS, ROWS);
+            exporter.write(out, "Delayed / SLA Breach", "the whole organisation", COLUMNS,
+                    ExportRows.of(ROWS));
 
             assertThat(new XSSFWorkbook(new ByteArrayInputStream(out.toByteArray())).getSheetAt(0))
                     .isNotNull();

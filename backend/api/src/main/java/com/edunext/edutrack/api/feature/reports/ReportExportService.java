@@ -1,158 +1,83 @@
 package com.edunext.edutrack.api.feature.reports;
 
+import com.edunext.edutrack.api.feature.reports.export.ExportDelivery;
+import com.edunext.edutrack.api.feature.reports.export.ExportRows;
 import com.edunext.edutrack.api.feature.reports.export.ReportExporter;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.time.LocalDate;
-import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * A-064 · turns a rendered report into a downloadable file.
  *
  * <p>Separate from {@link ReportService} because that owns "what are the rows"
- * and this owns "how are they written and named" — and because A-065 will hand
- * the same rendered report to the mail engine rather than to a servlet
- * response, so the writing must not be entangled with HTTP.
+ * and this owns "how are they written and named" — and because A-065 hands the
+ * same rendered report to the mail engine rather than to a servlet response, so
+ * the writing must not be entangled with HTTP.
+ *
+ * <h2>B-062 · what is left here, and what moved</h2>
+ *
+ * <p>Everything generic — choosing the exporter, the dated filename, the
+ * headers, {@code no-store}, buffering for the scheduled path, and failing
+ * without delivering a truncated file — is {@link ExportDelivery} now, because
+ * two other features needed it and only one of them could reach it. What stays
+ * is the single thing that is genuinely about <em>reports</em>: turning a
+ * {@code reportKey} into the title the catalogue gives it, and a
+ * {@code Rendered} into columns and rows.
+ *
+ * <p>That adapter is why the class survives rather than being deleted for its
+ * two callers' sake — {@link ReportController} and {@code ScheduledReportRunner}
+ * both hold a {@code Rendered}, and neither should have to know what a
+ * {@code ReportCatalogue} descriptor is in order to write a file.
  */
 @Service
 class ReportExportService {
 
-    private final Map<ReportExporter.Format, ReportExporter> exporters;
+    private final ExportDelivery delivery;
 
-    ReportExportService(List<ReportExporter> exporters) {
-        this.exporters = exporters.stream()
-                .collect(Collectors.toMap(ReportExporter::format, Function.identity()));
+    ReportExportService(ExportDelivery delivery) {
+        this.delivery = delivery;
     }
 
-    /**
-     * Writes the file straight onto the servlet response.
-     *
-     * <h2>Why not {@code ResponseEntity<StreamingResponseBody>}</h2>
-     *
-     * <p>That was the first version and it returned <b>500 "Failed to write
-     * request"</b> for all three formats while JSON on the same route kept
-     * working. The handler has to answer both a JSON body and a file, so its
-     * declared return type is {@code ResponseEntity<?>} — and Spring selects
-     * {@code StreamingResponseBodyReturnValueHandler} by inspecting that
-     * declared type, not the runtime value. With the type argument erased to
-     * {@code ?} it never matched, so the framework fell through to the JSON
-     * converter and tried to serialise the lambda.
-     *
-     * <p>Writing to the response directly sidesteps the question. It also
-     * keeps the streaming property that mattered: the exporter is handed the
-     * container's own {@code OutputStream}, so nothing larger than SXSSF's row
-     * window is ever resident. Buffering into a {@code byte[]} would be a heap
-     * spike per concurrent export at A-073's 50,000 tickets — and exports are
-     * exactly the request people fire twice when the first feels slow.
-     *
-     * <p><b>No {@code Content-Length}.</b> It is not knowable without writing
-     * the file first, which is the thing being avoided; the response is chunked
-     * and a browser shows an indeterminate progress bar. Worth naming, because
-     * "the download has no size" reads as a bug to whoever notices it.
-     */
+    /** Writes the rendered report onto the response, in {@code format}. */
     void writeTo(HttpServletResponse response, ReportExporter.Format format,
                  String reportKey, ReportService.Rendered rendered) throws IOException {
 
-        ReportExporter exporter = exporters.get(format);
-        if (exporter == null) {
-            // Format.of() already rejected anything outside the enum, so this is
-            // an enum value with no registered bean — a wiring error, not a
-            // caller error, and it must not read as a bad request.
-            throw new IllegalStateException("No exporter is registered for " + format);
-        }
-
-        response.setStatus(HttpServletResponse.SC_OK);
-        response.setContentType(format.contentType());
-        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
-                ContentDisposition.attachment().filename(filenameFor(reportKey, format)).build().toString());
-        // An export is a snapshot of rows that move. A cached one redelivered
-        // tomorrow would be a file dated today holding yesterday's figures,
-        // with nothing on it to say so.
-        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
-
-        try {
-            exporter.write(response.getOutputStream(),
-                    titleFor(reportKey),
-                    rendered.meta().appliedScope(),
-                    rendered.report().columns(),
-                    rendered.report().rows());
-        } catch (IOException e) {
-            throw e;
-        } catch (Exception e) {
-            // Once the status line is sent there is no way to turn a failure
-            // here into a 500 the client can read — it sees a truncated file.
-            // Rethrowing at least aborts the response and logs, rather than
-            // delivering a silently short spreadsheet that looks complete.
-            throw new IOException("Failed writing " + format + " export of " + reportKey, e);
-        }
-        response.flushBuffer();
+        delivery.writeTo(response, format, reportKey, titleFor(reportKey),
+                rendered.meta().appliedScope(), rendered.report().columns(), rowsOf(rendered));
     }
 
     /**
      * A-065 · the same file, in memory, for a run nobody is waiting on.
      *
-     * <h2>Buffered here and streamed there, on purpose</h2>
-     *
-     * <p>{@link #writeTo} above goes to lengths to avoid a {@code byte[]},
-     * because an interactive export is a request somebody fires twice when the
-     * first feels slow and a heap spike per concurrent export is the failure
-     * A-073 is measured on. None of that applies to a scheduled run: it happens
-     * once per schedule per day, on a worker thread with no client attached,
-     * and the bytes have to exist as a whole anyway — an object store
-     * {@code PutObject} needs a length, and the alternative is a multipart
-     * upload for a spreadsheet.
-     *
-     * <p>What matters is that it is the <em>same</em> exporter over the
-     * <em>same</em> rendered report. A second writer for the mail path would be
-     * a second place for the applied-scope header to be written differently,
-     * and the file people keep would be the one nobody re-checked.
+     * <p>The interactive path streams and this one buffers, deliberately — the
+     * reasoning is on {@link ExportDelivery#toBytes}, along with why both live
+     * in one class rather than as two writers that agree today.
      */
     byte[] toBytes(ReportExporter.Format format, String reportKey, ReportService.Rendered rendered)
             throws IOException {
 
-        ReportExporter exporter = exporters.get(format);
-        if (exporter == null) {
-            throw new IllegalStateException("No exporter is registered for " + format);
-        }
-
-        var buffer = new java.io.ByteArrayOutputStream();
-        try {
-            exporter.write(buffer,
-                    titleFor(reportKey),
-                    rendered.meta().appliedScope(),
-                    rendered.report().columns(),
-                    rendered.report().rows());
-        } catch (IOException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IOException("Failed writing " + format + " export of " + reportKey, e);
-        }
-        return buffer.toByteArray();
+        return delivery.toBytes(format, reportKey, titleFor(reportKey),
+                rendered.meta().appliedScope(), rendered.report().columns(), rowsOf(rendered));
     }
 
     /**
-     * {@code date-wise-2026-08-17.xlsx}.
+     * A rendered report's rows as a source.
      *
-     * <p>Dated because these accumulate in a downloads folder, and three files
-     * called {@code date-wise.xlsx} are indistinguishable a week later —
-     * {@code (2)} in a filename tells you the order they arrived and nothing
-     * about what is in them.
-     *
-     * <p>The key rather than the title: a title contains spaces and, in
-     * "Delayed / SLA Breach", a slash. {@code ContentDisposition} would quote
-     * it correctly, and it would still be a filename that breaks a shell script
-     * somebody points at the folder.
+     * <p>Every runner materialises its rows — a report is bounded by a date
+     * range and a scope, and the thirteen that run aggregate in SQL and return
+     * tens of rows. The streaming source exists for the callers that page, not
+     * to make these pretend to.
      */
+    private static ExportRows rowsOf(ReportService.Rendered rendered) {
+        return ExportRows.of(rendered.report().rows());
+    }
+
+    /** @see ExportDelivery#filenameFor */
     static String filenameFor(String reportKey, ReportExporter.Format format) {
-        return reportKey + "-" + LocalDate.now() + "." + format.wire();
+        return ExportDelivery.filenameFor(reportKey, format);
     }
 
     /**

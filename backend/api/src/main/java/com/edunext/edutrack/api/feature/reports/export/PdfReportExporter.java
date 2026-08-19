@@ -47,6 +47,18 @@ import java.util.Map;
  * different pictures of the same query. The alternative — the client posting a
  * rendered image back for the server to embed — makes an export depend on a
  * browser having been open, which breaks A-065's scheduled emails entirely.
+ *
+ * <h2>B-062 · the chart now plots the rows the table shows</h2>
+ *
+ * <p>It used to be drawn from every row while the table below it showed the
+ * first {@value #MAX_ROWS}, so on a long report the picture summarised data the
+ * document did not contain — a reader checking a peak against the table could
+ * not find it, and there was nothing on the page to explain why. Both now read
+ * the same truncated page, and the line under the table says what was left out.
+ *
+ * <p>It is also what the streaming source makes possible: holding
+ * {@value #MAX_ROWS} rows is bounded whatever the query returns, and holding all
+ * of them was the heap spike the other two formats were careful to avoid.
  */
 @Component
 class PdfReportExporter implements ReportExporter {
@@ -69,7 +81,25 @@ class PdfReportExporter implements ReportExporter {
 
     @Override
     public void write(OutputStream out, String reportTitle, String appliedScope,
-                      List<ReportDtos.Column> columns, List<Map<String, Object>> rows) throws Exception {
+                      List<ReportDtos.Column> columns, ExportRows rows) throws Exception {
+
+        // B-062 · the only exporter that buffers, and it buffers exactly what it
+        // was already going to print. MAX_ROWS is the truncation this document
+        // has always applied; holding that many is bounded whatever the query
+        // returns, which is what the streaming source is protecting.
+        //
+        // The total is counted while draining rather than asked for up front.
+        // ExportRows.knownCount() is null for a cursor-paged source, and a
+        // second COUNT(*) over the same filter is the query the export exists to
+        // avoid running twice.
+        List<Map<String, Object>> page = new java.util.ArrayList<>(MAX_ROWS);
+        int[] total = {0};
+        rows.forEach(row -> {
+            if (total[0]++ < MAX_ROWS) {
+                page.add(row);
+            }
+        });
+        int rowCount = total[0];
 
         // Landscape: a report is wider than it is tall, and portrait would
         // squeeze a five-column table into half the page it needs.
@@ -80,9 +110,9 @@ class PdfReportExporter implements ReportExporter {
 
             document.add(heading(reportTitle));
             document.add(subheading("Scope: " + (appliedScope == null ? "not stated" : appliedScope)));
-            document.add(subheading(rows.size() + (rows.size() == 1 ? " row" : " rows")));
+            document.add(subheading(rowCount + (rowCount == 1 ? " row" : " rows")));
 
-            if (rows.isEmpty()) {
+            if (rowCount == 0) {
                 // An empty report is still a document worth producing — it is
                 // evidence that the question was asked and had no answer, which
                 // is often exactly what somebody needs to attach.
@@ -92,16 +122,16 @@ class PdfReportExporter implements ReportExporter {
             }
 
             document.add(spacer());
-            PdfChart.draw(writer, document, columns, rows);
+            PdfChart.draw(writer, document, columns, page);
 
             document.add(spacer());
-            document.add(table(columns, rows));
+            document.add(table(columns, page));
 
-            if (rows.size() > MAX_ROWS) {
+            if (rowCount > MAX_ROWS) {
                 // Stated on the page, not only in the row count above. A reader
                 // who scrolls to the end of the table must not be able to
                 // mistake it for the whole set.
-                document.add(subheading("Showing the first " + MAX_ROWS + " of " + rows.size()
+                document.add(subheading("Showing the first " + MAX_ROWS + " of " + rowCount
                         + " rows. Export to Excel or CSV for every row."));
             }
         } finally {
@@ -110,6 +140,8 @@ class PdfReportExporter implements ReportExporter {
     }
 
     private static PdfPTable table(List<ReportDtos.Column> columns, List<Map<String, Object>> rows) {
+        // `rows` is already the truncated page — see write(). The limit was
+        // applied there so the chart above the table plots the same rows.
         PdfPTable table = new PdfPTable(columns.size());
         table.setWidthPercentage(100);
         // The header repeats on every page. Without it, page four of a table is
@@ -127,7 +159,7 @@ class PdfReportExporter implements ReportExporter {
         }
 
         Font bodyFont = FontFactory.getFont(FontFactory.HELVETICA, 9, INK);
-        for (Map<String, Object> row : rows.stream().limit(MAX_ROWS).toList()) {
+        for (Map<String, Object> row : rows) {
             for (ReportDtos.Column column : columns) {
                 Object value = row.get(column.key());
                 // An em dash rather than an empty cell: in a column of figures

@@ -1,12 +1,14 @@
 package com.edunext.edutrack.api.feature.masters.resources;
 
+import com.edunext.edutrack.api.feature.reports.export.ExportDelivery;
+import com.edunext.edutrack.api.feature.reports.export.ExportRows;
+import com.edunext.edutrack.api.feature.reports.export.ReportExporter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -19,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -40,16 +43,16 @@ class ResourceControllerTest {
             List.of("ADMIN", "PM", "SUPPORT", "DEVELOPER", "QA", "DEPLOYMENT");
 
     private ResourceService service;
-    private ResourceExportWriter exporter;
+    private ExportDelivery exports;
     private ResourceWriteService writes;
     private ResourceController controller;
 
     @BeforeEach
     void setUp() {
         service = mock(ResourceService.class);
-        exporter = mock(ResourceExportWriter.class);
+        exports = mock(ExportDelivery.class);
         writes = mock(ResourceWriteService.class);
-        controller = new ResourceController(service, exporter, writes);
+        controller = new ResourceController(service, exports, writes);
 
         // B-015 replaced the hardcoded Set.of(...) here with the roles table, so
         // the stub stands in for it. The codes are B-001's six because that is
@@ -154,25 +157,49 @@ class ResourceControllerTest {
 
         private final MockHttpServletResponse response = new MockHttpServletResponse();
 
+        /*
+          B-062 · these assert what the controller *asks for*, not what comes out
+          of the file. The writing is ExportDelivery's now and is tested where it
+          lives, in ReportExporterTest and ExportDeliveryTest; the mapping from a
+          resource to a row is ResourceExportRowsTest. Re-asserting the bytes
+          here would be a third copy of a guarantee the deleted writer already
+          made twice.
+        */
+
         @Test
-        @DisplayName("xlsx is offered as an attachment with the right extension")
+        @DisplayName("xlsx is delivered under the resources stem, so the filename keeps its shape")
         void xlsxAttachment() throws IOException {
             controller.export("xlsx", null, null, null, null, null, response);
 
-            assertThat(response.getStatus()).isEqualTo(200);
-            assertThat(response.getHeader(HttpHeaders.CONTENT_DISPOSITION))
-                    .startsWith("attachment; filename=\"resources-")
-                    .endsWith(".xlsx\"");
-            verify(exporter).writeXlsx(any(), any());
+            verify(exports).writeTo(eq(response), eq(ReportExporter.Format.XLSX),
+                    eq("resources"), eq("Resources"), any(), eq(ResourceExportRows.COLUMNS), any());
+            // The name itself, from the one place that builds it — this is the
+            // header B-010's callers already depend on.
+            assertThat(ExportDelivery.filenameFor("resources", ReportExporter.Format.XLSX))
+                    .startsWith("resources-")
+                    .endsWith(".xlsx");
         }
 
         @Test
-        @DisplayName("csv goes to the csv writer, not the spreadsheet one")
+        @DisplayName("csv asks for the csv writer, and the format parameter is case-insensitive")
         void csvGoesToTheCsvWriter() throws IOException {
             controller.export("CSV", null, null, null, null, null, response);
 
-            verify(exporter).writeCsv(any(), any());
-            verify(exporter, never()).writeXlsx(any(), any());
+            verify(exports).writeTo(any(), eq(ReportExporter.Format.CSV),
+                    any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("pdf is refused although the engine can write one, because the contract offers two")
+        void pdfIsNotOffered() throws IOException {
+            // The engine gained a PDF writer at A-064 and this route has always
+            // declared `format: [xlsx, csv]`. Routing through the engine must not
+            // quietly widen what the route answers — a format no schema lists is
+            // a behaviour no client can discover.
+            assertThatThrownBy(() -> controller.export("pdf", null, null, null, null, null, response))
+                    .isInstanceOf(ResponseStatusException.class);
+
+            verify(exports, never()).writeTo(any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -205,9 +232,33 @@ class ResourceControllerTest {
         void exportHonoursFilters() throws IOException {
             controller.export("csv", "ravi", "QA", 7L, 9L, true, response);
 
+            // B-062 · the filter now travels inside the row source rather than
+            // as an argument to a writer, so the assertion drains the source and
+            // catches it where it is actually used. Verifying the source was
+            // *passed* would pass just as well if it queried the whole directory.
+            var rows = forClass(ExportRows.class);
+            verify(exports).writeTo(any(), any(), any(), any(), any(), any(), rows.capture());
+            rows.getValue().forEach(row -> { });
+
             var captor = forClass(ResourceFilter.class);
-            verify(exporter).writeCsv(captor.capture(), any());
+            verify(service).streamAll(captor.capture(), any());
             assertThat(captor.getValue()).isEqualTo(new ResourceFilter("ravi", "QA", 7L, 9L, true));
+        }
+
+        @Test
+        @DisplayName("and states them in the file, which B-010's export could not")
+        void exportStatesItsFilters() throws IOException {
+            // A directory narrowed to one project and one manager used to be a
+            // file indistinguishable from the whole organisation. Whoever it was
+            // forwarded to read 14 rows as the headcount.
+            controller.export("csv", null, "QA", 7L, null, false, response);
+
+            var scope = forClass(String.class);
+            verify(exports).writeTo(any(), any(), any(), any(), scope.capture(), any(), any());
+            assertThat(scope.getValue())
+                    .contains("role QA")
+                    .contains("project 7")
+                    .contains("inactive only");
         }
 
         @Test

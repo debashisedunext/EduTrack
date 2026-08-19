@@ -18,7 +18,6 @@ import org.springframework.stereotype.Component;
 import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 
 /**
  * A-064 · Excel, through POI's streaming writer.
@@ -35,6 +34,13 @@ import java.util.Map;
  * <p>{@code dispose()} in the finally block is not optional bookkeeping — it
  * deletes that temp file. Without it a busy morning of exports fills the disk
  * with orphaned spool files that nothing else will ever clean up.
+ *
+ * <p><b>B-062 · the header row is written and frozen before any data row.</b>
+ * SXSSF will not let a flushed row be revisited, so anything touching row 0 has
+ * to happen while it is still inside the window — which with a hundred-row
+ * window means before the hundred-and-first data row, not "before write()".
+ * Stated because the failure is silent on a small sheet and only appears on a
+ * large one.
  *
  * <h2>Numbers are written as numbers</h2>
  *
@@ -65,7 +71,7 @@ class XlsxReportExporter implements ReportExporter {
 
     @Override
     public void write(OutputStream out, String reportTitle, String appliedScope,
-                      List<ReportDtos.Column> columns, List<Map<String, Object>> rows) throws Exception {
+                      List<ReportDtos.Column> columns, ExportRows rows) throws Exception {
 
         SXSSFWorkbook workbook = new SXSSFWorkbook(ROW_WINDOW);
         try {
@@ -99,12 +105,28 @@ class XlsxReportExporter implements ReportExporter {
                 cell.setCellStyle(header);
             }
 
-            for (Map<String, Object> row : rows) {
-                Row sheetRow = sheet.createRow(r++);
+            // B-062 · the header stays visible while the sheet is scrolled.
+            // Carried over from ResourceExportWriter, which had it and which
+            // this replaces — routing the resource directory through the engine
+            // and quietly losing its frozen header would be a regression
+            // delivered under the word "consolidation".
+            //
+            // Set here, while row 0 is still inside the window: SXSSF will not
+            // let a flushed row be revisited, so on a sheet longer than the
+            // window a freeze pane applied at the end throws.
+            sheet.createFreezePane(0, r);
+
+            // B-062 · pulled from the source. The row index has to survive the
+            // lambda, so it is held in a one-element array — the same idiom
+            // ResourceExportWriter used for exactly this reason before its own
+            // copy of this loop was deleted in favour of this one.
+            int[] rowIndex = {r};
+            rows.forEach(row -> {
+                Row sheetRow = sheet.createRow(rowIndex[0]++);
                 for (int c = 0; c < columns.size(); c++) {
                     write(sheetRow.createCell(c), row.get(columns.get(c).key()), columns.get(c).type());
                 }
-            }
+            });
 
             // Widths are set from the header rather than autosized. autoSizeColumn
             // requires every row to still be in memory, which is exactly what the
