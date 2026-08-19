@@ -330,6 +330,31 @@ final class PermissionMatrix {
             {"level":"HIGH","name":"Matrix Fixture","colour":"#F59E0B"}""";
 
     /**
+     * {@code StatusWrite}: code, name, category and colour are all required, the
+     * colour must be a {@code #RRGGBB} token, and <b>the code must be one of the
+     * contract's eight</b> — a ninth is refused by {@code StatusService}. As with
+     * {@code PRIORITY}, it does not matter that {@code ON_HOLD} already exists: an
+     * allowed row is entitled to reach the handler and get its 409, and a denied
+     * row never gets that far, which is the only distinction this matrix measures.
+     */
+    private static final String STATUS = """
+            {"code":"ON_HOLD","name":"Matrix Fixture","category":"IN_PROGRESS","colour":"#F59E0B"}""";
+
+    /**
+     * {@code TransitionMatrixWrite}: the list is {@code @NotNull} and each cell
+     * needs {@code toStatus} and {@code roleCode}.
+     *
+     * <p><b>It carries a real on-create row rather than an empty array</b>, and
+     * that is not decoration. An empty list is refused by
+     * {@code StatusTransitionService} with the one refusal in this feature whose
+     * consequence is global — so a fixture that sent one would exercise the guard
+     * rather than the authorisation, and an allowed role would look identical to a
+     * denied one at the status-code level this matrix compares.
+     */
+    private static final String STATUS_TRANSITIONS = """
+            {"transitions":[{"toStatus":"NEW","roleCode":"ADMIN"}]}""";
+
+    /**
      * {@code TaskTypeWrite}: code, name, colour and defaultLevel are all
      * required, and the colour must be a {@code #RRGGBB} token.
      */
@@ -980,6 +1005,40 @@ final class PermissionMatrix {
             // Retiring is the PATCH.
             adminOnly("POST", "/api/v1/masters/priorities", PRIORITY),
             adminOnly("PATCH", "/api/v1/masters/priorities/{priorityId}", EMPTY_PATCH),
+
+            // ── statuses and the transition matrix · S-13 tab 1 (B-039) ──────
+            // Both status reads open to all six, on the same §2 argument the
+            // levels above use and one step stronger: every role may raise a
+            // ticket (§2 row 3), every ticket carries a status, and a role that
+            // could not list statuses could not render its own ticket's chip.
+            everyRole("GET", "/api/v1/masters/statuses"),
+            everyRole("GET", "/api/v1/masters/statuses/{statusId}"),
+            // **The matrix read is open to all six too, and this is the row worth
+            // arguing rather than copying.** It looks like policy configuration,
+            // which reads Admin-only — but it is also the list of moves a ticket
+            // detail page offers, and Stream C's ribbon and status control have to
+            // know which buttons to render. Restricting it would not conceal the
+            // policy either: a user discovers a forbidden move by pressing it and
+            // being refused, so a 403 here would hide the answer from the screen
+            // while leaving it discoverable by anyone willing to click. Authoring
+            // the policy is Admin-only; seeing it is not.
+            everyRole("GET", "/api/v1/masters/status-transitions"),
+            // The writes are master.write — Admin alone — and unlike the levels
+            // above this one needs no argument at all. §2's row reads "Master data
+            // (task types, SLA, **workflow**, holidays)", S-13 is titled "Status,
+            // Stage & Workflow Template Master", and the transition matrix is the
+            // workflow policy itself.
+            //
+            // There is no DELETE row because there is no DELETE route, and the
+            // absence matters more here than on either master above. Nothing has a
+            // foreign key to `statuses`, so a delete would *succeed* — and unlike a
+            // level, a status is the left-hand side of every transition lookup, so
+            // deleting one strands every ticket in it with no move offered on any
+            // screen. Retiring is the PATCH, and even that refuses while tickets
+            // are still there.
+            adminOnly("POST", "/api/v1/masters/statuses", STATUS),
+            adminOnly("PATCH", "/api/v1/masters/statuses/{statusId}", EMPTY_PATCH),
+            adminOnly("PUT", "/api/v1/masters/status-transitions", STATUS_TRANSITIONS),
 
             // ── task types · S-11 (B-020) ────────────────────────────────────
             // Both reads open to all six, and the argument is §2's rather than

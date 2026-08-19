@@ -48,6 +48,7 @@ class MasterRoutesTest {
             "com.edunext.edutrack.api.feature.masters.resources.ResourceController",
             "com.edunext.edutrack.api.feature.masters.roles.RoleController",
             "com.edunext.edutrack.api.feature.masters.priorities.PriorityController",
+            "com.edunext.edutrack.api.feature.masters.statuses.StatusController",
             "com.edunext.edutrack.api.feature.masters.tasktypes.TaskTypeController",
             "com.edunext.edutrack.api.feature.masters.notificationtemplates"
                     + ".NotificationTemplateController",

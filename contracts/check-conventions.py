@@ -46,6 +46,8 @@ NO_IF_MATCH = {
 NO_PAGINATION = {
     "/masters/task-types":               "11 rows",
     "/masters/priorities":               "4 rows",
+    "/masters/statuses":                 "B-039 — 8 rows, and bounded by the contract's own closed StatusCode enum rather than by a habit: createStatus refuses a ninth, so a page could never contain one",
+    "/masters/status-transitions":       "B-039 — the whole matrix, and it has to be the whole matrix: a cell is only meaningful beside its neighbours, and the one invariant the PUT enforces (at least one on-create row survives) is uncheckable against a page. Bounded above by statuses x statuses x roles with only the allowed cells stored — 74 rows seeded, and the S-13 grid is unreadable long before it is unpageable",
     "/masters/modules":                  "8 rows, seeded; a ninth is a row somebody adds",
     "/masters/permissions":              "18 rows, and reference data — a nineteenth arrives by migration, not by a screen",
     "/masters/roles":                    "the six of blueprint §2 plus whatever an Admin adds; the S-09 matrix is unreadable long before it is unpageable",
@@ -80,6 +82,9 @@ ROWLESS_403 = {
     "/masters/roles/{roleId}/permissions": "same: the role's existence is public, only the write is Admin-only",
     "/masters/priorities":                 "master data, not row-scoped — every active level is already public through listPriorities, and there is no row yet on a create",
     "/masters/priorities/{priorityId}":    "same: the level's existence is public, only the write is Admin-only",
+    "/masters/statuses":                   "B-039 — master data, not row-scoped. Every active status is already public through listStatuses, which every role reads to render a ticket's own status chip, and there is no row yet on a create",
+    "/masters/statuses/{statusId}":        "same: the status's existence is public through that list, so only the write is Admin-only and a 403 conceals nothing a 404 would have",
+    "/masters/status-transitions":         "B-039 — the matrix is not a row either, and the read is open to all six roles because a ticket page has to know which moves to offer. So a 403 on the PUT concedes only what the GET already told the same caller: which moves exist. Admin-only is about authoring the policy, not about seeing it",
     "/masters/task-types":                 "master data, not row-scoped — every task type is already public through listTaskTypes, and there is no row yet on a create",
     "/masters/task-types/{taskTypeId}":    "same: the type's existence is public, only the write is Admin-only",
     "/masters/notification-templates":     "Admin-only screen, reads included — master data, not row-scoped, so there is no row whose existence a 404 could protect",

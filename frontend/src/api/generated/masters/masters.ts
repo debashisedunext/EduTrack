@@ -76,6 +76,8 @@ import type {
   ListPrioritiesParams,
   ListResourceLeavesParams,
   ListRolesParams,
+  ListStatusTransitionsParams,
+  ListStatusesParams,
   ListWorkflowTemplatesParams,
   ModuleListResponse,
   NotFoundResponse,
@@ -101,6 +103,12 @@ import type {
   RolePatchRequest,
   RolePermissionsRequest,
   RoleWriteRequest,
+  StatusListResponse,
+  StatusPatchRequest,
+  StatusResponse,
+  StatusTransitionMatrixResponse,
+  StatusTransitionMatrixWriteRequest,
+  StatusWriteRequest,
   TaskTypeListResponse,
   TaskTypePatchRequest,
   TaskTypeResponse,
@@ -1009,6 +1017,629 @@ export const useUpdatePriority = <TError = ValidationFailedResponse | Unauthoriz
       > => {
 
       const mutationOptions = getUpdatePriorityMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The status master — blueprint §7.4's S-13 tab 1, *"status list, categories
+(To-do / In progress / Done), allowed-transition matrix per role"*.
+
+**Status is not stage.** §3 keeps them apart on purpose: a ticket can be
+`IN_PROGRESS` while sitting in the `QA` stage. This route is status;
+`listWorkflowTemplates` is the ribbon. Collapsing the two is the
+modelling mistake §3 exists to prevent, and it is why S-13 has three tabs
+rather than one.
+
+Eight rows seeded by B-003, returned in `seq` order — the lifecycle
+order an Admin arranged, and the same order the ticket screens' status
+filters use. **Not category order**, which is a grouping the screen
+applies: sorting here by category would make this list and those filters
+disagree about what follows what.
+
+**Active rows only unless `includeInactive` is set**, matching
+`listPriorities` rather than `listTaskTypes`. Nothing filters this list
+downstream, and a retired status handed to a status filter offers a value
+that matches no ticket anybody can still create.
+
+ * @summary Ticket statuses (S-13 tab 1)
+ */
+export const listStatuses = (
+    params?: ListStatusesParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<StatusListResponse>(
+      {url: `/masters/statuses`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListStatusesQueryKey = (params?: ListStatusesParams,) => {
+    return [
+    `/masters/statuses`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListStatusesQueryOptions = <TData = Awaited<ReturnType<typeof listStatuses>>, TError = UnauthorizedResponse>(params?: ListStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatuses>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListStatusesQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listStatuses>>> = ({ signal }) => listStatuses(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listStatuses>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListStatusesQueryResult = NonNullable<Awaited<ReturnType<typeof listStatuses>>>
+export type ListStatusesQueryError = UnauthorizedResponse
+
+
+export function useListStatuses<TData = Awaited<ReturnType<typeof listStatuses>>, TError = UnauthorizedResponse>(
+ params: undefined |  ListStatusesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatuses>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listStatuses>>,
+          TError,
+          Awaited<ReturnType<typeof listStatuses>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListStatuses<TData = Awaited<ReturnType<typeof listStatuses>>, TError = UnauthorizedResponse>(
+ params?: ListStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatuses>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listStatuses>>,
+          TError,
+          Awaited<ReturnType<typeof listStatuses>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListStatuses<TData = Awaited<ReturnType<typeof listStatuses>>, TError = UnauthorizedResponse>(
+ params?: ListStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatuses>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Ticket statuses (S-13 tab 1)
+ */
+
+export function useListStatuses<TData = Awaited<ReturnType<typeof listStatuses>>, TError = UnauthorizedResponse>(
+ params?: ListStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatuses>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListStatusesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only — `master.write`.
+
+**A ninth status is refused with `400`, and the refusal is the honest
+answer rather than a gap.** `StatusCode` is a closed eight-value enum in
+this contract and it types `Ticket.status`, `TicketListItem.status` and
+two query parameters. A ninth code stored here would serialise into a
+response the generated TypeScript client's own zod schema rejects — a
+ticket list that breaks on read because of what somebody saved on a
+master screen — and Stream C's status chips key their variants off
+`Record<StatusCode, …>` maps a ninth key would leave `undefined`.
+
+This is the same refusal `createPriority` makes for `Level`, for the same
+reason and with the same remedy: opening the enum is a coordinated change
+across Streams A, C and D, not one this screen can make alone. The message
+names what has to change and who owns it.
+
+What this operation *is* for meanwhile: nothing that `PATCH` cannot do.
+Bringing back a retired status is `isActive: true` on the `PATCH`, not a
+create — the code is unique and re-creating it is refused with `409`.
+
+ * @summary Create a status (S-13 tab 1)
+ */
+export const createStatus = (
+    statusWriteRequest: StatusWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<StatusResponse>(
+      {url: `/masters/statuses`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: statusWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateStatusMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createStatus>>, TError,{data: StatusWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createStatus>>, TError,{data: StatusWriteRequest}, TContext> => {
+
+const mutationKey = ['createStatus'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createStatus>>, {data: StatusWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createStatus(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateStatusMutationResult = NonNullable<Awaited<ReturnType<typeof createStatus>>>
+    export type CreateStatusMutationBody = StatusWriteRequest
+    export type CreateStatusMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse
+
+    /**
+ * @summary Create a status (S-13 tab 1)
+ */
+export const useCreateStatus = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createStatus>>, TError,{data: StatusWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createStatus>>,
+        TError,
+        {data: StatusWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateStatusMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+CONVENTIONS.md §5 — the same gap B-011, B-016, B-020 and B-021 closed for
+users, projects, task types and levels. A write whose precondition has no
+read to come from is uncallable.
+
+The tag is taken over the content, `ticketCount` and `transitionCount`
+included. Those two are what the retire decision is made against, so a
+ticket moving into this status while the dialog is open costs a reload —
+which is correct, because it changes the answer.
+
+ * @summary One status (S-13 tab 1)
+ */
+export const getStatus = (
+    statusId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<StatusResponse>(
+      {url: `/masters/statuses/${statusId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetStatusQueryKey = (statusId?: number,) => {
+    return [
+    `/masters/statuses/${statusId}`
+    ] as const;
+    }
+
+    
+export const getGetStatusQueryOptions = <TData = Awaited<ReturnType<typeof getStatus>>, TError = UnauthorizedResponse | NotFoundResponse>(statusId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStatus>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetStatusQueryKey(statusId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getStatus>>> = ({ signal }) => getStatus(statusId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(statusId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getStatus>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getStatus>>>
+export type GetStatusQueryError = UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetStatus<TData = Awaited<ReturnType<typeof getStatus>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ statusId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStatus>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getStatus>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetStatus<TData = Awaited<ReturnType<typeof getStatus>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ statusId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStatus>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getStatus>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetStatus<TData = Awaited<ReturnType<typeof getStatus>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ statusId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStatus>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One status (S-13 tab 1)
+ */
+
+export function useGetStatus<TData = Awaited<ReturnType<typeof getStatus>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ statusId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStatus>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetStatusQueryOptions(statusId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`code` is in the body only so that sending a different one can be
+refused with `409`**, as on task types and levels. `tickets.status` stores
+the code and is not a foreign key, so a rename here would not cascade — it
+would orphan every ticket ever raised.
+
+**`isActive: false` retires the status, and there is no delete.** A
+delete would *succeed*, because nothing has a foreign key to `statuses`,
+and leave every historical ticket rendering a code nothing resolves.
+
+**Retiring is not local, and this is the part a caller must know before
+pressing it.** The transition whitelist the ticket engine consults checks
+the *transition* row's `isActive`, never the status's — so a retired
+status whose transitions were left alone goes on accepting tickets, and
+the master would say one thing while the engine did another. Two rules
+close that:
+
+- **Refused with `409` while any ticket is still in this status.** Those
+  tickets would be stranded: no transition out of a retired status is
+  offered, and the screen that could fix it is a different one. Move them
+  first. This is the same "one screen must not put another into a state it
+  cannot get out of" rule that makes `taskTypeCount` block a level retire.
+- Otherwise the retire **deactivates every transition into and out of this
+  status in the same transaction**, and the response reports how many as
+  `deactivatedTransitions`. Reactivating the status does **not** bring
+  them back — the matrix is data an Admin authored, and restoring a guess
+  at it would be worse than asking for it again. The S-13 dialog states
+  both before the click.
+
+**Category, `isOpen` and `isTerminal` are three separate facts and the
+service refuses only the combination that contradicts.** A terminal status
+that is also open is refused (`409`) — `isTerminal` means only a reopen
+moves a ticket on, which is not a state the dashboard's open count can
+include. `RESOLVED` being `DONE` while `isOpen` stays `true` is *not* a
+contradiction and is not refused: the category describes the work, `isOpen`
+describes the ticket record, and that gap is precisely why category is a
+column of its own rather than `isOpen` renamed.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the current tag from `GET /masters/statuses/{statusId}`.
+
+ * @summary Edit a status, or retire it (S-13 tab 1)
+ */
+export const updateStatus = (
+    statusId: number,
+    statusPatchRequest: StatusPatchRequest,
+ ) => {
+      
+      
+      return http<StatusResponse>(
+      {url: `/masters/statuses/${statusId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: statusPatchRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateStatusMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateStatus>>, TError,{statusId: number;data: StatusPatchRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateStatus>>, TError,{statusId: number;data: StatusPatchRequest}, TContext> => {
+
+const mutationKey = ['updateStatus'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateStatus>>, {statusId: number;data: StatusPatchRequest}> = (props) => {
+          const {statusId,data} = props ?? {};
+
+          return  updateStatus(statusId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateStatusMutationResult = NonNullable<Awaited<ReturnType<typeof updateStatus>>>
+    export type UpdateStatusMutationBody = StatusPatchRequest
+    export type UpdateStatusMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Edit a status, or retire it (S-13 tab 1)
+ */
+export const useUpdateStatus = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateStatus>>, TError,{statusId: number;data: StatusPatchRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateStatus>>,
+        TError,
+        {statusId: number;data: StatusPatchRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateStatusMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `workflow_transitions` — **a whitelist, so absence is the answer**: no row
+for a `(from, to, role)` means that move is impossible for that role, and
+there is nothing else to consult.
+
+This is why governance decision G-3 (PLAN.md §5) — *may a Developer close
+a ticket?* — is **data rather than code**: there is simply no
+`(RESOLVED, CLOSED, DEVELOPER)` row. B-003's seed header said changing that
+policy was "a seed edit, not a deploy". S-13 makes it a screen edit, and
+this route deliberately does **not** hard-code G-3 as a refusal — doing so
+would put back into code the one decision the table exists to keep out of
+it. The S-13 grid flags governance-locked cells visually and lets an Admin
+change them anyway, which is the difference between advice and a lock.
+
+`fromStatus: null` means **on creation** — the only way into `NEW`.
+
+Retired transitions are returned with `isActive: false` rather than
+omitted, because the grid renders a cleared cell and a never-configured
+cell identically and an Admin restoring one needs to see which it was.
+
+ * @summary The allowed-transition matrix, per role (S-13 tab 1)
+ */
+export const listStatusTransitions = (
+    params?: ListStatusTransitionsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<StatusTransitionMatrixResponse>(
+      {url: `/masters/status-transitions`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListStatusTransitionsQueryKey = (params?: ListStatusTransitionsParams,) => {
+    return [
+    `/masters/status-transitions`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListStatusTransitionsQueryOptions = <TData = Awaited<ReturnType<typeof listStatusTransitions>>, TError = UnauthorizedResponse>(params?: ListStatusTransitionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatusTransitions>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListStatusTransitionsQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listStatusTransitions>>> = ({ signal }) => listStatusTransitions(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listStatusTransitions>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListStatusTransitionsQueryResult = NonNullable<Awaited<ReturnType<typeof listStatusTransitions>>>
+export type ListStatusTransitionsQueryError = UnauthorizedResponse
+
+
+export function useListStatusTransitions<TData = Awaited<ReturnType<typeof listStatusTransitions>>, TError = UnauthorizedResponse>(
+ params: undefined |  ListStatusTransitionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatusTransitions>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listStatusTransitions>>,
+          TError,
+          Awaited<ReturnType<typeof listStatusTransitions>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListStatusTransitions<TData = Awaited<ReturnType<typeof listStatusTransitions>>, TError = UnauthorizedResponse>(
+ params?: ListStatusTransitionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatusTransitions>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listStatusTransitions>>,
+          TError,
+          Awaited<ReturnType<typeof listStatusTransitions>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListStatusTransitions<TData = Awaited<ReturnType<typeof listStatusTransitions>>, TError = UnauthorizedResponse>(
+ params?: ListStatusTransitionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatusTransitions>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The allowed-transition matrix, per role (S-13 tab 1)
+ */
+
+export function useListStatusTransitions<TData = Awaited<ReturnType<typeof listStatusTransitions>>, TError = UnauthorizedResponse>(
+ params?: ListStatusTransitionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatusTransitions>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListStatusTransitionsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only — `master.write`. **`PUT` and not `PATCH`, because the matrix
+is edited and saved as a whole**: a cell's meaning depends on its
+neighbours (clearing the last on-create row is only detectable against the
+full set), and a per-cell verb would make the one invariant below
+uncheckable.
+
+**Upsert, not delete-and-reinsert.** A row already present is updated in
+place and keeps its `id` and `createdAt`; a row absent from the body is
+**deactivated**, not deleted. `requiresReason` and `requiresEffort` are
+facts an Admin authored — the same argument B-017 and B-018 made against
+replacing `project_members` and `sla_policies` by delete — and a
+deactivated row is what lets a cell cleared by accident be restored as it
+was rather than re-guessed.
+
+**One invariant, and it is the only thing that can lock the product out
+of itself:** at least one `fromStatus: null` row must survive. With none,
+no role can raise a ticket at all, on any screen, and the screen that
+could undo it is this one. Refused with `409`.
+
+Also refused with `409`: an unknown status code or role code (the
+whitelist would hold a row that matches no caller — exactly the defect
+B-008 found in the seed, where thirteen `SUPPORT_DESK` rows silently
+matched nobody); `fromStatus == toStatus`, which is a move that changes
+nothing and which the unique key would otherwise happily store; and the
+same `(from, to, role)` appearing twice in one body, which would make the
+result depend on iteration order.
+
+A transition **may** name a retired status. That is not a refusal — the
+matrix is authored ahead of the vocabulary as often as behind it — but
+`updateStatus` deactivates the rows touching a status it retires, so this
+is the route that puts them back.
+
+**`If-Match` is required**, and this is the one collection `PUT` in the
+contract that takes one. Every other exemption in `check-conventions.py`'s
+`NO_IF_MATCH` rests on the same two arguments — an idempotent setter where
+last-write-wins is the correct answer, or a collection with no `ETag` of
+its own to read a tag from. Neither holds here. A whole-matrix replace is
+not idempotent against a concurrent one: the second save carries the first
+editor's screen state and silently deletes every cell the first added.
+And the collection *is* the resource at this URL, so `listStatusTransitions`
+emits the tag rather than borrowing one from a row route. Absent `If-Match`
+is `428`; a stale one is `412`.
+
+ * @summary Replace the transition matrix (S-13 tab 1)
+ */
+export const replaceStatusTransitions = (
+    statusTransitionMatrixWriteRequest: StatusTransitionMatrixWriteRequest,
+ ) => {
+      
+      
+      return http<StatusTransitionMatrixResponse>(
+      {url: `/masters/status-transitions`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: statusTransitionMatrixWriteRequest
+    },
+      );
+    }
+  
+
+
+export const getReplaceStatusTransitionsMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceStatusTransitions>>, TError,{data: StatusTransitionMatrixWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof replaceStatusTransitions>>, TError,{data: StatusTransitionMatrixWriteRequest}, TContext> => {
+
+const mutationKey = ['replaceStatusTransitions'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceStatusTransitions>>, {data: StatusTransitionMatrixWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  replaceStatusTransitions(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplaceStatusTransitionsMutationResult = NonNullable<Awaited<ReturnType<typeof replaceStatusTransitions>>>
+    export type ReplaceStatusTransitionsMutationBody = StatusTransitionMatrixWriteRequest
+    export type ReplaceStatusTransitionsMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Replace the transition matrix (S-13 tab 1)
+ */
+export const useReplaceStatusTransitions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceStatusTransitions>>, TError,{data: StatusTransitionMatrixWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof replaceStatusTransitions>>,
+        TError,
+        {data: StatusTransitionMatrixWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getReplaceStatusTransitionsMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

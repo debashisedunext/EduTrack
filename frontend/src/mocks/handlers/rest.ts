@@ -3,7 +3,8 @@ import { isWellFormedEmail } from '@/lib/email';
 import { getDb, nextId } from '../db';
 import type {
   Db, Holiday, Level, NotificationChannelCode, NotificationTemplateRow, Priority,
-  ProjectRoleCode, Role, TaskType, User,
+  ProjectRoleCode, Role, Status, StatusCategory, StatusCode, TaskType, User,
+  WorkflowTransitionRow,
 } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
 import { round, statusRequestDto } from './tickets';
@@ -370,6 +371,109 @@ function recipientProblem(recipients: string[]) {
       + "this ticket's project, not everybody holding the PM role."],
   });
 }
+
+// ── statuses and the transition matrix · S-13 tab 1 (B-039) ─────────────────
+
+/**
+ * The eight the contract's `StatusCode` can carry — mirrors `StatusService`.
+ *
+ * A ninth is refused with 400 here exactly as it is on the server, so the S-13
+ * form is built against the one error it will actually see rather than against
+ * a mock that accepts anything.
+ */
+const CONTRACT_STATUS_CODES: StatusCode[] = [
+  'NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO',
+  'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED',
+];
+
+/**
+ * The two usage counts, derived rather than stored.
+ *
+ * Both key on the status **code** against another collection, exactly as the
+ * server's SQL keys on a `VARCHAR` rather than joining `statuses.id` — a fixture
+ * that joined on the id would make the screen look right against data that
+ * cannot exist.
+ *
+ * `transitionCount` counts **both ends**, because that is what a retire
+ * deactivates. Counting only incoming moves would quote the retire dialog a
+ * smaller number than the button then acts on.
+ */
+const statusDto = (status: Status) => {
+  const db = getDb();
+  return {
+    ...status,
+    ticketCount: db.tickets.filter((t) => t.status === status.code).length,
+    transitionCount: db.workflowTransitions.filter(
+      (t) => t.isActive && (t.fromStatus === status.code || t.toStatus === status.code),
+    ).length,
+    deactivatedTransitions: null as number | null,
+  };
+};
+
+/**
+ * Over the content, and **without `deactivatedTransitions`** — that field
+ * describes an event rather than the row, so a status that reads identically has
+ * to tag identically whether it was last written by a retire or by a rename.
+ */
+const statusEtag = (status: Status) =>
+  `"${Math.abs([...JSON.stringify({ ...statusDto(status), deactivatedTransitions: null })]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/**
+ * The matrix's own tag, taken over the whole table even when the read was
+ * filtered by role.
+ *
+ * The one collection in this mock that carries an `ETag`, because it is the one
+ * collection that is itself the unit of edit. A tag over a single column would
+ * let two Admins editing different columns each save over the other with both
+ * preconditions passing.
+ */
+const matrixEtag = () =>
+  `"${Math.abs([...JSON.stringify(getDb().workflowTransitions)]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/**
+ * The mock enforces `If-Match` too. A guard the real backend has and the mock
+ * waves through is a guard the frontend never gets to exercise.
+ */
+function statusPrecondition(status: Status, ifMatch: string | null) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the status first and send back its ETag.');
+  }
+  if (ifMatch !== '*'
+      && ifMatch.replace(/W\/|"/g, '') !== statusEtag(status).replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'This status changed since you read it. Reload and reapply your edit.');
+  }
+  return null;
+}
+
+function matrixPrecondition(ifMatch: string | null) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the matrix first and send back its ETag. A replace '
+      + 'without one would silently discard whatever another Admin saved while this '
+      + 'screen was open.');
+  }
+  if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== matrixEtag().replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'The matrix changed since you read it. Reload and reapply your edit — saving now '
+      + 'would delete cells somebody else has just added.');
+  }
+  return null;
+}
+
+/** Stated once, because the create and the patch have to refuse identically. */
+const CONTRADICTORY_STATUS =
+  'A status cannot be both terminal and open. Terminal means only a reopen moves a '
+  + 'ticket on; open means the dashboard counts it as outstanding. Together they would '
+  + 'put every ticket that reached this status into an open count nobody can drive to '
+  + 'zero.';
+
+/** Null is a real key here: it is the on-create row. */
+const cellKey = (from: string | null | undefined, to: string, role: string) =>
+  `${from ?? ''} ${to} ${role}`;
 
 // ── priorities · S-12 (B-021) ───────────────────────────────────────────────
 
@@ -2581,6 +2685,278 @@ export const restHandlers = [
   http.get(url('/masters/modules'), () =>
     ok([...getDb().modules].sort((a, b) => a.seq - b.seq)),
   ),
+  // ── statuses and the transition matrix · S-13 tab 1 (B-039) ───────────────
+  // Neither table had a contract path, a mock or a client before B-039 — two
+  // seeded masters, eighty-two rows, reachable only by a migration. So unlike
+  // the priorities above, nothing here is being corrected; it is all new.
+  //
+  // **Active-only by default**, following the priorities rather than the task
+  // types: a retired status handed to a ticket screen's status filter offers a
+  // value matching no ticket anybody can still create.
+  http.get(url('/masters/statuses'), ({ request }) => {
+    const includeInactive =
+      new URL(request.url).searchParams.get('includeInactive') === 'true';
+    return ok(
+      getDb().statuses
+        .filter((s) => includeInactive || s.isActive)
+        .sort((a, b) => a.seq - b.seq || a.id - b.id)
+        .map(statusDto),
+    );
+  }),
+
+  http.get(url('/masters/statuses/:statusId'), ({ params }) => {
+    const status = getDb().statuses.find((s) => s.id === Number(params.statusId));
+    if (!status) return notFound('Status');
+    return ok(statusDto(status), undefined, { headers: { ETag: statusEtag(status) } });
+  }),
+
+  http.post(url('/masters/statuses'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as Partial<Status>;
+    const code = String(body.code ?? '').trim().toUpperCase() as StatusCode;
+
+    // The headline refusal, mirrored from `StatusService`. A mock that accepted
+    // a ninth status would let the S-13 form ship with no handling for the one
+    // error it will actually see.
+    if (!CONTRACT_STATUS_CODES.includes(code)) {
+      return validationFailed({
+        code: [`'${code}' is not one of the eight statuses this release supports `
+          + `(${[...CONTRACT_STATUS_CODES].sort().join(', ')}). The contract's StatusCode `
+          + 'enum types tickets.status on every response, so a ninth code would be '
+          + "rejected by the generated client's own validation before any screen "
+          + 'rendered it. Opening the set is a coordinated change across '
+          + 'contracts/openapi.yaml (Stream D), the ticket screens (Stream C) and the '
+          + 'summary tables (Stream A) — not one this screen can make alone.'],
+      });
+    }
+    if (db.statuses.some((s) => s.code === code)) {
+      const detail = `A status with code '${code}' already exists. To bring back a `
+        + 'retired one, reactivate it instead.';
+      return problem(409, 'duplicate', detail, { errors: { code: [detail] } });
+    }
+
+    const name = String(body.name ?? '').trim();
+    const clash = db.statuses.find((s) => s.name.toLowerCase() === name.toLowerCase());
+    if (clash) {
+      const detail = `'${clash.name}' already exists. Two statuses with the same name `
+        + 'are indistinguishable in the ticket grid, in every status filter and on the '
+        + 'board.';
+      return problem(409, 'duplicate', detail, { errors: { name: [detail] } });
+    }
+
+    const isOpen = body.isOpen ?? true;
+    const isTerminal = body.isTerminal ?? false;
+    if (isTerminal && isOpen) {
+      return problem(409, 'contradictory-state', CONTRADICTORY_STATUS,
+        { errors: { isTerminal: [CONTRADICTORY_STATUS] } });
+    }
+
+    const created: Status = {
+      id: Math.max(0, ...db.statuses.map((s) => s.id)) + 1,
+      code,
+      name,
+      category: (body.category ?? 'TODO') as StatusCategory,
+      colour: String(body.colour ?? '').trim(),
+      seq: body.seq ?? Math.max(0, ...db.statuses.map((s) => s.seq)) + 10,
+      isOpen,
+      isTerminal,
+      isActive: body.isActive ?? true,
+    };
+    db.statuses.push(created);
+    return ok(statusDto(created), undefined,
+      { status: 201, headers: { ETag: statusEtag(created) } });
+  }),
+
+  // There is no DELETE, and the absence is the design. Nothing has a foreign key
+  // to `statuses`, so a delete would *succeed* — and a status is the left-hand
+  // side of every transition lookup, so deleting one strands every ticket in it
+  // with no move offered on any screen.
+  http.patch(url('/masters/statuses/:statusId'), async ({ params, request }) => {
+    const db = getDb();
+    const status = db.statuses.find((s) => s.id === Number(params.statusId));
+    if (!status) return notFound('Status');
+
+    const refusal = statusPrecondition(status, request.headers.get('If-Match'));
+    if (refusal) return refusal;
+
+    const body = (await request.json()) as Partial<Status>;
+
+    if (body.code != null
+        && String(body.code).trim().toUpperCase() !== status.code) {
+      return problem(409, 'immutable-field',
+        `A status code cannot be changed once created. This one is '${status.code}'. `
+        + 'tickets.status stores the code and is not a foreign key, so a rename would '
+        + 'not cascade — it would orphan every ticket ever raised in this status.',
+        { errors: { code: [`A status code cannot be changed once created. This one is `
+          + `'${status.code}'.`] } });
+    }
+
+    // The end state, derived before anything is written. Reading each flag from
+    // the stored row would let `{isTerminal: true}` past a guard that saw the old
+    // `isOpen` — mirrors the ordering fix in `StatusService.update`.
+    const willBeActive = body.isActive ?? status.isActive;
+    const willBeOpen = body.isOpen ?? status.isOpen;
+    const willBeTerminal = body.isTerminal ?? status.isTerminal;
+
+    if (willBeTerminal && willBeOpen) {
+      return problem(409, 'contradictory-state', CONTRADICTORY_STATUS,
+        { errors: { isTerminal: [CONTRADICTORY_STATUS] } });
+    }
+
+    const retiring = status.isActive && !willBeActive;
+    if (retiring) {
+      const ticketCount = db.tickets.filter((t) => t.status === status.code).length;
+      if (ticketCount > 0) {
+        const detail =
+          `${ticketCount} ticket${ticketCount === 1 ? ' is' : 's are'} currently in `
+          + `'${status.name}'. Retiring it deactivates every transition out of it, which `
+          + `would leave ${ticketCount === 1 ? 'that ticket' : 'those tickets'} with no `
+          + 'move offered on any screen. Move them to another status first.';
+        return problem(409, 'in-use', detail,
+          { ticketCount, errors: { isActive: [detail] } });
+      }
+    }
+
+    if (body.name != null) status.name = String(body.name).trim();
+    if (body.category != null) status.category = body.category;
+    if (body.colour != null) status.colour = String(body.colour).trim();
+    if (body.seq != null) status.seq = body.seq;
+    status.isOpen = willBeOpen;
+    status.isTerminal = willBeTerminal;
+    status.isActive = willBeActive;
+
+    // The cascade Stream C's whitelist gate cannot do for itself: it reads the
+    // *transition* row's isActive and never looks at the status, so a retire that
+    // left the matrix alone would go on accepting tickets into a status the master
+    // says is gone. Both ends, because a move *into* it is the same disagreement.
+    let deactivatedTransitions: number | null = null;
+    if (retiring) {
+      const affected = db.workflowTransitions.filter(
+        (t) => t.isActive && (t.fromStatus === status.code || t.toStatus === status.code),
+      );
+      affected.forEach((t) => { t.isActive = false; });
+      deactivatedTransitions = affected.length;
+    }
+
+    return ok({ ...statusDto(status), deactivatedTransitions }, undefined,
+      { headers: { ETag: statusEtag(status) } });
+  }),
+
+  // The matrix is a **whitelist**: a missing (from, to, role) means the move is
+  // impossible for that role. Retired rows are returned rather than filtered,
+  // because the grid has to render a cell an Admin *cleared* differently from one
+  // nobody ever configured.
+  http.get(url('/masters/status-transitions'), ({ request }) => {
+    const roleCode = new URL(request.url).searchParams.get('roleCode');
+    const rows = getDb().workflowTransitions
+      .filter((t) => !roleCode || t.roleCode === roleCode.toUpperCase())
+      .sort((a, b) => a.id - b.id);
+    return ok(rows, undefined, { headers: { ETag: matrixEtag() } });
+  }),
+
+  // PUT, not PATCH: the one invariant worth having — at least one on-create row
+  // survives — is uncheckable against a single cell.
+  http.put(url('/masters/status-transitions'), async ({ request }) => {
+    const db = getDb();
+    const refusal = matrixPrecondition(request.headers.get('If-Match'));
+    if (refusal) return refusal;
+
+    const body = (await request.json()) as {
+      transitions?: {
+        fromStatus?: string | null; toStatus?: string; roleCode?: string;
+        requiresReason?: boolean | null; requiresEffort?: boolean | null;
+      }[];
+    };
+    const wanted = body.transitions ?? [];
+
+    const knownStatuses = new Set(db.statuses.map((s) => s.code));
+    const knownRoles = new Set(db.roles.map((r) => r.code));
+    const seen = new Set<string>();
+    const cells: WorkflowTransitionRow[] = [];
+
+    for (const row of wanted) {
+      const from = (row.fromStatus ?? '').trim().toUpperCase() || null;
+      const to = String(row.toStatus ?? '').trim().toUpperCase();
+      const role = String(row.roleCode ?? '').trim().toUpperCase();
+
+      // No foreign key on either column, so a wrong code is not a constraint
+      // violation — it is a row that silently matches no caller, ever. Exactly
+      // the defect B-008 found in the seed.
+      if (from && !knownStatuses.has(from as StatusCode)) {
+        return problem(409, 'validation', `'${from}' is not a status code this system knows.`,
+          { errors: { fromStatus: ['Unknown status'] } });
+      }
+      if (!knownStatuses.has(to as StatusCode)) {
+        return problem(409, 'validation', `'${to}' is not a status code this system knows.`,
+          { errors: { toStatus: ['Unknown status'] } });
+      }
+      if (!knownRoles.has(role)) {
+        return problem(409, 'validation', `'${role}' is not a role code this system knows.`,
+          { errors: { roleCode: ['Unknown role'] } });
+      }
+      if (from === to) {
+        return problem(409, 'validation',
+          `'${from}' cannot transition to itself. A move that changes nothing is not a `
+          + 'permission, and the unique key would store it as one.',
+          { errors: { toStatus: ['Self-transition'] } });
+      }
+      const key = cellKey(from, to, role);
+      if (seen.has(key)) {
+        return problem(409, 'validation',
+          `The move ${from ?? 'on creation'} -> ${to} for ${role} appears twice.`,
+          { errors: { transitions: ['Duplicate cell'] } });
+      }
+      seen.add(key);
+      cells.push({
+        id: 0,
+        fromStatus: from as StatusCode | null,
+        toStatus: to as StatusCode,
+        roleCode: role,
+        requiresReason: row.requiresReason === true,
+        requiresEffort: row.requiresEffort === true,
+        isActive: true,
+      });
+    }
+
+    // The only edit on this screen that can lock the product out of itself.
+    if (!cells.some((c) => c.fromStatus === null)) {
+      return problem(409, 'no-create-transition',
+        'At least one on-creation move must remain. Those are the rows with no '
+        + "'from' status, and they are the only way a ticket enters the system — with "
+        + 'none of them, no role can raise a ticket on any screen. Every other cell can '
+        + 'be cleared; this one cannot.',
+        { errors: { transitions: ['At least one on-create move is required'] } });
+    }
+
+    // Upsert: an existing row keeps its id, an absent one is deactivated rather
+    // than deleted. `requiresReason`/`requiresEffort` are facts an Admin
+    // authored, and a cleared cell that kept them can be restored as it was.
+    for (const cell of cells) {
+      const existing = db.workflowTransitions.find(
+        (t) => t.fromStatus === cell.fromStatus
+          && t.toStatus === cell.toStatus
+          && t.roleCode === cell.roleCode,
+      );
+      if (existing) {
+        existing.requiresReason = cell.requiresReason;
+        existing.requiresEffort = cell.requiresEffort;
+        existing.isActive = true;
+      } else {
+        db.workflowTransitions.push({
+          ...cell,
+          id: Math.max(0, ...db.workflowTransitions.map((t) => t.id)) + 1,
+        });
+      }
+    }
+    db.workflowTransitions
+      .filter((t) => t.isActive
+        && !seen.has(cellKey(t.fromStatus, t.toStatus, t.roleCode)))
+      .forEach((t) => { t.isActive = false; });
+
+    return ok([...db.workflowTransitions].sort((a, b) => a.id - b.id), undefined,
+      { headers: { ETag: matrixEtag() } });
+  }),
+
   // ── priorities · S-12 (B-021) ─────────────────────────────────────────────
   // Rows from the store, not a literal. Until B-021 this was four frozen
   // objects with colours that matched neither §12.1 nor the migration, and two
