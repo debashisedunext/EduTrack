@@ -87,6 +87,26 @@ function catalogue(body: object = CATALOGUE) {
 }
 
 describe('S-27 the reports hub', () => {
+  /**
+   * A-065 · the hub is the only way in to the schedules screen.
+   *
+   * <p>Asserted because it was missing on first build and nothing failed: the
+   * route existed, the page rendered, the dialog created schedules, and the
+   * only ways to reach the list were typing the URL or waiting for the first
+   * email. Somebody who scheduled a report by mistake had no way to cancel it.
+   *
+   * <p>A link is easy to lose in a header refactor and its absence breaks
+   * nothing that any other test looks at, which is exactly the shape of gap
+   * worth pinning.
+   */
+  it('links to the scheduled reports screen', async () => {
+    catalogue()
+    renderHub()
+
+    const link = await screen.findByRole('link', { name: /scheduled reports/i })
+    expect(link).toHaveAttribute('href', '/reports/schedules')
+  })
+
   it('renders a card per report, grouped by category', async () => {
     catalogue()
     renderHub()

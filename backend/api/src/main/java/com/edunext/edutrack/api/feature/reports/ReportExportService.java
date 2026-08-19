@@ -97,6 +97,48 @@ class ReportExportService {
     }
 
     /**
+     * A-065 · the same file, in memory, for a run nobody is waiting on.
+     *
+     * <h2>Buffered here and streamed there, on purpose</h2>
+     *
+     * <p>{@link #writeTo} above goes to lengths to avoid a {@code byte[]},
+     * because an interactive export is a request somebody fires twice when the
+     * first feels slow and a heap spike per concurrent export is the failure
+     * A-073 is measured on. None of that applies to a scheduled run: it happens
+     * once per schedule per day, on a worker thread with no client attached,
+     * and the bytes have to exist as a whole anyway — an object store
+     * {@code PutObject} needs a length, and the alternative is a multipart
+     * upload for a spreadsheet.
+     *
+     * <p>What matters is that it is the <em>same</em> exporter over the
+     * <em>same</em> rendered report. A second writer for the mail path would be
+     * a second place for the applied-scope header to be written differently,
+     * and the file people keep would be the one nobody re-checked.
+     */
+    byte[] toBytes(ReportExporter.Format format, String reportKey, ReportService.Rendered rendered)
+            throws IOException {
+
+        ReportExporter exporter = exporters.get(format);
+        if (exporter == null) {
+            throw new IllegalStateException("No exporter is registered for " + format);
+        }
+
+        var buffer = new java.io.ByteArrayOutputStream();
+        try {
+            exporter.write(buffer,
+                    titleFor(reportKey),
+                    rendered.meta().appliedScope(),
+                    rendered.report().columns(),
+                    rendered.report().rows());
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Failed writing " + format + " export of " + reportKey, e);
+        }
+        return buffer.toByteArray();
+    }
+
+    /**
      * {@code date-wise-2026-08-17.xlsx}.
      *
      * <p>Dated because these accumulate in a downloads folder, and three files

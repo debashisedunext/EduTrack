@@ -573,6 +573,21 @@ export interface Db {
     leaves: ResourceLeave[];
   };
   /**
+   * A-065 · scheduled report emails (§7.8).
+   *
+   * ⚠️ Stream A, in Stream D's `mocks/` — the mock-coverage test refuses a
+   * contract operation with no handler, so the three routes A-065 adds bring
+   * their handlers with them. Flagged rather than quiet, like the rest of that
+   * task's cross-stream edits.
+   *
+   * Held here rather than as a module-level `let` in the handler for the
+   * calendar's stated reason: state outside this object survives `resetDb()`,
+   * and one test's saved schedule would become the next test's starting point.
+   *
+   * Empty to start, which is the honest state — nobody has scheduled anything.
+   */
+  reportSchedules: ReportScheduleRow[];
+  /**
    * A-029 · two-factor enrolment, keyed by user id. No entry means never
    * enrolled — which is the starting state for every seeded user, because 2FA
    * is opt-in.
@@ -670,6 +685,31 @@ export interface ImportBatchRow {
 export interface Holiday {
   id: number; date: string; name: string;
   projectId: number | null; isRecurring: boolean; isActive: boolean;
+}
+
+/**
+ * A-065 · one scheduled report and the runs it has produced.
+ *
+ * Deliberately carries `createdBy` and no stored scope, mirroring
+ * `report_schedules`: the server re-resolves the owner's role and projects on
+ * every run, and a mock that held a frozen scope would be modelling a design
+ * the schema went out of its way not to have.
+ */
+export interface ReportScheduleRow {
+  id: number; reportKey: string; reportTitle: string;
+  cadence: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+  format: 'xlsx' | 'csv' | 'pdf';
+  recipients: string[]; parameters: Record<string, unknown>;
+  active: boolean; createdBy: number; createdByName: string | null;
+  nextRunAt: string; lastRunAt: string | null;
+  recentRuns: ReportScheduleRunRow[];
+}
+
+export interface ReportScheduleRunRow {
+  id: number; runAt: string; periodFrom: string; periodTo: string;
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  rowCount: number | null; appliedScope: string | null; errorText: string | null;
+  downloadable: boolean;
 }
 
 /**
@@ -1452,6 +1492,9 @@ export function createDb(): Db {
     mappingPresets: {},
     // B-035 · and nobody has committed one either.
     importBatches: {},
+    // A-065 · nor has anybody scheduled a report. The empty state is the one
+    // most users meet first, so it is what the mock starts in.
+    reportSchedules: [],
     calendar: {
       week: {
         weeklyOff: [6, 7],

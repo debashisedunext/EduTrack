@@ -100,9 +100,34 @@ class MailContextRepository {
                             // Keyed on the code, not the numeric id: the code is
                             // what a recipient can also paste into search.
                             .put(MergeTag.TICKET_URL, code == null ? null : baseUrl + "/tickets/" + code)
+                            .put(MergeTag.PORTAL_URL, baseUrl)
                             .build();
                 })
                 .optional();
-        return found.orElseGet(MailContext::empty);
+        return found.orElseGet(this::base);
+    }
+
+    /**
+     * A-065 · the values available to a mail that is about no ticket.
+     *
+     * <p>⚠️ <b>Stream D's file, changed by Stream A — flagged, not quiet.</b>
+     * See the note on {@link MailRenderer#render}.
+     *
+     * <p>Until this existed, a non-ticket mail rendered against
+     * {@link MailContext#empty()} and every {@code {{tag}}} in its template
+     * resolved to nothing — so <em>no such mail could carry a working link</em>.
+     * The daily digest and the weekly manager summary have shipped with that
+     * limitation since D-038; A-065's scheduled report is the first mail whose
+     * entire purpose is to get somebody to a page, so it is the first that
+     * could not live with it.
+     *
+     * <p>Deliberately not the ticket context with the ticket fields blank:
+     * those tags are absent because there is no ticket, and
+     * {@link MailContext} already renders an absent tag as nothing.
+     */
+    MailContext base() {
+        return MailContext.builder()
+                .put(MergeTag.PORTAL_URL, baseUrl)
+                .build();
     }
 }

@@ -229,9 +229,59 @@ agree with itself by construction. This is the report §7.8 describes as shaped 
 be sent to a client, which is the worst place in the product for an invented
 figure. One migration closes it whenever CSAT lands.
 
+
+## Scheduled reports (A-065)
+
+| Route | What |
+|---|---|
+| `POST /reports/schedule` | create one — D-001 declared this |
+| `GET /reports/schedules` | the caller's own, cancelled included |
+| `DELETE /reports/schedules/{id}` | stop it |
+| `GET /reports/schedules/{id}/runs/{runId}/download` | **what the emailed link points at** |
+
+D-001 declared only the first, answering a bare `201`. The other three are what
+make it a feature rather than a subscription with no unsubscribe.
+
+**Scope is re-resolved on every run, never stored.** This is the whole security
+design and it is worth understanding before touching anything here. A report is
+scoped to whoever runs it (§2), and a schedule runs with nobody logged in — so
+the obvious move is to freeze the creator's role and projects onto the row. That
+is wrong in a way that never announces itself: roles change, and a PM moved to
+Developer would go on receiving project-wide figures every Monday from a row
+recording what they used to be, with the mail arriving on time being exactly
+what stops anybody noticing.
+
+`ReportScheduleRepository.callerFor` reads the owner's *current* role and
+*current* project memberships and hands back the same `CallerIdentity` an HTTP
+request would carry — so the run goes through the identical `ReportService.run`
+the viewer uses, and there is no second path where scope could be forgotten. A
+demotion narrows the next email; deactivating a leaver stops it, and empty means
+stop rather than "unrestricted".
+
+**The mail carries a link, not the file.** `ImportReportStore`'s argument, and
+it matters more here: a report is a verbatim extract of the organisation's data,
+and an attachment is an uncontrolled copy that outlives every permission change
+made afterwards — in an inbox, in a mail archive, and in every relay in between.
+`ReportFileStore` deliberately has no method that can mint a public address, so
+there is no presigned URL to leak either. The download route re-checks ownership
+*at the moment of the click*, which is the check an attachment cannot make and a
+signed URL makes once.
+
+**The period comes from the cadence and is never stored.** A stored `from`/`to`
+would win over it and make every run email the same window for ever — a failure
+indistinguishable from a working schedule until two files are compared. Both the
+dialog and the service drop dates, and both say why.
+
+**The scheduler lives in `api`, not `worker`.** The only one that does. `worker`
+depends on `domain` and not on `api`, and the eighteen runners are here — so the
+alternatives were moving three thousand lines into `domain` or giving a mail
+worker a dependency on the web module. `ApiSchedulingConfig` is opt-in and
+switched on in `application.yml`; with it off there is no `@EnableScheduling`,
+which is what keeps ShedLock away from a Redis that test contexts do not run.
+
 ## Not here yet
 
-- **Scheduling** (`POST /reports/schedule`) — A-065.
+- ~~**Scheduling**~~ — landed with A-065. See below.
 - **Five reports** — A-068 and whoever takes `resource-contribution`,
   `rework-analysis`, `deployment-report`, `audit-compliance` and
   `email-delivery-log`. Thirteen run today: `date-wise` (A-063), §7.8's first six

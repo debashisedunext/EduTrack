@@ -5529,6 +5529,27 @@ paths:
       tags: [reports]
       operationId: scheduleReport
       summary: Schedule a recurring report email
+      description: |
+        A-065 · §7.8's "All reports schedulable by email (daily/weekly/monthly)".
+
+        **The schedule is never more privileged than its owner is right now.**
+        A report is scoped to whoever runs it (§2), and a schedule runs with
+        nobody logged in — so the creator's role and projects are *not* stored.
+        Every run re-reads them, which means a demotion narrows the next email
+        and deactivating a leaver stops it. A frozen scope would keep sending a
+        former PM project-wide figures, on time, for ever.
+
+        **Recipients must be active EduTrack users.** The mail carries a link to
+        an authenticated download rather than an attachment, so an address with
+        no account would receive a permanent invitation to a sign-in page it
+        cannot get past. Refused here with a `400` naming the addresses, where
+        the person choosing them can fix it.
+
+        **Any date range in `parameters` is ignored.** The reporting period comes
+        from the cadence — a daily run covers yesterday, a weekly one last week,
+        a monthly one last month — and a stored window would make every run email
+        the same period for ever, which looks exactly like a working schedule
+        until two files are compared.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true
@@ -5536,8 +5557,89 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/ReportScheduleRequest' }
       responses:
-        '201': { description: Scheduled. }
+        # A-065 · D-001 declared a bare 201 with no body. The schedule comes
+        # back because the client needs the id to offer "cancel" without a
+        # second round trip, and `nextRunAt` is the only question anybody has
+        # after pressing Schedule.
+        '201':
+          description: Scheduled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportScheduleResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
+
+  /reports/schedules:
+    get:
+      tags: [reports]
+      operationId: listReportSchedules
+      summary: My scheduled reports
+      description: |
+        A-065 · the caller's own schedules, **cancelled ones included**. "Why did
+        this stop arriving" is a question the screen has to be able to answer,
+        and a row that disappears on cancel answers it with silence.
+
+        Each carries its recent runs, so the screen that manages a schedule is
+        also the screen that downloads what it produced and the screen that says
+        why a run failed.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportScheduleListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /reports/schedules/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+    delete:
+      tags: [reports]
+      operationId: cancelReportSchedule
+      summary: Cancel a scheduled report
+      description: |
+        A-065 · stops the mail. Deactivates rather than deletes, so the schedule
+        stays visible with its history.
+
+        **`404` for somebody else's schedule, never `403`** — §2's rule for an
+        out-of-scope id. A `403` would confirm that schedule 41 exists and
+        belongs to someone, which is worth nothing to its owner and something to
+        anybody enumerating.
+
+        Cancelling twice is not an error: the caller asked for it to stop and it
+        is stopped.
+      responses:
+        '204': { description: Cancelled. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reports/schedules/{id}/runs/{runId}/download:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      - { name: runId, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [reports]
+      operationId: downloadScheduledReport
+      summary: Download a scheduled run's file
+      description: |
+        A-065 · **this is what the emailed link points at**, and the reason the
+        mail carries neither an attachment nor a signed URL.
+
+        The bytes are handed over only after the caller has been authenticated
+        and confirmed to own the schedule — *at the moment of the click*, not at
+        the moment the mail was sent. An attachment cannot make that check, and
+        a presigned URL makes it once and then keeps working for everybody the
+        mail is forwarded to, from a mail archive, long after the recipient's
+        access was taken away.
+
+        `404` covers "no such schedule", "not yours" and "the file has aged out
+        of the object store". The first two must be indistinguishable; the third
+        is genuinely the same answer.
+      responses:
+        '200':
+          description: The generated file.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ─────────────────────────────────────────────────── notifications ─────────
   /notifications:
@@ -10357,6 +10459,97 @@ components:
         format: { type: string, enum: [xlsx, csv, pdf], default: xlsx }
         recipients: { type: array, minItems: 1, items: { type: string, format: email } }
         parameters: { type: object, additionalProperties: true }
+
+    # A-065 · everything on the way back. D-001 declared the request and a bare
+    # 201, which made a schedule something you could create and never see, stop
+    # or read the output of.
+    ReportSchedule:
+      type: object
+      required: [id, reportKey, cadence, format, recipients, active, ownedByMe, createdBy, nextRunAt]
+      properties:
+        id: { type: integer, format: int64 }
+        reportKey: { type: string }
+        reportTitle:
+          type: string
+          description: >
+            The catalogue title, so a list of schedules does not have to hold a
+            second copy of the report vocabulary — `/reports`' argument again.
+        cadence: { type: string, enum: [DAILY, WEEKLY, MONTHLY] }
+        format: { type: string, enum: [xlsx, csv, pdf] }
+        recipients: { type: array, items: { type: string, format: email } }
+        parameters:
+          type: object
+          additionalProperties: true
+          description: The stored filters. Never a date range — see the POST description.
+        active:
+          type: boolean
+          description: False once cancelled. Cancelled schedules stay listed with their history.
+        ownedByMe:
+          type: boolean
+          description: >
+            False when the caller is a **recipient** rather than the owner. The
+            list carries both, because the emailed link points at this screen —
+            a list of only what you created sent everybody who was sent a report
+            to an empty page. A recipient can download the files and cannot
+            cancel: stopping somebody else's standing instruction is not theirs
+            to decide, and `createdByName` is who to ask.
+        createdBy:
+          type: integer
+          format: int64
+          description: >
+            The owner. Their **current** role and projects scope every run, so
+            this is the one field that decides what the emails will contain.
+        createdByName: { type: [string, 'null'] }
+        nextRunAt: { type: string, format: date-time }
+        lastRunAt: { type: [string, 'null'], format: date-time }
+        recentRuns:
+          type: array
+          items: { $ref: '#/components/schemas/ReportScheduleRun' }
+          description: Newest first, bounded. A summary, not a log.
+
+    ReportScheduleRun:
+      type: object
+      required: [id, runAt, periodFrom, periodTo, status, downloadable]
+      properties:
+        id: { type: integer, format: int64 }
+        runAt: { type: string, format: date-time }
+        periodFrom:
+          type: string
+          format: date
+          description: First day the report covered. Derived from the cadence, never stored on the schedule.
+        periodTo: { type: string, format: date }
+        status: { type: string, enum: [RUNNING, SUCCEEDED, FAILED] }
+        rowCount: { type: [integer, 'null'] }
+        appliedScope:
+          type: [string, 'null']
+          description: >
+            What the rows were narrowed to **on that run**. A property of the run
+            and not of the schedule, because the owner's role can change between
+            two of them and that difference is the thing worth seeing.
+        errorText:
+          type: [string, 'null']
+          description: >
+            Why a run failed, in words for the person who owns it — a report
+            withdrawn from the catalogue, or an owner who lost the access it
+            needed. Recorded rather than dropped: a schedule that silently
+            produces nothing is indistinguishable from one nobody looks at.
+        downloadable:
+          type: boolean
+          description: >
+            False for a failed run and for one whose file has aged out. Sent
+            explicitly so the client never infers a button's existence from a null.
+
+    ReportScheduleResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ReportSchedule' }
+
+    ReportScheduleListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ReportSchedule' } }
 
     # ── notifications, chat, mail, audit ──────────────────────────────────
     Notification:

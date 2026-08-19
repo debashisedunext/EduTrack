@@ -39,6 +39,7 @@ import { ResetPasswordPage } from './features/auth/ResetPasswordPage'
 import { AuditLogPage } from './features/audit/AuditLogPage'
 import { ReportsHubPage } from './features/reports/ReportsHubPage'
 import { ReportViewerPage } from './features/reports/ReportViewerPage'
+import { ScheduledReportsPage } from './features/reports/ScheduledReportsPage'
 import { ResourceProfilePage } from './features/resources/ResourceProfilePage'
 import { Button } from './components/ui/button'
 
@@ -106,6 +107,8 @@ export default function App() {
               the query string.
             */}
             <Route path="/reports" element={<ReportsHubPage />} />
+            {/* A-065 · before the :reportKey route, or "schedules" is read as a report key. */}
+            <Route path="/reports/schedules" element={<ScheduledReportsPage />} />
             <Route path="/reports/:reportKey" element={<ReportViewerPage />} />
             {/*
               A-071 · S-16. A top-level path rather than `/masters/audit-logs`:

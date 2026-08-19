@@ -2,7 +2,7 @@ import { http, HttpResponse } from 'msw';
 import { isWellFormedEmail } from '@/lib/email';
 import { getDb, nextId } from '../db';
 import type {
-  Db, Holiday, Level, NotificationChannelCode, NotificationTemplateRow, Priority,
+  Db, Holiday, Level, NotificationChannelCode, NotificationTemplateRow, Priority, ReportScheduleRow,
   ProjectRoleCode, Role, Status, StatusCategory, StatusCode, TaskType, TemplateStage, User,
   WorkflowTransitionRow,
 } from '../db';
@@ -1142,6 +1142,62 @@ function clientImportPreview() {
     rejected: count('REJECTED'),
     rows,
   };
+}
+
+/**
+ * A-065 · the eighteen report titles, for a schedule row that has to name the
+ * report it belongs to.
+ *
+ * The catalogue handler has its own copy in a closure; this is the third place
+ * the vocabulary appears in this file and the second in this module. Left as a
+ * lookup rather than hoisting the catalogue's table, because that table also
+ * carries category and chart type — pulling it out to share one column would
+ * make the catalogue handler read from a structure shaped for somewhere else.
+ * The key is returned unchanged for anything unlisted, which is what the server
+ * does too.
+ */
+function reportTitleOf(reportKey: string): string {
+  const titles: Record<string, string> = {
+    'date-wise': 'Date-wise Report',
+    'resource-scorecard': 'Resource Performance Scorecard',
+    'resource-velocity': 'Resource Velocity',
+    'effort-summary': 'Effort Summary',
+    'resource-contribution': 'Resource Contribution',
+    'project-health': 'Project Health',
+    aging: 'Aging Report',
+    'sla-breach': 'Delayed / SLA Breach',
+    'workload-capacity': 'Workload & Capacity',
+    'reopen-analysis': 'Reopen Analysis',
+    'rework-analysis': 'Rework Analysis',
+    'task-type-analysis': 'Task Type Analysis',
+    'stage-funnel': 'Stage Funnel',
+    'stage-cycle-time': 'Stage Cycle Time',
+    'deployment-report': 'Deployment Report',
+    'client-report': 'Client Report',
+    'audit-compliance': 'Audit & Compliance',
+    'email-delivery-log': 'Email Delivery Log',
+  };
+  return titles[reportKey] ?? reportKey;
+}
+
+/**
+ * A-065 · a schedule's stored filters never include a date range.
+ *
+ * The period comes from the cadence, so a stored window would make every run
+ * cover the same days for ever. Modelled here as well as on the server so a
+ * screen built against the mock cannot come to rely on dates surviving.
+ */
+/** A-065 · the signed-in user's address, for "am I a recipient of this?". */
+function meEmail(): string {
+  const db = getDb();
+  return db.users.find((u) => u.id === db.currentUserId)?.email ?? '';
+}
+
+function withoutDates(parameters: Record<string, unknown>): Record<string, unknown> {
+  const kept = { ...parameters };
+  delete kept.from;
+  delete kept.to;
+  return kept;
 }
 
 export const restHandlers = [
@@ -4062,7 +4118,128 @@ export const restHandlers = [
       })),
     }, undefined, { headers: { ETag: `W/"report-${params.reportKey}"` } });
   }),
-  http.post(url('/reports/schedule'), () => new HttpResponse(null, { status: 201 })),
+  /*
+    A-065 · §7.8's scheduled report emails.
+
+    ⚠️ Stream A, in Stream D's handler file — flagged, not quiet. The
+    mock-coverage test refuses a contract operation with no handler, so the
+    three routes A-065 adds arrive with these.
+
+    The POST used to answer a bare `201` with no body, matching what D-001
+    declared. It now returns the schedule, because that is what the contract
+    says and because the dialog needs the id to offer Cancel without a second
+    round trip.
+  */
+  http.post(url('/reports/schedule'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as {
+      reportKey: string;
+      cadence: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+      format?: 'xlsx' | 'csv' | 'pdf';
+      recipients: string[];
+      parameters?: Record<string, unknown>;
+    };
+
+    // The server's rule, modelled rather than skipped: the mail links to an
+    // authenticated download, so an address with no account could never open
+    // it. A mock that accepted anything would let the dialog's error path go
+    // untested against the one refusal users will actually hit.
+    const unknown = body.recipients.filter(
+      (address) => !db.users.some((u) => u.email.toLowerCase() === address.toLowerCase()),
+    );
+    if (unknown.length > 0) {
+      return HttpResponse.json(
+        {
+          type: 'about:blank',
+          title: 'Bad Request',
+          status: 400,
+          detail:
+            'These addresses do not belong to an active EduTrack user, and the report link '
+            + `can only be opened by somebody who can sign in: ${unknown.join(', ')}`,
+        },
+        { status: 400 },
+      );
+    }
+
+    const owner = db.users.find((u) => u.id === db.currentUserId);
+    const row: ReportScheduleRow = {
+      id: nextId(db, 'reportSchedule'),
+      reportKey: body.reportKey,
+      reportTitle: reportTitleOf(body.reportKey),
+      cadence: body.cadence,
+      format: body.format ?? 'xlsx',
+      recipients: body.recipients,
+      // Dates are dropped here too. The server drops them because it must —
+      // the period comes from the cadence — and the mock drops them so a
+      // screen built against it cannot come to rely on them surviving.
+      parameters: withoutDates(body.parameters ?? {}),
+      active: true,
+      createdBy: db.currentUserId,
+      createdByName: owner?.displayName ?? null,
+      nextRunAt: '2026-08-24T00:30:00.000Z',
+      lastRunAt: null,
+      recentRuns: [],
+    };
+    db.reportSchedules.push(row);
+    // `ownedByMe` is a per-caller view of the row rather than a column, so it
+    // is added on the way out here and in the list, never stored.
+    return HttpResponse.json({ data: { ...row, ownedByMe: true } }, { status: 201 });
+  }),
+
+  http.get(url('/reports/schedules'), () => {
+    const db = getDb();
+    // Cancelled ones included, as the contract says: "why did this stop
+    // arriving" is the question the screen exists to answer.
+    return HttpResponse.json({
+      data: db.reportSchedules
+        .filter((s) =>
+          s.createdBy === db.currentUserId
+          || s.recipients.some((r) => r.toLowerCase() === meEmail().toLowerCase()))
+        .map((s) => ({ ...s, ownedByMe: s.createdBy === db.currentUserId })),
+    });
+  }),
+
+  http.delete(url('/reports/schedules/:id'), ({ params }) => {
+    const db = getDb();
+    const row = db.reportSchedules.find(
+      (s) => s.id === Number(params.id) && s.createdBy === db.currentUserId,
+    );
+    // 404 for somebody else's, never 403 — §2's rule for an out-of-scope id,
+    // modelled so a screen cannot be built against a distinction the server
+    // deliberately does not make.
+    if (!row) {
+      return problem(404, 'not-found', 'No such scheduled report.');
+    }
+    row.active = false;
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get(url('/reports/schedules/:id/runs/:runId/download'), ({ params }) => {
+    const db = getDb();
+    // Owner or recipient — a recipient who cannot open the file the email told
+    // them about is the defect this route was fixed for.
+    const schedule = db.reportSchedules.find(
+      (s) =>
+        s.id === Number(params.id)
+        && (s.createdBy === db.currentUserId
+          || s.recipients.some((r) => r.toLowerCase() === meEmail().toLowerCase())),
+    );
+    const run = schedule?.recentRuns.find((r) => r.id === Number(params.runId));
+    if (!run?.downloadable) {
+      return problem(404, 'not-found', 'No downloadable run for that scheduled report.');
+    }
+    // Bytes, not JSON — the real route streams a file and the screen turns it
+    // into a blob. A JSON body here would let the download path pass in a mock
+    // and fail against the server.
+    return new HttpResponse(new Blob(['scheduled report']), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition':
+          `attachment; filename="${schedule?.reportKey}-${run.periodFrom}_${run.periodTo}.${schedule?.format}"`,
+      },
+    });
+  }),
 
   // ── notifications ─────────────────────────────────────────────────────────
   http.get(url('/notifications'), ({ request }) => {

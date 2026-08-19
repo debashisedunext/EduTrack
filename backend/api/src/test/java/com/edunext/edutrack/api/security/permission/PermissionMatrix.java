@@ -179,6 +179,26 @@ final class PermissionMatrix {
             {"resolutionSummary":"Root cause identified and the fix deployed to production."}""";
 
     /**
+     * A-065 · {@code ReportScheduleDtos.ScheduleRequest}, at the contract's
+     * three required fields and no more — {@link #REOPEN}'s reasoning again.
+     *
+     * <p>This row was the one {@code everyRouteWithARequiredBodyCarriesAFixture}
+     * caught on its first draft, exactly as that test is written to. With no
+     * body, all six cases were passing on a 400 raised while resolving the
+     * argument, <em>before</em> {@code @PreAuthorize} ran, so the row asserted
+     * nothing about authorisation at all and would have stayed green if the
+     * route had been left open to nobody or to everybody.
+     *
+     * <p>The values do not have to succeed and deliberately do not: the report
+     * key is real so the request is well-formed, and the recipient belongs to no
+     * user, so a request that reaches the handler is refused at validation. What
+     * matters is that it reaches the handler, which is what makes the six role
+     * cases mean something.
+     */
+    private static final String SCHEDULE_REPORT = """
+            {"reportKey":"date-wise","cadence":"WEEKLY","recipients":["nobody@example.test"]}""";
+
+    /**
      * C-020 · {@code PriorityChangeDtos.ChangePriorityRequest}: {@code level} is
      * the only {@code @NotBlank} field.
      *
@@ -986,6 +1006,30 @@ final class PermissionMatrix {
             // ReportScope and asserted by ReportScopeTest and ReportsIT — not
             // here, because it is a row rule and this file is about capability.
             everyRole("GET", "/api/v1/reports/{reportKey}"),
+
+            // ── scheduled reports · A-065, §7.8 ─────────────────────────────
+            //
+            // All four reachable by every role, for the reason the runner above
+            // is: §2 gives all six a reports section, and a Developer
+            // scheduling their own scorecard is exactly what "Own perf."
+            // grants. A capability check here would take that away.
+            //
+            // Nothing is widened by scheduling, and that is the property worth
+            // stating in this file even though it is enforced elsewhere: every
+            // run goes through the same ReportService.run under the owner's
+            // identity, re-resolved from the database at run time. So a
+            // schedule can never contain a row its owner could not have opened
+            // in the viewer that morning — and if they are demoted, the next
+            // email narrows on its own.
+            //
+            // The two id-bearing routes are ROW questions like profile-360
+            // above: they answer 404, never 403, for a schedule belonging to
+            // somebody else, so ownership cannot be enumerated. Asserted in
+            // ReportScheduleIT rather than here.
+            everyRole("POST", "/api/v1/reports/schedule", SCHEDULE_REPORT),
+            everyRole("GET", "/api/v1/reports/schedules"),
+            everyRole("DELETE", "/api/v1/reports/schedules/{id}"),
+            everyRole("GET", "/api/v1/reports/schedules/{id}/runs/{runId}/download"),
 
             // ── audit · A-071, S-16 ─────────────────────────────────────────
             // The narrowest row in this file, and the only one read straight

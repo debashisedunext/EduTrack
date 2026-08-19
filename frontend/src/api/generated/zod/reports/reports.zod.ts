@@ -161,6 +161,27 @@ export const runReportResponse = zod.object({
 })
 
 /**
+ * A-065 · §7.8's "All reports schedulable by email (daily/weekly/monthly)".
+
+**The schedule is never more privileged than its owner is right now.**
+A report is scoped to whoever runs it (§2), and a schedule runs with
+nobody logged in — so the creator's role and projects are *not* stored.
+Every run re-reads them, which means a demotion narrows the next email
+and deactivating a leaver stops it. A frozen scope would keep sending a
+former PM project-wide figures, on time, for ever.
+
+**Recipients must be active EduTrack users.** The mail carries a link to
+an authenticated download rather than an attachment, so an address with
+no account would receive a permanent invitation to a sign-in page it
+cannot get past. Refused here with a `400` naming the addresses, where
+the person choosing them can fix it.
+
+**Any date range in `parameters` is ignored.** The reporting period comes
+from the cadence — a daily run covers yesterday, a weekly one last week,
+a monthly one last month — and a stored window would make every run email
+the same period for ever, which looks exactly like a working schedule
+until two files are compared.
+
  * @summary Schedule a recurring report email
  */
 export const scheduleReportHeader = zod.object({
@@ -176,5 +197,85 @@ export const scheduleReportBody = zod.object({
   "format": zod.enum(['xlsx', 'csv', 'pdf']).default(scheduleReportBodyFormatDefault),
   "recipients": zod.array(zod.string().email()).min(1),
   "parameters": zod.record(zod.string(), zod.unknown()).optional()
+})
+
+/**
+ * A-065 · the caller's own schedules, **cancelled ones included**. "Why did
+this stop arriving" is a question the screen has to be able to answer,
+and a row that disappears on cancel answers it with silence.
+
+Each carries its recent runs, so the screen that manages a schedule is
+also the screen that downloads what it produced and the screen that says
+why a run failed.
+
+ * @summary My scheduled reports
+ */
+export const listReportSchedulesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "reportKey": zod.string(),
+  "reportTitle": zod.string().optional().describe('The catalogue title, so a list of schedules does not have to hold a second copy of the report vocabulary — `\/reports`\' argument again.\n'),
+  "cadence": zod.enum(['DAILY', 'WEEKLY', 'MONTHLY']),
+  "format": zod.enum(['xlsx', 'csv', 'pdf']),
+  "recipients": zod.array(zod.string().email()),
+  "parameters": zod.record(zod.string(), zod.unknown()).optional().describe('The stored filters. Never a date range — see the POST description.'),
+  "active": zod.boolean().describe('False once cancelled. Cancelled schedules stay listed with their history.'),
+  "ownedByMe": zod.boolean().describe('False when the caller is a \*\*recipient\*\* rather than the owner. The list carries both, because the emailed link points at this screen — a list of only what you created sent everybody who was sent a report to an empty page. A recipient can download the files and cannot cancel: stopping somebody else\'s standing instruction is not theirs to decide, and `createdByName` is who to ask.\n'),
+  "createdBy": zod.number().describe('The owner. Their \*\*current\*\* role and projects scope every run, so this is the one field that decides what the emails will contain.\n'),
+  "createdByName": zod.string().nullish(),
+  "nextRunAt": zod.string().datetime({}),
+  "lastRunAt": zod.string().datetime({}).nullish(),
+  "recentRuns": zod.array(zod.object({
+  "id": zod.number(),
+  "runAt": zod.string().datetime({}),
+  "periodFrom": zod.string().date().describe('First day the report covered. Derived from the cadence, never stored on the schedule.'),
+  "periodTo": zod.string().date(),
+  "status": zod.enum(['RUNNING', 'SUCCEEDED', 'FAILED']),
+  "rowCount": zod.number().nullish(),
+  "appliedScope": zod.string().nullish().describe('What the rows were narrowed to \*\*on that run\*\*. A property of the run and not of the schedule, because the owner\'s role can change between two of them and that difference is the thing worth seeing.\n'),
+  "errorText": zod.string().nullish().describe('Why a run failed, in words for the person who owns it — a report withdrawn from the catalogue, or an owner who lost the access it needed. Recorded rather than dropped: a schedule that silently produces nothing is indistinguishable from one nobody looks at.\n'),
+  "downloadable": zod.boolean().describe('False for a failed run and for one whose file has aged out. Sent explicitly so the client never infers a button\'s existence from a null.\n')
+})).optional().describe('Newest first, bounded. A summary, not a log.')
+}))
+})
+
+/**
+ * A-065 · stops the mail. Deactivates rather than deletes, so the schedule
+stays visible with its history.
+
+**`404` for somebody else's schedule, never `403`** — §2's rule for an
+out-of-scope id. A `403` would confirm that schedule 41 exists and
+belongs to someone, which is worth nothing to its owner and something to
+anybody enumerating.
+
+Cancelling twice is not an error: the caller asked for it to stop and it
+is stopped.
+
+ * @summary Cancel a scheduled report
+ */
+export const cancelReportScheduleParams = zod.object({
+  "id": zod.number()
+})
+
+/**
+ * A-065 · **this is what the emailed link points at**, and the reason the
+mail carries neither an attachment nor a signed URL.
+
+The bytes are handed over only after the caller has been authenticated
+and confirmed to own the schedule — *at the moment of the click*, not at
+the moment the mail was sent. An attachment cannot make that check, and
+a presigned URL makes it once and then keeps working for everybody the
+mail is forwarded to, from a mail archive, long after the recipient's
+access was taken away.
+
+`404` covers "no such schedule", "not yours" and "the file has aged out
+of the object store". The first two must be indistinguishable; the third
+is genuinely the same answer.
+
+ * @summary Download a scheduled run's file
+ */
+export const downloadScheduledReportParams = zod.object({
+  "id": zod.number(),
+  "runId": zod.number()
 })
 
