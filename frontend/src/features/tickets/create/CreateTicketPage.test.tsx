@@ -630,6 +630,126 @@ describe('S-19 actions — C-013', () => {
   })
 })
 
+/* ── C-021 — client-contact dropdowns and the §4B.2 auto-fills ──────────── */
+
+describe('C-021 — client auto-fills', () => {
+  it('adds the account manager as a watcher when their client is picked, without fighting a manual removal', async () => {
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('clientId', /ACME — Acme Retail Ltd/)
+
+    // Acme's account manager in the fixture is Meera Iyer — added to the
+    // watcher chips without the user opening that picker at all.
+    const remove = await screen.findByRole('button', { name: 'Remove Meera Iyer from watchers' })
+
+    // A starting point, not a rule the desk cannot override.
+    fireEvent.click(remove)
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Remove Meera Iyer from watchers' })).not.toBeInTheDocument(),
+    )
+
+    // And nothing re-adds her while the client has not actually changed —
+    // switching contact, or anything else on the form, must not re-run the
+    // fill.
+    await pickFromDropdown('clientContactId', /Sara Kapoor/)
+    expect(screen.queryByRole('button', { name: 'Remove Meera Iyer from watchers' })).not.toBeInTheDocument()
+  })
+
+  it('shows the client’s time zone alongside the planned close date when it differs from the viewer’s', async () => {
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    // Production Bug is what the existing SLA-preview tests use to get a
+    // resolved date quickly.
+    await pickFromDropdown('taskTypeId', /^Production Bug$/)
+    await waitFor(() => expect(screen.getByText(/8 working hours/)).toBeInTheDocument(), { timeout: 4000 })
+
+    // Northwind's fixture time zone is Europe/London — never the viewer's in
+    // this suite (jsdom's default is UTC, and the dev fixture is IST either
+    // way), so the extra line is always expected here.
+    await pickFromDropdown('clientId', /NORTH — Northwind Logistics/)
+
+    expect(await screen.findByText(/in the client's time zone \(Europe\/London\)/)).toBeInTheDocument()
+  })
+
+  describe('the inline "+ Add contact" dialog', () => {
+    it('is not offered to a Developer, who is told a new contact needs an Admin', async () => {
+      renderPage()
+      await formReady()
+
+      await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+      await pickFromDropdown('clientId', /ACME — Acme Retail Ltd/)
+
+      expect(screen.queryByRole('button', { name: '+ Add contact' })).not.toBeInTheDocument()
+      expect(screen.getByText(/a new one takes an admin/i)).toBeInTheDocument()
+    })
+
+    it('lets an Admin add a contact inline and selects it without leaving the form', async () => {
+      // Anita Rao — the fixture's Admin.
+      getDb().currentUserId = 1
+      renderPage()
+      await formReady()
+
+      await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+      await pickFromDropdown('clientId', /ACME — Acme Retail Ltd/)
+
+      // Enabled only once this client's contacts have loaded once — see the
+      // component note on why the click has to wait for that.
+      const addContact = await screen.findByRole('button', { name: '+ Add contact' })
+      await waitFor(() => expect(addContact).toBeEnabled(), { timeout: 4000 })
+      fireEvent.click(addContact)
+      const dialog = await screen.findByRole('dialog', { name: 'Add contact' })
+
+      fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'New Reporter' } })
+      fireEvent.change(within(dialog).getByLabelText(/^Email/), {
+        target: { value: 'new.reporter@acme.example' },
+      })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Add contact' }))
+
+      // The dialog is Stream B's — it reports success only by invalidating
+      // the same `useListClientContacts` query this screen already reads, so
+      // proving the round trip actually happened means waiting for the real
+      // MSW request rather than the dialog closing.
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), { timeout: 4000 })
+      await waitFor(() => expect(screen.getByLabelText(/Client contact/)).toHaveTextContent('New Reporter'), {
+        timeout: 4000,
+      })
+    })
+  })
+
+  describe('the "Show all clients" toggle', () => {
+    it('is not offered to a Developer', async () => {
+      renderPage()
+      await formReady()
+      await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+
+      expect(screen.queryByRole('checkbox', { name: /show all clients/i })).not.toBeInTheDocument()
+    })
+
+    it('lets an Admin see clients not mapped to the project', async () => {
+      // Anita Rao — the fixture's Admin.
+      getDb().currentUserId = 1
+      renderPage()
+      await formReady()
+      await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+
+      // Bluewave is mapped to no project in the fixture, so it is absent from
+      // CRM's ordinary, project-filtered list.
+      expect((await readDropdownOptions('clientId')).some((o) => /BLUE/.test(o))).toBe(false)
+
+      fireEvent.click(screen.getByRole('checkbox', { name: /show all clients/i }))
+
+      await waitFor(
+        async () => expect((await readDropdownOptions('clientId')).some((o) => /BLUE/.test(o))).toBe(true),
+        { timeout: 4000 },
+      )
+    })
+  })
+})
+
 /* ── Clipboard paste — C-024 ────────────────────────────────────────────── */
 
 describe('CreateTicketPage — pasting a screenshot', () => {

@@ -12,6 +12,28 @@ import type { PlannedCloseDateState } from './usePlannedCloseDate'
 const DATE_TIME_FORMAT = 'd MMM yyyy, HH:mm'
 
 /**
+ * C-021 · §4B.2's "the client's time zone for due-date display", read with
+ * `Intl` rather than pulled in as a dependency — the one thing a fixed format
+ * string cannot do is follow an IANA zone name handed to it at runtime.
+ *
+ * `en-GB` rather than the viewer's own locale: this is a second reading of the
+ * same instant for comparison, and a locale swap between the two lines (say,
+ * `en-US`'s `M/d/yyyy`) would read as two different dates rather than one time
+ * in two zones.
+ */
+function formatInZone(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+/**
  * Where the figure came from, in the words the person reading it would use.
  *
  * Prose rather than the enum, because the enum is a storage detail and
@@ -43,6 +65,16 @@ export interface SlaPreviewProps extends PlannedCloseDateState {
   overrideValue?: string
   /** Offered only alongside an override; omitted, no reset button renders. */
   onUseComputed?: (isoValue: string) => void
+  /**
+   * C-021 · the selected client's `timezone`, when it has one. §4B.2 asks for
+   * the due date to be readable in the client's own zone, not only the
+   * viewer's — a support agent in Bengaluru promising Northwind a Monday
+   * morning close needs to know that is still Sunday night in London.
+   *
+   * Shown only when it differs from the viewer's own resolved zone: a client
+   * in the same zone as the desk would just repeat the line above it.
+   */
+  clientTimezone?: string | null
   className?: string
 }
 
@@ -71,6 +103,7 @@ export function SlaPreview({
   isReady,
   overrideValue,
   onUseComputed,
+  clientTimezone,
   className,
 }: SlaPreviewProps) {
   const base = cn('rounded-control border px-3 py-2.5 text-caption', className)
@@ -117,6 +150,9 @@ export function SlaPreview({
 
   const computed = parseISO(preview.plannedCloseDate)
   const isOverridden = Boolean(overrideValue)
+  const showClientZone =
+    clientTimezone != null &&
+    clientTimezone !== Intl.DateTimeFormat().resolvedOptions().timeZone
 
   return (
     <div
@@ -143,6 +179,12 @@ export function SlaPreview({
             <p className="mt-0.5">
               First response due {format(parseISO(preview.firstResponseDue), DATE_TIME_FORMAT)}
               {preview.responseHrs != null && <> · {workingHours(preview.responseHrs)}</>}
+            </p>
+          )}
+          {showClientZone && (
+            <p className="mt-0.5">
+              {formatInZone(computed, clientTimezone as string)} in the client&apos;s time zone (
+              {clientTimezone})
             </p>
           )}
         </div>
