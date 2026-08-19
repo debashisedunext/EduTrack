@@ -124,7 +124,12 @@ export const ticketHandlers = [
       projectId: project.id,
       clientId: (body.clientId as number) ?? null,
       clientContactId: (body.clientContactId as number) ?? null,
-      isClientRaised: Boolean(body.isClientRaised),
+      // C-022 · §4B.2: derived server-side from the two fields above, never
+      // trusted from the request. `body.isClientRaised` is ignored on purpose
+      // — a client bug or a hand-crafted request could otherwise mark a
+      // ticket client-raised with no client on it, which is exactly the value
+      // this flag exists to rule out for the client-wise reports and CSAT.
+      isClientRaised: body.clientId != null && body.clientContactId != null,
       taskTypeId: Number(body.taskTypeId),
       moduleId: body.moduleId == null ? null : Number(body.moduleId),
       screenName: (body.screenName as string) ?? null,

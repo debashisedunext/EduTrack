@@ -85,6 +85,12 @@ precisely because the answer is not known yet.
   level: Level;
   clientId?: TicketCreateRequestClientId;
   clientContactId?: TicketCreateRequestClientContactId;
+  /** Ignored on write — §4B.2: the server derives this from whether
+`clientId` and `clientContactId` are both set, never from what the
+caller sends. Present on the request only so a client that still
+round-trips a `Ticket` it read back onto a new one is not refused
+for an extra field; the value that matters is on the response.
+ */
   isClientRaised?: boolean;
   assigneeId?: TicketCreateRequestAssigneeId;
   watcherIds?: number[];
