@@ -1,0 +1,61 @@
+-- ---------------------------------------------------------------------
+-- Correction to V20260819_0555 (A-065): the SCHEDULED_REPORT email
+-- template was seeded with subject_template NULL.
+--
+-- A new migration rather than an edit, per CLAUDE.md: V20260819_0555 is
+-- applied, Flyway has checksummed it, and CI's migration guard rejects a
+-- change to it.
+--
+-- WHY IT IS WRONG
+--
+-- notification_templates is B-022's master and the master's own rule is
+-- that an EMAIL row must carry a subject —
+-- NotificationTemplateService.requireSubjectWhenEmail throws
+-- TemplateValidationException with "A mail with no subject line is
+-- unsendable" on both create and update. The INSERT went in as raw SQL
+-- and so bypassed the check the API enforces.
+--
+-- The consequence is not a blank subject line on the wire.
+-- ScheduledReportRunner computes its own subject and hands it to the
+-- outbox, so the mail that goes out reads "Date-wise Report — Weekly
+-- report for 12 Aug to 18 Aug". The consequence is that the row cannot
+-- be saved: an Admin who opens S-15 and changes one word of this
+-- template gets a 400 on save, because the update path re-runs the same
+-- check against the stored NULL subject. That is precisely the outcome
+-- V20260819_0555's own header says it exists to avoid — "A body compiled
+-- into the worker would be the one mail they cannot change" — reached by
+-- a different route.
+--
+-- It also turned develop red: NotificationTemplateMasterIT
+-- .subjectsMatchTheirChannel (B-022) asserts that every EMAIL template
+-- has a subject and every IN_APP one does not, which is the same
+-- invariant read from the other side.
+--
+-- THE VALUE
+--
+-- Worded to match what ScheduledReportRunner.subject() actually sends,
+-- so a reader comparing the template against a received mail does not
+-- find two different claims. It carries no merge tag: the tags that
+-- would make it exact — the report's title and the period — do not exist
+-- in MergeTag, which knows only ticket-shaped and org-shaped values.
+--
+-- OWED, AND DELIBERATELY NOT DONE HERE
+--
+-- The runner does not render this column; it builds its subject in Java
+-- and passes it to OutboxEnqueuer directly. So an Admin can now save an
+-- edit to this subject and the mail will keep arriving with the computed
+-- one — the "set it and nothing happens" failure this codebase names
+-- elsewhere. Closing it means two new MergeTag entries (report title,
+-- period) in Stream D's domain enum and a change to
+-- ScheduledReportRunner in Stream A's feature package, which is a task
+-- rather than an unblock. Flagged for Stream A against A-065.
+--
+-- Idempotent by construction: the WHERE clause matches only the row that
+-- still holds the NULL, so re-running after somebody has set a subject
+-- by hand does not overwrite their wording.
+-- ---------------------------------------------------------------------
+UPDATE notification_templates
+   SET subject_template = 'Your scheduled report is ready'
+ WHERE event_code = 'SCHEDULED_REPORT'
+   AND channel = 'EMAIL'
+   AND subject_template IS NULL;
