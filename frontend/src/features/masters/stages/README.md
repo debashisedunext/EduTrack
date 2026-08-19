@@ -1,4 +1,4 @@
-# `features/masters/stages` — S-13 tab 2, the Stage Master (B-040)
+# `features/masters/stages` — S-13 tab 2, the Stage Master (B-040, B-042)
 
 | File | What it is |
 |---|---|
@@ -106,9 +106,51 @@ the screen that edits the database's rows. Reconciling the older fixture means
 renaming codes that Stream C's reopen fixture and `ReopenDialog.test.tsx` assert
 on — their files, so it is recorded rather than done.
 
+## Retired, not removed — B-042
+
+§7.4: *"Stages used by live tickets can only be deprecated, never deleted."* So the
+row action is **Deprecate**, and **Delete appears only where `isDeletable` is
+true** — which is the server's answer, not a count this screen re-derives. Three
+of the four conditions behind it are facts about *other rows*: nothing has ever
+entered the stage, nothing stands in it, no live stage returns to it, and it is
+not the template's last live one. A screen deriving it from the array it happens
+to hold would offer a button that 409s.
+
+They are deliberately not one **Remove** control with a confirmation that explains
+which happened. Two operations, two consequences, and a screen that acted first
+and explained after would be describing the rule at the wrong end of the click.
+
+**A deprecated row stays in the list, in its place, and stays legible.** It holds a
+`seq` the reorder sends back, and it is what every ribbon that has been through it
+still renders — hiding it would make the ribbon an Admin edits disagree with the
+ribbon a ticket shows. The surface dims and the type does not, because the text on
+a retired row is exactly what somebody deciding whether to restore it has to read.
+
+**The retire dialog names the blocker before the request.** `retireBlockers` is the
+screen's copy of `guardRetirable`, the same bargain `forwardReturnPaths` makes with
+the reorder: an Admin reads *"QA → DEV would point at a retired stage"* rather than
+a 409 naming a rule. The server checks it again.
+
+**Open tickets are stated, not refused.** They are the case §7.4's clause is about,
+so the dialog says how many are standing there and what happens to them — they keep
+the segment and keep their way out of it — and the button stays enabled.
+
+**A deprecated stage already named as a return target stays in the picker, ticked.**
+`returnTargetOptions` drops retired stages because the server refuses them, but not
+one this stage already returns to: that arrow was authored before the target was
+retired, and a picker that silently omitted it would render the box unticked — so
+the next unrelated edit would send a `canReturnTo` with the target quietly missing
+and clear a loop-back nobody touched. Shown, ticked, and labelled *"deprecated,
+clear this"*, so removing it is a decision rather than a side effect.
+
 ## Tests
 
 | Suite | What it holds |
 |---|---|
-| `stageForm.test.ts` | 33 — the validation subset, both mappers, the backward-target rule and the reorder model |
-| `StagesTab.test.tsx` | 18 against the mock server — the tab turning on, the frozen code with its counts, staged-then-saved reordering, the refusal before the request, the live-region announcement, and that no delete exists |
+| `stageForm.test.ts` | 39 — the validation subset, both mappers, the backward-target rule, the reorder model, and B-042's two retire blockers |
+| `StagesTab.test.tsx` | 23 against the mock server — the tab turning on, the frozen code with its counts, staged-then-saved reordering, the refusal before the request, the live-region announcement, and which row offers Deprecate and which offers Delete |
+
+`StagesTab.test.tsx`'s *"there is no delete"* was **replaced** rather than deleted.
+It asserted the absence B-040 shipped on purpose and named this task as the one
+that would end it; what stands in its place is which control appears on which row,
+which is the assertion worth having now.

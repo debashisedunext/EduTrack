@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,15 +24,18 @@ import java.util.List;
 /**
  * B-040 · S-13 tab 2 — the Stage Master, per {@code contracts/openapi.yaml}.
  *
- * <p><b>Six operations. One of them has been declared since D-001 and served by
- * nobody</b> — {@code listWorkflowTemplates} is the sixth case this stream has
- * found of a route that existed in the contract, the MSW mock and the generated
- * client with no controller behind it. The other five are new. What made this one
- * different from B-021's priorities is that the declared <em>shape</em> had
- * drifted from A-005's table as well: {@code version}, {@code projectId} and
- * {@code taskTypeId} name no column and no mapping table, so B-040 removed them
- * rather than emit a hard-coded {@code 1} and two nulls. B-041 brings the mapping
- * back when it has somewhere to store it.
+ * <p><b>Eight operations.</b> Six arrived with B-040, and B-042 added the two §7.4
+ * asks for by name: the deprecation setter, and the narrow delete its clause
+ * leaves room for.
+ *
+ * <p>One of the six <b>had been declared since D-001 and served by nobody</b> —
+ * {@code listWorkflowTemplates}, the sixth case this stream has found of a route
+ * that existed in the contract, the MSW mock and the generated client with no
+ * controller behind it. What made it different from B-021's priorities is that the
+ * declared <em>shape</em> had drifted from A-005's table as well: {@code version},
+ * {@code projectId} and {@code taskTypeId} name no column and no mapping table, so
+ * B-040 removed them rather than emit a hard-coded {@code 1} and two nulls. B-041
+ * brings the mapping back when it has somewhere to store it.
  *
  * <h2>Permissions</h2>
  *
@@ -58,8 +62,12 @@ import java.util.List;
  * {@code check-conventions.py}'s {@code ROWLESS_403} with that reason, beside the
  * role, task type, priority and status masters.
  *
- * <p><b>There is no {@code DELETE} mapping</b>, and the absence is deliberate
- * rather than deferred — see {@link StageService}, and B-042.
+ * <p><b>There is a {@code DELETE} mapping and it refuses most of the stages it
+ * could be pointed at</b> — B-042. §7.4 permits removal only where its clause does
+ * not reach: a stage nothing has ever entered, nothing stands in, nothing live
+ * returns to, and which is not the template's last live one. Everything else is
+ * {@code /deprecation}, and the 409 says so rather than only saying no. See
+ * {@link StageService#delete}.
  *
  * <p>The {@code /api/v1} prefix is spelled out. Nothing declares it globally.
  */
@@ -195,6 +203,76 @@ class StageController {
         List<StageDtos.StageView> reordered = service.reorder(templateId, order.stageIds());
         return ResponseEntity.ok().eTag(etagOfList(reordered))
                 .body(new StageDtos.StageListResponse(reordered));
+    }
+
+    /**
+     * Retire a stage, or bring it back — §7.4's "deprecated, never deleted".
+     *
+     * <p><b>{@code PUT} to a sub-resource rather than a field on the
+     * {@code PATCH}</b>, which is the shape {@code /users/{userId}/status} and
+     * {@code /clients/{clientId}/status} both take. The patch's convention is that
+     * null means "leave it alone", so a boolean there would carry three wire states
+     * for a column with two — and the one write in this package with a consequence
+     * for live tickets would arrive indistinguishable from a display-name edit.
+     *
+     * <p><b>No {@code If-Match}</b>, and it is the only write here without one.
+     * This is an idempotent setter: the body names the state it wants rather than
+     * a delta, so two Admins racing produce the state whoever clicked last asked
+     * for, which is the correct answer rather than a lost update. Recorded in
+     * {@code check-conventions.py}'s {@code NO_IF_MATCH} beside the two status
+     * setters it copies. The refusals that do depend on other rows — the last live
+     * stage, an arrow still pointing here — are re-read inside the transaction, so
+     * a stale screen cannot talk the server past them.
+     */
+    @PutMapping(path = "/workflow-templates/{templateId}/stages/{stageId}/deprecation",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "setStageDeprecation",
+            summary = "Deprecate or restore a stage (S-13 tab 2)")
+    ResponseEntity<StageDtos.StageResponse> deprecation(
+            @PathVariable long templateId,
+            @PathVariable long stageId,
+            @Valid @RequestBody StageDtos.StageDeprecation body) {
+
+        service.find(templateId, stageId).orElseThrow(() -> notFound(templateId));
+        StageDtos.StageView updated =
+                service.setDeprecated(templateId, stageId, body.isDeprecated());
+        return ResponseEntity.ok().eTag(etagOf(updated))
+                .body(new StageDtos.StageResponse(updated));
+    }
+
+    /**
+     * Remove a stage — only where §7.4's clause does not reach.
+     *
+     * <p><b>{@code If-Match} required, which is unusual on a {@code DELETE} and is
+     * the point of it here.</b> The entire guard is that both usage counts are
+     * zero, and those two counts are inside the tag {@link #stage} emits. So a
+     * ticket entering the stage while the confirmation dialog sits open moves the
+     * tag, and the delete is refused with 412 rather than performed on evidence
+     * that stopped being true a moment ago. A destructive verb whose precondition
+     * is a fact about other tables is exactly where a lost update is worst — the
+     * row is gone and there is nothing left to notice it by.
+     *
+     * <p>{@code 204}, and no body. The screen refetches the ribbon, which it has to
+     * anyway: {@code position} is a fact about neighbours and every row after this
+     * one has just changed.
+     */
+    @DeleteMapping(path = "/workflow-templates/{templateId}/stages/{stageId}")
+    @PreAuthorize("hasAuthority('master.write')")
+    @Operation(operationId = "deleteStage", summary = "Delete an unused stage (S-13 tab 2)")
+    ResponseEntity<Void> delete(
+            @PathVariable long templateId,
+            @PathVariable long stageId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch) {
+
+        StageDtos.StageView current = service.find(templateId, stageId)
+                .orElseThrow(() -> notFound(templateId));
+        requirePrecondition(ifMatch, etagOf(current),
+                "If-Match is required. GET the stage first and send back its ETag.");
+
+        service.delete(templateId, stageId);
+        return ResponseEntity.noContent().build();
     }
 
     // ------------------------------------------------------------------

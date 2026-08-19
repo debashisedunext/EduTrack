@@ -365,6 +365,16 @@ export interface TemplateStage {
   canReturnTo: string[]; icon: string | null; seq: number;
   /** What freezes the code. Seeded above zero on one stage so the rule is reachable. */
   transitionCount: number; openTicketCount: number;
+  /**
+   * B-042 · §7.4's "deprecated, never deleted".
+   *
+   * **Seeded false on all eighteen, deliberately.** A retired row here would be
+   * one `TicketListPage` drops from S-25's stage filter and one tab 2 renders
+   * greyed — both correct, and both making it impossible for a test to tell "the
+   * screen handles a deprecated stage" from "the fixture came with one". The
+   * screen's own tests retire a stage first and then assert.
+   */
+  isDeprecated: boolean; deprecatedAt: string | null;
 }
 export interface Ticket {
   ticketId: string; title: string; description: string;
@@ -1360,26 +1370,26 @@ const WORKFLOW_TEMPLATES: WorkflowTemplateRow[] = [
 
 const TEMPLATE_STAGES: TemplateStage[] = [
   // Standard Dev Flow — §4A.1 verbatim.
-  { id: 1, templateId: 1, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0 },
-  { id: 2, templateId: 1, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0 },
-  { id: 3, templateId: 1, seq: 30, stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', slaHours: null, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'code-2', transitionCount: 0, openTicketCount: 0 },
-  { id: 4, templateId: 1, seq: 40, stageCode: 'QA', displayName: 'QA / Testing', ownerRole: 'QA', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'flask-conical', transitionCount: 41, openTicketCount: 3 },
-  { id: 5, templateId: 1, seq: 50, stageCode: 'DEPLOY', displayName: 'Deployment', ownerRole: 'DEPLOYMENT', slaHours: 4, isOptional: false, canReturnTo: ['DEV'], icon: 'rocket', transitionCount: 0, openTicketCount: 0 },
-  { id: 6, templateId: 1, seq: 60, stageCode: 'VERIFY', displayName: 'Verification', ownerRole: 'DEVELOPER', slaHours: 4, isOptional: false, canReturnTo: ['DEV'], icon: 'check-check', transitionCount: 0, openTicketCount: 0 },
-  { id: 7, templateId: 1, seq: 70, stageCode: 'SIGNOFF', displayName: 'Sign-off', ownerRole: 'PM', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'clipboard-check', transitionCount: 0, openTicketCount: 0 },
-  { id: 8, templateId: 1, seq: 80, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0 },
+  { id: 1, templateId: 1, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 2, templateId: 1, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 3, templateId: 1, seq: 30, stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', slaHours: null, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'code-2', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 4, templateId: 1, seq: 40, stageCode: 'QA', displayName: 'QA / Testing', ownerRole: 'QA', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'flask-conical', transitionCount: 41, openTicketCount: 3, isDeprecated: false, deprecatedAt: null },
+  { id: 5, templateId: 1, seq: 50, stageCode: 'DEPLOY', displayName: 'Deployment', ownerRole: 'DEPLOYMENT', slaHours: 4, isOptional: false, canReturnTo: ['DEV'], icon: 'rocket', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 6, templateId: 1, seq: 60, stageCode: 'VERIFY', displayName: 'Verification', ownerRole: 'DEVELOPER', slaHours: 4, isOptional: false, canReturnTo: ['DEV'], icon: 'check-check', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 7, templateId: 1, seq: 70, stageCode: 'SIGNOFF', displayName: 'Sign-off', ownerRole: 'PM', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'clipboard-check', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 8, templateId: 1, seq: 80, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
   // Support Fast-Track.
-  { id: 9, templateId: 2, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0 },
-  { id: 10, templateId: 2, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0 },
-  { id: 11, templateId: 2, seq: 30, stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', slaHours: null, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'code-2', transitionCount: 0, openTicketCount: 0 },
-  { id: 12, templateId: 2, seq: 40, stageCode: 'SIGNOFF', displayName: 'Sign-off', ownerRole: 'SUPPORT', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'clipboard-check', transitionCount: 0, openTicketCount: 0 },
-  { id: 13, templateId: 2, seq: 50, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'SUPPORT', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0 },
+  { id: 9, templateId: 2, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 10, templateId: 2, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 11, templateId: 2, seq: 30, stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', slaHours: null, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'code-2', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 12, templateId: 2, seq: 40, stageCode: 'SIGNOFF', displayName: 'Sign-off', ownerRole: 'SUPPORT', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'clipboard-check', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 13, templateId: 2, seq: 50, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'SUPPORT', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
   // Infra Flow.
-  { id: 14, templateId: 3, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0 },
-  { id: 15, templateId: 3, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0 },
-  { id: 16, templateId: 3, seq: 30, stageCode: 'DEPLOY', displayName: 'Deployment', ownerRole: 'DEPLOYMENT', slaHours: 4, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'rocket', transitionCount: 0, openTicketCount: 0 },
-  { id: 17, templateId: 3, seq: 40, stageCode: 'VERIFY', displayName: 'Verification', ownerRole: 'DEVELOPER', slaHours: 4, isOptional: false, canReturnTo: ['DEPLOY'], icon: 'check-check', transitionCount: 0, openTicketCount: 0 },
-  { id: 18, templateId: 3, seq: 50, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0 },
+  { id: 14, templateId: 3, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 15, templateId: 3, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 16, templateId: 3, seq: 30, stageCode: 'DEPLOY', displayName: 'Deployment', ownerRole: 'DEPLOYMENT', slaHours: 4, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'rocket', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 17, templateId: 3, seq: 40, stageCode: 'VERIFY', displayName: 'Verification', ownerRole: 'DEVELOPER', slaHours: 4, isOptional: false, canReturnTo: ['DEPLOY'], icon: 'check-check', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 18, templateId: 3, seq: 50, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
 ]
 
 export function createDb(): Db {

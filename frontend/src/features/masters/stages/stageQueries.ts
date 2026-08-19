@@ -145,12 +145,13 @@ export function useCreateStage() {
 }
 
 /**
- * The only write that edits — and there is no delete anywhere on this screen.
+ * The field editor.
  *
- * §7.4: stages in use are deprecated, never deleted, because deleting one breaks
- * every historical ribbon that referenced its code. The flag that makes
- * deprecation possible is B-042, so until it lands this screen offers no removal
- * at all rather than a delete B-042 would have to take away.
+ * Deprecation is not here — it is `useSetStageDeprecation`, a separate route, for
+ * the reason `formToPatch` already has to work around on `canReturnTo`: an
+ * omitted field means "leave it alone", so a boolean would carry three states for
+ * a column with two and the one write with a consequence for live tickets would
+ * go out looking like a display-name edit.
  */
 export function useUpdateStage() {
   const queryClient = useQueryClient()
@@ -203,6 +204,69 @@ export function useReorderStages() {
       return body.data
     },
     onSuccess: (_stages, { templateId }) => invalidate(queryClient, templateId),
+  })
+}
+
+/**
+ * Retire a stage, or bring it back — B-042, §7.4's "deprecated, never deleted".
+ *
+ * **No `If-Match`, and it is the only write here without one.** The body names
+ * the state it wants rather than a delta, so two Admins racing produce whichever
+ * state was asked for last — right, rather than a lost update. Sending `*` the
+ * way the other two mutations do on a missing tag would be machinery around a
+ * race with no loser.
+ */
+export function useSetStageDeprecation() {
+  const queryClient = useQueryClient()
+
+  return useMutation<
+    Stage,
+    ApiError,
+    { templateId: number; stageId: number; isDeprecated: boolean }
+  >({
+    mutationFn: async ({ templateId, stageId, isDeprecated }) => {
+      const body = await http<{ data: Stage }>({
+        url: `/masters/workflow-templates/${templateId}/stages/${stageId}/deprecation`,
+        method: 'PUT',
+        data: { isDeprecated },
+      })
+      return body.data
+    },
+    onSuccess: (_stage, { templateId, stageId }) =>
+      invalidate(queryClient, templateId, stageId),
+  })
+}
+
+/**
+ * The narrow delete §7.4 leaves room for — a stage nothing has entered, nothing
+ * stands in, nothing returns to, and which is not the template's last live one.
+ *
+ * **`If-Match` from `useStage`, and it is doing real work on a `DELETE`.** The
+ * server's whole guard is that both usage counts are zero, and those counts are
+ * inside the per-row tag — so a ticket entering the stage while the confirmation
+ * dialog sits open moves the tag and the request is refused with 412 rather than
+ * performed on evidence that has stopped being true.
+ *
+ * The screen refetches rather than splicing the row out of the cache: `position`
+ * is a fact about neighbours, so every row after this one has just changed.
+ */
+export function useDeleteStage() {
+  const queryClient = useQueryClient()
+
+  return useMutation<
+    void,
+    ApiError,
+    { templateId: number; stageId: number; etag: string | null }
+  >({
+    mutationFn: async ({ templateId, stageId, etag }) => {
+      await http<void>({
+        url: `/masters/workflow-templates/${templateId}/stages/${stageId}`,
+        method: 'DELETE',
+        headers: { 'If-Match': etag ?? '*' },
+      })
+    },
+    onSuccess: (_void, { templateId, stageId }) =>
+      invalidate(queryClient, templateId, stageId),
   })
 }
 

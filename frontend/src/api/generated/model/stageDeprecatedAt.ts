@@ -46,32 +46,13 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { RoleCode } from './roleCode';
-import type { WorkflowStageIcon } from './workflowStageIcon';
-import type { WorkflowStageStageSlaHrs } from './workflowStageStageSlaHrs';
 
 /**
- * A stage as it is written into a template by `createWorkflowTemplate`
-(B-041/B-043, still unmounted). **`Stage` is the served shape** — it is
-what `listStages` returns, and it carries the identity and the two usage
-counts this one has no way to know at write time.
+ * When it was retired, and **not derivable from anything else**: the last
+hop into a stage says when it was last *used*, which is a different date
+from when it stopped being offered — the gap between the two is what
+makes the question worth asking. `null` while the stage is live; the two
+move together, and `ck_workflow_stages_deprecation` enforces it.
 
  */
-export interface WorkflowStage {
-  stageCode?: string;
-  displayName?: string;
-  sequence?: number;
-  ownerRole?: RoleCode;
-  icon?: WorkflowStageIcon;
-  stageSlaHrs?: WorkflowStageStageSlaHrs;
-  isOptional?: boolean;
-  /** Allowed backward targets. Stored as JSON — MySQL has no array type. */
-  canReturnTo?: string[];
-  /** Retired — accepts no new entry, and keeps rendering on every ribbon it
-is already on. **Served from the column as of B-042**; it was a
-hard-coded `false` from D-001 until then, which is why `TicketListPage`
-has had a branch skipping deprecated codes since C-013 that could not
-run.
- */
-  isDeprecated?: boolean;
-}
+export type StageDeprecatedAt = string | null;

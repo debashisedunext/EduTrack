@@ -1,22 +1,24 @@
-# `feature/masters/stages` — S-13 tab 2, the Stage Master (B-040)
+# `feature/masters/stages` — S-13 tab 2, the Stage Master (B-040, B-042)
 
 | File | What it is |
 |---|---|
-| `StageController.java` | Six operations. Five new, one served for the first time. |
+| `StageController.java` | Eight operations. Six from B-040, two from B-042. |
 | `StageService.java` | Every rule the schema cannot state. |
 | `StageDtos.java` | The wire shapes — and **two** stage shapes, which is a decision. |
 | `StageUsageRepository.java` | The two counts that decide whether a code may still be renamed. |
-| `StageExceptionHandler.java` | Five refusals, five remedies. |
+| `StageExceptionHandler.java` | Seven refusals, seven remedies. |
 
-## No migration
+## One migration, and it arrived a task late
 
-`workflow_stages` has existed since A-005 and B-004 seeded three templates with
-8 + 5 + 5 stages. `WorkflowStage` and `WorkflowStageRepository` have been read by
-Stream C's reopen and Stream D's stage-SLA scanner since. **Nothing had ever
-written to the table** — every ribbon an Admin could see was a migration.
+B-040 needed none: `workflow_stages` has existed since A-005, B-004 seeded three
+templates with 8 + 5 + 5 stages, and `WorkflowStage` has been read by Stream C's
+reopen and Stream D's stage-SLA scanner since. **Nothing had ever written to the
+table** — every ribbon an Admin could see was a migration.
 
-So this task is API and UI only, no schema change, and CLAUDE.md's Stream A review
-does not apply.
+B-042 adds `V20260818_2140__workflow_stage_deprecation.sql`: `is_deprecated` and
+`deprecated_at`, with a `CHECK` keeping them in step. `workflow_stages` is A-005's
+table and none of the four protected ones, so CLAUDE.md asks for no Stream A
+review — the same call B-039 made about `statuses`.
 
 ## A stage belongs to a template, and §7.4 reads as though it does not
 
@@ -95,16 +97,58 @@ Serving the editing shape there instead would have put four fields with no meani
 to a filter into a response every ticket list reads — and two grouped `COUNT`
 queries per template behind them.
 
-## What this package deliberately does not do
+## Deprecated, never deleted — B-042
 
-**There is no delete.** §7.4: *"Stages used by live tickets can only be
-deprecated, never deleted — otherwise historical ribbons would break."* The
-deprecation flag and its guard are **B-042**. The narrower version — delete only
-where both counts are zero — was drawn and rejected: it is safe in itself, and it
-is also a delete route on the ribbon's definition table existing before the rule
-that protects that table does. `StageControllerTest.noDeleteExists` asserts the
-absence, and there is no `DELETE` row in `PermissionMatrix` because there is no
-route.
+§7.4: *"Stages used by live tickets can only be deprecated, never deleted —
+otherwise historical ribbons would break."* B-040 shipped this package with **no
+removal at all** rather than a delete this task would have had to take away; the
+narrower "delete only where both counts are zero" was drawn and rejected then, on
+the ground that it would put a delete route on the ribbon's definition table
+before the rule protecting that table existed.
+
+That rule is `setDeprecated` and `delete`, and the ordering was the point: they
+land together.
+
+**Deprecating a stage that live tickets are standing in is allowed, and the
+obvious guard against it is exactly wrong.** §7.4's clause is about stages *used
+by live tickets*, so refusing on `openTicketCount` would refuse the only case the
+word "deprecated" is in the blueprint to describe. Those tickets keep rendering
+their segment and keep their ordinary way out of it. What deprecation stops is new
+*entry*.
+
+Two things are refused, and both are states an Admin could not get back out of:
+
+- **The template's last live stage.** A workflow with nothing live routes no
+  ticket at all, and nothing would notice — the create form's picker would go on
+  offering it. B-039 refused a status retire on the same ground.
+- **A live stage that still returns to it.** `can_return_to` is a whitelist of
+  moves the transition service will honour, so an arrow into a retired stage is an
+  entry into a stage nothing may enter. Same failure the reorder refuses from the
+  other direction, so it reuses that problem type and its `pairs` property — the
+  screen highlights both ends of each pair on the ribbon it is already drawing,
+  and should not need to know which operation produced the list.
+
+**Delete survives, narrowly.** Both counts zero, nothing live returning to it, and
+not the last live stage — the typo caught the same afternoon. Everything else is
+409 `stage-in-use` carrying both counts *and* `canDeprecate: true`, because an
+Admin told "no" with no alternative concludes the row cannot be got rid of.
+
+**Nothing in the database would have refused any of this**, which is why the rule
+is a service and not a constraint: `ticket_stage_transitions.to_stage` and
+`tickets.current_stage` hold the code as plain text with no foreign key onto this
+table, so a delete cascades nothing, fails nowhere, and takes every historical
+ribbon segment's meaning with it in silence.
+
+**Two routes, not a field on the `PATCH`.** The patch's convention is that null
+means "leave it alone", so a boolean there would carry three wire states for a
+column with two — and the one write in this package with a consequence for live
+tickets would arrive indistinguishable from a display-name edit.
+`/users/{userId}/status` and `/clients/{clientId}/status` are separate setters for
+the same reason, and the deprecation route inherits their `NO_IF_MATCH`
+exemption. The `DELETE` does **not**: its whole guard is that both usage counts
+are zero, and both are inside the tag `getStage` emits.
+
+## What this package still does not do
 
 **It does not refuse to edit a template with live tickets.** A-005's own header
 says a template is "versioned by copy, never edited in place", and that is kept by
@@ -127,6 +171,25 @@ The mapping is **B-041**'s, along with the table to store it in.
 | Suite | What it holds |
 |---|---|
 | `StageServiceTest` | 34 — the four refusals, both usage paths, the reorder's completeness and direction rules |
-| `StageControllerTest` | 13 — both preconditions, both `ETag` scopes, the 404 before them, and that no `DELETE` exists |
+| `StageControllerTest` | 18 — both preconditions, both `ETag` scopes, the 404 before them, and B-042's `DELETE` shape |
 | `StageBodyValidationTest` | 15 — the annotations, including the `slaHours` floor and that `seq` is not patchable |
-| `StageMasterIT` | 15 against real MySQL — the unique key the reorder has to survive, the counts' columns, their template scope, and B-004's seed |
+| `StageMasterIT` | 19 against real MySQL — the unique key the reorder has to survive, the counts' columns, their template scope, B-004's seed, and that `ck_workflow_stages_deprecation` is enforced rather than parsed |
+
+B-040's `StageControllerTest.noDeleteExists` and `StagesTab.test.tsx`'s *"there is
+no delete"* were both replaced by B-042 rather than deleted. Each named this task
+as the one that would change it, and each did real work while it lived.
+
+## For Stream C and Stream D — two consequences in your files
+
+Recorded rather than done, because neither is this stream's code.
+
+**`ReopenService` (C)** validates a restart stage with
+`findByTemplateIdAndStageCode(...).isEmpty()`. That now accepts a *deprecated*
+stage, so a reopen can restart a ticket into a stage the master says is retired.
+Whether that should be refused is C's call — it may well be right to allow it on a
+cycle that ran on the old ribbon.
+
+**The stage-SLA scanner (D)** must go on matching deprecated codes for history —
+`ticket_stage_transitions` rows naming them are exactly the rows §4A.7's scan is
+for. What is worth a look is whether a *new* stuck-in-stage alert should be raised
+against a retired stage; nothing here changes the query either way.

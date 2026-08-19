@@ -30,8 +30,13 @@ import java.util.List;
  * resource leave — so a Friday-18:00 handoff with a 4-hour stage SLA does not
  * breach on Saturday morning.
  *
- * <p>Stages in use are deprecated, never deleted (B-042): deletion breaks every
- * historical ribbon that referenced the code.
+ * <p><b>Stages in use are deprecated, never deleted</b> — blueprint §7.4, and
+ * {@code isDeprecated} is B-042's column for saying so. The rule lives here rather
+ * than in a constraint because the database cannot state it: A-005 made
+ * {@code ticket_stage_transitions.to_stage} and {@code tickets.current_stage}
+ * plain {@code VARCHAR} holding the code with no foreign key onto this table, so
+ * deleting a row cascades nothing and fails nowhere while leaving every
+ * historical ribbon segment pointing at a definition that is gone.
  */
 @Entity
 @Table(name = "workflow_stages")
@@ -86,6 +91,30 @@ public class WorkflowStage {
 
     @Column(name = "icon", length = 30)
     private String icon;
+
+    /**
+     * Retired — B-042. A deprecated stage keeps rendering on every ribbon that has
+     * already been through it and accepts no new entry.
+     *
+     * <p>Not {@code isActive}, which is what every other master calls this, and the
+     * difference is not cosmetic. An inactive task type or level is one nobody may
+     * <em>choose</em> any more; a deprecated stage is one that tickets are still
+     * standing in and whose code is still written into rows nothing can rewrite.
+     * §7.4 uses the word deliberately and so does this column.
+     */
+    @Column(name = "is_deprecated", nullable = false)
+    private boolean isDeprecated;
+
+    /**
+     * When it was retired, and it is not derivable.
+     *
+     * <p>The last hop into a stage says when it was last <em>used</em>, which is a
+     * different date from when it was <em>retired</em> — the gap between them is
+     * the interval that makes "when did we stop using this?" worth asking at all.
+     * {@code ck_workflow_stages_deprecation} keeps this and the flag in step.
+     */
+    @Column(name = "deprecated_at")
+    private Instant deprecatedAt;
 
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", insertable = false, updatable = false)
@@ -169,6 +198,22 @@ public class WorkflowStage {
 
     public void setIcon(String icon) {
         this.icon = icon;
+    }
+
+    public boolean isDeprecated() {
+        return isDeprecated;
+    }
+
+    public void setDeprecated(boolean deprecated) {
+        this.isDeprecated = deprecated;
+    }
+
+    public Instant getDeprecatedAt() {
+        return deprecatedAt;
+    }
+
+    public void setDeprecatedAt(Instant deprecatedAt) {
+        this.deprecatedAt = deprecatedAt;
     }
 
     public Instant getCreatedAt() {

@@ -46,32 +46,16 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { RoleCode } from './roleCode';
-import type { WorkflowStageIcon } from './workflowStageIcon';
-import type { WorkflowStageStageSlaHrs } from './workflowStageStageSlaHrs';
 
 /**
- * A stage as it is written into a template by `createWorkflowTemplate`
-(B-041/B-043, still unmounted). **`Stage` is the served shape** — it is
-what `listStages` returns, and it carries the identity and the two usage
-counts this one has no way to know at write time.
+ * B-042. The state to put the stage into, named rather than toggled — which is
+what makes the route idempotent and therefore what earns it its
+`NO_IF_MATCH` exemption. `true` retires, `false` restores.
 
  */
-export interface WorkflowStage {
-  stageCode?: string;
-  displayName?: string;
-  sequence?: number;
-  ownerRole?: RoleCode;
-  icon?: WorkflowStageIcon;
-  stageSlaHrs?: WorkflowStageStageSlaHrs;
-  isOptional?: boolean;
-  /** Allowed backward targets. Stored as JSON — MySQL has no array type. */
-  canReturnTo?: string[];
-  /** Retired — accepts no new entry, and keeps rendering on every ribbon it
-is already on. **Served from the column as of B-042**; it was a
-hard-coded `false` from D-001 until then, which is why `TicketListPage`
-has had a branch skipping deprecated codes since C-013 that could not
-run.
+export interface StageDeprecationRequest {
+  /** Required. Absent is `400` rather than a silent restore, because the one
+request a client sends by mistake is an empty body.
  */
-  isDeprecated?: boolean;
+  isDeprecated: boolean;
 }

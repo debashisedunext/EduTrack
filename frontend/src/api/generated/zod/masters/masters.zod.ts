@@ -1758,7 +1758,7 @@ export const listWorkflowTemplatesResponse = zod.object({
   "stageSlaHrs": zod.number().nullish(),
   "isOptional": zod.boolean().optional(),
   "canReturnTo": zod.array(zod.string()).optional().describe('Allowed backward targets. Stored as JSON — MySQL has no array type.'),
-  "isDeprecated": zod.boolean().optional().describe('Deprecated, never deleted — historical ribbons depend on it. B-042 adds the column; B-040 does not serve this field.')
+  "isDeprecated": zod.boolean().optional().describe('Retired — accepts no new entry, and keeps rendering on every ribbon it\nis already on. \*\*Served from the column as of B-042\*\*; it was a\nhard-coded `false` from D-001 until then, which is why `TicketListPage`\nhas had a branch skipping deprecated codes since C-013 that could not\nrun.\n')
 }).describe('A stage as it is written into a template by `createWorkflowTemplate`\n(B-041\/B-043, still unmounted). \*\*`Stage` is the served shape\*\* — it is\nwhat `listStages` returns, and it carries the identity and the two usage\ncounts this one has no way to know at write time.\n')).optional().describe('\*\*Kept, and `Stage` is not a replacement for it.\*\* S-25\'s ticket list\nbuilds its stage filter from this array across every template, and\nthat screen shipped before S-13 tab 2 existed — removing it to tidy\nthe shape would have broken a live filter to save a field.\n\nThe two differ in what they are for. This is the ribbon as a\n\*vocabulary\*: enough to label and order a filter, with no identity,\nbecause a filter matches on `stageCode` and several templates share\none. `Stage` is the ribbon as \*rows to edit\*, with `id`, `templateId`\nand the two usage counts that decide whether a code may still be\nrenamed. Serving the editing shape here would have put four fields\nwith no meaning to a filter into a response every ticket list reads.\n\n`isDeprecated` is `false` on every row until \*\*B-042\*\* adds the\ncolumn, which is what it already was — the field has been in this\nschema since D-001 with nothing behind it.\n')
 }).describe('S-13 tab 2\'s selector. `version`, `projectId` and `taskTypeId` were\nremoved by B-040 — see `listWorkflowTemplates` for why each one could not\nbe served honestly, and which task brings the mapping back.\n'))
 })
@@ -1793,7 +1793,7 @@ export const createWorkflowTemplateBody = zod.object({
   "stageSlaHrs": zod.number().nullish(),
   "isOptional": zod.boolean().optional(),
   "canReturnTo": zod.array(zod.string()).optional().describe('Allowed backward targets. Stored as JSON — MySQL has no array type.'),
-  "isDeprecated": zod.boolean().optional().describe('Deprecated, never deleted — historical ribbons depend on it. B-042 adds the column; B-040 does not serve this field.')
+  "isDeprecated": zod.boolean().optional().describe('Retired — accepts no new entry, and keeps rendering on every ribbon it\nis already on. \*\*Served from the column as of B-042\*\*; it was a\nhard-coded `false` from D-001 until then, which is why `TicketListPage`\nhas had a branch skipping deprecated codes since C-013 that could not\nrun.\n')
 }).describe('A stage as it is written into a template by `createWorkflowTemplate`\n(B-041\/B-043, still unmounted). \*\*`Stage` is the served shape\*\* — it is\nwhat `listStages` returns, and it carries the identity and the two usage\ncounts this one has no way to know at write time.\n')).min(1)
 })
 
@@ -1861,7 +1861,10 @@ export const listStagesResponse = zod.object({
   "position": zod.number().describe('1-based index in the ribbon, left to right.'),
   "transitionCount": zod.number().describe('`ticket_stage_transitions` rows that have ever named this code on a\nticket of this template. Above zero, the code is frozen.\n'),
   "openTicketCount": zod.number().describe('Tickets of this template sitting in this stage right now. What the\nreorder warning counts, and the second reason a code may be frozen.\n'),
-  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n')
+  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n'),
+  "isDeprecated": zod.boolean().describe('Retired — B-042. §7.4\'s \*\"stages used by live tickets can only be\ndeprecated, never deleted\"\*. Set through `setStageDeprecation`, never\nthrough `updateStage`.\n'),
+  "deprecatedAt": zod.string().datetime({}).nullish().describe('When it was retired, and \*\*not derivable from anything else\*\*: the last\nhop into a stage says when it was last \*used\*, which is a different date\nfrom when it stopped being offered — the gap between the two is what\nmakes the question worth asking. `null` while the stage is live; the two\nmove together, and `ck_workflow_stages_deprecation` enforces it.\n'),
+  "isDeletable": zod.boolean().describe('Whether `deleteStage` would be permitted — B-042, and server-computed\nfor the reason `isCodeEditable` is, one step stronger. Four conditions\nsit behind it and \*\*three are facts about other rows\*\*: nothing has ever\nentered this stage, nothing stands in it now, no live stage returns to\nit, and it is not the template\'s last live one. A client deriving it\nfrom the array it happens to hold would be right until it held a\nfiltered one.\n')
 }).describe('One segment of one template\'s ribbon — S-13 tab 2, B-040.\n\n\*\*`seq` is not `sequence`, and neither is a position.\*\* The stored value\nis B-004\'s 10, 20, 30 … so that a stage can later be dragged between two\nothers without renumbering the table; `position` is the 1-based index the\nscreen shows an Admin. Both are here because a client that computed\n`position` from array order would be right only until a caller sorted the\nlist differently.\n'))
 })
 
@@ -1993,7 +1996,10 @@ export const reorderStagesResponse = zod.object({
   "position": zod.number().describe('1-based index in the ribbon, left to right.'),
   "transitionCount": zod.number().describe('`ticket_stage_transitions` rows that have ever named this code on a\nticket of this template. Above zero, the code is frozen.\n'),
   "openTicketCount": zod.number().describe('Tickets of this template sitting in this stage right now. What the\nreorder warning counts, and the second reason a code may be frozen.\n'),
-  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n')
+  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n'),
+  "isDeprecated": zod.boolean().describe('Retired — B-042. §7.4\'s \*\"stages used by live tickets can only be\ndeprecated, never deleted\"\*. Set through `setStageDeprecation`, never\nthrough `updateStage`.\n'),
+  "deprecatedAt": zod.string().datetime({}).nullish().describe('When it was retired, and \*\*not derivable from anything else\*\*: the last\nhop into a stage says when it was last \*used\*, which is a different date\nfrom when it stopped being offered — the gap between the two is what\nmakes the question worth asking. `null` while the stage is live; the two\nmove together, and `ck_workflow_stages_deprecation` enforces it.\n'),
+  "isDeletable": zod.boolean().describe('Whether `deleteStage` would be permitted — B-042, and server-computed\nfor the reason `isCodeEditable` is, one step stronger. Four conditions\nsit behind it and \*\*three are facts about other rows\*\*: nothing has ever\nentered this stage, nothing stands in it now, no live stage returns to\nit, and it is not the template\'s last live one. A client deriving it\nfrom the array it happens to hold would be right until it held a\nfiltered one.\n')
 }).describe('One segment of one template\'s ribbon — S-13 tab 2, B-040.\n\n\*\*`seq` is not `sequence`, and neither is a position.\*\* The stored value\nis B-004\'s 10, 20, 30 … so that a stage can later be dragged between two\nothers without renumbering the table; `position` is the 1-based index the\nscreen shows an Admin. Both are here because a client that computed\n`position` from array order would be right only until a caller sorted the\nlist differently.\n'))
 })
 
@@ -2040,7 +2046,10 @@ export const getStageResponse = zod.object({
   "position": zod.number().describe('1-based index in the ribbon, left to right.'),
   "transitionCount": zod.number().describe('`ticket_stage_transitions` rows that have ever named this code on a\nticket of this template. Above zero, the code is frozen.\n'),
   "openTicketCount": zod.number().describe('Tickets of this template sitting in this stage right now. What the\nreorder warning counts, and the second reason a code may be frozen.\n'),
-  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n')
+  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n'),
+  "isDeprecated": zod.boolean().describe('Retired — B-042. §7.4\'s \*\"stages used by live tickets can only be\ndeprecated, never deleted\"\*. Set through `setStageDeprecation`, never\nthrough `updateStage`.\n'),
+  "deprecatedAt": zod.string().datetime({}).nullish().describe('When it was retired, and \*\*not derivable from anything else\*\*: the last\nhop into a stage says when it was last \*used\*, which is a different date\nfrom when it stopped being offered — the gap between the two is what\nmakes the question worth asking. `null` while the stage is live; the two\nmove together, and `ck_workflow_stages_deprecation` enforces it.\n'),
+  "isDeletable": zod.boolean().describe('Whether `deleteStage` would be permitted — B-042, and server-computed\nfor the reason `isCodeEditable` is, one step stronger. Four conditions\nsit behind it and \*\*three are facts about other rows\*\*: nothing has ever\nentered this stage, nothing stands in it now, no live stage returns to\nit, and it is not the template\'s last live one. A client deriving it\nfrom the array it happens to hold would be right until it held a\nfiltered one.\n')
 }).describe('One segment of one template\'s ribbon — S-13 tab 2, B-040.\n\n\*\*`seq` is not `sequence`, and neither is a position.\*\* The stored value\nis B-004\'s 10, 20, 30 … so that a stage can later be dragged between two\nothers without renumbering the table; `position` is the 1-based index the\nscreen shows an Admin. Both are here because a client that computed\n`position` from array order would be right only until a caller sorted the\nlist differently.\n')
 })
 
@@ -2074,12 +2083,13 @@ would leave a segment no role on earth can move.
 and always one earlier in the order** — the same backward rule
 `reorderStages` enforces from the other side. Field-keyed `400`.
 
-**There is no delete, and the absence is the design.** §7.4: *"Stages used
-by live tickets can only be deprecated, never deleted — otherwise
-historical ribbons would break."* The deprecation flag and its guard are
-**B-042**; until they land this screen offers no removal at all, rather
-than a delete B-042 would have to take away. A stage added by mistake is
-edited, not removed.
+**Retiring a stage is not this route.** §7.4's *"deprecated, never deleted"*
+is `setStageDeprecation`, a separate setter for the reason
+`/users/{userId}/status` is one: an omitted field here means "leave it
+alone", so a boolean would carry three wire states for a column with two,
+and the one write with a consequence for live tickets would arrive looking
+like a display-name edit. `deleteStage` covers the narrow case §7.4's clause
+does not reach.
 
 `If-Match` is required, not optional; a write without one is refused with
 `428`. Read the current tag from `GET .../stages/{stageId}`.
@@ -2145,7 +2155,142 @@ export const updateStageResponse = zod.object({
   "position": zod.number().describe('1-based index in the ribbon, left to right.'),
   "transitionCount": zod.number().describe('`ticket_stage_transitions` rows that have ever named this code on a\nticket of this template. Above zero, the code is frozen.\n'),
   "openTicketCount": zod.number().describe('Tickets of this template sitting in this stage right now. What the\nreorder warning counts, and the second reason a code may be frozen.\n'),
-  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n')
+  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n'),
+  "isDeprecated": zod.boolean().describe('Retired — B-042. §7.4\'s \*\"stages used by live tickets can only be\ndeprecated, never deleted\"\*. Set through `setStageDeprecation`, never\nthrough `updateStage`.\n'),
+  "deprecatedAt": zod.string().datetime({}).nullish().describe('When it was retired, and \*\*not derivable from anything else\*\*: the last\nhop into a stage says when it was last \*used\*, which is a different date\nfrom when it stopped being offered — the gap between the two is what\nmakes the question worth asking. `null` while the stage is live; the two\nmove together, and `ck_workflow_stages_deprecation` enforces it.\n'),
+  "isDeletable": zod.boolean().describe('Whether `deleteStage` would be permitted — B-042, and server-computed\nfor the reason `isCodeEditable` is, one step stronger. Four conditions\nsit behind it and \*\*three are facts about other rows\*\*: nothing has ever\nentered this stage, nothing stands in it now, no live stage returns to\nit, and it is not the template\'s last live one. A client deriving it\nfrom the array it happens to hold would be right until it held a\nfiltered one.\n')
+}).describe('One segment of one template\'s ribbon — S-13 tab 2, B-040.\n\n\*\*`seq` is not `sequence`, and neither is a position.\*\* The stored value\nis B-004\'s 10, 20, 30 … so that a stage can later be dragged between two\nothers without renumbering the table; `position` is the 1-based index the\nscreen shows an Admin. Both are here because a client that computed\n`position` from array order would be right only until a caller sorted the\nlist differently.\n')
+})
+
+/**
+ * Admin only, and **refused for most of the stages it can be pointed at** —
+B-042. §7.4: *"Stages used by live tickets can only be deprecated, never
+deleted — otherwise historical ribbons would break."* This route serves the
+complement of that clause and nothing more: a stage nothing has ever
+entered, nothing is standing in, no live stage returns to, and which is not
+the template's last live one. A stage added by mistake and caught the same
+afternoon.
+
+**Nothing in the database would have refused this, which is why the rule is
+here.** A-005 made `ticket_stage_transitions.to_stage` and
+`tickets.current_stage` plain `VARCHAR` columns holding the stage *code*,
+deliberately with no foreign key onto `workflow_stages`. So a delete
+cascades nothing and fails nowhere — it just leaves every historical ribbon
+segment pointing at a definition that is gone, and the §4A.7 stuck-in-stage
+scan quietly ceasing to match those rows. The same silent pair that freezes
+`stageCode`, one verb further along.
+
+Refused with `409` and `type: stage-in-use` when either usage count is above
+zero. That document carries both counts **and** `canDeprecate: true`, so the
+screen can offer the correct action rather than only reporting the refusal —
+an Admin told "no" with no alternative concludes the row cannot be removed
+at all. `409` with `type: last-live-stage` when it is the only live stage
+left, and `type: return-target-direction` when a live stage still names it
+in `canReturnTo`, with the pairs on the document.
+
+**`If-Match` is required, which is unusual on a `DELETE` and is the point of
+it here.** The whole guard is that `transitionCount` and `openTicketCount`
+are zero, and both are inside the tag `GET .../stages/{stageId}` emits — so
+a ticket entering the stage while the confirmation dialog is open moves the
+tag and the delete is refused with `412`, rather than performed on evidence
+that stopped being true. A destructive verb whose precondition is a fact
+about other tables is exactly where a lost update is worst: the row is gone,
+and there is nothing left to notice it by.
+
+`seq` is not renumbered. The gap is B-004's spacing doing its job, and
+`reorderStages` closes it on the next drag.
+
+ * @summary Delete an unused stage (S-13 tab 2)
+ */
+export const deleteStageParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n'),
+  "stageId": zod.number().describe('`workflow_stages.id`. Nothing points at it — `ticket_stage_transitions`\nstores `to_stage` as the \*\*code\*\*, deliberately not this key, which is\nexactly why `updateStage` refuses to rename a code that is in use.\n')
+})
+
+export const deleteStageHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+/**
+ * Admin only. §7.4's *"can only be deprecated, never deleted"* — B-042, and
+the route that makes retiring a stage possible at all.
+
+A deprecated stage **keeps rendering on every ribbon it is already on** and
+accepts no new entry. That is the whole distinction: the row has to survive,
+because `ticket_stage_transitions` holds its code as text with nothing
+pointing back, so retiring it is a statement about the future rather than a
+removal.
+
+**Open tickets do not refuse this, and that is the case the rule exists
+for.** §7.4's clause is about stages *used by live tickets*, so a guard on
+`openTicketCount` would refuse the only situation the word is in the
+blueprint to describe. Tickets standing in a retired stage keep their
+segment and keep their ordinary way out of it.
+
+Two things are refused, both with `409`, and both are states with no way
+back out:
+
+- **`last-live-stage`** — the template's only remaining live stage. A
+  workflow with nothing live routes no ticket, and no screen would notice.
+- **`return-target-direction`** — a live stage still names this one in
+  `canReturnTo`. That whitelist is a set of moves the transition service
+  will honour, so an arrow into a retired stage is an entry into a stage
+  nothing may enter. The offending pairs travel on the document exactly as
+  `reorderStages` sends them, because the screen highlights both ends of
+  each pair on the ribbon it is already drawing.
+
+**Restoring is unconditional.** Neither guard can be broken by bringing a
+stage back, and unlike B-039's status restore there is nothing to reinstate:
+this retire clears no other row, so nothing has to be guessed at.
+
+**No `If-Match`**, and it is the only write on this screen without one. The
+body names the state it wants rather than a delta, so two Admins racing
+produce whichever state was asked for last — the correct answer rather than
+a lost update. Same exemption as `/users/{userId}/status` and
+`/clients/{clientId}/status`; recorded in `check-conventions.py`. The
+refusals above depend on other rows and are re-read inside the transaction,
+so a stale screen cannot talk the server past them.
+
+ * @summary Deprecate or restore a stage (S-13 tab 2)
+ */
+export const setStageDeprecationParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n'),
+  "stageId": zod.number().describe('`workflow_stages.id`. Nothing points at it — `ticket_stage_transitions`\nstores `to_stage` as the \*\*code\*\*, deliberately not this key, which is\nexactly why `updateStage` refuses to rename a code that is in use.\n')
+})
+
+export const setStageDeprecationBody = zod.object({
+  "isDeprecated": zod.boolean().describe('Required. Absent is `400` rather than a silent restore, because the one\nrequest a client sends by mistake is an empty body.\n')
+}).describe('B-042. The state to put the stage into, named rather than toggled — which is\nwhat makes the route idempotent and therefore what earns it its\n`NO_IF_MATCH` exemption. `true` retires, `false` restores.\n')
+
+export const setStageDeprecationResponseDataStageCodeMax = 20;
+
+export const setStageDeprecationResponseDataDisplayNameMax = 50;
+
+export const setStageDeprecationResponseDataOwnerRoleMax = 20;
+
+export const setStageDeprecationResponseDataIconMax = 30;
+
+
+
+export const setStageDeprecationResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "templateId": zod.number(),
+  "stageCode": zod.string().max(setStageDeprecationResponseDataStageCodeMax).describe('Upper-case, unique within the template. Stored again as plain text in\nevery `ticket_stage_transitions` row, which is why it stops being\neditable the moment one exists.\n'),
+  "displayName": zod.string().max(setStageDeprecationResponseDataDisplayNameMax),
+  "ownerRole": zod.string().max(setStageDeprecationResponseDataOwnerRoleMax).describe('A `roles.code`. Not the `RoleCode` enum: S-09 lets an Admin add a\nseventh role, and typing this to the six of §2 would make a stage\nowned by that role unreadable.\n'),
+  "slaHours": zod.number().nullish().describe('\*\*Working\*\* hours, resolved through B-024\'s calendar — never\nwall-clock. `null` where the figure is not a template-level one:\n§4A.1 gives Development as \*\"per SLA policy\"\*, so B-004 seeds it null\non purpose and an empty field here means the same thing.\n'),
+  "isOptional": zod.boolean().describe('Skippable, with a reason.'),
+  "canReturnTo": zod.array(zod.string()).describe('Allowed \*\*backward\*\* targets, as stage codes in this template. §4A.1\'s\nloop-back table, stored as JSON because MySQL has no array type.\n'),
+  "icon": zod.string().max(setStageDeprecationResponseDataIconMax).nullish(),
+  "seq": zod.number().describe('Stored ribbon order — 10, 20, 30 …'),
+  "position": zod.number().describe('1-based index in the ribbon, left to right.'),
+  "transitionCount": zod.number().describe('`ticket_stage_transitions` rows that have ever named this code on a\nticket of this template. Above zero, the code is frozen.\n'),
+  "openTicketCount": zod.number().describe('Tickets of this template sitting in this stage right now. What the\nreorder warning counts, and the second reason a code may be frozen.\n'),
+  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n'),
+  "isDeprecated": zod.boolean().describe('Retired — B-042. §7.4\'s \*\"stages used by live tickets can only be\ndeprecated, never deleted\"\*. Set through `setStageDeprecation`, never\nthrough `updateStage`.\n'),
+  "deprecatedAt": zod.string().datetime({}).nullish().describe('When it was retired, and \*\*not derivable from anything else\*\*: the last\nhop into a stage says when it was last \*used\*, which is a different date\nfrom when it stopped being offered — the gap between the two is what\nmakes the question worth asking. `null` while the stage is live; the two\nmove together, and `ck_workflow_stages_deprecation` enforces it.\n'),
+  "isDeletable": zod.boolean().describe('Whether `deleteStage` would be permitted — B-042, and server-computed\nfor the reason `isCodeEditable` is, one step stronger. Four conditions\nsit behind it and \*\*three are facts about other rows\*\*: nothing has ever\nentered this stage, nothing stands in it now, no live stage returns to\nit, and it is not the template\'s last live one. A client deriving it\nfrom the array it happens to hold would be right until it held a\nfiltered one.\n')
 }).describe('One segment of one template\'s ribbon — S-13 tab 2, B-040.\n\n\*\*`seq` is not `sequence`, and neither is a position.\*\* The stored value\nis B-004\'s 10, 20, 30 … so that a stage can later be dragged between two\nothers without renumbering the table; `position` is the 1-based index the\nscreen shows an Admin. Both are here because a client that computed\n`position` from array order would be right only until a caller sorted the\nlist differently.\n')
 })
 

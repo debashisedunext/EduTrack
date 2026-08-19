@@ -48,6 +48,7 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { StageSlaHours } from './stageSlaHours';
 import type { StageIcon } from './stageIcon';
+import type { StageDeprecatedAt } from './stageDeprecatedAt';
 
 /**
  * One segment of one template's ribbon — S-13 tab 2, B-040.
@@ -111,4 +112,25 @@ reorder warning counts, and the second reason a code may be frozen.
 either count is above zero.
  */
   isCodeEditable: boolean;
+  /** Retired — B-042. §7.4's *"stages used by live tickets can only be
+deprecated, never deleted"*. Set through `setStageDeprecation`, never
+through `updateStage`.
+ */
+  isDeprecated: boolean;
+  /** When it was retired, and **not derivable from anything else**: the last
+hop into a stage says when it was last *used*, which is a different date
+from when it stopped being offered — the gap between the two is what
+makes the question worth asking. `null` while the stage is live; the two
+move together, and `ck_workflow_stages_deprecation` enforces it.
+ */
+  deprecatedAt?: StageDeprecatedAt;
+  /** Whether `deleteStage` would be permitted — B-042, and server-computed
+for the reason `isCodeEditable` is, one step stronger. Four conditions
+sit behind it and **three are facts about other rows**: nothing has ever
+entered this stage, nothing stands in it now, no live stage returns to
+it, and it is not the template's last live one. A client deriving it
+from the array it happens to hold would be right until it held a
+filtered one.
+ */
+  isDeletable: boolean;
 }

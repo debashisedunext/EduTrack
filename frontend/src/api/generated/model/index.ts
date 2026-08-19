@@ -533,6 +533,8 @@ export * from './slaPolicyWrite';
 export * from './slaPolicyWriteResponseHrs';
 export * from './slaSource';
 export * from './stage';
+export * from './stageDeprecatedAt';
+export * from './stageDeprecationRequest';
 export * from './stageIcon';
 export * from './stageListResponse';
 export * from './stageOrderRequest';

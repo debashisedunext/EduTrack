@@ -233,7 +233,51 @@ function stageDto(stage: TemplateStage) {
     transitionCount: stage.transitionCount,
     openTicketCount: stage.openTicketCount,
     isCodeEditable: stage.transitionCount === 0 && stage.openTicketCount === 0,
+    isDeprecated: stage.isDeprecated,
+    deprecatedAt: stage.deprecatedAt,
+    // B-042. Three of the four conditions are facts about *other* rows, which is
+    // why the server computes it and the screen does not — the mock has to do the
+    // same work or the Delete button appears on rows the backend would refuse.
+    isDeletable: stage.transitionCount === 0 && stage.openTicketCount === 0
+      && retireBlockers(stage, ribbon(stage.templateId)) === null,
   };
+}
+
+/**
+ * B-042 · the two states a stage may not be retired into, as the server refuses
+ * them — shared by the deprecation setter and the delete, exactly as
+ * `guardRetirable` is.
+ *
+ * Returns the problem document or `null`. Written out in full rather than
+ * stubbed, because each sentence is one the confirm dialog renders and a mock
+ * answering "Conflict" would let that copy ship having never been read.
+ */
+function retireBlockers(stage: TemplateStage, stages: TemplateStage[]) {
+  const others = stages.filter((s) => s.id !== stage.id);
+
+  if (!others.some((s) => !s.isDeprecated)) {
+    return problem(409, 'last-live-stage', "That is the template's last live stage", {
+      detail: `${stage.stageCode} is the last stage on this template that is still live. `
+        + 'Retiring it would leave a workflow that can route no ticket at all, and the '
+        + 'template picker would go on offering it. Add or restore another stage first.',
+    });
+  }
+
+  const arrows = others
+    .filter((s) => !s.isDeprecated)
+    .filter((s) => s.canReturnTo.some((t) => t.toUpperCase() === stage.stageCode.toUpperCase()))
+    .map((s) => `${s.stageCode} \u2192 ${stage.stageCode}`);
+
+  if (arrows.length > 0) {
+    const detail = `${stage.stageCode} is still a return target — ${arrows.join(', ')}. `
+      + 'A return target is a move the transition service will honour, so leaving one '
+      + 'pointing at a retired stage is an arrow into a stage nothing may enter. Clear it '
+      + 'there first.';
+    return problem(409, 'return-target-direction', 'That order breaks a return path',
+      { detail, pairs: arrows, errors: { stageIds: [detail] } });
+  }
+
+  return null;
 }
 
 const hash = (value: string) =>
@@ -3612,7 +3656,9 @@ export const restHandlers = [
           stageSlaHrs: stage.slaHours,
           isOptional: stage.isOptional,
           canReturnTo: stage.canReturnTo,
-          isDeprecated: false,
+          // B-042's column. A hard-coded false until now, against a
+          // TicketListPage branch that has skipped deprecated codes since C-013.
+          isDeprecated: stage.isDeprecated,
         })),
       };
     })),
@@ -3685,6 +3731,8 @@ export const restHandlers = [
       seq: Math.max(0, ...stages.map((s) => s.seq)) + 10,
       transitionCount: 0,
       openTicketCount: 0,
+      isDeprecated: false,
+      deprecatedAt: null,
     };
     getDb().templateStages.push(created);
     return ok(stageDto(created), undefined, {
@@ -3778,6 +3826,85 @@ export const restHandlers = [
       ordered.forEach((stage, index) => { stage.seq = (index + 1) * 10; });
       const next = ribbon(templateId);
       return ok(next.map(stageDto), undefined, { headers: { ETag: ribbonEtag(next) } });
+    },
+  ),
+
+  /**
+   * B-042 · retire or restore — §7.4's "deprecated, never deleted".
+   *
+   * **No `If-Match`, matching the server.** An idempotent setter naming the state
+   * it wants, so a mock that demanded a precondition would make the screen build
+   * a guard the real backend does not want.
+   *
+   * Both refusals are here rather than stubbed to 200, because each is a sentence
+   * the dialog renders before the click and a mock that never produced one would
+   * let that copy ship untested.
+   */
+  http.put(url('/masters/workflow-templates/:templateId/stages/:stageId/deprecation'),
+    async ({ request, params }) => {
+      const templateId = Number(params.templateId);
+      const stages = ribbon(templateId);
+      const stage = stages.find((s) => s.id === Number(params.stageId));
+      if (!stage) return notFound('Stage');
+
+      const { isDeprecated } = (await request.json()) as { isDeprecated: boolean };
+
+      if (isDeprecated && !stage.isDeprecated) {
+        const blocked = retireBlockers(stage, stages);
+        if (blocked) return blocked;
+        stage.isDeprecated = true;
+        stage.deprecatedAt = new Date().toISOString();
+      } else if (!isDeprecated && stage.isDeprecated) {
+        // Cleared together — ck_workflow_stages_deprecation would refuse the row
+        // otherwise, and a mock that left the timestamp behind would let a screen
+        // ship reading it on a live stage.
+        stage.isDeprecated = false;
+        stage.deprecatedAt = null;
+      }
+
+      return ok(stageDto(stage), undefined, { headers: { ETag: stageEtag(stage) } });
+    },
+  ),
+
+  /**
+   * B-042 · the narrow delete §7.4 leaves room for.
+   *
+   * `If-Match` **is** required here, unlike on the setter above, and the mock
+   * enforces it: the server's whole guard is that both usage counts are zero and
+   * both are inside the per-row tag, so a client that skipped the precondition
+   * would work against this mock and 428 against the backend.
+   */
+  http.delete(url('/masters/workflow-templates/:templateId/stages/:stageId'),
+    ({ request, params }) => {
+      const templateId = Number(params.templateId);
+      const stages = ribbon(templateId);
+      const stage = stages.find((s) => s.id === Number(params.stageId));
+      if (!stage) return notFound('Stage');
+
+      const stale = stagePrecondition(request.headers.get('If-Match'), stageEtag(stage), 'stage');
+      if (stale) return stale;
+
+      if (stage.transitionCount > 0 || stage.openTicketCount > 0) {
+        const detail = `${stage.stageCode} has been used — ${stage.transitionCount} ribbon `
+          + `segments and ${stage.openTicketCount} tickets standing in it now. Deleting it `
+          + 'would leave every one of those rows pointing at a stage definition that no longer '
+          + 'exists, and nothing would fail: the code travels as plain text with no foreign '
+          + 'key. Deprecate it instead — it keeps rendering on the ribbons it is already on '
+          + 'and accepts nothing new.';
+        return problem(409, 'stage-in-use', 'Stage in use — deprecate it instead', {
+          detail,
+          transitionCount: stage.transitionCount,
+          openTicketCount: stage.openTicketCount,
+          canDeprecate: true,
+        });
+      }
+
+      const blocked = retireBlockers(stage, stages);
+      if (blocked) return blocked;
+
+      const db = getDb();
+      db.templateStages.splice(db.templateStages.findIndex((s) => s.id === stage.id), 1);
+      return noContent();
     },
   ),
 

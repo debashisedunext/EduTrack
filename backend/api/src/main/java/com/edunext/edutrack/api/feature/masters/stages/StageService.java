@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -46,7 +47,7 @@ import java.util.stream.Collectors;
  * table, a migration touching the ribbon, and two sources of truth for what a
  * stage is.
  *
- * <h2>The four refusals</h2>
+ * <h2>The refusals</h2>
  *
  * <table>
  *   <tr><th>Rule</th><th>Where</th><th>Status</th></tr>
@@ -56,8 +57,15 @@ import java.util.stream.Collectors;
  *       <td>{@link #update}</td><td>409 {@code immutable-field}</td></tr>
  *   <tr><td>{@code ownerRole} must match a live {@code roles.code}</td>
  *       <td>{@link #resolveOwnerRole}</td><td>400 {@code validation}</td></tr>
- *   <tr><td>{@code canReturnTo} must be backward, in-template, not self</td>
+ *   <tr><td>{@code canReturnTo} must be backward, in-template, not self,
+ *       and not a deprecated stage</td>
  *       <td>{@link #validateReturnTargets}</td><td>400/409</td></tr>
+ *   <tr><td>A stage in use is deprecated, never deleted</td>
+ *       <td>{@link #delete}</td><td>409 {@code stage-in-use}</td></tr>
+ *   <tr><td>The template's last live stage may not be retired</td>
+ *       <td>{@link #setDeprecated}, {@link #delete}</td><td>409 {@code last-live-stage}</td></tr>
+ *   <tr><td>Nothing live may still return to a stage being retired</td>
+ *       <td>{@link #setDeprecated}, {@link #delete}</td><td>409 {@code return-target-direction}</td></tr>
  * </table>
  *
  * <h2>Why renaming a code in use is the worst edit in this package</h2>
@@ -77,16 +85,35 @@ import java.util.stream.Collectors;
  * anywhere holding the old code. That is the only case it is allowed in, and it
  * is the case that matters — a typo caught the same afternoon.
  *
- * <h2>What this service deliberately does not do</h2>
+ * <h2>Removal, in the shape §7.4 asks for — B-042</h2>
  *
- * <p><b>There is no delete.</b> §7.4 is explicit: "Stages used by live tickets can
- * only be deprecated, never deleted — otherwise historical ribbons would break."
- * The deprecation flag and its guard are <b>B-042</b>, one task away, and this
- * package ships no removal at all rather than a delete B-042 would then have to
- * take away. The narrower version — "delete only where both counts are zero" —
- * was drawn and rejected: it is safe in itself, and it is also a delete route on
- * the ribbon's definition table that would exist before the rule protecting that
- * table did. B-042 adds removal in the shape §7.4 asks for.
+ * <p>"Stages used by live tickets can only be deprecated, never deleted —
+ * otherwise historical ribbons would break." B-040 shipped this package with no
+ * removal at all rather than a delete this task would have had to take away;
+ * {@link #setDeprecated} and {@link #delete} are the two halves of what replaced
+ * it.
+ *
+ * <p><b>Deprecating a stage that live tickets are standing in is allowed, and
+ * that is the case the rule exists for.</b> §7.4's sentence is about stages used
+ * by live tickets, so refusing on {@code openTicketCount} would refuse the only
+ * situation the word "deprecated" is in the blueprint to describe. Those tickets
+ * keep rendering the segment they are in and keep moving on out of it; what
+ * deprecation stops is new <em>entry</em>.
+ *
+ * <p>What it does refuse is the two states an Admin could not get out of. A
+ * template whose last live stage is retired can route no ticket at all, and there
+ * is no screen that would put it back — B-039 refused a status retire on the same
+ * ground. And a live stage whose {@code canReturnTo} names the retired one is an
+ * arrow pointing into a stage nothing may enter, which is B-040's forward-return
+ * refusal seen from the other side: same failure, same remedy, so the pairs are
+ * named the same way rather than left for the Admin to find.
+ *
+ * <p><b>Delete survives, narrowly, and only where §7.4's clause does not
+ * apply.</b> Nothing has ever entered the stage, nothing stands in it now, no live
+ * sibling returns to it, and it is not the template's last live stage — a stage
+ * added by mistake and caught the same afternoon. Every other case is refused
+ * with the remedy on the problem document, because the alternative is an Admin
+ * concluding the row cannot be got rid of at all.
  *
  * <p><b>It does not refuse to edit a template that has live tickets.</b> A-005's
  * own header says a template is "versioned by copy, never edited in place",
@@ -165,9 +192,11 @@ public class StageService {
                     stage.getOwnerRole(), stage.getIcon(), stage.getSlaHours(),
                     stage.isOptional(),
                     stage.getCanReturnTo() == null ? List.of() : List.copyOf(stage.getCanReturnTo()),
-                    // B-042 adds the column. Constant false is what this field has
-                    // been since D-001, not new drift introduced here.
-                    false));
+                    // B-042's column, and the first value this field has ever had.
+                    // TicketListPage has skipped deprecated codes when building
+                    // S-25's stage filter since C-013, against a constant false —
+                    // so the branch shipped, was covered, and could not run.
+                    stage.isDeprecated()));
         }
         return out;
     }
@@ -373,6 +402,121 @@ public class StageService {
         return view(ordered, templateId);
     }
 
+    /**
+     * Retire a stage, or bring it back — B-042, and §7.4's "deprecated, never
+     * deleted".
+     *
+     * <p><b>Open tickets do not refuse this.</b> §7.4's clause is about stages
+     * <em>used by live tickets</em>, so a guard on {@code openTicketCount} would
+     * refuse the very case the word exists for. A ticket standing in a retired
+     * stage keeps rendering that segment and keeps its ordinary way out; what
+     * stops is new entry.
+     *
+     * <p>Two things are refused, and both are states with no way back out.
+     *
+     * <p><b>The last live stage.</b> A template with nothing live routes no ticket
+     * at all, and no screen would notice — the create form's template picker would
+     * simply offer a workflow that goes nowhere. B-039 refused a status retire on
+     * the same ground: one screen must not put another into a state it cannot get
+     * out of. Counted over live stages of this template only, so retiring seven of
+     * eight is fine and the eighth is not.
+     *
+     * <p><b>A live stage that still returns to it.</b> {@code canReturnTo} is a
+     * whitelist of moves the transition service will honour, so an arrow into a
+     * retired stage is an entry into a stage nothing may enter — exactly the
+     * inconsistency {@link #reorder} refuses from the other direction, and named
+     * the same way so the screen renders both through one component. Deprecated
+     * siblings are not counted: an arrow from a retired stage is not a move
+     * anything can make.
+     *
+     * <p><b>Restoring is unconditional</b>, and that is not symmetry for its own
+     * sake. Neither guard can be violated by bringing a stage back — a template
+     * gains a live stage rather than losing its last, and a restored stage's own
+     * targets were validated when they were written. B-039's status restore
+     * deliberately does <em>not</em> reinstate what its retire cleared, because a
+     * restore there would have to guess which transition rows this retire
+     * deactivated; nothing is cleared here, so there is nothing to guess.
+     */
+    @Transactional
+    public StageDtos.StageView setDeprecated(long templateId, long stageId, boolean deprecated) {
+        List<WorkflowStage> siblings = stages.findByTemplateIdOrderBySeqAsc(templateId);
+        WorkflowStage stage = siblings.stream()
+                .filter(s -> stageId == s.getId())
+                .findFirst()
+                .orElseThrow(() -> new StageNotFoundException(templateId, stageId));
+
+        if (deprecated && !stage.isDeprecated()) {
+            guardRetirable(stage, siblings);
+            stage.setDeprecated(true);
+            stage.setDeprecatedAt(Instant.now());
+        } else if (!deprecated && stage.isDeprecated()) {
+            stage.setDeprecated(false);
+            // Cleared together, or ck_workflow_stages_deprecation refuses the row.
+            stage.setDeprecatedAt(null);
+        } else {
+            // Already in the requested state. An idempotent setter answers the
+            // current view rather than inventing a conflict out of a repeated
+            // click or a retried request.
+            return view(stage, siblings, templateId);
+        }
+
+        WorkflowStage saved = stages.save(stage);
+        return view(saved, siblings, templateId);
+    }
+
+    /**
+     * Remove a stage outright — permitted only where §7.4's clause does not reach.
+     *
+     * <p>The clause is "stages used by live tickets", and this is the complement of
+     * it: nothing has ever entered the stage, nothing stands in it now, no live
+     * sibling returns to it, and it is not the template's last live stage. A stage
+     * added by mistake and caught the same afternoon, which is the case worth
+     * having a delete for at all.
+     *
+     * <p><b>Both usage counts, not one.</b> {@code transitionCount} is the history
+     * a delete orphans; {@code openTicketCount} is the set of tickets whose
+     * {@code current_stage} stops resolving the instant the row is gone. Neither is
+     * a superset of the other, for the reason {@link #guardRename} gives about the
+     * identical pair.
+     *
+     * <p><b>Nothing in the database would have stopped this.</b> A-005 made
+     * {@code ticket_stage_transitions.to_stage} and {@code tickets.current_stage}
+     * plain {@code VARCHAR} with no foreign key onto {@code workflow_stages}, so
+     * the row simply goes and the damage is entirely silent — every historical
+     * ribbon segment left pointing at a definition that no longer exists, and the
+     * §4A.7 stuck-in-stage scan quietly stopping on those rows. That is why the
+     * refusal is here and not a constraint, and why the problem document names
+     * deprecation as the remedy rather than only reporting the counts: an Admin
+     * told "no" without an alternative concludes the row cannot be got rid of.
+     *
+     * <p>{@code seq} is left as it is. The gap a removed stage leaves is B-004's
+     * spacing doing its job, and renumbering the ribbon to close it would be a
+     * whole-set write nobody asked for on the one operation already destroying a
+     * row. {@link #reorder} closes it on the next drag.
+     */
+    @Transactional
+    public void delete(long templateId, long stageId) {
+        List<WorkflowStage> siblings = stages.findByTemplateIdOrderBySeqAsc(templateId);
+        WorkflowStage stage = siblings.stream()
+                .filter(s -> stageId == s.getId())
+                .findFirst()
+                .orElseThrow(() -> new StageNotFoundException(templateId, stageId));
+
+        StageUsageRepository.Counts counts = usage.forTemplate(templateId);
+        long transitions = counts.transitionsFor(stage.getStageCode());
+        long open = counts.openTicketsFor(stage.getStageCode());
+        if (transitions > 0 || open > 0) {
+            throw new StageInUseException(stage.getStageCode(), transitions, open);
+        }
+
+        // The same two states a retire refuses, and for the same reasons — a
+        // delete is a retire the row does not come back from, so it cannot be the
+        // looser check of the two.
+        guardRetirable(stage, siblings);
+
+        stages.delete(stage);
+    }
+
     // ------------------------------------------------------------------
     // Rules
     // ------------------------------------------------------------------
@@ -400,6 +544,46 @@ public class StageService {
         long open = counts.openTicketsFor(stage.getStageCode());
         if (transitions > 0 || open > 0) {
             throw new ImmutableStageCodeException(stage.getStageCode(), transitions, open);
+        }
+    }
+
+    /**
+     * The two states a stage may not be retired into, whether by
+     * {@link #setDeprecated} or by {@link #delete}.
+     *
+     * <p>Shared rather than written twice, because a delete is a retire the row
+     * does not come back from: any state deprecation refuses, deletion must refuse
+     * at least as hard, and two copies of that rule would drift the first time one
+     * of them is edited.
+     */
+    private void guardRetirable(WorkflowStage stage, List<WorkflowStage> siblings) {
+        long liveElsewhere = siblings.stream()
+                .filter(s -> !s.getId().equals(stage.getId()))
+                .filter(s -> !s.isDeprecated())
+                .count();
+        if (liveElsewhere == 0) {
+            throw new LastLiveStageException(stage.getStageCode());
+        }
+
+        List<String> arrows = new ArrayList<>();
+        for (WorkflowStage sibling : siblings) {
+            if (sibling.getId().equals(stage.getId()) || sibling.isDeprecated()) {
+                continue;
+            }
+            List<String> targets = sibling.getCanReturnTo() == null
+                    ? List.<String>of() : sibling.getCanReturnTo();
+            for (String target : targets) {
+                if (target.equalsIgnoreCase(stage.getStageCode())) {
+                    arrows.add("%s \u2192 %s".formatted(sibling.getStageCode(), stage.getStageCode()));
+                }
+            }
+        }
+        if (!arrows.isEmpty()) {
+            throw new ReturnTargetDirectionException(arrows,
+                    ("%s is still a return target — %s. A return target is a move the transition "
+                            + "service will honour, so leaving one pointing at a retired stage is "
+                            + "an arrow into a stage nothing may enter. Clear it there first.")
+                            .formatted(stage.getStageCode(), String.join(", ", arrows)));
         }
     }
 
@@ -474,6 +658,20 @@ public class StageService {
                                 + "— moving forward is an ordinary handoff, not a return.")
                                 .formatted(code, stage.getStageCode()));
             }
+            // B-042. A return target is a move the transition service will
+            // honour, so a whitelist entry naming a retired stage is an entry
+            // into a stage nothing may enter. Refused on the write rather than
+            // tolerated and filtered on the read, because the stored row is what
+            // the engine consults — and this is the same inconsistency
+            // setDeprecated refuses from the other side, caught here for the
+            // stage that arrives after the retire rather than before it.
+            if (target.isDeprecated()) {
+                throw new StageValidationException("canReturnTo",
+                        ("%s is deprecated. A return target is a move the transition service "
+                                + "will honour, so it has to name a stage that still accepts "
+                                + "tickets — restore it first, or pick another.")
+                                .formatted(code));
+            }
             resolved.add(target.getStageCode());
         }
         return resolved;
@@ -511,7 +709,7 @@ public class StageService {
         StageUsageRepository.Counts counts = usage.forTemplate(templateId);
         List<StageDtos.StageView> out = new ArrayList<>(ordered.size());
         for (int i = 0; i < ordered.size(); i++) {
-            out.add(view(ordered.get(i), i + 1, templateId, counts));
+            out.add(view(ordered.get(i), i + 1, templateId, counts, ordered));
         }
         return out;
     }
@@ -527,11 +725,27 @@ public class StageService {
                 position = i + 1;
             }
         }
-        return view(stage, position, templateId, usage.forTemplate(templateId));
+        return view(stage, position, templateId, usage.forTemplate(templateId), ordered);
     }
 
     private StageDtos.StageView view(WorkflowStage stage, int position, long templateId,
                                      StageUsageRepository.Counts counts) {
+        return view(stage, position, templateId, counts, List.of());
+    }
+
+    /**
+     * The one place a {@code StageView} is built.
+     *
+     * <p>{@code siblings} is what {@code isDeletable} needs and the counts cannot
+     * supply: two of the four conditions behind it are facts about <em>other
+     * rows</em> — whether anything live still returns to this stage, and whether
+     * anything live would be left if it went. An empty list means "not known
+     * here", and the field falls back to the two counts, which is the answer for
+     * the single-row reads that have no siblings loaded.
+     */
+    private StageDtos.StageView view(WorkflowStage stage, int position, long templateId,
+                                     StageUsageRepository.Counts counts,
+                                     List<WorkflowStage> siblings) {
         long transitions = counts.transitionsFor(stage.getStageCode());
         long open = counts.openTicketsFor(stage.getStageCode());
         return new StageDtos.StageView(
@@ -540,7 +754,34 @@ public class StageService {
                 stage.getCanReturnTo() == null ? List.of() : List.copyOf(stage.getCanReturnTo()),
                 stage.getIcon(), stage.getSeq(), position,
                 transitions, open,
-                transitions == 0 && open == 0);
+                transitions == 0 && open == 0,
+                stage.isDeprecated(), stage.getDeprecatedAt(),
+                transitions == 0 && open == 0 && retirable(stage, siblings));
+    }
+
+    /**
+     * Whether {@link #guardRetirable} would let this stage go, asked as a question
+     * rather than answered with an exception.
+     *
+     * <p>The guard itself stays the authority — this is the same rule read for the
+     * screen, and it is deliberately the *only* other place it is expressed, so
+     * that a button offered and a request refused cannot disagree.
+     */
+    private static boolean retirable(WorkflowStage stage, List<WorkflowStage> siblings) {
+        if (siblings.isEmpty()) {
+            return true;
+        }
+        boolean liveElsewhere = siblings.stream()
+                .filter(s -> !s.getId().equals(stage.getId()))
+                .anyMatch(s -> !s.isDeprecated());
+        if (!liveElsewhere) {
+            return false;
+        }
+        return siblings.stream()
+                .filter(s -> !s.getId().equals(stage.getId()) && !s.isDeprecated())
+                .flatMap(s -> (s.getCanReturnTo() == null ? List.<String>of() : s.getCanReturnTo())
+                        .stream())
+                .noneMatch(target -> target.equalsIgnoreCase(stage.getStageCode()));
     }
 
     private static short nextSeq(List<WorkflowStage> existing) {
@@ -629,8 +870,75 @@ public class StageService {
             this.pairs = List.copyOf(pairs);
         }
 
+        /**
+         * B-042's retire, which breaks the same consistency from the other side —
+         * an arrow that stays put while its target stops accepting entry.
+         *
+         * <p>Same {@code type} and same {@code pairs} property deliberately: the
+         * screen highlights both ends of every pair on the ribbon it is already
+         * drawing, and that component should not need to know which of the two
+         * operations produced the list. Only the sentence differs, because the
+         * remedy does — move a row, or clear a target.
+         */
+        public ReturnTargetDirectionException(List<String> pairs, String message) {
+            super(message);
+            this.pairs = List.copyOf(pairs);
+        }
+
         public List<String> pairs() {
             return pairs;
+        }
+    }
+
+    /**
+     * 409 — the stage has been used, so §7.4 permits deprecation and not deletion.
+     *
+     * <p>Carries both counts <em>and</em> the remedy, which is the part that
+     * matters. A refusal that only reports numbers leaves an Admin concluding the
+     * row cannot be got rid of at all, and the whole point of the rule is that
+     * there is a correct way to retire it.
+     */
+    public static class StageInUseException extends RuntimeException {
+        private final long transitionCount;
+        private final long openTicketCount;
+
+        public StageInUseException(String code, long transitionCount, long openTicketCount) {
+            super(("%s has been used — %d ribbon %s and %d ticket%s standing in it now. Deleting "
+                    + "it would leave every one of those rows pointing at a stage definition that "
+                    + "no longer exists, and nothing would fail: the code travels as plain text "
+                    + "with no foreign key. Deprecate it instead — it keeps rendering on the "
+                    + "ribbons it is already on and accepts nothing new.")
+                    .formatted(code, transitionCount,
+                            transitionCount == 1 ? "segment" : "segments",
+                            openTicketCount, openTicketCount == 1 ? "" : "s"));
+            this.transitionCount = transitionCount;
+            this.openTicketCount = openTicketCount;
+        }
+
+        public long transitionCount() {
+            return transitionCount;
+        }
+
+        public long openTicketCount() {
+            return openTicketCount;
+        }
+    }
+
+    /**
+     * 409 — the last live stage of a template, which may be neither retired nor
+     * removed.
+     *
+     * <p>Its own type rather than a validation failure, because nothing about the
+     * request is wrong: the stage exists, the caller may write it, and the verb is
+     * the right one. What refuses it is the template's remaining shape, and the
+     * remedy is on a different row than the one the Admin is looking at.
+     */
+    public static class LastLiveStageException extends RuntimeException {
+        public LastLiveStageException(String code) {
+            super(("%s is the last stage on this template that is still live. Retiring it would "
+                    + "leave a workflow that can route no ticket at all, and the template picker "
+                    + "would go on offering it. Add or restore another stage first.")
+                    .formatted(code));
         }
     }
 

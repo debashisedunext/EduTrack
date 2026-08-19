@@ -17,8 +17,8 @@ import { StatusMasterPage } from '../statuses/StatusMasterPage'
  * The behaviours worth a test are the ones a screenshot would not show: that a
  * frozen code is disabled with the count that froze it, that dragging is staged
  * rather than saved, that an order inverting a return path is refused before the
- * request, that the keyboard path does the same thing the drag does, and that no
- * delete exists anywhere.
+ * request, that the keyboard path does the same thing the drag does, and — since
+ * B-042 — which row offers Deprecate and which offers Delete.
  */
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -291,16 +291,85 @@ describe('adding a stage', () => {
 })
 
 /**
- * §7.4: stages in use are deprecated, never deleted. The flag that makes that
- * possible is B-042, so this screen offers no removal at all rather than a delete
- * B-042 would then have to take away.
+ * B-042 · §7.4's "deprecated, never deleted", through the screen.
+ *
+ * **This replaced B-040's `there is no delete`**, which asserted that no removal
+ * control existed anywhere and named this task as the one that would change it.
+ *
+ * What replaces it is not "a delete button exists" — the useful assertions are
+ * which row offers which control, and that the one refusal an Admin is most
+ * likely to hit is stated before the click rather than after.
  */
-describe('there is no delete', () => {
-  it('offers no delete control on any row or in the dialog', async () => {
+describe('deprecated, never deleted', () => {
+  it('offers Delete only on a stage nothing has entered, and never on a used one', async () => {
     await openStagesTab()
-    await openEditor('Deployment')
 
-    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument()
+    // QA is the seeded row with 41 transitions and 3 open tickets.
+    const qa = await rowFor('QA / Testing')
+    expect(within(qa).queryByRole('button', { name: /^Delete/ })).not.toBeInTheDocument()
+    expect(within(qa).getByRole('button', { name: /^Deprecate/ })).toBeInTheDocument()
+
+    // Intake is unused and nothing returns to it.
+    const intake = await rowFor('Intake')
+    expect(within(intake).getByRole('button', { name: /^Delete/ })).toBeInTheDocument()
+  })
+
+  it('offers no Delete on an unused stage something still returns to — the count is not the whole rule', async () => {
+    await openStagesTab()
+
+    // Nothing has entered Triage, and DEV returns to it.
+    const triage = await rowFor('Triage / Planning')
+    expect(within(triage).queryByRole('button', { name: /^Delete/ })).not.toBeInTheDocument()
+  })
+
+  it('deprecates a stage with live tickets in it, and states what happens to them first', async () => {
+    await openStagesTab()
+
+    const qa = await rowFor('QA / Testing')
+    fireEvent.click(within(qa).getByRole('button', { name: /^Deprecate/ }))
+
+    // The consequence, before the click that causes it.
+    expect(await screen.findByText(/standing in this stage right now/, undefined, SLOW))
+      .toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Deprecate' }))
+
+    expect(await screen.findByText('Deprecated', undefined, SLOW)).toBeInTheDocument()
+  })
+
+  it('names the return path in the way, before the request, rather than rendering a 409', async () => {
+    await openStagesTab()
+
+    // QA returns to DEV on B-004's seed, so retiring DEV would leave that arrow
+    // pointing at a stage nothing may enter.
+    const dev = await rowFor('Development')
+    fireEvent.click(within(dev).getByRole('button', { name: /^Deprecate/ }))
+
+    const alert = await screen.findByRole('alert', undefined, SLOW)
+    expect(alert).toHaveTextContent(/QA/)
+    expect(screen.getByRole('button', { name: 'Deprecate' })).toBeDisabled()
+  })
+
+  it('restores a deprecated stage, and the row stops being marked', async () => {
+    await openStagesTab()
+
+    const qa = await rowFor('QA / Testing')
+    fireEvent.click(within(qa).getByRole('button', { name: /^Deprecate/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Deprecate' }, SLOW))
+    await screen.findByText('Deprecated', undefined, SLOW)
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Restore/ }, SLOW))
+
+    await waitFor(() => expect(screen.queryByText('Deprecated')).not.toBeInTheDocument(), SLOW)
+  })
+
+  it('deletes an unused stage and the row goes', async () => {
+    await openStagesTab()
+
+    const intake = await rowFor('Intake')
+    fireEvent.click(within(intake).getByRole('button', { name: /^Delete/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }, SLOW))
+
+    await waitFor(() => expect(screen.queryByText('Intake')).not.toBeInTheDocument(), SLOW)
+    expect(getDb().templateStages.some((s) => s.id === 1)).toBe(false)
   })
 })

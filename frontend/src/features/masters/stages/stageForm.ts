@@ -197,10 +197,54 @@ function sameTargets(a: string[], b: string[]): boolean {
  *
  * A stage being created is appended last, so `position` of `null` means every
  * existing stage qualifies.
+ *
+ * **Deprecated stages are dropped unless this stage already returns to one** —
+ * B-042. The server refuses a target naming a retired stage, because a return
+ * target is a move the transition service will honour and an arrow into a retired
+ * stage is an entry into one nothing may enter. Offering it would be offering a
+ * checkbox that 400s.
+ *
+ * The exception is not politeness. A stage retired *after* a loop-back was
+ * authored leaves that arrow stored, and a picker that silently omitted it would
+ * render the checkbox unticked — so the next unrelated edit would send a
+ * `canReturnTo` with the target quietly missing and clear an arrow nobody
+ * touched. Shown, ticked, and clearable on purpose.
  */
-export function returnTargetOptions(stages: Stage[], position: number | null): Stage[] {
-  if (position == null) return stages
-  return stages.filter((stage) => stage.position < position)
+export function returnTargetOptions(
+  stages: Stage[],
+  position: number | null,
+  selected: string[] = [],
+): Stage[] {
+  const backward = position == null ? stages : stages.filter((s) => s.position < position)
+  return backward.filter((stage) => !stage.isDeprecated || selected.includes(stage.stageCode))
+}
+
+/**
+ * Why this stage cannot be retired yet, or null if it can.
+ *
+ * The screen's copy of `guardRetirable`, for the reason `forwardReturnPaths` is
+ * the screen's copy of the reorder's rule: an Admin should read which stage is in
+ * the way before the click rather than a 409 naming a rule after it. The server
+ * checks both again — a browser is not a guarantee, and this list is only ever
+ * the ribbon the screen happens to be holding.
+ *
+ * Arrows are returned in the `"QA → DEV"` shape the server puts on its `pairs`
+ * property, so both paths render through one component.
+ */
+export function retireBlockers(
+  stage: Stage,
+  stages: Stage[],
+): { reason: 'last-live'; arrows: [] } | { reason: 'return-target'; arrows: string[] } | null {
+  const others = stages.filter((s) => s.id !== stage.id)
+  if (!others.some((s) => !s.isDeprecated)) {
+    return { reason: 'last-live', arrows: [] }
+  }
+  const arrows = others
+    .filter((s) => !s.isDeprecated)
+    .filter((s) => s.canReturnTo.some((t) => t === stage.stageCode))
+    .map((s) => `${s.stageCode} \u2192 ${stage.stageCode}`)
+
+  return arrows.length > 0 ? { reason: 'return-target', arrows } : null
 }
 
 /**
