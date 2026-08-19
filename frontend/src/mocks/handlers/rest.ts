@@ -125,6 +125,73 @@ const workingWeek = () => {
   return { weeklyOff, workDayStart, workDayEnd };
 };
 
+/**
+ * B-063 · the date and capacity arithmetic the timesheet needs.
+ *
+ * ISO strings throughout rather than a date library: the mock has no
+ * dependencies, and `YYYY-MM-DD` compares correctly as a string, which is what
+ * the week-bounds filter relies on.
+ */
+const addDays = (date: string, days: number) => {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+/** Mon=1 … Sun=7, matching `weeklyOff`'s ISO-8601 numbering rather than JS's. */
+const isoWeekday = (date: string) => {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+};
+
+/** The Monday of the week containing `date` — the server resolves it the same way. */
+const mondayOf = (date: string) => addDays(date, 1 - isoWeekday(date));
+
+const isoToday = () => new Date().toISOString().slice(0, 10);
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+const hoursOfWorkingDay = () => {
+  const { workDayStart, workDayEnd } = calendarState().week;
+  const minutes = (t: string) => {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  };
+  return (minutes(workDayEnd) - minutes(workDayStart)) / 60;
+};
+
+/**
+ * What the calendar offers one resource on one date.
+ *
+ * <p>Weekly off, then org holidays — recurring ones matched on month and day,
+ * as the server expands them — then that person's approved leave, with a half
+ * day counted as half. Project holidays are not consulted: a week spans
+ * projects, so the server does not pass a project id either.
+ */
+const capacityOn = (userId: number, date: string) => {
+  const cal = calendarState();
+  if (cal.week.weeklyOff.includes(isoWeekday(date))) return 0;
+
+  const onHoliday = cal.holidays.some(
+    (h) =>
+      h.isActive &&
+      h.projectId === null &&
+      (h.date === date || (h.isRecurring && h.date.slice(5) === date.slice(5))),
+  );
+  if (onHoliday) return 0;
+
+  const leave = cal.leaves.find(
+    (l) =>
+      l.userId === userId &&
+      l.status === 'APPROVED' &&
+      l.startDate <= date &&
+      date <= l.endDate,
+  );
+  const full = hoursOfWorkingDay();
+  if (!leave) return round2(full);
+  return leave.isHalfDay ? round2(full / 2) : 0;
+};
+
 /** The settings resource, which also carries the zone those bounds are read in. */
 const workingWeekFull = () => ({ ...calendarState().week });
 
@@ -1539,6 +1606,107 @@ export const restHandlers = [
       currentStages: [...stages.entries()]
         .map(([stage, openCount]) => ({ stage, openCount }))
         .sort((a, b) => b.openCount - a.openCount),
+    });
+  }),
+  /*
+    B-063 · §21's timesheet, one person's week laid out as ticket × stage.
+
+    ⚠️ Stream B, in Stream D's `mocks/` — the mock-coverage test (D-004) refuses
+    a contract operation with no handler, so the route brings its handler with
+    it. Flagged rather than quiet, exactly as A-065's three routes are above.
+
+    Capacity is computed from the seeded calendar rather than assumed to be
+    eight hours: `weeklyOff`, org holidays (recurring ones matched on month and
+    day) and this resource's approved leave, with a half day counted as half.
+    That is the same rule `WorkingHoursService` applies server-side, and a mock
+    that returned a flat 8 would make the utilisation figure — the one number on
+    the screen worth checking — look right in dev and wrong in production.
+
+    Visibility is deliberately not enforced here, following the profile-360
+    handler directly above: the mock server has never modelled row scoping, and
+    a screen built against a mock that refused would be built against a rule the
+    mock cannot get right anyway. The server answers 404, and the page treats an
+    error as "not yours to see" without needing the mock to prove it.
+  */
+  http.get(url('/users/:userId/timesheet'), ({ params, request }) => {
+    const db = getDb();
+    const u = db.users.find((x) => x.id === Number(params.userId));
+    if (!u) return notFound('User');
+
+    const weekOf = new URL(request.url).searchParams.get('weekOf') ?? isoToday();
+    const weekStart = mondayOf(weekOf);
+    const dates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    const weekEnd = dates[6];
+
+    const entries = db.effortLogs.filter(
+      (e) => e.userId === u.id && e.workDate >= weekStart && e.workDate <= weekEnd,
+    );
+
+    type Row = {
+      ticketId: string; ticketTitle: string;
+      project: ReturnType<typeof projectRef>;
+      stage: string | null; stageName: string | null;
+      iterationNo: number; cycleNo: number;
+      hours: Record<string, number>; totalHours: number; hasCorrection: boolean;
+    };
+
+    const rows = new Map<string, Row>();
+    for (const e of entries) {
+      const key = `${e.ticketId}|${e.stageCode ?? ''}|${e.iterationNo}|${e.cycleNo}`;
+      const t = db.tickets.find((x) => x.ticketId === e.ticketId);
+      // The stage's display name by code alone. The server resolves it through
+      // the ticket's own workflow template, because two templates may name the
+      // same code differently; the mock's tickets do not carry a template id,
+      // and inventing one to model that distinction would be modelling it wrong
+      // rather than not at all.
+      const stage = db.templateStages.find((x) => x.stageCode === e.stageCode);
+
+      const row = rows.get(key) ?? {
+        ticketId: e.ticketId,
+        ticketTitle: t?.title ?? '',
+        project: t ? projectRef(t.projectId, db) : null,
+        stage: e.stageCode ?? null,
+        stageName: stage?.displayName ?? null,
+        iterationNo: e.iterationNo,
+        cycleNo: e.cycleNo,
+        hours: {},
+        totalHours: 0,
+        hasCorrection: false,
+      };
+
+      row.hours[e.workDate] = round2((row.hours[e.workDate] ?? 0) + e.hours);
+      row.totalHours = round2(row.totalHours + e.hours);
+      row.hasCorrection = row.hasCorrection || Boolean(e.isCorrection);
+      rows.set(key, row);
+    }
+
+    const days = dates.map((date) => {
+      const capacityHours = capacityOn(u.id, date);
+      const loggedHours = round2(
+        entries.filter((e) => e.workDate === date).reduce((s, e) => s + e.hours, 0),
+      );
+      return { date, capacityHours, loggedHours, isWorkingDay: capacityHours > 0 };
+    });
+
+    const totalHours = round2(days.reduce((s, d) => s + d.loggedHours, 0));
+    const capacityHours = round2(days.reduce((s, d) => s + d.capacityHours, 0));
+
+    return ok({
+      person: userRef(u.id, db),
+      weekStart,
+      weekEnd,
+      days,
+      // Busiest first, matching the server: a week should read top-down as
+      // where the time actually went.
+      rows: [...rows.values()].sort(
+        (a, b) => b.totalHours - a.totalHours || a.ticketId.localeCompare(b.ticketId),
+      ),
+      totalHours,
+      capacityHours,
+      // Null rather than 0% when nothing was available — a week nobody was
+      // expected to work makes no claim about how it was spent.
+      utilisationPct:
+        capacityHours > 0 ? Math.round((totalHours / capacityHours) * 1000) / 10 : null,
     });
   }),
   http.get(url('/users/:userId/reportees'), ({ params, request }) => {

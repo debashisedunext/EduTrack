@@ -594,6 +594,94 @@ export const getUserProfile360Response = zod.object({
 })
 
 /**
+ * B-063 · blueprint §21's timesheet, made stage-aware. One person, one
+week, every hour they logged — laid out as rows of *ticket × stage*
+against the seven days, which is what "stage-aware" buys: six hours on
+one ticket reads very differently when four of them are a second pass
+through QA.
+
+**Capacity comes from the working calendar**, not from seven times
+eight. `capacityHours` on each day honours weekly-off days, org and
+project holidays and that resource's approved leave, so a Monday
+holiday shows zero available rather than eight — every utilisation
+figure on the screen is wrong otherwise. It is the same
+`WorkingHoursService` every SLA and duration figure in the system
+routes through.
+
+**Correction rows are included and may be negative.** `ticket_effort_logs`
+is append-only: a mistake is reversed by a compensating row, never by an
+edit, so a week containing one nets out and `hasCorrection` marks the
+row it happened on. A timesheet that filtered them out would disagree
+with the ticket's own effort tab.
+
+**Who may look at whom is blueprint §2's "View team member history"
+row**, exactly as `GET /users/{userId}/profile-360` reads it: Admin
+anyone, PM their reportees *or* anybody on their projects, Support
+anybody on their projects, and the three delivery roles nobody but
+themselves. A caller who may not see the subject gets the same `404` as
+one asking for a user who does not exist — distinguishing them would let
+anyone enumerate the staff list by id.
+
+**No approval step.** §21 also asks for one, and it is not here: an
+approval cannot be a flag on an append-only, hash-chained table, and the
+policy it would enforce — the backdating window and who signs off — is
+still an open governance question. Raised rather than invented.
+
+ * @summary A resource's week, stage by stage (B-063)
+ */
+export const getUserTimesheetParams = zod.object({
+  "userId": zod.number()
+})
+
+export const getUserTimesheetQueryParams = zod.object({
+  "weekOf": zod.string().date().optional().describe('Any date inside the week wanted; the server answers the ISO week (Monday–Sunday) containing it, and echoes the resolved bounds in `weekStart`\/`weekEnd`. Omitted means the week containing today. A caller sending Monday and a caller sending the Thursday of the same week get the same payload, so a client never has to compute a week boundary to ask a question about a week.\n')
+})
+
+export const getUserTimesheetResponseDataRowsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+export const getUserTimesheetResponseDataRowsItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
+
+
+export const getUserTimesheetResponse = zod.object({
+  "data": zod.object({
+  "person": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),
+  "weekStart": zod.string().date().describe('The Monday of the ISO week the server resolved from `weekOf`.'),
+  "weekEnd": zod.string().date(),
+  "days": zod.array(zod.object({
+  "date": zod.string().date(),
+  "capacityHours": zod.number().describe('What the working calendar makes available to \*this\* resource on this date — weekly-off days, org and project holidays and their own approved leave all removed, and a half-day leave counted as half.\n'),
+  "loggedHours": zod.number(),
+  "isWorkingDay": zod.boolean().describe('`capacityHours > 0`. Carried explicitly so the grid can grey a weekend without inferring it from a zero, which is also what a working day somebody is fully on leave for looks like.\n')
+})),
+  "rows": zod.array(zod.object({
+  "ticketId": zod.string().regex(getUserTimesheetResponseDataRowsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "ticketTitle": zod.string(),
+  "project": zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "name": zod.string(),
+  "colourTag": zod.string().regex(getUserTimesheetResponseDataRowsItemProjectColourTagRegExp).nullish()
+}).optional().describe('The label half of `Project`, for embedding. Kept to four fields for the\nreason `UserRef` gives — it is inlined wherever a project is named, so\nanything more becomes weight in every schema that references it.\n'),
+  "stage": zod.string().nullish().describe('The ribbon stage the hours were stamped with at the moment they were logged, not the ticket\'s stage now. Null for entries predating the ribbon, which render under an unattributed row rather than being dropped.\n'),
+  "stageName": zod.string().nullish().describe('The stage\'s display name on that ticket\'s own workflow template. Two templates may name the same code differently, so this is resolved per ticket rather than from a global list.\n'),
+  "iterationNo": zod.number(),
+  "cycleNo": zod.number(),
+  "hours": zod.record(zod.string(), zod.number()).describe('Hours keyed by ISO date, carrying only the days this row has something on. A dense seven-key map would make an eight-row timesheet mostly zeros, and the grid already knows the week.\n'),
+  "totalHours": zod.number(),
+  "hasCorrection": zod.boolean().optional().describe('At least one entry in this row is a correction, and may be negative. Marked rather than hidden: `ticket_effort_logs` is append-only, so a fixed mistake is a compensating row, and a timesheet that dropped them would not add up to the ticket\'s own effort tab.\n')
+})).describe('One row per ticket × stage × iteration the person logged against this week, busiest first. Stage and iteration are part of the key, not decoration: a second pass through QA is a different row from the first, which is the whole of what \"stage-aware\" means here.\n'),
+  "totalHours": zod.number().describe('Σ of every entry in the week, corrections included and signed.'),
+  "capacityHours": zod.number().describe('Σ of the seven days\' `capacityHours`, from the working calendar.\n'),
+  "utilisationPct": zod.number().nullish().describe('`totalHours \/ capacityHours × 100`. Null rather than 0 when the week offered no working hours at all — a person on leave all week has no utilisation, and reporting 0% would read as having done nothing with a week they were never expected to work.\n')
+}).describe('One resource\'s week. `days` is always seven entries, Monday first, even\nwhere nothing was logged and nothing was available — a week that dropped\nits empty days would render as a grid whose columns move, and a Tuesday\nholiday is exactly the day a reader is looking for when the totals look\nthin.\n')
+})
+
+/**
  * @summary Direct and indirect reportees
  */
 export const listReporteesParams = zod.object({

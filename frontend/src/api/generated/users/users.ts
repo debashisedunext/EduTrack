@@ -71,6 +71,7 @@ import type {
   ConflictResponse,
   ExportUsersParams,
   GetUserProfile360Params,
+  GetUserTimesheetParams,
   ListReporteesParams,
   ListUsersParams,
   NotFoundResponse,
@@ -79,6 +80,7 @@ import type {
   Problem,
   Profile360Response,
   SetUserStatusBody,
+  TimesheetResponse,
   UnauthorizedResponse,
   UserCreatedResponse,
   UserDetailResponse,
@@ -844,6 +846,139 @@ export function useGetUserProfile360<TData = Awaited<ReturnType<typeof getUserPr
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetUserProfile360QueryOptions(userId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * B-063 · blueprint §21's timesheet, made stage-aware. One person, one
+week, every hour they logged — laid out as rows of *ticket × stage*
+against the seven days, which is what "stage-aware" buys: six hours on
+one ticket reads very differently when four of them are a second pass
+through QA.
+
+**Capacity comes from the working calendar**, not from seven times
+eight. `capacityHours` on each day honours weekly-off days, org and
+project holidays and that resource's approved leave, so a Monday
+holiday shows zero available rather than eight — every utilisation
+figure on the screen is wrong otherwise. It is the same
+`WorkingHoursService` every SLA and duration figure in the system
+routes through.
+
+**Correction rows are included and may be negative.** `ticket_effort_logs`
+is append-only: a mistake is reversed by a compensating row, never by an
+edit, so a week containing one nets out and `hasCorrection` marks the
+row it happened on. A timesheet that filtered them out would disagree
+with the ticket's own effort tab.
+
+**Who may look at whom is blueprint §2's "View team member history"
+row**, exactly as `GET /users/{userId}/profile-360` reads it: Admin
+anyone, PM their reportees *or* anybody on their projects, Support
+anybody on their projects, and the three delivery roles nobody but
+themselves. A caller who may not see the subject gets the same `404` as
+one asking for a user who does not exist — distinguishing them would let
+anyone enumerate the staff list by id.
+
+**No approval step.** §21 also asks for one, and it is not here: an
+approval cannot be a flag on an append-only, hash-chained table, and the
+policy it would enforce — the backdating window and who signs off — is
+still an open governance question. Raised rather than invented.
+
+ * @summary A resource's week, stage by stage (B-063)
+ */
+export const getUserTimesheet = (
+    userId: number,
+    params?: GetUserTimesheetParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<TimesheetResponse>(
+      {url: `/users/${userId}/timesheet`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetUserTimesheetQueryKey = (userId?: number,
+    params?: GetUserTimesheetParams,) => {
+    return [
+    `/users/${userId}/timesheet`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getGetUserTimesheetQueryOptions = <TData = Awaited<ReturnType<typeof getUserTimesheet>>, TError = NotFoundResponse>(userId: number,
+    params?: GetUserTimesheetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserTimesheet>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetUserTimesheetQueryKey(userId,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUserTimesheet>>> = ({ signal }) => getUserTimesheet(userId,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(userId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getUserTimesheet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetUserTimesheetQueryResult = NonNullable<Awaited<ReturnType<typeof getUserTimesheet>>>
+export type GetUserTimesheetQueryError = NotFoundResponse
+
+
+export function useGetUserTimesheet<TData = Awaited<ReturnType<typeof getUserTimesheet>>, TError = NotFoundResponse>(
+ userId: number,
+    params: undefined |  GetUserTimesheetParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserTimesheet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getUserTimesheet>>,
+          TError,
+          Awaited<ReturnType<typeof getUserTimesheet>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetUserTimesheet<TData = Awaited<ReturnType<typeof getUserTimesheet>>, TError = NotFoundResponse>(
+ userId: number,
+    params?: GetUserTimesheetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserTimesheet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getUserTimesheet>>,
+          TError,
+          Awaited<ReturnType<typeof getUserTimesheet>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetUserTimesheet<TData = Awaited<ReturnType<typeof getUserTimesheet>>, TError = NotFoundResponse>(
+ userId: number,
+    params?: GetUserTimesheetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserTimesheet>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary A resource's week, stage by stage (B-063)
+ */
+
+export function useGetUserTimesheet<TData = Awaited<ReturnType<typeof getUserTimesheet>>, TError = NotFoundResponse>(
+ userId: number,
+    params?: GetUserTimesheetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUserTimesheet>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetUserTimesheetQueryOptions(userId,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

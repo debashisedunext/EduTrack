@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, ListChecks, Inbox, Ticket, FolderKanban, MessageSquare,
-  BarChart3, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
+  BarChart3, CalendarClock, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { useSidebarStore } from './sidebarStore'
@@ -35,6 +35,12 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/projects', label: 'Projects', icon: FolderKanban },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  /*
+    B-063 · §21. Not `adminOnly`: every role has a week of their own to look at,
+    and the three delivery roles are the ones who log the hours. Whose week they
+    may open beyond their own is the server's decision, not this list's.
+  */
+  { to: '/timesheet', label: 'Timesheet', icon: CalendarClock },
   { to: '/masters', label: 'Masters', icon: Database, adminOnly: true },
   // A-071 · S-16. adminOnly like Masters, and for a stronger reason: `audit.view`
   // is Admin's alone in §2, so for every other role this link is a 403 waiting to
