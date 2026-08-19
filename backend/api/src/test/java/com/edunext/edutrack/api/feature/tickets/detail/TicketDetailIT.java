@@ -26,10 +26,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * A-052 · the aggregated detail read.
  *
  * <p>The assertions that matter here are not "does it return data" but the
- * three things that are easy to get wrong and silent when wrong: that the scope
+ * things that are easy to get wrong and silent when wrong: that the scope
  * guard is applied <em>before</em> anything is read by ticket id, that
- * {@code ?cycle=} filters the journals and nothing else, and that the two
- * unbuilt fields are null rather than quietly invented.
+ * {@code ?cycle=} filters the journals and nothing else, that {@code ribbon}
+ * stays null rather than quietly invented (still blocked on Stream B's
+ * workflow-stage sequence — C-051), and that {@code availableActions}
+ * reflects C-043's golden rule against a real {@code Ticket} entity, not
+ * just the mocked one {@code TicketDetailServiceTest} exercises.
  */
 @SpringBootTest
 @Testcontainers
@@ -205,22 +208,32 @@ class TicketDetailIT {
         }
 
         /**
-         * The two fields whose rules are Stream C's and unbuilt. Asserted
-         * explicitly so that filling them in is a deliberate act that breaks a
-         * test, rather than something that quietly starts returning invented
-         * data.
+         * {@code ribbon}'s rule is still unbuilt. Asserted explicitly so that
+         * filling it in is a deliberate act that breaks a test, rather than
+         * something that quietly starts returning invented data.
          */
         @Test
-        @DisplayName("ribbon and availableActions are null until C-042 and C-043 exist")
-        void unbuiltFieldsAreNullNotInvented() {
+        @DisplayName("ribbon is null until C-051's stage sequence exists")
+        void ribbonIsNullNotInvented() {
             TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
 
             assertThat(d.ribbon())
-                    .as("a ribbon needs C-042's transitions and B's workflow stages; neither exists")
+                    .as("a ribbon needs C-042's transitions and B's workflow stages; the second half is still missing")
                     .isNull();
-            assertThat(d.availableActions())
-                    .as("availableActions is C-043's golden rule — a second implementation would diverge")
-                    .isNull();
+        }
+
+        /**
+         * C-043 · the fixture ticket defaults to {@code current_stage = 'INTAKE'}
+         * and status {@code IN_PROGRESS} — a live stage — and {@code admin()} is
+         * both an Admin <em>and</em> (same {@code userId}) the ticket's own
+         * assignee, so either half of the golden rule alone would pass this.
+         */
+        @Test
+        @DisplayName("availableActions offers handoff/rework to the current owner")
+        void availableActionsOffersAdvanceToTheOwner() {
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+
+            assertThat(d.availableActions()).containsExactlyInAnyOrder("handoff", "rework");
         }
     }
 
@@ -250,6 +263,29 @@ class TicketDetailIT {
         void missingTicketFailsTheSameWay() {
             assertThatThrownBy(() -> service.detail(admin(), 999_999_999L, null))
                     .isInstanceOf(TicketNotFoundException.class);
+        }
+
+        /**
+         * C-043 · in scope but not the owner. Support holds {@code
+         * ticket.view_all} — {@code project_id IN (their projects)}, per
+         * {@code ScopeResolver} — so this caller sees the ticket at all, unlike
+         * a Developer who would be scoped out before the golden rule is ever
+         * asked. What stops them advancing it is the golden rule specifically,
+         * not the row scope, and this is the one caller shape that isolates
+         * that difference against a real {@code Ticket} entity.
+         */
+        @Test
+        @DisplayName("in scope but not the owner sees the ticket with no advance actions")
+        void inScopeButNotOwnerGetsNoAdvanceActions() {
+            Authentication otherSupport = new UsernamePasswordAuthenticationToken(
+                    new DevPrincipal(userId + 1, "other.support", "Other Support",
+                            "SUPPORT", List.of(projectId), List.of()),
+                    null, List.of());
+
+            TicketDetailDtos.Detail d = service.detail(otherSupport, ticketId, null);
+
+            assertThat(d.ticket().id()).isEqualTo(ticketId);
+            assertThat(d.availableActions()).isEmpty();
         }
     }
 
