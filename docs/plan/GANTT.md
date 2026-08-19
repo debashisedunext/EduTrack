@@ -13,7 +13,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 186 of 235 (79%) | 275.5 of 352.8 (78%) |
-| In flight | 1 | 2.0 |
+| In flight | 2 | 2.5 |
 | On the driving chain | 25 | 35.0 |
 | Zero float (no slack at all) | 21 | 32.0 |
 
@@ -319,7 +319,7 @@ gantt
 |  | `C-019` | Detail shell + summary panel — every entity a link | 2 | `C-005` `D-004` | Tue 11 Aug | Tue 11 Aug | 0 | ✅ done |
 |  | `C-020` | Priority dropdown | 1.5 | `C-019` `B-021` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `C-021` | Client + client-contact dependent dropdowns, type-ahead over… | 2 | `C-019` `B-028` | Wed 19 Aug | Wed 19 Aug | 0 | ✅ done |
-| ▲ | `C-022` | Client-raised flag driving client-wise reports, CSAT and the… | 0.5 | `C-021` ᶦ | Wed 19 Aug | Wed 19 Aug | 0 | ▫️ to do |
+| ▲ | `C-022` | Client-raised flag driving client-wise reports, CSAT and the… | 0.5 | `C-021` ᶦ | Wed 19 Aug | Wed 19 Aug | 0 | 🟡 50% |
 |  | `C-023` | Upload surfaces | 1.5 | `C-019` ᶦ | Wed 12 Aug | Wed 12 Aug | 36 | ✅ done |
 | 🔴 | `C-024` | Clipboard paste alongside drag-drop and file picker | 1 | `C-023` ᶦ | Fri 14 Aug | Fri 14 Aug | 37 | ✅ done |
 |  | `C-025` | Security | 2 | `C-023` ᶦ | Fri 14 Aug | Fri 14 Aug | 35 | ✅ done |
