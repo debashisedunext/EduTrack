@@ -21,6 +21,7 @@ import {
   useUploadImportFile,
   type StagedUploadSummary,
 } from './importQueries'
+import { type ImportWizardConfig } from './importWizard'
 import { MappingStep } from './MappingStep'
 import { UploadDropzone } from './UploadDropzone'
 import { ValidationStep } from './ValidationStep'
@@ -44,11 +45,28 @@ const STEPS = [
 ] as const
 
 /**
- * S-34 Client Import Wizard — all five steps. B-031, B-032, B-033, B-034, B-035.
+ * The five-step import wizard — B-031, B-032, B-033, B-034, B-035, B-037.
  *
- * Blueprint §4B.3, and the engine behind it is B-030's schema registry: this
- * screen names clients exactly once, in the route it is mounted at and in the
- * schema it asks for. B-038 registers resources and this page is what it reuses.
+ * Blueprint §4B.3, and the engine behind it is B-030's schema registry.
+ *
+ * ## One page, two registrations — B-038
+ *
+ * This was `ClientImportPage`, and it named clients in twenty-four places.
+ * §4B.3 closes with "the same wizard pattern is reused for the resource master
+ * bulk import — build it once, register two schemas", and §7.5 says of S-34 that
+ * "the same component is registered a second time for resource bulk import". So
+ * it is this component plus an `ImportWizardConfig`, and the two registrations —
+ * `ClientImportPage` and `ResourceImportPage` — are a handful of lines each whose
+ * only job is to be a distinct route.
+ *
+ * The folder moved with it. This lived under `features/clients/`, which was true
+ * of every file in it and is now true of none; a resource screen importing its
+ * wizard out of the client feature is the kind of thing that reads as an accident
+ * six months later.
+ *
+ * **Nothing here branches on which schema it is.** Where the two differ, the
+ * difference is a field on `config` — see `importWizard.ts`, which explains why
+ * the nouns are configured rather than genericised away.
  *
  * ## Step 5 is where the wizard stops being reversible
  *
@@ -83,9 +101,10 @@ const STEPS = [
  * authoritative, and they describe a run that will not happen. So going back to
  * mapping drops it, and so does every path that touches the upload.
  */
-export function ClientImportPage() {
+export function ImportWizardPage({ config }: { config: ImportWizardConfig }) {
+  const { nouns } = config
   const download = useDownloadImportTemplate()
-  const upload = useUploadImportFile('clients')
+  const upload = useUploadImportFile(config.schema)
 
   /** The chosen file, kept so a sheet change can re-post it. */
   const [file, setFile] = useState<File | null>(null)
@@ -178,7 +197,7 @@ export function ClientImportPage() {
     if (!staged?.uploadId || !mapping) return
     validate.mutate(
       {
-        schema: 'clients',
+        schema: config.schema,
         data: { uploadId: staged.uploadId, sheet: staged.sheet, mapping },
       },
       { onSuccess: (response) => setPreview(response.data) },
@@ -216,7 +235,7 @@ export function ClientImportPage() {
     if (!staged?.uploadId || !mapping) return
     commit.mutate(
       {
-        schema: 'clients',
+        schema: config.schema,
         data: { uploadId: staged.uploadId, sheet: staged.sheet, mapping },
       },
       { onSuccess: (response) => setBatchId(response.data.batchId) },
@@ -240,12 +259,12 @@ export function ClientImportPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-h1 text-content">Import clients from Excel</h1>
+        <h1 className="text-h1 text-content">{config.title}</h1>
         <div className="ml-auto">
           <Button asChild variant="secondary" size="sm">
-            <Link to="/masters/clients">
+            <Link to={config.master.href}>
               <ArrowLeft className="h-4 w-4" />
-              Back to clients
+              Back to {config.master.label}
             </Link>
           </Button>
         </div>
@@ -303,12 +322,7 @@ export function ClientImportPage() {
         </p>
 
         <ul className="mt-4 space-y-2 text-sm text-content">
-          {[
-            'Every column the client master accepts, in order.',
-            'Dropdowns on Status and Support Plan — the same values the import accepts, so a chosen value is never rejected later.',
-            'One filled example row. Replace it with your own data or delete it; it is imported like any other row.',
-            'An Instructions sheet naming the required columns and what Client Code does: a code that already exists updates that client, it never creates a second one.',
-          ].map((line) => (
+          {config.templateHighlights.map((line) => (
             <li key={line} className="flex gap-2">
               <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden="true" />
               <span>{line}</span>
@@ -318,7 +332,7 @@ export function ClientImportPage() {
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <Button
-            onClick={() => download.mutate('clients')}
+            onClick={() => download.mutate(config.schema)}
             disabled={download.isPending}
             aria-describedby={download.isError ? 'template-error' : undefined}
           >
@@ -358,7 +372,7 @@ export function ClientImportPage() {
         </h2>
         <p className="mt-1 max-w-2xl text-sm text-content-muted">
           Nothing is written by uploading. The file is read so the next steps can
-          show you what is in it — no client changes until you have seen the
+          show you what is in it — no {nouns.one} changes until you have seen the
           per-row preview at step 4 and confirmed it.
         </p>
 
@@ -391,7 +405,7 @@ export function ClientImportPage() {
             className="mt-4 flex items-start gap-2 rounded-control border border-danger bg-surface p-3 text-sm text-danger-text"
           >
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>{rejected ?? serverRefusal(upload.error)}</span>
+            <span>{rejected ?? serverRefusal(upload.error, nouns.many)}</span>
           </p>
         )}
 
@@ -442,7 +456,7 @@ export function ClientImportPage() {
             {(staged.sheets?.length ?? 0) > 1 && (
               <fieldset disabled={upload.isPending}>
                 <legend className="text-sm font-medium text-content">
-                  Which sheet holds the clients?
+                  Which sheet holds the {nouns.many}?
                 </legend>
                 <p className="mt-1 text-sm text-content-muted">
                   This workbook has {staged.sheets?.length} sheets. The first is read by
@@ -486,7 +500,9 @@ export function ClientImportPage() {
                     >
                       {header}
                       <span className="sr-only">
-                        {matched ? ' — matched to a client field' : ' — not matched yet'}
+                        {matched
+                          ? ` — matched to a ${nouns.one} field`
+                          : ' — not matched yet'}
                       </span>
                     </li>
                   )
@@ -494,7 +510,7 @@ export function ClientImportPage() {
               </ul>
               <p className="mt-2 text-sm text-content-muted">
                 {Object.keys(staged.suggestedMapping ?? {}).length} of {staged.headers?.length}{' '}
-                matched a client field automatically. The rest are mapped by hand at step 3.
+                matched a {nouns.one} field automatically. The rest are mapped by hand at step 3.
               </p>
             </div>
 
@@ -503,7 +519,7 @@ export function ClientImportPage() {
                 Continue to mapping
               </Button>
               <p className="text-sm text-content-muted">
-                Your file has been read and nothing has been written — no client has
+                Your file has been read and nothing has been written — no {nouns.one} has
                 changed.
               </p>
             </div>
@@ -521,7 +537,8 @@ export function ClientImportPage() {
             Map the columns
           </h2>
           <MappingStep
-            schema="clients"
+            schema={config.schema}
+            nouns={nouns}
             headers={staged.headers ?? []}
             rowCount={staged.rowCount ?? 0}
             mapping={mapping}
@@ -546,7 +563,9 @@ export function ClientImportPage() {
             one failed. Each of them is fixed on this screen or the one before
             it, which is why the remedy decides the sentence.
           */}
-          {validate.isError && <PreviewRefusalNotice error={validate.error} />}
+          {validate.isError && (
+            <PreviewRefusalNotice error={validate.error} noun={nouns.one} />
+          )}
         </section>
       )}
 
@@ -560,7 +579,8 @@ export function ClientImportPage() {
             Check what the import will do
           </h2>
           <ValidationStep
-            schema="clients"
+            schema={config.schema}
+            nouns={nouns}
             preview={preview}
             fileName={file?.name ?? staged.fileName ?? 'your file'}
             onBack={backToMapping}
@@ -574,7 +594,7 @@ export function ClientImportPage() {
             request that would have started one failed, and nothing has been
             written.
           */}
-          {commit.isError && <CommitRefusalNotice error={commit.error} />}
+          {commit.isError && <CommitRefusalNotice error={commit.error} noun={nouns.one} />}
         </section>
       )}
         </>
@@ -592,6 +612,7 @@ export function ClientImportPage() {
           <div className="mt-4">
             <CommitStep
               batchId={batchId}
+              config={config}
               fileName={file?.name ?? staged?.fileName ?? 'your file'}
               onStartAnother={startOver}
             />
@@ -611,7 +632,7 @@ export function ClientImportPage() {
         acted on; this describes what those choices did, which is exactly what
         somebody wants while the import runs and immediately after it.
       */}
-      <ImportHistoryPanel />
+      <ImportHistoryPanel config={config} />
     </div>
   )
 }
@@ -623,7 +644,7 @@ export function ClientImportPage() {
  * leaves a user pressing the same button on an upload that expired half an hour
  * ago; "choose your file again at step 2" does not.
  */
-function PreviewRefusalNotice({ error }: { error: unknown }) {
+function PreviewRefusalNotice({ error, noun }: { error: unknown; noun: string }) {
   const { message, remedy } = previewRefusal(error)
   const next =
     remedy === 'upload'
@@ -640,7 +661,7 @@ function PreviewRefusalNotice({ error }: { error: unknown }) {
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <span>
         {message}
-        {next ? ` ${next}` : ''} Nothing has been written — no client has changed.
+        {next ? ` ${next}` : ''} Nothing has been written — no {noun} has changed.
       </span>
     </p>
   )
@@ -658,7 +679,7 @@ function PreviewRefusalNotice({ error }: { error: unknown }) {
  * re-judged the file and disagreed with what is on screen — the honest
  * instruction is to run the preview again, not to press Import harder.
  */
-function CommitRefusalNotice({ error }: { error: unknown }) {
+function CommitRefusalNotice({ error, noun }: { error: unknown; noun: string }) {
   const { message, remedy } = commitRefusal(error)
   const next =
     remedy === 'upload'
@@ -677,7 +698,7 @@ function CommitRefusalNotice({ error }: { error: unknown }) {
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <span>
         {message} {next} <strong className="font-medium">Nothing has been written</strong> —
-        no client has changed.
+        no {noun} has changed.
       </span>
     </p>
   )
@@ -692,7 +713,7 @@ function CommitRefusalNotice({ error }: { error: unknown }) {
  * more than 5,000 rows"), because it names the actual number; the type decides
  * whether to trust it and what to add.
  */
-function serverRefusal(error: unknown): string {
+function serverRefusal(error: unknown, nouns: string): string {
   if (!(error instanceof ApiError)) {
     return 'The file could not be uploaded. Check your connection and try again.'
   }
@@ -705,7 +726,7 @@ function serverRefusal(error: unknown): string {
     return detail ?? error.problem.title
   }
   if (error.status === 403) {
-    return 'You do not have permission to import clients. Importing is an administrator action.'
+    return `You do not have permission to import ${nouns}. Importing is an administrator action.`
   }
   return `The file could not be uploaded (${error.status}${detail ? ` — ${detail}` : ''}).`
 }

@@ -193,13 +193,12 @@ class ImportMappingPresetControllerTest {
 
     /**
      * The same 404 as the other three routes on this path, and it fires before a
-     * query. <b>Delete this when B-038 registers {@code users}</b>, like the
-     * matching assertions in {@code ImportTemplateControllerTest} and
-     * {@code ImportSchemaFieldsControllerTest}.
+     * query. <b>Repointed by B-038</b>, which registered the {@code users} this
+     * used to name — see {@code ImportTemplateControllerTest}.
      */
     @Test
     void anUnregisteredSchemaIsNotFound() throws Exception {
-        mvc.perform(get("/api/v1/imports/users/mapping-presets").with(admin()))
+        mvc.perform(get("/api/v1/imports/widgets/mapping-presets").with(admin()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Unknown import schema"));
 

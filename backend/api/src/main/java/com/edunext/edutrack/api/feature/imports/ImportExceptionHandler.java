@@ -125,10 +125,11 @@ class ImportExceptionHandler {
      *
      * <p>An unregistered key does not make the request malformed — it makes the
      * resource absent, which is what {@link UnknownImportSchemaException}'s own
-     * javadoc has said since B-030. {@code /imports/users/template} is the live
-     * case: the contract declares {@code users} and B-038 has not registered it,
-     * so the honest answer today is "there is no such template", not "your
-     * request was wrong".
+     * javadoc has said since B-030. {@code /imports/users/template} was the live
+     * case until B-038 registered it — the contract declared {@code users} and
+     * nothing answered to it, so the honest answer was "there is no such
+     * template", not "your request was wrong". Both declared keys resolve now,
+     * and the rule is unchanged for the next one.
      *
      * <p><b>The registered keys go in the body.</b> Nothing here is a secret —
      * they are in the contract, in the generated client and in the URL enum the

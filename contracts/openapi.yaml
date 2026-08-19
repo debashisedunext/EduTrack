@@ -2844,8 +2844,9 @@ paths:
           description: |
             No schema is registered under that key. `schema` is a path segment,
             so an unregistered value makes the resource absent rather than the
-            request malformed — and `users` is that case today, declared in the
-            enum and not registered until B-038.
+            request malformed. `users` was that case until B-038 registered it;
+            both values the enum declares now resolve, so this answers a key the
+            enum does not carry at all.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -2915,7 +2916,7 @@ paths:
         '404':
           description: |
             No schema is registered under that key — the same case as the
-            template route, and `users` until B-038.
+            template route.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -2985,7 +2986,7 @@ paths:
         '404':
           description: |
             No schema is registered under that key — the same case as the
-            template and upload routes, and `users` until B-038.
+            template and upload routes.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3125,7 +3126,7 @@ paths:
         '404':
           description: |
             No schema is registered under that key — the same case as the
-            template, upload and fields routes, and `users` until B-038.
+            template, upload and fields routes.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3211,8 +3212,7 @@ paths:
         '404':
           description: |
             No schema is registered under that key — the same case as the
-            template, upload, fields and validate routes, and `users` until
-            B-038.
+            template, upload, fields and validate routes.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3288,9 +3288,11 @@ paths:
           required: false
           schema: { type: string, default: CLIENT }
           description: |
-            Which registration's runs. Defaults to `CLIENT` because S-34 is the
-            screen that has this panel; `RESOURCE` arrives with B-038 and needs
-            no change here.
+            Which registration's runs. Defaults to `CLIENT` because S-34 was the
+            only screen with this panel when the parameter was added. B-038's
+            resource wizard passes `RESOURCE` and needed no change here, which
+            is what the default being a default rather than the only value was
+            for.
       responses:
         '200':
           description: OK.

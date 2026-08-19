@@ -116,11 +116,15 @@ class ImportTemplateControllerTest {
      * The registered key is a path segment, so an unregistered one makes the
      * resource absent rather than the request malformed.
      *
-     * <p>{@code users} is the live case and is deliberately the one asserted:
-     * the contract declares it, the generated client can already call it, and
-     * B-038's registration does not exist yet. The day that {@code @Component}
-     * lands this test fails and is deleted, which is the correct amount of
-     * ceremony for "the second schema now exists".
+     * <p><b>{@code users} used to be the live case, and B-038 registered it.</b>
+     * Six assertions across this package named that path and carried a note to
+     * delete themselves the day the second {@code @Component} landed — which was
+     * the right amount of ceremony for "the second schema now exists", and it
+     * fired. What they were deleted <em>for</em> was the choice of key, not the
+     * rule: an unregistered segment must still answer 404 rather than 400, 406 or
+     * an empty success, and nothing else pins that. So they point at
+     * {@code widgets} now, which is unregistered because no registration claims
+     * it rather than because nobody has written one yet.
      *
      * <p>The content type is asserted too, and not as decoration. The handler
      * declares {@code produces} an .xlsx type; a problem document answered
@@ -130,12 +134,12 @@ class ImportTemplateControllerTest {
     @Test
     @DisplayName("an unregistered schema is 404 with a problem document, not 406 or 400")
     void unregisteredSchemaIsNotFound() throws Exception {
-        mvc.perform(get("/api/v1/imports/users/template").with(admin()))
+        mvc.perform(get("/api/v1/imports/widgets/template").with(admin()))
                 .andExpect(status().isNotFound())
                 .andExpect(header().string(HttpHeaders.CONTENT_TYPE,
                         MediaType.APPLICATION_PROBLEM_JSON_VALUE))
                 .andExpect(jsonPath("$.title").value("Unknown import schema"))
-                .andExpect(jsonPath("$.schema").value("users"));
+                .andExpect(jsonPath("$.schema").value("widgets"));
     }
 
     /**

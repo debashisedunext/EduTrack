@@ -145,12 +145,13 @@ class ImportUploadControllerTest {
     /**
      * The same 404 the template route gives, from the same handler:
      * {@code schema} is a path segment, so an unregistered key makes the resource
-     * absent. {@code users} is the live case until B-038 registers it.
+     * absent. <b>Repointed by B-038</b>, which registered the {@code users} this
+     * used to name — see {@code ImportTemplateControllerTest}.
      */
     @Test
     void anUnregisteredSchemaIsNotFound() throws Exception {
-        mvc.perform(multipart("/api/v1/imports/users/upload")
-                        .file(csv("users.csv", "Email\nsomebody@example.test\n"))
+        mvc.perform(multipart("/api/v1/imports/widgets/upload")
+                        .file(csv("widgets.csv", "Email\nsomebody@example.test\n"))
                         .with(admin()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Unknown import schema"));
