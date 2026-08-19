@@ -282,6 +282,63 @@ describe('S-17 Ticket List — C-014', () => {
     expect(screen.queryByRole('columnheader', { name: 'Eff' })).not.toBeInTheDocument()
   })
 
+  /* ── C-070 · §7.5's module ──────────────────────────────────────────── */
+
+  it('filters by module, and the filter is in the URL like every other one', async () => {
+    renderPage()
+    await rowsReady()
+    listRequests = []
+
+    await pickFilterOption('Module', 'Fees')
+
+    // Sent to the server, never applied in the browser: the grid is cursor
+    // paginated, so a client-side filter would silently drop matching rows
+    // that happen to live on page two.
+    await waitFor(() => expect(listRequests.at(-1)?.searchParams.get('moduleId')).toBe('3'), {
+      timeout: 4000,
+    })
+  })
+
+  it('reads a module filter out of the URL, so a filtered grid is a pasteable link', async () => {
+    renderPage('/tickets?moduleId=3')
+    await rowsReady()
+
+    expect(listRequests.at(-1)?.searchParams.get('moduleId')).toBe('3')
+    // Named exactly: the chip also carries a "Clear Module filter" button, and
+    // a loose match finds both.
+    expect(screen.getByRole('button', { name: 'Module: Fees' })).toBeInTheDocument()
+  })
+
+  it('offers a retired module in the filter, which the create form deliberately does not', async () => {
+    // Blueprint line 986: "filterable always". "Every open Transport ticket" is
+    // a fair question about a module being wound down, and hiding it from the
+    // filter is the one thing that makes it unanswerable. S-19 filters the same
+    // row out for the opposite and equally correct reason — nothing new should
+    // be raised against it.
+    renderPage()
+    await rowsReady()
+    await openFilter('Module')
+
+    expect(await screen.findByRole('option', { name: /Transport \(retired\)/ })).toBeInTheDocument()
+  })
+
+  it('keeps the Module column out of the grid until it is chosen', async () => {
+    // Blueprint line 986: off by default "because the grid is already at its
+    // width budget", but present in the chooser. The filter is what the field
+    // is for; the column is for the rarer case of scanning across modules.
+    renderPage()
+    await rowsReady()
+    expect(screen.queryByRole('columnheader', { name: 'Module' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Columns/ }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Module' }))
+
+    const header = await screen.findByRole('columnheader', { name: 'Module' })
+    expect(header).toBeInTheDocument()
+    // Resolved through the master rather than printed as an id.
+    expect(screen.getAllByRole('cell').some((cell) => cell.textContent === 'Fees')).toBe(true)
+  })
+
   it('switches row density from comfortable to compact', async () => {
     renderPage()
     const rows = await rowsReady()

@@ -8,7 +8,7 @@ import { useGetMe } from '@/api/generated/auth/auth'
 import { useListProjects } from '@/api/generated/projects/projects'
 import { useListClients, useListClientContacts } from '@/api/generated/clients/clients'
 import { useListUsers } from '@/api/generated/users/users'
-import { useListTaskTypes, useListPriorities } from '@/api/generated/masters/masters'
+import { useListTaskTypes, useListPriorities, useListModules } from '@/api/generated/masters/masters'
 import { newIdempotencyKey, ApiError } from '@/api/http'
 import type { Level } from '@/api/generated/model/level'
 import type { Project } from '@/api/generated/model/project'
@@ -25,7 +25,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { AttachmentPicker, type AttachmentPickerHandle } from '@/components/ui/attachment-picker'
 import { toast } from '@/components/ui/use-toast'
-import { createTicketBodyDescriptionMax } from '@/api/generated/zod/tickets/tickets.zod'
+import {
+  createTicketBodyDescriptionMax,
+  createTicketBodyStepsToGenerateMax,
+} from '@/api/generated/zod/tickets/tickets.zod'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
 // B-029 · both new-ticket gates, stated once. Stream B's module, read by
 // Stream C's screen — the same crossing B-028 made for the first of the two.
@@ -47,6 +50,7 @@ import { LevelPicker } from './LevelPicker'
 import { WatcherPicker } from './WatcherPicker'
 import { useCreateTicket } from './createTicketMutation'
 import {
+  bugTaskTypeIds,
   clientRequiringTaskTypeIds,
   emptyTicketForm,
   retainedForNextTicket,
@@ -72,6 +76,15 @@ export function CreateTicketPage() {
   const { data: projectsData, isPending: projectsPending } = useListProjects({ isActive: true, limit: 200 })
   const { data: taskTypesData, isPending: taskTypesPending } = useListTaskTypes()
   const { data: prioritiesData } = useListPriorities()
+  /*
+    C-068 · §7.5's module master. **Inactive rows are filtered out here and
+    nowhere else**: `GET /masters/modules` returns them on purpose, because a
+    grid still has to render the name of a module some old ticket was raised
+    against (D-060), but a *picker* offering a retired module would let somebody
+    raise today's ticket against it — and `ModuleGuard` refuses that with a 400,
+    so offering it is offering a refusal.
+  */
+  const { data: modulesData, isError: modulesFailed } = useListModules()
 
   const projects = React.useMemo(() => projectsData?.data ?? [], [projectsData])
   const taskTypes = React.useMemo(
@@ -83,7 +96,17 @@ export function CreateTicketPage() {
     [prioritiesData],
   )
 
+  const modules = React.useMemo(
+    () => (modulesData?.data ?? []).filter((m) => m.isActive !== false),
+    [modulesData],
+  )
+
   const clientRequiredIds = React.useMemo(() => clientRequiringTaskTypeIds(taskTypes), [taskTypes])
+  const bugTypeIds = React.useMemo(() => bugTaskTypeIds(taskTypes), [taskTypes])
+  const taskTypeRules = React.useMemo(
+    () => ({ clientRequired: clientRequiredIds, bugTypes: bugTypeIds }),
+    [clientRequiredIds, bugTypeIds],
+  )
 
   /**
    * Which button is being validated for. Held in a ref because the resolver has
@@ -98,8 +121,8 @@ export function CreateTicketPage() {
   const submitAction = React.useRef<TicketSaveAction>('assign')
   const resolver = React.useMemo<Resolver<TicketFormValues>>(
     () => (values, context, options) =>
-      zodResolver(ticketFormSchema(clientRequiredIds, submitAction.current))(values, context, options),
-    [clientRequiredIds],
+      zodResolver(ticketFormSchema(taskTypeRules, submitAction.current))(values, context, options),
+    [taskTypeRules],
   )
 
   const {
@@ -125,6 +148,15 @@ export function CreateTicketPage() {
   const level = watch('level')
   const assigneeId = watch('assigneeId')
   const plannedCloseDate = watch('plannedCloseDate')
+  /*
+    C-068 · whether the Module field draws its asterisk. `bugTypeIds` is empty
+    while the task-type master is still loading, so this is false first and true
+    once the answer arrives — the same direction `canChangeLevel` chose on S-20
+    and for the same reason: a required marker that appears late is a marker
+    somebody has already read past.
+  */
+  const moduleRequired = taskTypeId != null && bugTypeIds.has(taskTypeId)
+  const modulesEmpty = modulesFailed || (modulesData != null && modules.length === 0)
 
   /**
    * C-012 · recomputed server-side on every change to the four inputs that move
@@ -784,6 +816,126 @@ export function CreateTicketPage() {
                       levelTouched.current = true
                       field.onChange(level)
                     }}
+                  />
+                )}
+              />
+            )}
+          </FormField>
+        </FieldGroup>
+
+        {/* ── Where it happened ────────────────────────────────────────── */}
+        {/*
+          C-068 · §7.5's fourth field group, and it sits here rather than inside
+          Extra because that is where §7.5's own table puts it — between Core and
+          People. The whole group exists so that "which module generates the most
+          concerns" is a query rather than a reading exercise, and so that a
+          developer opening a bug is not starting from a one-line title.
+        */}
+        <FieldGroup
+          title="Where it happened"
+          description="Routes the ticket and saves the assignee a round trip asking where to look."
+        >
+          <FormField
+            id="moduleId"
+            label="Module"
+            required={moduleRequired}
+            error={errors.moduleId?.message}
+            hint={
+              /*
+                The empty case is spelled out rather than left as a dropdown
+                that opens onto nothing. `GET /masters/modules` is B-064 and is
+                unbuilt on the real backend today — it answers 404 — so against
+                a live server this list *is* empty, and a bug-type ticket cannot
+                be raised until it lands.
+
+                **The requirement is not waived when the master is missing**,
+                which is the tempting fix and the wrong one: it would let a
+                network failure silently disable a validation rule, and the
+                tickets raised during the outage would carry no module at all —
+                the data poisoning §7.5 wrote the rule to prevent, except
+                invisible. Saying plainly why the field is empty is the honest
+                version of being blocked.
+              */
+              modulesEmpty
+                ? 'The module list could not be loaded, so there is nothing to choose from yet.'
+                : moduleRequired
+                  ? 'Required for bug-type tickets — it is what routes this to the right team.'
+                  : 'Optional for change requests and internal work. Leave it blank rather than guessing.'
+            }
+          >
+            {(aria) => (
+              <Controller
+                control={control}
+                name="moduleId"
+                render={({ field }) => (
+                  <Select
+                    value={field.value != null ? String(field.value) : undefined}
+                    onValueChange={(value) => field.onChange(Number(value))}
+                  >
+                    <SelectTrigger {...aria}>
+                      <SelectValue placeholder="Select a module" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {modules.map((module) => (
+                        <SelectItem key={module.id} value={String(module.id)}>
+                          {module.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            )}
+          </FormField>
+
+          <FormField
+            id="screenName"
+            label="Screen name"
+            error={errors.screenName?.message}
+            hint="The screen it happened on."
+          >
+            {(aria) => <Input {...aria} {...register('screenName')} placeholder="Fee Receipt Print" />}
+          </FormField>
+
+          <FormField
+            id="feature"
+            label="Feature"
+            error={errors.feature?.message}
+            hint="The feature within that screen."
+            className="sm:col-span-2"
+          >
+            {(aria) => (
+              <Input {...aria} {...register('feature')} placeholder="Reprint with duplicate watermark" />
+            )}
+          </FormField>
+
+          <FormField
+            id="stepsToGenerate"
+            label="Steps to generate"
+            error={errors.stepsToGenerate?.message}
+            hint="Numbered steps and screenshots — what a developer needs in order to reproduce it without coming back to ask."
+            className="sm:col-span-2"
+          >
+            {(aria) => (
+              // Same `Controller` binding and the same shared editor the
+              // description uses, for the reason C-066 gives: `register()`
+              // cannot bind a contentEditable, which emits no `input` event
+              // carrying a `value`. A pasted screenshot goes to the attachment
+              // picker here too — the person writing repro steps is the most
+              // likely person on this form to be pasting one.
+              <Controller
+                name="stepsToGenerate"
+                control={control}
+                render={({ field }) => (
+                  <RichTextEditor
+                    {...aria}
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    showCount
+                    maxLength={createTicketBodyStepsToGenerateMax}
+                    placeholder="1. Open Fees → Receipts&#10;2. Print a receipt already printed once&#10;3. The duplicate watermark is missing"
+                    onPasteFiles={(files) => pickerRef.current?.addFiles(files)}
                   />
                 )}
               />

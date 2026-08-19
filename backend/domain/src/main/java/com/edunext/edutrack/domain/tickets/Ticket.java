@@ -73,6 +73,37 @@ public class Ticket {
     @Column(name = "task_type_id")
     private Integer taskTypeId;
 
+    /**
+     * C-065/C-067 · blueprint §7.5's "Where it happened".
+     *
+     * <p>All four are nullable and none has a default, because §7.5 is explicit
+     * that a change request may span three modules and that a draft is saved
+     * before anybody knows the answer. A {@code NOT NULL} would force a wrong
+     * value at the moment the truth is least known.
+     *
+     * <p>{@code moduleId} is a plain column rather than a {@code @ManyToOne} —
+     * the same choice {@code taskTypeId} above already made. The master is
+     * resolved by whoever needs its name; carrying an association here would put
+     * a join on every ticket read that wants none of it.
+     */
+    @Column(name = "module_id")
+    private Integer moduleId;
+
+    @Column(name = "screen_name", length = 120)
+    private String screenName;
+
+    @Column(name = "feature", length = 120)
+    private String feature;
+
+    /**
+     * Sanitised HTML, PLAN.md §3.9 — {@code MEDIUMTEXT} because {@code TEXT} is
+     * 64 KB and a few pasted screenshots as data URIs exceed it, truncating
+     * silently into invalid markup. The 20 000-character bound is Bean
+     * Validation's on the DTO, so springdoc emits it into the contract.
+     */
+    @Column(name = "steps_to_generate", columnDefinition = "mediumtext")
+    private String stepsToGenerate;
+
     /** LOW | MEDIUM | HIGH | CRITICAL. The code, not an FK — see Priority. */
     @Column(name = "level", nullable = false, length = 10)
     private String level;
@@ -230,6 +261,38 @@ public class Ticket {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Integer getModuleId() {
+        return moduleId;
+    }
+
+    public void setModuleId(Integer moduleId) {
+        this.moduleId = moduleId;
+    }
+
+    public String getScreenName() {
+        return screenName;
+    }
+
+    public void setScreenName(String screenName) {
+        this.screenName = screenName;
+    }
+
+    public String getFeature() {
+        return feature;
+    }
+
+    public void setFeature(String feature) {
+        this.feature = feature;
+    }
+
+    public String getStepsToGenerate() {
+        return stepsToGenerate;
+    }
+
+    public void setStepsToGenerate(String stepsToGenerate) {
+        this.stepsToGenerate = stepsToGenerate;
     }
 
     public Integer getTaskTypeId() {

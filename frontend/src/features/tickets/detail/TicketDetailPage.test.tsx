@@ -332,6 +332,68 @@ describe('S-20 Ticket detail shell — C-019', () => {
     expect(within(ribbon).getByText(/C-051/)).toBeInTheDocument()
   })
 
+  describe('where it happened — C-069', () => {
+    it('puts Module, Screen and Feature in the summary panel directly under Type', async () => {
+      signInAsAdmin()
+      renderPage()
+      await waitForTicket()
+
+      const panel = within(summary())
+      // Blueprint line 1083 places them, and the order matters: Type, Module,
+      // Screen and Feature are the four answers to "what is this and where",
+      // and they are read together.
+      const labels = panel.getAllByRole('term').map((dt) => dt.textContent)
+      expect(labels.slice(labels.indexOf('Type'), labels.indexOf('Type') + 4)).toEqual([
+        'Type',
+        'Module',
+        'Screen',
+        'Feature',
+      ])
+
+      // Resolved through the module master, not printed as an id.
+      expect(panel.getByText('Fees')).toBeInTheDocument()
+      expect(panel.getByText('Checkout — payment')).toBeInTheDocument()
+    })
+
+    it('renders Steps to Generate below the description, not in the summary rail', async () => {
+      signInAsAdmin()
+      renderPage()
+      await waitForTicket()
+
+      const steps = screen.getByRole('region', { name: 'Steps to generate' })
+      expect(within(steps).getByText(/Sign in as a returning customer/)).toBeInTheDocument()
+      // §7.5's one field of the four that is not a label-and-value. It belongs
+      // where the person about to reproduce the bug is already reading.
+      expect(within(summary()).queryByText(/Sign in as a returning customer/)).not.toBeInTheDocument()
+    })
+
+    it('saves an inline edit and writes the FIELD_CHANGED row the History tab then shows', async () => {
+      // End to end through the shared mock rather than an intercepted request:
+      // this is the assertion that the write, the refetch and the history entry
+      // are one chain. Blueprint line 1083 makes the history row part of the
+      // feature — "every change writes a FIELD_CHANGED history row with the old
+      // and new value like any other field".
+      signInAsAdmin()
+      const user = userEvent.setup()
+      renderPage()
+      await waitForTicket()
+
+      const panel = within(summary())
+      await user.click(panel.getByRole('button', { name: 'Edit feature' }))
+      const input = panel.getByRole('textbox', { name: 'Feature' })
+      await user.clear(input)
+      await user.type(input, 'Saved-card payment reprint{Enter}')
+
+      await waitFor(() => expect(panel.getByText('Saved-card payment reprint')).toBeInTheDocument(), {
+        timeout: 4000,
+      })
+
+      await user.click(screen.getByRole('tab', { name: /History/ }))
+      const history = await screen.findByText(/Saved-card payment reprint/, { selector: 'ins,del,span,td,li,p' })
+      expect(history).toBeInTheDocument()
+    })
+  })
+
   describe('description — rich text since C-066', () => {
     const setDescription = (description: string) => {
       const ticket = getDb().tickets.find((t) => t.ticketId === TICKET)!

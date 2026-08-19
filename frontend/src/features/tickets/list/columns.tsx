@@ -13,6 +13,7 @@ export type ColumnKey =
   | 'ticketId'
   | 'title'
   | 'taskType'
+  | 'module'
   | 'level'
   | 'assignee'
   | 'plannedCloseDate'
@@ -27,6 +28,15 @@ export type ColumnKey =
 export interface ColumnRenderContext {
   /** `Ticket.taskTypeId` names a master row the list payload does not embed — resolved from `/masters/task-types`, fetched once for the filter bar and reused here. */
   taskTypeNames: Map<number, string>
+  /**
+   * C-070 · same arrangement for `moduleId`, and **built from every row the
+   * master returns, retired ones included**. `GET /masters/modules` includes
+   * deactivated rows for exactly this reason (D-060): a grid still has to render
+   * the name of a module some old ticket was raised against, and resolving only
+   * the active ones would blank that cell — which reads as missing data rather
+   * than as a retirement.
+   */
+  moduleNames: Map<number, string>
 }
 
 export interface ColumnDef {
@@ -99,6 +109,17 @@ export const COLUMNS: ColumnDef[] = [
     render: (t, ctx) => (
       <Chip variant="neutral">{(t.taskTypeId != null && ctx.taskTypeNames.get(t.taskTypeId)) || '—'}</Chip>
     ),
+  },
+  {
+    // C-070 · off by default — see DEFAULT_VISIBLE_COLUMNS. Blueprint line 986:
+    // "an optional Module column — off by default in the column chooser,
+    // because the grid is already at its width budget, but filterable always."
+    key: 'module',
+    header: 'Module',
+    render: (t, ctx) => {
+      const name = t.moduleId != null ? ctx.moduleNames.get(t.moduleId) : undefined
+      return name ?? <span className="text-content-muted">—</span>
+    },
   },
   {
     key: 'level',

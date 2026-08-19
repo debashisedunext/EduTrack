@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, ListChecks, Ticket, FolderKanban, MessageSquare,
+  LayoutDashboard, ListChecks, Inbox, Ticket, FolderKanban, MessageSquare,
   BarChart3, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
@@ -18,6 +18,19 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/my-tasks', label: 'My Tasks', icon: ListChecks },
+  /*
+    C-062 · S-31. Beside My Tasks rather than below Tickets, because for QA and
+    Deployment it *is* My Tasks — §17 item 12: "QA and Deployment are
+    queue-driven teams, not assignment-driven ones", and `LandingRoutes` already
+    sends those two roles here on sign-in.
+
+    Shown to every role and not gated to those two. A Developer watching the QA
+    queue is how they see their own handoff land, which is the walkthrough §16
+    describes, and `StageQueueSubscriptionScope` allows exactly that on the
+    matching WebSocket room for the same reason. The stage picker defaults to
+    the viewer's own team, so nobody has to know which queue is theirs.
+  */
+  { to: '/stages/queue', label: 'Stage Queue', icon: Inbox },
   { to: '/tickets', label: 'Tickets', icon: Ticket },
   { to: '/projects', label: 'Projects', icon: FolderKanban },
   { to: '/chat', label: 'Chat', icon: MessageSquare },

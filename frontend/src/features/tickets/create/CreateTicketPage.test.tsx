@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 import { getDb } from '@/mocks/db'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
@@ -118,6 +119,13 @@ function typeDescription(html: string) {
   fireEvent.input(editor)
 }
 
+/** C-068 · the second rich-text field, driven the same way for the same reason. */
+function typeSteps(html: string) {
+  const editor = screen.getByRole('textbox', { name: /Steps to generate/ })
+  editor.innerHTML = html
+  fireEvent.input(editor)
+}
+
 /** The three fields Save & Assign insists on beyond project and task type. */
 function fillTicketBody(title: string) {
   fireEvent.change(screen.getByLabelText(/Title \/ summary/), { target: { value: title } })
@@ -138,10 +146,12 @@ afterEach(() => {
 })
 
 describe('S-19 Create Ticket', () => {
-  it('renders all five blueprint §7.5 field groups', async () => {
+  it('renders all six blueprint §7.5 field groups', async () => {
     renderPage()
     await formReady()
-    for (const group of ['Identity', 'Core', 'People', 'Effort', 'Extra']) {
+    // Six since C-068. "Where it happened" sits between Core and People
+    // because that is where §7.5's own field table puts it.
+    for (const group of ['Identity', 'Core', 'Where it happened', 'People', 'Effort', 'Extra']) {
       expect(screen.getByRole('group', { name: group })).toBeInTheDocument()
     }
   })
@@ -326,6 +336,10 @@ describe('S-19 Create Ticket', () => {
 
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Client Bug$/)
+    // C-068 · §7.5 makes Module mandatory for bug-type task types, so a form
+    // that skips it never reaches `onSubmit` and this test would pass while
+    // asserting nothing about the client — the trap the comment below names.
+    await pickFromDropdown('moduleId', /^Fees$/)
     await pickFromDropdown('clientId', /ACME/)
     // Filled, or zod refuses the body first and `onSubmit` never runs — which
     // would make this test pass while asserting nothing about the client.
@@ -399,6 +413,7 @@ describe('S-19 Create Ticket', () => {
 
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    await pickFromDropdown('moduleId', /^Fees$/)
     fillTicketBody('Payment gateway times out on checkout')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
 
@@ -424,6 +439,7 @@ describe('S-19 Create Ticket', () => {
 
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    await pickFromDropdown('moduleId', /^Fees$/)
     fireEvent.change(screen.getByLabelText(/Title \/ summary/), {
       target: { value: 'Payment gateway times out on checkout' },
     })
@@ -554,6 +570,7 @@ describe('S-19 actions — C-013', () => {
 
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    await pickFromDropdown('moduleId', /^Fees$/)
     await pickFromDropdown('assigneeId', /Ravi Kumar/)
     fillTicketBody('First of a batch')
 
@@ -603,6 +620,7 @@ describe('S-19 actions — C-013', () => {
 
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    await pickFromDropdown('moduleId', /^Fees$/)
     fillTicketBody('First of a batch')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Create Another' }))
     // Both waits are on a real round trip through MSW, which carries a
@@ -617,6 +635,13 @@ describe('S-19 actions — C-013', () => {
     })
 
     fillTicketBody('Second of a batch')
+    // C-068 · re-picked, not inherited. `retainedForNextTicket` deliberately
+    // clears the module while keeping the project, client, type and level — so
+    // the second bug of a batch costs one dropdown and gets a module somebody
+    // actually chose, rather than the previous ticket's carried forward into a
+    // field that is never blank enough to look wrong. This line is the cost of
+    // that decision, stated where it is paid.
+    await pickFromDropdown('moduleId', /^Admission$/)
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
     await waitFor(() => expect(creates).toHaveLength(2), { timeout: 4000 })
 
@@ -627,6 +652,125 @@ describe('S-19 actions — C-013', () => {
     // shown the first ID again and the second ticket is never created. The
     // mock does not implement replay, so only this assertion catches it.
     expect(second).not.toBe(first)
+  })
+})
+
+/* ── C-068 — the "Where it happened" group ─────────────────────────────── */
+
+describe('C-068 — Where it happened', () => {
+  it('marks Module required for a bug-type task type and optional for a change request', async () => {
+    renderPage()
+    await formReady()
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+
+    // The asterisk is `aria-hidden` and paired with an `sr-only` "(required)",
+    // so this reads what a screen reader reads rather than what is drawn.
+    await pickFromDropdown('taskTypeId', /^Production Bug$/)
+    await waitFor(() => expect(screen.getByText('Module').textContent).toMatch(/\(required\)/))
+
+    await pickFromDropdown('taskTypeId', /^Change Request$/)
+    await waitFor(() => expect(screen.getByText('Module').textContent).not.toMatch(/\(required\)/))
+  })
+
+  it('refuses Save & Assign on a bug with no module, and accepts the same form as a draft', async () => {
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    fillTicketBody('Receipt reprint drops the duplicate watermark')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+    expect(
+      await screen.findByText('Pick the module this bug is in — it is what routes it to the right team'),
+    ).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+
+    // §7.5: "Save as Draft waives it either way." A draft is often parked
+    // precisely because the reporter does not yet know where it happened.
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }))
+    await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
+  })
+
+  it('does not let a change request be blocked by a module it may not have', async () => {
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Change Request$/)
+    fillTicketBody('Add a duplicate watermark toggle to receipt printing')
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+
+    await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
+    expect('moduleId' in (await bodyOf(0))).toBe(false)
+  })
+
+  it('sends all four fields, with the steps sanitised on the way out', async () => {
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    await pickFromDropdown('moduleId', /^Fees$/)
+    fireEvent.change(screen.getByLabelText(/Screen name/), { target: { value: 'Fee Receipt Print' } })
+    fireEvent.change(screen.getByLabelText(/^Feature/), {
+      target: { value: 'Reprint with duplicate watermark' },
+    })
+    typeSteps('<p>1. Open Fees → Receipts</p><script>alert(1)</script>')
+    fillTicketBody('Receipt reprint drops the duplicate watermark')
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+
+    await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
+    const body = await bodyOf(0)
+    expect(body).toMatchObject({
+      moduleId: 3,
+      screenName: 'Fee Receipt Print',
+      feature: 'Reprint with duplicate watermark',
+      stepsToGenerate: '<p>1. Open Fees → Receipts</p>',
+    })
+  })
+
+  it('says why the Module list is empty rather than opening onto nothing', async () => {
+    // `GET /masters/modules` is B-064 and unbuilt on the real backend — it
+    // answers 404 today, so this is the live state, not a hypothetical.
+    server.use(http.get('*/masters/modules', () => new HttpResponse(null, { status: 404 })))
+    renderPage()
+    await formReady()
+
+    expect(await screen.findByText(/module list could not be loaded/i)).toBeInTheDocument()
+  })
+
+  it('does not waive the requirement just because the master is unavailable', async () => {
+    // The tempting fix and the wrong one. Waiving it would let a network
+    // failure silently disable a validation rule, and every bug raised during
+    // the outage would carry no module — §7.5's data poisoning, invisible.
+    server.use(http.get('*/masters/modules', () => new HttpResponse(null, { status: 404 })))
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    fillTicketBody('Receipt reprint drops the duplicate watermark')
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+
+    expect(
+      await screen.findByText('Pick the module this bug is in — it is what routes it to the right team'),
+    ).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+  })
+
+  it('does not offer a deactivated module', async () => {
+    // The endpoint returns inactive rows on purpose — a grid has to render the
+    // name of a module an old ticket was raised against. A picker offering one
+    // would be offering a 400: `ModuleGuard` refuses an inactive module on
+    // write. Transport is the fixture's retired row.
+    renderPage()
+    await formReady()
+
+    await withOpenDropdown('moduleId', () => {
+      expect(screen.getByRole('option', { name: 'Fees' })).toBeInTheDocument()
+      expect(screen.queryByRole('option', { name: 'Transport' })).not.toBeInTheDocument()
+    })
   })
 })
 

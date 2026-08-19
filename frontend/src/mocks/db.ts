@@ -1835,6 +1835,8 @@ function seedFiller(db: Db) {
   const ACTIVE: StatusCode[] = ['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK'];
   const OPEN_STAGES = ['TRIAGE', 'DEVELOPMENT', 'QA', 'DEPLOYMENT', 'VERIFICATION', 'SIGNOFF'];
   const now = Date.parse('2026-08-06T09:00:00Z');
+  /** C-062 · counts only the tickets that land in a queue-driven stage. */
+  let queuePosition = 0;
 
   TITLES.forEach((title, i) => {
     const project = db.projects[i % 3];
@@ -1844,6 +1846,33 @@ function seedFiller(db: Db) {
     const stage = closed ? 'CLOSED' : pick(OPEN_STAGES);
     const stageDef = db.stages.find((s) => s.stageCode === stage)!;
     const assignee = db.users.find((u) => u.role === stageDef.ownerRole) ?? db.users[2];
+    /*
+     * C-062 · **half the tickets waiting in a queue-driven stage have nobody
+     * holding them**, and that is the state S-31 exists to make visible.
+     *
+     * Until now every filler ticket was assigned to the first user whose role
+     * owns its stage — so QA's queue was three tickets, all Anil's, and the
+     * screen was indistinguishable from My Tasks with a different title. That
+     * fixture cannot tell the bug from the fix: with row scope applied it looked
+     * identical, which is precisely how the defect would have shipped.
+     *
+     * It is also the honest shape. §17 item 12 describes the failure this screen
+     * prevents as *"tickets stall between the handoff and someone noticing"* —
+     * a stalled ticket is one nobody has picked up, so a queue in which
+     * everything is already assigned is a queue with the interesting case
+     * removed. `unassignedOnly` is on this endpoint and on `GET /tickets`, and
+     * before this it could not return a single row from either.
+     *
+     * Narrowed to QA and Deployment on purpose. Leaving Development or Triage
+     * tickets unassigned would move numbers on My Tasks, the dashboards and the
+     * resource reports for a reason that has nothing to do with them.
+     */
+    const queueDriven = !closed && (stageDef.ownerRole === 'QA' || stageDef.ownerRole === 'DEPLOYMENT');
+    // Alternated over the queue itself rather than over `i`. Only a handful of
+    // the generated tickets land in QA or Deployment at all, and `i % 2` over
+    // the whole run left the QA queue with three tickets and none of them
+    // unassigned — a fixture that says the right thing and demonstrates nothing.
+    const assigneeId = queueDriven && queuePosition++ % 2 === 0 ? null : assignee.id;
     const createdAt = new Date(now - int(1, 21) * 86_400_000).toISOString();
     const pcd = new Date(now + int(-4, 12) * 86_400_000).toISOString();
     const delayed = !closed && Date.parse(pcd) < now;
@@ -1878,7 +1907,7 @@ function seedFiller(db: Db) {
       originalLevel: pick(LEVELS),
       status: closed ? 'CLOSED' : pick(ACTIVE),
       currentStageCode: stage,
-      assigneeId: assignee.id,
+      assigneeId,
       reportedById: 6,
       cycleNo: i % 7 === 0 ? 2 : 1,
       iterationNo: i % 4 === 0 ? 2 : 1,

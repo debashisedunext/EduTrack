@@ -103,8 +103,10 @@ class TicketListService {
                 t.getTicketCode(), t.getTitle(),
                 refs.project(t.getProjectId()), refs.client(t.getClientId()),
                 t.getClientContactId(), t.isClientRaised(), t.getTaskTypeId(),
-                // D-060's field, declared on the contract with no column behind it yet.
-                null,
+                // C-070 · the real column since C-065. Widened to Long because
+                // that is what the contract declares; the column is an INT
+                // because eight seeded modules do not need eight bytes.
+                t.getModuleId() == null ? null : t.getModuleId().longValue(),
                 t.getLevel(), t.getOriginalLevel(), t.getStatus(), t.getCurrentStage(),
                 refs.person(t.getAssignedTo()), refs.person(t.getReportedBy()),
                 t.getCurrentCycleNo(), t.getCurrentIteration(), t.getReopenCount(), t.isReopened(),

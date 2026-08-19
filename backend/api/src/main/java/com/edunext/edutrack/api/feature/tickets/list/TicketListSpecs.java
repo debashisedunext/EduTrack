@@ -145,9 +145,10 @@ final class TicketListSpecs {
     }
 
     /**
-     * @param moduleId accepted and ignored — {@code tickets} has no module
-     *                 column until C-065 adds one. Rejecting it would break the
-     *                 generated client, which already sends the parameter.
+     * C-070 · {@code moduleId} is applied now. It was accepted and ignored until
+     * C-065 added the column, which was honest while nothing could answer it and
+     * would be a silent lie now — a filter that returns every row is worse than
+     * one that returns an error, because nobody checks a grid that looks full.
      */
     static Specification<Ticket> filters(Filters f) {
         return (root, query, cb) -> {
@@ -168,6 +169,23 @@ final class TicketListSpecs {
             eq(and, cb, root, "projectId", f.projectId());
             eq(and, cb, root, "clientId", f.clientId());
             eq(and, cb, root, "taskTypeId", f.taskTypeId());
+            // C-070 · §7.5's module filter — "every open Fees ticket" is the
+            // question this list gets asked most once the field exists
+            // (blueprint line 986).
+            //
+            // Narrowed to Integer rather than bound as the Long the contract
+            // declares, because `tickets.module_id` is an INT and
+            // `Ticket.moduleId` is an Integer. A value that does not fit is not
+            // a module any row can carry, so it matches nothing — spelled out
+            // as an impossible predicate rather than left to `intValue()`,
+            // which would truncate 4294967299 to 3 and quietly return every
+            // Fees ticket to somebody who asked for something else.
+            if (f.moduleId() != null) {
+                long moduleId = f.moduleId();
+                and.add(moduleId >= Integer.MIN_VALUE && moduleId <= Integer.MAX_VALUE
+                        ? cb.equal(root.get("moduleId"), (int) moduleId)
+                        : cb.disjunction());
+            }
             eq(and, cb, root, "level", f.level());
             eq(and, cb, root, "status", f.status());
             eq(and, cb, root, "currentStage", f.stage());
@@ -235,6 +253,7 @@ final class TicketListSpecs {
             Long projectId,
             Long clientId,
             Integer taskTypeId,
+            /** C-070 · applied since the column landed; see {@link #filters}. */
             Long moduleId,
             String level,
             String status,

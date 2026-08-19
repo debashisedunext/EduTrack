@@ -5,6 +5,7 @@ import com.edunext.edutrack.api.feature.tickets.SlaResolution;
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
+import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
 import com.edunext.edutrack.domain.tickets.Ticket;
@@ -141,6 +142,13 @@ class ReopenService {
     private final WorkflowStageRepository stages;
     private final PlannedCloseDateService slaLadder;
     private final WorkingHoursService workingHours;
+    /**
+     * D-037 · §4B.6's producer for this event. **Stream D's class, injected
+     * into Stream C's service** — the arrangement `CommentService` already has
+     * with `CommentMentionNotifier`. Flagged for Divyansh in the pull request
+     * rather than added quietly.
+     */
+    private final TicketEventNotifier notifier;
     private final Clock clock;
 
     /*
@@ -156,8 +164,9 @@ class ReopenService {
                   TicketJournal journal,
                   WorkflowStageRepository stages,
                   PlannedCloseDateService slaLadder,
-                  WorkingHoursService workingHours) {
-        this(tickets, cycles, journal, stages, slaLadder, workingHours, Clock.systemUTC());
+                  WorkingHoursService workingHours,
+                  TicketEventNotifier notifier) {
+        this(tickets, cycles, journal, stages, slaLadder, workingHours, notifier, Clock.systemUTC());
     }
 
     /**
@@ -173,6 +182,7 @@ class ReopenService {
                  WorkflowStageRepository stages,
                  PlannedCloseDateService slaLadder,
                  WorkingHoursService workingHours,
+                 TicketEventNotifier notifier,
                  Clock clock) {
         this.tickets = tickets;
         this.cycles = cycles;
@@ -180,6 +190,7 @@ class ReopenService {
         this.stages = stages;
         this.slaLadder = slaLadder;
         this.workingHours = workingHours;
+        this.notifier = notifier;
         this.clock = clock;
     }
 
@@ -323,6 +334,12 @@ class ReopenService {
         // cycle 1 is looking at a cycle whose story ended when it closed.
         journal.append(reopenedEntry(ticketId, newCycleNo, caller, request.reason()));
 
+        // D-037 · §4B.6 row 13 — the NEW assignee and the project's PMs. The
+        // assignee is passed rather than read back because S-22 lets the
+        // reopener change it, and `assignee` here is the value this transaction
+        // has just set.
+        notifier.reopened(ticket, actorIdOrZero(caller), assignee, newCycleNo);
+
         return TicketWire.of(ticket);
     }
 
@@ -444,6 +461,12 @@ class ReopenService {
      * pairing; the route is behind {@code hasAuthority('ticket.reopen')}, so an
      * unidentifiable caller cannot reach here.
      */
+    /** D-037 · the caller, or 0 when there is none — `dev-noauth` has no principal. */
+    private static long actorIdOrZero(Authentication caller) {
+        Long id = actorId(caller);
+        return id == null ? 0L : id;
+    }
+
     private static Long actorId(Authentication caller) {
         return Optional.ofNullable(caller)
                 .flatMap(CallerIdentity::of)
