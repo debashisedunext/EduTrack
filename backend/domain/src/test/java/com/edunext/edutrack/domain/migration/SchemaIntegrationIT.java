@@ -194,6 +194,9 @@ class SchemaIntegrationIT {
                                 "chain_anchors",
                                 // A-050
                                 "daily_ticket_stats", "resource_daily_stats",
+                                // A-059 · §S-05 widget 20, keyed by project as
+                                // well as client so the row rule can scope it
+                                "client_daily_stats",
                                 // B-033 · S-34 step 3's saveable column mappings.
                                 // `.contains` would not have failed without this
                                 // line, but the paragraphs above ask for the name

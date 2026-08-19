@@ -4,6 +4,7 @@ import { WidgetFrame } from './WidgetFrame'
 import { useDashboardVariant } from './useDashboardVariant'
 import { AgingBuckets } from './charts/AgingBuckets'
 import { CalendarHeatmap } from './charts/CalendarHeatmap'
+import { ClientVolumeBar } from './charts/ClientVolumeBar'
 import { DailyStackedArea } from './charts/DailyStackedArea'
 import { PriorityBar } from './charts/PriorityBar'
 import { ProjectTreemap } from './charts/ProjectTreemap'
@@ -35,14 +36,14 @@ import { VelocityLines } from './charts/VelocityLines'
  *
  * §S-05: the Developer's dashboard "shows only widgets 1–6, 9, 12". Cards 1–6
  * are the row above; 9 and 12 are the two rendered below when the variant is
- * `own-work`, and the other seven are not requested at all.
+ * `own-work`, and the other eight are not requested at all.
  *
  * Before this, a delivery role loaded all nine and got six panels of
  * "this breakdown is not kept per resource" — each an accurate sentence, and
  * together a screen that reads as broken. The sentences stay, because they are
  * right for a PM who has filtered to a resource and for anybody who reaches a
  * widget another way; what changes is that the developer dashboard no longer
- * asks seven questions it already knows have no answer.
+ * asks eight questions it already knows have no answer.
  *
  * **Widgets 10 and 13 are omitted although they would answer.** A-057 gave the
  * heatmap a per-resource measure ("tickets you closed") and widget 10 renders a
@@ -164,6 +165,20 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
         params={params}
       >
         {(series) => <ProjectTreemap series={series} />}
+      </WidgetFrame>
+
+      {/* A-059 · widget 20. Titled "raised" rather than "volume": the bars
+          count tickets the client submitted in the window, and a panel headed
+          "Client-wise volume" beside the treemap's open-ticket tiles invites
+          being read as the same measure. The one word is the difference
+          between intake and backlog. */}
+      <WidgetFrame
+        widgetKey="client-volume"
+        title="Client-wise tickets raised"
+        categoryLabel="Client"
+        params={params}
+      >
+        {(series) => <ClientVolumeBar series={series} />}
       </WidgetFrame>
     </div>
   )

@@ -509,6 +509,57 @@ class WidgetRepository {
                 .list();
     }
 
+    // ── widget 20 · client-wise volume ───────────────────────────────────────
+
+    /**
+     * A-059 · tickets raised per client over the window.
+     *
+     * <p><b>Flow, so summed</b> — and this is the one place in this class where
+     * summing over days is the correct operation rather than the bug the other
+     * queries guard against. "Volume" is intake: blueprint §7.8 lists it
+     * separately from "open versus closed", and a count of creations aggregates
+     * over a date range by construction. Widget 15's treemap next door reads a
+     * single day for exactly the opposite reason, and the two sitting side by
+     * side is why both carry the argument.
+     *
+     * <p><b>Scoped by project, which is why the table carries one.</b> A client
+     * spans projects, so the sum is over the projects this caller can see. Two
+     * callers with different scopes get different bars for one client, and each
+     * is the honest answer to "this client's volume, within the work you can
+     * open". The migration header carries the disclosure argument for why the
+     * table could not be keyed by client alone.
+     *
+     * <p>Clients with nothing raised in the window are absent rather than zero,
+     * the same way {@link #projectDistribution} omits empty projects: a bar of
+     * length zero is a label with no bar, and a horizontal chart of them is a
+     * list of clients who did not appear.
+     */
+    record ClientVolume(long clientId, String clientName, long created) {
+    }
+
+    List<ClientVolume> clientVolume(LocalDate from, LocalDate to,
+                                    List<Long> projectIds, Long projectFilter) {
+        return jdbc.sql("""
+                        SELECT s.client_id, c.name, SUM(s.created) AS raised
+                          FROM client_daily_stats s
+                          JOIN clients c ON c.id = s.client_id
+                         WHERE s.stat_date BETWEEN :from AND :to
+                           AND (:unscoped = 1 OR s.project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR s.project_id = :projectFilter)
+                         GROUP BY s.client_id, c.name
+                        HAVING raised > 0
+                         ORDER BY raised DESC, c.name
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .param("projectFilter", projectFilter)
+                .query((rs, n) -> new ClientVolume(
+                        rs.getLong("client_id"), rs.getString("name"), rs.getLong("raised")))
+                .list();
+    }
+
     /**
      * An empty {@code IN ()} list is a MySQL syntax error, and the guard against
      * reaching it is the {@code :unscoped} flag beside every use. The sentinel

@@ -108,6 +108,7 @@ class DashboardWidgetIT {
     void seed() {
         jdbc.update("DELETE FROM daily_ticket_stats");
         jdbc.update("DELETE FROM resource_daily_stats");
+        jdbc.update("DELETE FROM client_daily_stats");
         jdbc.update("DELETE FROM project_members");
 
         mine = project("WDGA");
@@ -816,6 +817,180 @@ class DashboardWidgetIT {
         }
     }
 
+    // ── widget 20 · client-wise volume ───────────────────────────────────────
+
+    @Nested
+    @DisplayName("widget 20 · client-wise volume")
+    class ClientVolume {
+
+        /**
+         * <b>The one widget on this screen that is meant to sum over days</b>,
+         * and the test that proves it does.
+         *
+         * <p>Every other categorical assertion in this class checks the
+         * opposite — that stock reads the latest day rather than three times
+         * it. Volume is intake, so three days of five raised is fifteen, and a
+         * client-volume implementation copied from the treemap next door would
+         * answer five. The fixture makes the two answers different numbers on
+         * purpose.
+         */
+        @Test
+        @DisplayName("volume sums the window, because intake is flow")
+        void volumeIsSummedOverTheWindow() {
+            long acme = client("Acme Industries");
+            for (LocalDate d : List.of(D1, D2, D3)) {
+                clientStat(d, mine, acme, 5, 0, 20);
+            }
+
+            WidgetDtos.Widget w = widget("ADMIN", "client-volume", List.of());
+
+            assertThat(pointNamed(w, "Acme Industries")).isEqualByComparingTo("15");
+        }
+
+        /**
+         * A client spans projects, and the bar is the sum over the projects
+         * this caller can open a ticket from.
+         *
+         * <p>This is the assertion the table's third key column exists for. A
+         * summary keyed by client alone could only have answered 12 to both
+         * callers, and the PM's bar would have been four tickets they cannot
+         * see, on a chart whose every other bar they can click into.
+         */
+        @Test
+        @DisplayName("a client's bar is scoped to the projects the caller can see")
+        void volumeIsScopedByProject() {
+            long acme = client("Acme Industries");
+            clientStat(D1, mine, acme, 8, 0, 8);
+            clientStat(D1, theirs, acme, 4, 0, 4);
+
+            assertThat(pointNamed(widget("ADMIN", "client-volume", List.of()), "Acme Industries"))
+                    .isEqualByComparingTo("12");
+            assertThat(pointNamed(widget("PM", "client-volume", List.of(mine)), "Acme Industries"))
+                    .isEqualByComparingTo("8");
+        }
+
+        /** The ranking is the information: the question is who raises the most. */
+        @Test
+        @DisplayName("bars are ordered largest first")
+        void barsAreOrderedLargestFirst() {
+            clientStat(D1, mine, client("Small Co"), 2, 0, 2);
+            clientStat(D1, mine, client("Large Co"), 30, 0, 30);
+            clientStat(D1, mine, client("Middle Co"), 9, 0, 9);
+
+            WidgetDtos.Widget w = widget("ADMIN", "client-volume", List.of());
+
+            assertThat(w.series().getFirst().points()).extracting(WidgetDtos.Point::x)
+                    .containsExactly("Large Co", "Middle Co", "Small Co");
+        }
+
+        /**
+         * A-060's convention, and the reason it matters here: the bar counts
+         * tickets <em>raised in the window</em>, so a link without the window
+         * would open every ticket that client has ever raised under a heading
+         * carrying this month's number.
+         */
+        @Test
+        @DisplayName("every bar deep-links to that client's tickets, within the window")
+        void barsDeepLinkWithTheReportedWindow() {
+            long acme = client("Acme Industries");
+            clientStat(D2, mine, acme, 3, 0, 3);
+
+            WidgetDtos.Widget w = widget("ADMIN", "client-volume", List.of());
+
+            assertThat(w.series().getFirst().points()).singleElement().satisfies(p ->
+                    assertThat(p.drillDown())
+                            .isEqualTo("/tickets?clientId=" + acme
+                                    + "&reportedFrom=" + D1 + "&reportedTo=" + D3));
+        }
+
+        /**
+         * The cap is a readability limit and must never become a silent one.
+         *
+         * <p>Thirteen named bars would be the failure this asserts against: the
+         * tail is pooled into a thirteenth bar carrying its own count and the
+         * sum of what it hides, so the bars still add up to every client-raised
+         * ticket in the window.
+         */
+        @Test
+        @DisplayName("beyond twelve clients the tail is pooled, not dropped")
+        void theTailIsPooledRatherThanTruncated() {
+            // Fourteen clients, descending, so the two smallest are the tail.
+            for (int i = 1; i <= 14; i++) {
+                clientStat(D1, mine, client("Client " + i), 100 - i, 0, 1);
+            }
+
+            WidgetDtos.Widget w = widget("ADMIN", "client-volume", List.of());
+            List<WidgetDtos.Point> points = w.series().getFirst().points();
+
+            assertThat(points).hasSize(13);
+            assertThat(points.getLast().x()).isEqualTo("Other (2 clients)");
+            // 87 + 86 — the two the cap displaced.
+            assertThat(points.getLast().y()).isEqualByComparingTo("173");
+            // Nothing was lost: the bars sum to every ticket raised.
+            long raised = 0;
+            for (int i = 1; i <= 14; i++) {
+                raised += 100 - i;
+            }
+            assertThat(points.stream().mapToLong(p -> p.y().longValue()).sum()).isEqualTo(raised);
+        }
+
+        /**
+         * No filter expresses "any of these two clients", and A-056's aging
+         * buckets established that a null link is the honest answer — a segment
+         * that opened a list contradicting itself is worse than one that does
+         * not open.
+         */
+        @Test
+        @DisplayName("the pooled bar has no drill-down, because no filter expresses it")
+        void thePooledBarDoesNotLink() {
+            for (int i = 1; i <= 14; i++) {
+                clientStat(D1, mine, client("Client " + i), 100 - i, 0, 1);
+            }
+
+            List<WidgetDtos.Point> points =
+                    widget("ADMIN", "client-volume", List.of()).series().getFirst().points();
+
+            assertThat(points.getLast().drillDown()).isNull();
+            assertThat(points.subList(0, 12)).allSatisfy(p ->
+                    assertThat(p.drillDown()).isNotNull());
+        }
+
+        /**
+         * A client that raised nothing in the window is absent rather than a
+         * zero-length bar — a label with no bar beside it, which on a ranking
+         * chart reads as a rendering fault.
+         */
+        @Test
+        @DisplayName("a client with open tickets but nothing raised is absent")
+        void clientsWithNothingRaisedAreAbsent() {
+            long quiet = client("Quiet Client");
+            long busy = client("Busy Client");
+            // Twenty open, none raised in the window: real rows, zero volume.
+            clientStat(D1, mine, quiet, 0, 1, 20);
+            clientStat(D1, mine, busy, 4, 0, 4);
+
+            WidgetDtos.Widget w = widget("ADMIN", "client-volume", List.of());
+
+            assertThat(w.series().getFirst().points()).extracting(WidgetDtos.Point::x)
+                    .containsExactly("Busy Client");
+        }
+
+        /**
+         * Not an empty chart, which would claim this caller's clients raised
+         * nothing.
+         */
+        @Test
+        @DisplayName("a delivery role is told why, rather than shown an empty chart")
+        void unavailableToDeliveryRoles() {
+            clientStat(D1, mine, client("Acme Industries"), 5, 0, 5);
+
+            WidgetDtos.Widget w = widget("DEVELOPER", "client-volume", List.of(mine));
+
+            assertThat(w.unavailableReason()).isNotNull();
+            assertThat(w.series()).isEmpty();
+        }
+    }
+
     // ── fixture ──────────────────────────────────────────────────────────────
 
     private WidgetDtos.Widget widget(String role, String key, List<Long> projects) {
@@ -951,5 +1126,36 @@ class DashboardWidgetIT {
                                                   assigned_in_progress, computed_at)
                 VALUES (?, ?, ?, 0.00, ?, ?, ?, ?, '2026-08-12 06:00:00')
                 """, day, userId, closed, assignedOpen, assignedCritical, assignedDelayed, assignedInProgress);
+    }
+
+    /**
+     * A-059 · distinct names for the same reason A-057 gave projects them:
+     * widget 20 is keyed by client name, and two clients both called
+     * "Widget IT" would let an assertion about one pass against the other.
+     * The names the tests pass in are already distinct; the code is what needs
+     * the counter, being unique and only twenty characters.
+     */
+    private long client(String name) {
+        jdbc.update("INSERT INTO clients (client_code, name) VALUES (?, ?)",
+                "WC" + SEQ.incrementAndGet(), name);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    /**
+     * One day of one client's activity on one project.
+     *
+     * <p>{@code created} and {@code openTotal} are deliberately given
+     * independently rather than derived from one another: the whole widget
+     * rests on volume being the flow column and not the stock one, so a fixture
+     * that made them agree would let an implementation reading the wrong column
+     * pass.
+     */
+    private void clientStat(LocalDate day, long projectId, long clientId,
+                            int created, int closed, int openTotal) {
+        jdbc.update("""
+                INSERT INTO client_daily_stats (stat_date, project_id, client_id,
+                                                created, closed, open_total, computed_at)
+                VALUES (?, ?, ?, ?, ?, ?, '2026-08-12 06:00:00')
+                """, day, projectId, clientId, created, closed, openTotal);
     }
 }
