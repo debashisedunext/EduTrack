@@ -634,6 +634,7 @@ export const getTicketDetailResponseDataTicketStepsToGenerateMax = 20000;
 export const getTicketDetailResponseDataTicketPctCompleteMin = 0;
 export const getTicketDetailResponseDataTicketPctCompleteMax = 100;
 
+export const getTicketDetailResponseDataLinkedTicketsItemTicketTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 
 
 export const getTicketDetailResponse = zod.object({
@@ -888,8 +889,86 @@ export const getTicketDetailResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 })).optional(),
+  "linkedTickets": zod.array(zod.object({
+  "id": zod.number(),
+  "linkType": zod.enum(['BLOCKS', 'BLOCKED_BY', 'DUPLICATE_OF', 'RELATES_TO', 'DUPLICATED_BY']).describe('C-064. Blueprint §16 item 17 and §7.5\'s create-form row name four:\nBlocks \/ Is blocked by \/ Duplicate of \/ Relates to — `BLOCKS`,\n`BLOCKED_BY`, `DUPLICATE_OF` and `RELATES_TO` are the only values\n`createTicketLink` accepts.\n\n`DUPLICATED_BY` is a fifth value \*\*`createTicketLink` refuses\*\* —\n`422`, not a type a caller ever picks. It exists only so a\n`linkedTickets` row can be labelled correctly on the \*original\*\nticket\'s side of a `DUPLICATE_OF` link, the way `BLOCKED_BY` labels\nthe far side of a `BLOCKS` link. Beyond the blueprint\'s literal four\nfor that reason, flagged here rather than silently added.\n\n`BLOCKS`\/`BLOCKED_BY` is one relationship stored once — see\n`createTicketLink`. `RELATES_TO` is symmetric.\n'),
+  "ticket": zod.object({
+  "ticketId": zod.string().regex(getTicketDetailResponseDataLinkedTicketsItemTicketTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "title": zod.string(),
+  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED'])
+}).describe('The linked ticket\'s own identity, enough to render a chip without a second fetch.'),
+  "createdAt": zod.string().datetime({}).optional(),
+  "createdBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional()
+})).optional(),
   "availableActions": zod.array(zod.string()).optional().describe('What this caller may do right now, decided server-side. The client\nrenders buttons from this rather than re-deriving permissions —\ntwo implementations of the same rule always diverge.\n')
 })
+})
+
+/**
+ * `linkType` reads **from this ticket to the target**: `BLOCKS` means this
+ticket blocks the target, `DUPLICATE_OF` means this ticket is a duplicate
+of the target. `BLOCKS`/`BLOCKED_BY` is one relationship stored once —
+picking `BLOCKED_BY` here writes the identical row `BLOCKS` would write
+from the target's side, so the two can never fall out of sync. Reading a
+ticket's own linked-tickets panel (`GET .../full`) resolves both
+directions, labelling each with the type as it reads from *that*
+ticket — a `BLOCKS` row shows as "Is blocked by" on the target.
+
+`RELATES_TO` is symmetric; `DUPLICATE_OF` is not — its inverse renders
+as `DUPLICATED_BY` on the other ticket, which is never a submittable
+`linkType` here.
+
+**`400`, not `422`, for both a self-link and a `DUPLICATED_BY`
+submission** — CONVENTIONS.md's own distinction: nothing about the
+ticket's *state* refuses either, and resending with a different
+`targetTicketId` or `linkType` succeeds. The target ticket is
+resolved through the caller's own row scope, so a target outside it
+is `404`, identical to one that does not exist (§10.2's
+no-existence-leak rule).
+
+ * @summary Link this ticket to another (blueprint §16 item 17, §7.5's create-form row)
+ */
+export const createTicketLinkPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
+
+export const createTicketLinkParams = zod.object({
+  "ticketId": zod.string().regex(createTicketLinkPathTicketIdRegExp)
+})
+
+export const createTicketLinkHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createTicketLinkBodyTargetTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
+
+export const createTicketLinkBody = zod.object({
+  "targetTicketId": zod.string().regex(createTicketLinkBodyTargetTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
+  "linkType": zod.enum(['BLOCKS', 'BLOCKED_BY', 'DUPLICATE_OF', 'RELATES_TO', 'DUPLICATED_BY']).describe('C-064. Blueprint §16 item 17 and §7.5\'s create-form row name four:\nBlocks \/ Is blocked by \/ Duplicate of \/ Relates to — `BLOCKS`,\n`BLOCKED_BY`, `DUPLICATE_OF` and `RELATES_TO` are the only values\n`createTicketLink` accepts.\n\n`DUPLICATED_BY` is a fifth value \*\*`createTicketLink` refuses\*\* —\n`422`, not a type a caller ever picks. It exists only so a\n`linkedTickets` row can be labelled correctly on the \*original\*\nticket\'s side of a `DUPLICATE_OF` link, the way `BLOCKED_BY` labels\nthe far side of a `BLOCKS` link. Beyond the blueprint\'s literal four\nfor that reason, flagged here rather than silently added.\n\n`BLOCKS`\/`BLOCKED_BY` is one relationship stored once — see\n`createTicketLink`. `RELATES_TO` is symmetric.\n')
+})
+
+/**
+ * Either side of the relationship may remove it — `ticket_links` is
+ordinary mutable data, not one of CLAUDE.md's three append-only
+tables. `linkId` must name a row touching this ticket on either end;
+one that does not is `404`, the same answer as one that never
+existed.
+
+ * @summary Remove a link
+ */
+export const deleteTicketLinkPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
+
+export const deleteTicketLinkParams = zod.object({
+  "ticketId": zod.string().regex(deleteTicketLinkPathTicketIdRegExp),
+  "linkId": zod.number()
 })
 
 /**

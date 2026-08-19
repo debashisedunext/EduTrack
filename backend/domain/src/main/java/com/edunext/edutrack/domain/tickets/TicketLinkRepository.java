@@ -14,4 +14,15 @@ public interface TicketLinkRepository extends JpaRepository<TicketLink, Long> {
      * own on the blocked side.
      */
     List<TicketLink> findByTargetTicketId(Long targetTicketId);
+
+    /**
+     * C-064 · the pre-flight for a clean {@code 409} rather than an unlabelled
+     * constraint violation from {@code uq_ticket_links}. Checked against the
+     * already-canonical {@code (source, target, linkType)} triple —
+     * {@code TicketLinkService} resolves {@code BLOCKED_BY} to its canonical
+     * {@code BLOCKS} row before this is called, so the two are never asked to
+     * agree independently.
+     */
+    boolean existsBySourceTicketIdAndTargetTicketIdAndLinkType(
+            Long sourceTicketId, Long targetTicketId, String linkType);
 }

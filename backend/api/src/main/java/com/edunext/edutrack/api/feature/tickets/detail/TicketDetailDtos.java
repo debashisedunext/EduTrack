@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.tickets.detail;
 
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
+import com.edunext.edutrack.api.feature.tickets.links.TicketLinkDtos;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -22,6 +23,10 @@ final class TicketDetailDtos {
     }
 
     /**
+     * @param linkedTickets   C-064 · {@code TicketLinkService.viewsFor}'s shape
+     *                        reused rather than duplicated — see that class's
+     *                        javadoc on why the source/target label derivation
+     *                        must have one implementation, not two
      * @param ribbon          always null for now — see {@link TicketDetailService}
      * @param availableActions always null for now — see {@link TicketDetailService}
      */
@@ -34,6 +39,7 @@ final class TicketDetailDtos {
             List<Comment> comments,
             List<Attachment> attachments,
             List<UserRef> watchers,
+            List<TicketLinkDtos.LinkedTicketView> linkedTickets,
             List<String> availableActions) {
     }
 

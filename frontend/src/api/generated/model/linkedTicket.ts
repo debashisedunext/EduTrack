@@ -46,29 +46,19 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { Ticket } from './ticket';
-import type { Cycle } from './cycle';
-import type { Ribbon } from './ribbon';
-import type { HistoryEntry } from './historyEntry';
-import type { EffortLog } from './effortLog';
-import type { Comment } from './comment';
-import type { Attachment } from './attachment';
+import type { TicketLinkType } from './ticketLinkType';
+import type { TicketRef } from './ticketRef';
 import type { UserRef } from './userRef';
-import type { LinkedTicket } from './linkedTicket';
 
-export type TicketDetailResponseData = {
-  ticket: Ticket;
-  cycles?: Cycle[];
-  ribbon?: Ribbon;
-  history?: HistoryEntry[];
-  effortLogs?: EffortLog[];
-  comments?: Comment[];
-  attachments?: Attachment[];
-  watchers?: UserRef[];
-  linkedTickets?: LinkedTicket[];
-  /** What this caller may do right now, decided server-side. The client
-renders buttons from this rather than re-deriving permissions —
-two implementations of the same rule always diverge.
+export interface LinkedTicket {
+  id: number;
+  /** As it reads **from the ticket this row is embedded under** — not
+necessarily the type the row was created with. A link created as
+`BLOCKS` from ticket A reads `BLOCKED_BY` inside ticket B's
+`linkedTickets`.
  */
-  availableActions?: string[];
-};
+  linkType: TicketLinkType;
+  ticket: TicketRef;
+  createdAt?: string;
+  createdBy?: UserRef;
+}

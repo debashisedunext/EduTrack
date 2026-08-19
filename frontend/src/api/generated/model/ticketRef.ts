@@ -46,29 +46,16 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { Ticket } from './ticket';
-import type { Cycle } from './cycle';
-import type { Ribbon } from './ribbon';
-import type { HistoryEntry } from './historyEntry';
-import type { EffortLog } from './effortLog';
-import type { Comment } from './comment';
-import type { Attachment } from './attachment';
-import type { UserRef } from './userRef';
-import type { LinkedTicket } from './linkedTicket';
+import type { TicketId } from './ticketId';
+import type { Level } from './level';
+import type { StatusCode } from './statusCode';
 
-export type TicketDetailResponseData = {
-  ticket: Ticket;
-  cycles?: Cycle[];
-  ribbon?: Ribbon;
-  history?: HistoryEntry[];
-  effortLogs?: EffortLog[];
-  comments?: Comment[];
-  attachments?: Attachment[];
-  watchers?: UserRef[];
-  linkedTickets?: LinkedTicket[];
-  /** What this caller may do right now, decided server-side. The client
-renders buttons from this rather than re-deriving permissions —
-two implementations of the same rule always diverge.
+/**
+ * The linked ticket's own identity, enough to render a chip without a second fetch.
  */
-  availableActions?: string[];
-};
+export interface TicketRef {
+  ticketId: TicketId;
+  title: string;
+  level: Level;
+  status: StatusCode;
+}
