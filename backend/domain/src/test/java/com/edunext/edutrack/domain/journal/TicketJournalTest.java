@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -966,6 +967,46 @@ class TicketJournalTest {
         @DisplayName("rejects a null ticket id rather than delegating it")
         void rejectsNullTicketId() {
             assertThatThrownBy(() -> journal.openHopFor(null))
+                    .isInstanceOf(AppendRejectedException.class);
+            verifyNoInteractions(transitions);
+        }
+    }
+
+    /**
+     * C-044 · {@link TicketJournal#hopsFor} — a plain pass-through onto
+     * {@code findByTicketIdAndCycleNoOrderBySeqNoAsc}, tested anyway on
+     * {@link OpenHopFor}'s own precedent: it is Stream C's only sanctioned
+     * way to see one cycle's hops, which the handoff response's ribbon
+     * assembly is built from.
+     */
+    @Nested
+    @DisplayName("hopsFor")
+    class HopsFor {
+
+        @Test
+        @DisplayName("returns the cycle's hops, unchanged and in the repository's order")
+        void returnsTheCyclesHops() {
+            TicketStageTransition first = hop();
+            TicketStageTransition second = hop();
+            when(transitions.findByTicketIdAndCycleNoOrderBySeqNoAsc(TICKET, (short) 1))
+                    .thenReturn(List.of(first, second));
+
+            assertThat(journal.hopsFor(TICKET, (short) 1)).containsExactly(first, second);
+        }
+
+        @Test
+        @DisplayName("empty when the cycle has no hops")
+        void emptyWhenNoHops() {
+            when(transitions.findByTicketIdAndCycleNoOrderBySeqNoAsc(TICKET, (short) 2))
+                    .thenReturn(List.of());
+
+            assertThat(journal.hopsFor(TICKET, (short) 2)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("rejects a null ticket id rather than delegating it")
+        void rejectsNullTicketId() {
+            assertThatThrownBy(() -> journal.hopsFor(null, (short) 1))
                     .isInstanceOf(AppendRejectedException.class);
             verifyNoInteractions(transitions);
         }
