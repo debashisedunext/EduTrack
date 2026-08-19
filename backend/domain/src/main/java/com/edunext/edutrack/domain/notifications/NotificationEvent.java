@@ -89,6 +89,18 @@ public enum NotificationEvent {
     DAILY_DIGEST(Category.OTHER, Col.QUIET, Col.NO_BELL, Mail.ALWAYS),
     WEEKLY_MANAGER_SUMMARY(Category.OTHER, Col.QUIET, Col.NO_BELL, Mail.ALWAYS),
 
+    /**
+     * A-065 · a scheduled report has run and is ready to download (§7.8).
+     *
+     * <p>{@code OTHER}, so it stays opt-out under D-036 — a report somebody
+     * asked for is the definition of a mail its recipient should be able to
+     * stop. {@code NO_BELL} for the digests' reason: it belongs to no ticket
+     * and has no in-app destination the bell could deep-link to, and a bell
+     * entry that only says "something happened elsewhere" is noise in the one
+     * place §9 keeps for ticket work.
+     */
+    SCHEDULED_REPORT(Category.OTHER, Col.QUIET, Col.NO_BELL, Mail.ALWAYS),
+
     /** D-033. Operational rather than §11: a mail this system gave up on. */
     MAIL_DELIVERY_FAILED(Category.OTHER, Col.QUIET, Col.RINGS_BELL, Mail.NEVER),
 

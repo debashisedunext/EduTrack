@@ -111,6 +111,23 @@ springdoc:
       enabled: false
 
 edutrack:
+  # A-065 · §7.8's scheduled report emails. The api module's only scheduled job.
+  #
+  # Enabled HERE rather than defaulted on in ApiSchedulingConfig, and the
+  # difference matters: ShedLock's interceptor reaches Redis before the job's
+  # own body runs, so a default-on scheduler makes every test context without
+  # Redis log a connection failure every five minutes. Off unless asked for;
+  # the shipped jar asks for it here.
+  reports:
+    scheduler-enabled: ${REPORTS_SCHEDULER_ENABLED:true}
+    # The organisation's clock, inherited from the digest's setting so the two
+    # cannot silently disagree about what "Monday" means.
+    zone: ${REPORTS_ZONE:${edutrack.digest.zone:Asia/Kolkata}}
+    # 06:00 local — before the working day, so a daily report is waiting rather
+    # than arriving mid-morning about a day already half spent.
+    send-hour: ${REPORTS_SEND_HOUR:6}
+    sweep-interval: PT5M
+
   jwt:
     # A-022 · HS256. NimbusJwtEncoder rejects anything under 256 bits, so this
     # placeholder is deliberately long — shortening it fails startup, not login.

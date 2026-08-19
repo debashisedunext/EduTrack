@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { ReportChart } from './ReportChart'
 import { ReportExportButtons } from './ReportExportButtons'
 import { ReportFilterBar } from './ReportFilterBar'
+import { ScheduleReportDialog } from './ScheduleReportDialog'
 import { ReportTable } from './ReportTable'
 
 /**
@@ -115,7 +116,21 @@ export function ReportViewerPage() {
         currently select — putting it in the header would suggest it exports the
         report rather than this view of it.
       */}
-      <ReportExportButtons reportKey={descriptor.key} params={params} />
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <ReportExportButtons reportKey={descriptor.key} params={params} />
+        {/*
+          A-065 · beside the exports, because they are the same intent one step
+          apart — "give me this file" and "give me this file every week". The
+          dialog saves the filters that are on screen and deliberately not the
+          date range, and says so, because a schedule's period comes from its
+          cadence.
+        */}
+        <ScheduleReportDialog
+          reportKey={descriptor.key}
+          reportTitle={descriptor.title}
+          params={params}
+        />
+      </div>
 
       {/*
         What the server actually narrowed to. Shown because a delivery role's

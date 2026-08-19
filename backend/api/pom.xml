@@ -43,6 +43,21 @@
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-websocket</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-mail</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-thymeleaf</artifactId></dependency>
+    <!--
+      A-065. The api module gains a scheduler for the first time: the report
+      schedule sweep has to live here because `worker` depends on `domain` and
+      not on `api`, and the eighteen report runners are in api/feature/reports.
+      Redis provider for D-011's reason, restated in ApiSchedulingConfig — the
+      JDBC one needs a `shedlock` table and therefore a migration, for a lock
+      holding no business data, and Redis is already a hard dependency here.
+      Versions come from the parent so this module pins nothing.
+    -->
+    <dependency><groupId>net.javacrumbs.shedlock</groupId><artifactId>shedlock-spring</artifactId></dependency>
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-provider-redis-spring</artifactId>
+      <version>${shedlock.version}</version>
+    </dependency>
     <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId></dependency>
     <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId></dependency>
     <dependency><groupId>software.amazon.awssdk</groupId><artifactId>s3</artifactId></dependency>

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { AlertCircle, BarChart3, Info } from 'lucide-react'
+import { AlertCircle, BarChart3, CalendarClock, Info } from 'lucide-react'
 import { useListReports } from '@/api/generated/reports/reports'
 import type { ReportCategory, ReportDescriptor } from '@/api/generated/model'
 
@@ -96,11 +96,36 @@ export function ReportsHubPage() {
 
 function Header() {
   return (
-    <header className="mb-6">
-      <h1 className="text-h2 font-semibold text-content">Reports</h1>
-      <p className="mt-1 text-sm text-content-muted">
-        Every report the system can run. Open one to set filters and see its chart and table.
-      </p>
+    <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 className="text-h2 font-semibold text-content">Reports</h1>
+        <p className="mt-1 text-sm text-content-muted">
+          Every report the system can run. Open one to set filters and see its chart and table.
+        </p>
+      </div>
+
+      {/*
+        A-065 · the way in to the schedules screen.
+
+        Added because it was missing: the route and the page existed, the dialog
+        that creates a schedule existed, and nothing anywhere linked to the
+        screen that lists them. The only routes in were typing the URL and the
+        link in the email — so somebody who scheduled a report could not find it
+        again until the first one arrived, and could not cancel one they
+        regretted at all.
+
+        Here rather than in the sidebar: §11's sidebar is a fixed list of
+        modules and this is one screen inside Reports, not a module. Next to the
+        heading is where the hub already puts things that are about the section
+        rather than about one report.
+      */}
+      <Link
+        to="/reports/schedules"
+        className="inline-flex items-center gap-1.5 rounded-control border border-border bg-surface px-3 py-1.5 text-caption font-medium text-content transition-colors hover:bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <CalendarClock className="h-3.5 w-3.5" aria-hidden />
+        Scheduled reports
+      </Link>
     </header>
   )
 }

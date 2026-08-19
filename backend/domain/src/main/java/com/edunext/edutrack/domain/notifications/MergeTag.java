@@ -88,7 +88,26 @@ public enum MergeTag {
     SLA_DUE("sla_due"),
 
     /** The organisation's name, for mail that belongs to no ticket. */
-    ORG("org");
+    ORG("org"),
+
+    /**
+     * A-065 · the application's own address, with no trailing slash — the root
+     * a template builds a link from, e.g. {@code {{portal_url}}/reports/schedules}.
+     *
+     * <p>⚠️ <b>Stream D's vocabulary, added by Stream A — see the flag on
+     * {@code MailRenderer}.</b> It exists because {@link #TICKET_URL} is the
+     * only link a template could carry and it is resolved from a ticket, so
+     * <em>no mail that is not about a ticket could contain a working link at
+     * all</em>. That is not specific to A-065: the daily digest and the weekly
+     * manager summary have the same gap today and their templates can now close
+     * it.
+     *
+     * <p>The root rather than a finished URL, because the destination is the
+     * template author's business and a tag per screen would need a code change
+     * for every new one — which is the opposite of what a template master is
+     * for.
+     */
+    PORTAL_URL("portal_url");
 
     /**
      * {@code {{ name }}} — braces doubled, optional inner whitespace, and the

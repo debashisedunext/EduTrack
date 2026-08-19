@@ -71,9 +71,27 @@ class MailRenderer {
     /**
      * @return the subject to send and the HTML body to send with it
      */
+    /**
+     * ⚠️ <b>A-065 · Stream D's file, one line changed by Stream A — flagged per
+     * CLAUDE.md rather than edited quietly, and it needs Debashis's sign-off.</b>
+     *
+     * <p>The change is {@code MailContext.empty()} becoming
+     * {@link MailContextRepository#base()}. Before it, a mail with no ticket
+     * rendered against an empty context, so every {@code {{tag}}} in its
+     * template resolved to nothing and <em>no non-ticket mail could contain a
+     * working link</em> — {@link com.edunext.edutrack.domain.notifications.MergeTag#TICKET_URL}
+     * was the only link tag and it is built from a ticket. A-065's scheduled
+     * report is a mail whose whole job is to get somebody to a page, so it is
+     * the first that could not live with that.
+     *
+     * <p>The daily digest and the weekly manager summary have the same gap and
+     * are unchanged here: their templates can now use {@code {{portal_url}}},
+     * but changing seeded template copy for D-038's mails is Stream D's call
+     * and not a side effect of a reports task.
+     */
     MailContent render(OutboxMessage message) {
         MailContext values = message.ticketId() == null
-                ? MailContext.empty()
+                ? context.base()
                 : context.forTicket(message.ticketId());
 
         Optional<NotificationTemplate> template = templateFor(message);

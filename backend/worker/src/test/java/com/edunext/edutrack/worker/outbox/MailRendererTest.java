@@ -15,6 +15,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -47,6 +48,20 @@ class MailRendererTest {
         thymeleaf = new SpringTemplateEngine();
         thymeleaf.setTemplateResolver(resolver);
         renderer = new MailRenderer(templates, context, thymeleaf);
+
+        // ⚠️ A-065 · Stream A, in Stream D's test file — the consequence of the
+        // one line changed in MailRenderer.render, and flagged with it.
+        //
+        // A mail with no ticket used to render against MailContext.empty() and
+        // now renders against MailContextRepository.base(), so that a non-ticket
+        // template can carry {{portal_url}}. Unstubbed, the mock returns null
+        // and substitute() throws — which is what this suite reported.
+        //
+        // Stubbed here rather than per test, because it is not what any of them
+        // is about: `base()` reads no database, so
+        // `nonTicketMailReadsNoTicket`'s assertion below — that forTicket() is
+        // never called — still says exactly what it always said.
+        lenient().when(context.base()).thenReturn(MailContext.empty());
     }
 
     // ─────────────────────────────────────────────── the one that must not fail
