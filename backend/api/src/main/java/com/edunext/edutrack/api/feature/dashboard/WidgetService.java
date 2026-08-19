@@ -93,10 +93,14 @@ class WidgetService {
         this.clock = clock;
     }
 
-    /** A-056's six and A-057's three. The contract's remaining five belong to A-058 and A-059. */
+    /**
+     * A-056's six, A-057's three and A-059's one. The contract's remaining four
+     * — {@code stage-funnel}, {@code rework}, {@code stage-duration} and
+     * {@code handoff-latency} — are A-058's and wait on Stream C's transitions.
+     */
     private static final List<String> IMPLEMENTED = List.of(
             "type-donut", "daily-stacked", "velocity", "resource-load", "priority-bar", "aging-buckets",
-            "calendar-heatmap", "sla-gauge", "project-treemap");
+            "calendar-heatmap", "sla-gauge", "project-treemap", "client-volume");
 
     static boolean isImplemented(String widgetKey) {
         return IMPLEMENTED.contains(widgetKey);
@@ -144,6 +148,7 @@ class WidgetService {
             case "calendar-heatmap" -> calendarHeatmap(scope, projectId, start, end, asOf);
             case "sla-gauge" -> slaGauge(scope, projectId, start, end, asOf);
             case "project-treemap" -> projectTreemap(scope, projectId, start, end, asOf);
+            case "client-volume" -> clientVolume(scope, projectId, start, end, asOf);
             default -> throw new IllegalStateException("implemented key with no branch: " + widgetKey);
         };
 
@@ -606,6 +611,99 @@ class WidgetService {
 
         return WidgetDtos.Widget.of("project-treemap", asOf,
                 List.of(new WidgetDtos.Series("Open by project", points)));
+    }
+
+    // ── widget 20 · client-wise volume ───────────────────────────────────────
+
+    /**
+     * How many named clients the bar chart draws before the rest are pooled.
+     *
+     * <p>Twelve is a readability limit, not a data one — a horizontal bar chart
+     * puts one label per row down the y axis, and at the frame's fixed height a
+     * fortieth row is four pixels tall with a name it cannot show. Every other
+     * widget's categories are bounded by something real (four levels, four age
+     * buckets, the task-type master), and clients are the first dimension here
+     * that grows without limit.
+     */
+    private static final int TOP_CLIENTS = 12;
+
+    /**
+     * A-059 · §S-05 widget 20 — tickets raised per client, largest first.
+     *
+     * <h2>Volume is intake, and it is summed</h2>
+     *
+     * <p>Every other categorical widget on this screen reads the latest
+     * summarised day, because open/critical/aging are stock and summing stock
+     * over days counts the same ticket once per day. This one is the exception
+     * and it is deliberate: blueprint §7.8 lists the client report's columns as
+     * "Volume, open versus closed, SLA compliance…", which puts volume and
+     * open-versus-closed side by side as different measures. Volume is what was
+     * <em>raised</em>, so it is flow, and flow is what a date window is for —
+     * a client that raised three tickets a day for a month raised ninety, not
+     * three.
+     *
+     * <p>Widget 15's treemap sits two panels away doing the opposite for the
+     * opposite reason. Both carry the argument, because the pair is exactly
+     * where a later reader would "fix" one to match the other.
+     *
+     * <h2>The long tail is pooled, never dropped</h2>
+     *
+     * <p>Beyond {@link #TOP_CLIENTS} the remainder becomes a single
+     * "Other (N clients)" bar rather than being truncated away. A chart that
+     * silently showed the top twelve would be read as the whole picture — the
+     * bars are the only figures on screen, and nothing in a bar chart says
+     * "there were also thirty-one more". Pooling keeps the arithmetic true: the
+     * bars still sum to every client-raised ticket in the window.
+     *
+     * <p><b>The pooled bar has no drill-down</b>, and that is the honest
+     * outcome rather than a gap: {@code /tickets?clientId=} takes one id, and
+     * there is no filter expressing "any of these thirty-one clients". A-056's
+     * aging buckets set the precedent — a segment with no target does nothing
+     * on click rather than opening a list that contradicts what was clicked.
+     */
+    private WidgetDtos.Widget clientVolume(DashboardScope scope, Long projectId,
+                                           LocalDate from, LocalDate to, Instant asOf) {
+        if (scope.ownWorkOnly()) {
+            // Not a permission refusal, and not merely a missing column either:
+            // client_daily_stats is keyed by project and client, and a delivery
+            // role's dashboard reads figures keyed by person. "Which clients
+            // raised the tickets assigned to me" is a question nothing records,
+            // and borrowing the project figures would head a chart of the
+            // organisation's client mix as though it were theirs — the same
+            // trap dailyStacked names above.
+            return WidgetDtos.Widget.unavailable("client-volume", NO_RESOURCE_EQUIVALENT);
+        }
+
+        List<WidgetRepository.ClientVolume> clients =
+                widgets.clientVolume(from, to, scope.projectIds(), projectId);
+
+        // The window travels with every link, so the list opens on the same
+        // tickets the bar counted. reportedFrom/reportedTo rather than a
+        // created-date parameter of its own: A-060 established that pair as the
+        // one convention for "raised between", and the aging buckets and the
+        // heatmap already emit it.
+        String window = "&reportedFrom=" + from + "&reportedTo=" + to + projectParam(projectId);
+
+        List<WidgetDtos.Point> points = new ArrayList<>(Math.min(clients.size(), TOP_CLIENTS + 1));
+        for (WidgetRepository.ClientVolume client : clients.stream().limit(TOP_CLIENTS).toList()) {
+            points.add(WidgetDtos.Point.of(
+                    client.clientName(),
+                    client.created(),
+                    "/tickets?clientId=" + client.clientId() + window));
+        }
+
+        if (clients.size() > TOP_CLIENTS) {
+            List<WidgetRepository.ClientVolume> tail = clients.subList(TOP_CLIENTS, clients.size());
+            long pooled = tail.stream().mapToLong(WidgetRepository.ClientVolume::created).sum();
+            // The count is in the label because it is the part that cannot be
+            // read off the chart: one bar of 47 tickets could be two clients or
+            // forty, and the difference changes what the bar means.
+            points.add(new WidgetDtos.Point(
+                    "Other (" + tail.size() + " clients)", java.math.BigDecimal.valueOf(pooled), null));
+        }
+
+        return WidgetDtos.Widget.of("client-volume", asOf,
+                List.of(new WidgetDtos.Series("Tickets raised", points)));
     }
 
     private static final WidgetRepository.StockBreakdown EMPTY_BREAKDOWN =

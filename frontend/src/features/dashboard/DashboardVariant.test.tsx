@@ -23,6 +23,17 @@ import { DashboardWidgets } from './DashboardWidgets'
  * screen read as broken.
  */
 
+/**
+ * Widgets 7–15 and 20 — every chart `DashboardWidgets` renders for a manager.
+ *
+ * Named rather than written as a literal because it has already moved once:
+ * A-057 made it nine and A-059 made it ten, and a bare `9` in two assertions
+ * says nothing about which widget was added or whether adding it was intended.
+ * What these two tests are actually about is that a manager's list is *not*
+ * the delivery role's short one.
+ */
+const MANAGER_WIDGETS = 10
+
 const useGetDashboardWidget = vi.fn()
 vi.mock('@/api/generated/dashboard/dashboard', () => ({
   useGetDashboardWidget: (...args: unknown[]) => useGetDashboardWidget(...args),
@@ -85,6 +96,10 @@ describe('the developer dashboard variant', () => {
     expect(requestedKeys()).not.toContain('priority-bar')
     expect(requestedKeys()).not.toContain('sla-gauge')
     expect(requestedKeys()).not.toContain('project-treemap')
+    // A-059 · widget 20 joined the manager's list and not this one. Client
+    // volume is keyed by project and client, and "which clients raised the
+    // tickets assigned to me" is a question nothing records.
+    expect(requestedKeys()).not.toContain('client-volume')
   })
 
   it('titles both widgets as the reader’s own work', () => {
@@ -102,11 +117,11 @@ describe('the developer dashboard variant', () => {
     expect(requestedKeys()).toHaveLength(2)
   })
 
-  it.each(['ADMIN', 'PM', 'SUPPORT'])('leaves %s on the full nine', (role) => {
+  it.each(['ADMIN', 'PM', 'SUPPORT'])('leaves %s on the full set', (role) => {
     signedInAs(role)
     renderWidgets()
 
-    expect(requestedKeys()).toHaveLength(9)
+    expect(requestedKeys()).toHaveLength(MANAGER_WIDGETS)
   })
 
   /**
@@ -120,6 +135,6 @@ describe('the developer dashboard variant', () => {
     useAuthStore.setState(initialAuthState)
     renderWidgets()
 
-    expect(requestedKeys()).toHaveLength(9)
+    expect(requestedKeys()).toHaveLength(MANAGER_WIDGETS)
   })
 })

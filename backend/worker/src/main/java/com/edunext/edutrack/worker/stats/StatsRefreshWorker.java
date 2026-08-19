@@ -133,6 +133,14 @@ class StatsRefreshWorker {
             // the rows that statement just wrote.
             stats.refreshTypeCounts(day, clock.instant());
             stats.refreshResourceStats(day, clock.instant());
+            // A-059 · widget 20's table. Independent of the three above — it
+            // reads tickets and writes its own table — so its position in this
+            // sequence carries no dependency, only the cost of a fourth
+            // statement per day. Inside the same loop rather than a pass of its
+            // own, so a day is summarised completely or not at all: two loops
+            // would leave a window in which the project charts had advanced to
+            // today and the client chart had not, on one dashboard.
+            stats.refreshClientStats(day, clock.instant());
             days++;
         }
         return days;

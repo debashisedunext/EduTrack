@@ -43,10 +43,9 @@ import { Skeleton } from '@/components/ui/skeleton'
  * The keys the server actually serves — A-056's six and A-057's three.
  *
  * Narrower than the contract's enum on purpose. That enum also lists
- * `stage-funnel`, `rework`, `stage-duration`, `handoff-latency` and
- * `client-volume`, which answer 404 until A-058 and A-059 land; naming one here
- * would compile and then render an error card, where this way it does not
- * compile at all.
+ * `stage-funnel`, `rework`, `stage-duration` and `handoff-latency`, which
+ * answer 404 until A-058 lands; naming one here would compile and then render
+ * an error card, where this way it does not compile at all.
  */
 export type WidgetKey =
   | 'type-donut'
@@ -58,6 +57,7 @@ export type WidgetKey =
   | 'calendar-heatmap'
   | 'sla-gauge'
   | 'project-treemap'
+  | 'client-volume'
 
 export interface WidgetPoint {
   x: string
