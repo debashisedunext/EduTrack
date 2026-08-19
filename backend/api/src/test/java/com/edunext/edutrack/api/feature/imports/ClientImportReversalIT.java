@@ -330,7 +330,7 @@ class ClientImportReversalIT {
         importAndAwait(row(2, "ITREVENT", "Client Entity Ltd"));
 
         assertThat(batchReads.history("RESOURCE").batches())
-                .as("nothing has registered RESOURCE yet — B-038 does")
+                .as("RESOURCE is registered since B-038, and its runs are not this one's")
                 .isEmpty();
     }
 

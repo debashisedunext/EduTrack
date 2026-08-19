@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { keepPreviousData } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Download, Plus, RotateCcw, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, Plus, RotateCcw, Search, Upload } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { useListUsers, useSetUserStatus, useSetUserStatusBulk } from '@/api/generated/users/users'
@@ -357,6 +357,19 @@ export function ResourceListPage() {
               <Download className="h-4 w-4" />
               Export
             </a>
+          </Button>
+          {/*
+            B-038 · §7.4's S-07 bulk action "bulk import via CSV", which is the
+            five-step wizard of §4B.3 registered a second time — not a second
+            screen. Secondary, beside Export, because the two are a pair: the
+            file that comes out of one is the file that goes into the other, and
+            the round trip is how an organisation edits four hundred people.
+          */}
+          <Button asChild variant="secondary" size="sm">
+            <Link to="/masters/resources/import">
+              <Upload className="h-4 w-4" />
+              Import from Excel
+            </Link>
           </Button>
           <Button asChild size="sm">
             <Link to="/masters/resources/new">

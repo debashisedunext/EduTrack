@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/modal'
 
 import { reversalWarning } from './importHistory'
+import { type ImportNouns } from './importWizard'
 
 /**
  * B-037 · the confirmation for the one action in this product that deletes
@@ -46,18 +47,21 @@ import { reversalWarning } from './importHistory'
  */
 export function ReverseImportDialog({
   batch,
+  nouns,
   isPending,
   onConfirm,
   onCancel,
 }: {
   /** The run to reverse, or `null` when the dialog is closed. */
   batch: ImportBatch | null
+  /** B-038 · what this registration calls the thing being deleted. */
+  nouns: ImportNouns
   isPending: boolean
   onConfirm: () => void
   onCancel: () => void
 }) {
   const open = batch != null
-  const warning = batch ? reversalWarning(batch) : null
+  const warning = batch ? reversalWarning(batch, nouns) : null
 
   return (
     <Modal open={open} onOpenChange={(next) => !next && !isPending && onCancel()}>
@@ -90,7 +94,7 @@ export function ReverseImportDialog({
           )}
 
           <p className="text-content-muted">
-            A client that has had a ticket raised against it since the import is
+            A {nouns.one} that work has been recorded against since the import is
             kept rather than deleted, and named in the result. This cannot be
             undone.
           </p>

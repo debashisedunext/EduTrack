@@ -1,6 +1,8 @@
 import { ApiError } from '@/api/http'
 import type { ImportBatch, ImportReversalResponseData } from '@/api/generated/model'
 
+import { type ImportNouns } from './importWizard'
+
 /**
  * B-037 · the import history panel's logic, with no JSX in it.
  *
@@ -94,14 +96,17 @@ export function reversalRefusal(error: unknown): ReversalRefusal {
  * happens. It is said here, in advance, rather than explained afterwards by a
  * result screen.
  */
-export function reversalWarning(batch: ImportBatch): { deletes: string; keeps: string | null } {
+export function reversalWarning(
+  batch: ImportBatch,
+  nouns: ImportNouns,
+): { deletes: string; keeps: string | null } {
   const created = batch.created
   const updated = batch.updated
 
   const deletes =
     created === 1
-      ? 'This deletes the 1 client this import created.'
-      : `This deletes the ${created.toLocaleString()} clients this import created.`
+      ? `This deletes the 1 ${nouns.one} this import created.`
+      : `This deletes the ${created.toLocaleString()} ${nouns.many} this import created.`
 
   if (updated === 0) {
     return { deletes, keeps: null }
@@ -111,8 +116,8 @@ export function reversalWarning(batch: ImportBatch): { deletes: string; keeps: s
     deletes,
     keeps:
       updated === 1
-        ? 'The 1 client it updated is not restored — its earlier values were overwritten and are not kept anywhere.'
-        : `The ${updated.toLocaleString()} clients it updated are not restored — their earlier values were overwritten and are not kept anywhere.`,
+        ? `The 1 ${nouns.one} it updated is not restored — its earlier values were overwritten and are not kept anywhere.`
+        : `The ${updated.toLocaleString()} ${nouns.many} it updated are not restored — their earlier values were overwritten and are not kept anywhere.`,
   }
 }
 
@@ -125,7 +130,10 @@ export function reversalWarning(batch: ImportBatch): { deletes: string; keeps: s
  * client has since been ticketed those two differ, and that difference is the
  * only thing on the screen worth reading.
  */
-export function reversalOutcome(result: ImportReversalResponseData): {
+export function reversalOutcome(
+  result: ImportReversalResponseData,
+  nouns: ImportNouns,
+): {
   headline: string
   retained: string | null
   notReverted: string | null
@@ -135,24 +143,24 @@ export function reversalOutcome(result: ImportReversalResponseData): {
 
   const headline =
     deleted === 0
-      ? 'Nothing was deleted — this import had not created any clients.'
+      ? `Nothing was deleted — this import had not created any ${nouns.many}.`
       : deleted === 1
-        ? 'Deleted the 1 client this import created.'
-        : `Deleted the ${deleted.toLocaleString()} clients this import created.`
+        ? `Deleted the 1 ${nouns.one} this import created.`
+        : `Deleted the ${deleted.toLocaleString()} ${nouns.many} this import created.`
 
   const retained =
     kept === 0
       ? null
       : kept === 1
-        ? '1 client was kept because work has been raised against it since the import. It is listed below.'
-        : `${kept.toLocaleString()} clients were kept because work has been raised against them since the import. They are listed below.`
+        ? `1 ${nouns.one} was kept because work has been recorded against it since the import. It is listed below.`
+        : `${kept.toLocaleString()} ${nouns.many} were kept because work has been recorded against them since the import. They are listed below.`
 
   const notReverted =
     result.updatedRowsNotReverted === 0
       ? null
       : result.updatedRowsNotReverted === 1
-        ? '1 client that this import updated was left as it is. Its earlier values are not kept anywhere, so they cannot be put back.'
-        : `${result.updatedRowsNotReverted.toLocaleString()} clients that this import updated were left as they are. Their earlier values are not kept anywhere, so they cannot be put back.`
+        ? `1 ${nouns.one} that this import updated was left as it is. Its earlier values are not kept anywhere, so they cannot be put back.`
+        : `${result.updatedRowsNotReverted.toLocaleString()} ${nouns.many} that this import updated were left as they are. Their earlier values are not kept anywhere, so they cannot be put back.`
 
   return { headline, retained, notReverted }
 }

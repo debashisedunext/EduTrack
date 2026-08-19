@@ -228,7 +228,9 @@ describe('S-20 Ticket detail shell — C-019', () => {
 
     const tabs = screen.getByRole('tablist', { name: 'Ticket detail' })
     expect(within(tabs).getByRole('tab', { name: 'History' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tabpanel')).toHaveTextContent(/no edit or delete affordance/i)
+    // C-059 · the real History tab, not a PendingSection placeholder — the
+    // toggle renders synchronously, before the history fetch resolves.
+    expect(screen.getByRole('tabpanel')).toHaveTextContent(/show comments in this stream/i)
 
     fireEvent.click(within(tabs).getByRole('tab', { name: 'Effort' }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('tab=effort'))

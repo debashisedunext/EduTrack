@@ -52,6 +52,7 @@ import type { HistoryEntryFieldName } from './historyEntryFieldName';
 import type { HistoryEntryOldValue } from './historyEntryOldValue';
 import type { HistoryEntryNewValue } from './historyEntryNewValue';
 import type { HistoryEntryNote } from './historyEntryNote';
+import type { HistoryEntryIsClientVisible } from './historyEntryIsClientVisible';
 import type { HistoryEntryStageCode } from './historyEntryStageCode';
 import type { HistoryEntryCorrectsEntryId } from './historyEntryCorrectsEntryId';
 
@@ -68,6 +69,7 @@ export interface HistoryEntry {
   oldValue?: HistoryEntryOldValue;
   newValue?: HistoryEntryNewValue;
   note?: HistoryEntryNote;
+  isClientVisible?: HistoryEntryIsClientVisible;
   stageCode?: HistoryEntryStageCode;
   cycleNo?: number;
   iterationNo?: number;

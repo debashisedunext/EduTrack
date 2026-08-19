@@ -13,6 +13,7 @@ import {
   progressPercent,
   useDownloadImportErrorReport,
 } from './importQueries'
+import { type ImportWizardConfig } from './importWizard'
 
 /**
  * S-34 step 5 — the commit, running. B-035, blueprint §4B.3.
@@ -42,10 +43,20 @@ import {
  */
 export function CommitStep({
   batchId,
+  config,
   fileName,
   onStartAnother,
 }: {
   batchId: number
+  /**
+   * B-038 · the registration this run belongs to.
+   *
+   * The whole config rather than the nouns alone, because the finished state
+   * links back to the master this wrote into — and "See the resources" pointing
+   * at the client list is the one mistake this screen could make that a user
+   * would not notice until they were looking at the wrong table.
+   */
+  config: ImportWizardConfig
   /** Named on screen so a finished run says which file it was. */
   fileName: string
   onStartAnother: () => void
@@ -83,15 +94,24 @@ export function CommitStep({
     )
   }
 
-  return <CommitProgress batch={batch.data.data} fileName={fileName} onStartAnother={onStartAnother} />
+  return (
+    <CommitProgress
+      batch={batch.data.data}
+      config={config}
+      fileName={fileName}
+      onStartAnother={onStartAnother}
+    />
+  )
 }
 
 function CommitProgress({
   batch,
+  config,
   fileName,
   onStartAnother,
 }: {
   batch: ImportBatch
+  config: ImportWizardConfig
   fileName: string
   onStartAnother: () => void
 }) {
@@ -114,8 +134,8 @@ function CommitProgress({
             */}
             {done
               ? failed
-                ? 'Some rows may have been written before it stopped. Re-importing the same file is safe — rows are matched on Client Code and updated, never duplicated.'
-                : 'Rows are matched on Client Code: existing clients were updated, not duplicated.'
+                ? `Some rows may have been written before it stopped. Re-importing the same file is safe — rows are matched on ${config.nouns.keyHeading} and updated, never duplicated.`
+                : `Rows are matched on ${config.nouns.keyHeading}: existing ${config.nouns.many} were updated, not duplicated.`
               : 'You can leave this page — the import keeps running. Import #' +
                 batch.batchId +
                 '.'}
@@ -166,7 +186,7 @@ function CommitProgress({
       {done && (
         <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
           <Button asChild>
-            <Link to="/masters/clients">See the clients</Link>
+            <Link to={config.master.href}>See the {config.master.label}</Link>
           </Button>
           <Button type="button" variant="secondary" onClick={onStartAnother}>
             Import another file

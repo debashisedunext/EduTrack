@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 import { type ImportSchemaKey } from './importQueries'
+import { type ImportNouns } from './importWizard'
 import {
   PREVIEW_PAGE_SIZE,
   VERDICTS,
@@ -47,6 +48,7 @@ import {
  */
 export function ValidationStep({
   schema,
+  nouns,
   preview,
   fileName,
   onBack,
@@ -54,6 +56,8 @@ export function ValidationStep({
   committing = false,
 }: {
   schema: ImportSchemaKey
+  /** B-038 · what this registration calls the thing being imported. */
+  nouns: ImportNouns
   preview: ImportPreviewResponseData
   /** Named on screen so the user knows which file this preview is of. */
   fileName: string
@@ -102,10 +106,10 @@ export function ValidationStep({
     <div className="space-y-5">
       <p className="max-w-2xl text-sm text-content-muted">
         Every row of <span className="font-medium text-content">{fileName}</span> has been
-        checked against the client master. <strong className="font-medium text-content">
+        checked against the {nouns.one} master. <strong className="font-medium text-content">
           Nothing has been written
         </strong>{' '}
-        — no client has been created or changed, and none will be until you commit at
+        — no {nouns.one} has been created or changed, and none will be until you commit at
         step 5.
       </p>
 
@@ -152,7 +156,7 @@ export function ValidationStep({
           ) : (
             <>
               No row in this file can be imported. Fix the problems below, or go back and
-              choose a different file — nothing here has changed any client.
+              choose a different file — nothing here has changed any {nouns.one}.
             </>
           )}
         </span>
@@ -262,7 +266,7 @@ export function ValidationStep({
         <p className="text-sm text-content-muted">
           {onCommit
             ? 'Nothing has been written yet. Importing runs in the background, so you can leave this page — and the rows it skips can be downloaded as an error report.'
-            : 'Nothing has been written — no client has changed. Committing arrives with the next step.'}
+            : `Nothing has been written — no ${nouns.one} has changed. Committing arrives with the next step.`}
         </p>
       </div>
     </div>

@@ -8,6 +8,7 @@ import { HttpResponse, http } from 'msw'
 import { server } from '@/mocks/server'
 
 import { CommitStep } from './CommitStep'
+import { CLIENT_IMPORT } from './importWizard'
 
 /**
  * B-035 · S-34 step 5, rendered.
@@ -78,7 +79,12 @@ function renderStep(onStartAnother = vi.fn()) {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <CommitStep batchId={77} fileName="clients.xlsx" onStartAnother={onStartAnother} />
+        <CommitStep
+          batchId={77}
+          config={CLIENT_IMPORT}
+          fileName="clients.xlsx"
+          onStartAnother={onStartAnother}
+        />
       </MemoryRouter>
     </QueryClientProvider>,
   )
