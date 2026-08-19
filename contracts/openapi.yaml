@@ -10201,6 +10201,18 @@ components:
         one table; eighteen ungrouped cards is a wall, and the grouping people
         actually use when asking for a report is by subject.
       enum: [PEOPLE, DELIVERY, QUALITY, WORKFLOW, OPERATIONS]
+    ReportEntityKind:
+      type: string
+      description: >
+        B-060 · what a linked report cell names. Four kinds, matching the four
+        path builders `entityLinks.ts` exports, so the client's mapping is total
+        and a kind cannot be added here without a route to receive it.
+
+        Deliberately not `ReportFilterKind`, which looks close enough to share
+        and answers a different question. The vocabularies diverge at once:
+        `DATE_RANGE` and `LEVEL` are not entities and nothing drills into them,
+        while `TICKET` is an entity no report filters by.
+      enum: [CLIENT, TICKET, PROJECT, RESOURCE]
     ReportFilterKind:
       type: string
       description: >
@@ -10282,6 +10294,30 @@ components:
                   key: { type: string }
                   label: { type: string }
                   type: { type: string, enum: [string, number, date, duration, percent] }
+                  # B-060 · the drill-in. §7.8 ends the Client Report's line
+                  # with "drills into the client 360 view", and the generic
+                  # column/row shape had no notion of a destination.
+                  #
+                  # The server names WHAT the cell is; the client decides where
+                  # that lives. Emitting `/clients/42` here would be shorter and
+                  # would put a second copy of the router in the API, in another
+                  # language, that nothing keeps in step with `entityLinks.ts` —
+                  # and the first symptom would be report links 404ing after a
+                  # rename every other screen survived.
+                  #
+                  # Both absent on every column of the twelve reports that
+                  # predate this, and absent together or present together: a
+                  # kind with nothing to key on renders a dead anchor rather
+                  # than plain text.
+                  linkTo: { $ref: '#/components/schemas/ReportEntityKind' }
+                  linkIdKey:
+                    type: string
+                    description: >
+                      Which row key holds the id to link to — `clientId`, not
+                      `client`. A separate key because the cell shows a *name*
+                      and the link needs an *id*; the id is carried in the row
+                      with no column of its own, so it stays out of the table
+                      and out of `?export=`, which iterates columns.
             rows: { type: array, items: { type: object, additionalProperties: true } }
         meta:
           allOf:

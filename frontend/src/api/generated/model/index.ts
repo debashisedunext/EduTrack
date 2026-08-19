@@ -466,6 +466,7 @@ export * from './reportCategory';
 export * from './reportDescriptor';
 export * from './reportDescriptorChart';
 export * from './reportDescriptorUnavailableReason';
+export * from './reportEntityKind';
 export * from './reportFilterKind';
 export * from './reportResponse';
 export * from './reportResponseData';

@@ -50,12 +50,96 @@ class ReportRunnerContractTest {
     }
 
     @Test
-    @DisplayName("twelve reports run in total — A-063's one, A-066's six, A-067's five")
+    @DisplayName("thirteen reports run in total — A-063's one, A-066's six, A-067's five, B-060's one")
     void totalAvailable() {
         // Pinned as a count so a report flipped on without a runner, or a runner
         // added without flipping the card, is caught here rather than by a 500.
         assertThat(ReportCatalogue.declared().stream().filter(ReportDtos.Descriptor::available).count())
-                .isEqualTo(12);
+                .isEqualTo(13);
+    }
+
+    /**
+     * B-060 · the client report, and the two things about it worth pinning
+     * without a database.
+     */
+    @Test
+    @DisplayName("the client report is offered, and declares the Client filter it is built around")
+    void clientReportIsOffered() {
+        assertThat(ClientReportRunner.KEY).isEqualTo("client-report");
+
+        ReportDtos.Descriptor d = ReportCatalogue.declared().stream()
+                .filter(x -> x.key().equals(ClientReportRunner.KEY))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(d.available()).isTrue();
+        assertThat(d.unavailableReason()).isNull();
+        // Without CLIENT the viewer draws no client control and the report is
+        // every client at once — which is not the screen §7.8 describes.
+        assertThat(d.filters()).contains(ReportFilterKind.CLIENT, ReportFilterKind.DATE_RANGE);
+    }
+
+    /**
+     * The card says what is missing before somebody opens it looking for it.
+     *
+     * <p>§7.8 promises five figures per client and the schema records four:
+     * there is no CSAT column anywhere, and blueprint §17 item 19 puts the
+     * closure rating that would feed one in phase 2–3. A card that promised all
+     * five and delivered four would be discovered by a person hunting an absent
+     * column, which is the state the catalogue's {@code unavailableReason}
+     * machinery exists one level up to avoid.
+     */
+    @Test
+    @DisplayName("the client report's own description says satisfaction is not in it")
+    void satisfactionIsDeclaredAbsent() {
+        ReportDtos.Descriptor d = ReportCatalogue.declared().stream()
+                .filter(x -> x.key().equals(ClientReportRunner.KEY))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(d.description()).containsIgnoringCase("satisfaction is not included");
+    }
+
+    /**
+     * A link kind and the row key it reads are useless apart.
+     *
+     * <p>{@code linkTo} with no {@code linkIdKey} gives the renderer a
+     * destination and no id, and it draws an anchor to {@code
+     * /clients/undefined}; {@code linkIdKey} with no {@code linkTo} is a key
+     * nothing reads. A dead link is harder to notice than a missing one, so the
+     * pairing is asserted here rather than left to a screenshot.
+     */
+    @Test
+    @DisplayName("a column's link kind and its id key are present together or not at all")
+    void linkFieldsArePaired() {
+        ReportDtos.Column plain = new ReportDtos.Column("closed", "Closed", ReportDtos.ColumnType.NUMBER);
+        assertThat(plain.linkTo()).isNull();
+        assertThat(plain.linkIdKey()).isNull();
+
+        ReportDtos.Column linked = ReportDtos.Column.linking(
+                "client", "Client", ReportDtos.ColumnType.STRING, ReportEntityKind.CLIENT, "clientId");
+        assertThat(linked.linkTo()).isEqualTo(ReportEntityKind.CLIENT);
+        assertThat(linked.linkIdKey()).isEqualTo("clientId");
+        // The id key is not the column's own: the cell shows a name, the link
+        // needs an id, and the id is carried in the row without a column.
+        assertThat(linked.linkIdKey()).isNotEqualTo(linked.key());
+    }
+
+    /**
+     * B-060 · the filter seam, asserted where it is cheapest.
+     *
+     * <p>{@code ReportFilters.NONE} is what every runner sees when the caller
+     * named nothing, and each field reaching SQL as null is what makes
+     * {@code (:clientId IS NULL OR ...)} mean "every client" rather than "no
+     * client at all". A zero or an empty string here would silently return an
+     * empty report on the unfiltered case, which reads as no data.
+     */
+    @Test
+    @DisplayName("an unfiltered run carries three nulls, not three empty values")
+    void noneIsAllNulls() {
+        assertThat(ReportFilters.NONE.clientId()).isNull();
+        assertThat(ReportFilters.NONE.taskTypeId()).isNull();
+        assertThat(ReportFilters.NONE.level()).isNull();
     }
 
     /** A-067's five, and the runner constant each must match. */

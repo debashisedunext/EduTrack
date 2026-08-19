@@ -73,11 +73,19 @@ class ReportController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) Long projectId,
             @RequestParam(required = false) Long resourceId,
+            // B-060 · the three the contract has declared since D-001/A-066 and
+            // this handler did not accept. Which report honours which is the
+            // catalogue's statement, not this method's — a runner reads the
+            // ones its descriptor declares and ignores the rest.
+            @RequestParam(required = false) Long clientId,
+            @RequestParam(required = false) Long taskTypeId,
+            @RequestParam(required = false) String level,
             @RequestParam(required = false) String export,
             jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
 
         ReportService.Rendered rendered = reports
-                .run(identity(caller), reportKey, from, to, projectId, resourceId)
+                .run(identity(caller), reportKey, from, to, projectId, resourceId,
+                        new ReportFilters(clientId, taskTypeId, level))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "No report is served for '" + reportKey + "'."));
 

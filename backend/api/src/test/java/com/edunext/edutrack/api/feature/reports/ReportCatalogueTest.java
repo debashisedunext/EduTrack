@@ -97,12 +97,13 @@ class ReportCatalogueTest {
     }
 
     @Test
-    @DisplayName("exactly the seven reports with a runner behind them are offered")
+    @DisplayName("exactly the reports with a runner behind them are offered")
     void availableSetIsPinned() {
         // An exact set rather than a count, so both halves of the mistake are
         // caught: a card flipped on with no runner (a 500 in front of a user)
         // and a runner added without flipping the card (a report that exists
-        // and is unreachable). A-063 shipped one; A-066 adds six.
+        // and is unreachable). A-063 shipped one, A-066 six, A-067 five and
+        // B-060 the client report.
         List<String> available = ReportCatalogue.declared().stream()
                 .filter(ReportDtos.Descriptor::available)
                 .map(ReportDtos.Descriptor::key)
@@ -120,7 +121,8 @@ class ReportCatalogueTest {
                 AgingReportRunner.KEY,
                 WorkloadCapacityRunner.KEY,
                 StageFunnelRunner.KEY,
-                StageCycleTimeRunner.KEY);
+                StageCycleTimeRunner.KEY,
+                ClientReportRunner.KEY);
     }
 
     /**

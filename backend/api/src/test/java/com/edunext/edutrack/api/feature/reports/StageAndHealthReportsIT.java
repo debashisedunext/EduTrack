@@ -92,7 +92,7 @@ class StageAndHealthReportsIT {
     }
 
     private List<Map<String, Object>> run(String key) {
-        return service.run(pm(), key, FROM, TO, myProject, null).orElseThrow().report().rows();
+        return service.run(pm(), key, FROM, TO, myProject, null, ReportFilters.NONE).orElseThrow().report().rows();
     }
 
     @Nested
@@ -168,7 +168,7 @@ class StageAndHealthReportsIT {
             resourceStat(LocalDate.of(2026, 8, 20), me, 7);
 
             List<Map<String, Object>> rows = service
-                    .run(pm(), WorkloadCapacityRunner.KEY, FROM, TO, null, null)
+                    .run(pm(), WorkloadCapacityRunner.KEY, FROM, TO, null, null, ReportFilters.NONE)
                     .orElseThrow().report().rows();
 
             Map<String, Object> mine = rows.stream()

@@ -4,6 +4,12 @@
 
 18 reports, exports, scheduling. Screens S-27, S-28.
 
+`client-report` is **Stream B's**, by `STREAM-B-MASTERS.md`'s M6 split ("Weeks
+12–14 — M6 reports. Split with Stream A. Typically yours"). B-060 is the one
+task in this package written from outside it; `ClientReportRunner`,
+`ReportFilters`, `ReportEntityKind` and `TicketReportRepository.clientReport` are
+its files.
+
 ## What is here today (A-063)
 
 The hub and the runner, not the reports.
@@ -75,8 +81,75 @@ filtered afterwards.
 Velocity is the exception and reads `resource_daily_stats`: A-050 already records
 closed and effort per person per day, and both are flow, so weeks are a sum.
 
+## Filters, and the seam B-060 opened
+
+`ReportRunner` originally took `(scope, from, to, projectIds)`, which was every
+parameter the first seven reports needed. The client report cannot be written
+against it — `CLIENT` is the filter §7.8 gives it — so B-060 added a
+`ReportFilters(clientId, taskTypeId, level)` record beside the scope.
+
+Two of the three were already broken and it did not show. The contract has
+declared `?taskTypeId=` and `?level=` since A-066, `TicketReportRepository`
+takes both on three queries, and every caller passed `null`, because
+`ReportController` accepted neither. `sla-breach` and `effort-summary` now read
+them from `ReportFilters`.
+
+**Filters are not scope, and the split is load-bearing.** `ReportScope` stays a
+separate argument: a filter narrows what the caller *asked for* and may be
+ignored; a scope narrows what they are *allowed* and may not. Folding
+`resourceId` in would put the one value with a security consequence — the one
+`ReportScope.resourceSubject` overrules for the three delivery roles — into a
+bag of optional preferences, where the next runner reads it directly and quietly
+reopens what §2 withholds.
+
+**Filters are in the ETag.** Two clients asked for from the same URL differ only
+by `?clientId=`, and a validator that ignored it would hand the second caller a
+304 against the first client's rows.
+
+**TASK_TYPE and LEVEL are honoured but undrawn.** `ReportFilterBar` renders four
+of the six kinds; those two have no control yet, so they are reachable by URL
+and by `?export=` and not from the bar. That is a gap rather than the failure the
+per-report filter list exists to prevent — nothing on screen claims to filter and
+then does not. One branch each, and they belong to those two reports.
+
+## Linked cells (B-060)
+
+§7.8 ends the Client Report's line with "drills into the client 360 view", and
+the generic column/row shape had no notion of a destination. A column may now
+declare `linkTo` (a `ReportEntityKind`) and `linkIdKey` (the row key holding the
+id), and `ReportTable` renders an anchor.
+
+**The server names an entity and never a path.** `/clients/42` from here would be
+a second copy of the router, in another language, that nothing keeps in step with
+`entityLinks.ts` — and the first symptom would be report links 404ing after a
+rename every other screen survived. The two properties are absent together or
+present together: a kind with nothing to key on renders a dead anchor, which is
+harder to notice than a missing one.
+
+The id is carried in the row with **no column of its own**, so it stays out of
+the table and out of `?export=`, which iterates columns. An internal id is not a
+figure to put in a spreadsheet sent to a client.
+
+## The figure the client report does not have
+
+§7.8 asks for five per client and four are recorded. There is no CSAT, rating or
+feedback column in this schema, in the contract, or in any migration — blueprint
+§17 item 19 puts the closure rating in **phase 2–3**. So `client-report` declares
+no satisfaction column and its catalogue description says so.
+
+Three alternatives were available and each is worse. A column of em dashes reads
+as "we asked and they did not answer", a claim about the clients rather than
+about the schema. Reopen rate relabelled is a plausible number under the wrong
+word — reopens measure our quality, not whether the client was content. SLA
+compliance standing in collapses two of the five into one and makes the report
+agree with itself by construction. This is the report §7.8 describes as shaped to
+be sent to a client, which is the worst place in the product for an invented
+figure. One migration closes it whenever CSAT lands.
+
 ## Not here yet
 
 - **Scheduling** (`POST /reports/schedule`) — A-065.
-- **Eleven reports** — A-067 and A-068. Seven run today: `date-wise` (A-063) and
-  §7.8's first six (A-066).
+- **Five reports** — A-068 and whoever takes `resource-contribution`,
+  `rework-analysis`, `deployment-report`, `audit-compliance` and
+  `email-delivery-log`. Thirteen run today: `date-wise` (A-063), §7.8's first six
+  (A-066), five more (A-067) and `client-report` (B-060).

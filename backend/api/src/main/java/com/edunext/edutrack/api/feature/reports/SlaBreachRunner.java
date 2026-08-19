@@ -57,7 +57,8 @@ class SlaBreachRunner implements ReportRunner {
     }
 
     @Override
-    public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds) {
+    public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
+                      ReportFilters filters) {
         List<ReportDtos.Column> columns = List.of(
                 new ReportDtos.Column("ticket", "Ticket", STRING),
                 new ReportDtos.Column("project", "Project", STRING),
@@ -70,7 +71,12 @@ class SlaBreachRunner implements ReportRunner {
 
         List<Map<String, Object>> rows = new ArrayList<>();
         for (TicketReportRepository.BreachRow r : tickets.slaBreaches(
-                from, to, projectIds, scope.ownWorkOnly(), scope.userId(), null, null)) {
+                // B-060 · level and task type were hardcoded null here from
+                // A-066 until the runner had somewhere to read them from. This
+                // descriptor has declared both controls since it was written,
+                // so the viewer drew two filters that changed nothing.
+                from, to, projectIds, scope.ownWorkOnly(), scope.userId(),
+                filters.level(), filters.taskTypeId())) {
 
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("ticket", r.ticketCode());

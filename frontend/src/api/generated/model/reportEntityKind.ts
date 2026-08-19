@@ -46,15 +46,19 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ReportResponseDataColumnsItemType } from './reportResponseDataColumnsItemType';
-import type { ReportEntityKind } from './reportEntityKind';
 
-export type ReportResponseDataColumnsItem = {
-  key: string;
-  label: string;
-  type: ReportResponseDataColumnsItemType;
-  linkTo?: ReportEntityKind;
-  /** Which row key holds the id to link to — `clientId`, not `client`. A separate key because the cell shows a *name* and the link needs an *id*; the id is carried in the row with no column of its own, so it stays out of the table and out of `?export=`, which iterates columns.
+/**
+ * B-060 · what a linked report cell names. Four kinds, matching the four path builders `entityLinks.ts` exports, so the client's mapping is total and a kind cannot be added here without a route to receive it.
+Deliberately not `ReportFilterKind`, which looks close enough to share and answers a different question. The vocabularies diverge at once: `DATE_RANGE` and `LEVEL` are not entities and nothing drills into them, while `TICKET` is an entity no report filters by.
+
  */
-  linkIdKey?: string;
-};
+export type ReportEntityKind = typeof ReportEntityKind[keyof typeof ReportEntityKind];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ReportEntityKind = {
+  CLIENT: 'CLIENT',
+  TICKET: 'TICKET',
+  PROJECT: 'PROJECT',
+  RESOURCE: 'RESOURCE',
+} as const;

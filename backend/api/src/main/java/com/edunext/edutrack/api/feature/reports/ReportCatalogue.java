@@ -135,8 +135,16 @@ public final class ReportCatalogue {
                     WORKFLOW, "bar", List.of(DATE_RANGE, PROJECT)),
 
             // ── OPERATIONS ──────────────────────────────────────────────────
-            unbuilt("client-report", "Client Report",
-                    "Volume, SLA and open work for one client, shaped to be sent to them.",
+            // B-060 · the description names what is absent as well as what is
+            // present. §7.8 promises five figures and the schema records four:
+            // there is no CSAT column anywhere, and blueprint §17 item 19 puts
+            // the rating that would feed one in phase 2–3. Somebody opening
+            // this card expecting the fifth should learn why from the hub
+            // rather than from a column that is not there.
+            built("client-report", "Client Report",
+                    "Raised, closed and still open per client, with SLA compliance and average "
+                            + "resolution time. Satisfaction is not included — no rating is "
+                            + "captured on closure yet.",
                     OPERATIONS, "bar", List.of(DATE_RANGE, CLIENT)),
             unbuilt("audit-compliance", "Audit & Compliance",
                     "Who changed what, with the hash chain's own verdict on each entry.",
