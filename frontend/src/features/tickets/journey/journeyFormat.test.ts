@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatDuration, formatEffortHrs } from './journeyFormat'
+import { formatDuration, formatEffortHrs, isQueueBound } from './journeyFormat'
 
 describe('formatDuration', () => {
   it('renders the two shapes blueprint §4A.4 puts in the grid', () => {
@@ -44,5 +44,30 @@ describe('formatEffortHrs', () => {
   it('distinguishes no effort logged from none recorded', () => {
     expect(formatEffortHrs(0)).toBe('0.0 h')
     expect(formatEffortHrs(null)).toBe('—')
+  })
+})
+
+describe('isQueueBound', () => {
+  it('flags the blueprint’s own example — two days in stage, two hours of work', () => {
+    // §4A.4: "a stage with 2 days duration but 2 hours of effort is a queue
+    // problem, not a capacity problem". 2880 minutes, 120 of them active.
+    expect(isQueueBound(2880, 2760)).toBe(true)
+  })
+
+  it('leaves a stage that was mostly worked alone', () => {
+    expect(isQueueBound(480, 60)).toBe(false)
+  })
+
+  it('treats exactly half as queue-bound', () => {
+    expect(isQueueBound(600, 300)).toBe(true)
+    expect(isQueueBound(600, 299)).toBe(false)
+  })
+
+  it('never flags an unmeasured hop', () => {
+    // The stage somebody is working in right now has no duration yet. Calling
+    // that idle-dominated would be both wrong and rude.
+    expect(isQueueBound(null, null)).toBe(false)
+    expect(isQueueBound(undefined, 100)).toBe(false)
+    expect(isQueueBound(0, 0)).toBe(false)
   })
 })

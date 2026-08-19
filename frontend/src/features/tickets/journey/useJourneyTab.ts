@@ -24,6 +24,9 @@ export interface UseJourneyTabOptions {
 
 export interface UseJourneyTabResult {
   rows: JourneyRow[]
+  /** Server figures, passed through rather than summed — see `journeyRollup`. */
+  cycleTotalHrs: number | undefined
+  allCyclesTotalHrs: number | undefined
   isLoading: boolean
   loadError: string | null
 }
@@ -53,6 +56,8 @@ export function useJourneyTab({ ticketId, cycle, enabled = true }: UseJourneyTab
 
   return {
     rows: data?.data?.rows ?? [],
+    cycleTotalHrs: data?.data?.cycleTotalHrs,
+    allCyclesTotalHrs: data?.data?.allCyclesTotalHrs,
     isLoading: enabled && ticketId.length > 0 && isPending,
     loadError: isError ? messageFor(error) : null,
   }

@@ -49,3 +49,24 @@ export function formatEffortHrs(hrs: number | null | undefined): string {
   if (hrs == null) return '—'
   return `${hrs.toFixed(1)} h`
 }
+
+/**
+ * C-056 · is this hop's time mostly waiting?
+ *
+ * <p>The threshold is a *display* decision and nothing else — no rule anywhere
+ * else in the product turns on it, and the server does not compute it. It marks
+ * a row the reader should look at twice, and the number that earns that is the
+ * blueprint's own example: "a stage with 2 days duration and 2 hours of effort
+ * is a queue problem, not a capacity problem". Two hours against two days is
+ * 4% active, so anything at or below half is comfortably inside what §4A.4 is
+ * pointing at, while not flagging a stage that simply had a lunch break in it.
+ *
+ * A hop with no measured duration is not idle-dominated; it is unmeasured, and
+ * saying otherwise about the stage somebody is working in right now would be
+ * both wrong and rude.
+ */
+export function isQueueBound(durationMins: number | null | undefined, idleMins: number | null | undefined): boolean {
+  if (durationMins == null || idleMins == null) return false
+  if (durationMins <= 0) return false
+  return idleMins / durationMins >= 0.5
+}

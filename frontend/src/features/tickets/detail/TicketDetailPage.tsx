@@ -240,13 +240,21 @@ export function TicketDetailPage() {
               onLoadMore={effortTab.loadMore}
             />
           ) : id === 'journey' ? (
-            <JourneyTab rows={journeyTab.rows} isLoading={journeyTab.isLoading} loadError={journeyTab.loadError} />
+            <JourneyTab
+              rows={journeyTab.rows}
+              cycleTotalHrs={journeyTab.cycleTotalHrs}
+              allCyclesTotalHrs={journeyTab.allCyclesTotalHrs}
+              isLoading={journeyTab.isLoading}
+              loadError={journeyTab.loadError}
+            />
           ) : (
             <PendingSection title={`${label} tab`} owner={owner} note={note} />
           ),
       })),
     [
       journeyTab.rows,
+      journeyTab.cycleTotalHrs,
+      journeyTab.allCyclesTotalHrs,
       journeyTab.isLoading,
       journeyTab.loadError,
       comments.comments,
