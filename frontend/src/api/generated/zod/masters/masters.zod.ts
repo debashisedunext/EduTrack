@@ -1701,21 +1701,54 @@ export const deleteResourceLeaveParams = zod.object({
 })
 
 /**
- * @summary Workflow templates with their stages
+ * The three templates of §4A.9 — Standard Dev Flow, Support Fast-Track,
+Infra Flow — seeded by B-004. **A ribbon is a template's stages**, so this
+is the picker S-13 tab 2 opens with; the stages themselves are
+`listStages`, one call per template.
+
+**Declared since D-001 and served for the first time by B-040**, and the
+shape it was declared with did not survive contact with A-005's table.
+Three fields have been removed rather than faked:
+
+- `version` — `workflow_templates` has no version column. The blueprint's
+  "versioned by copy, never edited in place" is a rule the *designer*
+  (B-043) keeps by cloning, not a column, and emitting a hard-coded `1`
+  would have told every caller a lie it could not check.
+- `projectId`, `taskTypeId` — the project x task-type mapping of §4A.9 has
+  no table yet. It is **B-041**'s, and the two query parameters that
+  filtered on them went with the fields: a filter that silently ignores
+  its argument is worse than one that does not exist.
+
+**`stages` stays**, and the drafting of B-040 is what settled that: S-25's
+ticket list has been building its stage filter from this array since
+C-013, so dropping it would have broken a shipped screen to tidy a
+response. It carries the `WorkflowStage` vocabulary shape — code, name,
+sequence, owner role — and **not** the `Stage` rows S-13 tab 2 edits.
+
+Tab 2 reads `listStages` instead, and the reason is the `ETag`: the stage
+set is the unit of edit for `reorderStages`, so the precondition has to
+come from the read the screen actually holds the rows from. A tag on this
+response would move whenever any template changed.
+
+Every role may read this. A ribbon renders on every ticket page and names
+its template; concealing the list would blank a label, not a secret.
+
+ * @summary Workflow templates (S-13 tab 2's selector)
  */
-export const listWorkflowTemplatesQueryParams = zod.object({
-  "projectId": zod.number().optional(),
-  "taskTypeId": zod.number().optional()
-})
+export const listWorkflowTemplatesResponseDataItemNameMax = 80;
+
+export const listWorkflowTemplatesResponseDataItemDescriptionMax = 255;
+
+
 
 export const listWorkflowTemplatesResponse = zod.object({
   "data": zod.array(zod.object({
-  "id": zod.number().optional(),
-  "name": zod.string().optional(),
-  "version": zod.number().optional(),
-  "projectId": zod.number().nullish(),
-  "taskTypeId": zod.number().nullish(),
-  "isActive": zod.boolean().optional(),
+  "id": zod.number(),
+  "name": zod.string().max(listWorkflowTemplatesResponseDataItemNameMax),
+  "description": zod.string().max(listWorkflowTemplatesResponseDataItemDescriptionMax).nullish(),
+  "isDefault": zod.boolean().describe('Exactly one template is the default — Standard Dev Flow, the one every\nother template is a reduction of (B-004).\n'),
+  "isActive": zod.boolean(),
+  "stageCount": zod.number().describe('How many stages the ribbon has.'),
   "stages": zod.array(zod.object({
   "stageCode": zod.string().optional(),
   "displayName": zod.string().optional(),
@@ -1725,9 +1758,9 @@ export const listWorkflowTemplatesResponse = zod.object({
   "stageSlaHrs": zod.number().nullish(),
   "isOptional": zod.boolean().optional(),
   "canReturnTo": zod.array(zod.string()).optional().describe('Allowed backward targets. Stored as JSON — MySQL has no array type.'),
-  "isDeprecated": zod.boolean().optional().describe('Deprecated, never deleted — historical ribbons depend on it.')
-})).optional()
-}))
+  "isDeprecated": zod.boolean().optional().describe('Deprecated, never deleted — historical ribbons depend on it. B-042 adds the column; B-040 does not serve this field.')
+}).describe('A stage as it is written into a template by `createWorkflowTemplate`\n(B-041\/B-043, still unmounted). \*\*`Stage` is the served shape\*\* — it is\nwhat `listStages` returns, and it carries the identity and the two usage\ncounts this one has no way to know at write time.\n')).optional().describe('\*\*Kept, and `Stage` is not a replacement for it.\*\* S-25\'s ticket list\nbuilds its stage filter from this array across every template, and\nthat screen shipped before S-13 tab 2 existed — removing it to tidy\nthe shape would have broken a live filter to save a field.\n\nThe two differ in what they are for. This is the ribbon as a\n\*vocabulary\*: enough to label and order a filter, with no identity,\nbecause a filter matches on `stageCode` and several templates share\none. `Stage` is the ribbon as \*rows to edit\*, with `id`, `templateId`\nand the two usage counts that decide whether a code may still be\nrenamed. Serving the editing shape here would have put four fields\nwith no meaning to a filter into a response every ticket list reads.\n\n`isDeprecated` is `false` on every row until \*\*B-042\*\* adds the\ncolumn, which is what it already was — the field has been in this\nschema since D-001 with nothing behind it.\n')
+}).describe('S-13 tab 2\'s selector. `version`, `projectId` and `taskTypeId` were\nremoved by B-040 — see `listWorkflowTemplates` for why each one could not\nbe served honestly, and which task brings the mapping back.\n'))
 })
 
 /**
@@ -1760,7 +1793,359 @@ export const createWorkflowTemplateBody = zod.object({
   "stageSlaHrs": zod.number().nullish(),
   "isOptional": zod.boolean().optional(),
   "canReturnTo": zod.array(zod.string()).optional().describe('Allowed backward targets. Stored as JSON — MySQL has no array type.'),
-  "isDeprecated": zod.boolean().optional().describe('Deprecated, never deleted — historical ribbons depend on it.')
-})).min(1)
+  "isDeprecated": zod.boolean().optional().describe('Deprecated, never deleted — historical ribbons depend on it. B-042 adds the column; B-040 does not serve this field.')
+}).describe('A stage as it is written into a template by `createWorkflowTemplate`\n(B-041\/B-043, still unmounted). \*\*`Stage` is the served shape\*\* — it is\nwhat `listStages` returns, and it carries the identity and the two usage\ncounts this one has no way to know at write time.\n')).min(1)
+})
+
+/**
+ * Blueprint §7.4's S-13 tab 2 — *"the ribbon stages: sequence, code, display
+name, owner role, icon, stage SLA hours, optional/mandatory, and the list
+of stages this one may return to"*.
+
+**A stage belongs to a template, and §7.4 reads as though it does not.**
+The tab is described as one flat list; `workflow_stages.template_id` is
+`NOT NULL` behind a cascading foreign key, so there is no such thing as a
+stage outside a template and no catalogue table for one to live in. A-005
+is the authority on implementation, so the tab carries a template selector
+and this route is scoped beneath it. Three templates, 8 + 5 + 5 stages.
+
+**Stage is not status.** §3 keeps them apart: a ticket can be
+`IN_PROGRESS` (status) while sitting in `QA` (stage). Tab 1 is *"is work
+moving?"*; this is *"who owns it right now?"* — which is what `ownerRole`
+makes enforceable, since only the current stage's owner, plus PM and
+Admin, may advance a ticket (§2's golden rule).
+
+Returned in `seq` order, ascending — left to right along the ribbon.
+
+**Carries an `ETag`, and it is the second collection read in this contract
+to do so.** `listStatusTransitions` (B-039) was the first, for the same
+reason: `reorderStages` rewrites the whole set at once and has no per-row
+verb to take a precondition from, so the tag comes from the collection or
+the reorder goes unguarded. A lost update on a reorder is the worst kind —
+two Admins each drag one row, and the second save silently restores the
+first's old order with nothing to show that it happened.
+
+Every role may read this. Stream C's ribbon renders `displayName`, `icon`
+and `slaHours` on every ticket page for every role, and a Developer who
+could not read the stage list could not see the segment they are standing
+in.
+
+ * @summary One template's stages, in ribbon order (S-13 tab 2)
+ */
+export const listStagesParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n')
+})
+
+export const listStagesResponseDataItemStageCodeMax = 20;
+
+export const listStagesResponseDataItemDisplayNameMax = 50;
+
+export const listStagesResponseDataItemOwnerRoleMax = 20;
+
+export const listStagesResponseDataItemIconMax = 30;
+
+
+
+export const listStagesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "templateId": zod.number(),
+  "stageCode": zod.string().max(listStagesResponseDataItemStageCodeMax).describe('Upper-case, unique within the template. Stored again as plain text in\nevery `ticket_stage_transitions` row, which is why it stops being\neditable the moment one exists.\n'),
+  "displayName": zod.string().max(listStagesResponseDataItemDisplayNameMax),
+  "ownerRole": zod.string().max(listStagesResponseDataItemOwnerRoleMax).describe('A `roles.code`. Not the `RoleCode` enum: S-09 lets an Admin add a\nseventh role, and typing this to the six of §2 would make a stage\nowned by that role unreadable.\n'),
+  "slaHours": zod.number().nullish().describe('\*\*Working\*\* hours, resolved through B-024\'s calendar — never\nwall-clock. `null` where the figure is not a template-level one:\n§4A.1 gives Development as \*\"per SLA policy\"\*, so B-004 seeds it null\non purpose and an empty field here means the same thing.\n'),
+  "isOptional": zod.boolean().describe('Skippable, with a reason.'),
+  "canReturnTo": zod.array(zod.string()).describe('Allowed \*\*backward\*\* targets, as stage codes in this template. §4A.1\'s\nloop-back table, stored as JSON because MySQL has no array type.\n'),
+  "icon": zod.string().max(listStagesResponseDataItemIconMax).nullish(),
+  "seq": zod.number().describe('Stored ribbon order — 10, 20, 30 …'),
+  "position": zod.number().describe('1-based index in the ribbon, left to right.'),
+  "transitionCount": zod.number().describe('`ticket_stage_transitions` rows that have ever named this code on a\nticket of this template. Above zero, the code is frozen.\n'),
+  "openTicketCount": zod.number().describe('Tickets of this template sitting in this stage right now. What the\nreorder warning counts, and the second reason a code may be frozen.\n'),
+  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n')
+}).describe('One segment of one template\'s ribbon — S-13 tab 2, B-040.\n\n\*\*`seq` is not `sequence`, and neither is a position.\*\* The stored value\nis B-004\'s 10, 20, 30 … so that a stage can later be dragged between two\nothers without renumbering the table; `position` is the 1-based index the\nscreen shows an Admin. Both are here because a client that computed\n`position` from array order would be right only until a caller sorted the\nlist differently.\n'))
+})
+
+/**
+ * Admin only — `master.write`. §2's row reads *"Master data (task types,
+SLA, **workflow**, holidays)"* and S-13 is titled *"Status, Stage &
+Workflow Template Master"*, so this capability needs no argument.
+
+**Appended to the end of the ribbon.** `seq` is assigned server-side as
+the next multiple of ten and is not in the request body, because
+`uq_workflow_stages_seq (template_id, seq)` makes a caller-chosen value a
+collision the caller cannot see coming. Put the stage where it belongs
+with `reorderStages` afterwards; the S-13 form does exactly that.
+
+**`stageCode` becomes permanent the moment a ticket enters it**, so the
+dialog says so before the save. See `updateStage`.
+
+**`canReturnTo` may only name stages already in this template.** A new
+stage is appended last, so at creation every existing stage is a legal
+backward target and none of them is this one.
+
+ * @summary Add a stage to a template (S-13 tab 2)
+ */
+export const createStageParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n')
+})
+
+export const createStageHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createStageBodyStageCodeMax = 20;
+
+
+export const createStageBodyStageCodeRegExp = new RegExp('^[A-Z][A-Z0-9_]\*$');
+export const createStageBodyDisplayNameMax = 50;
+
+export const createStageBodyOwnerRoleMax = 20;
+
+export const createStageBodySlaHoursMin = 0.01;
+export const createStageBodySlaHoursMax = 9999.99;
+
+export const createStageBodyIsOptionalDefault = false;export const createStageBodyIconMax = 30;
+
+
+
+export const createStageBody = zod.object({
+  "stageCode": zod.string().min(1).max(createStageBodyStageCodeMax).regex(createStageBodyStageCodeRegExp),
+  "displayName": zod.string().min(1).max(createStageBodyDisplayNameMax),
+  "ownerRole": zod.string().min(1).max(createStageBodyOwnerRoleMax),
+  "slaHours": zod.number().min(createStageBodySlaHoursMin).max(createStageBodySlaHoursMax).nullish(),
+  "isOptional": zod.boolean().optional(),
+  "canReturnTo": zod.array(zod.string()).optional(),
+  "icon": zod.string().max(createStageBodyIconMax).nullish()
+}).describe('\*\*No `seq`.\*\* A new stage is appended to the end; move it with\n`reorderStages`.\n')
+
+/**
+ * Admin only. §7.4's *"Drag to reorder"*, and the whole ordered set in one
+request — `stageIds` must be **every** stage of this template exactly
+once. A partial list is refused with `400` rather than interpreted:
+moving one row changes the position of every row after it, so a request
+naming only the dragged stage would leave the server guessing which of two
+orders the screen was showing.
+
+`seq` is rewritten to 10, 20, 30 … in the order given, in **two passes
+inside one transaction**. `uq_workflow_stages_seq` is a unique key and
+MySQL enforces it per row rather than at statement end, so writing the
+final values directly collides the moment two stages swap. The gap of ten
+is B-004's seeding convention, kept.
+
+**Refused with `409` when the new order would leave a `canReturnTo`
+pointing forwards.** A return target is a *backward* target — §4A.1's
+loop-back table is entirely backward moves, and a forward "return" is an
+ordinary advance with a reason attached. So dragging `DEV` past `QA` while
+`QA → DEV` exists is refused, naming every pair it would break, rather
+than saved into a ribbon whose arrows point the wrong way. Clear the
+return target first, or drag the other row.
+
+**Reordering a template with live tickets changes the ribbon those tickets
+render.** The blueprint's *"versioned by copy, never edited in place"*
+(§4A.5) is kept by B-043's designer cloning a template, not by this route
+refusing: there is no version column to clone into yet, and a tab that
+refused every template with an open ticket would refuse all three seeded
+ones and be unusable on day one. `openTicketCount` is on every stage so
+the screen can warn with a number before the drag is saved.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the tag from `listStages`.
+
+ * @summary Drag to reorder the ribbon (S-13 tab 2)
+ */
+export const reorderStagesParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n')
+})
+
+export const reorderStagesHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+
+
+
+export const reorderStagesBody = zod.object({
+  "stageIds": zod.array(zod.number()).min(1).describe('Every stage of this template, exactly once, in the order they should\nappear left to right. A partial or duplicated list is `400`.\n')
+})
+
+export const reorderStagesResponseDataItemStageCodeMax = 20;
+
+export const reorderStagesResponseDataItemDisplayNameMax = 50;
+
+export const reorderStagesResponseDataItemOwnerRoleMax = 20;
+
+export const reorderStagesResponseDataItemIconMax = 30;
+
+
+
+export const reorderStagesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "templateId": zod.number(),
+  "stageCode": zod.string().max(reorderStagesResponseDataItemStageCodeMax).describe('Upper-case, unique within the template. Stored again as plain text in\nevery `ticket_stage_transitions` row, which is why it stops being\neditable the moment one exists.\n'),
+  "displayName": zod.string().max(reorderStagesResponseDataItemDisplayNameMax),
+  "ownerRole": zod.string().max(reorderStagesResponseDataItemOwnerRoleMax).describe('A `roles.code`. Not the `RoleCode` enum: S-09 lets an Admin add a\nseventh role, and typing this to the six of §2 would make a stage\nowned by that role unreadable.\n'),
+  "slaHours": zod.number().nullish().describe('\*\*Working\*\* hours, resolved through B-024\'s calendar — never\nwall-clock. `null` where the figure is not a template-level one:\n§4A.1 gives Development as \*\"per SLA policy\"\*, so B-004 seeds it null\non purpose and an empty field here means the same thing.\n'),
+  "isOptional": zod.boolean().describe('Skippable, with a reason.'),
+  "canReturnTo": zod.array(zod.string()).describe('Allowed \*\*backward\*\* targets, as stage codes in this template. §4A.1\'s\nloop-back table, stored as JSON because MySQL has no array type.\n'),
+  "icon": zod.string().max(reorderStagesResponseDataItemIconMax).nullish(),
+  "seq": zod.number().describe('Stored ribbon order — 10, 20, 30 …'),
+  "position": zod.number().describe('1-based index in the ribbon, left to right.'),
+  "transitionCount": zod.number().describe('`ticket_stage_transitions` rows that have ever named this code on a\nticket of this template. Above zero, the code is frozen.\n'),
+  "openTicketCount": zod.number().describe('Tickets of this template sitting in this stage right now. What the\nreorder warning counts, and the second reason a code may be frozen.\n'),
+  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n')
+}).describe('One segment of one template\'s ribbon — S-13 tab 2, B-040.\n\n\*\*`seq` is not `sequence`, and neither is a position.\*\* The stored value\nis B-004\'s 10, 20, 30 … so that a stage can later be dragged between two\nothers without renumbering the table; `position` is the 1-based index the\nscreen shows an Admin. Both are here because a client that computed\n`position` from array order would be right only until a caller sorted the\nlist differently.\n'))
+})
+
+/**
+ * **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+CONVENTIONS.md §5 — the same gap B-011, B-016, B-020, B-021 and B-039
+closed for users, projects, task types, levels and statuses. A write whose
+precondition has no read to come from is uncallable.
+
+The tag covers `transitionCount` and `openTicketCount` as well as the
+content. Those two decide whether `stageCode` may still be edited, so a
+ticket entering this stage while the dialog is open costs a reload — which
+is right, because it changes the answer.
+
+ * @summary One stage (S-13 tab 2)
+ */
+export const getStageParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n'),
+  "stageId": zod.number().describe('`workflow_stages.id`. Nothing points at it — `ticket_stage_transitions`\nstores `to_stage` as the \*\*code\*\*, deliberately not this key, which is\nexactly why `updateStage` refuses to rename a code that is in use.\n')
+})
+
+export const getStageResponseDataStageCodeMax = 20;
+
+export const getStageResponseDataDisplayNameMax = 50;
+
+export const getStageResponseDataOwnerRoleMax = 20;
+
+export const getStageResponseDataIconMax = 30;
+
+
+
+export const getStageResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "templateId": zod.number(),
+  "stageCode": zod.string().max(getStageResponseDataStageCodeMax).describe('Upper-case, unique within the template. Stored again as plain text in\nevery `ticket_stage_transitions` row, which is why it stops being\neditable the moment one exists.\n'),
+  "displayName": zod.string().max(getStageResponseDataDisplayNameMax),
+  "ownerRole": zod.string().max(getStageResponseDataOwnerRoleMax).describe('A `roles.code`. Not the `RoleCode` enum: S-09 lets an Admin add a\nseventh role, and typing this to the six of §2 would make a stage\nowned by that role unreadable.\n'),
+  "slaHours": zod.number().nullish().describe('\*\*Working\*\* hours, resolved through B-024\'s calendar — never\nwall-clock. `null` where the figure is not a template-level one:\n§4A.1 gives Development as \*\"per SLA policy\"\*, so B-004 seeds it null\non purpose and an empty field here means the same thing.\n'),
+  "isOptional": zod.boolean().describe('Skippable, with a reason.'),
+  "canReturnTo": zod.array(zod.string()).describe('Allowed \*\*backward\*\* targets, as stage codes in this template. §4A.1\'s\nloop-back table, stored as JSON because MySQL has no array type.\n'),
+  "icon": zod.string().max(getStageResponseDataIconMax).nullish(),
+  "seq": zod.number().describe('Stored ribbon order — 10, 20, 30 …'),
+  "position": zod.number().describe('1-based index in the ribbon, left to right.'),
+  "transitionCount": zod.number().describe('`ticket_stage_transitions` rows that have ever named this code on a\nticket of this template. Above zero, the code is frozen.\n'),
+  "openTicketCount": zod.number().describe('Tickets of this template sitting in this stage right now. What the\nreorder warning counts, and the second reason a code may be frozen.\n'),
+  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n')
+}).describe('One segment of one template\'s ribbon — S-13 tab 2, B-040.\n\n\*\*`seq` is not `sequence`, and neither is a position.\*\* The stored value\nis B-004\'s 10, 20, 30 … so that a stage can later be dragged between two\nothers without renumbering the table; `position` is the 1-based index the\nscreen shows an Admin. Both are here because a client that computed\n`position` from array order would be right only until a caller sorted the\nlist differently.\n')
+})
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`seq` is not in this body.** Order is `reorderStages` and only
+`reorderStages`, because one row's `seq` cannot change without deciding
+what happens to the rows it displaces.
+
+**`stageCode` is in the body only so that changing it can be refused once
+the stage is in use**, exactly as `code` is on task types, levels and
+statuses — and here the consequence is the widest in the product.
+`ticket_stage_transitions.to_stage` stores the code as plain text with no
+foreign key, and the stage-SLA scanner joins on
+`workflow_stages.stage_code = ticket_stage_transitions.to_stage`. Renaming
+a code in use therefore does two things at once and neither of them fails:
+every historical ribbon segment stops resolving to a stage, and the §4A.7
+"stuck in stage" scan stops matching those rows and silently never alerts
+on them again. Refused with `409` when `transitionCount` or
+`openTicketCount` is above zero; allowed on a stage nothing has entered
+yet, which is the only case where it is provably safe.
+
+**`ownerRole` may be changed at any time, including on a live stage, and
+that is the point of the master.** It reassigns who may advance every
+ticket currently sitting here. Validated against `roles.code` —
+`owner_role` carries no foreign key, so a typo would not fail loudly, it
+would leave a segment no role on earth can move.
+
+**`canReturnTo` may only name stages in this template, never this stage,
+and always one earlier in the order** — the same backward rule
+`reorderStages` enforces from the other side. Field-keyed `400`.
+
+**There is no delete, and the absence is the design.** §7.4: *"Stages used
+by live tickets can only be deprecated, never deleted — otherwise
+historical ribbons would break."* The deprecation flag and its guard are
+**B-042**; until they land this screen offers no removal at all, rather
+than a delete B-042 would have to take away. A stage added by mistake is
+edited, not removed.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the current tag from `GET .../stages/{stageId}`.
+
+ * @summary Edit a stage (S-13 tab 2)
+ */
+export const updateStageParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n'),
+  "stageId": zod.number().describe('`workflow_stages.id`. Nothing points at it — `ticket_stage_transitions`\nstores `to_stage` as the \*\*code\*\*, deliberately not this key, which is\nexactly why `updateStage` refuses to rename a code that is in use.\n')
+})
+
+export const updateStageHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateStageBodyStageCodeMax = 20;
+
+
+export const updateStageBodyStageCodeRegExp = new RegExp('^[A-Z][A-Z0-9_]\*$');
+export const updateStageBodyDisplayNameMax = 50;
+
+export const updateStageBodyOwnerRoleMax = 20;
+
+export const updateStageBodySlaHoursMin = 0.01;
+export const updateStageBodySlaHoursMax = 9999.99;
+
+export const updateStageBodyIconMax = 30;
+
+
+
+export const updateStageBody = zod.object({
+  "stageCode": zod.string().min(1).max(updateStageBodyStageCodeMax).regex(updateStageBodyStageCodeRegExp).optional(),
+  "displayName": zod.string().min(1).max(updateStageBodyDisplayNameMax).optional(),
+  "ownerRole": zod.string().min(1).max(updateStageBodyOwnerRoleMax).optional(),
+  "slaHours": zod.number().min(updateStageBodySlaHoursMin).max(updateStageBodySlaHoursMax).nullish(),
+  "isOptional": zod.boolean().optional(),
+  "canReturnTo": zod.array(zod.string()).optional(),
+  "icon": zod.string().max(updateStageBodyIconMax).nullish()
+}).describe('Partial — an omitted field keeps its stored value. \*\*No `seq`\*\*, and\n`stageCode` only so that changing it in use can be refused.\n')
+
+export const updateStageResponseDataStageCodeMax = 20;
+
+export const updateStageResponseDataDisplayNameMax = 50;
+
+export const updateStageResponseDataOwnerRoleMax = 20;
+
+export const updateStageResponseDataIconMax = 30;
+
+
+
+export const updateStageResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "templateId": zod.number(),
+  "stageCode": zod.string().max(updateStageResponseDataStageCodeMax).describe('Upper-case, unique within the template. Stored again as plain text in\nevery `ticket_stage_transitions` row, which is why it stops being\neditable the moment one exists.\n'),
+  "displayName": zod.string().max(updateStageResponseDataDisplayNameMax),
+  "ownerRole": zod.string().max(updateStageResponseDataOwnerRoleMax).describe('A `roles.code`. Not the `RoleCode` enum: S-09 lets an Admin add a\nseventh role, and typing this to the six of §2 would make a stage\nowned by that role unreadable.\n'),
+  "slaHours": zod.number().nullish().describe('\*\*Working\*\* hours, resolved through B-024\'s calendar — never\nwall-clock. `null` where the figure is not a template-level one:\n§4A.1 gives Development as \*\"per SLA policy\"\*, so B-004 seeds it null\non purpose and an empty field here means the same thing.\n'),
+  "isOptional": zod.boolean().describe('Skippable, with a reason.'),
+  "canReturnTo": zod.array(zod.string()).describe('Allowed \*\*backward\*\* targets, as stage codes in this template. §4A.1\'s\nloop-back table, stored as JSON because MySQL has no array type.\n'),
+  "icon": zod.string().max(updateStageResponseDataIconMax).nullish(),
+  "seq": zod.number().describe('Stored ribbon order — 10, 20, 30 …'),
+  "position": zod.number().describe('1-based index in the ribbon, left to right.'),
+  "transitionCount": zod.number().describe('`ticket_stage_transitions` rows that have ever named this code on a\nticket of this template. Above zero, the code is frozen.\n'),
+  "openTicketCount": zod.number().describe('Tickets of this template sitting in this stage right now. What the\nreorder warning counts, and the second reason a code may be frozen.\n'),
+  "isCodeEditable": zod.boolean().describe('Server-computed, so the form does not restate the rule. False once\neither count is above zero.\n')
+}).describe('One segment of one template\'s ribbon — S-13 tab 2, B-040.\n\n\*\*`seq` is not `sequence`, and neither is a position.\*\* The stored value\nis B-004\'s 10, 20, 30 … so that a stage can later be dragged between two\nothers without renumbering the table; `position` is the 1-based index the\nscreen shows an Admin. Both are here because a client that computed\n`position` from array order would be right only until a caller sorted the\nlist differently.\n')
 })
 

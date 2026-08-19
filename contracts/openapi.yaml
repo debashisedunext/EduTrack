@@ -4865,13 +4865,42 @@ paths:
     get:
       tags: [masters]
       operationId: listWorkflowTemplates
-      summary: Workflow templates with their stages
-      parameters:
-        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
-        - { name: taskTypeId, in: query, schema: { type: integer, format: int64 } }
+      summary: Workflow templates (S-13 tab 2's selector)
+      description: |
+        The three templates of §4A.9 — Standard Dev Flow, Support Fast-Track,
+        Infra Flow — seeded by B-004. **A ribbon is a template's stages**, so this
+        is the picker S-13 tab 2 opens with; the stages themselves are
+        `listStages`, one call per template.
+
+        **Declared since D-001 and served for the first time by B-040**, and the
+        shape it was declared with did not survive contact with A-005's table.
+        Three fields have been removed rather than faked:
+
+        - `version` — `workflow_templates` has no version column. The blueprint's
+          "versioned by copy, never edited in place" is a rule the *designer*
+          (B-043) keeps by cloning, not a column, and emitting a hard-coded `1`
+          would have told every caller a lie it could not check.
+        - `projectId`, `taskTypeId` — the project x task-type mapping of §4A.9 has
+          no table yet. It is **B-041**'s, and the two query parameters that
+          filtered on them went with the fields: a filter that silently ignores
+          its argument is worse than one that does not exist.
+
+        **`stages` stays**, and the drafting of B-040 is what settled that: S-25's
+        ticket list has been building its stage filter from this array since
+        C-013, so dropping it would have broken a shipped screen to tidy a
+        response. It carries the `WorkflowStage` vocabulary shape — code, name,
+        sequence, owner role — and **not** the `Stage` rows S-13 tab 2 edits.
+
+        Tab 2 reads `listStages` instead, and the reason is the `ETag`: the stage
+        set is the unit of edit for `reorderStages`, so the precondition has to
+        come from the read the screen actually holds the rows from. A tag on this
+        response would move whenever any template changed.
+
+        Every role may read this. A ribbon renders on every ticket page and names
+        its template; concealing the list would blank a label, not a secret.
       responses:
         '200':
-          description: OK.
+          description: OK. A bounded list — no `meta`, the set is complete.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/WorkflowTemplateListResponse' }
@@ -4899,6 +4928,260 @@ paths:
               schema: { $ref: '#/components/schemas/WorkflowTemplateResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '409': { $ref: '#/components/responses/Conflict' }
+
+  /masters/workflow-templates/{templateId}/stages:
+    parameters: [{ $ref: '#/components/parameters/WorkflowTemplateId' }]
+    get:
+      tags: [masters]
+      operationId: listStages
+      summary: One template's stages, in ribbon order (S-13 tab 2)
+      description: |
+        Blueprint §7.4's S-13 tab 2 — *"the ribbon stages: sequence, code, display
+        name, owner role, icon, stage SLA hours, optional/mandatory, and the list
+        of stages this one may return to"*.
+
+        **A stage belongs to a template, and §7.4 reads as though it does not.**
+        The tab is described as one flat list; `workflow_stages.template_id` is
+        `NOT NULL` behind a cascading foreign key, so there is no such thing as a
+        stage outside a template and no catalogue table for one to live in. A-005
+        is the authority on implementation, so the tab carries a template selector
+        and this route is scoped beneath it. Three templates, 8 + 5 + 5 stages.
+
+        **Stage is not status.** §3 keeps them apart: a ticket can be
+        `IN_PROGRESS` (status) while sitting in `QA` (stage). Tab 1 is *"is work
+        moving?"*; this is *"who owns it right now?"* — which is what `ownerRole`
+        makes enforceable, since only the current stage's owner, plus PM and
+        Admin, may advance a ticket (§2's golden rule).
+
+        Returned in `seq` order, ascending — left to right along the ribbon.
+
+        **Carries an `ETag`, and it is the second collection read in this contract
+        to do so.** `listStatusTransitions` (B-039) was the first, for the same
+        reason: `reorderStages` rewrites the whole set at once and has no per-row
+        verb to take a precondition from, so the tag comes from the collection or
+        the reorder goes unguarded. A lost update on a reorder is the worst kind —
+        two Admins each drag one row, and the second save silently restores the
+        first's old order with nothing to show that it happened.
+
+        Every role may read this. Stream C's ribbon renders `displayName`, `icon`
+        and `slaHours` on every ticket page for every role, and a Developer who
+        could not read the stage list could not see the segment they are standing
+        in.
+      responses:
+        '200':
+          description: OK. A bounded list — no `meta`, the set is complete.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on `reorderStages`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StageListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [masters]
+      operationId: createStage
+      summary: Add a stage to a template (S-13 tab 2)
+      description: |
+        Admin only — `master.write`. §2's row reads *"Master data (task types,
+        SLA, **workflow**, holidays)"* and S-13 is titled *"Status, Stage &
+        Workflow Template Master"*, so this capability needs no argument.
+
+        **Appended to the end of the ribbon.** `seq` is assigned server-side as
+        the next multiple of ten and is not in the request body, because
+        `uq_workflow_stages_seq (template_id, seq)` makes a caller-chosen value a
+        collision the caller cannot see coming. Put the stage where it belongs
+        with `reorderStages` afterwards; the S-13 form does exactly that.
+
+        **`stageCode` becomes permanent the moment a ticket enters it**, so the
+        dialog says so before the save. See `updateStage`.
+
+        **`canReturnTo` may only name stages already in this template.** A new
+        stage is appended last, so at creation every existing stage is a legal
+        backward target and none of them is this one.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StageWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StageResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /masters/workflow-templates/{templateId}/stages/order:
+    parameters: [{ $ref: '#/components/parameters/WorkflowTemplateId' }]
+    put:
+      tags: [masters]
+      operationId: reorderStages
+      summary: Drag to reorder the ribbon (S-13 tab 2)
+      description: |
+        Admin only. §7.4's *"Drag to reorder"*, and the whole ordered set in one
+        request — `stageIds` must be **every** stage of this template exactly
+        once. A partial list is refused with `400` rather than interpreted:
+        moving one row changes the position of every row after it, so a request
+        naming only the dragged stage would leave the server guessing which of two
+        orders the screen was showing.
+
+        `seq` is rewritten to 10, 20, 30 … in the order given, in **two passes
+        inside one transaction**. `uq_workflow_stages_seq` is a unique key and
+        MySQL enforces it per row rather than at statement end, so writing the
+        final values directly collides the moment two stages swap. The gap of ten
+        is B-004's seeding convention, kept.
+
+        **Refused with `409` when the new order would leave a `canReturnTo`
+        pointing forwards.** A return target is a *backward* target — §4A.1's
+        loop-back table is entirely backward moves, and a forward "return" is an
+        ordinary advance with a reason attached. So dragging `DEV` past `QA` while
+        `QA → DEV` exists is refused, naming every pair it would break, rather
+        than saved into a ribbon whose arrows point the wrong way. Clear the
+        return target first, or drag the other row.
+
+        **Reordering a template with live tickets changes the ribbon those tickets
+        render.** The blueprint's *"versioned by copy, never edited in place"*
+        (§4A.5) is kept by B-043's designer cloning a template, not by this route
+        refusing: there is no version column to clone into yet, and a tab that
+        refused every template with an open ticket would refuse all three seeded
+        ones and be unusable on day one. `openTicketCount` is on every stage so
+        the screen can warn with a number before the drag is saved.
+
+        `If-Match` is required, not optional; a write without one is refused with
+        `428`. Read the tag from `listStages`.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StageOrderRequest' }
+      responses:
+        '200':
+          description: Reordered. Returns the whole set in its new order.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StageListResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: '`If-Match` absent. The precondition is required, not opt-in.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /masters/workflow-templates/{templateId}/stages/{stageId}:
+    parameters:
+      - { $ref: '#/components/parameters/WorkflowTemplateId' }
+      - { $ref: '#/components/parameters/StageId' }
+    get:
+      tags: [masters]
+      operationId: getStage
+      summary: One stage (S-13 tab 2)
+      description: |
+        **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+        CONVENTIONS.md §5 — the same gap B-011, B-016, B-020, B-021 and B-039
+        closed for users, projects, task types, levels and statuses. A write whose
+        precondition has no read to come from is uncallable.
+
+        The tag covers `transitionCount` and `openTicketCount` as well as the
+        content. Those two decide whether `stageCode` may still be edited, so a
+        ticket entering this stage while the dialog is open costs a reload — which
+        is right, because it changes the answer.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StageResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [masters]
+      operationId: updateStage
+      summary: Edit a stage (S-13 tab 2)
+      description: |
+        Admin only. A partial update — an omitted field keeps its stored value.
+
+        **`seq` is not in this body.** Order is `reorderStages` and only
+        `reorderStages`, because one row's `seq` cannot change without deciding
+        what happens to the rows it displaces.
+
+        **`stageCode` is in the body only so that changing it can be refused once
+        the stage is in use**, exactly as `code` is on task types, levels and
+        statuses — and here the consequence is the widest in the product.
+        `ticket_stage_transitions.to_stage` stores the code as plain text with no
+        foreign key, and the stage-SLA scanner joins on
+        `workflow_stages.stage_code = ticket_stage_transitions.to_stage`. Renaming
+        a code in use therefore does two things at once and neither of them fails:
+        every historical ribbon segment stops resolving to a stage, and the §4A.7
+        "stuck in stage" scan stops matching those rows and silently never alerts
+        on them again. Refused with `409` when `transitionCount` or
+        `openTicketCount` is above zero; allowed on a stage nothing has entered
+        yet, which is the only case where it is provably safe.
+
+        **`ownerRole` may be changed at any time, including on a live stage, and
+        that is the point of the master.** It reassigns who may advance every
+        ticket currently sitting here. Validated against `roles.code` —
+        `owner_role` carries no foreign key, so a typo would not fail loudly, it
+        would leave a segment no role on earth can move.
+
+        **`canReturnTo` may only name stages in this template, never this stage,
+        and always one earlier in the order** — the same backward rule
+        `reorderStages` enforces from the other side. Field-keyed `400`.
+
+        **There is no delete, and the absence is the design.** §7.4: *"Stages used
+        by live tickets can only be deprecated, never deleted — otherwise
+        historical ribbons would break."* The deprecation flag and its guard are
+        **B-042**; until they land this screen offers no removal at all, rather
+        than a delete B-042 would have to take away. A stage added by mistake is
+        edited, not removed.
+
+        `If-Match` is required, not optional; a write without one is refused with
+        `428`. Read the current tag from `GET .../stages/{stageId}`.
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StagePatchRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StageResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: '`If-Match` absent. The precondition is required, not opt-in.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   # ─────────────────────────────────────────────────────── dashboard ─────────
   /dashboard/summary:
@@ -5668,6 +5951,29 @@ components:
         `roles.id` is an `INT`, not a `BIGINT` like every other identifier here:
         blueprint §8.2 declares `users.role_id INT` and A-003 kept it, so the key
         type follows the column rather than the house convention.
+    WorkflowTemplateId:
+      name: templateId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        `workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the
+        reference masters, because A-005 declared it beside the ticket tables
+        rather than beside `statuses`.
+
+        **Not `TemplateId`**, which S-15's notification templates already hold.
+        Two parameters of the same name are one parameter in YAML: the second
+        silently replaces the first, and the generated client would have typed one
+        of the two screens' paths against the other's key.
+    StageId:
+      name: stageId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        `workflow_stages.id`. Nothing points at it — `ticket_stage_transitions`
+        stores `to_stage` as the **code**, deliberately not this key, which is
+        exactly why `updateStage` refuses to rename a code that is in use.
     StatusId:
       name: statusId
       in: path
@@ -9352,6 +9658,11 @@ components:
             workDayEnd: { type: string, examples: ['18:30'] }
     WorkflowStage:
       type: object
+      description: |
+        A stage as it is written into a template by `createWorkflowTemplate`
+        (B-041/B-043, still unmounted). **`Stage` is the served shape** — it is
+        what `listStages` returns, and it carries the identity and the two usage
+        counts this one has no way to know at write time.
       properties:
         stageCode: { type: string }
         displayName: { type: string }
@@ -9364,17 +9675,162 @@ components:
           type: array
           items: { type: string }
           description: Allowed backward targets. Stored as JSON — MySQL has no array type.
-        isDeprecated: { type: boolean, description: 'Deprecated, never deleted — historical ribbons depend on it.' }
-    WorkflowTemplate:
+        isDeprecated: { type: boolean, description: 'Deprecated, never deleted — historical ribbons depend on it. B-042 adds the column; B-040 does not serve this field.' }
+    Stage:
       type: object
+      description: |
+        One segment of one template's ribbon — S-13 tab 2, B-040.
+
+        **`seq` is not `sequence`, and neither is a position.** The stored value
+        is B-004's 10, 20, 30 … so that a stage can later be dragged between two
+        others without renumbering the table; `position` is the 1-based index the
+        screen shows an Admin. Both are here because a client that computed
+        `position` from array order would be right only until a caller sorted the
+        list differently.
+      required:
+        [id, templateId, stageCode, displayName, ownerRole, seq, position,
+         isOptional, canReturnTo, transitionCount, openTicketCount, isCodeEditable]
       properties:
         id: { type: integer, format: int64 }
-        name: { type: string }
-        version: { type: integer }
-        projectId: { type: [integer, 'null'], format: int64 }
-        taskTypeId: { type: [integer, 'null'], format: int64 }
+        templateId: { type: integer, format: int64 }
+        stageCode:
+          type: string
+          maxLength: 20
+          examples: ['DEV']
+          description: |
+            Upper-case, unique within the template. Stored again as plain text in
+            every `ticket_stage_transitions` row, which is why it stops being
+            editable the moment one exists.
+        displayName: { type: string, maxLength: 50, examples: ['Development'] }
+        ownerRole:
+          type: string
+          maxLength: 20
+          description: |
+            A `roles.code`. Not the `RoleCode` enum: S-09 lets an Admin add a
+            seventh role, and typing this to the six of §2 would make a stage
+            owned by that role unreadable.
+        slaHours:
+          type: [number, 'null']
+          format: double
+          description: |
+            **Working** hours, resolved through B-024's calendar — never
+            wall-clock. `null` where the figure is not a template-level one:
+            §4A.1 gives Development as *"per SLA policy"*, so B-004 seeds it null
+            on purpose and an empty field here means the same thing.
+        isOptional: { type: boolean, description: 'Skippable, with a reason.' }
+        canReturnTo:
+          type: array
+          items: { type: string }
+          description: |
+            Allowed **backward** targets, as stage codes in this template. §4A.1's
+            loop-back table, stored as JSON because MySQL has no array type.
+        icon: { type: [string, 'null'], maxLength: 30, examples: ['code-2'] }
+        seq: { type: integer, description: 'Stored ribbon order — 10, 20, 30 …' }
+        position: { type: integer, description: '1-based index in the ribbon, left to right.' }
+        transitionCount:
+          type: integer
+          description: |
+            `ticket_stage_transitions` rows that have ever named this code on a
+            ticket of this template. Above zero, the code is frozen.
+        openTicketCount:
+          type: integer
+          description: |
+            Tickets of this template sitting in this stage right now. What the
+            reorder warning counts, and the second reason a code may be frozen.
+        isCodeEditable:
+          type: boolean
+          description: |
+            Server-computed, so the form does not restate the rule. False once
+            either count is above zero.
+    StageWriteRequest:
+      type: object
+      required: [stageCode, displayName, ownerRole]
+      description: |
+        **No `seq`.** A new stage is appended to the end; move it with
+        `reorderStages`.
+      properties:
+        stageCode:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^[A-Z][A-Z0-9_]*$'
+        displayName: { type: string, minLength: 1, maxLength: 50 }
+        ownerRole: { type: string, minLength: 1, maxLength: 20 }
+        slaHours: { type: [number, 'null'], format: double, minimum: 0.01, maximum: 9999.99 }
+        isOptional: { type: boolean, default: false }
+        canReturnTo: { type: array, items: { type: string } }
+        icon: { type: [string, 'null'], maxLength: 30 }
+    StagePatchRequest:
+      type: object
+      description: |
+        Partial — an omitted field keeps its stored value. **No `seq`**, and
+        `stageCode` only so that changing it in use can be refused.
+      properties:
+        stageCode: { type: string, minLength: 1, maxLength: 20, pattern: '^[A-Z][A-Z0-9_]*$' }
+        displayName: { type: string, minLength: 1, maxLength: 50 }
+        ownerRole: { type: string, minLength: 1, maxLength: 20 }
+        slaHours: { type: [number, 'null'], format: double, minimum: 0.01, maximum: 9999.99 }
+        isOptional: { type: boolean }
+        canReturnTo: { type: array, items: { type: string } }
+        icon: { type: [string, 'null'], maxLength: 30 }
+    StageOrderRequest:
+      type: object
+      required: [stageIds]
+      properties:
+        stageIds:
+          type: array
+          minItems: 1
+          items: { type: integer, format: int64 }
+          description: |
+            Every stage of this template, exactly once, in the order they should
+            appear left to right. A partial or duplicated list is `400`.
+    StageResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/Stage' } }
+    StageListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Stage' } }
+    WorkflowTemplate:
+      type: object
+      required: [id, name, isDefault, isActive, stageCount]
+      description: |
+        S-13 tab 2's selector. `version`, `projectId` and `taskTypeId` were
+        removed by B-040 — see `listWorkflowTemplates` for why each one could not
+        be served honestly, and which task brings the mapping back.
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, maxLength: 80 }
+        description: { type: [string, 'null'], maxLength: 255 }
+        isDefault:
+          type: boolean
+          description: |
+            Exactly one template is the default — Standard Dev Flow, the one every
+            other template is a reduction of (B-004).
         isActive: { type: boolean }
-        stages: { type: array, items: { $ref: '#/components/schemas/WorkflowStage' } }
+        stageCount: { type: integer, description: 'How many stages the ribbon has.' }
+        stages:
+          type: array
+          items: { $ref: '#/components/schemas/WorkflowStage' }
+          description: |
+            **Kept, and `Stage` is not a replacement for it.** S-25's ticket list
+            builds its stage filter from this array across every template, and
+            that screen shipped before S-13 tab 2 existed — removing it to tidy
+            the shape would have broken a live filter to save a field.
+
+            The two differ in what they are for. This is the ribbon as a
+            *vocabulary*: enough to label and order a filter, with no identity,
+            because a filter matches on `stageCode` and several templates share
+            one. `Stage` is the ribbon as *rows to edit*, with `id`, `templateId`
+            and the two usage counts that decide whether a code may still be
+            renamed. Serving the editing shape here would have put four fields
+            with no meaning to a filter into a response every ticket list reads.
+
+            `isDeprecated` is `false` on every row until **B-042** adds the
+            column, which is what it already was — the field has been in this
+            schema since D-001 with nothing behind it.
     WorkflowTemplateWriteRequest:
       type: object
       required: [name, stages]

@@ -67,3 +67,11 @@ docker/data/
 .pytest_cache/
 __pycache__/
 venv/
+
+# ---- Assistant scaffolding, never committed ----
+# Mirrors of .claude/skills/ and CLAUDE.md in other assistants' formats. They
+# duplicate files this repository already tracks, so a copy on develop is a
+# second thing to keep in step with the working agreement — and it drifts.
+.agents/
+.codex/
+AGENTS.md

@@ -355,6 +355,29 @@ final class PermissionMatrix {
             {"transitions":[{"toStatus":"NEW","roleCode":"ADMIN"}]}""";
 
     /**
+     * {@code StageDtos.StageWrite}: {@code stageCode}, {@code displayName} and
+     * {@code ownerRole} are all required and the code has to match the pattern.
+     *
+     * <p><b>It reuses {@code DEV}</b>, which every seeded template already has, for
+     * {@code PRIORITY}'s reason: an allowed row is entitled to reach the handler
+     * and earn its 409, a denied row never gets that far, and the 409 is the proof
+     * that authorisation passed rather than that the fixture was lucky.
+     */
+    private static final String STAGE = """
+            {"stageCode":"DEV","displayName":"Matrix Fixture","ownerRole":"DEVELOPER"}""";
+
+    /**
+     * {@code StageDtos.StageOrder}: the list is all there is.
+     *
+     * <p>The ids are deliberately not a real template's, so an allowed role gets a
+     * 400 from the completeness check rather than actually reordering a seeded
+     * ribbon underneath the rest of this matrix. The distinction this measures is
+     * 403-or-not, and 400 is on the allowed side of it.
+     */
+    private static final String STAGE_ORDER = """
+            {"stageIds":[1,2,3]}""";
+
+    /**
      * {@code TaskTypeWrite}: code, name, colour and defaultLevel are all
      * required, and the colour must be a {@code #RRGGBB} token.
      */
@@ -1039,6 +1062,33 @@ final class PermissionMatrix {
             adminOnly("POST", "/api/v1/masters/statuses", STATUS),
             adminOnly("PATCH", "/api/v1/masters/statuses/{statusId}", EMPTY_PATCH),
             adminOnly("PUT", "/api/v1/masters/status-transitions", STATUS_TRANSITIONS),
+
+            // ── workflow templates and their stages · S-13 tab 2 (B-040) ─────
+            // All three reads open to all six, and the argument is Stream C's
+            // rather than this screen's. The ribbon renders on every ticket page
+            // for every role, and it renders `displayName`, `icon` and `slaHours`
+            // from these rows — a Developer who could not read them could not see
+            // the segment they are standing in. `ownerRole` is the same case one
+            // step stronger: it is the answer to "why can I not move this ticket?",
+            // and §2's golden rule is better read than discovered by pressing a
+            // button and being refused.
+            everyRole("GET", "/api/v1/masters/workflow-templates"),
+            everyRole("GET", "/api/v1/masters/workflow-templates/{templateId}/stages"),
+            everyRole("GET", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}"),
+            // The writes are master.write — Admin alone — and this one needs no
+            // argument at all. §2's row reads "Master data (task types, SLA,
+            // **workflow**, holidays)", and a workflow template's stages are the
+            // most literal reading of that word anywhere in the product.
+            //
+            // There is no DELETE row because there is no DELETE route, and the
+            // absence is the design rather than a gap: §7.4 says stages in use are
+            // deprecated and never deleted, and the flag that makes that possible
+            // is B-042. `workflow_stages` has no foreign key pointing at it from
+            // `ticket_stage_transitions` — the code travels as text — so a delete
+            // would succeed and take every historical ribbon segment with it.
+            adminOnly("POST", "/api/v1/masters/workflow-templates/{templateId}/stages", STAGE),
+            adminOnly("PATCH", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}", EMPTY_PATCH),
+            adminOnly("PUT", "/api/v1/masters/workflow-templates/{templateId}/stages/order", STAGE_ORDER),
 
             // ── task types · S-11 (B-020) ────────────────────────────────────
             // Both reads open to all six, and the argument is §2's rather than

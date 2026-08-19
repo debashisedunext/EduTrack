@@ -46,27 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { RoleCode } from './roleCode';
-import type { WorkflowStageIcon } from './workflowStageIcon';
-import type { WorkflowStageStageSlaHrs } from './workflowStageStageSlaHrs';
+import type { Stage } from './stage';
 
-/**
- * A stage as it is written into a template by `createWorkflowTemplate`
-(B-041/B-043, still unmounted). **`Stage` is the served shape** — it is
-what `listStages` returns, and it carries the identity and the two usage
-counts this one has no way to know at write time.
-
- */
-export interface WorkflowStage {
-  stageCode?: string;
-  displayName?: string;
-  sequence?: number;
-  ownerRole?: RoleCode;
-  icon?: WorkflowStageIcon;
-  stageSlaHrs?: WorkflowStageStageSlaHrs;
-  isOptional?: boolean;
-  /** Allowed backward targets. Stored as JSON — MySQL has no array type. */
-  canReturnTo?: string[];
-  /** Deprecated, never deleted — historical ribbons depend on it. B-042 adds the column; B-040 does not serve this field. */
-  isDeprecated?: boolean;
+export interface StageResponse {
+  data: Stage;
 }

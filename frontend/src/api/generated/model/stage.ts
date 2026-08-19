@@ -46,27 +46,69 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { RoleCode } from './roleCode';
-import type { WorkflowStageIcon } from './workflowStageIcon';
-import type { WorkflowStageStageSlaHrs } from './workflowStageStageSlaHrs';
+import type { StageSlaHours } from './stageSlaHours';
+import type { StageIcon } from './stageIcon';
 
 /**
- * A stage as it is written into a template by `createWorkflowTemplate`
-(B-041/B-043, still unmounted). **`Stage` is the served shape** — it is
-what `listStages` returns, and it carries the identity and the two usage
-counts this one has no way to know at write time.
+ * One segment of one template's ribbon — S-13 tab 2, B-040.
+
+**`seq` is not `sequence`, and neither is a position.** The stored value
+is B-004's 10, 20, 30 … so that a stage can later be dragged between two
+others without renumbering the table; `position` is the 1-based index the
+screen shows an Admin. Both are here because a client that computed
+`position` from array order would be right only until a caller sorted the
+list differently.
 
  */
-export interface WorkflowStage {
-  stageCode?: string;
-  displayName?: string;
-  sequence?: number;
-  ownerRole?: RoleCode;
-  icon?: WorkflowStageIcon;
-  stageSlaHrs?: WorkflowStageStageSlaHrs;
-  isOptional?: boolean;
-  /** Allowed backward targets. Stored as JSON — MySQL has no array type. */
-  canReturnTo?: string[];
-  /** Deprecated, never deleted — historical ribbons depend on it. B-042 adds the column; B-040 does not serve this field. */
-  isDeprecated?: boolean;
+export interface Stage {
+  id: number;
+  templateId: number;
+  /**
+   * Upper-case, unique within the template. Stored again as plain text in
+every `ticket_stage_transitions` row, which is why it stops being
+editable the moment one exists.
+
+   * @maxLength 20
+   */
+  stageCode: string;
+  /** @maxLength 50 */
+  displayName: string;
+  /**
+   * A `roles.code`. Not the `RoleCode` enum: S-09 lets an Admin add a
+seventh role, and typing this to the six of §2 would make a stage
+owned by that role unreadable.
+
+   * @maxLength 20
+   */
+  ownerRole: string;
+  /** **Working** hours, resolved through B-024's calendar — never
+wall-clock. `null` where the figure is not a template-level one:
+§4A.1 gives Development as *"per SLA policy"*, so B-004 seeds it null
+on purpose and an empty field here means the same thing.
+ */
+  slaHours?: StageSlaHours;
+  /** Skippable, with a reason. */
+  isOptional: boolean;
+  /** Allowed **backward** targets, as stage codes in this template. §4A.1's
+loop-back table, stored as JSON because MySQL has no array type.
+ */
+  canReturnTo: string[];
+  /** @maxLength 30 */
+  icon?: StageIcon;
+  /** Stored ribbon order — 10, 20, 30 … */
+  seq: number;
+  /** 1-based index in the ribbon, left to right. */
+  position: number;
+  /** `ticket_stage_transitions` rows that have ever named this code on a
+ticket of this template. Above zero, the code is frozen.
+ */
+  transitionCount: number;
+  /** Tickets of this template sitting in this stage right now. What the
+reorder warning counts, and the second reason a code may be frozen.
+ */
+  openTicketCount: number;
+  /** Server-computed, so the form does not restate the rule. False once
+either count is above zero.
+ */
+  isCodeEditable: boolean;
 }

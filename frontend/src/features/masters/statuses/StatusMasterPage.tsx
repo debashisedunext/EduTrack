@@ -45,6 +45,7 @@ import {
   type MatrixRow,
   type StatusFormValues,
 } from './statusForm'
+import { StagesTab } from '../stages/StagesTab'
 import {
   useCreateStatus,
   useReplaceStatusTransitions,
@@ -57,9 +58,9 @@ import {
 /**
  * S-13 Status, Stage & Workflow Template Master. B-039 builds tab 1.
  *
- * §7.4 specifies three tabs — statuses, stages, workflow templates. Tabs 2 and 3
- * are B-040 and B-041, and they are rendered here as disabled tabs naming their
- * task rather than omitted. A screen that grows two tabs later is a screen whose
+ * §7.4 specifies three tabs — statuses, stages, workflow templates. B-040 filled
+ * in tab 2; tab 3 is B-041, and it is rendered here as a disabled tab naming its
+ * task rather than omitted. A screen that grows a tab later is a screen whose
  * shape nobody could see coming; one that shows them greyed out tells an Admin
  * what this master will hold and tells the next developer where their work goes.
  *
@@ -95,7 +96,12 @@ export function StatusMasterPage() {
           task in the tooltip is how the next developer finds where their screen
           goes without reading the backlog.
         */}
-        <TabButton id="stages" label="Stages" disabled title="B-040 — the ribbon's stages" />
+        <TabButton
+          id="stages"
+          label="Stages"
+          active={tab === 'stages'}
+          onSelect={() => setTab('stages')}
+        />
         <TabButton
           id="templates"
           label="Workflow templates"
@@ -105,6 +111,7 @@ export function StatusMasterPage() {
       </div>
 
       {tab === 'statuses' && <StatusesTab />}
+      {tab === 'stages' && <StagesTab />}
     </div>
   )
 }

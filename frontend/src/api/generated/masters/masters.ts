@@ -78,7 +78,6 @@ import type {
   ListRolesParams,
   ListStatusTransitionsParams,
   ListStatusesParams,
-  ListWorkflowTemplatesParams,
   ModuleListResponse,
   NotFoundResponse,
   NotificationTemplateListResponse,
@@ -103,6 +102,11 @@ import type {
   RolePatchRequest,
   RolePermissionsRequest,
   RoleWriteRequest,
+  StageListResponse,
+  StageOrderRequest,
+  StagePatchRequest,
+  StageResponse,
+  StageWriteRequest,
   StatusListResponse,
   StatusPatchRequest,
   StatusResponse,
@@ -3583,17 +3587,48 @@ export const useDeleteResourceLeave = <TError = UnauthorizedResponse | NotFoundR
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * @summary Workflow templates with their stages
+ * The three templates of §4A.9 — Standard Dev Flow, Support Fast-Track,
+Infra Flow — seeded by B-004. **A ribbon is a template's stages**, so this
+is the picker S-13 tab 2 opens with; the stages themselves are
+`listStages`, one call per template.
+
+**Declared since D-001 and served for the first time by B-040**, and the
+shape it was declared with did not survive contact with A-005's table.
+Three fields have been removed rather than faked:
+
+- `version` — `workflow_templates` has no version column. The blueprint's
+  "versioned by copy, never edited in place" is a rule the *designer*
+  (B-043) keeps by cloning, not a column, and emitting a hard-coded `1`
+  would have told every caller a lie it could not check.
+- `projectId`, `taskTypeId` — the project x task-type mapping of §4A.9 has
+  no table yet. It is **B-041**'s, and the two query parameters that
+  filtered on them went with the fields: a filter that silently ignores
+  its argument is worse than one that does not exist.
+
+**`stages` stays**, and the drafting of B-040 is what settled that: S-25's
+ticket list has been building its stage filter from this array since
+C-013, so dropping it would have broken a shipped screen to tidy a
+response. It carries the `WorkflowStage` vocabulary shape — code, name,
+sequence, owner role — and **not** the `Stage` rows S-13 tab 2 edits.
+
+Tab 2 reads `listStages` instead, and the reason is the `ETag`: the stage
+set is the unit of edit for `reorderStages`, so the precondition has to
+come from the read the screen actually holds the rows from. A tag on this
+response would move whenever any template changed.
+
+Every role may read this. A ribbon renders on every ticket page and names
+its template; concealing the list would blank a label, not a secret.
+
+ * @summary Workflow templates (S-13 tab 2's selector)
  */
 export const listWorkflowTemplates = (
-    params?: ListWorkflowTemplatesParams,
+    
  signal?: AbortSignal
 ) => {
       
       
       return http<WorkflowTemplateListResponse>(
-      {url: `/masters/workflow-templates`, method: 'GET',
-        params, signal
+      {url: `/masters/workflow-templates`, method: 'GET', signal
     },
       );
     }
@@ -3601,23 +3636,23 @@ export const listWorkflowTemplates = (
 
 
 
-export const getListWorkflowTemplatesQueryKey = (params?: ListWorkflowTemplatesParams,) => {
+export const getListWorkflowTemplatesQueryKey = () => {
     return [
-    `/masters/workflow-templates`, ...(params ? [params]: [])
+    `/masters/workflow-templates`
     ] as const;
     }
 
     
-export const getListWorkflowTemplatesQueryOptions = <TData = Awaited<ReturnType<typeof listWorkflowTemplates>>, TError = UnauthorizedResponse>(params?: ListWorkflowTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>>, }
+export const getListWorkflowTemplatesQueryOptions = <TData = Awaited<ReturnType<typeof listWorkflowTemplates>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListWorkflowTemplatesQueryKey(params);
+  const queryKey =  queryOptions?.queryKey ?? getListWorkflowTemplatesQueryKey();
 
   
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listWorkflowTemplates>>> = ({ signal }) => listWorkflowTemplates(params, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listWorkflowTemplates>>> = ({ signal }) => listWorkflowTemplates(signal);
 
       
 
@@ -3631,7 +3666,7 @@ export type ListWorkflowTemplatesQueryError = UnauthorizedResponse
 
 
 export function useListWorkflowTemplates<TData = Awaited<ReturnType<typeof listWorkflowTemplates>>, TError = UnauthorizedResponse>(
- params: undefined |  ListWorkflowTemplatesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>> & Pick<
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWorkflowTemplates>>,
           TError,
@@ -3641,7 +3676,7 @@ export function useListWorkflowTemplates<TData = Awaited<ReturnType<typeof listW
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListWorkflowTemplates<TData = Awaited<ReturnType<typeof listWorkflowTemplates>>, TError = UnauthorizedResponse>(
- params?: ListWorkflowTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>> & Pick<
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWorkflowTemplates>>,
           TError,
@@ -3651,19 +3686,19 @@ export function useListWorkflowTemplates<TData = Awaited<ReturnType<typeof listW
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListWorkflowTemplates<TData = Awaited<ReturnType<typeof listWorkflowTemplates>>, TError = UnauthorizedResponse>(
- params?: ListWorkflowTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Workflow templates with their stages
+ * @summary Workflow templates (S-13 tab 2's selector)
  */
 
 export function useListWorkflowTemplates<TData = Awaited<ReturnType<typeof listWorkflowTemplates>>, TError = UnauthorizedResponse>(
- params?: ListWorkflowTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWorkflowTemplates>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListWorkflowTemplatesQueryOptions(params,options)
+  const queryOptions = getListWorkflowTemplatesQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -3741,6 +3776,521 @@ export const useCreateWorkflowTemplate = <TError = ValidationFailedResponse | Co
       > => {
 
       const mutationOptions = getCreateWorkflowTemplateMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Blueprint §7.4's S-13 tab 2 — *"the ribbon stages: sequence, code, display
+name, owner role, icon, stage SLA hours, optional/mandatory, and the list
+of stages this one may return to"*.
+
+**A stage belongs to a template, and §7.4 reads as though it does not.**
+The tab is described as one flat list; `workflow_stages.template_id` is
+`NOT NULL` behind a cascading foreign key, so there is no such thing as a
+stage outside a template and no catalogue table for one to live in. A-005
+is the authority on implementation, so the tab carries a template selector
+and this route is scoped beneath it. Three templates, 8 + 5 + 5 stages.
+
+**Stage is not status.** §3 keeps them apart: a ticket can be
+`IN_PROGRESS` (status) while sitting in `QA` (stage). Tab 1 is *"is work
+moving?"*; this is *"who owns it right now?"* — which is what `ownerRole`
+makes enforceable, since only the current stage's owner, plus PM and
+Admin, may advance a ticket (§2's golden rule).
+
+Returned in `seq` order, ascending — left to right along the ribbon.
+
+**Carries an `ETag`, and it is the second collection read in this contract
+to do so.** `listStatusTransitions` (B-039) was the first, for the same
+reason: `reorderStages` rewrites the whole set at once and has no per-row
+verb to take a precondition from, so the tag comes from the collection or
+the reorder goes unguarded. A lost update on a reorder is the worst kind —
+two Admins each drag one row, and the second save silently restores the
+first's old order with nothing to show that it happened.
+
+Every role may read this. Stream C's ribbon renders `displayName`, `icon`
+and `slaHours` on every ticket page for every role, and a Developer who
+could not read the stage list could not see the segment they are standing
+in.
+
+ * @summary One template's stages, in ribbon order (S-13 tab 2)
+ */
+export const listStages = (
+    templateId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<StageListResponse>(
+      {url: `/masters/workflow-templates/${templateId}/stages`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListStagesQueryKey = (templateId?: number,) => {
+    return [
+    `/masters/workflow-templates/${templateId}/stages`
+    ] as const;
+    }
+
+    
+export const getListStagesQueryOptions = <TData = Awaited<ReturnType<typeof listStages>>, TError = UnauthorizedResponse | NotFoundResponse>(templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStages>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListStagesQueryKey(templateId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listStages>>> = ({ signal }) => listStages(templateId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(templateId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listStages>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListStagesQueryResult = NonNullable<Awaited<ReturnType<typeof listStages>>>
+export type ListStagesQueryError = UnauthorizedResponse | NotFoundResponse
+
+
+export function useListStages<TData = Awaited<ReturnType<typeof listStages>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ templateId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStages>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listStages>>,
+          TError,
+          Awaited<ReturnType<typeof listStages>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListStages<TData = Awaited<ReturnType<typeof listStages>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStages>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listStages>>,
+          TError,
+          Awaited<ReturnType<typeof listStages>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListStages<TData = Awaited<ReturnType<typeof listStages>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStages>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One template's stages, in ribbon order (S-13 tab 2)
+ */
+
+export function useListStages<TData = Awaited<ReturnType<typeof listStages>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStages>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListStagesQueryOptions(templateId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only — `master.write`. §2's row reads *"Master data (task types,
+SLA, **workflow**, holidays)"* and S-13 is titled *"Status, Stage &
+Workflow Template Master"*, so this capability needs no argument.
+
+**Appended to the end of the ribbon.** `seq` is assigned server-side as
+the next multiple of ten and is not in the request body, because
+`uq_workflow_stages_seq (template_id, seq)` makes a caller-chosen value a
+collision the caller cannot see coming. Put the stage where it belongs
+with `reorderStages` afterwards; the S-13 form does exactly that.
+
+**`stageCode` becomes permanent the moment a ticket enters it**, so the
+dialog says so before the save. See `updateStage`.
+
+**`canReturnTo` may only name stages already in this template.** A new
+stage is appended last, so at creation every existing stage is a legal
+backward target and none of them is this one.
+
+ * @summary Add a stage to a template (S-13 tab 2)
+ */
+export const createStage = (
+    templateId: number,
+    stageWriteRequest: StageWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<StageResponse>(
+      {url: `/masters/workflow-templates/${templateId}/stages`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: stageWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateStageMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createStage>>, TError,{templateId: number;data: StageWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createStage>>, TError,{templateId: number;data: StageWriteRequest}, TContext> => {
+
+const mutationKey = ['createStage'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createStage>>, {templateId: number;data: StageWriteRequest}> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  createStage(templateId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateStageMutationResult = NonNullable<Awaited<ReturnType<typeof createStage>>>
+    export type CreateStageMutationBody = StageWriteRequest
+    export type CreateStageMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse
+
+    /**
+ * @summary Add a stage to a template (S-13 tab 2)
+ */
+export const useCreateStage = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createStage>>, TError,{templateId: number;data: StageWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createStage>>,
+        TError,
+        {templateId: number;data: StageWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateStageMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Admin only. §7.4's *"Drag to reorder"*, and the whole ordered set in one
+request — `stageIds` must be **every** stage of this template exactly
+once. A partial list is refused with `400` rather than interpreted:
+moving one row changes the position of every row after it, so a request
+naming only the dragged stage would leave the server guessing which of two
+orders the screen was showing.
+
+`seq` is rewritten to 10, 20, 30 … in the order given, in **two passes
+inside one transaction**. `uq_workflow_stages_seq` is a unique key and
+MySQL enforces it per row rather than at statement end, so writing the
+final values directly collides the moment two stages swap. The gap of ten
+is B-004's seeding convention, kept.
+
+**Refused with `409` when the new order would leave a `canReturnTo`
+pointing forwards.** A return target is a *backward* target — §4A.1's
+loop-back table is entirely backward moves, and a forward "return" is an
+ordinary advance with a reason attached. So dragging `DEV` past `QA` while
+`QA → DEV` exists is refused, naming every pair it would break, rather
+than saved into a ribbon whose arrows point the wrong way. Clear the
+return target first, or drag the other row.
+
+**Reordering a template with live tickets changes the ribbon those tickets
+render.** The blueprint's *"versioned by copy, never edited in place"*
+(§4A.5) is kept by B-043's designer cloning a template, not by this route
+refusing: there is no version column to clone into yet, and a tab that
+refused every template with an open ticket would refuse all three seeded
+ones and be unusable on day one. `openTicketCount` is on every stage so
+the screen can warn with a number before the drag is saved.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the tag from `listStages`.
+
+ * @summary Drag to reorder the ribbon (S-13 tab 2)
+ */
+export const reorderStages = (
+    templateId: number,
+    stageOrderRequest: StageOrderRequest,
+ ) => {
+      
+      
+      return http<StageListResponse>(
+      {url: `/masters/workflow-templates/${templateId}/stages/order`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: stageOrderRequest
+    },
+      );
+    }
+  
+
+
+export const getReorderStagesMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderStages>>, TError,{templateId: number;data: StageOrderRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof reorderStages>>, TError,{templateId: number;data: StageOrderRequest}, TContext> => {
+
+const mutationKey = ['reorderStages'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reorderStages>>, {templateId: number;data: StageOrderRequest}> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  reorderStages(templateId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReorderStagesMutationResult = NonNullable<Awaited<ReturnType<typeof reorderStages>>>
+    export type ReorderStagesMutationBody = StageOrderRequest
+    export type ReorderStagesMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Drag to reorder the ribbon (S-13 tab 2)
+ */
+export const useReorderStages = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderStages>>, TError,{templateId: number;data: StageOrderRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reorderStages>>,
+        TError,
+        {templateId: number;data: StageOrderRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getReorderStagesMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **Exists to carry the `ETag` the `PATCH` requires as `If-Match`**, per
+CONVENTIONS.md §5 — the same gap B-011, B-016, B-020, B-021 and B-039
+closed for users, projects, task types, levels and statuses. A write whose
+precondition has no read to come from is uncallable.
+
+The tag covers `transitionCount` and `openTicketCount` as well as the
+content. Those two decide whether `stageCode` may still be edited, so a
+ticket entering this stage while the dialog is open costs a reload — which
+is right, because it changes the answer.
+
+ * @summary One stage (S-13 tab 2)
+ */
+export const getStage = (
+    templateId: number,
+    stageId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<StageResponse>(
+      {url: `/masters/workflow-templates/${templateId}/stages/${stageId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetStageQueryKey = (templateId?: number,
+    stageId?: number,) => {
+    return [
+    `/masters/workflow-templates/${templateId}/stages/${stageId}`
+    ] as const;
+    }
+
+    
+export const getGetStageQueryOptions = <TData = Awaited<ReturnType<typeof getStage>>, TError = UnauthorizedResponse | NotFoundResponse>(templateId: number,
+    stageId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStage>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetStageQueryKey(templateId,stageId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getStage>>> = ({ signal }) => getStage(templateId,stageId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(templateId && stageId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getStage>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetStageQueryResult = NonNullable<Awaited<ReturnType<typeof getStage>>>
+export type GetStageQueryError = UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetStage<TData = Awaited<ReturnType<typeof getStage>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ templateId: number,
+    stageId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStage>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStage>>,
+          TError,
+          Awaited<ReturnType<typeof getStage>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetStage<TData = Awaited<ReturnType<typeof getStage>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ templateId: number,
+    stageId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStage>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStage>>,
+          TError,
+          Awaited<ReturnType<typeof getStage>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetStage<TData = Awaited<ReturnType<typeof getStage>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ templateId: number,
+    stageId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStage>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One stage (S-13 tab 2)
+ */
+
+export function useGetStage<TData = Awaited<ReturnType<typeof getStage>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ templateId: number,
+    stageId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStage>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetStageQueryOptions(templateId,stageId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Admin only. A partial update — an omitted field keeps its stored value.
+
+**`seq` is not in this body.** Order is `reorderStages` and only
+`reorderStages`, because one row's `seq` cannot change without deciding
+what happens to the rows it displaces.
+
+**`stageCode` is in the body only so that changing it can be refused once
+the stage is in use**, exactly as `code` is on task types, levels and
+statuses — and here the consequence is the widest in the product.
+`ticket_stage_transitions.to_stage` stores the code as plain text with no
+foreign key, and the stage-SLA scanner joins on
+`workflow_stages.stage_code = ticket_stage_transitions.to_stage`. Renaming
+a code in use therefore does two things at once and neither of them fails:
+every historical ribbon segment stops resolving to a stage, and the §4A.7
+"stuck in stage" scan stops matching those rows and silently never alerts
+on them again. Refused with `409` when `transitionCount` or
+`openTicketCount` is above zero; allowed on a stage nothing has entered
+yet, which is the only case where it is provably safe.
+
+**`ownerRole` may be changed at any time, including on a live stage, and
+that is the point of the master.** It reassigns who may advance every
+ticket currently sitting here. Validated against `roles.code` —
+`owner_role` carries no foreign key, so a typo would not fail loudly, it
+would leave a segment no role on earth can move.
+
+**`canReturnTo` may only name stages in this template, never this stage,
+and always one earlier in the order** — the same backward rule
+`reorderStages` enforces from the other side. Field-keyed `400`.
+
+**There is no delete, and the absence is the design.** §7.4: *"Stages used
+by live tickets can only be deprecated, never deleted — otherwise
+historical ribbons would break."* The deprecation flag and its guard are
+**B-042**; until they land this screen offers no removal at all, rather
+than a delete B-042 would have to take away. A stage added by mistake is
+edited, not removed.
+
+`If-Match` is required, not optional; a write without one is refused with
+`428`. Read the current tag from `GET .../stages/{stageId}`.
+
+ * @summary Edit a stage (S-13 tab 2)
+ */
+export const updateStage = (
+    templateId: number,
+    stageId: number,
+    stagePatchRequest: StagePatchRequest,
+ ) => {
+      
+      
+      return http<StageResponse>(
+      {url: `/masters/workflow-templates/${templateId}/stages/${stageId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: stagePatchRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateStageMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateStage>>, TError,{templateId: number;stageId: number;data: StagePatchRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateStage>>, TError,{templateId: number;stageId: number;data: StagePatchRequest}, TContext> => {
+
+const mutationKey = ['updateStage'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateStage>>, {templateId: number;stageId: number;data: StagePatchRequest}> = (props) => {
+          const {templateId,stageId,data} = props ?? {};
+
+          return  updateStage(templateId,stageId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateStageMutationResult = NonNullable<Awaited<ReturnType<typeof updateStage>>>
+    export type UpdateStageMutationBody = StagePatchRequest
+    export type UpdateStageMutationError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Edit a stage (S-13 tab 2)
+ */
+export const useUpdateStage = <TError = ValidationFailedResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateStage>>, TError,{templateId: number;stageId: number;data: StagePatchRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateStage>>,
+        TError,
+        {templateId: number;stageId: number;data: StagePatchRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateStageMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
