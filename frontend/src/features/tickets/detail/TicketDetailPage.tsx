@@ -21,6 +21,8 @@ import { useTicketComments } from '../comments/useTicketComments'
 import { HistoryTab } from '../history/HistoryTab'
 import { useTicketHistory } from '../history/useTicketHistory'
 import { EffortTab } from '../effort/EffortTab'
+import { JourneyTab } from '../journey/JourneyTab'
+import { useJourneyTab } from '../journey/useJourneyTab'
 import { useEffortTab } from '../effort/useEffortTab'
 
 import { canChangeLevel } from './levelChange'
@@ -35,6 +37,10 @@ const DEFAULT_TAB = 'journey'
 
 /** Every tab in S-20, each pointing at the task that fills it. */
 const TAB_OWNERS: { id: string; label: string; owner: string; note?: string }[] = [
+  // `note` is dead for this one now too — `JourneyTab` never reads it — kept for
+  // the same one-line-description reason C-059's and C-061's identical comments
+  // give. The active/idle half of the note is still accurate as a description of
+  // where the tab is going: C-056 adds the idle column, C-057 the roll-up.
   { id: 'journey', label: 'Journey', owner: 'C-055', note: 'The stage-by-stage roll-up — every hop, its duration, and the active-versus-idle split.' },
   // C-059 fills this one too, same reason C-029's comments entry does below:
   // kept here so the strip's order, labels and ownership stay in one list,
@@ -175,6 +181,10 @@ export function TicketDetailPage() {
   // C-061 · gated on the tab being open — `useEffortTab`'s own note on why,
   // and the identical rule `useTicketHistory`/`useAttachmentsTab` follow.
   const effortTab = useEffortTab({ ticketId, cycle, enabled: ticketId.length > 0 && activeTab === 'effort' })
+  // C-055 · same gate as the three above. Unlike them this one forwards `cycle`
+  // as the *scope* rather than a narrowing filter — §4A.4's grid is one cycle's
+  // journey, because `iterationNo` restarts at 1 on a reopen.
+  const journeyTab = useJourneyTab({ ticketId, cycle, enabled: ticketId.length > 0 && activeTab === 'journey' })
   // `ticket` is still possibly undefined here — the pending/404 guards below
   // haven't run yet at this point in the render — so this mirrors `taskTypeName`
   // and `contactName` above rather than `TicketSummaryPanel`'s narrowed `ticket`.
@@ -229,11 +239,16 @@ export function TicketDetailPage() {
               isLoadingMore={effortTab.isLoadingMore}
               onLoadMore={effortTab.loadMore}
             />
+          ) : id === 'journey' ? (
+            <JourneyTab rows={journeyTab.rows} isLoading={journeyTab.isLoading} loadError={journeyTab.loadError} />
           ) : (
             <PendingSection title={`${label} tab`} owner={owner} note={note} />
           ),
       })),
     [
+      journeyTab.rows,
+      journeyTab.isLoading,
+      journeyTab.loadError,
       comments.comments,
       comments.isLoading,
       comments.loadError,
