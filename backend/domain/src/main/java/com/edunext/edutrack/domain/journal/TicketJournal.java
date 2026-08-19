@@ -474,6 +474,37 @@ public class TicketJournal {
         return all.stream().filter(e -> e.getCycleNo() == cycleNo).toList();
     }
 
+    /**
+     * C-042 · where a ticket's ribbon is right now, if anywhere.
+     *
+     * <p>The transition service builds its next hop from this row —
+     * {@code toStage} becomes {@code fromStage}, {@code toUserId} becomes
+     * {@code fromUserId}, and {@code seqNo}/{@code iterationNo} are the numbers
+     * it counts up from — and had no sanctioned way to read it:
+     * {@code TicketStageTransitionRepository} is behind this package's door, and
+     * A-037 forbids reaching it from {@code api.feature.transitions} directly.
+     * {@link #historyFor} and {@link #effortFor} already establish that a plain
+     * read costs the append-only guarantee nothing, so this widens the same
+     * door rather than cutting a new one.
+     *
+     * <p>⚠ <b>Touches Stream A's {@code domain/journal/}</b> (TEAM-PLAN.md §6).
+     * Added for C-042 on the precedent {@code ScopedTickets#byIds} records for
+     * A-037's other side of the same rule; flagged for Shivendra's sign-off
+     * rather than done quietly.
+     *
+     * @return the hop with {@code exitedAt} still null, or empty if the ticket
+     *         has no open segment — no first hop ever written, most notably.
+     *         {@code ReopenService}'s own javadoc names the other case this
+     *         resolves for free once a caller advances a reopened ticket: the
+     *         still-open hop it deliberately left at the sealed cycle's last
+     *         stage comes back here exactly as any other open hop would.
+     */
+    @Transactional(readOnly = true)
+    public Optional<TicketStageTransition> openHopFor(Long ticketId) {
+        require(ticketId != null, "a ticket id is required to read the open hop");
+        return transitions.findByCurrentTicketId(ticketId);
+    }
+
     // ------------------------------------------------------------------
     // Shared guards
     // ------------------------------------------------------------------
