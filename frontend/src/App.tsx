@@ -10,6 +10,7 @@ import {
   TICKET_ROUTE,
 } from './features/tickets/detail/entityLinks'
 import { TicketListPage } from './features/tickets/list/TicketListPage'
+import { BulkReassignWizardPage } from './features/tickets/reassign/BulkReassignWizardPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ClientListPage } from './features/clients/ClientListPage'
@@ -70,22 +71,14 @@ export default function App() {
                 the static segment higher regardless of order. */}
             <Route path="/tickets/new" element={<CreateTicketPage />} />
             {/*
-              S-24, the bulk reassignment wizard. Stream C's C-063 replaces this
-              element; B-014 declares the route because the Resource Master now
-              links into it — deactivating somebody who holds open tickets sends
-              the admin here with `?fromUserId=…&returnTo=…`, per
-              `features/masters/resources/reassignHandoff.ts`.
-
-              Declared rather than left to the catch-all for the reason the three
-              routes below give: an unbuilt screen and a broken link look
-              identical to a user, and only one of them is worth reporting.
-              **Flagged for Stream C** — one line in a shared file, replaced by
-              one line when C-063 lands.
+              S-24, the bulk reassignment wizard — C-063. B-014 declared this
+              route as a placeholder because the Resource Master links into it —
+              deactivating somebody who holds open tickets sends the admin here
+              with `?fromUserId=…&returnTo=…`, per
+              `features/masters/resources/reassignHandoff.ts` — and C-063 is
+              what replaces the placeholder with the real screen.
             */}
-            <Route
-              path="/tickets/bulk-reassign"
-              element={<ScreenPlaceholder title="Bulk reassignment wizard" />}
-            />
+            <Route path="/tickets/bulk-reassign" element={<BulkReassignWizardPage />} />
             <Route path={TICKET_ROUTE} element={<TicketDetailPage />} />
             <Route path="/projects" element={<ScreenPlaceholder title="Projects" />} />
             {/*

@@ -192,6 +192,17 @@ final class PermissionMatrix {
     private static final String CHANGE_PRIORITY = """
             {"level":"HIGH"}""";
 
+    /**
+     * C-063 · {@code BulkReassignDtos.BulkReassignRequest}: {@code ticketIds}
+     * is {@code @NotEmpty}, {@code toUserId} is {@code @NotNull} and
+     * {@code reason} is {@code @Size(min = 3)}. The id names no real ticket —
+     * an allowed row is entitled to reach the handler and fail on the missing
+     * row (or, here, on the unreachable database), and a denied row never gets
+     * that far, which is the only distinction this matrix measures.
+     */
+    private static final String BULK_REASSIGN = """
+            {"ticketIds":["CRM-26-00347"],"toUserId":1,"reason":"Matrix fixture reassignment"}""";
+
     /** {@code TwoFactorRequests.ConfirmRequest}: six digits exactly. */
     private static final String TOTP_CODE = """
             {"code":"123456"}""";
@@ -797,6 +808,19 @@ final class PermissionMatrix {
             // caller's own ?projectId= is ANDed underneath that, so a filter
             // can only narrow what they already see and never widen it.
             everyRole("GET", "/api/v1/tickets"),
+
+            // ── bulk reassignment · C-063, S-17 and S-24 ─────────────────────
+            // Admin and PM, stated as an explicit matrix in the route's own
+            // contract text rather than named as a §2 capability — see
+            // BulkReassignController's note on why no seeded code has this
+            // exact grant set, and why ticket.assign (Admin, PM, Support) is
+            // the wrong one to borrow: this route is narrower by one role.
+            //
+            // *Which* tickets is not this file's question either way:
+            // ScopedTickets applies row scope inside the service, so a PM
+            // reaching past their own projects gets a per-ticket "Not found or
+            // out of scope" in the result, never a 403 (A-035).
+            adminAndPm("POST", "/api/v1/tickets/bulk-reassign", BULK_REASSIGN),
 
             // ── dashboard · A-054, and the same reasoning one step further ───
             //

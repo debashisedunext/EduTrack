@@ -298,7 +298,7 @@ Added 11 Aug 2026 at the client's request; blueprint revision 1.3 (§7.5, §8.2)
 - [ ] **C-060** Attachments tab — gallery, filterable by client-visible, grouped by cycle and stage.
 - [ ] **C-061** Effort tab — every log line, sum per cycle + grand total.
 - [ ] **C-062** Stage Queue / team inbox — "Waiting in QA", "Waiting in Deployment", sorted by time-in-stage descending. The landing page for QA and Deployment. **S-31**
-- [ ] **C-063** Bulk reassignment wizard — source resource → tickets → target → reason → confirm. Each move writes its own history entry. **S-24**
+- [x] **C-063** Bulk reassignment wizard — source resource → tickets → target → reason → confirm. Each move writes its own history entry. **S-24**
 - [ ] **C-064** Ticket linking — blocks / is blocked by / duplicate of / relates to.
 
 **Exit:** blueprint §14 walkthrough A runs end to end — 8 stages, a QA rework, a reopen into cycle 2, and a Journey grid reconciling to 38.0 h across 5 resources and 3 iterations.
