@@ -222,7 +222,7 @@ export const createTicketBody = zod.object({
   "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   "clientId": zod.number().nullish(),
   "clientContactId": zod.number().nullish(),
-  "isClientRaised": zod.boolean().optional(),
+  "isClientRaised": zod.boolean().optional().describe('Ignored on write — §4B.2: the server derives this from whether\n`clientId` and `clientContactId` are both set, never from what the\ncaller sends. Present on the request only so a client that still\nround-trips a `Ticket` it read back onto a new one is not refused\nfor an extra field; the value that matters is on the response.\n'),
   "assigneeId": zod.number().nullish(),
   "watcherIds": zod.array(zod.number()).optional(),
   "estimatedHrs": zod.number().nullish(),

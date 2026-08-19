@@ -121,6 +121,12 @@ describe('toCreateRequest', () => {
     expect(createTicketBody.safeParse(body)).toMatchObject({ success: true })
   })
 
+  it('marks a ticket client-raised only when both the client and its contact are set — C-022, §4B.2', () => {
+    expect(toCreateRequest({ ...valid, clientId: 1, clientContactId: 2 }).isClientRaised).toBe(true)
+    expect(toCreateRequest({ ...valid, clientId: 1, clientContactId: null }).isClientRaised).toBe(false)
+    expect(toCreateRequest({ ...valid, clientId: null, clientContactId: null }).isClientRaised).toBe(false)
+  })
+
   it('omits plannedCloseDate entirely when blank', () => {
     // Omitted means "compute it from the SLA policy". An explicit null would
     // mean "this ticket has no planned close date", which takes it out of every
@@ -205,7 +211,6 @@ describe('retainedForNextTicket', () => {
     ...valid,
     clientId: 3,
     clientContactId: 7,
-    isClientRaised: true,
     assigneeId: 9,
     watcherIds: [4, 5],
     plannedCloseDate: '2026-08-20T17:30',
@@ -220,7 +225,6 @@ describe('retainedForNextTicket', () => {
       clientContactId: 7,
       taskTypeId: 5,
       level: 'HIGH',
-      isClientRaised: true,
       assigneeId: 9,
       watcherIds: [4, 5],
     })

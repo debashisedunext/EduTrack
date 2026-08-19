@@ -918,25 +918,15 @@ export function CreateTicketPage() {
 
         {/* ── Extra ────────────────────────────────────────────────────── */}
         <FieldGroup title="Extra">
-          <FormField
-            id="isClientRaised"
-            label="Client-raised"
-            error={errors.isClientRaised?.message}
-            hint="Drives the client-wise reports, the CSAT survey and the client-visible default on comments."
-            className="sm:col-span-2"
-          >
-            {(aria) => (
-              <label className="flex h-10 items-center gap-2 text-sm text-content">
-                <input
-                  {...aria}
-                  {...register('isClientRaised')}
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
-                />
-                This ticket was raised by the client
-              </label>
-            )}
-          </FormField>
+          {/*
+            C-022 · §4B.2: "When the client is set and the reporter is a
+            client contact, the ticket is marked client-raised" — a fact the
+            server derives from the Core group's two fields above, not a
+            choice offered here. S-19's own field table (§7.5) has no
+            Client-raised row for the same reason Ticket ID and Assigned By
+            have none: it is written, not filled in. `toCreateRequest` sends
+            the derived value; nothing renders it on this form.
+          */}
 
           {/*
             Deferred mode — there is no ticket to attach to until the 201 comes

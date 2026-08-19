@@ -7403,7 +7403,15 @@ components:
         level: { $ref: '#/components/schemas/Level' }
         clientId: { type: [integer, 'null'], format: int64 }
         clientContactId: { type: [integer, 'null'], format: int64 }
-        isClientRaised: { type: boolean, default: false }
+        isClientRaised:
+          type: boolean
+          default: false
+          description: |
+            Ignored on write — §4B.2: the server derives this from whether
+            `clientId` and `clientContactId` are both set, never from what the
+            caller sends. Present on the request only so a client that still
+            round-trips a `Ticket` it read back onto a new one is not refused
+            for an extra field; the value that matters is on the response.
         assigneeId: { type: [integer, 'null'], format: int64 }
         watcherIds: { type: array, items: { type: integer, format: int64 } }
         estimatedHrs: { type: [number, 'null'], format: double }

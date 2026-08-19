@@ -75,7 +75,6 @@ export interface TicketFormValues {
   level: Level | null
   clientId: number | null
   clientContactId: number | null
-  isClientRaised: boolean
   assigneeId: number | null
   watcherIds: number[]
   estimatedHrs: string
@@ -91,7 +90,6 @@ export const emptyTicketForm: TicketFormValues = {
   level: null,
   clientId: null,
   clientContactId: null,
-  isClientRaised: false,
   assigneeId: null,
   watcherIds: [],
   estimatedHrs: '',
@@ -176,7 +174,6 @@ export function ticketFormSchema(
         .refine((v) => v !== null, { message: 'Select a priority level' }),
       clientId: optionalId,
       clientContactId: optionalId,
-      isClientRaised: z.boolean(),
       assigneeId: optionalId,
       watcherIds: z.array(z.number().int().positive()),
       // Blank is reachable only on the draft path, where it means "not
@@ -263,7 +260,15 @@ export function toCreateRequest(
     level,
     clientId: values.clientId,
     clientContactId: values.clientContactId,
-    isClientRaised: values.isClientRaised,
+    // §4B.2: "When the client is set and the reporter is a client contact, the
+    // ticket is marked client-raised" — derived, never a choice the user
+    // makes. `clientContactId` *is* "the reporter is a client contact" here:
+    // it is the person S-19's Client contact dropdown names as who reported
+    // it, so its presence alongside a client is the whole rule. The server is
+    // still the authority (C-022's mock recomputes rather than trusting this),
+    // the same trust boundary C-012's SLA preview draws for a value the
+    // browser could get right most of the time and be silently wrong the rest.
+    isClientRaised: values.clientId != null && values.clientContactId != null,
     assigneeId: values.assigneeId,
     watcherIds: values.watcherIds,
     ...(description ? { description } : {}),
@@ -295,7 +300,6 @@ export function retainedForNextTicket(values: TicketFormValues): Partial<TicketF
     clientContactId: values.clientContactId,
     taskTypeId: values.taskTypeId,
     level: values.level,
-    isClientRaised: values.isClientRaised,
     assigneeId: values.assigneeId,
     // Copied, not aliased — the array in the request body that was just sent
     // must not be the one the next ticket's picker mutates.

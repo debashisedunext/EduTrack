@@ -52,7 +52,9 @@ the two keys *differ* catches it; `mints a fresh idempotency key for the second
 ticket of a batch` is that assertion.
 
 It keeps what a batch shares — project, client, contact, task type, level,
-client-raised, assignee, watchers — and clears what describes one ticket. Then
+assignee, watchers — and clears what describes one ticket. Client-raised is
+not named here because C-022 made it derived rather than carried state; see
+below. Then
 it moves focus back to the title, which has to happen in an effect rather than
 inline: `reset` drops React Hook Form's field-ref registry and lets the inputs
 re-register as they render, so a `setFocus` in the same tick looks up a field
@@ -133,6 +135,25 @@ as `LabelledWithError`.
 **The watcher multi-select is feature-local.** It is the only multi-select in the
 product so far, and anything in `components/ui/` becomes a contract the other
 three streams depend on. Promote it when a second caller appears.
+
+**Client-raised is derived, not a field — C-022, §4B.2.** "When the client is
+set and the reporter is a client contact, the ticket is marked client-raised"
+is not a row in §7.5's own S-19 table (Ticket ID and Assigned By are the same
+kind of absence, for the same reason), so the Extra group's checkbox this task
+started as was a stand-in that let the wrong thing drift onto the wire: a user
+could mark a ticket client-raised with no client on it at all, or leave a
+genuinely client-raised ticket unmarked. `toCreateRequest` now sends
+`clientId != null && clientContactId != null` — `clientContactId` already
+means "the individual who reported it", so its presence alongside a client
+*is* the rule, not a proxy for it. The mock recomputes the same way rather
+than trusting `body.isClientRaised`, the same trust boundary C-012 draws for
+the SLA preview: a value the browser could derive right most of the time and
+be silently wrong the rest is one the server should not have to take on
+faith. Drives the client-wise reports and the CSAT survey per §4B.2 — neither
+built yet, both Stream A/D's. The third half of §4B.2's sentence, the
+client-visible default on comments, is a **recorded deviation**: `CommentBox`
+(C-031) defaults every comment to internal regardless of this flag, per §16's
+later recommendation — see its own doc comment, not repeated here.
 
 ## Deliberately not here
 
