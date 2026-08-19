@@ -89,6 +89,22 @@ class MailThreadingIT {
         when(templates.findByEventCodeAndChannel(anyString(), anyString())).thenReturn(Optional.empty());
         MailContextRepository context = mock(MailContextRepository.class);
         when(context.forTicket(anyLong())).thenReturn(MailContext.empty());
+        // The ticketless branch, which aSystemMailCarriesNoReferences is the
+        // only test here to take.
+        //
+        // It needed no stub until A-065: MailRenderer chose MailContext.empty()
+        // for a mail with no ticket, which is a static call and cannot be
+        // absent. A-065 changed that one line to context.base() so that a
+        // non-ticket mail could carry {{portal_url}} — correctly, and its own
+        // javadoc flags the edit as Stream A's work in Stream D's file — but
+        // this fixture was not told. An unstubbed Mockito mock answers null,
+        // so layout() dereferenced it and the test died on an NPE rather than
+        // on anything to do with threading.
+        //
+        // empty() rather than base(): this IT is about the headers that reach
+        // the server, not about substitution, and the sibling stub above makes
+        // the same choice for the same reason.
+        when(context.base()).thenReturn(MailContext.empty());
 
         ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
         resolver.setPrefix("templates/");
