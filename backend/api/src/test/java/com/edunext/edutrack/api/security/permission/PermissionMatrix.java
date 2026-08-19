@@ -691,6 +691,15 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/tickets/{ticketId}/effort", EFFORT_LOG),
             everyRole("GET", "/api/v1/tickets/{ticketId}/effort-logs"),
 
+            // ── history · C-059, §7/§4B.5 ────────────────────────────────────
+            // isAuthenticated() rather than a capability, on the identical
+            // argument as the effort-log and comment reads one and forty lines
+            // up: reading a ticket's own history is not a privileged act once
+            // ScopedTickets has already decided the caller may see the ticket
+            // at all. *Which* tickets is not this file's question — a ticket
+            // outside the caller's scope is 404 (A-035) whatever they hold.
+            everyRole("GET", "/api/v1/tickets/{ticketId}/history"),
+
             // ── quick update · C-036, S-21 ────────────────────────────────────
             // The same ticket.update_progress as the effort row one line up —
             // S-21's own status dropdown and effort field are the same
