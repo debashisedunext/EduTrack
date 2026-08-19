@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.tickets.detail;
 
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
+import com.edunext.edutrack.api.feature.tickets.links.TicketLinkService;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketAttachment;
@@ -93,19 +94,22 @@ class TicketDetailService {
     private final TicketCommentRepository comments;
     private final TicketAttachmentRepository attachments;
     private final TicketWatcherRepository watchers;
+    private final TicketLinkService links;
 
     TicketDetailService(ScopedTickets tickets,
                         TicketCycleRepository cycles,
                         TicketJournal journal,
                         TicketCommentRepository comments,
                         TicketAttachmentRepository attachments,
-                        TicketWatcherRepository watchers) {
+                        TicketWatcherRepository watchers,
+                        TicketLinkService links) {
         this.tickets = tickets;
         this.cycles = cycles;
         this.journal = journal;
         this.comments = comments;
         this.attachments = attachments;
         this.watchers = watchers;
+        this.links = links;
     }
 
     /**
@@ -137,6 +141,7 @@ class TicketDetailService {
                         .map(this::toAttachment).toList(),
                 watchers.findByIdTicketId(ticketId).stream()
                         .map(w -> new TicketDetailDtos.UserRef(w.getId().getUserId())).toList(),
+                links.viewsFor(caller, ticket),
                 null);  // availableActions — C-043, see the class note
     }
 

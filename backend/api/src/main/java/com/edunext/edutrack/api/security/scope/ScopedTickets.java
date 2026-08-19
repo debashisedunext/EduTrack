@@ -94,6 +94,29 @@ public class ScopedTickets {
         return tickets.findAll(scoped(caller, criteria), sort);
     }
 
+    /**
+     * C-064 · batch form of {@link #byId}, for rendering references to
+     * <em>other</em> tickets a caller did not ask for by id — the far side of
+     * a link, one per row of a {@code linkedTickets} panel. Ids outside the
+     * caller's scope are silently absent from the result, the same
+     * "absence, not refusal" contract every other method here keeps; a
+     * caller wanting to know <em>which</em> ids were dropped is asking the
+     * question this class exists to refuse.
+     *
+     * <p>⚠ Touches Stream A's {@code api/security/} (TEAM-PLAN.md §6).
+     * Added here rather than reimplemented in {@code feature/tickets/links/}
+     * because A-037's {@code ScopeGuardRulesTest} forbids any class outside
+     * this package from touching {@link TicketRepository} directly — the
+     * same rule {@link #byId} and {@link #byCode} exist to satisfy. Flagged
+     * for Shivendra's sign-off rather than done quietly.
+     */
+    public List<Ticket> byIds(Authentication caller, java.util.Collection<Long> ticketIds) {
+        if (ticketIds == null || ticketIds.isEmpty()) {
+            return List.of();
+        }
+        return tickets.findAll(scoped(caller, hasIdIn(ticketIds)));
+    }
+
     public Page<Ticket> page(Authentication caller, Specification<Ticket> criteria, Pageable pageable) {
         return tickets.findAll(scoped(caller, criteria), pageable);
     }
@@ -148,5 +171,9 @@ public class ScopedTickets {
 
     private static Specification<Ticket> hasCode(String ticketCode) {
         return (root, query, builder) -> builder.equal(root.get("ticketCode"), ticketCode);
+    }
+
+    private static Specification<Ticket> hasIdIn(java.util.Collection<Long> ids) {
+        return (root, query, builder) -> root.get("id").in(ids);
     }
 }

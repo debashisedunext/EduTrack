@@ -5,6 +5,7 @@ import { AlertTriangle } from 'lucide-react'
 
 import type { Cycle } from '@/api/generated/model/cycle'
 import type { HistoryEntry } from '@/api/generated/model/historyEntry'
+import type { LinkedTicket } from '@/api/generated/model/linkedTicket'
 import type { Ticket } from '@/api/generated/model/ticket'
 import type { UserRef } from '@/api/generated/model/userRef'
 
@@ -16,6 +17,7 @@ import { STATUS_LABEL, STATUS_VARIANT } from '../list/columns'
 import { clientPath, cycleEffortPath, projectPath, resourcePath } from './entityLinks'
 import { slaClockStart } from './levelChange'
 import { TicketLevelControl } from './TicketLevelControl'
+import { TicketLinksControl } from './TicketLinksControl'
 import {
   ageInDays,
   assignedBy,
@@ -30,6 +32,10 @@ export interface TicketSummaryPanelProps {
   cycles?: Cycle[]
   history?: HistoryEntry[]
   watchers?: UserRef[]
+  /** C-064 · blueprint §16 item 17 — blocks / is blocked by / duplicate of / relates to. */
+  linkedTickets?: LinkedTicket[]
+  /** C-064 · refetch after a link is added or removed. */
+  onLinksChanged?: () => void
   /** Which cycle the page is showing. Highlighted in the Cycles row. */
   selectedCycleNo: number
   /** `Ticket.taskTypeId` names a master row the payload does not embed. */
@@ -126,6 +132,8 @@ export function TicketSummaryPanel({
   cycles,
   history,
   watchers,
+  linkedTickets,
+  onLinksChanged,
   selectedCycleNo,
   taskTypeName,
   contactName,
@@ -297,6 +305,21 @@ export function TicketSummaryPanel({
           ) : (
             <span className="text-content-muted">None</span>
           )}
+        </Row>
+
+        {/*
+          Blueprint §16 item 17 and §7.5's create-form row, and the last of
+          C-019's "every entity is a link" traceability rules: linked ticket
+          → that ticket. `TicketLinksControl` is both the display and the
+          editor — add/remove is `ticket.update_progress`, which all six
+          roles hold, so unlike Level this row carries no `canEdit` gate.
+        */}
+        <Row label="Linked">
+          <TicketLinksControl
+            ticketId={ticket.ticketId}
+            links={linkedTickets}
+            onChanged={() => onLinksChanged?.()}
+          />
         </Row>
       </dl>
     </aside>

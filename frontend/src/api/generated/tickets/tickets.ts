@@ -74,6 +74,8 @@ import type {
   BulkResultResponse,
   ChangeTicketPriorityBody,
   CloseRequest,
+  ConflictResponse,
+  CreateTicketLinkRequest,
   EffortLogListResponse,
   EffortLogRequest,
   EffortLogResponse,
@@ -81,6 +83,7 @@ import type {
   ForbiddenResponse,
   GetTicketDetailParams,
   HistoryListResponse,
+  LinkedTicketResponse,
   ListEffortLogsParams,
   ListTicketEmailsParams,
   ListTicketHistoryParams,
@@ -856,6 +859,160 @@ export function useGetTicketDetail<TData = Awaited<ReturnType<typeof getTicketDe
 
 
 /**
+ * `linkType` reads **from this ticket to the target**: `BLOCKS` means this
+ticket blocks the target, `DUPLICATE_OF` means this ticket is a duplicate
+of the target. `BLOCKS`/`BLOCKED_BY` is one relationship stored once —
+picking `BLOCKED_BY` here writes the identical row `BLOCKS` would write
+from the target's side, so the two can never fall out of sync. Reading a
+ticket's own linked-tickets panel (`GET .../full`) resolves both
+directions, labelling each with the type as it reads from *that*
+ticket — a `BLOCKS` row shows as "Is blocked by" on the target.
+
+`RELATES_TO` is symmetric; `DUPLICATE_OF` is not — its inverse renders
+as `DUPLICATED_BY` on the other ticket, which is never a submittable
+`linkType` here.
+
+**`400`, not `422`, for both a self-link and a `DUPLICATED_BY`
+submission** — CONVENTIONS.md's own distinction: nothing about the
+ticket's *state* refuses either, and resending with a different
+`targetTicketId` or `linkType` succeeds. The target ticket is
+resolved through the caller's own row scope, so a target outside it
+is `404`, identical to one that does not exist (§10.2's
+no-existence-leak rule).
+
+ * @summary Link this ticket to another (blueprint §16 item 17, §7.5's create-form row)
+ */
+export const createTicketLink = (
+    ticketId: string,
+    createTicketLinkRequest: CreateTicketLinkRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<LinkedTicketResponse>(
+      {url: `/tickets/${ticketId}/links`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: createTicketLinkRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateTicketLinkMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTicketLink>>, TError,{ticketId: string;data: CreateTicketLinkRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createTicketLink>>, TError,{ticketId: string;data: CreateTicketLinkRequest}, TContext> => {
+
+const mutationKey = ['createTicketLink'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createTicketLink>>, {ticketId: string;data: CreateTicketLinkRequest}> = (props) => {
+          const {ticketId,data} = props ?? {};
+
+          return  createTicketLink(ticketId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateTicketLinkMutationResult = NonNullable<Awaited<ReturnType<typeof createTicketLink>>>
+    export type CreateTicketLinkMutationBody = CreateTicketLinkRequest
+    export type CreateTicketLinkMutationError = ValidationFailedResponse | NotFoundResponse | ConflictResponse
+
+    /**
+ * @summary Link this ticket to another (blueprint §16 item 17, §7.5's create-form row)
+ */
+export const useCreateTicketLink = <TError = ValidationFailedResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTicketLink>>, TError,{ticketId: string;data: CreateTicketLinkRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createTicketLink>>,
+        TError,
+        {ticketId: string;data: CreateTicketLinkRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateTicketLinkMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Either side of the relationship may remove it — `ticket_links` is
+ordinary mutable data, not one of CLAUDE.md's three append-only
+tables. `linkId` must name a row touching this ticket on either end;
+one that does not is `404`, the same answer as one that never
+existed.
+
+ * @summary Remove a link
+ */
+export const deleteTicketLink = (
+    ticketId: string,
+    linkId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/tickets/${ticketId}/links/${linkId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteTicketLinkMutationOptions = <TError = NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTicketLink>>, TError,{ticketId: string;linkId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteTicketLink>>, TError,{ticketId: string;linkId: number}, TContext> => {
+
+const mutationKey = ['deleteTicketLink'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteTicketLink>>, {ticketId: string;linkId: number}> = (props) => {
+          const {ticketId,linkId} = props ?? {};
+
+          return  deleteTicketLink(ticketId,linkId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteTicketLinkMutationResult = NonNullable<Awaited<ReturnType<typeof deleteTicketLink>>>
+    
+    export type DeleteTicketLinkMutationError = NotFoundResponse
+
+    /**
+ * @summary Remove a link
+ */
+export const useDeleteTicketLink = <TError = NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTicketLink>>, TError,{ticketId: string;linkId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteTicketLink>>,
+        TError,
+        {ticketId: string;linkId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteTicketLinkMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * **This does not create a new ribbon segment.** Reassignment inside a stage
 writes `STAGE_REASSIGNED` and splits effort attribution so both resources
 appear in the journey roll-up. Only a handoff advances the ribbon.
