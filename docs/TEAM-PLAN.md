@@ -124,6 +124,7 @@ backend/
   api/feature/transitions/     → C    handoff, rework, skip, ribbon, journey
   api/feature/notifications/   → D
   api/feature/chat/            → D
+  api/text/                    → shared   §3.9's allow-list sanitiser (see note)
   api/realtime/                → D    STOMP config, channel interceptor, topics
   worker/                      → D    all schedulers
   worker/journal/              → A    A-044's hash-chain verifier
@@ -164,6 +165,16 @@ This map is committed as `.github/CODEOWNERS`, so GitHub requests the right revi
 > **Signed off by Divyansh, confirmed by Debashis on 19 Aug 2026.** Agreed offline rather than on the brief thread (issue #5), so this entry is the record — there is no written reply from Divyansh to point at, and that is worth knowing if anyone re-opens the question later.
 >
 > `.github/CODEOWNERS` stays **unchanged**, and now for a purely technical reason rather than a pending conversation: it matches on paths, so a rule there would route *all* ticket reviews to D rather than these ten tasks' worth. The exception is per-task and CODEOWNERS cannot express that. **Reviews on this work should still name Divyansh explicitly** — he remains the owner of the surrounding code, and the sign-off covers who does the work, not who no longer needs to see it.
+
+> **`api/text/` is shared, and that is a decision rather than an accident — taken by Debashis on 19 Aug 2026.**
+>
+> It holds one class: `RichTextSanitizer`, PLAN.md §3.9's allow-list. That section is normative for **three** fields across two streams — the ticket's Task Description and Steps to Generate (§7.5, Stream D since the 19 Aug reassignment) and the comment body (§4B.5, Stream C) — and it ends by requiring that tightening the list *retroactively protects rows already stored*.
+>
+> **Two copies of an allow-list cannot satisfy that.** The day one gains a tag the other does not, the weaker one is the vulnerability and no build fails to say so. So C-067 extracted the rule out of Stream C's package-private `CommentSanitizer` rather than duplicating it; that class now delegates, keeping its name and its API, and its **90 tests pass unaltered** — which is the evidence the move changed no comment behaviour.
+>
+> `common/` was the alternative and was not chosen: it is Stream A's, and this is neither schema, auth nor CI. A shared row is the honest description of a class two streams depend on and neither alone should be free to loosen.
+>
+> **Changes here need both C's and D's sign-off**, not one — that is what "shared" is buying. `.github/CODEOWNERS` should name both once they agree the shape.
 
 > ⚠️ **The table above is a package map; CODEOWNERS matches paths.** `api/feature/auth/` here means `backend/api/src/main/java/com/edunext/edutrack/api/feature/auth/` on disk, and until 14 Aug 2026 CODEOWNERS was written the short way — so 17 of its 20 backend rules matched nothing, every pull request requested only the lead, and no stream was ever auto-notified of a change to its own code. Fixed in A-040 by dropping the leading slash so the patterns match at any depth. **If you add a row here, add the path form to CODEOWNERS and prove it resolves** with `git ls-files | grep -E '<pattern>'` — an empty result is a rule that does nothing and looks exactly like one that works.
 
