@@ -7805,6 +7805,13 @@ components:
         # the merged stream sees the same internal/client-visible fact the
         # Comments tab shows, without having to cross-reference the other list.
         isClientVisible: { type: [boolean, 'null'] }
+        # C-032 · the actor's role AT THE TIME OF WRITING, on a COMMENTED row
+        # only — the blueprint's own §7 sample transcript names it there
+        # ("Ravi Kumar (Developer)") and nowhere else in the stream. Null for
+        # every real ticket_history row (there is no stamped role to read for
+        # a field change or a handoff) and null on a comment posted before
+        # Comment.authorRole's own stamp existed.
+        actorRole: { $ref: '#/components/schemas/RoleCode' }
         stageCode: { type: [string, 'null'] }
         cycleNo: { type: integer }
         iterationNo: { type: integer }

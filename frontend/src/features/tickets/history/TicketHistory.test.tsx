@@ -120,6 +120,48 @@ describe('the History tab', () => {
     expect(rowScope.getByText('Client visible')).toBeInTheDocument()
   })
 
+  /**
+   * C-032 · blueprint §7's own sample transcript names the shape:
+   * `Ravi Kumar (Developer) · Development · iteration 2`. "Fix is live" is
+   * Meera's (a PM), seeded cycle 2 / SIGNOFF / iteration 1.
+   */
+  it('C-032 · draws the comment author’s role and the ticket’s iteration at time of writing', async () => {
+    renderPage()
+    await waitForTicket()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Show comments/ }))
+
+    const cycle2 = within(await screen.findByRole('list', { name: 'Cycle 2' }))
+    const row = (await cycle2.findByText(/Fix is live/)).closest('li')
+    const rowScope = within(row as HTMLElement)
+
+    // A regex rather than an exact string: the actor label, the stage and the
+    // iteration are each their own text node inside one `<span>` — the way
+    // `{expr}{expr}{expr}` always renders in JSX — so the span's own full text
+    // is longer than any one of them, and `getByText`'s default matcher reads
+    // an element's *whole* text content rather than one child node's.
+    expect(rowScope.getByText(/Meera Iyer \(PM\)/)).toBeInTheDocument()
+    expect(rowScope.getByText(/iteration 1/)).toBeInTheDocument()
+  })
+
+  /**
+   * A real `ticket_history` row (not a `COMMENTED` one) carries no stamped
+   * role or iteration at all — `TicketHistoryDtos`'s own null-for-real-rows
+   * rule. The level-change row is System's, which already has no actor name
+   * to parenthesise a role onto.
+   */
+  it('C-032 · draws no role or iteration parenthetical on a real history row', async () => {
+    renderPage()
+    await waitForTicket()
+
+    const cycle2 = within(await screen.findByRole('list', { name: 'Cycle 2' }))
+    const row = (await cycle2.findByText('Level changed HIGH → CRITICAL')).closest('li')
+    const rowScope = within(row as HTMLElement)
+
+    expect(rowScope.queryByText(/iteration/)).not.toBeInTheDocument()
+    expect(rowScope.getByText(/System/).textContent).not.toMatch(/\(/)
+  })
+
   it('draws no client-visible chip on an internal comment', async () => {
     renderPage()
     await waitForTicket()

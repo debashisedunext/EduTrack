@@ -4,9 +4,11 @@ import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
+import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketComment;
 import com.edunext.edutrack.domain.tickets.TicketCommentRepository;
+import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -61,6 +63,15 @@ class CommentServiceTest {
     private final CommentMentionNotifier mentionNotifier = mock(CommentMentionNotifier.class);
 
     /**
+     * C-032 · the door {@code stamp} reads {@code iterationNo} through.
+     * Unstubbed calls answer {@code Optional.empty()} — Mockito's own default
+     * for an {@code Optional}-returning method — which is what keeps every
+     * nested class outside {@link Stamp} unaware this dependency exists at
+     * all.
+     */
+    private final TicketJournal journal = mock(TicketJournal.class);
+
+    /**
      * D-14 · <b>no edit window, which is the shipped default.</b> The five
      * minutes are still implemented and are exercised by
      * {@link EditWindow.WhenAWindowIsConfigured}, which builds its own
@@ -92,7 +103,7 @@ class CommentServiceTest {
 
     private CommentService service() {
         return new CommentService(tickets, comments, rows, people, sanitizer, mentions,
-                mentionNotifier, eventNotifier, properties, clock);
+                mentionNotifier, eventNotifier, properties, journal, clock);
     }
 
     /**
@@ -102,7 +113,7 @@ class CommentServiceTest {
      */
     private final CommentService service = new CommentService(
             tickets, comments, rows, people, sanitizer, mentions, mentionNotifier, eventNotifier, properties,
-            Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(4)), ZoneOffset.UTC));
+            journal, Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(4)), ZoneOffset.UTC));
 
     /**
      * The three-argument constructor, deliberately: the two-argument one leaves
@@ -246,14 +257,58 @@ class CommentServiceTest {
             assertThat(saved().getStageCode()).isEqualTo("DEVELOPMENT");
         }
 
+        /** C-032 · the fourth stamped field, read off the caller's identity. */
+        @Test
+        void stampsTheCallersRoleAtTimeOfWriting() {
+            service.create(caller, TICKET, body("<p>hello</p>"));
+            assertThat(saved().getAuthorRole()).isEqualTo("DEVELOPER");
+        }
+
         /**
-         * Null rather than a guess. A real first iteration is also {@code 1}, so
-         * writing {@code 1} here would make the guess indistinguishable from the
-         * fact and leave C-032 no way to find the rows needing repair.
+         * C-032 · now readable through {@code TicketJournal#openHopFor}, which
+         * C-042 built. The open hop's own {@code cycleNo} matches the ticket's
+         * current one, so it is trusted.
          */
         @Test
-        void leavesIterationNullUntilC042MakesItReadable() {
+        @DisplayName("stamps iteration from the ticket's open hop, now that C-042 makes it readable")
+        void stampsIterationFromTheOpenHop() {
+            when(journal.openHopFor(TICKET)).thenReturn(Optional.of(openHop((short) 2, (short) 3)));
+
             service.create(caller, TICKET, body("<p>hello</p>"));
+
+            assertThat(saved().getIterationNo()).isEqualTo((short) 3);
+        }
+
+        /**
+         * A freshly created ticket with no first hop yet — the one case
+         * {@code cycleNo}/{@code stageCode} were already nullable for.
+         */
+        @Test
+        @DisplayName("leaves iteration null when there is no open hop yet")
+        void leavesIterationNullWithNoOpenHop() {
+            when(journal.openHopFor(TICKET)).thenReturn(Optional.empty());
+
+            service.create(caller, TICKET, body("<p>hello</p>"));
+
+            assertThat(saved().getIterationNo()).isNull();
+        }
+
+        /**
+         * <b>Guard.</b> {@code ReopenService} can leave a stale open hop at the
+         * previous cycle's last stage until something advances it — the same
+         * staleness {@code TransitionService#advance} checks for before building
+         * its next hop. Stamping that hop's iteration onto a comment written
+         * against the new cycle would read as real: removing the
+         * {@code hop.getCycleNo() == ticket.getCurrentCycleNo()} filter in
+         * {@code CommentService.currentIterationNo} turns this red.
+         */
+        @Test
+        @DisplayName("ignores a stale open hop left behind at an earlier cycle")
+        void ignoresAStaleOpenHopFromAnEarlierCycle() {
+            when(journal.openHopFor(TICKET)).thenReturn(Optional.of(openHop((short) 1, (short) 4)));
+
+            service.create(caller, TICKET, body("<p>hello</p>"));
+
             assertThat(saved().getIterationNo()).isNull();
         }
 
@@ -268,6 +323,15 @@ class CommentServiceTest {
 
             assertThat(row.getStageCode()).isEqualTo("DEVELOPMENT");
             assertThat(row.getCycleNo()).isEqualTo((short) 2);
+        }
+
+        private TicketStageTransition openHop(short cycleNo, short iterationNo) {
+            TicketStageTransition hop = new TicketStageTransition();
+            hop.setTicketId(TICKET);
+            hop.setCycleNo(cycleNo);
+            hop.setIterationNo(iterationNo);
+            hop.setToStage("DEVELOPMENT");
+            return hop;
         }
     }
 

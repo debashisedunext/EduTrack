@@ -199,6 +199,67 @@ class TicketHistoryServiceTest {
             assertThat(clientDto.isClientVisible()).isTrue();
         }
 
+        /**
+         * C-032 · the two fields this task adds to the interleaved row, read
+         * straight off {@code TicketComment} rather than looked up — blueprint
+         * §7's own sample transcript is what names the shape:
+         * {@code Ravi Kumar (Developer) · Development · iteration 2}.
+         */
+        @Test
+        @DisplayName("C-032 · carries the comment's stamped role and iteration")
+        void carriesRoleAndIteration() {
+            TicketComment comment = commentRow(9L, "root cause found", Instant.parse("2026-08-06T14:22:00Z"));
+            ReflectionTestUtils.setField(comment, "stageCode", "DEVELOPMENT");
+            ReflectionTestUtils.setField(comment, "authorRole", "DEVELOPER");
+            ReflectionTestUtils.setField(comment, "iterationNo", (short) 2);
+
+            when(journal.historyFor(TICKET, null)).thenReturn(List.of());
+            when(comments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(TICKET))
+                    .thenReturn(List.of(comment));
+
+            TicketHistoryDtos.HistoryListResponse response =
+                    service.list(caller, TICKET_CODE, null, List.of("comments"), null, null);
+
+            TicketHistoryDtos.HistoryEntryDto dto = response.data().get(0);
+            assertThat(dto.actorRole()).isEqualTo("DEVELOPER");
+            assertThat(dto.iterationNo()).isEqualTo(2);
+        }
+
+        /**
+         * A comment posted before C-032's column existed carries neither —
+         * honestly empty rather than guessed, {@code CommentDto.iterationNo}'s
+         * own rule.
+         */
+        @Test
+        @DisplayName("C-032 · both are null on a comment predating the stamp")
+        void roleAndIterationAreNullWhenNeverStamped() {
+            TicketComment comment = commentRow(9L, "an old note", Instant.parse("2026-08-06T14:22:00Z"));
+
+            when(journal.historyFor(TICKET, null)).thenReturn(List.of());
+            when(comments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(TICKET))
+                    .thenReturn(List.of(comment));
+
+            TicketHistoryDtos.HistoryListResponse response =
+                    service.list(caller, TICKET_CODE, null, List.of("comments"), null, null);
+
+            TicketHistoryDtos.HistoryEntryDto dto = response.data().get(0);
+            assertThat(dto.actorRole()).isNull();
+            assertThat(dto.iterationNo()).isNull();
+        }
+
+        @Test
+        @DisplayName("C-032 · a real history row carries neither — there is no stamp to read")
+        void realHistoryRowHasNoRoleOrIteration() {
+            TicketHistory row = historyRow(501L, "LEVEL_CHANGED", "level", "HIGH", "CRITICAL",
+                    ACTOR, "USER", "SLA breach", Instant.parse("2026-08-13T10:15:00Z"));
+            when(journal.historyFor(TICKET, null)).thenReturn(List.of(row));
+
+            TicketHistoryDtos.HistoryListResponse response = service.list(caller, TICKET_CODE, null, null, null, null);
+
+            assertThat(response.data().get(0).actorRole()).isNull();
+            assertThat(response.data().get(0).iterationNo()).isNull();
+        }
+
         @Test
         @DisplayName("a real history row's isClientVisible is null — visibility is a comment concept only")
         void historyRowHasNoVisibility() {

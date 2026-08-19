@@ -77,7 +77,9 @@ export function HistoryEntryRow({ entry }: { entry: HistoryEntry }) {
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-content-muted">
           <span>
             {actorLabel(entry)}
-            {isComment && entry.stageCode ? ` · ${titleCase(entry.stageCode)}` : ''} · {formatWhen(entry.createdAt)}
+            {isComment && entry.stageCode ? ` · ${titleCase(entry.stageCode)}` : ''}
+            {isComment && entry.stageCode && entry.iterationNo != null ? ` · iteration ${entry.iterationNo}` : ''} ·{' '}
+            {formatWhen(entry.createdAt)}
           </span>
           {isComment && entry.isClientVisible && (
             <Chip variant="warning">
@@ -91,9 +93,23 @@ export function HistoryEntryRow({ entry }: { entry: HistoryEntry }) {
   )
 }
 
-/** `"System"` for an escalation or a scanner — never a name nobody wrote. */
+/**
+ * `"System"` for an escalation or a scanner — never a name nobody wrote.
+ *
+ * C-032 · `"Ravi Kumar (DEVELOPER)"` on a `COMMENTED` row, blueprint §7's own
+ * sample transcript. **Not run through `titleCase`** — that helper is seeded
+ * from the stage vocabulary alone (its own doc says so) and mis-cases `PM` to
+ * `Pm`; `CommentCard` already renders `authorRole` raw for the identical
+ * reason, and this follows it rather than titlecasing one of the two. Null on
+ * every real `ticket_history` row (a field change or a handoff carries no
+ * stamped role for its actor) and on a comment posted before the stamp
+ * existed, so the parenthetical simply does not appear rather than reading
+ * `(null)`.
+ */
 function actorLabel(entry: HistoryEntry): string {
-  if (entry.actor?.displayName) return entry.actor.displayName
+  if (entry.actor?.displayName) {
+    return entry.actorRole ? `${entry.actor.displayName} (${entry.actorRole})` : entry.actor.displayName
+  }
   if (entry.actorType === 'SYSTEM') return 'System'
   return 'Unknown'
 }

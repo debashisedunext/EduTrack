@@ -60,24 +60,26 @@ while withholding the value. **Needs Stream A sign-off** — either the
 contract drops the field, or this package is told the exposure is acceptable
 and starts returning `row.getRowHash()`.
 
-## `stageCode` and `iterationNo` are always null — except `stageCode` on a comment row
+## `stageCode`, `iterationNo` and `actorRole` are null on a real row — always
 
-Neither exists on `ticket_history` — a handoff's stage lives on
-`ticket_stage_transitions`, which C-042 has not built, and nothing pairs a
-handoff's `ticket_history` row with its transition yet. `CommentDtos.CommentDto.iterationNo`
-documents the identical absence, for the identical reason: writing an invented
-value would be indistinguishable from a real first iteration, and worse than
-leaving the field honestly empty.
+Neither `stageCode` nor `iterationNo` exists on `ticket_history` — a handoff's
+stage lives on `ticket_stage_transitions`, which C-042 has not paired with its
+`ticket_history` row — and `actorRole` (C-032) has no equivalent at all: a
+field change or a handoff carries no stamped role for its actor to fall back
+to. All three stay null for every real row, for as long as that is true.
 
-⚠ **C-034 found one place that blanket statement did not actually hold.**
-`ticket_comments` stamps its own `stage_code` at write time — a comment
-written during QA reads as QA forever, even after the ribbon moves on — and
-`frontend/src/mocks/handlers/tickets.ts` has read it onto the interleaved row
-since C-059 shipped. `TicketHistoryDtos.HistoryEntryDto.ofComment` was passing
-`null` regardless, which is exactly the "works against every mock, differs on
-the real server" shape C-038 and C-028 each found once. `stageCode` now reads
-`TicketComment.getStageCode()` on a `COMMENTED` row; a real `ticket_history`
-row is unaffected and still has nothing to read.
+⚠ **C-034 found one place a blanket "always null" did not actually hold, and
+C-032 found the rest of it.** `ticket_comments` stamps its own `stage_code`,
+`iteration_no` and (since C-032) `author_role` at write time — a comment
+written by a Developer during QA iteration 2 reads as exactly that forever,
+even after the ribbon moves on and the author is promoted — and
+`frontend/src/mocks/handlers/tickets.ts` has read `stage_code` onto the
+interleaved row since C-059 shipped. `TicketHistoryDtos.HistoryEntryDto.ofComment`
+now reads all three straight off the `TicketComment` row on a `COMMENTED` row;
+a real `ticket_history` row is unaffected and still has nothing to read.
+`iterationNo` and `actorRole` can still be null on a `COMMENTED` row: the
+former when the comment precedes the ticket's first stage transition, the
+latter when it predates the `author_role` column — neither is invented.
 
 ## `isClientVisible` — C-034, comment rows only
 
@@ -109,3 +111,7 @@ scan CLAUDE.md's `COUNT(*)` rule targets. The two lists are merged, sorted by
 ⚠ **Stream A — `PermissionMatrix.java` gains one row** (`everyRole`, the read),
 on `CommentController.list`'s and `EffortLogController.list`'s identical
 argument.
+
+⚠ **Stream D sign-off — `contracts/openapi.yaml`.** C-032 adds `HistoryEntry
+.actorRole`, additive, mirroring `Comment.authorRole`. Client regenerated;
+the diff is one property.

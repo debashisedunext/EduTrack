@@ -18,13 +18,14 @@ import java.util.List;
  * The discussion thread (blueprint §4B.5).
  *
  * <p><b>The journey coordinates are copied, never joined.</b>
- * {@code cycleNo}, {@code stageCode} and {@code iterationNo} are stamped at the
- * time of writing: the ribbon moves on, and a comment written during QA
- * iteration 2 must still read as QA iteration 2 forever. Joining to the live
- * ticket would silently rewrite the past every time the ticket advanced. This
- * is also what lets a ribbon segment click filter the thread beneath it. They
- * are nullable because a comment can precede the first stage transition on a
- * freshly created ticket.
+ * {@code cycleNo}, {@code stageCode}, {@code iterationNo} and (C-032)
+ * {@code authorRole} are stamped at the time of writing: the ribbon moves on,
+ * and a comment written during QA iteration 2 by a Developer who is later
+ * promoted to PM must still read as QA iteration 2 by a Developer forever.
+ * Joining to the live ticket or the live user would silently rewrite the past
+ * every time either advanced. This is also what lets a ribbon segment click
+ * filter the thread beneath it. They are nullable because a comment can
+ * precede the first stage transition on a freshly created ticket.
  *
  * <p><b>{@code isInternal} defaults to true.</b> Blueprint §4B.5 and Stream C's
  * decision log both settle on internal-always: an accidental leak to a client
@@ -58,6 +59,16 @@ public class TicketComment {
 
     @Column(name = "author_id", nullable = false)
     private Long authorId;
+
+    /**
+     * C-032 · the author's role AT THE TIME OF WRITING, stamped alongside
+     * {@code cycleNo}/{@code stageCode}/{@code iterationNo} above and for the
+     * identical reason — copied, never joined, so a role change afterwards
+     * cannot rewrite what the comment looked like when it was posted. Null on
+     * any row written before this column existed.
+     */
+    @Column(name = "author_role", length = 20)
+    private String authorRole;
 
     @Column(name = "body_html", nullable = false, columnDefinition = "text")
     private String bodyHtml;
@@ -150,6 +161,14 @@ public class TicketComment {
 
     public void setAuthorId(Long authorId) {
         this.authorId = authorId;
+    }
+
+    public String getAuthorRole() {
+        return authorRole;
+    }
+
+    public void setAuthorRole(String authorRole) {
+        this.authorRole = authorRole;
     }
 
     public String getBodyHtml() {

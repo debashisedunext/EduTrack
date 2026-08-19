@@ -7,9 +7,11 @@ import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.common.pagination.Cursor;
 import com.edunext.edutrack.common.pagination.CursorPage;
 import com.edunext.edutrack.common.pagination.PageLimit;
+import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketComment;
 import com.edunext.edutrack.domain.tickets.TicketCommentRepository;
+import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.Authentication;
@@ -89,6 +91,12 @@ class CommentService {
     private final TicketEventNotifier eventNotifier;
     private final CommentProperties properties;
     private final Clock clock;
+    /**
+     * C-032 · the sanctioned read for "where is this ticket right now",
+     * needed to stamp {@code iterationNo} — see {@link #currentIterationNo}.
+     * {@code TransitionService} injects the same bean for the same door.
+     */
+    private final TicketJournal journal;
 
     /*
      * @Autowired is required, not decoration. Two constructors means Spring has
@@ -107,9 +115,10 @@ class CommentService {
                    CommentMentions mentions,
                    CommentMentionNotifier mentionNotifier,
                    TicketEventNotifier eventNotifier,
-                   CommentProperties properties) {
+                   CommentProperties properties,
+                   TicketJournal journal) {
         this(tickets, comments, rows, people, sanitizer, mentions, mentionNotifier, eventNotifier,
-                properties, Clock.systemUTC());
+                properties, journal, Clock.systemUTC());
     }
 
     /**
@@ -126,6 +135,7 @@ class CommentService {
                    CommentMentionNotifier mentionNotifier,
                    TicketEventNotifier eventNotifier,
                    CommentProperties properties,
+                   TicketJournal journal,
                    Clock clock) {
         this.tickets = tickets;
         this.comments = comments;
@@ -136,6 +146,7 @@ class CommentService {
         this.mentionNotifier = mentionNotifier;
         this.eventNotifier = eventNotifier;
         this.properties = properties;
+        this.journal = journal;
         this.clock = clock;
     }
 
@@ -232,7 +243,8 @@ class CommentService {
             throw InvalidCommentException.tooLong(html.length());
         }
 
-        long author = authorId(caller);
+        CallerIdentity identity = requireIdentity(caller);
+        long author = identity.userId();
         String plainText = sanitizer.toPlainText(html);
 
         // C-030. Parsed from the body, resolved against the ticket's project —
@@ -252,7 +264,7 @@ class CommentService {
                 ? null
                 : mentioned.stream().map(CommentMentions.MentionedUser::id).toList());
         row.setSource("WEB");
-        stamp(row, ticket);
+        stamp(row, ticket, identity.roleCode());
 
         TicketComment saved = comments.save(row);
         ticket.setCommentCount(ticket.getCommentCount() + 1);
@@ -578,30 +590,53 @@ class CommentService {
     }
 
     /**
-     * §4B.5's journey stamp, as far as it can honestly be written today.
+     * §4B.5's journey stamp — author, role, stage and iteration, all at time
+     * of writing (C-032).
      *
      * <p>The stamp is <b>copied, never joined</b> — the migration's own comment
      * makes the point: "the ribbon moves on, and a comment written during QA
-     * iteration 2 must still read as QA iteration 2 forever". That is also why
-     * this is written in C-029 rather than left to C-032, which owns *displaying*
-     * it. A stamp is the one field that cannot be backfilled: once the ticket has
-     * moved on, what stage it was in when a comment was written is gone. Leaving
-     * the columns null until C-032 lands would mean every comment posted in the
-     * meantime is permanently unplaceable in the journey, and C-034's timeline
-     * would have a hole in it that no later task could repair.
+     * iteration 2 must still read as QA iteration 2 forever". A stamp is the one
+     * field that cannot be backfilled: once the ticket has moved on, what stage
+     * it was in when a comment was written is gone. {@code cycleNo}, {@code
+     * stageCode} and {@code authorRole} were written from C-029 onward for
+     * exactly that reason, even before anything read them back — leaving them
+     * null until this task landed would have meant every comment posted in the
+     * meantime was permanently unplaceable in the journey, and C-034's timeline
+     * would have a hole in it no later task could repair.
      *
-     * <p><b>{@code iterationNo} stays null, deliberately.</b> Cycle and stage are
-     * on the ticket row and can simply be read. An iteration number lives on the
-     * open {@code ticket_stage_transitions} row, and nothing in this codebase can
-     * read one yet — C-042 is the task that makes it readable. Writing {@code 1}
-     * to fill the column would be worse than leaving it empty: a real first
-     * iteration is also {@code 1}, so the guess would be indistinguishable from
-     * the fact, and C-032 would have no way to find the rows needing repair.
+     * @param authorRole the caller's role at the moment of posting — see
+     *                   {@link CallerIdentity#roleCode}
      */
-    private static void stamp(TicketComment row, Ticket ticket) {
+    private void stamp(TicketComment row, Ticket ticket, String authorRole) {
         row.setCycleNo(ticket.getCurrentCycleNo());
         row.setStageCode(ticket.getCurrentStage());
-        row.setIterationNo(null);
+        row.setAuthorRole(authorRole);
+        row.setIterationNo(currentIterationNo(ticket));
+    }
+
+    /**
+     * C-032 · the iteration half of the stamp, readable now that C-042's
+     * {@link TicketJournal#openHopFor} exists.
+     *
+     * <p><b>Filtered to the ticket's own {@code cycleNo}, not trusted blind.</b>
+     * The open hop {@code openHopFor} returns is not necessarily on the cycle
+     * just stamped onto {@code cycleNo} above — {@code ReopenService} leaves a
+     * still-open hop at the previous cycle's last stage until something
+     * advances it (its own javadoc names the gap, and {@code TransitionService
+     * #advance} guards against the identical staleness before building the next
+     * hop). Stamping a stale hop's iteration onto a fresh cycle's comment would
+     * read as real: a real first iteration is also a small number, so a wrong
+     * one is indistinguishable from a right one once it is on the row.
+     *
+     * @return null when there is no open hop for this cycle yet — most notably
+     *         a comment written before the ticket's first stage transition,
+     *         the same case {@code cycleNo}/{@code stageCode} are nullable for
+     */
+    private Short currentIterationNo(Ticket ticket) {
+        return journal.openHopFor(ticket.getId())
+                .filter(hop -> hop.getCycleNo() == ticket.getCurrentCycleNo())
+                .map(TicketStageTransition::getIterationNo)
+                .orElse(null);
     }
 
     /**
@@ -636,8 +671,12 @@ class CommentService {
      * than a row that permanently claims an author it does not have.
      */
     private static long authorId(Authentication caller) {
+        return requireIdentity(caller).userId();
+    }
+
+    /** {@link #authorId}'s full identity, needed by {@link #create} for the role half of the stamp. */
+    private static CallerIdentity requireIdentity(Authentication caller) {
         return CallerIdentity.of(caller)
-                .map(CallerIdentity::userId)
                 .orElseThrow(() -> new IllegalStateException(
                         "a comment reached the service with no identifiable author; "
                                 + "the route's @PreAuthorize should have refused this caller"));

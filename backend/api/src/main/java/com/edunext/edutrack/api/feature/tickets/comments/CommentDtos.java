@@ -39,16 +39,24 @@ final class CommentDtos {
     }
 
     /**
-     * @param authorRole      <b>the author's role now, not the role they held when
-     *                        they wrote this</b> — see {@link #of}. §4B.5 asks for
-     *                        the latter and C-032 is the task that delivers it
+     * @param authorRole      C-032 · the author's role AT THE TIME OF WRITING,
+     *                        stamped onto {@code ticket_comments.author_role}
+     *                        alongside {@code stageCode} and {@code iterationNo}
+     *                        — see {@link #of}. <b>Null on a comment posted
+     *                        before that column existed</b>, where there is no
+     *                        honest value to invent; {@link #of} falls back to
+     *                        the author's <em>current</em> role for exactly
+     *                        those rows, which is what every comment served
+     *                        before this task
      * @param stageCode       stamped at write time from the ticket's current stage
-     * @param iterationNo     <b>always null today.</b> Nothing in the codebase can
-     *                        yet read the open stage transition, which is where an
-     *                        iteration number lives; C-042 is what makes it
-     *                        readable and C-032 is what stamps it. Null is honest —
-     *                        an invented {@code 1} would be indistinguishable from
-     *                        a real first iteration
+     * @param iterationNo     C-032 · stamped from the ticket's open stage
+     *                        transition, now that C-042's {@code TicketJournal
+     *                        #openHopFor} makes one readable. <b>Still null</b>
+     *                        for a comment written before the ticket's first
+     *                        stage transition, or before this task shipped —
+     *                        an invented {@code 1} would be indistinguishable
+     *                        from a real first iteration, so it stays honestly
+     *                        empty rather than guessed
      * @param mentions        C-030 · the active project members the body named,
      *                        resolved from {@code mentioned_user_ids}. The column
      *                        is written as null rather than as an empty array, so
@@ -124,12 +132,11 @@ final class CommentDtos {
             @Schema(nullable = true)
             UserRef author,
             @Schema(description = """
-                    The author's role. **C-029 sends their role as it is now, not the role they held \
-                    when they wrote the comment** — `ticket_comments` has no `author_role` column and \
-                    adding one is a migration, which is Stream A's path. §4B.5 asks for the stamped \
-                    value and C-032 is the task that delivers it. The two differ only for someone \
-                    whose role changed after commenting, which is rare and is exactly the case the \
-                    stamp exists for.""",
+                    The author's role AT THE TIME OF WRITING (C-032), stamped onto the row alongside \
+                    `stageCode` and `iterationNo`. **Falls back to the author's current role on a \
+                    comment posted before the stamp existed** — there is no honest value to write \
+                    back onto those rows, and the fallback is what every comment served before this \
+                    task, so it changes nothing for them.""",
                     allowableValues = {"ADMIN", "PM", "DEVELOPER", "QA", "DEPLOYMENT", "SUPPORT"},
                     nullable = true)
             String authorRole,
@@ -153,7 +160,7 @@ final class CommentDtos {
             @Schema(description = "Stage at time of writing.", nullable = true)
             String stageCode,
             Integer cycleNo,
-            @Schema(description = "Iteration at time of writing. Null until C-042 makes it readable.", nullable = true)
+            @Schema(description = "Iteration at time of writing. Null on a comment written before the ticket's first stage transition, or before C-032 shipped.", nullable = true)
             Integer iterationNo,
             List<UserRef> mentions,
             List<Object> attachments,
@@ -201,7 +208,10 @@ final class CommentDtos {
                     tombstoned ? "" : row.getBodyHtml(),
                     tombstoned ? null : row.getOriginalBody(),
                     people.get(row.getAuthorId()),
-                    roles.get(row.getAuthorId()),
+                    // C-032 · the stamped role wins; a row written before the
+                    // column existed falls back to the author's current role,
+                    // which is what this line served on its own before C-032.
+                    row.getAuthorRole() != null ? row.getAuthorRole() : roles.get(row.getAuthorId()),
                     // The column is `is_internal` and the contract's field is
                     // `isClientVisible`. Inverted here, in one place, rather than
                     // renamed on either side: the column's default is what makes

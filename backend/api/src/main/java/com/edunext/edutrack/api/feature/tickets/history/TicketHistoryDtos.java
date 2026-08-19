@@ -44,6 +44,15 @@ final class TicketHistoryDtos {
      *                      {@code COMMENTED} row, mirroring {@code CommentDto}'s own
      *                      inversion, so the merged stream carries the same
      *                      internal/client-visible fact the Comments tab shows
+     * @param actorRole     C-032 · the actor's role AT THE TIME OF WRITING, on a
+     *                      {@code COMMENTED} row only — blueprint §7's own sample
+     *                      transcript names it there ("Ravi Kumar (Developer)")
+     *                      and nowhere else. Read straight off {@code
+     *                      TicketComment.getAuthorRole()}, which {@code
+     *                      CommentService} stamps at post time; null for every
+     *                      real {@code ticket_history} row (a field change or a
+     *                      handoff carries no comparable stamp) and null on a
+     *                      comment posted before that column existed
      * @param stageCode     Null for a real {@code ticket_history} row — a handoff's
      *                      stage lives on {@code ticket_stage_transitions}, which
      *                      C-042 has not built. <b>Not null on a {@code COMMENTED}
@@ -53,12 +62,15 @@ final class TicketHistoryDtos {
      *                      QA after the ribbon moves on) and the mock has read it
      *                      onto the interleaved row since C-059 — this was the one
      *                      place the real endpoint still disagreed with its own mock
-     * @param iterationNo   <b>always null today</b>, for the same reason as
-     *                      {@code stageCode} — {@code CommentDtos.CommentDto}
-     *                      documents the identical absence for the identical
-     *                      reason and this follows it rather than inventing a
-     *                      value a real first iteration would be indistinguishable
-     *                      from
+     * @param iterationNo   Null for a real {@code ticket_history} row, for the
+     *                      same reason {@code stageCode} is. <b>Not null on a
+     *                      {@code COMMENTED} row as of C-032</b>, which reads
+     *                      {@code TicketComment.getIterationNo()} the same way
+     *                      {@code stageCode} already did — null there too on a
+     *                      comment written before the ticket's first stage
+     *                      transition, or before C-042/C-032 shipped, rather
+     *                      than an invented value a real first iteration would
+     *                      be indistinguishable from
      * @param entryHash     <b>declared, and always null.</b> See the field's own
      *                      note below — the property has to exist for
      *                      {@code ContractConformanceTest} to agree the response
@@ -74,6 +86,7 @@ final class TicketHistoryDtos {
             String newValue,
             String note,
             Boolean isClientVisible,
+            String actorRole,
             String stageCode,
             Integer cycleNo,
             Integer iterationNo,
@@ -123,6 +136,7 @@ final class TicketHistoryDtos {
                     row.getRemarks(),
                     null,
                     null,
+                    null,
                     row.getCycleNo() == null ? null : (int) row.getCycleNo(),
                     null,
                     row.isCorrection(),
@@ -152,9 +166,10 @@ final class TicketHistoryDtos {
                     null,
                     row.getBodyText(),
                     !row.isInternal(),
+                    row.getAuthorRole(),
                     row.getStageCode(),
                     row.getCycleNo() == null ? null : (int) row.getCycleNo(),
-                    null,
+                    row.getIterationNo() == null ? null : (int) row.getIterationNo(),
                     false,
                     null,
                     null,
