@@ -271,3 +271,37 @@ not generalise — it batches the same *idea* over resources and shares no props
 with this one. A shared bulk bar would have to be a slot renderer with a
 `children` bag of buttons, which is a `<div className="flex gap-3">` with extra
 steps.
+
+## C-070 · the Module filter and the optional Module column
+
+Blueprint line 986, in one sentence: "**Module filter and an optional Module
+column** — off by default in the column chooser, because the grid is already at
+its width budget, but filterable always. 'Every open Fees ticket' is the question
+this list gets asked most once the field exists."
+
+So the two halves are deliberately asymmetric. The **filter** is always there,
+because it is what the field is for. The **column** is in the chooser and off by
+default, because scanning across modules is the rarer act and the grid has no
+width to spend on it. `useListPreferences` persists a reader's own selection, so
+turning it on is a decision that sticks.
+
+**The filter offers retired modules; S-19's picker does not.** Both are right.
+Nothing new should be *raised* against a wound-down module — `ModuleGuard`
+refuses it with a 400 — but "every open Transport ticket" is a fair question
+about one, and hiding the row from the filter is the single thing that makes it
+unanswerable. Retired rows are labelled `(retired)` rather than silently mixed
+in. The column resolves names from the same unfiltered master for the same
+reason: a cell that blanks out when a module is retired reads as missing data.
+
+**The backend half is in this task too.** `TicketListSpecs.filters` accepted
+`moduleId` and ignored it, and `TicketListService.toSummary` returned an
+unconditional `null` for it — both honest while C-065's column did not exist, and
+both a silent lie the moment it did. A filter that quietly returns every row is
+worse than one that errors, because nobody checks a grid that looks full.
+
+One thing worth knowing about the narrowing: the contract declares `moduleId` as
+`int64` and `tickets.module_id` is an `INT`. A value outside int range is
+matched as an impossible predicate rather than passed through `intValue()`,
+which would truncate `4294967299` to `3` and hand back every Fees ticket to
+somebody who asked for a module that cannot exist. There is an IT for exactly
+that number.

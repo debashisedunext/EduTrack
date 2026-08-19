@@ -107,12 +107,13 @@ final class TicketListDtos {
      * <p>Property order follows the contract's, so the two can be read side by
      * side when one of them changes.
      *
-     * <p>{@code moduleId} is always null today and that is honest rather than
-     * lazy: D-060 put the "where it happened" fields on the contract and in the
-     * mock server, and no {@code module_id} column exists on {@code tickets}
-     * yet. Emitting the declared name as null says "not recorded"; omitting the
-     * field would make the payload disagree with the document again, which is
-     * the defect this whole change exists to close.
+     * <p>{@code moduleId} carries the real column since C-070. It was
+     * unconditionally null while C-065's {@code module_id} did not exist, which
+     * was honest then — emitting the declared name as null says "not recorded",
+     * where omitting it would have made the payload disagree with the document.
+     * It is the only one of §7.5's four fields on this row: the module is what
+     * S-17 filters and groups by, while a screen name, a feature and kilobytes
+     * of repro steps are the detail page's job.
      */
     record TicketSummary(
             String ticketId,
