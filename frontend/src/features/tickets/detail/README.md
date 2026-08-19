@@ -284,3 +284,61 @@ not just D-046's, and each D-046 test still adds exactly what it is about via
 
 Stream D's file, changed without prior sign-off at the developer's direction —
 raising it here and in the PR body rather than doing it quietly.
+
+## C-069 · the four §7.5 fields, inline-editable
+
+Blueprint line 1083 places them exactly, and the placement is the design:
+Module, Screen and Feature sit in the summary panel **directly under Type** —
+the four answers to "what is this and where", read together — while **Steps to
+Generate renders below the description**, where the person about to reproduce
+the bug is already looking. It is the one of the four that is not a
+label-and-value, so it is a section rather than a rail row.
+
+**There is no role gate, and that is not an omission.** "Inline-editable by the
+roles that may edit the description" resolves to every role: `PATCH /tickets/{id}`
+is `ticket.update_progress`, which all six hold — `PermissionMatrix` carries the
+rows C-067 added, taken off blueprint §2. This is the same position
+`TicketLinksControl` is in one row below and it takes the same shape. Row scope
+still gates everything, server-side: a ticket outside the caller's scope 404s on
+the read and this page never renders.
+
+**A sealed cycle does not disable these**, unlike the comment box, the attachment
+strip and `TicketLevelControl`. A level is a fact about the current cycle's SLA
+clock, so editing one while reading cycle 1 performs the right act under the
+wrong label. `module_id`, `screen_name`, `feature` and `steps_to_generate` are
+ticket columns with no `cycle_no` — one value, shown by every cycle. Where a bug
+happened does not become a different fact when the ticket reopens.
+`TicketLinksControl` makes this argument first; this is the same one.
+
+Two rules in `whereItHappened.ts` are worth knowing:
+
+- **The Module editor offers the active rows plus this ticket's own retired
+  one.** The create form filters retired modules out flatly and is right to.
+  Editing is the case that rule cannot cover: a ticket already on `Transport`,
+  opened to fix a typo in the screen name, would find its Module trigger empty
+  and saving would look like it had dropped the module. Off, never onto.
+- **Empty is `null`, and a no-op is not sent.** `''` would store a second,
+  indistinguishable blank beside `NULL`. And `ticket_history` cannot take a row
+  back once written, so the client refusing to send an unchanged field is the
+  cheaper half of the guarantee `TicketWriteService` also enforces.
+
+### ⚠ No `If-Match` on this PATCH, at either end
+
+CONVENTIONS.md asks a `PATCH` to carry `If-Match` so a lost update is a 412
+rather than a silent overwrite, and the contract declares the 412. Neither end
+implements it: orval drops header parameters (the gap C-010 found on
+`useCreateTicket` and C-064 on the link create), and `TicketWriteController` does
+not read the header. The exposure is two people editing the same short field
+inside one another's page load, and the loser's value is **recoverable** — every
+change writes a `FIELD_CHANGED` row carrying the old value. Raised rather than
+worked around with a hand-rolled header only one of the two ends would honour.
+
+### Fixed on the way — the mock PATCH wrote no history
+
+`http.patch('/tickets/:ticketId')` in `frontend/src/mocks/handlers/tickets.ts`
+did `Object.assign` and nothing else, so the History tab stayed empty after an
+inline edit and a client could be built against a screen production does not
+produce. It now writes one `FIELD_CHANGED` row per genuinely changed field, the
+same rule `TicketWriteService.patch` follows. Same class of gap C-020 recorded on
+the priority handler; `frontend/src/mocks/` is Stream D's, so this one was mine
+to fix rather than flag.

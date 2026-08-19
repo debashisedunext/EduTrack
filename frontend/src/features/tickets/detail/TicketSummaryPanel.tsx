@@ -4,6 +4,7 @@ import { format, parseISO } from 'date-fns'
 import { AlertTriangle } from 'lucide-react'
 
 import type { Cycle } from '@/api/generated/model/cycle'
+import type { Module } from '@/api/generated/model/module'
 import type { HistoryEntry } from '@/api/generated/model/historyEntry'
 import type { LinkedTicket } from '@/api/generated/model/linkedTicket'
 import type { Ticket } from '@/api/generated/model/ticket'
@@ -16,8 +17,11 @@ import { cn } from '@/lib/utils'
 import { STATUS_LABEL, STATUS_VARIANT } from '../list/columns'
 import { clientPath, cycleEffortPath, projectPath, resourcePath } from './entityLinks'
 import { slaClockStart } from './levelChange'
+import { updateTicketBodyFeatureMax, updateTicketBodyScreenNameMax } from '@/api/generated/zod/tickets/tickets.zod'
+
 import { TicketLevelControl } from './TicketLevelControl'
 import { TicketLinksControl } from './TicketLinksControl'
+import { ModuleControl, TextControl } from './WhereItHappenedControls'
 import {
   ageInDays,
   assignedBy,
@@ -42,6 +46,15 @@ export interface TicketSummaryPanelProps {
   taskTypeName?: string
   /** Same for `clientContactId`, resolved from `GET /clients/{id}/contacts`. */
   contactName?: string
+  /**
+   * C-069 · the module master, **including deactivated rows**. Passed rather
+   * than fetched here so the page owns every query on this screen, and
+   * unfiltered because a ticket raised against a since-retired module still has
+   * to render its name — see `whereItHappened.moduleName`.
+   */
+  modules?: Module[]
+  /** C-069 · refetch after any of the four §7.5 fields is edited. */
+  onWhereItHappenedChanged?: () => void
   /**
    * C-020 · whether the Level row offers the §4B.1 editor. False for the three
    * roles it excludes, while `useGetMe()` is resolving, and on a sealed cycle —
@@ -120,12 +133,12 @@ function DateCell({ value, warn }: { value?: string | null; warn?: boolean }) {
 /**
  * S-20's right rail.
  *
- * Read-only apart from one field. C-019 drew every row as plain text; C-020
- * replaced the Level chip with `TicketLevelControl` — the picker, the mandatory
- * reason and the `LEVEL_CHANGED` row — rather than adding a second place a level
- * can be changed from. Every other row here is still read-only by design, and a
- * second editable field should be argued for on its own terms rather than
- * inherited from this one.
+ * Mostly read-only. C-019 drew every row as plain text; C-020 replaced the Level
+ * chip with `TicketLevelControl`, C-064 made the Linked row its own editor, and
+ * C-069 added Module, Screen and Feature — each argued on its own terms rather
+ * than inherited from the one before it, which is what C-020's note asked for.
+ * Every remaining row is read-only by design: a fifth editable field should have
+ * to make its own case too.
  */
 export function TicketSummaryPanel({
   ticket,
@@ -137,6 +150,8 @@ export function TicketSummaryPanel({
   selectedCycleNo,
   taskTypeName,
   contactName,
+  modules,
+  onWhereItHappenedChanged,
   canChangeLevel = false,
   onLevelChanged,
   now = new Date(),
@@ -183,6 +198,45 @@ export function TicketSummaryPanel({
         <Row label="Contact">{contactName ?? <Dash />}</Row>
 
         <Row label="Type">{taskTypeName ? <Chip variant="neutral">{taskTypeName}</Chip> : <Dash />}</Row>
+
+        {/*
+          C-069 · blueprint line 1083 places these three "directly under Type",
+          and that is not decoration: Type, Module, Screen and Feature are the
+          four answers to "what is this and where" and they are read together.
+          Steps to Generate is the one of the four that is *not* here — it goes
+          below the description in the Details pane, where the person about to
+          reproduce the bug is already looking.
+        */}
+        <Row label="Module">
+          <ModuleControl
+            ticketId={ticket.ticketId}
+            moduleId={ticket.moduleId}
+            modules={modules}
+            onChanged={() => onWhereItHappenedChanged?.()}
+          />
+        </Row>
+
+        <Row label="Screen">
+          <TextControl
+            ticketId={ticket.ticketId}
+            field="screenName"
+            label="Screen name"
+            value={ticket.screenName}
+            maxLength={updateTicketBodyScreenNameMax}
+            onChanged={() => onWhereItHappenedChanged?.()}
+          />
+        </Row>
+
+        <Row label="Feature">
+          <TextControl
+            ticketId={ticket.ticketId}
+            field="feature"
+            label="Feature"
+            value={ticket.feature}
+            maxLength={updateTicketBodyFeatureMax}
+            onChanged={() => onWhereItHappenedChanged?.()}
+          />
+        </Row>
 
         <Row label="Level">
           <span className="flex flex-wrap items-center gap-1.5">

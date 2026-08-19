@@ -2,7 +2,7 @@ import * as React from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { useGetTicketDetail } from '@/api/generated/tickets/tickets'
-import { useListTaskTypes } from '@/api/generated/masters/masters'
+import { useListModules, useListTaskTypes } from '@/api/generated/masters/masters'
 import { useListClientContacts } from '@/api/generated/clients/clients'
 import { useGetMe } from '@/api/generated/auth/auth'
 import { ApiError } from '@/api/http'
@@ -26,6 +26,7 @@ import { useJourneyTab } from '../journey/useJourneyTab'
 import { useEffortTab } from '../effort/useEffortTab'
 
 import { canChangeLevel } from './levelChange'
+import { StepsToGenerateSection } from './WhereItHappenedControls'
 import { PendingSection } from './PendingSection'
 import { TicketAttachmentsSection } from './TicketAttachmentsSection'
 import { TicketDetailHeader } from './TicketDetailHeader'
@@ -128,6 +129,16 @@ export function TicketDetailPage() {
     () => ({ id: meData?.data.id ?? null, role: meData?.data.role }),
     [meData?.data.id, meData?.data.role],
   )
+
+  /*
+    C-069 · the module master, fetched once for the whole screen. **Not
+    filtered to active rows**, unlike the create form's picker: the summary has
+    to render the name of a module a ticket was raised against even after it has
+    been retired, and `moduleOptions` re-adds only *this* ticket's row to the
+    editor. `useListModules` is a small cached master, so the list page and this
+    one share the query rather than each paying for it.
+  */
+  const { data: modulesData } = useListModules()
 
   const { data: taskTypesData } = useListTaskTypes()
   const taskTypeName = React.useMemo(() => {
@@ -390,6 +401,21 @@ export function TicketDetailPage() {
           </section>
 
           {/*
+            C-069 · blueprint line 1083: "Steps to Generate renders below the
+            description in the Details pane, where the person about to reproduce
+            the bug is already looking." Above the attachments rather than below
+            them, because a screenshot referred to by step 3 should be read after
+            step 3 — and this is the only one of §7.5's four fields that is not a
+            label-and-value, so it does not belong in the summary rail with the
+            other three.
+          */}
+          <StepsToGenerateSection
+            ticketId={ticket.ticketId}
+            steps={ticket.stepsToGenerate}
+            onChanged={() => void refetch()}
+          />
+
+          {/*
             Directly under the description, where S-20's wireframe puts it. Fed
             from the `/full` payload this page already fetched — C-019's single
             aggregated call stands, and `refetch` is what makes an upload or a
@@ -442,6 +468,8 @@ export function TicketDetailPage() {
           selectedCycleNo={selectedCycleNo}
           taskTypeName={taskTypeName}
           contactName={contactName}
+          modules={modulesData?.data}
+          onWhereItHappenedChanged={() => void refetch()}
           /*
             C-020 · §4B.1's three roles, and never on a sealed cycle. The second
             half is the same rule the comment box and the attachment strip

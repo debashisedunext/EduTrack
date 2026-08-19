@@ -491,6 +491,41 @@ export const ticketHandlers = [
       return problem(412, 'stale', 'This ticket changed since you loaded it');
     }
     const body = (await request.json()) as Partial<Ticket>;
+
+    /*
+      C-069 · **one `FIELD_CHANGED` row per field that actually changed**, which
+      this handler did not write at all before. `TicketWriteService.patch` writes
+      them, and blueprint line 1083 makes it part of the feature — "every change
+      writes a `FIELD_CHANGED` history row with the old and new value like any
+      other field". Without this the History tab stayed empty after an inline
+      edit against the mock, so a client could be built and demoed against a
+      screen production does not produce. Same class of gap C-020's note above
+      records on the priority handler, fixed the same way.
+
+      `!== undefined` rather than truthiness: `null` is how a field is *cleared*
+      and is the most interesting change of the four to record.
+
+      Only the fields the request actually names are considered, and a field
+      named with the value it already holds writes nothing — the server compares
+      before it writes for the reason its own commit gives, that a history
+      recording `screenName Login → Login` is noise in the one place noise is
+      most expensive.
+    */
+    for (const [field, next] of Object.entries(body)) {
+      if (next === undefined) continue;
+      const previous = (t as unknown as Record<string, unknown>)[field] ?? null;
+      if ((previous ?? null) === (next ?? null)) continue;
+      db.history.push({
+        id: nextId(db, 'history'), ticketId: t.ticketId, action: 'FIELD_CHANGED',
+        actorId: db.currentUserId, actorType: 'USER',
+        fieldName: field, oldValue: previous == null ? null : String(previous),
+        newValue: next == null ? null : String(next),
+        note: null, stageCode: t.currentStageCode, cycleNo: t.cycleNo, iterationNo: t.iterationNo,
+        isCorrection: false, correctsEntryId: null,
+        entryHash: `sha256:${nextId(db, 'hash').toString(16)}`, createdAt: new Date().toISOString(),
+      });
+    }
+
     Object.assign(t, body);
     t.version += 1;
     t.updatedAt = new Date().toISOString();
