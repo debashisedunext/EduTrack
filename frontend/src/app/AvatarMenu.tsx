@@ -1,7 +1,7 @@
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { KeyRound, LogOut, Moon, Sun, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useGetMe } from '@/api/generated/auth/auth'
+import { useAuthStore } from '@/features/auth/authStore'
 import { useSignOut } from '@/features/auth/useSignOut'
 import { useThemeStore } from './theme/themeStore'
 
@@ -11,8 +11,13 @@ function initials(name: string) {
 
 // Avatar menu — Profile, Change password, Logout — blueprint §7.2.
 export function AvatarMenu() {
-  const { data: me } = useGetMe()
-  const user = me?.data
+  // Same correction as `Sidebar`, and the same reason: `GET /api/v1/me` is
+  // declared in the contract and never implemented, so this fetched nothing and
+  // the avatar showed its '…' placeholder for ever — against a session whose
+  // user was already in memory. Fixed here too rather than left half-done: one
+  // missing endpoint, two symptoms, and the second is the one every user looks
+  // at on every screen.
+  const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const signOut = useSignOut()
   const theme = useThemeStore((s) => s.theme)

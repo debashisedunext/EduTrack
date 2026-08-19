@@ -3,7 +3,7 @@ import {
   LayoutDashboard, ListChecks, Ticket, FolderKanban, MessageSquare,
   BarChart3, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
-import { useGetMe } from '@/api/generated/auth/auth'
+import { useAuthStore } from '@/features/auth/authStore'
 import { useSidebarStore } from './sidebarStore'
 import { cn } from '@/lib/utils'
 
@@ -34,8 +34,31 @@ const NAV_ITEMS: NavItem[] = [
 export function Sidebar() {
   const collapsed = useSidebarStore((s) => s.collapsed)
   const toggle = useSidebarStore((s) => s.toggle)
-  const { data: me } = useGetMe()
-  const isAdmin = me?.data.role === 'ADMIN'
+  /*
+    The role comes from the session the user signed in with, not from a second
+    request for it.
+
+    This used to call `useGetMe()`, and **`GET /api/v1/me` has never been
+    implemented** — the contract declares it, `MeController` serves only
+    `/me/password` and the 2FA routes, and `ContractConformanceTest` reports
+    coverage rather than failing on it. So the call 404s, `me` is undefined,
+    `isAdmin` is false for everybody, and every `adminOnly` entry below is
+    hidden from every user including Admins. Masters has been unreachable from
+    this sidebar for as long as it has existed; A-071's Audit log arrived into
+    the same hole.
+
+    The fix does not need the endpoint. `POST /auth/login` already returns the
+    user inside its `Session`, `authStore` already keeps it, and `Me` carries
+    `role` — so the answer was in memory the whole time and was being asked for
+    again over HTTP. Reading it here is also the *more* correct source: it is
+    the identity this session was issued for, so it cannot disagree with the
+    token the requests are being made with.
+
+    `GET /me` is still worth building — it is on the contract and a token
+    outliving a role change is a real (if narrow) staleness window. That is its
+    own task, not a prerequisite for the navigation working.
+  */
+  const isAdmin = useAuthStore((s) => s.user?.role) === 'ADMIN'
 
   const items = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin)
 
