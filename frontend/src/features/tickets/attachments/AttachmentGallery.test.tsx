@@ -116,6 +116,27 @@ describe('AttachmentGallery — images and documents are drawn differently', () 
   })
 })
 
+describe('AttachmentGallery — C-060 uploader captions', () => {
+  it('names the uploader on a document row when the caller supplies one', () => {
+    render(
+      <AttachmentGallery
+        items={[item({ id: '7', name: 'notes.txt', contentType: 'text/plain', thumbnailUrl: null })]}
+        uploaderNames={{ '7': 'Anil Shah' }}
+      />,
+    )
+    expect(screen.getByRole('link', { name: /Download notes\.txt/ })).toHaveTextContent('Anil Shah')
+  })
+
+  it('says nothing about an uploader the caller did not name', () => {
+    // The strip's own call site never passes this prop — it must render
+    // exactly as it always has. Checked on the accessible name rather than
+    // visible text, since that is where "uploaded by" would appear at all.
+    render(<AttachmentGallery items={[item({ contentType: 'text/plain', thumbnailUrl: null })]} />)
+    const link = screen.getByRole('link', { name: /Download screenshot\.png/ })
+    expect(link.getAttribute('aria-label')).not.toMatch(/uploaded by/)
+  })
+})
+
 describe('AttachmentGallery — the lightbox', () => {
   const three: AttachmentItem[] = [
     item({ id: '1', name: 'one.png', downloadUrl: 'blob:one' }),

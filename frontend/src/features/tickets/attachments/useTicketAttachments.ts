@@ -70,7 +70,8 @@ function scanStatusToItemStatus(scanStatus: Attachment['scanStatus']): Attachmen
   return 'scanning'
 }
 
-function serverToItem(attachment: Attachment): AttachmentItem {
+/** Exported for `useAttachmentsTab` (C-060) — the tab maps the same server row the same way. */
+export function serverToItem(attachment: Attachment): AttachmentItem {
   return {
     id: String(attachment.id),
     name: attachment.fileName ?? 'Untitled',
