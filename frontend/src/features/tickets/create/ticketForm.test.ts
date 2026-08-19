@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createTicketBody } from '@/api/generated/zod/tickets/tickets.zod'
 import {
+  BUG_TASK_TYPE_CODES,
+  bugTaskTypeIds,
   CLIENT_REQUIRING_TASK_TYPES,
   clientRequiringTaskTypeIds,
   emptyTicketForm,
@@ -11,14 +13,17 @@ import {
 } from './ticketForm'
 
 const TASK_TYPES = [
-  { id: 1, name: 'Change Request', isActive: true },
-  { id: 2, name: 'Production Bug', isActive: true },
-  { id: 5, name: 'Internal Bug', isActive: true },
-  { id: 6, name: 'Client Bug', isActive: true },
+  { id: 1, code: 'CHANGE_REQUEST', name: 'Change Request', isActive: true },
+  { id: 2, code: 'PRODUCTION_BUG', name: 'Production Bug', isActive: true },
+  { id: 5, code: 'INTERNAL_BUG', name: 'Internal Bug', isActive: true },
+  { id: 6, code: 'CLIENT_BUG', name: 'Client Bug', isActive: true },
+  { id: 7, code: 'SERVER_ISSUE', name: 'Server Issue', isActive: true },
 ]
 
 const clientRequired = clientRequiringTaskTypeIds(TASK_TYPES)
-const schema = ticketFormSchema(clientRequired)
+const bugTypes = bugTaskTypeIds(TASK_TYPES)
+const rules = { clientRequired, bugTypes }
+const schema = ticketFormSchema(rules)
 
 const valid: TicketFormValues = {
   ...emptyTicketForm,
@@ -27,6 +32,10 @@ const valid: TicketFormValues = {
   description: 'Card payments hang at the confirmation step for about 30 seconds, then fail.',
   taskTypeId: 5,
   level: 'HIGH',
+  // Task type 5 is Internal Bug, so §7.5 makes the module mandatory here —
+  // `valid` has to carry one or every assertion below would be measuring the
+  // module rule instead of the field it names.
+  moduleId: 3,
   estimatedHrs: '4.5',
 }
 
@@ -87,6 +96,42 @@ describe('ticketFormSchema', () => {
     expect(errorsByField({ ...valid, taskTypeId: internalBug, clientId: null })).not.toHaveProperty('clientId')
   })
 
+  it('requires a module for bug-type task types and not for the others — §7.5', () => {
+    const productionBug = TASK_TYPES.find((t) => t.code === 'PRODUCTION_BUG')!.id
+    const changeRequest = TASK_TYPES.find((t) => t.code === 'CHANGE_REQUEST')!.id
+    const serverIssue = TASK_TYPES.find((t) => t.code === 'SERVER_ISSUE')!.id
+
+    expect(errorsByField({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: null })).toHaveProperty(
+      'moduleId',
+    )
+    expect(
+      errorsByField({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: 2 }),
+    ).not.toHaveProperty('moduleId')
+    // The half §7.5 argues hardest for: a change request may genuinely span
+    // three modules, and forcing a choice there teaches people to pick the
+    // first item in the list.
+    expect(errorsByField({ ...valid, taskTypeId: changeRequest, moduleId: null })).not.toHaveProperty('moduleId')
+    expect(errorsByField({ ...valid, taskTypeId: serverIssue, moduleId: null })).not.toHaveProperty('moduleId')
+  })
+
+  it('bounds screen name, feature and steps at the contract lengths', () => {
+    expect(errorsByField({ ...valid, screenName: 'x'.repeat(121) })).toHaveProperty('screenName')
+    expect(errorsByField({ ...valid, screenName: 'x'.repeat(120) })).not.toHaveProperty('screenName')
+    expect(errorsByField({ ...valid, feature: 'x'.repeat(121) })).toHaveProperty('feature')
+    expect(errorsByField({ ...valid, stepsToGenerate: `<p>${'x'.repeat(20001)}</p>` })).toHaveProperty(
+      'stepsToGenerate',
+    )
+  })
+
+  it('leaves all four blank fields alone when nothing requires them', () => {
+    const changeRequest = TASK_TYPES.find((t) => t.code === 'CHANGE_REQUEST')!.id
+    const errors = errorsByField({ ...valid, taskTypeId: changeRequest, ...({ moduleId: null } as const) })
+    expect(errors).not.toHaveProperty('moduleId')
+    expect(errors).not.toHaveProperty('screenName')
+    expect(errors).not.toHaveProperty('feature')
+    expect(errors).not.toHaveProperty('stepsToGenerate')
+  })
+
   it('rejects a contact without its client', () => {
     expect(errorsByField({ ...valid, clientId: null, clientContactId: 7 })).toHaveProperty('clientContactId')
   })
@@ -110,6 +155,30 @@ describe('clientRequiringTaskTypeIds', () => {
     const renamed = TASK_TYPES.map((t) => ({ ...t, name: `${t.name} (v2)` }))
     expect(clientRequiringTaskTypeIds(renamed).size).toBe(0)
     expect(CLIENT_REQUIRING_TASK_TYPES).toContain('Client Bug')
+  })
+})
+
+describe('bugTaskTypeIds', () => {
+  it('resolves §7.5’s three bug codes against the loaded master', () => {
+    expect([...bugTypes].sort()).toEqual([2, 5, 6])
+  })
+
+  it('survives a rename in the Task Type master, which the client rule does not', () => {
+    // This is the whole reason the module rule matches on `code` and the client
+    // rule matches on `name`. `TaskType.code` is documented in the contract as
+    // immutable once created; a display name is whatever an admin last typed
+    // into S-13, and the test directly above this describe block pins the fact
+    // that renaming one silently disables the older rule.
+    const renamed = TASK_TYPES.map((t) => ({ ...t, name: `${t.name} (2026)` }))
+    expect([...bugTaskTypeIds(renamed)].sort()).toEqual([2, 5, 6])
+    expect(clientRequiringTaskTypeIds(renamed).size).toBe(0)
+  })
+
+  it('names the three codes rather than testing for a _BUG suffix', () => {
+    // A suffix test would capture whatever a future admin happens to call a
+    // row. A validation rule should change when somebody decides it changes.
+    expect([...BUG_TASK_TYPE_CODES].sort()).toEqual(['CLIENT_BUG', 'INTERNAL_BUG', 'PRODUCTION_BUG'])
+    expect(bugTaskTypeIds([{ id: 99, code: 'HARDWARE_BUG', name: 'Hardware Bug' }]).size).toBe(0)
   })
 })
 
@@ -156,6 +225,31 @@ describe('toCreateRequest', () => {
     expect(toCreateRequest(valid).saveAsDraft).toBe(false)
   })
 
+  it('carries the four §7.5 fields, sanitised, and omits the blank ones', () => {
+    const body = toCreateRequest({
+      ...valid,
+      moduleId: 3,
+      screenName: '  Fee Receipt Print  ',
+      feature: '',
+      stepsToGenerate: '<p>Open Fees<script>alert(1)</script></p>',
+    })
+    expect(body.moduleId).toBe(3)
+    expect(body.screenName).toBe('Fee Receipt Print')
+    expect('feature' in body).toBe(false)
+    // §3.9 applies to *both* rich-text fields, not only the description.
+    expect(body.stepsToGenerate).toBe('<p>Open Fees</p>')
+    expect(createTicketBody.safeParse(body)).toMatchObject({ success: true })
+  })
+
+  it('omits steps the editor was focused and left empty', () => {
+    // A focused-then-abandoned contentEditable holds `<p><br></p>` — 13
+    // characters of nothing that a truthiness check reads as present, and the
+    // detail page would then render an empty Steps section for every ticket
+    // whose author clicked into the field and thought better of it.
+    const body = toCreateRequest({ ...valid, stepsToGenerate: '<p><br></p>' })
+    expect('stepsToGenerate' in body).toBe(false)
+  })
+
   it('omits description and effort a draft left blank rather than sending empties', () => {
     // `estimatedHrs: 0` is a genuine zero-hour estimate and `description: ''`
     // is a genuine empty description; both are different claims from "not
@@ -172,7 +266,7 @@ describe('toCreateRequest', () => {
 })
 
 describe('ticketFormSchema — the draft action (C-013)', () => {
-  const draftSchema = ticketFormSchema(clientRequired, 'draft')
+  const draftSchema = ticketFormSchema(rules, 'draft')
 
   it('accepts a ticket that has only what the contract requires', () => {
     // `TicketCreateRequest.required` is [projectId, title, taskTypeId, level],
@@ -195,6 +289,14 @@ describe('ticketFormSchema — the draft action (C-013)', () => {
     // reason to park it as a draft in the first place.
     expect(draftSchema.safeParse({ ...draftable, taskTypeId: clientBug }).success).toBe(true)
     expect(schema.safeParse({ ...valid, taskTypeId: clientBug }).success).toBe(false)
+  })
+
+  it('waives the §7.5 module rule too — "Save as Draft waives it either way"', () => {
+    const productionBug = TASK_TYPES.find((t) => t.code === 'PRODUCTION_BUG')!.id
+    expect(draftSchema.safeParse({ ...draftable, taskTypeId: productionBug, moduleId: null }).success).toBe(true)
+    expect(schema.safeParse({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: null }).success).toBe(
+      false,
+    )
   })
 
   it('still rejects effort the user actually typed but typed wrongly', () => {
@@ -231,6 +333,17 @@ describe('retainedForNextTicket', () => {
     // A title or an estimate surviving is how a batch ends up as five copies
     // of the same ticket.
     expect(next).toMatchObject({ title: '', description: '', estimatedHrs: '', plannedCloseDate: '' })
+  })
+
+  it('clears the module rather than carrying it into the next ticket', () => {
+    // Deliberately unlike task type and level beside it. Module is the field
+    // §7.5's mandatoriness rule exists to make somebody think about, and a
+    // value pre-filled from the last ticket makes accepting the default the
+    // path of least resistance on exactly that field — which is the outcome
+    // §7.5 warns poisons the reporting the whole feature was asked for.
+    const next = { ...emptyTicketForm, ...retainedForNextTicket(submitted) }
+    expect(next.moduleId).toBeNull()
+    expect(next).toMatchObject({ screenName: '', feature: '', stepsToGenerate: '' })
   })
 
   it('copies the watcher list rather than aliasing the one just sent', () => {
