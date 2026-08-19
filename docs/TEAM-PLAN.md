@@ -153,7 +153,7 @@ This map is committed as `.github/CODEOWNERS`, so GitHub requests the right revi
 >
 > **This entry records the state of the code, not an agreement.** It was raised by Stream A and is written here so the map stops disagreeing with the repository; it is not D's assent, which is still outstanding. If Debashis would rather own the stats refresh outright, the carve-out comes back out and A-058's aggregates get raised as requests instead — either answer is workable, and the one thing that is not is the map staying wrong. `.github/CODEOWNERS` is deliberately **not** updated until that conversation happens, because that file is the enforceable version and changing who GitHub asks for review is exactly the part that needs both streams to agree.
 
-> ⚠️ **Ten M4 ticket tasks moved to Stream D on 19 Aug 2026 — the tasks moved, the paths did not. Needs Divyansh's confirmation.**
+> **Ten M4 ticket tasks moved to Stream D on 19 Aug 2026 — the tasks moved, the paths did not. Signed off by Divyansh.**
 >
 > `C-055`–`C-058` (Journey roll-up), `C-062` (Stage Queue) and `C-065`, `C-067`–`C-070` ("Where it happened") are now owned by Debashis. Divyansh's queue was 22 deep behind `C-042` while Stream D sat at 92% with nothing startable; these ten are the part of M4 that does not need the transition service in hand.
 >
@@ -161,7 +161,9 @@ This map is committed as `.github/CODEOWNERS`, so GitHub requests the right revi
 >
 > Splitting the directories instead would be wrong. `C-042` and most of the ticket surface stay with Divyansh, so a row change would hand over paths whose active work is still his — the opposite of what §6 is for.
 >
-> **This records a reassignment, not Divyansh's assent**, which is outstanding. `.github/CODEOWNERS` is deliberately **not** updated, for the same reason as the `worker/` carve-out above: it is the enforceable version, and a path-level change there would route *all* ticket reviews to D rather than these ten tasks' worth. Reviews on this work should name Divyansh explicitly until that conversation happens.
+> **Signed off by Divyansh, confirmed by Debashis on 19 Aug 2026.** Agreed offline rather than on the brief thread (issue #5), so this entry is the record — there is no written reply from Divyansh to point at, and that is worth knowing if anyone re-opens the question later.
+>
+> `.github/CODEOWNERS` stays **unchanged**, and now for a purely technical reason rather than a pending conversation: it matches on paths, so a rule there would route *all* ticket reviews to D rather than these ten tasks' worth. The exception is per-task and CODEOWNERS cannot express that. **Reviews on this work should still name Divyansh explicitly** — he remains the owner of the surrounding code, and the sign-off covers who does the work, not who no longer needs to see it.
 
 > ⚠️ **The table above is a package map; CODEOWNERS matches paths.** `api/feature/auth/` here means `backend/api/src/main/java/com/edunext/edutrack/api/feature/auth/` on disk, and until 14 Aug 2026 CODEOWNERS was written the short way — so 17 of its 20 backend rules matched nothing, every pull request requested only the lead, and no stream was ever auto-notified of a change to its own code. Fixed in A-040 by dropping the leading slash so the patterns match at any depth. **If you add a row here, add the path form to CODEOWNERS and prove it resolves** with `git ls-files | grep -E '<pattern>'` — an empty result is a rule that does nothing and looks exactly like one that works.
 
