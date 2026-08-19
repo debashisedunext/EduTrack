@@ -222,7 +222,13 @@ class SchemaIntegrationIT {
                         // B-011 · a resource cannot be their own reporting manager
                         "trg_users_no_self_manager_ins", "trg_users_no_self_manager_upd",
                         // A-044 · the truncation anchor moves forward or not at all
-                        "trg_chain_anchor_monotonic", "trg_chain_anchor_no_delete");
+                        "trg_chain_anchor_monotonic", "trg_chain_anchor_no_delete",
+                        // A-071 · audit_logs, export-only. Listed here for the
+                        // reason the paragraph above gives: these two are the
+                        // layer that makes S-16's "never editable" a refusal
+                        // rather than a convention, and a silent drop is exactly
+                        // what this assertion exists to notice.
+                        "trg_audit_no_update", "trg_audit_no_delete");
             }
         }
     }
