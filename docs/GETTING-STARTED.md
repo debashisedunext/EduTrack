@@ -225,6 +225,12 @@ Four blueprint sections are the **shared mental model**. A developer who hasn't 
 
 Plus, for your own work: `CLAUDE.md` (rules, all streams) and your `docs/streams/STREAM-*.md` backlog.
 
+Once you are in the code, `/explain-code` answers "how does this work" and "why is
+it built this way" from what the repository already records — the class javadoc,
+the feature README, the commit body and the backlog entry — rather than from a
+reading of the syntax. Most of the *why* in this codebase is written down; that
+skill knows where.
+
 Skim the rest of the blueprint. Read §12 (design tokens) if you touch UI — which, being full-stack, you do.
 
 ### 5.4 Verify the stack on your machine · once A-002 lands, ~day 2
