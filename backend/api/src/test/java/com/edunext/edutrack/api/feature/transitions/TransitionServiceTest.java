@@ -238,6 +238,97 @@ class TransitionServiceTest {
         }
     }
 
+    // ── the golden rule ──────────────────────────────────────────────────────
+
+    /**
+     * C-043 · {@code CURRENT_ASSIGNEE} is 55L throughout this fixture, so
+     * these tests build their own caller rather than reusing the class-level
+     * {@code caller} field (a PM, always allowed, which is why the 17 tests
+     * above never had to know this rule existed).
+     */
+    @Nested
+    @DisplayName("the golden rule — C-043")
+    class GoldenRule {
+
+        @Test
+        @DisplayName("the current assignee, a Developer, may advance")
+        void currentAssigneeMayAdvance() {
+            Authentication assignee = devCaller(CURRENT_ASSIGNEE, "DEVELOPER");
+
+            service.advance(assignee, TICKET, request("FORWARD", "QA", null));
+
+            verify(journal).seal(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a Developer who is not the assignee is refused, even holding ticket.handoff")
+        void otherDeveloperIsRefused() {
+            Authentication otherDeveloper = devCaller(CURRENT_ASSIGNEE + 1, "DEVELOPER");
+
+            assertThatThrownBy(() -> service.advance(otherDeveloper, TICKET, request("FORWARD", "QA", null)))
+                    .isInstanceOf(NotCurrentStageOwnerException.class);
+
+            verify(journal, never()).seal(any(), any(), any());
+            verify(journal, never()).append(any(TicketStageTransition.class));
+        }
+
+        @Test
+        @DisplayName("QA sitting with the ticket cannot push it into Deployment when Dev owns the stage")
+        void qaCannotAdvanceADevTicket() {
+            Authentication qa = devCaller(CURRENT_ASSIGNEE + 1, "QA");
+
+            assertThatThrownBy(() -> service.advance(qa, TICKET, request("FORWARD", "DEPLOY", null)))
+                    .isInstanceOf(NotCurrentStageOwnerException.class);
+        }
+
+        @Test
+        @DisplayName("PM may advance a ticket assigned to someone else")
+        void pmMayAdvanceRegardlessOfAssignment() {
+            Authentication pm = devCaller(CURRENT_ASSIGNEE + 1, "PM");
+
+            service.advance(pm, TICKET, request("FORWARD", "QA", null));
+
+            verify(journal).seal(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Admin may advance a ticket assigned to someone else")
+        void adminMayAdvanceRegardlessOfAssignment() {
+            Authentication admin = devCaller(CURRENT_ASSIGNEE + 1, "ADMIN");
+
+            service.advance(admin, TICKET, request("FORWARD", "QA", null));
+
+            verify(journal).seal(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("an unidentifiable caller is refused, not defaulted to allowed")
+        void unidentifiableCallerIsRefused() {
+            Authentication anonymous = new TestingAuthenticationToken(null, null);
+            anonymous.setAuthenticated(false);
+
+            assertThatThrownBy(() -> service.advance(anonymous, TICKET, request("FORWARD", "QA", null)))
+                    .isInstanceOf(NotCurrentStageOwnerException.class);
+        }
+
+        @Test
+        @DisplayName("refused before the action code or open hop is even read")
+        void checkedBeforeActionCodeValidation() {
+            Authentication otherDeveloper = devCaller(CURRENT_ASSIGNEE + 1, "DEVELOPER");
+
+            // An action code the service would otherwise reject with
+            // UnknownActionCodeException — the golden rule must win first.
+            assertThatThrownBy(() -> service.advance(otherDeveloper, TICKET, request("EXPLODE", "QA", null)))
+                    .isInstanceOf(NotCurrentStageOwnerException.class);
+        }
+
+        private Authentication devCaller(long userId, String role) {
+            return new TestingAuthenticationToken(
+                    new DevPrincipal(userId, "u" + userId, "User " + userId, role, List.of(PROJECT), List.of()),
+                    "n/a", "ticket.handoff");
+        }
+    }
+
     // ── refusals ─────────────────────────────────────────────────────────────
 
     @Nested

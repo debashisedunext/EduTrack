@@ -45,9 +45,14 @@ import java.util.Set;
  * of it:
  *
  * <ul>
- *   <li><b>No permission check.</b> §2's golden rule — only the current stage
- *       owner, plus PM and Admin, may advance a ticket — is C-043's, enforced
- *       before this is ever called.</li>
+ *   <li><b>The golden rule is enforced here, and only here.</b> §2 — only the
+ *       current stage owner, plus PM and Admin, may advance a ticket — is
+ *       C-043, checked via {@link StageOwnership#mayAdvance} as the first
+ *       thing this method does once the ticket is loaded. It is a shared
+ *       predicate rather than a private check so {@code TicketDetailService}
+ *       can ask the identical question when deciding whether
+ *       {@code handoff}/{@code rework} belong in {@code availableActions} —
+ *       see {@link StageOwnership}'s own javadoc.</li>
  *   <li><b>No route.</b> The contract already declares {@code handoffTicket},
  *       {@code reworkTicket} and {@code skipStage}; each is built by the task
  *       that owns it (C-044…C-048) and maps its own request shape onto
@@ -159,6 +164,7 @@ class TransitionService {
      * @throws com.edunext.edutrack.api.security.scope.TicketNotFoundException
      *         404, identically for a ticket that does not exist and one this
      *         caller may not see
+     * @throws NotCurrentStageOwnerException  422 — the golden rule, C-043
      * @throws NoOpenStageException           422 — no open hop on this cycle
      * @throws UnknownActionCodeException     400
      * @throws ToStageRequiredException       400
@@ -169,6 +175,16 @@ class TransitionService {
     TicketWire.Ticket advance(Authentication caller, long ticketId,
                               TransitionDtos.TransitionRequest request) {
         Ticket ticket = tickets.require(caller, ticketId);
+
+        // C-043 · the golden rule, checked before anything about the request
+        // itself: an unauthorised caller gets no feedback about the move they
+        // tried to make, only that they may not make one. An unidentifiable
+        // caller (CallerIdentity.of empty) is denied the same way — "absent,
+        // not defaulted" per that class's own doc.
+        CallerIdentity identity = CallerIdentity.of(caller).orElse(null);
+        if (identity == null || !StageOwnership.mayAdvance(identity, ticket)) {
+            throw new NotCurrentStageOwnerException(ticketId, ticket.getAssignedTo());
+        }
 
         String actionCode = normalize(request.actionCode());
         if (!VALID_ACTIONS.contains(actionCode)) {

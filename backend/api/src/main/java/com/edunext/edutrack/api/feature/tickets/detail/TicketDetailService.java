@@ -2,6 +2,8 @@ package com.edunext.edutrack.api.feature.tickets.detail;
 
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.feature.tickets.links.TicketLinkService;
+import com.edunext.edutrack.api.feature.transitions.StageOwnership;
+import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketAttachment;
@@ -17,6 +19,8 @@ import com.edunext.edutrack.domain.tickets.TicketWatcherRepository;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 /**
  * A-052 · the ticket detail page in one call.
@@ -36,33 +40,31 @@ import org.springframework.transaction.annotation.Transactional;
  * ever becomes the bottleneck the answer is to widen the fetch, not to hand the
  * waterfall back to the client.
  *
- * <h2>🔴 Two fields the contract declares and this does not return</h2>
+ * <h2>🔴 {@code ribbon} the contract declares and this does not return</h2>
  *
- * <p>{@code ribbon} and {@code availableActions} are <b>deliberately null</b>,
- * for the same reason: the rules that produce them are Stream C's and are not
- * written yet.
+ * <p>{@code ribbon} is <b>deliberately null</b>: it needs stage segments from
+ * {@code ticket_stage_transitions} (C-042, built) laid against a workflow
+ * template's stage sequence (Stream B's {@code api/feature/workflow/}, which
+ * still holds only a README). The second half does not exist, so any ribbon
+ * assembled here would be invented. It is optional in
+ * {@code TicketDetailResponse} — only {@code ticket} is required — so
+ * omitting it is a contract-valid answer, and a client sees it absent and
+ * renders no ribbon, the truthful rendering of a system that cannot yet lay
+ * one out. <b>C-051 fills it in once the stage-sequence half exists.</b>
  *
- * <ul>
- *   <li><b>{@code ribbon}</b> needs stage segments from
- *       {@code ticket_stage_transitions} (C-042, unbuilt) laid against a
- *       workflow template's stage sequence (Stream B's
- *       {@code api/feature/workflow/}, which holds only a README). Neither
- *       exists, so any ribbon returned here would be invented.</li>
- *   <li><b>{@code availableActions}</b> is <b>C-043, the golden rule</b> — only
- *       the current stage owner, plus PM and Admin, may advance a ticket. The
- *       contract's note on this very field says the client renders buttons from
- *       it rather than re-deriving permissions, "because two implementations of
- *       the same rule always diverge". Writing it here before C-043 writes it
- *       there would create exactly the second implementation that warning is
- *       about, and the two would diverge on the one question that matters most:
- *       who may move a ticket.</li>
- * </ul>
+ * <h2>{@code availableActions} — C-043, the golden rule</h2>
  *
- * <p>Both are optional in {@code TicketDetailResponse} — only {@code ticket} is
- * required — so omitting them is a contract-valid answer rather than a broken
- * one. A client sees them absent and renders no ribbon and no action buttons,
- * which is the truthful rendering of a system that cannot yet advance a ticket
- * at all. <b>When C-042 and C-043 land, they are filled in here.</b>
+ * <p>Filled in by {@link #availableActions}, which asks
+ * {@link StageOwnership#mayAdvance} the same question
+ * {@code TransitionService.advance} gates on — <b>one predicate, not two</b>,
+ * per that class's own javadoc on why a second copy here would diverge from
+ * it the first time either one changes without the other. Only
+ * {@code handoff}/{@code rework} are decided here: they are exactly what the
+ * golden rule answers. {@code close}, {@code reopen}, {@code skip-stage} and
+ * the rest of the contract's action vocabulary are a different, still-open
+ * question — each is its own role rule, not this one — and are left off
+ * rather than guessed at, the same restraint this class already applies to
+ * {@code ribbon}.
  *
  * <h2>What {@code ?cycle=} selects, and what it does not</h2>
  *
@@ -142,7 +144,26 @@ class TicketDetailService {
                 watchers.findByIdTicketId(ticketId).stream()
                         .map(w -> new TicketDetailDtos.UserRef(w.getId().getUserId())).toList(),
                 links.viewsFor(caller, ticket),
-                null);  // availableActions — C-043, see the class note
+                availableActions(caller, ticket));
+    }
+
+    /**
+     * C-043 · what this caller may do to this ticket right now, per the class
+     * javadoc above. {@code handoff}/{@code rework} require both halves of
+     * {@code canAdvance}: the golden rule ({@link StageOwnership#mayAdvance})
+     * <em>and</em> a live stage to advance from — a closed ticket, or one
+     * whose current stage code no longer resolves, has nothing to hand off
+     * even to its own owner. An unidentifiable caller (empty
+     * {@link CallerIdentity#of}) gets none, the same deny-by-default that
+     * class's own doc requires.
+     */
+    private List<String> availableActions(Authentication caller, Ticket ticket) {
+        CallerIdentity identity = CallerIdentity.of(caller).orElse(null);
+        boolean hasLiveStage = ticket.getCurrentStage() != null && !"CLOSED".equals(ticket.getStatus());
+        if (identity != null && hasLiveStage && StageOwnership.mayAdvance(identity, ticket)) {
+            return List.of("handoff", "rework");
+        }
+        return List.of();
     }
 
     // ── mapping ──────────────────────────────────────────────────────────────

@@ -28,7 +28,9 @@ final class TicketDetailDtos {
      *                        javadoc on why the source/target label derivation
      *                        must have one implementation, not two
      * @param ribbon          always null for now — see {@link TicketDetailService}
-     * @param availableActions always null for now — see {@link TicketDetailService}
+     * @param availableActions C-043 · {@code handoff}/{@code rework} when the
+     *                        golden rule allows it, empty otherwise — see
+     *                        {@link TicketDetailService}
      */
     record Detail(
             TicketWire.Ticket ticket,
