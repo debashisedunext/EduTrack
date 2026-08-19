@@ -47,12 +47,12 @@ class HandoffController {
             description = """
                     Only the current stage owner — plus PM and Admin — may advance a ticket \
                     (422 otherwise, C-043). Seals the hop being left in working minutes, \
-                    inserts the next, and confirms effort for the stage being left \
+                    inserts the next, confirms effort for the stage being left \
                     (`effortHours`, mandatory unless the project allows warn-only — G-1's default \
-                    is blocking, and no project carries the override yet).
-
-                    Not yet: the notification to the receiving owner and the WebSocket push — \
-                    both are C-045's, waiting on Stream D's STOMP topics.""")
+                    is blocking, and no project carries the override yet), notifies the receiving \
+                    owner (bell + mandatory mail) and pushes the ribbon's advance live over \
+                    WebSocket to anyone with the ticket open, plus a nudge to the stage queues \
+                    the ticket entered and left.""")
     HandoffDtos.RibbonResponse handoff(
             Authentication caller,
             @PathVariable String ticketId,

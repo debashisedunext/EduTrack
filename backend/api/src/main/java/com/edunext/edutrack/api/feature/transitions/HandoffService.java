@@ -14,10 +14,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 
 /**
- * C-044 · {@code POST /tickets/{ticketId}/handoff} — the shared engine
- * ({@code TransitionService}, C-042) plus the two things it deliberately does
- * not do (its own javadoc names both): the golden-rule route, and the
- * mandatory effort-confirmation write for the stage being left.
+ * C-044/C-045 · {@code POST /tickets/{ticketId}/handoff} — the shared engine
+ * ({@code TransitionService}, C-042) plus what it deliberately does not do
+ * (its own javadoc names each): the golden-rule route, the mandatory
+ * effort-confirmation write for the stage being left, and — C-045 — telling
+ * the receiving owner via {@link HandoffNotifier}. The live ribbon push and
+ * team-queue nudge {@code advance} itself now raises are action-agnostic and
+ * live in {@code TransitionService}/{@code RibbonLiveBroadcaster}, not here.
  *
  * <h2>Effort is captured before {@link TransitionService#advance} runs</h2>
  *
@@ -76,14 +79,16 @@ class HandoffService {
     private final TicketJournal journal;
     private final TicketCycleRepository cycles;
     private final RibbonAssembler ribbon;
+    private final HandoffNotifier notifier;
 
     HandoffService(ScopedTickets tickets, TransitionService transitionService, TicketJournal journal,
-                   TicketCycleRepository cycles, RibbonAssembler ribbon) {
+                   TicketCycleRepository cycles, RibbonAssembler ribbon, HandoffNotifier notifier) {
         this.tickets = tickets;
         this.transitionService = transitionService;
         this.journal = journal;
         this.cycles = cycles;
         this.ribbon = ribbon;
+        this.notifier = notifier;
     }
 
     /**
@@ -115,6 +120,11 @@ class HandoffService {
         if (request.effortHours().compareTo(BigDecimal.ZERO) > 0) {
             logEffort(caller, ticket, leavingStage, leavingCycle, leavingIteration, request.effortHours());
         }
+
+        // C-045 · the receiving owner is told — after advance succeeded, on
+        // the same reasoning as logEffort above: a refused handoff must
+        // never notify anybody about work that did not happen.
+        notifier.received(ticket, request.toUserId(), actorId(caller), request.toStageCode());
 
         boolean canAdvance = CallerIdentity.of(caller)
                 .map(identity -> StageOwnership.mayAdvance(identity, ticket))
@@ -159,5 +169,17 @@ class HandoffService {
                                 + " cycle " + saved.getCycleNo() + ", which has no ticket_cycles row"));
         cycle.setEffortHrs(cycle.getEffortHrs().add(saved.getHours()));
         ticket.setTotalEffortHrs(ticket.getTotalEffortHrs().add(saved.getHours()));
+    }
+
+    /**
+     * Who is handing the ticket off, for {@link HandoffNotifier}. Unlike
+     * {@link #logEffort}'s identical lookup, this tolerates an unidentifiable
+     * caller rather than throwing — {@code advance} above has already
+     * refused one, so in practice this is never empty, but the notifier
+     * degrades to "Someone" rather than the whole handoff response failing
+     * on a notification that is not the point of the request.
+     */
+    private static Long actorId(Authentication caller) {
+        return CallerIdentity.of(caller).map(CallerIdentity::userId).orElse(null);
     }
 }

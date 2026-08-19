@@ -51,8 +51,10 @@ class HandoffServiceTest {
     private final TicketJournal journal = mock(TicketJournal.class);
     private final TicketCycleRepository cycles = mock(TicketCycleRepository.class);
     private final RibbonAssembler ribbon = mock(RibbonAssembler.class);
+    private final HandoffNotifier notifier = mock(HandoffNotifier.class);
 
-    private final HandoffService service = new HandoffService(tickets, transitionService, journal, cycles, ribbon);
+    private final HandoffService service =
+            new HandoffService(tickets, transitionService, journal, cycles, ribbon, notifier);
 
     private final Authentication pm = new TestingAuthenticationToken(
             new DevPrincipal(ACTOR, "priya", "Priya Nair", "PM", List.of(PROJECT), List.of()),
@@ -173,6 +175,28 @@ class HandoffServiceTest {
                     .isInstanceOf(NotCurrentStageOwnerException.class);
 
             verify(journal, never()).append(any(TicketEffortLog.class));
+            verify(notifier, never()).received(any(), anyLong(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("C-045: the receiving owner is notified")
+    class ReceivingOwnerNotified {
+
+        @Test
+        @DisplayName("notified after advance succeeds, with the caller, the new owner and the destination stage")
+        void notifiesAfterAdvance() {
+            service.handoff(pm, TICKET_CODE, request("QA", 99L, new BigDecimal("2.00")));
+
+            verify(notifier).received(ticket, 99L, ACTOR, "QA");
+        }
+
+        @Test
+        @DisplayName("a zero-hour handoff still notifies — the effort skip is independent")
+        void notifiesEvenWithNoEffortLogged() {
+            service.handoff(pm, TICKET_CODE, request("QA", 99L, BigDecimal.ZERO));
+
+            verify(notifier).received(ticket, 99L, ACTOR, "QA");
         }
     }
 
