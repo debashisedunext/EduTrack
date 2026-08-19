@@ -281,6 +281,19 @@ final class PermissionMatrix {
      * fixture on {@link #CHANGE_PRIORITY}'s own reasoning, since it proves the
      * row is not passing because some field happened to satisfy a validator.
      */
+    /**
+     * C-067 · {@code TicketCreateDtos.CreateRequest}'s four @NotNull/@NotBlank
+     * fields and nothing else. No client, no module — either would be checked by
+     * ClientGate or ModuleGuard before the guard this matrix asserts could
+     * matter, and a fixture that could trip a 400 proves nothing about
+     * authorisation. Same reasoning EFFORT_LOG's own note gives.
+     */
+    private static final String CREATE_TICKET = """
+            {"projectId":1,"title":"matrix fixture","taskTypeId":1,"level":"MEDIUM"}""";
+
+    /** C-067 · every PATCH field is optional, so an empty object is already valid — {@link #QUICK_UPDATE}'s reasoning. */
+    private static final String PATCH_TICKET = "{}";
+
     private static final String QUICK_UPDATE = "{}";
 
     /**
@@ -924,6 +937,24 @@ final class PermissionMatrix {
             // caller's own ?projectId= is ANDed underneath that, so a filter
             // can only narrow what they already see and never widen it.
             everyRole("GET", "/api/v1/tickets"),
+
+            /*
+             * C-067 · the create and edit the contract has declared since D-001.
+             *
+             * BOTH are every role, and the POST was written as Admin/PM/Support
+             * first on an assumption about §2 that the blueprint contradicts.
+             * §2's "Create ticket" row is six ticks — a Developer who finds a bug
+             * in their own work raises it themselves rather than asking a PM to
+             * type it — and V20260806_0900 seeds ticket.create to all six
+             * accordingly. This matrix caught the guess, which is what it is for.
+             *
+             * PATCH is ticket.update_progress, also every role: editing a
+             * ticket's own fields is what everybody working it does, and WHICH
+             * tickets they may reach is A-034's row question, answered before
+             * this one by ScopedTickets.
+             */
+            everyRole("POST", "/api/v1/tickets", CREATE_TICKET),
+            everyRole("PATCH", "/api/v1/tickets/{ticketId}", PATCH_TICKET),
 
             // ── bulk reassignment · C-063, S-17 and S-24 ─────────────────────
             // Admin and PM, stated as an explicit matrix in the route's own
