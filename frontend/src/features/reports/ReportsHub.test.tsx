@@ -51,6 +51,18 @@ const CATALOGUE = {
         available: false,
         unavailableReason: 'This report is not built yet.',
       },
+      // A-070 · the only descriptor here declaring TASK_TYPE, which is what
+      // makes the filter-bar assertions about it mean something.
+      {
+        key: 'critical-origin',
+        title: 'Born Critical vs Became Critical',
+        description: 'How much of the critical load arrived that way.',
+        category: 'QUALITY',
+        chart: 'stacked-bar',
+        filters: ['DATE_RANGE', 'PROJECT', 'RESOURCE', 'TASK_TYPE'],
+        available: true,
+        unavailableReason: null,
+      },
     ],
     scopeNote: null,
   },
@@ -216,6 +228,29 @@ describe('S-27 the report viewer', () => {
     // its runner would ignore.
     expect(await screen.findByLabelText('From')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Resource/ })).not.toBeInTheDocument()
+    // A-070 · and no Task type either, for the same reason.
+    expect(screen.queryByRole('button', { name: /Task type/ })).not.toBeInTheDocument()
+  })
+
+  /**
+   * A-070 · the Task type control, and the reason it is worth a test of its own.
+   *
+   * <p>TASK_TYPE had been declared by `sla-breach` and `effort-summary` since
+   * A-066 and honoured by their runners, with no control to set it — a filter
+   * that worked and could not be reached. A-070 declares it too, so it is drawn
+   * rather than inherited.
+   *
+   * <p>Pinned because the failure is quiet in both directions: a declared filter
+   * with no control is invisible, and a control the viewer does not forward is
+   * a dropdown that changes nothing. `critical-origin` declares it, so the
+   * control appears; `date-wise` does not, so it must not.
+   */
+  it('draws the Task type control for a report that declares it, and not otherwise', async () => {
+    catalogue()
+    run()
+    renderViewer('/reports/critical-origin')
+
+    expect(await screen.findByRole('button', { name: /Task type/ })).toBeInTheDocument()
   })
 
   it('explains an unbuilt report rather than running it', async () => {
