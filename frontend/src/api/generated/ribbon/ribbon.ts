@@ -66,6 +66,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ForceMoveRequest,
   GetRibbonParams,
   GetStageQueueParams,
   HandoffRequest,
@@ -404,6 +405,82 @@ export const useSkipStage = <TError = NotFoundResponse | UnprocessableTransition
       > => {
 
       const mutationOptions = getSkipStageMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **Any stage to any stage** — forward, backward, or sideways — logged as
+`OVERRIDE` rather than as whichever direction it happens to move. Unlike
+`rework`/`skip`, there is no default destination: `toStageCode` is
+always required.
+
+Gated on `ticket.force_move` alone (Admin and PM hold it, nobody else
+— blueprint §2's "Force-move ribbon backwards" row); the golden rule's
+current-stage-owner check is not the point of this route; the
+capability already is. `reason` is mandatory so the override is
+self-explaining in the ribbon's history the way a rework's is.
+
+ * @summary Force-move to any stage — PM and Admin only (C-048)
+ */
+export const forceMoveTicket = (
+    ticketId: string,
+    forceMoveRequest: ForceMoveRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<RibbonResponse>(
+      {url: `/tickets/${ticketId}/force-move`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: forceMoveRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getForceMoveTicketMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forceMoveTicket>>, TError,{ticketId: string;data: ForceMoveRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof forceMoveTicket>>, TError,{ticketId: string;data: ForceMoveRequest}, TContext> => {
+
+const mutationKey = ['forceMoveTicket'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof forceMoveTicket>>, {ticketId: string;data: ForceMoveRequest}> = (props) => {
+          const {ticketId,data} = props ?? {};
+
+          return  forceMoveTicket(ticketId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ForceMoveTicketMutationResult = NonNullable<Awaited<ReturnType<typeof forceMoveTicket>>>
+    export type ForceMoveTicketMutationBody = ForceMoveRequest
+    export type ForceMoveTicketMutationError = ValidationFailedResponse | NotFoundResponse | UnprocessableTransitionResponse
+
+    /**
+ * @summary Force-move to any stage — PM and Admin only (C-048)
+ */
+export const useForceMoveTicket = <TError = ValidationFailedResponse | NotFoundResponse | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forceMoveTicket>>, TError,{ticketId: string;data: ForceMoveRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof forceMoveTicket>>,
+        TError,
+        {ticketId: string;data: ForceMoveRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getForceMoveTicketMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

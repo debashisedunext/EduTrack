@@ -303,6 +303,72 @@ export const skipStageResponse = zod.object({
 })
 
 /**
+ * **Any stage to any stage** — forward, backward, or sideways — logged as
+`OVERRIDE` rather than as whichever direction it happens to move. Unlike
+`rework`/`skip`, there is no default destination: `toStageCode` is
+always required.
+
+Gated on `ticket.force_move` alone (Admin and PM hold it, nobody else
+— blueprint §2's "Force-move ribbon backwards" row); the golden rule's
+current-stage-owner check is not the point of this route; the
+capability already is. `reason` is mandatory so the override is
+self-explaining in the ribbon's history the way a rework's is.
+
+ * @summary Force-move to any stage — PM and Admin only (C-048)
+ */
+export const forceMoveTicketPathTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+
+
+export const forceMoveTicketParams = zod.object({
+  "ticketId": zod.string().regex(forceMoveTicketPathTicketIdRegExp)
+})
+
+export const forceMoveTicketBodyReasonMin = 3;
+export const forceMoveTicketBodyReasonMax = 2000;
+
+
+
+export const forceMoveTicketBody = zod.object({
+  "toStageCode": zod.string().describe('Any stage of the ticket\'s workflow template — forward, backward or\nsideways. Unlike `rework`\/`skip` there is no default; the caller\nalways names the destination.\n'),
+  "reason": zod.string().min(forceMoveTicketBodyReasonMin).max(forceMoveTicketBodyReasonMax),
+  "toUserId": zod.number().nullish().describe('The receiving owner. Omitted keeps the current assignee.')
+})
+
+export const forceMoveTicketResponse = zod.object({
+  "data": zod.object({
+  "cycleNo": zod.number().optional(),
+  "iterationNo": zod.number().optional(),
+  "isSealed": zod.boolean().optional().describe('True for a past cycle — renders read-only.'),
+  "currentStageCode": zod.string().nullish(),
+  "canAdvance": zod.boolean().optional().describe('Whether \*\*this caller\*\* may advance the ticket — the golden rule,\nresolved server-side. The contextual action button is hidden for\neveryone else.\n'),
+  "segments": zod.array(zod.object({
+  "stageCode": zod.string().optional(),
+  "displayName": zod.string().optional(),
+  "icon": zod.string().nullish(),
+  "state": zod.enum(['COMPLETED', 'CURRENT', 'PENDING', 'REWORKED', 'SKIPPED', 'BLOCKED']).optional(),
+  "sequence": zod.number().optional(),
+  "owner": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "ownerRole": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "enteredAt": zod.string().datetime({}).nullish(),
+  "exitedAt": zod.string().datetime({}).nullish(),
+  "durationMins": zod.number().nullish().describe('Working minutes, not wall-clock. Weekends and holidays excluded.'),
+  "effortHrs": zod.number().optional(),
+  "idleMins": zod.number().nullish().describe('`durationMins − effort`. High idle against low effort is a queue problem.'),
+  "iterationNo": zod.number().optional(),
+  "loopBackCount": zod.number().optional().describe('Drives the loop-back badge.'),
+  "skipReason": zod.string().nullish(),
+  "handoffNote": zod.string().nullish()
+})).optional()
+})
+})
+
+/**
  * "Waiting in QA", "Waiting in Deployment" — the landing page for QA and
 Deployment roles. Sorted by time-in-stage descending, so the ticket
 rotting longest is first.

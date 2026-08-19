@@ -211,6 +211,16 @@ final class PermissionMatrix {
             {"toStageCode":"QA","toUserId":1}""";
 
     /**
+     * C-048 · {@code ForceMoveDtos.ForceMoveRequest}: {@code toStageCode} and
+     * {@code reason} are the only required fields — {@code toUserId} is
+     * omitted, on {@link #HANDOFF}'s own reasoning: keeping the current
+     * assignee is the strongest fixture, since it reaches authorisation
+     * without depending on a field this matrix has no opinion about.
+     */
+    private static final String FORCE_MOVE = """
+            {"toStageCode":"QA","reason":"Matrix fixture override — see PermissionMatrix's own header."}""";
+
+    /**
      * C-020 · {@code PriorityChangeDtos.ChangePriorityRequest}: {@code level} is
      * the only {@code @NotBlank} field.
      *
@@ -888,6 +898,27 @@ final class PermissionMatrix {
             // @RequestBody — without one, argument resolution answers 400 before
             // @PreAuthorize is consulted, on this file's own header's warning.
             everyRole("POST", "/api/v1/tickets/{ticketId}/handoff", HANDOFF),
+
+            // ── force-move · C-048, §2's "Force-move ribbon backwards" row ────
+            //
+            // Admin and PM, and unlike the handoff row immediately above this
+            // is a genuine capability rather than a row rule wearing one.
+            // ticket.force_move (V20260806_0900) is granted to exactly these
+            // two — nobody else holds it — so the capability itself is the
+            // whole authorisation question ForceMoveController asks; there is
+            // no StageOwnership narrowing underneath it the way handoff/rework
+            // have, because both roles that hold the capability already
+            // satisfy StageOwnership.mayAdvance regardless of assignment.
+            //
+            // *Which* tickets is still not this file's question: ScopedTickets
+            // answers 404 for a ticket outside the caller's scope (A-035)
+            // whatever capability they hold.
+            //
+            // Carries a fixture because the handler takes a required
+            // @RequestBody — without one, argument resolution answers 400
+            // before @PreAuthorize is consulted, on this file's own header's
+            // warning.
+            adminAndPm("POST", "/api/v1/tickets/{ticketId}/force-move", FORCE_MOVE),
 
             // ── reopen · C-038, and the one ticket route where three roles is
             //    the whole answer rather than half a rule ────────────────────
