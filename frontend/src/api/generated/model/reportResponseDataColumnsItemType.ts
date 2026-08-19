@@ -57,4 +57,5 @@ export const ReportResponseDataColumnsItemType = {
   date: 'date',
   duration: 'duration',
   percent: 'percent',
+  trend: 'trend',
 } as const;

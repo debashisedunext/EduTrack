@@ -145,7 +145,7 @@ class PdfReportExporter implements ReportExporter {
     /** Numbers right, everything else left — the same rule the on-screen table follows. */
     private static int alignment(ReportDtos.ColumnType type) {
         return switch (type) {
-            case NUMBER, PERCENT, DURATION -> Element.ALIGN_RIGHT;
+            case NUMBER, PERCENT, DURATION, TREND -> Element.ALIGN_RIGHT;
             default -> Element.ALIGN_LEFT;
         };
     }

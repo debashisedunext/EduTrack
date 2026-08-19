@@ -171,7 +171,14 @@ class ReportRunnersIT {
     }
 
     private List<Map<String, Object>> run(CallerIdentity caller, String key, Long projectId) {
-        return service.run(caller, key, FROM, TO, projectId, null, ReportFilters.NONE).orElseThrow().report().rows();
+        return run(caller, key, projectId, null);
+    }
+
+    /** B-061 · the same call with {@code ?resourceId=} actually set. */
+    private List<Map<String, Object>> run(CallerIdentity caller, String key, Long projectId,
+                                          Long resourceId) {
+        return service.run(caller, key, FROM, TO, projectId, resourceId, ReportFilters.NONE)
+                .orElseThrow().report().rows();
     }
 
     private static Object cell(List<Map<String, Object>> rows, int index, String column) {
@@ -487,6 +494,104 @@ class ReportRunnersIT {
             // made it runnable by a Developer for the first time.
             assertThat(service.run(developer(), ClientReportRunner.KEY, FROM, TO,
                     myProject, null, ReportFilters.NONE)).isEmpty();
+        }
+    }
+
+    /**
+     * B-061 · the Resource filter, which four of these reports declared and none
+     * of them applied.
+     *
+     * <h2>What was wrong</h2>
+     *
+     * <p>{@link ReportService} resolved {@code ?resourceId=} into a subject and
+     * handed it to the ETag and to {@code meta.appliedScope} — and never to the
+     * runner. Every runner re-derived it as {@code scope.resourceSubject(null)},
+     * which answers null for everybody who is not a delivery role. So an Admin
+     * or a PM — the only callers the control exists for — picked a person and
+     * got the whole report back, under a line reading <i>"showing one resource,
+     * across all projects"</i>.
+     *
+     * <p>That is worse than an inert control. A filter that is absent asks no
+     * question; this one answered, in words, that it had narrowed rows it had
+     * not touched. The ETag varied by a parameter the body did not depend on,
+     * which is the same defect from the caching side.
+     *
+     * <h2>Why the assertions are shaped as they are</h2>
+     *
+     * <p>Each case asks for a project holding exactly one person's work and
+     * filters to the <em>other</em> person. Before B-061 every one of these
+     * returned the resident's rows; the empty result is only reachable if the
+     * parameter reaches SQL. Asserting the positive case alone would have passed
+     * against the bug, because filtering to the only person present is
+     * indistinguishable from not filtering at all — which is precisely how this
+     * survived A-066 and A-067.
+     */
+    @Nested
+    @DisplayName("B-061 · the resource filter")
+    class ResourceFilter {
+
+        @Test
+        @DisplayName("the scorecard narrows to the person asked for")
+        void scorecard() {
+            // otherProject holds only the colleague's twenty.
+            assertThat(run(admin(), ResourceScorecardRunner.KEY, otherProject, colleague)).hasSize(1);
+            assertThat(cell(run(admin(), ResourceScorecardRunner.KEY, otherProject, colleague), 0, "closed"))
+                    .isEqualTo(20L);
+
+            // Before B-061 this returned the colleague's row too.
+            assertThat(run(admin(), ResourceScorecardRunner.KEY, otherProject, me)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("effort summary narrows to the person asked for")
+        void effortSummary() {
+            assertThat(run(admin(), EffortSummaryRunner.KEY, otherProject, colleague)).isNotEmpty();
+            assertThat(run(admin(), EffortSummaryRunner.KEY, otherProject, me)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("reopen analysis narrows to the person asked for")
+        void reopenAnalysis() {
+            // t3 is mine and reopened twice; nothing in myProject is the
+            // colleague's, so filtering to them empties a report that has rows.
+            assertThat(run(admin(), ReopenAnalysisRunner.KEY, myProject, me)).isNotEmpty();
+            assertThat(run(admin(), ReopenAnalysisRunner.KEY, myProject, colleague)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("velocity narrows to the person asked for")
+        void velocity() {
+            resourceStat(LocalDate.of(2026, 8, 10), me, 4, "9.0");
+            resourceStat(LocalDate.of(2026, 8, 10), colleague, 9, "20.0");
+
+            // An Admin, unbounded by project, so both people are in range and
+            // the filter is the only thing that can separate them.
+            List<Map<String, Object>> justMine = run(admin(), ResourceVelocityRunner.KEY, null, me);
+
+            assertThat(justMine).isNotEmpty();
+            assertThat(justMine).allSatisfy(row ->
+                    assertThat(row.get("closed")).isEqualTo(4L));
+        }
+
+        /**
+         * The half that has to keep working now that the parameter is live.
+         *
+         * <p>Making an inert parameter live is exactly the change that can open
+         * what §2 withholds. {@link ReportScope#resourceSubject} overrules a
+         * delivery role's request <em>before</em> {@link ReportService} passes
+         * it on, so a Developer naming a colleague's id reads their own rows.
+         * Asserted on the figure and not merely on the row count: one row is
+         * what both the correct and the leaking answer return here.
+         */
+        @Test
+        @DisplayName("a delivery role naming a colleague still reads their own rows")
+        void aDeliveryRoleCannotAimIt() {
+            List<Map<String, Object>> rows =
+                    run(developer(), ResourceScorecardRunner.KEY, myProject, colleague);
+
+            assertThat(rows).hasSize(1);
+            // Mine, not the colleague's twenty.
+            assertThat(cell(rows, 0, "closed")).isEqualTo(3L);
         }
     }
 

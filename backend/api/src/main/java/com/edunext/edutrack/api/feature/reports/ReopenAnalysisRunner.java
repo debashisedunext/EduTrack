@@ -54,7 +54,7 @@ class ReopenAnalysisRunner implements ReportRunner {
 
     @Override
     public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
-                      ReportFilters filters) {
+                      Long resourceSubject, ReportFilters filters) {
         List<ReportDtos.Column> columns = List.of(
                 new ReportDtos.Column("resource", "Resource", STRING),
                 new ReportDtos.Column("project", "Project", STRING),
@@ -67,7 +67,8 @@ class ReopenAnalysisRunner implements ReportRunner {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (TicketReportRepository.ReopenRow r : tickets.reopenAnalysis(
                 from, to, projectIds, scope.ownWorkOnly(), scope.userId(),
-                scope.resourceSubject(null))) {
+                // B-061 · was scope.resourceSubject(null) — see ReportRunner.
+                resourceSubject)) {
 
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("resource", r.fullName());

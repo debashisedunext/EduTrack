@@ -5,10 +5,15 @@
 18 reports, exports, scheduling. Screens S-27, S-28.
 
 `client-report` is **Stream B's**, by `STREAM-B-MASTERS.md`'s M6 split ("Weeks
-12–14 — M6 reports. Split with Stream A. Typically yours"). B-060 is the one
+12–14 — M6 reports. Split with Stream A. Typically yours"). B-060 is the first
 task in this package written from outside it; `ClientReportRunner`,
 `ReportFilters`, `ReportEntityKind` and `TicketReportRepository.clientReport` are
 its files.
+
+`resource-scorecard` and `workload-capacity` are Stream B's by the same split.
+B-061 added no runner — both existed — and changed `ReportRunner`,
+`ReportService`, `ReportRepository.workload`, `ReportDtos.ColumnType` and the
+three exporters. See **The subject that never arrived** and **Allocation** below.
 
 ## What is here today (A-063)
 
@@ -106,11 +111,89 @@ reopens what §2 withholds.
 by `?clientId=`, and a validator that ignored it would hand the second caller a
 304 against the first client's rows.
 
+**RESOURCE was drawn and unhonoured until B-061** — the opposite failure, and
+the worse one. See **The subject that never arrived** above.
+
 **TASK_TYPE and LEVEL are honoured but undrawn.** `ReportFilterBar` renders four
 of the six kinds; those two have no control yet, so they are reachable by URL
 and by `?export=` and not from the bar. That is a gap rather than the failure the
 per-report filter list exists to prevent — nothing on screen claims to filter and
 then does not. One branch each, and they belong to those two reports.
+
+## The subject that never arrived (B-061)
+
+`ReportService.run` resolved `?resourceId=` into a subject, put it in the ETag
+and in `meta.appliedScope`, and **did not pass it to the runner**. Every runner
+re-derived it as `scope.resourceSubject(null)`, which answers null for anybody
+who is not a delivery role — so the Resource control narrowed nothing for the
+Admins and PMs it exists for, on all five reports declaring it. `workload` had
+no query parameter for it at all.
+
+**It presented as an applied filter, not an absent one.** The viewer printed
+"showing one resource, across all projects" over rows that had not been
+narrowed, and the ETag varied by a parameter the body did not depend on, so two
+subjects asked for from one URL could share a validator. B-060 found the same
+shape in `?taskTypeId=` and `?level=`; this is the seam below it.
+
+`resourceSubject` is now the fifth argument to `ReportRunner.run`, sitting
+beside `projectIds` because they are the two **resolved narrowings**. It is
+deliberately not a fourth field on `ReportFilters`: a filter narrows what was
+asked for and may be ignored, a scope narrows what is allowed and may not, and
+that record is where an optional preference belongs. `ReportScope.resourceSubject`
+now says at the method that a runner must read the parameter rather than call it.
+
+Making an inert parameter live is the change that can leak, so
+`ReportRunnersIT.ResourceFilter` pins both halves — that it narrows, and that a
+delivery role naming a colleague still reads their own rows. Each case filters
+to the person who is *not* in the project under test: asking for the only person
+present passes against the bug, which is how this survived two tasks.
+
+## Trend is a column type (B-061)
+
+§7.8 ends the scorecard's column list with "Trend arrows". The column was typed
+`NUMBER`, so the cell read `-3` and `ReportChart` plotted a signed delta as a
+series beside an SLA percentage and a cycle time.
+
+`TREND` is the one `ColumnType` that is not a data type — it says what the number
+*means*: a change against the comparable preceding window. A `key === 'trend'`
+branch in the table would have drawn the arrow and left the chart wrong, and
+would be the second copy of the server's vocabulary this package refuses to keep.
+
+**Direction is not a verdict.** Up is not drawn as good. The same type will carry
+a reopen-rate trend, where up is bad. **Exports write the number, not the arrow**
+— a spreadsheet cell holding a glyph cannot be sorted or summed, which is what an
+export is for, so `TREND` joins the numeric arm in `XlsxReportExporter` and
+`PdfReportExporter` and stays out of `PdfChart`'s series, matching the screen.
+
+## Allocation, and why it is not project-scoped (B-061)
+
+B-017 built the Team tab's per-project allocation and could not answer the
+question that is actually a warning — a resource's total across *all* their
+projects — because that screen holds one project's rows. It flagged the figure
+for B-061 by name.
+
+`workload-capacity` reports three columns from `project_members`: projects,
+allocated, and allocation stated on. The aggregate spans **every active
+membership, including projects the caller cannot see**. That is not a widening:
+`resource_daily_stats` is keyed by user with no project column, so the load
+columns beside it have always shown a person's whole load. Narrowing only the
+allocation reproduces the bug B-017 flagged — a PM owning one of somebody's
+three projects reads 50% and concludes there is room. A percentage and a count
+cross the boundary; a project name never does.
+
+**The total is a floor and says so.** `allocation_pct` is nullable and means "not
+stated"; B-017 refused the contract's `default: 100` because a backfill would
+read 300% for every fixture resource on three projects. So the sum covers only
+memberships that stated a figure, `SUM` over an all-null set stays null
+(`getBigDecimal`, never `getInt`), and the count that stated one is published
+beside the total. The card's description names the limit, which is the call
+`client-report` made about the figure it does not have.
+
+`workload-capacity` also moved from `stacked-bar` to `bar`. Stacking asserts the
+series partition a total and these never did — an open ticket is also counted
+under critical and under delayed — so the height was double-counting before
+B-061 added a percentage to it. **Still not a good chart**: eight series on one
+axis is hard to read, and that is A-067's to redesign.
 
 ## Linked cells (B-060)
 

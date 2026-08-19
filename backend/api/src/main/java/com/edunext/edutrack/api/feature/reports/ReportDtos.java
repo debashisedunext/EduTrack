@@ -118,8 +118,30 @@ public final class ReportDtos {
         }
     }
 
+    /**
+     * How the client formats a cell, and how A-064's exporter writes it.
+     *
+     * <p>{@code TREND} is B-061's, and is the one type that is not a data type.
+     * §7.8 ends the scorecard's column list with "Trend arrows", and the value
+     * behind one is an ordinary signed number — so the type exists to say
+     * <em>what the number means</em> rather than what it is: a change against
+     * the comparable preceding window, to be drawn as a direction and a
+     * magnitude rather than as a bare {@code -3}.
+     *
+     * <p>It buys two things a {@code NUMBER} could not. The arrow, which is what
+     * §7.8 asked for and what makes a column of deltas scannable. And exclusion
+     * from the chart: {@code ReportChart} plots every numeric column as a
+     * series, so the scorecard's bar chart was stacking a signed delta beside an
+     * SLA percentage and a cycle time — three quantities with nothing in common
+     * but being numbers.
+     *
+     * <p><b>Direction is not a verdict.</b> The renderer draws up, down or
+     * level and says how much; it does not colour one of them good. The same
+     * type will carry a reopen-rate trend, where up is bad, and a type that
+     * decided from the sign would be wrong on half its uses.
+     */
     public enum ColumnType {
-        STRING, NUMBER, DATE, DURATION, PERCENT;
+        STRING, NUMBER, DATE, DURATION, PERCENT, TREND;
 
         /** The contract spells these lower-case; the enum is Java's convention. */
         @com.fasterxml.jackson.annotation.JsonValue

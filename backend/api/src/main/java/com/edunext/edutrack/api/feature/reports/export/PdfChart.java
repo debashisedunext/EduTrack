@@ -71,6 +71,10 @@ final class PdfChart {
     static void draw(PdfWriter writer, Document document,
                      List<ReportDtos.Column> columns, List<Map<String, Object>> rows) {
 
+        // B-061 · TREND is absent from this list on purpose, matching
+        // ReportChart on screen: a signed change against the previous window is
+        // not a series to plot beside an SLA percentage. The allow-list shape is
+        // what makes that free — a deny-list would have had to be remembered.
         List<ReportDtos.Column> series = columns.stream()
                 .filter(c -> c.type() == ReportDtos.ColumnType.NUMBER
                         || c.type() == ReportDtos.ColumnType.PERCENT

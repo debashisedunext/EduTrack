@@ -310,23 +310,62 @@ class ReportRepository {
      * {@code resource_daily_stats} has no project column. A-051 recorded that
      * limitation and it still holds: somebody on three projects appears with
      * their whole load, not the part belonging to the asking PM.
+     *
+     * <h2>B-061 · the allocation half, and why it is not project-scoped either</h2>
+     *
+     * <p>B-017 built the Team tab&#39;s per-project allocation and could not
+     * answer the question that would actually be a warning — <i>a resource&#39;s
+     * total across all of their projects</i> — because that screen holds one
+     * project&#39;s rows. It flagged the figure for this report, which is where
+     * it belongs: "who is overloaded" is exactly what over-100% allocation says.
+     *
+     * <p>The aggregate spans <b>every active membership</b>, including projects
+     * the caller cannot see. That reads like a widening and is not: the load
+     * columns beside it already do the same thing, for the reason two paragraphs
+     * up — {@code resource_daily_stats} is keyed by user and not by project, so
+     * this report has always shown a person&#39;s whole load. Narrowing only the
+     * allocation would reproduce the exact bug B-017 flagged: a PM who owns one
+     * of somebody&#39;s three projects would read 50% and conclude there is
+     * room. What crosses the boundary is a percentage and a count, never a
+     * project name.
+     *
+     * <p><b>{@code SUM} over an all-null set is null, which is the answer this
+     * wants.</b> B-017 made the column nullable on purpose: {@code NULL} means
+     * "not stated", and it refused {@code NOT NULL DEFAULT 100} because a
+     * backfill would have read 300% for every fixture resource on three
+     * projects. So a person with no stated allocation anywhere gets null rather
+     * than 0%, and {@code COUNT(allocation_pct)} — which skips nulls — comes
+     * back beside the total so the runner can say how much of the sum was
+     * actually stated.
      */
     List<WorkloadRow> workload(LocalDate from, LocalDate to, boolean ownWork, long userId,
-                               List<Long> memberOfProjects) {
+                               Long resourceId, List<Long> memberOfProjects) {
         return jdbc.sql("""
                         SELECT r.user_id,
                                u.full_name,
                                r.assigned_open,
                                r.assigned_critical,
                                r.assigned_delayed,
-                               r.assigned_in_progress
+                               r.assigned_in_progress,
+                               a.allocation_pct,
+                               COALESCE(a.project_count, 0)   AS project_count,
+                               COALESCE(a.allocated_count, 0) AS allocated_count
                           FROM resource_daily_stats r
                           JOIN users u ON u.id = r.user_id
+                          LEFT JOIN (
+                                   SELECT pm.user_id,
+                                          SUM(pm.allocation_pct)   AS allocation_pct,
+                                          COUNT(*)                 AS project_count,
+                                          COUNT(pm.allocation_pct) AS allocated_count
+                                     FROM project_members pm
+                                    WHERE pm.is_active = 1
+                                    GROUP BY pm.user_id) a ON a.user_id = r.user_id
                          WHERE r.stat_date = (
                                    SELECT MAX(x.stat_date) FROM resource_daily_stats x
                                     WHERE x.user_id = r.user_id
                                       AND x.stat_date BETWEEN :from AND :to)
                            AND (:ownWork = 0 OR r.user_id = :userId)
+                           AND (:resourceId IS NULL OR r.user_id = :resourceId)
                            AND (:unscoped = 1 OR EXISTS (
                                    SELECT 1 FROM project_members pm
                                     WHERE pm.user_id = r.user_id
@@ -337,16 +376,37 @@ class ReportRepository {
                 .param("to", to)
                 .param("ownWork", ownWork ? 1 : 0)
                 .param("userId", userId)
+                // B-061 · the report declares a RESOURCE filter and had no
+                // parameter to honour it with, so picking a person changed
+                // nothing. See ReportRunner#run.
+                .param("resourceId", resourceId)
                 .param("unscoped", memberOfProjects.isEmpty() ? 1 : 0)
                 .param("projectIds", memberOfProjects.isEmpty() ? List.of(-1L) : memberOfProjects)
                 .query((rs, n) -> new WorkloadRow(
                         rs.getLong("user_id"), rs.getString("full_name"),
                         rs.getLong("assigned_open"), rs.getLong("assigned_critical"),
-                        rs.getLong("assigned_delayed"), rs.getLong("assigned_in_progress")))
+                        rs.getLong("assigned_delayed"), rs.getLong("assigned_in_progress"),
+                        // getBigDecimal, not getInt. B-017 spelled out why the
+                        // write-side mapper uses getObject: getInt answers 0 for
+                        // a SQL NULL, which would turn "nobody has stated an
+                        // allocation" into "0% allocated" — a decision, rather
+                        // than the absence of one. getBigDecimal answers null.
+                        rs.getBigDecimal("allocation_pct"),
+                        rs.getLong("project_count"),
+                        rs.getLong("allocated_count")))
                 .list();
     }
 
+    /**
+     * @param allocationPct  sum of the <i>stated</i> allocations across every
+     *                       active membership, or null when none states one.
+     * @param projectCount   active memberships, stated or not.
+     * @param allocatedCount how many of them stated a figure. Fewer than
+     *                       {@code projectCount} means {@code allocationPct} is
+     *                       a floor rather than a total.
+     */
     record WorkloadRow(long userId, String fullName, long assignedOpen, long assignedCritical,
-                       long assignedDelayed, long assignedInProgress) {
+                       long assignedDelayed, long assignedInProgress,
+                       java.math.BigDecimal allocationPct, long projectCount, long allocatedCount) {
     }
 }

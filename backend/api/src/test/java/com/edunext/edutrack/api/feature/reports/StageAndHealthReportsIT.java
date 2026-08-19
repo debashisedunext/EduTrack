@@ -182,6 +182,103 @@ class StageAndHealthReportsIT {
             assertThat(mine.get("capacityHours")).isNotNull();
             assertThat(mine.get("perAvailableDay")).isNotNull();
         }
+
+        /**
+         * B-061 · the figure B-017 could not compute and flagged for this task.
+         *
+         * <p>The Team tab holds one project's rows, so it can show what a
+         * project committed one person to and never what that person is
+         * committed to in total — which is the only version of the number that
+         * is a warning. Here it spans every active membership, including
+         * projects the caller cannot see, for the reason the load columns beside
+         * it already do: narrowing it would tell a PM who owns one of somebody's
+         * three projects that there is room.
+         */
+        @Test
+        @DisplayName("allocation totals every project the person is on, not the one being looked at")
+        void allocationSpansEveryProject() {
+            resourceStat(LocalDate.of(2026, 8, 20), me, 7);
+
+            memberWithAllocation(me, project("A67B"), 60);
+            memberWithAllocation(me, project("A67C"), 70);
+
+            // Removed from a fourth. B-017 deactivates rather than deletes so a
+            // membership can be restored without a fabricated departure — which
+            // means a commitment that ended would otherwise be counted forever.
+            long past = project("A67D");
+            memberWithAllocation(me, past, 100);
+            jdbc.update("UPDATE project_members SET is_active = 0 WHERE user_id = ? AND project_id = ?",
+                    me, past);
+
+            Map<String, Object> mine = mine();
+
+            // 130, not 230: the ended membership is not a commitment.
+            assertThat(new java.math.BigDecimal(String.valueOf(mine.get("allocationPct"))))
+                    .isEqualByComparingTo("130");
+            // Three active memberships, two of which stated a figure — the
+            // fixture's own left allocation_pct NULL, as most real rows do.
+            // Published so the reader can see that 130% is a floor: two more
+            // projects could be committing this person to anything at all.
+            assertThat(mine.get("projects")).isEqualTo(3L);
+            assertThat(mine.get("allocationStated")).isEqualTo(2L);
+        }
+
+        /**
+         * B-017 kept {@code allocation_pct} nullable and refused the contract's
+         * {@code default: 100} precisely so that "not stated" and "committed to
+         * nothing" would stay distinguishable. This is the report that would
+         * have collapsed them: a 0% here is a decision somebody made, and a
+         * backfilled 100 would have read as a resourcing crisis across the
+         * fixture corpus.
+         */
+        @Test
+        @DisplayName("no stated allocation anywhere reads as absent, never as 0%")
+        void unstatedAllocationIsNullNotZero() {
+            resourceStat(LocalDate.of(2026, 8, 20), me, 3);
+
+            Map<String, Object> mine = mine();
+
+            // SUM over an all-null set is SQL NULL, and getBigDecimal keeps it.
+            // getInt would have answered 0 — B-017 named that exact trap on the
+            // write side and it is the same one here.
+            assertThat(mine.get("allocationPct")).isNull();
+            assertThat(mine.get("projects")).isEqualTo(1L);
+            assertThat(mine.get("allocationStated")).isEqualTo(0L);
+        }
+
+        /**
+         * B-061 · this report declared a RESOURCE filter and
+         * {@code ReportRepository.workload} had no parameter to honour it with,
+         * so picking a person changed nothing. See {@code ReportRunner#run}.
+         */
+        @Test
+        @DisplayName("?resourceId= narrows to one person")
+        void resourceFilterNarrows() {
+            long other = user("a67.other");
+            member(other, myProject);
+            resourceStat(LocalDate.of(2026, 8, 20), me, 7);
+            resourceStat(LocalDate.of(2026, 8, 20), other, 4);
+
+            // Both are on this test's project, so both are in range unfiltered —
+            // which is what makes the filtered case mean something.
+            assertThat(workload(null)).hasSize(2);
+
+            List<Map<String, Object>> justMe = workload(me);
+            assertThat(justMe).hasSize(1);
+            assertThat(justMe.get(0).get("assignedOpen")).isEqualTo(7L);
+        }
+
+        private Map<String, Object> mine() {
+            return workload(null).stream()
+                    .filter(r -> String.valueOf(r.get("resource")).startsWith("a67.me"))
+                    .findFirst().orElseThrow();
+        }
+
+        private List<Map<String, Object>> workload(Long resourceId) {
+            return service
+                    .run(pm(), WorkloadCapacityRunner.KEY, FROM, TO, null, resourceId, ReportFilters.NONE)
+                    .orElseThrow().report().rows();
+        }
     }
 
     @Nested
@@ -291,6 +388,14 @@ class StageAndHealthReportsIT {
                 VALUES (?, ?, ?, 'x', ?, ?, 1)
                 """, u, u, u + "@example.test", u, roleId);
         return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    /** B-061 · a membership that states what it commits the person to. */
+    private void memberWithAllocation(long userId, long projectId, int allocationPct) {
+        jdbc.update("""
+                INSERT INTO project_members (project_id, user_id, role_in_project, allocation_pct)
+                VALUES (?, ?, 'DEVELOPER', ?)
+                """, projectId, userId, allocationPct);
     }
 
     private void member(long userId, long projectId) {

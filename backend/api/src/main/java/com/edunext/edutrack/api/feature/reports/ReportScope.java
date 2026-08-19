@@ -63,6 +63,13 @@ record ReportScope(boolean ownWorkOnly, long userId, List<Long> projectIds) {
      * a colleague's scorecard by guessing a user id, which is the whole of what
      * "Own perf." withholds.
      *
+     * <p><b>Called once, by {@link ReportService}, which hands the result to the
+     * runner.</b> A runner must read that parameter and must not call this
+     * method itself: {@code scope.resourceSubject(null)} compiles, reads as
+     * "resolve the subject", and returns null for every caller who is not a
+     * delivery role — which is every caller the filter is for. Five runners did
+     * exactly that between A-066 and B-061.
+     *
      * <p>Discarded silently rather than rejected with a 400. The client is
      * usually posting back a filter bar it rendered from the descriptor, and
      * failing the request would punish the caller for our own UI; the response

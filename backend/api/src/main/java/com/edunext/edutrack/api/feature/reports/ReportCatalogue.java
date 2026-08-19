@@ -108,9 +108,25 @@ public final class ReportCatalogue {
             built("sla-breach", "Delayed / SLA Breach",
                     "Every breached ticket, worst first, with how far overdue and its latest remark.",
                     DELIVERY, "bar", List.of(DATE_RANGE, PROJECT, LEVEL, TASK_TYPE)),
+            // B-061 · the description names the limit of the allocation figure,
+            // for the reason client-report names the figure it does not have:
+            // allocation_pct is nullable and means "not stated", so the total is
+            // a floor. The row publishes how many projects stated one, and the
+            // card says so before it is opened rather than after.
+            //
+            // "bar", not "stacked-bar". Stacking asserts the series partition a
+            // total and these have never done so — an open ticket is also
+            // counted under critical and under delayed, so the bar's height was
+            // already double-counting, and B-061's three columns would have
+            // stacked a percentage and two counts on top of it. Side-by-side
+            // makes no claim about a sum. It is not the whole fix: eight series
+            // on one axis is still hard to read at a glance, and that is the
+            // chart's owner's call rather than a description change.
             built("workload-capacity", "Workload & Capacity",
-                    "What each person is carrying against the working hours they actually have.",
-                    DELIVERY, "stacked-bar", List.of(DATE_RANGE, RESOURCE)),
+                    "What each person is carrying against the working hours they actually have, "
+                            + "and what their projects add up to committing them to. Allocation "
+                            + "counts only projects where one was stated.",
+                    DELIVERY, "bar", List.of(DATE_RANGE, RESOURCE)),
 
             // ── QUALITY ─────────────────────────────────────────────────────
             built("reopen-analysis", "Reopen Analysis",

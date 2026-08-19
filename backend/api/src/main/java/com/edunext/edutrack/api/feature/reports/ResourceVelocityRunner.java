@@ -71,8 +71,9 @@ class ResourceVelocityRunner implements ReportRunner {
 
     @Override
     public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
-                      ReportFilters filters) {
-        Long subject = scope.resourceSubject(null);
+                      Long resourceSubject, ReportFilters filters) {
+        // B-061 · read, not re-derived — see ResourceScorecardRunner.
+        Long subject = resourceSubject;
 
         List<TicketReportRepository.VelocityRow> raw = tickets.velocity(
                 from, to, scope.ownWorkOnly(), scope.userId(), subject, projectIds);

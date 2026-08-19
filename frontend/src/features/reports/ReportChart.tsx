@@ -57,6 +57,14 @@ export function ReportChart({
   // The first non-numeric column is the axis; every numeric one is a series.
   // Derived from the declared types rather than from position, so a report that
   // puts its label second still plots correctly.
+  //
+  // B-061 · `trend` is numeric and is deliberately absent from the series list.
+  // A signed change against the previous window shares no axis with the
+  // quantities beside it — on the scorecard it was being plotted against an SLA
+  // percentage and a cycle time in hours — and on a stacked chart a negative
+  // value subtracts from the bar it is stacked into. This is an allow-list
+  // rather than a deny-list precisely so a new type has to be admitted on
+  // purpose; a `!== 'trend'` would have let the next one in by default.
   const categoryColumn = columns.find((c) => c.type === 'string' || c.type === 'date')
   const valueColumns = columns.filter((c) => c.type === 'number' || c.type === 'percent' || c.type === 'duration')
 

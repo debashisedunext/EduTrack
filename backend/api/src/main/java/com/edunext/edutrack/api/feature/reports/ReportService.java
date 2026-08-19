@@ -100,7 +100,14 @@ class ReportService {
         List<Long> projects = scope.projectFilter(projectId);
         Long subject = scope.resourceSubject(resourceId);
 
-        ReportRunner.Result result = runner.run(scope, start, end, projects, filters);
+        // B-061 · `subject` is handed to the runner rather than only to the
+        // ETag and the scope note. It was resolved here and dropped: every
+        // runner re-derived it as `scope.resourceSubject(null)`, so `?resourceId=`
+        // narrowed nothing for an Admin or a PM on all five reports declaring a
+        // RESOURCE filter — while meta.appliedScope below went on printing "one
+        // resource, across all projects", and the ETag below went on varying by
+        // a value the body did not depend on.
+        ReportRunner.Result result = runner.run(scope, start, end, projects, subject, filters);
 
         ReportDtos.Report report =
                 new ReportDtos.Report(reportKey, result.columns(), result.rows());
