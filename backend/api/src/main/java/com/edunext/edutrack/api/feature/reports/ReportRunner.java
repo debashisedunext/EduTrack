@@ -37,8 +37,15 @@ interface ReportRunner {
      *                   caller's scope by {@link ReportScope#projectFilter}.
      *                   Empty means unrestricted, matching the convention
      *                   everywhere else in this codebase.
+     * @param filters    B-060 · the non-scope filters the caller sent, never
+     *                   null. A runner reads the ones its descriptor declares
+     *                   and ignores the rest — the catalogue is what promises
+     *                   the user a control does something, so the two have to
+     *                   agree, and {@code ReportRunnerContractTest} is where
+     *                   that is checked.
      */
-    Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds);
+    Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
+               ReportFilters filters);
 
     /**
      * @param rows one map per row, keyed by {@link ReportDtos.Column#key()}. A

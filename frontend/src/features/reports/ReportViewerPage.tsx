@@ -35,6 +35,7 @@ export function ReportViewerPage() {
   const to = params.get('to') ?? undefined
   const projectId = params.get('projectId')
   const resourceId = params.get('resourceId')
+  const clientId = params.get('clientId')
 
   // The catalogue is already cached by the hub in the ordinary case — this is
   // a second consumer of one query, not a second request. Fetched here at all
@@ -47,6 +48,11 @@ export function ReportViewerPage() {
     to,
     projectId: projectId ? Number(projectId) : undefined,
     resourceId: resourceId ? Number(resourceId) : undefined,
+    // B-060 · sent whatever the descriptor declares, like the two above it.
+    // Which reports honour it is the server's statement — a report that does
+    // not declare CLIENT has no control to set it, so the parameter is only
+    // ever present when the filter bar put it in the URL.
+    clientId: clientId ? Number(clientId) : undefined,
   })
 
   if (catalogue.isLoading) {

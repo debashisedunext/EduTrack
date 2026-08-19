@@ -280,7 +280,7 @@ class ReportsIT {
         @Test
         @DisplayName("a delivery role cannot reach a project-keyed report by URL either")
         void deliveryRoleCannotRunItDirectly() {
-            assertThat(service.run(developer(), "project-health", D1, D3, null, null)).isEmpty();
+            assertThat(service.run(developer(), "project-health", D1, D3, null, null, ReportFilters.NONE)).isEmpty();
         }
 
         /**
@@ -291,7 +291,7 @@ class ReportsIT {
         @DisplayName("a delivery role gets their own figures, from the resource-keyed table")
         void deliveryRoleSeesOwnWork() {
             ReportService.Rendered rendered = service
-                    .run(developer(), DateWiseReportRunner.KEY, D1, D3, null, null)
+                    .run(developer(), DateWiseReportRunner.KEY, D1, D3, null, null, ReportFilters.NONE)
                     .orElseThrow();
 
             // Different columns, because created and reopened do not exist per
@@ -313,7 +313,7 @@ class ReportsIT {
         @DisplayName("one developer's report never contains another's rows")
         void resourceRowsAreNotShared() {
             ReportService.Rendered rendered = service
-                    .run(developer(), DateWiseReportRunner.KEY, D1, D3, null, null)
+                    .run(developer(), DateWiseReportRunner.KEY, D1, D3, null, null, ReportFilters.NONE)
                     .orElseThrow();
 
             // The colleague holds 60. If scoping were wrong this would be 64.
@@ -361,7 +361,7 @@ class ReportsIT {
         @Test
         @DisplayName("an unknown key is empty, which the controller turns into 404")
         void unknownKey() {
-            assertThat(service.run(admin(), "no-such-report", D1, D3, null, null)).isEmpty();
+            assertThat(service.run(admin(), "no-such-report", D1, D3, null, null, ReportFilters.NONE)).isEmpty();
         }
 
         @Test
@@ -374,13 +374,13 @@ class ReportsIT {
             // resource-contribution, not resource-scorecard — A-066 built that
             // one, and a test naming a report that keeps changing state is a
             // test that fails on somebody else's task.
-            assertThat(service.run(admin(), "resource-contribution", D1, D3, null, null)).isEmpty();
+            assertThat(service.run(admin(), "resource-contribution", D1, D3, null, null, ReportFilters.NONE)).isEmpty();
         }
     }
 
     private ReportService.Rendered run(CallerIdentity caller, LocalDate from, LocalDate to, Long projectId) {
         Optional<ReportService.Rendered> rendered =
-                service.run(caller, DateWiseReportRunner.KEY, from, to, projectId, null);
+                service.run(caller, DateWiseReportRunner.KEY, from, to, projectId, null, ReportFilters.NONE);
         assertThat(rendered).as("the date-wise report should be runnable").isPresent();
         return rendered.get();
     }

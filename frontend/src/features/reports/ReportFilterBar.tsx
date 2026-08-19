@@ -1,4 +1,5 @@
 import { useSearchParams } from 'react-router-dom'
+import { useListClients } from '@/api/generated/clients/clients'
 import { useListProjects } from '@/api/generated/projects/projects'
 import { useListUsers } from '@/api/generated/users/users'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
@@ -15,6 +16,14 @@ import type { ReportFilterKind } from '@/api/generated/model'
  * screen is broken — which is worse than the control being absent, because a
  * missing control asks no question.
  *
+ * <p>B-060 adds the fourth control, CLIENT, for the client report. **TASK_TYPE
+ * and LEVEL are still undrawn** — declared by `sla-breach` and `effort-summary`
+ * and honoured by their runners since B-060 threaded `ReportFilters`, but with
+ * no control here yet. That is a capability reachable by URL and export and not
+ * from the bar, which is a gap rather than the failure above: nothing on screen
+ * claims to filter and then does not. One branch each, and they belong to those
+ * two reports' owner.
+ *
  * <h2>The lists are only fetched when they are drawn</h2>
  *
  * <p>A report with no Project filter issues no `/projects` request. The
@@ -28,14 +37,25 @@ export function ReportFilterBar({ filters }: { filters: ReportFilterKind[] }) {
   const wantsProject = filters.includes('PROJECT')
   const wantsResource = filters.includes('RESOURCE')
   const wantsDates = filters.includes('DATE_RANGE')
+  const wantsClient = filters.includes('CLIENT')
 
   // `enabled` rather than a conditional hook — hooks cannot be called
   // conditionally, and the query simply does not run when the control is absent.
   const projects = useListProjects(undefined, { query: { enabled: wantsProject } })
   const users = useListUsers(undefined, { query: { enabled: wantsResource } })
+  /*
+    B-060 · the client report is the only report declaring CLIENT, so this
+    request is made on exactly one screen. Active clients only: the list is a
+    control for narrowing a report, and a deactivated client with historical
+    tickets is still worth picking — which is why `status` is not sent and the
+    server's default ordering stands. B-029's rule is that deactivating blocks
+    *new* tickets and never hides historical ones, and a report is history.
+  */
+  const clients = useListClients(undefined, { query: { enabled: wantsClient } })
 
   const projectList = projects.data?.data ?? []
   const userList = users.data?.data ?? []
+  const clientList = clients.data?.data ?? []
 
   function set(key: string, value: string | undefined) {
     const next = new URLSearchParams(params)
@@ -82,6 +102,25 @@ export function ReportFilterBar({ filters }: { filters: ReportFilterKind[] }) {
           onChange={(p) => set('projectId', p ? String(p.id) : undefined)}
           getKey={(p) => String(p.id)}
           getLabel={(p) => p.name ?? `#${p.id}`}
+          searchable
+        />
+      )}
+
+      {wantsClient && (
+        <FilterDropdown
+          label="Client"
+          options={clientList}
+          value={clientList.find((c) => String(c.id) === params.get('clientId')) ?? null}
+          onChange={(c) => set('clientId', c ? String(c.id) : undefined)}
+          getKey={(c) => String(c.id)}
+          /*
+            Name and code together. Two clients of the same group routinely
+            share a leading word — "Acme Retail" and "Acme Logistics" — and the
+            code is the thing a support desk actually says out loud, so picking
+            the wrong one off a name-only list is a report sent to the wrong
+            client.
+          */
+          getLabel={(c) => (c.clientCode ? `${c.name} (${c.clientCode})` : (c.name ?? `#${c.id}`))}
           searchable
         />
       )}

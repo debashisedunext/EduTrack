@@ -53,7 +53,8 @@ class ReopenAnalysisRunner implements ReportRunner {
     }
 
     @Override
-    public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds) {
+    public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
+                      ReportFilters filters) {
         List<ReportDtos.Column> columns = List.of(
                 new ReportDtos.Column("resource", "Resource", STRING),
                 new ReportDtos.Column("project", "Project", STRING),

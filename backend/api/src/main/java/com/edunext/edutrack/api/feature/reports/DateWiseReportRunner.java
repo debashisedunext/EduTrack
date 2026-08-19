@@ -59,7 +59,8 @@ class DateWiseReportRunner implements ReportRunner {
     }
 
     @Override
-    public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds) {
+    public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
+                      ReportFilters filters) {
         // Which table can answer this caller — not merely which rows of one.
         // Same branch DashboardService makes, for the same reason: a
         // project-keyed table cannot express "assigned to me" however it is

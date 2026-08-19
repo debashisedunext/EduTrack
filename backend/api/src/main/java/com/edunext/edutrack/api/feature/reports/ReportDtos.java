@@ -69,12 +69,53 @@ public final class ReportDtos {
     }
 
     /**
-     * @param type how the client formats and aligns the cell, and how A-064
-     *             will write it into a spreadsheet. Numbers right-align and
-     *             durations are hours rather than millis; sending both as
-     *             strings would push those decisions into eighteen renderers.
+     * @param type      how the client formats and aligns the cell, and how
+     *                  A-064 writes it into a spreadsheet. Numbers right-align
+     *                  and durations are hours rather than millis; sending both
+     *                  as strings would push those decisions into eighteen
+     *                  renderers.
+     * @param linkTo    B-060 · what this cell names, when it names something
+     *                  that has its own screen. Null on every column of the
+     *                  first twelve reports, and null is the answer for most
+     *                  columns of the next six — a count drills into nothing.
+     *                  <b>What, not where</b>: routes live in the frontend's
+     *                  {@code entityLinks.ts}, and a server that also spelled
+     *                  them would be a second copy of the router that nothing
+     *                  keeps in step. See {@link ReportEntityKind}.
+     * @param linkIdKey the row key holding the id to link to — {@code
+     *                  "clientId"}, not {@code "client"}. A separate key rather
+     *                  than reusing the column's own, because the cell shows a
+     *                  <em>name</em> and the link needs an <em>id</em>, and the
+     *                  id is deliberately carried in the row without a column
+     *                  of its own: an internal id is not a figure, and A-064's
+     *                  exporter iterates columns, so it stays out of the
+     *                  spreadsheet. Present exactly when {@code linkTo} is —
+     *                  {@code ReportRunnerContractTest} pins the pairing, since
+     *                  a link kind with nothing to key on renders as a dead
+     *                  anchor rather than as plain text.
      */
-    public record Column(String key, String label, ColumnType type) {
+    @com.fasterxml.jackson.annotation.JsonInclude(
+            com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public record Column(String key, String label, ColumnType type,
+                         ReportEntityKind linkTo, String linkIdKey) {
+
+        /**
+         * The ordinary column: a value, formatted by its type, linking nowhere.
+         *
+         * <p>A three-argument constructor so the twelve runners written before
+         * B-060 read exactly as they did. Adding two nulls to roughly seventy
+         * existing column declarations would have been a diff in which the one
+         * line that gained a link was invisible.
+         */
+        public Column(String key, String label, ColumnType type) {
+            this(key, label, type, null, null);
+        }
+
+        /** A column whose cell drills into {@code kind}, keyed by {@code idKey} in the row. */
+        static Column linking(String key, String label, ColumnType type,
+                              ReportEntityKind kind, String idKey) {
+            return new Column(key, label, type, kind, idKey);
+        }
     }
 
     public enum ColumnType {

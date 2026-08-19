@@ -91,6 +91,8 @@ class ReportRunnersIT {
     private long colleague;
     private long taskTypeBug;
     private long taskTypeServer;
+    private long myClient;
+    private long otherClient;
 
     /** Ticket ids by the label this fixture used, so effort attaches to the right row. */
     private final Map<String, Long> ticketIds = new HashMap<>();
@@ -125,6 +127,25 @@ class ReportRunnersIT {
                     "2026-08-02", "2026-08-20", "2026-08-19", 0, 2, 2);
         }
 
+        /*
+          B-060 · clients are *attached to the existing tickets* rather than
+          seeded with tickets of their own. Every assertion above counts rows
+          this fixture already produces, and four more tickets would have moved
+          six reports' numbers to test a seventh. `client_id` is nullable and no
+          other query in this package joins `clients`, so attaching changes
+          nothing for them.
+
+          t4 is deliberately left with no client: it is the internally-raised
+          ticket the client report must drop, and without one here the JOIN and
+          a LEFT JOIN would give identical answers.
+        */
+        myClient = client("RN-A", "Ariadne Systems");
+        otherClient = client("RN-B", "Borealis Freight");
+        attachClient(myClient, "t1", "t2", "t3");
+        for (int i = 0; i < 20; i++) {
+            attachClient(otherClient, "other" + i);
+        }
+
         effort(me, "t1", "2026-08-05", "3.00");
         effort(me, "t2", "2026-08-06", "5.00");
         // 20 rather than 40: ck_effort_hours caps one entry at 24, because
@@ -150,7 +171,7 @@ class ReportRunnersIT {
     }
 
     private List<Map<String, Object>> run(CallerIdentity caller, String key, Long projectId) {
-        return service.run(caller, key, FROM, TO, projectId, null).orElseThrow().report().rows();
+        return service.run(caller, key, FROM, TO, projectId, null, ReportFilters.NONE).orElseThrow().report().rows();
     }
 
     private static Object cell(List<Map<String, Object>> rows, int index, String column) {
@@ -357,6 +378,132 @@ class ReportRunnersIT {
     }
 
     // ── fixture ──────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("13 · client report (B-060)")
+    class ClientReport {
+
+        private List<Map<String, Object>> forClient(Long clientId) {
+            return service.run(pm(), ClientReportRunner.KEY, FROM, TO, myProject, null,
+                            new ReportFilters(clientId, null, null))
+                    .orElseThrow().report().rows();
+        }
+
+        @Test
+        @DisplayName("counts raised, closed and still-open as three separate populations")
+        void volumes() {
+            List<Map<String, Object>> rows = forClient(null);
+
+            // One row: the PM's scope is myProject, and the other client's
+            // twenty tickets live in otherProject.
+            assertThat(rows).hasSize(1);
+            assertThat(cell(rows, 0, "client")).isEqualTo("Ariadne Systems");
+            // t1, t2, t3 — all raised in the window. t4 has no client and is
+            // absent, which is the JOIN doing its job.
+            assertThat(cell(rows, 0, "raised")).isEqualTo(3L);
+            assertThat(cell(rows, 0, "closed")).isEqualTo(3L);
+            // Stock, not flow: nothing of this client's is still open, and the
+            // one open ticket in the fixture (t4) belongs to no client.
+            assertThat(cell(rows, 0, "openNow")).isEqualTo(0L);
+        }
+
+        @Test
+        @DisplayName("SLA compliance divides met by committed, not by closed")
+        void slaRate() {
+            // t1 and t2 closed on or before their planned date; t3 closed six
+            // days late. All three carried a planned_close_date, so the
+            // denominator is three and not the four tickets in the project.
+            assertThat(cell(forClient(null), 0, "slaPct")).hasToString("66.7");
+        }
+
+        @Test
+        @DisplayName("the client filter narrows, and an out-of-scope client returns nothing")
+        void filtered() {
+            assertThat(forClient(myClient)).hasSize(1);
+
+            // The other client exists and has twenty tickets, none of them on a
+            // project this PM can see. Empty rather than 403 — there is no row
+            // to deny, which is the shape §7 of the conventions asks for.
+            assertThat(forClient(otherClient)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("an Admin reaches the other client, where the PM could not")
+        void adminSeesBoth() {
+            List<Map<String, Object>> rows = service
+                    .run(admin(), ClientReportRunner.KEY, FROM, TO, otherProject, null,
+                            new ReportFilters(otherClient, null, null))
+                    .orElseThrow().report().rows();
+
+            assertThat(rows).hasSize(1);
+            assertThat(cell(rows, 0, "raised")).isEqualTo(20L);
+        }
+
+        @Test
+        @DisplayName("declares no satisfaction column, because no rating is recorded")
+        void noSatisfactionColumn() {
+            List<ReportDtos.Column> columns = service
+                    .run(pm(), ClientReportRunner.KEY, FROM, TO, myProject, null, ReportFilters.NONE)
+                    .orElseThrow().report().columns();
+
+            // §7.8 names five figures and the schema holds four. Blueprint §17
+            // item 19 puts CSAT in phase 2–3, so there is nothing to average.
+            // Asserted rather than assumed: a later task adding the rating should
+            // find a failing test naming exactly what it now makes possible.
+            assertThat(columns).extracting(ReportDtos.Column::key)
+                    .doesNotContain("satisfaction", "csat", "rating");
+        }
+
+        @Test
+        @DisplayName("the client cell carries a drill-in, and the id it links by is not a column")
+        void drillsIntoClient360() {
+            ReportService.Rendered rendered = service
+                    .run(pm(), ClientReportRunner.KEY, FROM, TO, myProject, null, ReportFilters.NONE)
+                    .orElseThrow();
+
+            ReportDtos.Column client = rendered.report().columns().stream()
+                    .filter(c -> c.key().equals("client")).findFirst().orElseThrow();
+
+            assertThat(client.linkTo()).isEqualTo(ReportEntityKind.CLIENT);
+            assertThat(client.linkIdKey()).isEqualTo("clientId");
+
+            // The row carries the id the column names — a link kind whose key is
+            // missing from the row renders a dead anchor, which is harder to
+            // notice than a missing one.
+            assertThat(rendered.report().rows().get(0)).containsKey("clientId");
+
+            // And `clientId` has no column of its own, so it stays out of the
+            // table and out of ?export=, which iterates columns. An internal id
+            // is not a figure to send a client.
+            assertThat(rendered.report().columns()).extracting(ReportDtos.Column::key)
+                    .doesNotContain("clientId");
+        }
+
+        @Test
+        @DisplayName("a delivery role cannot run it at all — a client is not a person's work")
+        void notAnsweredPerPerson() {
+            // In NOT_KEPT_PER_PERSON since A-063. Asserted here because B-060
+            // flipping the card to `built` is exactly the change that could have
+            // made it runnable by a Developer for the first time.
+            assertThat(service.run(developer(), ClientReportRunner.KEY, FROM, TO,
+                    myProject, null, ReportFilters.NONE)).isEmpty();
+        }
+    }
+
+    // ── fixture ────────────────────────────────────────────────────
+
+    private long client(String code, String name) {
+        jdbc.update("INSERT INTO clients (client_code, name, status) VALUES (?, ?, 'ACTIVE')",
+                code + SEQ.incrementAndGet(), name);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    /** Attaches by the fixture's own label, since ticket codes carry a sequence suffix. */
+    private void attachClient(long clientId, String... labels) {
+        for (String label : labels) {
+            jdbc.update("UPDATE tickets SET client_id = ? WHERE id = ?", clientId, ticketIds.get(label));
+        }
+    }
 
     private long project(String code) {
         jdbc.update("INSERT INTO projects (project_code, name, status) VALUES (?, ?, 'ACTIVE')",

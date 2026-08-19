@@ -67,7 +67,8 @@ class StageCycleTimeRunner implements ReportRunner {
     }
 
     @Override
-    public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds) {
+    public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
+                      ReportFilters filters) {
         List<ReportDtos.Column> columns = List.of(
                 new ReportDtos.Column("stage", "Stage", STRING),
                 new ReportDtos.Column("visits", "Completed visits", NUMBER),

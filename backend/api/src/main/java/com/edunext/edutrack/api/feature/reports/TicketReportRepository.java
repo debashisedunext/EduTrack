@@ -545,4 +545,143 @@ class TicketReportRepository {
     record StageTimeRow(String stageCode, long visits, BigDecimal avgElapsedHours,
                         BigDecimal totalElapsedHours, BigDecimal activeHours) {
     }
+
+    // ── 13 · client report (B-060) ────────────────────────────────
+
+    /**
+     * B-060 · one row per client. §7.8: "volume, open versus closed, SLA
+     * compliance, avg resolution time and satisfaction per client".
+     *
+     * <h2>Four of the five figures, and the fifth is not withheld — it is not
+     * recorded</h2>
+     *
+     * <p>There is no CSAT column in this schema, in any of the forty-odd
+     * migrations, or in the contract. Blueprint §17 item 19 — <i>"CSAT /
+     * feedback on closure — a 1–5 rating drives the client-satisfaction
+     * report"</i> — is a phase 2–3 item that has not been built. So this query
+     * returns no satisfaction, and {@link ClientReportRunner} declares no column
+     * for it rather than averaging something adjacent into a number a person
+     * would read as a score. This is the report §7.8 describes as shaped to be
+     * sent to a client, which is the worst place in the product for an invented
+     * figure.
+     *
+     * <h2>Three populations in one row, on purpose</h2>
+     *
+     * <p>{@code raised} counts tickets <b>reported</b> in the window,
+     * {@code closed} and both SLA halves count those <b>closed</b> in it, and
+     * {@code open_now} is a <b>stock</b> taken at read time and deliberately
+     * unbounded by the window. Forcing all three onto one population would make
+     * each answer a question nobody asked: tickets both raised and closed inside
+     * a fortnight are the fast ones, so an average over them flatters every slow
+     * client, and "open" restricted to the window would omit exactly the backlog
+     * the client is ringing about. The same split {@code taskTypeAnalysis} above
+     * states for its two.
+     *
+     * <h2>The SLA denominator is commitments, not closures</h2>
+     *
+     * <p>{@code sla_committed} counts closed tickets that had a
+     * {@code planned_close_date}; {@code sla_met} those that also beat it. A
+     * ticket nobody promised a date for can neither meet an SLA nor breach one,
+     * so counting it either way is a claim about a commitment that was never
+     * made — A-057's migration makes that argument for the dashboard gauge and
+     * this is the same ratio one screen over. A client whose closed tickets all
+     * lack a planned date gets a null percentage, which the table renders as an
+     * em dash rather than as 0% or 100%.
+     *
+     * <h2>Internal tickets are excluded, and that is not a filter</h2>
+     *
+     * <p>{@code client_id} is nullable — §4B.7's own comment says an internally
+     * raised ticket can still belong to a client, and by the same token a ticket
+     * can belong to none. The {@code JOIN} drops those. A "(no client)" row
+     * would be the largest one on most deployments and belongs to no client, on
+     * a report whose every row is a client.
+     *
+     * <p><b>{@code is_client_raised} is likewise not consulted.</b> §4B.7 makes
+     * it the flag that "drives client-wise reporting", and it is the wrong one
+     * here: a client's experience covers every ticket about their work,
+     * including the ones the desk raised on their behalf. Filtering by it would
+     * report a subset under the client's name.
+     *
+     * <h2>Scope</h2>
+     *
+     * <p>Applied over {@code t.project_id}, so a PM sees this client's tickets
+     * on their own projects and nobody else's. That makes the figures partial
+     * rather than wrong, which is what {@code meta.appliedScope} exists to say:
+     * a client on four projects, read by a PM who owns two, is two projects'
+     * worth of that client, and the response states so in words.
+     *
+     * @param clientId one client, or null for every client with something in
+     *                 range. Never widens scope — an out-of-scope client simply
+     *                 has no rows the caller may read, which is the
+     *                 404-not-403 shape §7 of the conventions asks for.
+     */
+    List<ClientRow> clientReport(LocalDate from, LocalDate to, List<Long> projectIds,
+                                 boolean ownWork, long userId, Long clientId) {
+        return jdbc.sql("""
+                        SELECT c.id          AS client_id,
+                               c.name        AS client_name,
+                               c.client_code AS client_code,
+                               SUM(CASE WHEN t.date_reported >= :from
+                                         AND t.date_reported < :toExclusive
+                                        THEN 1 ELSE 0 END) AS raised,
+                               SUM(CASE WHEN t.actual_close_date >= :from
+                                         AND t.actual_close_date < :toExclusive
+                                        THEN 1 ELSE 0 END) AS closed,
+                               SUM(CASE WHEN t.status <> 'CLOSED' THEN 1 ELSE 0 END) AS open_now,
+                               SUM(CASE WHEN t.actual_close_date >= :from
+                                         AND t.actual_close_date < :toExclusive
+                                         AND t.planned_close_date IS NOT NULL
+                                        THEN 1 ELSE 0 END) AS sla_committed,
+                               SUM(CASE WHEN t.actual_close_date >= :from
+                                         AND t.actual_close_date < :toExclusive
+                                         AND t.planned_close_date IS NOT NULL
+                                         AND t.actual_close_date <= t.planned_close_date
+                                        THEN 1 ELSE 0 END) AS sla_met,
+                               AVG(CASE WHEN t.actual_close_date >= :from
+                                         AND t.actual_close_date < :toExclusive
+                                        THEN TIMESTAMPDIFF(HOUR, t.date_reported, t.actual_close_date)
+                                   END) AS avg_resolution_hours
+                          FROM tickets t
+                          JOIN clients c ON c.id = t.client_id
+                         WHERE t.date_reported < :toExclusive
+                           AND (:unscoped = 1 OR t.project_id IN (:projectIds))
+                           AND (:ownWork = 0 OR t.assigned_to = :userId)
+                           AND (:clientId IS NULL OR t.client_id = :clientId)
+                      GROUP BY c.id, c.name, c.client_code
+                        HAVING raised > 0 OR closed > 0 OR open_now > 0
+                      ORDER BY raised DESC, open_now DESC, c.name
+                        """)
+                .param("from", from)
+                // Exclusive upper bound, for the reason `scorecard` states: a
+                // DATETIME(6) compared `<= :to` means midnight, and silently
+                // drops the last day of the range the user actually asked for.
+                .param("toExclusive", to.plusDays(1))
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .param("ownWork", ownWork ? 1 : 0)
+                .param("userId", userId)
+                .param("clientId", clientId)
+                .query((rs, n) -> new ClientRow(
+                        rs.getLong("client_id"),
+                        rs.getString("client_name"),
+                        rs.getString("client_code"),
+                        rs.getLong("raised"),
+                        rs.getLong("closed"),
+                        rs.getLong("open_now"),
+                        rs.getLong("sla_committed"),
+                        rs.getLong("sla_met"),
+                        rs.getBigDecimal("avg_resolution_hours")))
+                .list();
+    }
+
+    /**
+     * @param slaCommitted the denominator, carried rather than divided in SQL so
+     *                     the runner can tell "nothing was committed" (a null
+     *                     percentage) from "nothing was met" (0%). Collapsing to
+     *                     a ratio here loses that distinction, and the two are
+     *                     opposite readings of the same client.
+     */
+    record ClientRow(long clientId, String clientName, String clientCode, long raised, long closed,
+                     long openNow, long slaCommitted, long slaMet, BigDecimal avgResolutionHours) {
+    }
 }

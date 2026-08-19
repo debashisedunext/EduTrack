@@ -68,7 +68,7 @@ class ReportService {
      */
     Optional<Rendered> run(CallerIdentity caller, String reportKey,
                            LocalDate from, LocalDate to,
-                           Long projectId, Long resourceId) {
+                           Long projectId, Long resourceId, ReportFilters filters) {
 
         ReportScope scope = ReportScope.of(caller);
 
@@ -100,7 +100,7 @@ class ReportService {
         List<Long> projects = scope.projectFilter(projectId);
         Long subject = scope.resourceSubject(resourceId);
 
-        ReportRunner.Result result = runner.run(scope, start, end, projects);
+        ReportRunner.Result result = runner.run(scope, start, end, projects, filters);
 
         ReportDtos.Report report =
                 new ReportDtos.Report(reportKey, result.columns(), result.rows());
@@ -108,7 +108,7 @@ class ReportService {
         return Optional.of(new Rendered(
                 report,
                 new ReportDtos.RunMeta(appliedScope(scope, projects, subject)),
-                etagOf(reportKey, scope, projects, subject, start, end, result.asOf())));
+                etagOf(reportKey, scope, projects, subject, start, end, filters, result.asOf())));
     }
 
     /**
@@ -149,12 +149,18 @@ class ReportService {
      * no validator rather than one that would pin an empty report in place.
      */
     static String etagOf(String reportKey, ReportScope scope, List<Long> projects,
-                         Long subject, LocalDate from, LocalDate to, java.time.Instant asOf) {
+                         Long subject, LocalDate from, LocalDate to,
+                         ReportFilters filters, java.time.Instant asOf) {
         if (asOf == null) {
             return null;
         }
+        // B-060 · filters are in the hash for the same reason scope is. Two
+        // clients asked for from the same URL differ only by ?clientId=, and a
+        // validator that ignored it would hand the second caller a 304 against
+        // the first client's rows — a cross-client leak on the one report
+        // explicitly shaped to be sent to a client.
         int hash = Objects.hash(reportKey, scope.ownWorkOnly(), scope.userId(),
-                scope.projectIds(), projects, subject, from, to, asOf);
+                scope.projectIds(), projects, subject, from, to, filters, asOf);
         return Integer.toHexString(hash);
     }
 
