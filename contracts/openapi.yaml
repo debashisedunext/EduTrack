@@ -5640,6 +5640,53 @@ paths:
             application/octet-stream:
               schema: { type: string, format: binary }
         '404': { $ref: '#/components/responses/NotFound' }
+  /search:
+    get:
+      tags: [search]
+      operationId: globalSearch
+      summary: Global search — ticket ID, keyword or person (§7.2)
+      description: |
+        A-072 · the top bar's search box and `Ctrl+K`. Blueprint gap item 9 gives
+        the reason in one sentence: *"people share ticket IDs in email all day"*.
+
+        **Three questions, answered separately.** A ticket code is a deep link
+        and resolves through the unique index — PLAN.md §3.8 calls that "the
+        dominant search" and requires it to be exact and instant. A word is a
+        full-text match over title and description, ranked. A name is a person.
+        All three run for any query, because they are not mutually exclusive and
+        guessing which was meant would be worse than answering all of them.
+
+        A pasted code is accepted with whatever came with it — surrounding
+        whitespace, the `[CRM-26-00347]` brackets from a mail subject, or a whole
+        ticket URL copied from an address bar.
+
+        **Row scope applies and cannot be widened.** Tickets follow §10.2 —
+        Admin everything, PM and Support their projects, delivery roles their own
+        work. An out-of-scope ticket code returns **no result rather than a
+        refusal**, so search cannot be used to confirm that a ticket exists; that
+        is the same reason `/tickets/{id}` answers 404 and never 403.
+
+        The people group is the staff directory `GET /users` already opens to
+        every role, and carries identity only — no counts, no workload, no
+        last-login. Finding a colleague is not reading their performance.
+
+        **Terms shorter than three characters are dropped**, because InnoDB's
+        `innodb_ft_min_token_size` defaults to 3 and never indexes them. A query
+        of only short words returns empty rather than matching everything.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+          description: A ticket code, one or more words, or the start of a name.
+      responses:
+        '200':
+          description: Results, grouped by kind.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GlobalSearchResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
 
   # ─────────────────────────────────────────────────── notifications ─────────
   /notifications:
@@ -10550,6 +10597,64 @@ components:
       required: [data]
       properties:
         data: { type: array, items: { $ref: '#/components/schemas/ReportSchedule' } }
+
+    # ── A-072 · global search ─────────────────────────────────────────────
+    GlobalSearchResults:
+      type: object
+      required: [tickets, people]
+      properties:
+        exactTicket:
+          oneOf:
+            - { $ref: '#/components/schemas/GlobalSearchTicketHit' }
+            - { type: 'null' }
+          description: >
+            The ticket whose code was pasted, or null. Separate from `tickets`
+            because it is a different claim: those mention your words, this **is
+            the one you asked for** — and it is what the client navigates
+            straight to on Enter. Null when the query is not code-shaped, and
+            also when it is code-shaped but names a ticket outside the caller's
+            scope: no result rather than a refusal, so search cannot confirm a
+            ticket exists.
+        tickets:
+          type: array
+          items: { $ref: '#/components/schemas/GlobalSearchTicketHit' }
+          description: >
+            Full-text matches over title and description, most relevant first,
+            with `exactTicket` removed so one ticket never appears twice.
+            Bounded small — this feeds a palette read while typing, not a
+            results page; `/tickets?q=` is where a wide search belongs.
+        people:
+          type: array
+          items: { $ref: '#/components/schemas/GlobalSearchPersonHit' }
+
+    GlobalSearchTicketHit:
+      type: object
+      required: [ticketId, title]
+      properties:
+        ticketId: { $ref: '#/components/schemas/TicketId' }
+        title: { type: string }
+        level: { type: [string, 'null'], enum: [LOW, MEDIUM, HIGH, CRITICAL, null] }
+        status: { type: [string, 'null'] }
+
+    GlobalSearchPersonHit:
+      type: object
+      required: [id, displayName]
+      description: >
+        Identity and nothing more — no ticket counts, no workload, no
+        last-login. Finding a colleague is not the same as reading their
+        performance, which §2 keeps for their manager.
+      properties:
+        id: { type: integer, format: int64 }
+        displayName: { type: string }
+        username: { type: [string, 'null'] }
+        email: { type: [string, 'null'] }
+        role: { type: [string, 'null'] }
+
+    GlobalSearchResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/GlobalSearchResults' }
 
     # ── notifications, chat, mail, audit ──────────────────────────────────
     Notification:

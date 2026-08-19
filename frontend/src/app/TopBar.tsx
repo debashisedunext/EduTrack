@@ -6,6 +6,7 @@ import { ProjectSwitcher } from './ProjectSwitcher'
 import { NotificationBell } from './NotificationBell'
 import { ChatBadge } from './ChatBadge'
 import { AvatarMenu } from './AvatarMenu'
+import { ticketCodeIn, ticketPath } from '@/features/tickets/detail/entityLinks'
 import { useCommandPaletteStore } from './commandPaletteStore'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
@@ -19,10 +20,29 @@ export function TopBar() {
   const [query, setQuery] = useState('')
   const openPalette = useCommandPaletteStore((s) => s.setOpen)
 
+  /**
+   * A-072 · a pasted ticket code goes straight to the ticket.
+   *
+   * Blueprint gap item 9 is the whole reason: *"people share ticket IDs in
+   * email all day"*. Somebody who has just pasted `CRM-26-00347` wants that
+   * ticket, and sending them to a filtered list with one row in it — which is
+   * what this did — makes them click again for something they had already
+   * named exactly.
+   *
+   * Anything else is still a keyword search against the list, which is the
+   * right destination for a word: a list has filters, sorting and paging, and
+   * the palette's six results do not.
+   */
   function onSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter' && query.trim()) {
-      navigate(`/tickets?q=${encodeURIComponent(query.trim())}`)
+    if (e.key !== 'Enter' || !query.trim()) return
+
+    const code = ticketCodeIn(query)
+    if (code) {
+      navigate(ticketPath(code))
+      setQuery('')
+      return
     }
+    navigate(`/tickets?q=${encodeURIComponent(query.trim())}`)
   }
 
   return (
