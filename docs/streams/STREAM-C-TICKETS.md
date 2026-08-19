@@ -290,7 +290,7 @@ Added 11 Aug 2026 at the client's request; blueprint revision 1.3 (§7.5, §8.2)
 - [ ] **C-058** Roll-up query — **must join effort logs on `cycle_no` as well as stage and iteration**, or cycle 1's effort double-counts into cycle 2 after a reopen. *(PLAN.md §3.4 — a defect in the blueprint's own query.)*
 
 ### Remaining tabs & screens
-- [ ] **C-059** History tab — cycle-grouped, expandable to every field change and handoff. **No edit or delete icon exists for anyone**, and the API rejects it even if the DOM is manipulated.
+- [x] **C-059** History tab — cycle-grouped, expandable to every field change and handoff. **No edit or delete icon exists for anyone**, and the API rejects it even if the DOM is manipulated.
 - [ ] **C-060** Attachments tab — gallery, filterable by client-visible, grouped by cycle and stage.
 - [ ] **C-061** Effort tab — every log line, sum per cycle + grand total.
 - [ ] **C-062** Stage Queue / team inbox — "Waiting in QA", "Waiting in Deployment", sorted by time-in-stage descending. The landing page for QA and Deployment. **S-31**
