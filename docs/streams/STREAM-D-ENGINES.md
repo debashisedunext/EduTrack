@@ -143,6 +143,39 @@ quietly.
 
 ---
 
+
+## M4 — Tickets · weeks 3–14
+
+Moved from Stream C on 19 Aug 2026. Divyansh's queue was 22 deep behind C-042
+while this stream sat at 92% with nothing ready; these ten are the part of M4
+that does not need the transition service in hand to start.
+
+**The `C-` prefix is kept deliberately.** plan-tracker reads ownership from the
+backlog file a task lives in, not from its ID (`extract.py`: `key = stream_key or
+tid[0]`), so moving the line is what moves the task. Renumbering to `D-0xx` would
+buy a tidier prefix and break every commit, PR and dependency row that already
+names these by their real IDs.
+
+**These are Stream C's code paths** (`api/feature/tickets/`, `api/feature/transitions/`,
+`frontend/src/features/tickets/`). TEAM-PLAN.md §6 still assigns those to C — either
+that map moves too, or each of these needs Divyansh's sign-off before it is touched.
+
+### Where it happened — module, screen, feature, steps
+- [ ] **C-065** `product_modules` master + the four columns on `tickets` — table (`code`, `name`, `seq`, `is_active`) seeded with Student, Admission, Fees, Examination, Attendance, Library, Inventory, Parent App in a Stream C seed file (TEAM-PLAN §7.3); `module_id` FK, `screen_name VARCHAR(120)`, `feature VARCHAR(120)`, `steps_to_generate MEDIUMTEXT`, all nullable, plus `ix_tickets_module`. **Needs Stream A's review before merge** — it ALTERs `tickets` (TEAM-PLAN §7.1). Timestamp-versioned; the eight rows are seed data, never a Java enum.
+- [ ] **C-067** Backend wiring for all four fields — create, PATCH, read, validation, sanitisation, history; Bean Validation bounds so springdoc emits them into the contract; **server-side HTML sanitisation on the write path** (§3.9 — the client's copy is advice, this one is the guarantee); one `FIELD_CHANGED` history row per changed field, same as any other. Module resolved against the master, inactive modules rejected on write but still readable on old tickets.
+- [ ] **C-068** Create form S-19 — the new "Where it happened" group: module dropdown from `GET /masters/modules`, screen name, feature, steps in C-066's editor. **Built against D-060's mock, not against B-064** — DEPENDENCIES §6's first rule, and the reason the mock server exists at all; B-064 is what it integrates with later, not what it waits for. **Module required on Save & Assign for bug-type task types only**, waived on Save as Draft — same shape as the existing description rule, and the reasoning is in §7.5: forcing a module on a change request teaches people to pick the first item in the list.
+- [ ] **C-069** Detail page S-20 shows all four, inline-editable — Module, Screen and Feature in the summary panel under Type; Steps to Generate below the description where the person about to reproduce it is already looking. Editable by the roles that may edit the description, each change writing its own `FIELD_CHANGED` row.
+- [ ] **C-070** List S-17 gains a Module filter — and a Module column **off by default** in the column chooser (the grid is at its width budget). Filter state in the URL like every other C-014 filter, so a filtered grid stays a pasteable link.
+
+### Journey tab — §4A.4
+- [ ] **C-055** Roll-up grid — iteration, stage, resource, role, in, out, duration, effort, per hop.
+- [ ] **C-056** 🔴 **Active vs idle split** — `idle = duration − Σ effort in that stage+iteration`. A stage with 2 days duration and 2 hours effort is a queue problem, not a capacity problem. This single insight justifies the whole feature.
+- [ ] **C-057** Per-resource roll-up + cycle total + all-cycles total.
+- [ ] **C-058** Roll-up query — **must join effort logs on `cycle_no` as well as stage and iteration**, or cycle 1's effort double-counts into cycle 2 after a reopen. *(PLAN.md §3.4 — a defect in the blueprint's own query.)*
+
+### Remaining tabs & screens
+- [ ] **C-062** Stage Queue / team inbox — "Waiting in QA", "Waiting in Deployment", sorted by time-in-stage descending. The landing page for QA and Deployment. **S-31**
+
 ## Decisions you own
 
 Answer during M5:
