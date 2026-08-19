@@ -186,12 +186,12 @@ class ImportCommitControllerTest {
     }
 
     /**
-     * The same 404 the other five routes on this path answer. <b>Delete this when
-     * B-038 lands</b>, like its siblings.
+     * The same 404 the other five routes on this path answer. <b>Repointed by
+     * B-038</b>, like its siblings — see {@code ImportTemplateControllerTest}.
      */
     @Test
     void anUnregisteredSchemaIsNotFound() throws Exception {
-        mvc.perform(commit("users", body(UUID.randomUUID(), mapping())).with(admin()))
+        mvc.perform(commit("widgets", body(UUID.randomUUID(), mapping())).with(admin()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Unknown import schema"));
     }

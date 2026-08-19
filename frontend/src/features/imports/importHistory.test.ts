@@ -10,6 +10,18 @@ import {
   reversalWarning,
   reverseDisabledReason,
 } from './importHistory'
+import { CLIENT_IMPORT, RESOURCE_IMPORT } from './importWizard'
+
+/**
+ * B-038 · the nouns these sentences are built from.
+ *
+ * Every assertion below reads the client wording, because that is the
+ * registration these functions were written for and the one whose exact phrasing
+ * B-037 argued about at length. The resource nouns appear once, at the bottom, to
+ * prove the parameter is actually used rather than accepted and ignored — which
+ * is the way a threaded-through argument silently fails.
+ */
+const NOUNS = CLIENT_IMPORT.nouns
 
 /**
  * B-037 · the sentences shown to somebody about to delete four hundred clients.
@@ -60,11 +72,13 @@ function problem(type: string, detail: string, status = 422): ApiError {
 
 describe('the warning shown before a reversal', () => {
   it('says how many clients will be deleted', () => {
-    expect(reversalWarning(batch({ created: 24 })).deletes).toContain('24 clients')
+    expect(reversalWarning(batch({ created: 24 }), NOUNS).deletes).toContain('24 clients')
   })
 
   it('does not say "1 clients"', () => {
-    expect(reversalWarning(batch({ created: 1 })).deletes).toContain('the 1 client this import created')
+    expect(reversalWarning(batch({ created: 1 }), NOUNS).deletes).toContain(
+      'the 1 client this import created',
+    )
   })
 
   /**
@@ -75,14 +89,14 @@ describe('the warning shown before a reversal', () => {
    * too late: they would have pressed it believing something else.
    */
   it('warns that updated clients are not restored, before anything is deleted', () => {
-    const warning = reversalWarning(batch({ created: 12, updated: 400 }))
+    const warning = reversalWarning(batch({ created: 12, updated: 400 }), NOUNS)
 
     expect(warning.keeps).toContain('400 clients it updated are not restored')
     expect(warning.keeps).toContain('not kept anywhere')
   })
 
   it('omits that warning entirely when the run updated nothing', () => {
-    expect(reversalWarning(batch({ created: 24, updated: 0 })).keeps).toBeNull()
+    expect(reversalWarning(batch({ created: 24, updated: 0 }), NOUNS).keeps).toBeNull()
   })
 })
 
@@ -98,13 +112,14 @@ describe('the result shown after a reversal', () => {
   }
 
   it('reports what was deleted from the batch, not from the request', () => {
-    expect(reversalOutcome(result()).headline).toContain('24 clients')
+    expect(reversalOutcome(result(), NOUNS).headline).toContain('24 clients')
   })
 
   it('says plainly when a run had created nothing', () => {
     expect(
       reversalOutcome(
         result({ batch: batch({ reversedRows: 0, reversedAt: '2026-08-18T09:02:00Z' }) }),
+        NOUNS,
       ).headline,
     ).toContain('had not created any clients')
   })
@@ -119,23 +134,42 @@ describe('the result shown after a reversal', () => {
       result({
         retained: [{ naturalKey: 'ZENITH', reason: 'Kept — 3 tickets.' }],
       }),
+      NOUNS,
     )
 
     expect(retained).toContain('1 client was kept')
-    expect(retained).toContain('work has been raised against it')
+    expect(retained).toContain('work has been recorded against it')
     expect(retained).not.toMatch(/fail/i)
   })
 
   it('says nothing about retained clients when there are none', () => {
-    expect(reversalOutcome(result()).retained).toBeNull()
+    expect(reversalOutcome(result(), NOUNS).retained).toBeNull()
   })
 
   /** The number that accounts for the rows the user is otherwise left wondering about. */
   it('accounts for the rows the run updated and the reversal did not touch', () => {
-    const { notReverted } = reversalOutcome(result({ updatedRowsNotReverted: 400 }))
+    const { notReverted } = reversalOutcome(result({ updatedRowsNotReverted: 400 }), NOUNS)
 
     expect(notReverted).toContain('400 clients')
     expect(notReverted).toContain('cannot be put back')
+  })
+
+  /**
+   * B-038 · the same numbers, the other registration's words.
+   *
+   * The failure this catches is the one a threaded-through parameter invites:
+   * accepting `nouns` and then not using it, so every screen in the product still
+   * says "client" and nobody notices until an Admin reverses a resource import
+   * and is told 24 clients were deleted.
+   */
+  it('speaks the registration’s own noun, not the client one', () => {
+    const { headline } = reversalOutcome(result(), RESOURCE_IMPORT.nouns)
+
+    expect(headline).toContain('24 resources')
+    expect(headline).not.toMatch(/client/i)
+
+    expect(reversalWarning(batch({ created: 12 }), RESOURCE_IMPORT.nouns).deletes)
+      .toContain('12 resources')
   })
 })
 

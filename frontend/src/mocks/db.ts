@@ -1291,6 +1291,12 @@ export function createDb(): Db {
  *
  * Neither is QUEUED or RUNNING: those belong to a batch the poll is advancing,
  * and one sitting here permanently would be a progress bar that never moves.
+ *
+ * **B-038 adds a third, under `RESOURCE`.** The panel filters on `entity`, and a
+ * fixture with only CLIENT runs cannot tell a working filter from a broken one:
+ * both render the same empty resource history and the same two client rows. It
+ * is reversible and has no error report, so the resource wizard opens on a run
+ * somebody can actually press Reverse on.
  */
 function seedImportBatches(db: Db) {
   const rows: ImportBatchRow[] = [
@@ -1327,6 +1333,25 @@ function seedImportBatches(db: Db) {
       rejected: 3,
       errorReportUrl: '/import-batches/2/error-report',
       startedAt: '2026-08-17T11:48:00.000Z',
+      importedBy: 1,
+      importedByName: 'Anita Desai',
+      reversedAt: null,
+      reversedRows: 0,
+      retainedRows: 0,
+      reversible: true,
+    },
+    {
+      batchId: nextId(db, 'importBatch'),
+      entity: 'RESOURCE',
+      fileName: 'joiners-august.xlsx',
+      status: 'COMPLETED',
+      processed: 18,
+      total: 18,
+      created: 16,
+      updated: 2,
+      rejected: 0,
+      errorReportUrl: null,
+      startedAt: '2026-08-18T05:30:00.000Z',
       importedBy: 1,
       importedByName: 'Anita Desai',
       reversedAt: null,

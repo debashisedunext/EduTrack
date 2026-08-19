@@ -7,6 +7,7 @@ import { HttpResponse, http } from 'msw'
 import { server } from '@/mocks/server'
 
 import { ImportHistoryPanel } from './ImportHistoryPanel'
+import { CLIENT_IMPORT } from './importWizard'
 
 /**
  * B-037 · the history panel, rendered.
@@ -67,7 +68,7 @@ function renderPanel() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <ImportHistoryPanel />
+      <ImportHistoryPanel config={CLIENT_IMPORT} />
     </QueryClientProvider>,
   )
 }

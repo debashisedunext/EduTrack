@@ -669,6 +669,87 @@ const CLIENT_IMPORT_FIELDS = [
 ];
 
 /**
+ * B-038 · `ResourceImportSchema.fields()`, mirrored — the second registration.
+ *
+ * Beside the client list rather than derived from it, because they are two
+ * declarations of two different masters and the moment one is expressed in terms
+ * of the other the mock has invented a hierarchy the server does not have.
+ *
+ * **Reporting manager, projects and password are absent**, matching the real
+ * registration. The first is the one worth knowing about: an employee code
+ * identifies a manager exactly, so the column *could* work — it is refused
+ * because B-012's cycle rule holds at any depth and a file can name a manager
+ * three rows below the person reporting to them.
+ */
+const RESOURCE_IMPORT_FIELDS = [
+  { name: 'employeeCode', header: 'Employee Code', required: true, naturalKey: true, type: 'TEXT', maxLength: 20, allowedValues: [], example: 'EDU-0142' },
+  { name: 'fullName', header: 'Full Name', required: true, naturalKey: false, type: 'TEXT', maxLength: 120, allowedValues: [], example: 'Asha Menon' },
+  { name: 'username', header: 'Username', required: true, naturalKey: false, type: 'TEXT', maxLength: 50, allowedValues: [], example: 'asha.menon' },
+  { name: 'email', header: 'Email', required: true, naturalKey: false, type: 'EMAIL', maxLength: 150, allowedValues: [], example: 'asha.menon@edunext.example' },
+  { name: 'role', header: 'Role', required: true, naturalKey: false, type: 'ENUM', maxLength: 0, allowedValues: ['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT'], example: 'DEVELOPER' },
+  { name: 'mobile', header: 'Mobile', required: false, naturalKey: false, type: 'TEXT', maxLength: 20, allowedValues: [], example: '+91 98200 11223' },
+  { name: 'status', header: 'Status', required: false, naturalKey: false, type: 'ENUM', maxLength: 0, allowedValues: ['ACTIVE', 'INACTIVE'], example: 'ACTIVE' },
+  { name: 'department', header: 'Department', required: false, naturalKey: false, type: 'TEXT', maxLength: 80, allowedValues: [], example: 'Engineering' },
+  { name: 'designation', header: 'Designation', required: false, naturalKey: false, type: 'TEXT', maxLength: 80, allowedValues: [], example: 'Senior Engineer' },
+  { name: 'location', header: 'Location', required: false, naturalKey: false, type: 'TEXT', maxLength: 120, allowedValues: [], example: 'Pune' },
+  { name: 'dateOfJoining', header: 'Date of Joining', required: false, naturalKey: false, type: 'DATE', maxLength: 0, allowedValues: [], example: '2026-04-01' },
+  { name: 'dailyCapacityHrs', header: 'Daily Capacity (hrs)', required: false, naturalKey: false, type: 'TEXT', maxLength: 5, allowedValues: [], example: '8' },
+  { name: 'timezone', header: 'Timezone', required: false, naturalKey: false, type: 'TEXT', maxLength: 50, allowedValues: [], example: 'Asia/Kolkata' },
+  { name: 'weeklyOff', header: 'Weekly Off', required: false, naturalKey: false, type: 'TEXT', maxLength: 20, allowedValues: [], example: '6, 7' },
+  { name: 'skills', header: 'Skills', required: false, naturalKey: false, type: 'TEXT', maxLength: 400, allowedValues: [], example: 'Java, React, MySQL' },
+];
+
+/**
+ * B-038 · everything the mock needs to answer for one registration.
+ *
+ * The real engine resolves a path segment to a Spring `@Component` and every
+ * route after that is schema-blind. The mock cannot do that — it has no
+ * registry — so this is the nearest honest equivalent: one table, looked up by
+ * the same key the URL carries, and no handler below branching on the schema
+ * itself.
+ *
+ * An unknown segment falls back to the client registration rather than 404ing,
+ * which is deliberately *unlike* the server. The mock exists so screens can be
+ * built and tested; answering 404 for a typo would fail a component test with a
+ * network error instead of a readable assertion, and the contract's enum already
+ * makes an unknown segment unreachable from the generated client.
+ */
+const IMPORT_REGISTRATIONS = {
+  clients: {
+    entity: 'CLIENT',
+    naturalKey: 'clientCode',
+    fields: CLIENT_IMPORT_FIELDS,
+    fileName: 'clients.xlsx',
+    sheets: ['Clients', 'Archive'],
+    headers: ['Client Code', 'Name', 'Website Domain', 'Support Plan', 'Status', 'Account Manager'],
+    suggestedMapping: {
+      clientCode: 'Client Code', name: 'Name', websiteDomain: 'Website Domain',
+      supportPlan: 'Support Plan', status: 'Status',
+    },
+  },
+  users: {
+    entity: 'RESOURCE',
+    naturalKey: 'employeeCode',
+    fields: RESOURCE_IMPORT_FIELDS,
+    fileName: 'joiners.xlsx',
+    sheets: ['Joiners', 'Leavers'],
+    // `Reporting Manager` plays the part `Account Manager` plays for clients: a
+    // column an HR export really does carry and the import deliberately has no
+    // home for, so step 3's "will not be imported" notice is exercised by the
+    // exact case it exists for.
+    headers: ['Employee Code', 'Full Name', 'Username', 'Email', 'Role', 'Reporting Manager'],
+    suggestedMapping: {
+      employeeCode: 'Employee Code', fullName: 'Full Name', username: 'Username',
+      email: 'Email', role: 'Role',
+    },
+  },
+} as const;
+
+const registration = (schema: unknown) =>
+  IMPORT_REGISTRATIONS[String(schema) as keyof typeof IMPORT_REGISTRATIONS]
+  ?? IMPORT_REGISTRATIONS.clients;
+
+/**
  * The media type both import downloads carry — the template (B-031) and the
  * error report (B-036). Named once because a client that branches on it would
  * be reading a string two handlers had to agree about.
@@ -694,6 +775,90 @@ const XLSX_MEDIA_TYPE =
  * names the fields it would change, which is the one this screen is built
  * around.
  */
+function importPreview(schema: unknown = 'clients') {
+  return schema === 'users' ? resourceImportPreview() : clientImportPreview();
+}
+
+/**
+ * B-038 · the step-4 preview for the resource registration.
+ *
+ * Its own function rather than the client one with the words swapped, for the
+ * reason the field lists are separate: the verdicts that matter differ. A
+ * rejected client row is usually a malformed email; a rejected joiner row is
+ * usually a role somebody typed as "Dev" — which is the case the ENUM dropdown
+ * on the template exists to prevent and the one an Admin needs to see named.
+ *
+ * Smaller than the client fixture (34 rows against 128) and deliberately so: a
+ * joiner list is a month's hiring, not a CRM export, and a preview claiming four
+ * hundred new employees would be the wrong thing to design a screen against.
+ */
+function resourceImportPreview() {
+  const rows: {
+    rowNumber: number;
+    verdict: string;
+    reason: string | null;
+    values: Record<string, string>;
+  }[] = [];
+
+  for (let i = 0; i < 28; i++) {
+    rows.push({
+      rowNumber: rows.length + 2,
+      verdict: 'WILL_CREATE',
+      reason: null,
+      values: {
+        employeeCode: `EDU-${String(2001 + i)}`,
+        fullName: `New Joiner ${i + 1}`,
+      },
+    });
+  }
+
+  const updates = [
+    ['EDU-0142', 'Asha Menon', 'Designation, Mobile'],
+    ['EDU-0198', 'Bhavin Rao', 'Department'],
+    // The row that reads oddly and is right: an upsert of a row matching what is
+    // stored is still an update, and "No change" is worth more than a blank cell.
+    ['EDU-0203', 'Chitra Iyer', 'No change'],
+  ] as const;
+  for (const [employeeCode, fullName, reason] of updates) {
+    rows.push({
+      rowNumber: rows.length + 2,
+      verdict: 'WILL_UPDATE',
+      reason,
+      values: { employeeCode, fullName },
+    });
+  }
+
+  rows.push({
+    rowNumber: rows.length + 2,
+    verdict: 'REJECTED',
+    reason: 'Role: Must be one of: ADMIN, PM, DEVELOPER, QA, DEPLOYMENT, SUPPORT',
+    values: { employeeCode: 'EDU-0311', fullName: 'Wrong Role', role: 'Dev' },
+  });
+  // Blueprint §4B.3's own row 5: a blank natural key, so the column has nothing
+  // to show and renders as "(blank)".
+  rows.push({
+    rowNumber: rows.length + 2,
+    verdict: 'REJECTED',
+    reason: 'Employee Code required',
+    values: { fullName: 'No Code Here' },
+  });
+  rows.push({
+    rowNumber: rows.length + 2,
+    verdict: 'DUPLICATE_IN_FILE',
+    reason: 'Row 2 wins',
+    values: { employeeCode: 'EDU-2001', fullName: 'New Joiner 1 (again)' },
+  });
+
+  const count = (verdict: string) => rows.filter((row) => row.verdict === verdict).length;
+  return {
+    willCreate: count('WILL_CREATE'),
+    willUpdate: count('WILL_UPDATE'),
+    duplicates: count('DUPLICATE_IN_FILE'),
+    rejected: count('REJECTED'),
+    rows,
+  };
+}
+
 function clientImportPreview() {
   const rows: {
     rowNumber: number;
@@ -1875,16 +2040,17 @@ export const restHandlers = [
   // length. `request.formData()` here does not fail, it *hangs*, and every test
   // that uploads times out with no hint why. The name is echoed as a constant
   // instead; the screen shows the browser's own File name anyway.
-  http.post(url('/imports/:schema/upload'), ({ request }) => {
-    const sheets = ['Clients', 'Archive'];
+  http.post(url('/imports/:schema/upload'), ({ params, request }) => {
+    const schema = registration(params.schema);
+    const sheets: string[] = [...schema.sheets];
     const requested = new URL(request.url).searchParams.get('sheet');
     const sheet = requested && sheets.includes(requested) ? requested : sheets[0];
 
     return ok({
       uploadId: '11111111-2222-3333-4444-555555555555',
-      fileName: 'clients.xlsx',
+      fileName: schema.fileName,
       sheets, sheet,
-      rowCount: sheet === 'Archive' ? 12 : 128,
+      rowCount: sheet === sheets[0] ? importPreview(params.schema).rows.length : 12,
       // B-033 corrected two of these. `suggestedMapping` was keyed `domain` and
       // `isActive`, which are not fields `ClientImportSchema` declares — the
       // real names are `websiteDomain` and `status`. Harmless while step 2 only
@@ -1896,13 +2062,8 @@ export const restHandlers = [
       // (see ClientImportSchema: it is a foreign key and a spreadsheet carries
       // only a name), so it exercises step 3's "will not be imported" notice
       // with the exact case that notice exists for.
-      headers: [
-        'Client Code', 'Name', 'Website Domain', 'Support Plan', 'Status', 'Account Manager',
-      ],
-      suggestedMapping: {
-        clientCode: 'Client Code', name: 'Name', websiteDomain: 'Website Domain',
-        supportPlan: 'Support Plan', status: 'Status',
-      },
+      headers: [...schema.headers],
+      suggestedMapping: { ...schema.suggestedMapping },
     });
   }),
   // B-033 · step 3. The columns the import accepts, mirroring
@@ -1914,14 +2075,15 @@ export const restHandlers = [
   // twenty would let a screen be built against a client master that does not
   // exist. The staleness this can still develop is what the OpenAPI check and
   // the real backend catch.
-  http.get(url('/imports/:schema/fields'), ({ params }) =>
-    ok({
+  http.get(url('/imports/:schema/fields'), ({ params }) => {
+    const schema = registration(params.schema);
+    return ok({
       schema: String(params.schema),
-      entity: 'CLIENT',
-      naturalKey: 'clientCode',
-      fields: CLIENT_IMPORT_FIELDS,
-    }),
-  ),
+      entity: schema.entity,
+      naturalKey: schema.naturalKey,
+      fields: schema.fields,
+    });
+  }),
   // §4B.3: "Mapping presets can be saved and reused for the next import."
   // Org-wide, so no caller identity is read — every Admin sees the same list.
   http.get(url('/imports/:schema/mapping-presets'), ({ params }) => {
@@ -1998,7 +2160,9 @@ export const restHandlers = [
   }),
   // B-034 · step 4. A dry run writes nothing and shows a per-row verdict — the
   // step that makes a bulk import safe to run at all.
-  http.post(url('/imports/:schema/validate'), () => ok(clientImportPreview())),
+  http.post(url('/imports/:schema/validate'), ({ params }) =>
+    ok(importPreview(params.schema)),
+  ),
   // B-035 · step 5. The fixture was rebuilt here for the reason B-034 rebuilt
   // step 4's, and it had two of the same class of defect:
   //
@@ -2013,7 +2177,7 @@ export const restHandlers = [
   //
   // It now holds a real batch in the db and advances it a little on every poll,
   // which is what the real runner's fifty-row flush looks like from the client.
-  http.post(url('/imports/:schema/commit'), async ({ request }) => {
+  http.post(url('/imports/:schema/commit'), async ({ params, request }) => {
     const body = (await request.json()) as { mapping?: Record<string, string> };
 
     // The refusal that is worth having in the mock, because it is the one a
@@ -2027,12 +2191,13 @@ export const restHandlers = [
     }
 
     const db = getDb();
-    const preview = clientImportPreview();
+    const schema = registration(params.schema);
+    const preview = importPreview(params.schema);
     const rejected = preview.rejected + preview.duplicates;
     const batch = {
       batchId: nextId(db, 'importBatch'),
-      entity: 'CLIENT',
-      fileName: 'clients.xlsx',
+      entity: schema.entity,
+      fileName: schema.fileName,
       status: 'QUEUED' as const,
       processed: rejected,
       total: preview.rows.length,
@@ -2155,7 +2320,14 @@ export const restHandlers = [
     // One step of the run per poll. `writable` is what the commit actually
     // writes, and creates are settled before updates so the two counters move
     // the way a file ordered by row number would move them.
-    const preview = clientImportPreview();
+    //
+    // B-038 · the run's own registration, read off the stored batch. The poll
+    // has no schema in its path — `/import-batches/{id}` is keyed on the run,
+    // not on what it imported — which is exactly why `entity` is a stored
+    // discriminator rather than something reconstructed from a URL.
+    const preview = batch.entity === 'RESOURCE'
+      ? importPreview('users')
+      : importPreview('clients');
     const writable = preview.willCreate + preview.willUpdate;
     if (batch.created + batch.updated < writable) {
       batch.status = 'RUNNING';

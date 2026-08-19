@@ -14,7 +14,8 @@ import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ClientListPage } from './features/clients/ClientListPage'
 import { ClientFormPage } from './features/clients/ClientFormPage'
-import { ClientImportPage } from './features/clients/import/ClientImportPage'
+import { ClientImportPage } from './features/imports/ClientImportPage'
+import { ResourceImportPage } from './features/imports/ResourceImportPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
 import { ProjectListPage } from './features/masters/projects/ProjectListPage'
@@ -156,6 +157,12 @@ export default function App() {
                 master screen: the S-08 form is an Admin screen, not one of
                 A-030's four shell-less auth routes. */}
             <Route path="/masters/resources/new" element={<ResourceFormPage />} />
+            {/* B-038 · S-07's "bulk import via CSV", on §4B.3's wizard. Literal
+                before `/:userId/edit` for the reason above, and deliberately the
+                same shape of path as `/masters/clients/import`: it is the same
+                screen, registered twice, and two differently-shaped URLs would be
+                the first place that stopped being obvious. */}
+            <Route path="/masters/resources/import" element={<ResourceImportPage />} />
             <Route path="/masters/resources/:userId/edit" element={<ResourceFormPage />} />
             {/* B-016 · S-10. `/new` before `/:projectId/edit` for the same
                 reason the resource routes give — otherwise "new" matches as a
@@ -217,8 +224,9 @@ export default function App() {
             <Route path="/masters/clients/new" element={<ClientFormPage />} />
             {/* B-031 · S-34, the Excel import wizard. A literal segment beside
                 `/new`, and the same ranking applies: `:clientId` never swallows
-                it. Only step 1 works today — B-032…B-035 are the rest, and the
-                screen says so rather than looking finished. */}
+                it. B-038 moved the component out of `features/clients/` and made
+                it configurable; this route is one of its two registrations and
+                the path is unchanged. */}
             <Route path="/masters/clients/import" element={<ClientImportPage />} />
             <Route path="/masters/clients/:clientId/edit" element={<ClientFormPage />} />
             <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />

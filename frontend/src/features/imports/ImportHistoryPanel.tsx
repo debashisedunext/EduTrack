@@ -18,6 +18,7 @@ import {
   reverseDisabledReason,
 } from './importHistory'
 import { useDownloadImportErrorReport } from './importQueries'
+import { type ImportNouns, type ImportWizardConfig } from './importWizard'
 import { ReverseImportDialog } from './ReverseImportDialog'
 
 /**
@@ -52,7 +53,8 @@ import { ReverseImportDialog } from './ReverseImportDialog'
  * rules are the server's two refusals, and a copy in TypeScript is a second
  * statement of them that drifts.
  */
-export function ImportHistoryPanel({ entity = 'CLIENT' }: { entity?: string }) {
+export function ImportHistoryPanel({ config }: { config: ImportWizardConfig }) {
+  const { entity, nouns } = config
   const queryClient = useQueryClient()
   const history = useListImportBatches({ entity })
   const reverse = useReverseImportBatch()
@@ -139,7 +141,9 @@ export function ImportHistoryPanel({ entity = 'CLIENT' }: { entity?: string }) {
         updated are not restored.
       </p>
 
-      {result && <ReversalResult result={result} onDismiss={() => setResult(null)} />}
+      {result && (
+        <ReversalResult result={result} nouns={nouns} onDismiss={() => setResult(null)} />
+      )}
 
       {reverse.isError && <ReversalRefusalNotice error={reverse.error} />}
 
@@ -212,6 +216,7 @@ export function ImportHistoryPanel({ entity = 'CLIENT' }: { entity?: string }) {
 
       <ReverseImportDialog
         batch={confirming}
+        nouns={nouns}
         isPending={reverse.isPending}
         onConfirm={confirmReverse}
         onCancel={() => setConfirming(null)}
@@ -341,20 +346,21 @@ function label(status: string): string {
 /**
  * What the reversal actually did.
  *
- * Every retained client is named, with its reason. The dialog deliberately does
+ * Every retained row is named, with its reason. The dialog deliberately does
  * not promise a count beforehand — see `ReverseImportDialog` — so this is the
- * first and only place the user learns which clients survived, and a count
- * without names would leave them diffing a spreadsheet against the master to
- * find out.
+ * first and only place the user learns which ones survived, and a count without
+ * names would leave them diffing a spreadsheet against the master to find out.
  */
 function ReversalResult({
   result,
+  nouns,
   onDismiss,
 }: {
   result: ImportReversalResponseData
+  nouns: ImportNouns
   onDismiss: () => void
 }) {
-  const { headline, retained, notReverted } = reversalOutcome(result)
+  const { headline, retained, notReverted } = reversalOutcome(result, nouns)
 
   return (
     <div

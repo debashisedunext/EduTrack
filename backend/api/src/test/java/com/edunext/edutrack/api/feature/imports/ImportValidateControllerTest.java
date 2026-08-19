@@ -206,13 +206,13 @@ class ImportValidateControllerTest {
     }
 
     /**
-     * The same 404 the other four routes on this path answer. <b>Delete this when
-     * B-038 lands</b>, like its siblings — the failure is the right amount of
-     * ceremony for "the second schema now exists".
+     * The same 404 the other four routes on this path answer. <b>Repointed by
+     * B-038</b>, like its siblings — see {@code ImportTemplateControllerTest} for
+     * why the rule outlived the key that first demonstrated it.
      */
     @Test
     void anUnregisteredSchemaIsNotFound() throws Exception {
-        mvc.perform(validate("users", body(UUID.randomUUID(), Map.of("a", "b"))).with(admin()))
+        mvc.perform(validate("widgets", body(UUID.randomUUID(), Map.of("a", "b"))).with(admin()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Unknown import schema"));
     }
@@ -227,7 +227,7 @@ class ImportValidateControllerTest {
     @Test
     @DisplayName("an unregistered schema wins over a broken body")
     void theSchemaIsResolvedFirst() throws Exception {
-        mvc.perform(validate("users", body(UUID.randomUUID(), Map.of("invented", "Column")))
+        mvc.perform(validate("widgets", body(UUID.randomUUID(), Map.of("invented", "Column")))
                         .with(admin()))
                 .andExpect(status().isNotFound());
     }
