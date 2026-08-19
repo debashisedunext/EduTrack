@@ -15,13 +15,21 @@ import java.time.Instant;
  * One audited action — every login, permission change, master change and ticket
  * action. Feeds S-16, the Audit Log Viewer (A-071), which is export-only.
  *
- * <p><b>This is not one of the hash-chained append-only tables.</b>
- * {@code ticket_history}, {@code ticket_effort_logs} and
- * {@code ticket_stage_transitions} are; A-008 puts no immutability trigger on
- * {@code audit_logs}, and this entity is not {@code @Immutable}. Nothing
- * currently stops an {@code UPDATE} but convention. If the audit log needs the
- * same guarantee, that is a separate decision and a separate migration — stated
- * plainly here because a reader will otherwise assume it is protected.
+ * <p><b>A-071 made this table append-only in earnest.</b> When it was created
+ * the javadoc here said the opposite — "nothing currently stops an
+ * {@code UPDATE} but convention" — and that is no longer true:
+ * {@code V20260818_1500} adds {@code trg_audit_no_update} and
+ * {@code trg_audit_no_delete}, the grant script hands {@code edutrack_app}
+ * {@code SELECT, INSERT} only, {@link AuditTrail} is the sole writer and
+ * exposes {@code record} alone, and {@code /audit-logs} registers no mutating
+ * route. Four layers, the same four {@code ticket_history} has.
+ *
+ * <p>It still does not have the fifth: there is no hash chain here, so nothing
+ * detects tampering that first defeats the triggers, and nothing detects a
+ * truncated tail the way A-044's {@code chain_anchors} does. This entity is
+ * therefore not {@code @Immutable} — Hibernate's annotation is a hint to the
+ * persistence context, not a guarantee, and the guarantee now lives where it
+ * cannot be edited out of a Java file.
  *
  * <p>{@code actorId} null means SYSTEM: a scanner escalation has no human
  * behind it.
@@ -48,6 +56,14 @@ public class AuditLog {
 
     @Column(name = "entity_id")
     private Long entityId;
+
+    /**
+     * The subject's human reference where it has no numeric id — a ticket
+     * code, {@code CRM-26-00347}. Null whenever {@link #entityId} is set;
+     * V20260818_1500 explains why the table needs both and never both at once.
+     */
+    @Column(name = "entity_ref", length = 40)
+    private String entityRef;
 
     @Column(name = "old_value", columnDefinition = "text")
     private String oldValue;
@@ -104,6 +120,14 @@ public class AuditLog {
 
     public void setEntityId(Long entityId) {
         this.entityId = entityId;
+    }
+
+    public String getEntityRef() {
+        return entityRef;
+    }
+
+    public void setEntityRef(String entityRef) {
+        this.entityRef = entityRef;
     }
 
     public String getOldValue() {

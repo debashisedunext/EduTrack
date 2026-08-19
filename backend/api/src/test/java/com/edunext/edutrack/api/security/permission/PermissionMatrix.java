@@ -977,6 +977,30 @@ final class PermissionMatrix {
             // here, because it is a row rule and this file is about capability.
             everyRole("GET", "/api/v1/reports/{reportKey}"),
 
+            // ── audit · A-071, S-16 ─────────────────────────────────────────
+            // The narrowest row in this file, and the only one read straight
+            // off §2 without an inference: `audit.view` is granted to Admin
+            // and to nobody else, and §17 gives the reason — the audit log
+            // names who did what, from which address, with which browser,
+            // across every module. A PM holding it could read the login times
+            // and the failed attempts of the developers reporting to them.
+            //
+            // Note this route deliberately refuses with 403 and NOT with the
+            // 404 the ticket routes use. The 404 rule exists so that an id
+            // cannot be probed for existence; there is no id here, and the
+            // existence of an audit log is documented in §13. A 404 would
+            // conceal nothing and would hide the refusal from the person
+            // reading the log — which matters, because AuditInterceptor
+            // records this very denial as ACCESS_DENIED. The five denials this
+            // row asserts each write a row proving the guard fired.
+            adminOnly("GET", "/api/v1/audit-logs"),
+            // There is no POST, PATCH or DELETE row because there is no such
+            // route, and unlike every other "no DELETE" note in this file that
+            // is a guarantee rather than a decision not yet needed: S-16 is
+            // "export only, never editable", and
+            // AppendOnlyRulesTest.noRouteOffersToEditTheAuditLog fails the
+            // build if one is ever added.
+
             // ── attachment limits · C-027, §4B.4 ────────────────────────────
             // Read open to all six, write to master.write.
             //

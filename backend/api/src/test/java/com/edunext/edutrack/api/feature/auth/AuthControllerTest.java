@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.auth;
 
+import com.edunext.edutrack.api.feature.audit.LoginAudit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -72,6 +73,15 @@ class AuthControllerTest {
 
     @MockitoBean
     LoginRateLimiter loginRateLimiter;
+
+    /**
+     * A-071 · the login path records its own audit rows, and this slice has no
+     * database for them to land in. Mocked rather than exercised: what the five
+     * login terms mean and when each is written is {@code LoginAudit}'s and the
+     * integration suite's, not this class's, which is about the HTTP contract.
+     */
+    @MockitoBean
+    LoginAudit loginAudit;
 
     private static final String VALID_BODY = """
             {"username":"asha.rao","password":"Correct-Horse-1!"}

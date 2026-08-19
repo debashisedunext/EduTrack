@@ -140,6 +140,21 @@ BEGIN
       SET v_sql = CONCAT('GRANT SELECT, INSERT, UPDATE ON edutrack.`', v_table,
                          '` TO ''edutrack_app''@''%''');
 
+    ELSEIF v_table = 'audit_logs' THEN
+      -- A-071 · S-16's audit log. SELECT and INSERT, exactly like
+      -- ticket_history, and the default branch below would hand out UPDATE
+      -- and DELETE with the rest of DML.
+      --
+      -- This is the branch that matters most on this table, because of who
+      -- reads it: `audit.view` is Admin's alone, so the one role with a
+      -- motive to remove a row from the audit log is the only role that can
+      -- see there is one. Layer 4 (V20260818_1500's two triggers) refuses
+      -- the statement; this refuses the privilege, and neither is enough by
+      -- itself — triggers do not fire on TRUNCATE, which is why edutrack_app
+      -- must never hold DROP here either.
+      SET v_sql = CONCAT('GRANT SELECT, INSERT ON edutrack.`', v_table,
+                         '` TO ''edutrack_app''@''%''');
+
     ELSEIF v_table = 'flyway_schema_history' THEN
       -- Readable for diagnostics; never written by the application.
       SET v_sql = CONCAT('GRANT SELECT ON edutrack.`', v_table,

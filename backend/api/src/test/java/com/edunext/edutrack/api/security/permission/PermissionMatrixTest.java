@@ -4,6 +4,7 @@ import com.edunext.edutrack.api.security.TestPrincipals;
 import com.edunext.edutrack.api.security.jwt.JwtAuthoritiesConverter;
 import com.edunext.edutrack.api.security.permission.PermissionMatrix.Entry;
 import com.edunext.edutrack.api.security.permission.PermissionMatrix.Outcome;
+import com.edunext.edutrack.domain.audit.AuditTrail;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -17,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
@@ -98,6 +100,23 @@ class PermissionMatrixTest {
      * happens to a request authorisation let through — see {@link #statusOf}.
      */
     private static final int HANDLER_WAS_REACHED = -1;
+
+
+    /**
+     * A-071 · the audit writer, stubbed, and the reason is this class's own
+     * "no reachable infrastructure" promise.
+     *
+     * <p>{@code AuditInterceptor} records every 403, which is most of the
+     * several hundred cases below — that is the interceptor working, and it is
+     * asserted in {@code AuditInterceptorTest}. Here each of those writes is a
+     * connection attempt to the closed port this suite deliberately points at,
+     * and HikariCP spends its full budget failing before giving up. Measured:
+     * 158 s without this stub, 209 s with the real bean, for no assertion
+     * either way. The audit writer is infrastructure like the datasource and
+     * Redis, and it belongs on the same side of that line.
+     */
+    @MockitoBean
+    AuditTrail auditTrail;
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
