@@ -1294,6 +1294,21 @@ final class PermissionMatrix {
             // reason they can stay that way. Retiring a type is the PATCH.
             adminOnly("POST", "/api/v1/masters/task-types", TASK_TYPE),
             adminOnly("PATCH", "/api/v1/masters/task-types/{taskTypeId}", EMPTY_PATCH),
+            // ── modules · §7.3 (B-064) ───────────────────────────────────────
+            // All six, on exactly the argument the task types above are open
+            // on. §2 row 3 gives every role the right to raise a ticket, §7.5
+            // puts the Module field on the create form, and this route is what
+            // fills that picker — so a role that could not read it could not
+            // raise a ticket, which would contradict a row §2 does state.
+            //
+            // There is no write row because there is no write route. The eight
+            // rows are reference data seeded by C-065's migration; the backlog
+            // is explicit that an admin CRUD screen is a new task on the
+            // S-11/S-12 pattern rather than a widening of this one. Nor is
+            // there a detail read: the sibling masters carry one only to emit
+            // the ETag their PATCH needs as If-Match, and there is no PATCH
+            // here to serve.
+            everyRole("GET", "/api/v1/masters/modules"),
             // ── notification templates · S-15 (B-022) ────────────────────────
             // **Admin on the reads too, and this is the only master where that
             // is true.** Task types, levels, roles and the calendar open their
