@@ -12,6 +12,7 @@ import {
 import { TicketListPage } from './features/tickets/list/TicketListPage'
 import { BulkReassignWizardPage } from './features/tickets/reassign/BulkReassignWizardPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
+import { StageQueuePage } from './features/tickets/stage-queue/StageQueuePage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ClientListPage } from './features/clients/ClientListPage'
 import { ClientFormPage } from './features/clients/ClientFormPage'
@@ -69,6 +70,13 @@ export default function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/my-tasks" element={<MyTasksPage />} />
+            {/*
+              C-062 · S-31, the QA and Deployment landing page. `LandingRoutes`
+              on the server has mapped those two roles here since A-018 and
+              carried a note that the route did not exist yet; this is the day
+              that note describes, and nothing changes on the server side.
+            */}
+            <Route path="/stages/queue" element={<StageQueuePage />} />
             <Route path="/tickets" element={<TicketListPage />} />
             {/* Ahead of `/tickets/:ticketId` for readability; React Router ranks
                 the static segment higher regardless of order. */}
