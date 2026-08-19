@@ -50,6 +50,13 @@ import type { RoleCode } from './roleCode';
 import type { WorkflowStageIcon } from './workflowStageIcon';
 import type { WorkflowStageStageSlaHrs } from './workflowStageStageSlaHrs';
 
+/**
+ * A stage as it is written into a template by `createWorkflowTemplate`
+(B-041/B-043, still unmounted). **`Stage` is the served shape** — it is
+what `listStages` returns, and it carries the identity and the two usage
+counts this one has no way to know at write time.
+
+ */
 export interface WorkflowStage {
   stageCode?: string;
   displayName?: string;
@@ -60,6 +67,11 @@ export interface WorkflowStage {
   isOptional?: boolean;
   /** Allowed backward targets. Stored as JSON — MySQL has no array type. */
   canReturnTo?: string[];
-  /** Deprecated, never deleted — historical ribbons depend on it. */
+  /** Retired — accepts no new entry, and keeps rendering on every ribbon it
+is already on. **Served from the column as of B-042**; it was a
+hard-coded `false` from D-001 until then, which is why `TicketListPage`
+has had a branch skipping deprecated codes since C-013 that could not
+run.
+ */
   isDeprecated?: boolean;
 }

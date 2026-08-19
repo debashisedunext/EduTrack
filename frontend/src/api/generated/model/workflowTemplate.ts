@@ -46,16 +46,44 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { WorkflowTemplateProjectId } from './workflowTemplateProjectId';
-import type { WorkflowTemplateTaskTypeId } from './workflowTemplateTaskTypeId';
+import type { WorkflowTemplateDescription } from './workflowTemplateDescription';
 import type { WorkflowStage } from './workflowStage';
 
+/**
+ * S-13 tab 2's selector. `version`, `projectId` and `taskTypeId` were
+removed by B-040 — see `listWorkflowTemplates` for why each one could not
+be served honestly, and which task brings the mapping back.
+
+ */
 export interface WorkflowTemplate {
-  id?: number;
-  name?: string;
-  version?: number;
-  projectId?: WorkflowTemplateProjectId;
-  taskTypeId?: WorkflowTemplateTaskTypeId;
-  isActive?: boolean;
+  id: number;
+  /** @maxLength 80 */
+  name: string;
+  /** @maxLength 255 */
+  description?: WorkflowTemplateDescription;
+  /** Exactly one template is the default — Standard Dev Flow, the one every
+other template is a reduction of (B-004).
+ */
+  isDefault: boolean;
+  isActive: boolean;
+  /** How many stages the ribbon has. */
+  stageCount: number;
+  /** **Kept, and `Stage` is not a replacement for it.** S-25's ticket list
+builds its stage filter from this array across every template, and
+that screen shipped before S-13 tab 2 existed — removing it to tidy
+the shape would have broken a live filter to save a field.
+
+The two differ in what they are for. This is the ribbon as a
+*vocabulary*: enough to label and order a filter, with no identity,
+because a filter matches on `stageCode` and several templates share
+one. `Stage` is the ribbon as *rows to edit*, with `id`, `templateId`
+and the two usage counts that decide whether a code may still be
+renamed. Serving the editing shape here would have put four fields
+with no meaning to a filter into a response every ticket list reads.
+
+`isDeprecated` is `false` on every row until **B-042** adds the
+column, which is what it already was — the field has been in this
+schema since D-001 with nothing behind it.
+ */
   stages?: WorkflowStage[];
 }

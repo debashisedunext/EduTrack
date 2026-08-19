@@ -10,6 +10,7 @@ import {
   TICKET_ROUTE,
 } from './features/tickets/detail/entityLinks'
 import { TicketListPage } from './features/tickets/list/TicketListPage'
+import { BulkReassignWizardPage } from './features/tickets/reassign/BulkReassignWizardPage'
 import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ClientListPage } from './features/clients/ClientListPage'
@@ -26,6 +27,7 @@ import { NotificationTemplateListPage } from './features/masters/notificationTem
 import { PriorityListPage } from './features/masters/priorities/PriorityListPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
+import { StatusMasterPage } from './features/masters/statuses/StatusMasterPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
 import { TaskTypeListPage } from './features/masters/taskTypes/TaskTypeListPage'
 import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
@@ -70,22 +72,14 @@ export default function App() {
                 the static segment higher regardless of order. */}
             <Route path="/tickets/new" element={<CreateTicketPage />} />
             {/*
-              S-24, the bulk reassignment wizard. Stream C's C-063 replaces this
-              element; B-014 declares the route because the Resource Master now
-              links into it — deactivating somebody who holds open tickets sends
-              the admin here with `?fromUserId=…&returnTo=…`, per
-              `features/masters/resources/reassignHandoff.ts`.
-
-              Declared rather than left to the catch-all for the reason the three
-              routes below give: an unbuilt screen and a broken link look
-              identical to a user, and only one of them is worth reporting.
-              **Flagged for Stream C** — one line in a shared file, replaced by
-              one line when C-063 lands.
+              S-24, the bulk reassignment wizard — C-063. B-014 declared this
+              route as a placeholder because the Resource Master links into it —
+              deactivating somebody who holds open tickets sends the admin here
+              with `?fromUserId=…&returnTo=…`, per
+              `features/masters/resources/reassignHandoff.ts` — and C-063 is
+              what replaces the placeholder with the real screen.
             */}
-            <Route
-              path="/tickets/bulk-reassign"
-              element={<ScreenPlaceholder title="Bulk reassignment wizard" />}
-            />
+            <Route path="/tickets/bulk-reassign" element={<BulkReassignWizardPage />} />
             <Route path={TICKET_ROUTE} element={<TicketDetailPage />} />
             <Route path="/projects" element={<ScreenPlaceholder title="Projects" />} />
             {/*
@@ -135,6 +129,9 @@ export default function App() {
                       </Button>
                       <Button asChild variant="secondary">
                         <Link to="/masters/task-types">Task types</Link>
+                      </Button>
+                      <Button asChild variant="secondary">
+                        <Link to="/masters/statuses">Statuses &amp; workflow</Link>
                       </Button>
                       <Button asChild variant="secondary">
                         <Link to="/masters/calendar">Working calendar</Link>
@@ -201,6 +198,13 @@ export default function App() {
                 so the create and edit forms are dialogs on the grid rather
                 than a page each. There is no `/:id` route to collide with. */}
             <Route path="/masters/task-types" element={<TaskTypeListPage />} />
+            {/*
+              S-13, B-039 builds tab 1. `/masters/statuses` rather than
+              `/masters/workflow`, because the tab an Admin lands on is the status
+              list and B-040/B-041 add tabs to this page rather than routes beside
+              it — a template designer gets its own route (S-30) when B-043 lands.
+            */}
+            <Route path="/masters/statuses" element={<StatusMasterPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
                 fields, so create and edit are dialogs on the grid rather than a

@@ -257,6 +257,40 @@ export interface Priority {
 }
 
 /**
+ * B-039 · S-13 tab 1. One status, as `GET /masters/statuses` returns it.
+ *
+ * `ticketCount` and `transitionCount` are **not** here, deliberately — the
+ * handler derives both from `tickets` and `workflowTransitions`, exactly as the
+ * server's SQL does. Storing them would let the fixture and the server disagree
+ * about whether a status can be retired, and the fixture would be the one the
+ * screen's tests believed.
+ *
+ * `category` cannot be derived from `isOpen`/`isTerminal` and is stored for the
+ * same reason the column exists: NEW and REOPENED are TODO while ON_HOLD is
+ * IN_PROGRESS, and all three carry `isOpen: true, isTerminal: false`.
+ */
+export interface Status {
+  id: number; code: StatusCode; name: string; category: StatusCategory;
+  colour: string; seq: number;
+  isOpen: boolean; isTerminal: boolean; isActive: boolean;
+}
+
+export type StatusCategory = 'TODO' | 'IN_PROGRESS' | 'DONE';
+
+/**
+ * B-039 · one cell of the allowed-transition matrix.
+ *
+ * **The collection is a whitelist**: a missing `(from, to, role)` means the move
+ * is impossible for that role. `fromStatus: null` is "on creation" — the only
+ * way into NEW, and the row the `PUT` refuses to let you clear entirely.
+ */
+export interface WorkflowTransitionRow {
+  id: number; fromStatus: StatusCode | null; toStatus: StatusCode;
+  roleCode: string; requiresReason: boolean; requiresEffort: boolean;
+  isActive: boolean;
+}
+
+/**
  * B-022 · S-15. One notification template, as
  * `GET /masters/notification-templates` returns it.
  *
@@ -304,6 +338,43 @@ export interface Role {
 export interface Stage {
   stageCode: string; displayName: string; sequence: number; ownerRole: RoleCode;
   icon: string; stageSlaHrs: number | null; isOptional: boolean; canReturnTo: string[];
+}
+
+/**
+ * B-040 · S-13 tab 2 — one template, and one row of one template's ribbon.
+ *
+ * **Separate from `Stage` above, and the separation is a finding rather than a
+ * preference.** `db.stages` is Stream C's flat ribbon fixture and its codes are
+ * `DEVELOPMENT` and `VERIFICATION`; the database seeds `DEV` and `VERIFY`
+ * (`V20260807_1700`). So the mock and the real backend disagree about the
+ * vocabulary of the ribbon, and a screen tested only against the mock would ship
+ * looking right. Reconciling it means renaming codes that Stream C's reopen
+ * fixture and `ReopenDialog.test.tsx` assert on, which is their file — recorded
+ * in the backlog note instead.
+ *
+ * These rows follow the database, because tab 2 is the screen that edits the
+ * database's rows.
+ */
+export interface WorkflowTemplateRow {
+  id: number; name: string; description: string | null;
+  isDefault: boolean; isActive: boolean;
+}
+export interface TemplateStage {
+  id: number; templateId: number; stageCode: string; displayName: string;
+  ownerRole: string; slaHours: number | null; isOptional: boolean;
+  canReturnTo: string[]; icon: string | null; seq: number;
+  /** What freezes the code. Seeded above zero on one stage so the rule is reachable. */
+  transitionCount: number; openTicketCount: number;
+  /**
+   * B-042 · §7.4's "deprecated, never deleted".
+   *
+   * **Seeded false on all eighteen, deliberately.** A retired row here would be
+   * one `TicketListPage` drops from S-25's stage filter and one tab 2 renders
+   * greyed — both correct, and both making it impossible for a test to tell "the
+   * screen handles a deprecated stage" from "the fixture came with one". The
+   * screen's own tests retire a stage first and then assert.
+   */
+  isDeprecated: boolean; deprecatedAt: string | null;
 }
 export interface Ticket {
   ticketId: string; title: string; description: string;
@@ -466,6 +537,10 @@ export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
   clientProjects: ClientProject[];
   taskTypes: TaskType[]; modules: Module[]; priorities: Priority[]; stages: Stage[];
+  /** B-039 · S-13 tab 1 — the status vocabulary and the whitelist that governs moves between them. */
+  statuses: Status[]; workflowTransitions: WorkflowTransitionRow[];
+  /** B-040 · S-13 tab 2 — the three templates of §4A.9 and their stages. */
+  workflowTemplates: WorkflowTemplateRow[]; templateStages: TemplateStage[];
   /** B-015 · S-09. `roleGrants` is keyed by role id — the matrix, one row per role. */
   permissions: Permission[]; roles: Role[]; roleGrants: Record<number, string[]>;
   /** B-022 · S-15. One row per (event, channel) — the wording of everything sent. */
@@ -1114,6 +1189,71 @@ const PRIORITIES: Priority[] = [
 ];
 
 /**
+ * B-039 · the eight statuses B-003 seeds, with the categories V20260818_1720
+ * backfilled.
+ *
+ * **The category mapping is the reason to read this list rather than skim it.**
+ * NEW and REOPENED are TODO; ON_HOLD, AWAITING_INFO and REWORK are IN_PROGRESS.
+ * All five carry `isOpen: true, isTerminal: false` — identical on both booleans,
+ * three categories apart — which is why the migration added a column instead of
+ * deriving one.
+ *
+ * RESOLVED is DONE while `isOpen` stays true: the category describes the work,
+ * `isOpen` describes the ticket record, and the gap is deliberate.
+ */
+const STATUSES: Status[] = [
+  { id: 1, code: 'NEW', name: 'New', category: 'TODO', colour: '#4F46E5', seq: 10, isOpen: true, isTerminal: false, isActive: true },
+  { id: 2, code: 'IN_PROGRESS', name: 'In Progress', category: 'IN_PROGRESS', colour: '#3B82F6', seq: 20, isOpen: true, isTerminal: false, isActive: true },
+  { id: 3, code: 'ON_HOLD', name: 'On Hold', category: 'IN_PROGRESS', colour: '#F59E0B', seq: 30, isOpen: true, isTerminal: false, isActive: true },
+  { id: 4, code: 'AWAITING_INFO', name: 'Awaiting Info', category: 'IN_PROGRESS', colour: '#6B7280', seq: 40, isOpen: true, isTerminal: false, isActive: true },
+  { id: 5, code: 'REWORK', name: 'Rework', category: 'IN_PROGRESS', colour: '#8B5CF6', seq: 50, isOpen: true, isTerminal: false, isActive: true },
+  { id: 6, code: 'RESOLVED', name: 'Resolved', category: 'DONE', colour: '#14B8A6', seq: 60, isOpen: true, isTerminal: false, isActive: true },
+  { id: 7, code: 'CLOSED', name: 'Closed', category: 'DONE', colour: '#10B981', seq: 70, isOpen: false, isTerminal: true, isActive: true },
+  { id: 8, code: 'REOPENED', name: 'Reopened', category: 'TODO', colour: '#EF4444', seq: 80, isOpen: true, isTerminal: false, isActive: true },
+];
+
+/**
+ * B-039 · the transition whitelist, transcribed from B-003's seed and B-008's
+ * correction.
+ *
+ * **`SUPPORT`, never `SUPPORT_DESK`.** The seed shipped thirteen rows with the
+ * wrong code and nothing failed — `role_code` has no foreign key, so the rows
+ * simply matched no caller and the Support Desk could make no status move at
+ * all. Getting it wrong here would reproduce that defect in the mock world,
+ * where it would look like a screen bug.
+ *
+ * **G-3 is expressed as absence**: there is no `RESOLVED -> CLOSED` row for
+ * DEVELOPER, QA or DEPLOYMENT, and that is the governance decision rather than
+ * an omission. The same for `CLOSED -> REOPENED`.
+ */
+const WORKFLOW_TRANSITIONS: WorkflowTransitionRow[] = (() => {
+  const ALL = ['ADMIN', 'PM', 'SUPPORT', 'DEVELOPER', 'QA', 'DEPLOYMENT'];
+  const MANAGERS = ['ADMIN', 'PM', 'SUPPORT'];
+  const spec: [StatusCode | null, StatusCode, string[], boolean, boolean][] = [
+    [null, 'NEW', ALL, false, false],
+    ['NEW', 'IN_PROGRESS', ALL, false, false],
+    ['NEW', 'RESOLVED', MANAGERS, true, false],
+    ['IN_PROGRESS', 'ON_HOLD', ALL, true, false],
+    ['ON_HOLD', 'IN_PROGRESS', ALL, false, false],
+    ['IN_PROGRESS', 'AWAITING_INFO', ALL, true, false],
+    ['AWAITING_INFO', 'IN_PROGRESS', ALL, false, false],
+    ['IN_PROGRESS', 'RESOLVED', ALL, false, true],
+    ['RESOLVED', 'REWORK', ['ADMIN', 'PM', 'QA'], true, false],
+    ['REWORK', 'IN_PROGRESS', ALL, false, false],
+    ['REWORK', 'RESOLVED', ALL, false, true],
+    ['RESOLVED', 'CLOSED', MANAGERS, false, false],
+    ['CLOSED', 'REOPENED', MANAGERS, true, false],
+    ['REOPENED', 'IN_PROGRESS', ALL, false, false],
+  ];
+  let id = 0;
+  return spec.flatMap(([fromStatus, toStatus, rolesFor, requiresReason, requiresEffort]) =>
+    rolesFor.map((roleCode) => ({
+      id: ++id, fromStatus, toStatus, roleCode, requiresReason, requiresEffort, isActive: true,
+    })),
+  );
+})();
+
+/**
  * B-001's eighteen capabilities, transcribed from the same §2 matrix the
  * migration seeds — so the mock world and a real database render S-09
  * identically.
@@ -1221,6 +1361,52 @@ const STAGES: Stage[] = [
   { stageCode: 'CLOSED', displayName: 'Closed', sequence: 8, ownerRole: 'PM', icon: 'archive', stageSlaHrs: null, isOptional: false, canReturnTo: [] },
 ];
 
+/**
+ * B-040 · the three templates and their stages, matching
+ * `V20260807_1700__seed_workflow_templates_stages.sql` row for row.
+ *
+ * **`DEV` on Standard Dev Flow and `DEV` on Support Fast-Track are two rows, not
+ * one.** That is the whole shape of tab 2 — `workflow_stages.template_id` is
+ * `NOT NULL` — and a mock that shared them would let a screen pass that had
+ * quietly assumed a global stage catalogue.
+ *
+ * `QA` carries usage counts above zero because it is the only way to reach the
+ * frozen-code path from the screen. Every other stage is editable, which is the
+ * ordinary case and the one the create flow lands in.
+ */
+const WORKFLOW_TEMPLATES: WorkflowTemplateRow[] = [
+  { id: 1, name: 'Standard Dev Flow', isDefault: true, isActive: true,
+    description: 'All 8 stages. Production Bug, Change Request, Future Release. Blueprint §4A.9.' },
+  { id: 2, name: 'Support Fast-Track', isDefault: false, isActive: true,
+    description: 'Intake -> Triage -> Development -> Sign-off -> Closed. Blueprint §4A.9.' },
+  { id: 3, name: 'Infra Flow', isDefault: false, isActive: true,
+    description: 'Intake -> Triage -> Deployment -> Verification -> Closed. Blueprint §4A.9.' },
+]
+
+const TEMPLATE_STAGES: TemplateStage[] = [
+  // Standard Dev Flow — §4A.1 verbatim.
+  { id: 1, templateId: 1, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 2, templateId: 1, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 3, templateId: 1, seq: 30, stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', slaHours: null, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'code-2', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 4, templateId: 1, seq: 40, stageCode: 'QA', displayName: 'QA / Testing', ownerRole: 'QA', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'flask-conical', transitionCount: 41, openTicketCount: 3, isDeprecated: false, deprecatedAt: null },
+  { id: 5, templateId: 1, seq: 50, stageCode: 'DEPLOY', displayName: 'Deployment', ownerRole: 'DEPLOYMENT', slaHours: 4, isOptional: false, canReturnTo: ['DEV'], icon: 'rocket', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 6, templateId: 1, seq: 60, stageCode: 'VERIFY', displayName: 'Verification', ownerRole: 'DEVELOPER', slaHours: 4, isOptional: false, canReturnTo: ['DEV'], icon: 'check-check', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 7, templateId: 1, seq: 70, stageCode: 'SIGNOFF', displayName: 'Sign-off', ownerRole: 'PM', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'clipboard-check', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 8, templateId: 1, seq: 80, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  // Support Fast-Track.
+  { id: 9, templateId: 2, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 10, templateId: 2, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 11, templateId: 2, seq: 30, stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', slaHours: null, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'code-2', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 12, templateId: 2, seq: 40, stageCode: 'SIGNOFF', displayName: 'Sign-off', ownerRole: 'SUPPORT', slaHours: 8, isOptional: false, canReturnTo: ['DEV'], icon: 'clipboard-check', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 13, templateId: 2, seq: 50, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'SUPPORT', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  // Infra Flow.
+  { id: 14, templateId: 3, seq: 10, stageCode: 'INTAKE', displayName: 'Intake', ownerRole: 'SUPPORT', slaHours: 2, isOptional: false, canReturnTo: [], icon: 'inbox', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 15, templateId: 3, seq: 20, stageCode: 'TRIAGE', displayName: 'Triage / Planning', ownerRole: 'PM', slaHours: 4, isOptional: false, canReturnTo: [], icon: 'list-checks', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 16, templateId: 3, seq: 30, stageCode: 'DEPLOY', displayName: 'Deployment', ownerRole: 'DEPLOYMENT', slaHours: 4, isOptional: false, canReturnTo: ['TRIAGE'], icon: 'rocket', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 17, templateId: 3, seq: 40, stageCode: 'VERIFY', displayName: 'Verification', ownerRole: 'DEVELOPER', slaHours: 4, isOptional: false, canReturnTo: ['DEPLOY'], icon: 'check-check', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+  { id: 18, templateId: 3, seq: 50, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
+]
+
 export function createDb(): Db {
   // Before anything reads `pick` or `int` — see `rewindFixtureRandom`. Without
   // this, two calls to this function produce different fixtures.
@@ -1234,6 +1420,10 @@ export function createDb(): Db {
     taskTypes: structuredClone(TASK_TYPES),
     modules: structuredClone(MODULES),
     priorities: structuredClone(PRIORITIES),
+    statuses: structuredClone(STATUSES),
+    workflowTransitions: structuredClone(WORKFLOW_TRANSITIONS),
+    workflowTemplates: structuredClone(WORKFLOW_TEMPLATES),
+    templateStages: structuredClone(TEMPLATE_STAGES),
     permissions: structuredClone(PERMISSIONS),
     roles: structuredClone(ROLES),
     notificationTemplates: structuredClone(NOTIFICATION_TEMPLATES),

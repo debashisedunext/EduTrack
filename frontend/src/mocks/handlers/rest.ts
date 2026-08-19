@@ -3,7 +3,8 @@ import { isWellFormedEmail } from '@/lib/email';
 import { getDb, nextId } from '../db';
 import type {
   Db, Holiday, Level, NotificationChannelCode, NotificationTemplateRow, Priority,
-  ProjectRoleCode, Role, TaskType, User,
+  ProjectRoleCode, Role, Status, StatusCategory, StatusCode, TaskType, TemplateStage, User,
+  WorkflowTransitionRow,
 } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
 import { round, statusRequestDto } from './tickets';
@@ -198,6 +199,118 @@ function taskTypePrecondition(type: TaskType, ifMatch: string | null) {
   return null;
 }
 
+// ── S-13 tab 2 · the stage master (B-040) ───────────────────────────────────
+
+/** One template's stages, left to right. */
+const ribbon = (templateId: number) =>
+  getDb().templateStages
+    .filter((s) => s.templateId === templateId)
+    .sort((a, b) => a.seq - b.seq);
+
+/**
+ * `position` is computed here rather than stored, exactly as the server computes
+ * it: it is a fact about a stage's neighbours, and storing it would be a second
+ * copy of the order to keep in step with `seq`.
+ *
+ * `isCodeEditable` is derived from the two counts for the same reason — it is the
+ * server's answer to "may I rename this?", and the form reads it rather than
+ * restating the rule.
+ */
+function stageDto(stage: TemplateStage) {
+  const position = ribbon(stage.templateId).findIndex((s) => s.id === stage.id) + 1;
+  return {
+    id: stage.id,
+    templateId: stage.templateId,
+    stageCode: stage.stageCode,
+    displayName: stage.displayName,
+    ownerRole: stage.ownerRole,
+    slaHours: stage.slaHours,
+    isOptional: stage.isOptional,
+    canReturnTo: stage.canReturnTo,
+    icon: stage.icon,
+    seq: stage.seq,
+    position,
+    transitionCount: stage.transitionCount,
+    openTicketCount: stage.openTicketCount,
+    isCodeEditable: stage.transitionCount === 0 && stage.openTicketCount === 0,
+    isDeprecated: stage.isDeprecated,
+    deprecatedAt: stage.deprecatedAt,
+    // B-042. Three of the four conditions are facts about *other* rows, which is
+    // why the server computes it and the screen does not — the mock has to do the
+    // same work or the Delete button appears on rows the backend would refuse.
+    isDeletable: stage.transitionCount === 0 && stage.openTicketCount === 0
+      && retireBlockers(stage, ribbon(stage.templateId)) === null,
+  };
+}
+
+/**
+ * B-042 · the two states a stage may not be retired into, as the server refuses
+ * them — shared by the deprecation setter and the delete, exactly as
+ * `guardRetirable` is.
+ *
+ * Returns the problem document or `null`. Written out in full rather than
+ * stubbed, because each sentence is one the confirm dialog renders and a mock
+ * answering "Conflict" would let that copy ship having never been read.
+ */
+function retireBlockers(stage: TemplateStage, stages: TemplateStage[]) {
+  const others = stages.filter((s) => s.id !== stage.id);
+
+  if (!others.some((s) => !s.isDeprecated)) {
+    return problem(409, 'last-live-stage', "That is the template's last live stage", {
+      detail: `${stage.stageCode} is the last stage on this template that is still live. `
+        + 'Retiring it would leave a workflow that can route no ticket at all, and the '
+        + 'template picker would go on offering it. Add or restore another stage first.',
+    });
+  }
+
+  const arrows = others
+    .filter((s) => !s.isDeprecated)
+    .filter((s) => s.canReturnTo.some((t) => t.toUpperCase() === stage.stageCode.toUpperCase()))
+    .map((s) => `${s.stageCode} \u2192 ${stage.stageCode}`);
+
+  if (arrows.length > 0) {
+    const detail = `${stage.stageCode} is still a return target — ${arrows.join(', ')}. `
+      + 'A return target is a move the transition service will honour, so leaving one '
+      + 'pointing at a retired stage is an arrow into a stage nothing may enter. Clear it '
+      + 'there first.';
+    return problem(409, 'return-target-direction', 'That order breaks a return path',
+      { detail, pairs: arrows, errors: { stageIds: [detail] } });
+  }
+
+  return null;
+}
+
+const hash = (value: string) =>
+  `"${Math.abs([...value].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+const stageEtag = (stage: TemplateStage) => hash(JSON.stringify(stageDto(stage)));
+
+/**
+ * The ribbon's tag, over every row's content and not just the order.
+ *
+ * Deliberate, and it matches the server: two Admins editing different stages of
+ * one template would otherwise both hold a valid tag for a reorder about to
+ * discard one of their edits.
+ */
+const ribbonEtag = (stages: TemplateStage[]) =>
+  hash(stages.map((s) => JSON.stringify(stageDto(s))).join('#'));
+
+/**
+ * The mock enforces `If-Match` too. A guard the real backend has and the mock
+ * waves through is a guard the frontend never gets to exercise.
+ */
+function stagePrecondition(ifMatch: string | null, expected: string, what: string) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      `If-Match is required. GET the ${what} first and send back its ETag.`);
+  }
+  if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== expected.replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'Somebody else changed this since you read it. Reload and try again.');
+  }
+  return null;
+}
+
 // ── roles & permissions · S-09 (B-015) ──────────────────────────────────────
 
 /**
@@ -370,6 +483,109 @@ function recipientProblem(recipients: string[]) {
       + "this ticket's project, not everybody holding the PM role."],
   });
 }
+
+// ── statuses and the transition matrix · S-13 tab 1 (B-039) ─────────────────
+
+/**
+ * The eight the contract's `StatusCode` can carry — mirrors `StatusService`.
+ *
+ * A ninth is refused with 400 here exactly as it is on the server, so the S-13
+ * form is built against the one error it will actually see rather than against
+ * a mock that accepts anything.
+ */
+const CONTRACT_STATUS_CODES: StatusCode[] = [
+  'NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO',
+  'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED',
+];
+
+/**
+ * The two usage counts, derived rather than stored.
+ *
+ * Both key on the status **code** against another collection, exactly as the
+ * server's SQL keys on a `VARCHAR` rather than joining `statuses.id` — a fixture
+ * that joined on the id would make the screen look right against data that
+ * cannot exist.
+ *
+ * `transitionCount` counts **both ends**, because that is what a retire
+ * deactivates. Counting only incoming moves would quote the retire dialog a
+ * smaller number than the button then acts on.
+ */
+const statusDto = (status: Status) => {
+  const db = getDb();
+  return {
+    ...status,
+    ticketCount: db.tickets.filter((t) => t.status === status.code).length,
+    transitionCount: db.workflowTransitions.filter(
+      (t) => t.isActive && (t.fromStatus === status.code || t.toStatus === status.code),
+    ).length,
+    deactivatedTransitions: null as number | null,
+  };
+};
+
+/**
+ * Over the content, and **without `deactivatedTransitions`** — that field
+ * describes an event rather than the row, so a status that reads identically has
+ * to tag identically whether it was last written by a retire or by a rename.
+ */
+const statusEtag = (status: Status) =>
+  `"${Math.abs([...JSON.stringify({ ...statusDto(status), deactivatedTransitions: null })]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/**
+ * The matrix's own tag, taken over the whole table even when the read was
+ * filtered by role.
+ *
+ * The one collection in this mock that carries an `ETag`, because it is the one
+ * collection that is itself the unit of edit. A tag over a single column would
+ * let two Admins editing different columns each save over the other with both
+ * preconditions passing.
+ */
+const matrixEtag = () =>
+  `"${Math.abs([...JSON.stringify(getDb().workflowTransitions)]
+    .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(16)}"`;
+
+/**
+ * The mock enforces `If-Match` too. A guard the real backend has and the mock
+ * waves through is a guard the frontend never gets to exercise.
+ */
+function statusPrecondition(status: Status, ifMatch: string | null) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the status first and send back its ETag.');
+  }
+  if (ifMatch !== '*'
+      && ifMatch.replace(/W\/|"/g, '') !== statusEtag(status).replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'This status changed since you read it. Reload and reapply your edit.');
+  }
+  return null;
+}
+
+function matrixPrecondition(ifMatch: string | null) {
+  if (!ifMatch) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the matrix first and send back its ETag. A replace '
+      + 'without one would silently discard whatever another Admin saved while this '
+      + 'screen was open.');
+  }
+  if (ifMatch !== '*' && ifMatch.replace(/W\/|"/g, '') !== matrixEtag().replace(/"/g, '')) {
+    return problem(412, 'precondition-failed',
+      'The matrix changed since you read it. Reload and reapply your edit — saving now '
+      + 'would delete cells somebody else has just added.');
+  }
+  return null;
+}
+
+/** Stated once, because the create and the patch have to refuse identically. */
+const CONTRADICTORY_STATUS =
+  'A status cannot be both terminal and open. Terminal means only a reopen moves a '
+  + 'ticket on; open means the dashboard counts it as outstanding. Together they would '
+  + 'put every ticket that reached this status into an open count nobody can drive to '
+  + 'zero.';
+
+/** Null is a real key here: it is the on-create row. */
+const cellKey = (from: string | null | undefined, to: string, role: string) =>
+  `${from ?? ''} ${to} ${role}`;
 
 // ── priorities · S-12 (B-021) ───────────────────────────────────────────────
 
@@ -2581,6 +2797,278 @@ export const restHandlers = [
   http.get(url('/masters/modules'), () =>
     ok([...getDb().modules].sort((a, b) => a.seq - b.seq)),
   ),
+  // ── statuses and the transition matrix · S-13 tab 1 (B-039) ───────────────
+  // Neither table had a contract path, a mock or a client before B-039 — two
+  // seeded masters, eighty-two rows, reachable only by a migration. So unlike
+  // the priorities above, nothing here is being corrected; it is all new.
+  //
+  // **Active-only by default**, following the priorities rather than the task
+  // types: a retired status handed to a ticket screen's status filter offers a
+  // value matching no ticket anybody can still create.
+  http.get(url('/masters/statuses'), ({ request }) => {
+    const includeInactive =
+      new URL(request.url).searchParams.get('includeInactive') === 'true';
+    return ok(
+      getDb().statuses
+        .filter((s) => includeInactive || s.isActive)
+        .sort((a, b) => a.seq - b.seq || a.id - b.id)
+        .map(statusDto),
+    );
+  }),
+
+  http.get(url('/masters/statuses/:statusId'), ({ params }) => {
+    const status = getDb().statuses.find((s) => s.id === Number(params.statusId));
+    if (!status) return notFound('Status');
+    return ok(statusDto(status), undefined, { headers: { ETag: statusEtag(status) } });
+  }),
+
+  http.post(url('/masters/statuses'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as Partial<Status>;
+    const code = String(body.code ?? '').trim().toUpperCase() as StatusCode;
+
+    // The headline refusal, mirrored from `StatusService`. A mock that accepted
+    // a ninth status would let the S-13 form ship with no handling for the one
+    // error it will actually see.
+    if (!CONTRACT_STATUS_CODES.includes(code)) {
+      return validationFailed({
+        code: [`'${code}' is not one of the eight statuses this release supports `
+          + `(${[...CONTRACT_STATUS_CODES].sort().join(', ')}). The contract's StatusCode `
+          + 'enum types tickets.status on every response, so a ninth code would be '
+          + "rejected by the generated client's own validation before any screen "
+          + 'rendered it. Opening the set is a coordinated change across '
+          + 'contracts/openapi.yaml (Stream D), the ticket screens (Stream C) and the '
+          + 'summary tables (Stream A) — not one this screen can make alone.'],
+      });
+    }
+    if (db.statuses.some((s) => s.code === code)) {
+      const detail = `A status with code '${code}' already exists. To bring back a `
+        + 'retired one, reactivate it instead.';
+      return problem(409, 'duplicate', detail, { errors: { code: [detail] } });
+    }
+
+    const name = String(body.name ?? '').trim();
+    const clash = db.statuses.find((s) => s.name.toLowerCase() === name.toLowerCase());
+    if (clash) {
+      const detail = `'${clash.name}' already exists. Two statuses with the same name `
+        + 'are indistinguishable in the ticket grid, in every status filter and on the '
+        + 'board.';
+      return problem(409, 'duplicate', detail, { errors: { name: [detail] } });
+    }
+
+    const isOpen = body.isOpen ?? true;
+    const isTerminal = body.isTerminal ?? false;
+    if (isTerminal && isOpen) {
+      return problem(409, 'contradictory-state', CONTRADICTORY_STATUS,
+        { errors: { isTerminal: [CONTRADICTORY_STATUS] } });
+    }
+
+    const created: Status = {
+      id: Math.max(0, ...db.statuses.map((s) => s.id)) + 1,
+      code,
+      name,
+      category: (body.category ?? 'TODO') as StatusCategory,
+      colour: String(body.colour ?? '').trim(),
+      seq: body.seq ?? Math.max(0, ...db.statuses.map((s) => s.seq)) + 10,
+      isOpen,
+      isTerminal,
+      isActive: body.isActive ?? true,
+    };
+    db.statuses.push(created);
+    return ok(statusDto(created), undefined,
+      { status: 201, headers: { ETag: statusEtag(created) } });
+  }),
+
+  // There is no DELETE, and the absence is the design. Nothing has a foreign key
+  // to `statuses`, so a delete would *succeed* — and a status is the left-hand
+  // side of every transition lookup, so deleting one strands every ticket in it
+  // with no move offered on any screen.
+  http.patch(url('/masters/statuses/:statusId'), async ({ params, request }) => {
+    const db = getDb();
+    const status = db.statuses.find((s) => s.id === Number(params.statusId));
+    if (!status) return notFound('Status');
+
+    const refusal = statusPrecondition(status, request.headers.get('If-Match'));
+    if (refusal) return refusal;
+
+    const body = (await request.json()) as Partial<Status>;
+
+    if (body.code != null
+        && String(body.code).trim().toUpperCase() !== status.code) {
+      return problem(409, 'immutable-field',
+        `A status code cannot be changed once created. This one is '${status.code}'. `
+        + 'tickets.status stores the code and is not a foreign key, so a rename would '
+        + 'not cascade — it would orphan every ticket ever raised in this status.',
+        { errors: { code: [`A status code cannot be changed once created. This one is `
+          + `'${status.code}'.`] } });
+    }
+
+    // The end state, derived before anything is written. Reading each flag from
+    // the stored row would let `{isTerminal: true}` past a guard that saw the old
+    // `isOpen` — mirrors the ordering fix in `StatusService.update`.
+    const willBeActive = body.isActive ?? status.isActive;
+    const willBeOpen = body.isOpen ?? status.isOpen;
+    const willBeTerminal = body.isTerminal ?? status.isTerminal;
+
+    if (willBeTerminal && willBeOpen) {
+      return problem(409, 'contradictory-state', CONTRADICTORY_STATUS,
+        { errors: { isTerminal: [CONTRADICTORY_STATUS] } });
+    }
+
+    const retiring = status.isActive && !willBeActive;
+    if (retiring) {
+      const ticketCount = db.tickets.filter((t) => t.status === status.code).length;
+      if (ticketCount > 0) {
+        const detail =
+          `${ticketCount} ticket${ticketCount === 1 ? ' is' : 's are'} currently in `
+          + `'${status.name}'. Retiring it deactivates every transition out of it, which `
+          + `would leave ${ticketCount === 1 ? 'that ticket' : 'those tickets'} with no `
+          + 'move offered on any screen. Move them to another status first.';
+        return problem(409, 'in-use', detail,
+          { ticketCount, errors: { isActive: [detail] } });
+      }
+    }
+
+    if (body.name != null) status.name = String(body.name).trim();
+    if (body.category != null) status.category = body.category;
+    if (body.colour != null) status.colour = String(body.colour).trim();
+    if (body.seq != null) status.seq = body.seq;
+    status.isOpen = willBeOpen;
+    status.isTerminal = willBeTerminal;
+    status.isActive = willBeActive;
+
+    // The cascade Stream C's whitelist gate cannot do for itself: it reads the
+    // *transition* row's isActive and never looks at the status, so a retire that
+    // left the matrix alone would go on accepting tickets into a status the master
+    // says is gone. Both ends, because a move *into* it is the same disagreement.
+    let deactivatedTransitions: number | null = null;
+    if (retiring) {
+      const affected = db.workflowTransitions.filter(
+        (t) => t.isActive && (t.fromStatus === status.code || t.toStatus === status.code),
+      );
+      affected.forEach((t) => { t.isActive = false; });
+      deactivatedTransitions = affected.length;
+    }
+
+    return ok({ ...statusDto(status), deactivatedTransitions }, undefined,
+      { headers: { ETag: statusEtag(status) } });
+  }),
+
+  // The matrix is a **whitelist**: a missing (from, to, role) means the move is
+  // impossible for that role. Retired rows are returned rather than filtered,
+  // because the grid has to render a cell an Admin *cleared* differently from one
+  // nobody ever configured.
+  http.get(url('/masters/status-transitions'), ({ request }) => {
+    const roleCode = new URL(request.url).searchParams.get('roleCode');
+    const rows = getDb().workflowTransitions
+      .filter((t) => !roleCode || t.roleCode === roleCode.toUpperCase())
+      .sort((a, b) => a.id - b.id);
+    return ok(rows, undefined, { headers: { ETag: matrixEtag() } });
+  }),
+
+  // PUT, not PATCH: the one invariant worth having — at least one on-create row
+  // survives — is uncheckable against a single cell.
+  http.put(url('/masters/status-transitions'), async ({ request }) => {
+    const db = getDb();
+    const refusal = matrixPrecondition(request.headers.get('If-Match'));
+    if (refusal) return refusal;
+
+    const body = (await request.json()) as {
+      transitions?: {
+        fromStatus?: string | null; toStatus?: string; roleCode?: string;
+        requiresReason?: boolean | null; requiresEffort?: boolean | null;
+      }[];
+    };
+    const wanted = body.transitions ?? [];
+
+    const knownStatuses = new Set(db.statuses.map((s) => s.code));
+    const knownRoles = new Set(db.roles.map((r) => r.code));
+    const seen = new Set<string>();
+    const cells: WorkflowTransitionRow[] = [];
+
+    for (const row of wanted) {
+      const from = (row.fromStatus ?? '').trim().toUpperCase() || null;
+      const to = String(row.toStatus ?? '').trim().toUpperCase();
+      const role = String(row.roleCode ?? '').trim().toUpperCase();
+
+      // No foreign key on either column, so a wrong code is not a constraint
+      // violation — it is a row that silently matches no caller, ever. Exactly
+      // the defect B-008 found in the seed.
+      if (from && !knownStatuses.has(from as StatusCode)) {
+        return problem(409, 'validation', `'${from}' is not a status code this system knows.`,
+          { errors: { fromStatus: ['Unknown status'] } });
+      }
+      if (!knownStatuses.has(to as StatusCode)) {
+        return problem(409, 'validation', `'${to}' is not a status code this system knows.`,
+          { errors: { toStatus: ['Unknown status'] } });
+      }
+      if (!knownRoles.has(role)) {
+        return problem(409, 'validation', `'${role}' is not a role code this system knows.`,
+          { errors: { roleCode: ['Unknown role'] } });
+      }
+      if (from === to) {
+        return problem(409, 'validation',
+          `'${from}' cannot transition to itself. A move that changes nothing is not a `
+          + 'permission, and the unique key would store it as one.',
+          { errors: { toStatus: ['Self-transition'] } });
+      }
+      const key = cellKey(from, to, role);
+      if (seen.has(key)) {
+        return problem(409, 'validation',
+          `The move ${from ?? 'on creation'} -> ${to} for ${role} appears twice.`,
+          { errors: { transitions: ['Duplicate cell'] } });
+      }
+      seen.add(key);
+      cells.push({
+        id: 0,
+        fromStatus: from as StatusCode | null,
+        toStatus: to as StatusCode,
+        roleCode: role,
+        requiresReason: row.requiresReason === true,
+        requiresEffort: row.requiresEffort === true,
+        isActive: true,
+      });
+    }
+
+    // The only edit on this screen that can lock the product out of itself.
+    if (!cells.some((c) => c.fromStatus === null)) {
+      return problem(409, 'no-create-transition',
+        'At least one on-creation move must remain. Those are the rows with no '
+        + "'from' status, and they are the only way a ticket enters the system — with "
+        + 'none of them, no role can raise a ticket on any screen. Every other cell can '
+        + 'be cleared; this one cannot.',
+        { errors: { transitions: ['At least one on-create move is required'] } });
+    }
+
+    // Upsert: an existing row keeps its id, an absent one is deactivated rather
+    // than deleted. `requiresReason`/`requiresEffort` are facts an Admin
+    // authored, and a cleared cell that kept them can be restored as it was.
+    for (const cell of cells) {
+      const existing = db.workflowTransitions.find(
+        (t) => t.fromStatus === cell.fromStatus
+          && t.toStatus === cell.toStatus
+          && t.roleCode === cell.roleCode,
+      );
+      if (existing) {
+        existing.requiresReason = cell.requiresReason;
+        existing.requiresEffort = cell.requiresEffort;
+        existing.isActive = true;
+      } else {
+        db.workflowTransitions.push({
+          ...cell,
+          id: Math.max(0, ...db.workflowTransitions.map((t) => t.id)) + 1,
+        });
+      }
+    }
+    db.workflowTransitions
+      .filter((t) => t.isActive
+        && !seen.has(cellKey(t.fromStatus, t.toStatus, t.roleCode)))
+      .forEach((t) => { t.isActive = false; });
+
+    return ok([...db.workflowTransitions].sort((a, b) => a.id - b.id), undefined,
+      { headers: { ETag: matrixEtag() } });
+  }),
+
   // ── priorities · S-12 (B-021) ─────────────────────────────────────────────
   // Rows from the store, not a literal. Until B-021 this was four frozen
   // objects with colours that matched neither §12.1 nor the migration, and two
@@ -3145,16 +3633,279 @@ export const restHandlers = [
     calendarState().leaves.splice(i, 1);
     return noContent();
   }),
+  // ── S-13 tab 2 · the stage master (B-040) ─────────────────────────────────
+  //
+  // The selector, and it no longer carries stages inline. The stage set is the
+  // unit of edit for the reorder and needs an `ETag` of its own, so two routes
+  // serving the same rows would have meant the reorder preconditioning on a tag
+  // the screen had not read the rows from.
   http.get(url('/masters/workflow-templates'), () =>
-    ok([{
-      id: 1, name: 'Standard Dev Flow', version: 1, projectId: null, taskTypeId: null,
-      isActive: true,
-      stages: getDb().stages.map((s) => ({ ...s, isDeprecated: false })),
-    }]),
+    ok(getDb().workflowTemplates.map((t) => {
+      const stages = ribbon(t.id);
+      return {
+        ...t,
+        stageCount: stages.length,
+        // The vocabulary shape, not the editing one — S-25's stage filter reads
+        // this array and has since C-013. See `InlineStageView` on the server.
+        stages: stages.map((stage, index) => ({
+          stageCode: stage.stageCode,
+          displayName: stage.displayName,
+          sequence: index + 1,
+          ownerRole: stage.ownerRole,
+          icon: stage.icon,
+          stageSlaHrs: stage.slaHours,
+          isOptional: stage.isOptional,
+          canReturnTo: stage.canReturnTo,
+          // B-042's column. A hard-coded false until now, against a
+          // TicketListPage branch that has skipped deprecated codes since C-013.
+          isDeprecated: stage.isDeprecated,
+        })),
+      };
+    })),
   ),
+
+  /**
+   * B-041's, untouched by B-040 and left as the stub it has always been.
+   *
+   * Creating a template is the tab-3 operation — it needs the project x task-type
+   * mapping that has no table yet — so there is nothing here to make faithful.
+   * Kept rather than deleted because `mocks.test.ts` requires a handler for every
+   * declared operation, and the alternative is deleting a contract operation
+   * B-041 is going to implement.
+   */
   http.post(url('/masters/workflow-templates'), async ({ request }) =>
-    ok({ id: 2, version: 1, isActive: true, ...(await request.json() as object) },
+    ok({ id: 4, isActive: true, isDefault: false, stageCount: 0, stages: [],
+         ...(await request.json() as object) },
        undefined, { status: 201 }),
+  ),
+
+  http.get(url('/masters/workflow-templates/:templateId/stages'), ({ params }) => {
+    const templateId = Number(params.templateId);
+    if (!getDb().workflowTemplates.some((t) => t.id === templateId)) {
+      return notFound('Workflow template');
+    }
+    const stages = ribbon(templateId);
+    return ok(stages.map(stageDto), undefined, { headers: { ETag: ribbonEtag(stages) } });
+  }),
+
+  http.get(url('/masters/workflow-templates/:templateId/stages/:stageId'), ({ params }) => {
+    const stage = ribbon(Number(params.templateId))
+      .find((s) => s.id === Number(params.stageId));
+    if (!stage) return notFound('Stage');
+    return ok(stageDto(stage), undefined, { headers: { ETag: stageEtag(stage) } });
+  }),
+
+  http.post(url('/masters/workflow-templates/:templateId/stages'), async ({ request, params }) => {
+    const templateId = Number(params.templateId);
+    if (!getDb().workflowTemplates.some((t) => t.id === templateId)) {
+      return notFound('Workflow template');
+    }
+    const body = (await request.json()) as {
+      stageCode: string; displayName: string; ownerRole: string;
+      slaHours?: number | null; isOptional?: boolean;
+      canReturnTo?: string[]; icon?: string | null;
+    };
+    const stages = ribbon(templateId);
+    const code = body.stageCode.trim().toUpperCase();
+
+    if (stages.some((s) => s.stageCode === code)) {
+      // The full sentence the server sends, not a placeholder. A mock answering
+      // "Duplicate" would let the screen ship looking fine and read uselessly
+      // against a real backend.
+      const detail = `${code} is already a stage on this template. `
+        + 'A code is unique within its template.';
+      return problem(409, 'duplicate', 'Duplicate stage code',
+        { detail, errors: { stageCode: [detail] } });
+    }
+
+    const created: TemplateStage = {
+      id: Math.max(0, ...getDb().templateStages.map((s) => s.id)) + 1,
+      templateId,
+      stageCode: code,
+      displayName: body.displayName.trim(),
+      ownerRole: body.ownerRole,
+      slaHours: body.slaHours ?? null,
+      isOptional: body.isOptional ?? false,
+      canReturnTo: body.canReturnTo ?? [],
+      icon: body.icon ?? null,
+      seq: Math.max(0, ...stages.map((s) => s.seq)) + 10,
+      transitionCount: 0,
+      openTicketCount: 0,
+      isDeprecated: false,
+      deprecatedAt: null,
+    };
+    getDb().templateStages.push(created);
+    return ok(stageDto(created), undefined, {
+      status: 201, headers: { ETag: stageEtag(created) },
+    });
+  }),
+
+  http.patch(url('/masters/workflow-templates/:templateId/stages/:stageId'),
+    async ({ request, params }) => {
+      const stage = ribbon(Number(params.templateId))
+        .find((s) => s.id === Number(params.stageId));
+      if (!stage) return notFound('Stage');
+
+      const stale = stagePrecondition(request.headers.get('If-Match'), stageEtag(stage), 'stage');
+      if (stale) return stale;
+
+      const body = (await request.json()) as Record<string, unknown>;
+
+      if (typeof body.stageCode === 'string') {
+        const code = body.stageCode.trim().toUpperCase();
+        if (code !== stage.stageCode) {
+          if (stage.transitionCount > 0 || stage.openTicketCount > 0) {
+            const detail = `${stage.stageCode} has been used — ${stage.transitionCount} ribbon `
+              + `segments and ${stage.openTicketCount} tickets standing in it now. The code is `
+              + 'stored as plain text on every one of those rows, so renaming it would leave '
+              + 'their journeys unresolvable and stop the stage-SLA scan matching them, both '
+              + 'without any error. Change the display name instead.';
+            return problem(409, 'immutable-field', 'Stage code cannot be changed', {
+              detail,
+              transitionCount: stage.transitionCount,
+              openTicketCount: stage.openTicketCount,
+              errors: { stageCode: [detail] },
+            });
+          }
+          stage.stageCode = code;
+        }
+      }
+      if (typeof body.displayName === 'string') stage.displayName = body.displayName.trim();
+      if (typeof body.ownerRole === 'string') stage.ownerRole = body.ownerRole;
+      if (body.slaHours !== undefined) stage.slaHours = body.slaHours as number | null;
+      if (typeof body.isOptional === 'boolean') stage.isOptional = body.isOptional;
+      if (Array.isArray(body.canReturnTo)) stage.canReturnTo = body.canReturnTo as string[];
+      if (body.icon !== undefined) stage.icon = body.icon as string | null;
+
+      return ok(stageDto(stage), undefined, { headers: { ETag: stageEtag(stage) } });
+    },
+  ),
+
+  /**
+   * The reorder. Refuses the same three things the server refuses, because each
+   * one is a sentence the screen renders rather than a status code it counts.
+   */
+  http.put(url('/masters/workflow-templates/:templateId/stages/order'),
+    async ({ request, params }) => {
+      const templateId = Number(params.templateId);
+      if (!getDb().workflowTemplates.some((t) => t.id === templateId)) {
+        return notFound('Workflow template');
+      }
+      const stages = ribbon(templateId);
+      const stale = stagePrecondition(
+        request.headers.get('If-Match'), ribbonEtag(stages), 'stage list');
+      if (stale) return stale;
+
+      const { stageIds } = (await request.json()) as { stageIds: number[] };
+      const unique = new Set(stageIds);
+      if (unique.size !== stageIds.length
+          || unique.size !== stages.length
+          || stageIds.some((id) => !stages.some((s) => s.id === id))) {
+        return validationFailed({
+          stageIds: [`Send every stage of this template exactly once — ${stages.length} `
+            + `expected, ${unique.size} given. Moving one stage changes the position of every `
+            + 'stage after it, so a partial list would leave the order ambiguous.'],
+        });
+      }
+
+      const ordered = stageIds.map((id) => stages.find((s) => s.id === id)!);
+      const position = new Map(ordered.map((s, i) => [s.stageCode, i]));
+      const broken = ordered.flatMap((s, i) =>
+        s.canReturnTo
+          .filter((target) => (position.get(target) ?? -1) >= i)
+          .map((target) => `${s.stageCode} \u2192 ${target}`));
+
+      if (broken.length > 0) {
+        const detail = `That order would leave ${broken.join(', ')} pointing forwards. `
+          + 'A return target is a backward target, so clear it first or move the other '
+          + 'stage instead.';
+        return problem(409, 'return-target-direction', 'That order breaks a return path',
+          { detail, pairs: broken, errors: { stageIds: [detail] } });
+      }
+
+      ordered.forEach((stage, index) => { stage.seq = (index + 1) * 10; });
+      const next = ribbon(templateId);
+      return ok(next.map(stageDto), undefined, { headers: { ETag: ribbonEtag(next) } });
+    },
+  ),
+
+  /**
+   * B-042 · retire or restore — §7.4's "deprecated, never deleted".
+   *
+   * **No `If-Match`, matching the server.** An idempotent setter naming the state
+   * it wants, so a mock that demanded a precondition would make the screen build
+   * a guard the real backend does not want.
+   *
+   * Both refusals are here rather than stubbed to 200, because each is a sentence
+   * the dialog renders before the click and a mock that never produced one would
+   * let that copy ship untested.
+   */
+  http.put(url('/masters/workflow-templates/:templateId/stages/:stageId/deprecation'),
+    async ({ request, params }) => {
+      const templateId = Number(params.templateId);
+      const stages = ribbon(templateId);
+      const stage = stages.find((s) => s.id === Number(params.stageId));
+      if (!stage) return notFound('Stage');
+
+      const { isDeprecated } = (await request.json()) as { isDeprecated: boolean };
+
+      if (isDeprecated && !stage.isDeprecated) {
+        const blocked = retireBlockers(stage, stages);
+        if (blocked) return blocked;
+        stage.isDeprecated = true;
+        stage.deprecatedAt = new Date().toISOString();
+      } else if (!isDeprecated && stage.isDeprecated) {
+        // Cleared together — ck_workflow_stages_deprecation would refuse the row
+        // otherwise, and a mock that left the timestamp behind would let a screen
+        // ship reading it on a live stage.
+        stage.isDeprecated = false;
+        stage.deprecatedAt = null;
+      }
+
+      return ok(stageDto(stage), undefined, { headers: { ETag: stageEtag(stage) } });
+    },
+  ),
+
+  /**
+   * B-042 · the narrow delete §7.4 leaves room for.
+   *
+   * `If-Match` **is** required here, unlike on the setter above, and the mock
+   * enforces it: the server's whole guard is that both usage counts are zero and
+   * both are inside the per-row tag, so a client that skipped the precondition
+   * would work against this mock and 428 against the backend.
+   */
+  http.delete(url('/masters/workflow-templates/:templateId/stages/:stageId'),
+    ({ request, params }) => {
+      const templateId = Number(params.templateId);
+      const stages = ribbon(templateId);
+      const stage = stages.find((s) => s.id === Number(params.stageId));
+      if (!stage) return notFound('Stage');
+
+      const stale = stagePrecondition(request.headers.get('If-Match'), stageEtag(stage), 'stage');
+      if (stale) return stale;
+
+      if (stage.transitionCount > 0 || stage.openTicketCount > 0) {
+        const detail = `${stage.stageCode} has been used — ${stage.transitionCount} ribbon `
+          + `segments and ${stage.openTicketCount} tickets standing in it now. Deleting it `
+          + 'would leave every one of those rows pointing at a stage definition that no longer '
+          + 'exists, and nothing would fail: the code travels as plain text with no foreign '
+          + 'key. Deprecate it instead — it keeps rendering on the ribbons it is already on '
+          + 'and accepts nothing new.';
+        return problem(409, 'stage-in-use', 'Stage in use — deprecate it instead', {
+          detail,
+          transitionCount: stage.transitionCount,
+          openTicketCount: stage.openTicketCount,
+          canDeprecate: true,
+        });
+      }
+
+      const blocked = retireBlockers(stage, stages);
+      if (blocked) return blocked;
+
+      const db = getDb();
+      db.templateStages.splice(db.templateStages.findIndex((s) => s.id === stage.id), 1);
+      return noContent();
+    },
   ),
 
   // ── dashboard & reports ───────────────────────────────────────────────────

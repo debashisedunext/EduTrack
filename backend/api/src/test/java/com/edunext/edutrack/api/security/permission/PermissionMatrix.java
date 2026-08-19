@@ -192,6 +192,17 @@ final class PermissionMatrix {
     private static final String CHANGE_PRIORITY = """
             {"level":"HIGH"}""";
 
+    /**
+     * C-063 · {@code BulkReassignDtos.BulkReassignRequest}: {@code ticketIds}
+     * is {@code @NotEmpty}, {@code toUserId} is {@code @NotNull} and
+     * {@code reason} is {@code @Size(min = 3)}. The id names no real ticket —
+     * an allowed row is entitled to reach the handler and fail on the missing
+     * row (or, here, on the unreachable database), and a denied row never gets
+     * that far, which is the only distinction this matrix measures.
+     */
+    private static final String BULK_REASSIGN = """
+            {"ticketIds":["CRM-26-00347"],"toUserId":1,"reason":"Matrix fixture reassignment"}""";
+
     /** {@code TwoFactorRequests.ConfirmRequest}: six digits exactly. */
     private static final String TOTP_CODE = """
             {"code":"123456"}""";
@@ -326,6 +337,66 @@ final class PermissionMatrix {
      */
     private static final String PRIORITY = """
             {"level":"HIGH","name":"Matrix Fixture","colour":"#F59E0B"}""";
+
+    /**
+     * {@code StatusWrite}: code, name, category and colour are all required, the
+     * colour must be a {@code #RRGGBB} token, and <b>the code must be one of the
+     * contract's eight</b> — a ninth is refused by {@code StatusService}. As with
+     * {@code PRIORITY}, it does not matter that {@code ON_HOLD} already exists: an
+     * allowed row is entitled to reach the handler and get its 409, and a denied
+     * row never gets that far, which is the only distinction this matrix measures.
+     */
+    private static final String STATUS = """
+            {"code":"ON_HOLD","name":"Matrix Fixture","category":"IN_PROGRESS","colour":"#F59E0B"}""";
+
+    /**
+     * {@code TransitionMatrixWrite}: the list is {@code @NotNull} and each cell
+     * needs {@code toStatus} and {@code roleCode}.
+     *
+     * <p><b>It carries a real on-create row rather than an empty array</b>, and
+     * that is not decoration. An empty list is refused by
+     * {@code StatusTransitionService} with the one refusal in this feature whose
+     * consequence is global — so a fixture that sent one would exercise the guard
+     * rather than the authorisation, and an allowed role would look identical to a
+     * denied one at the status-code level this matrix compares.
+     */
+    private static final String STATUS_TRANSITIONS = """
+            {"transitions":[{"toStatus":"NEW","roleCode":"ADMIN"}]}""";
+
+    /**
+     * {@code StageDtos.StageWrite}: {@code stageCode}, {@code displayName} and
+     * {@code ownerRole} are all required and the code has to match the pattern.
+     *
+     * <p><b>It reuses {@code DEV}</b>, which every seeded template already has, for
+     * {@code PRIORITY}'s reason: an allowed row is entitled to reach the handler
+     * and earn its 409, a denied row never gets that far, and the 409 is the proof
+     * that authorisation passed rather than that the fixture was lucky.
+     */
+    private static final String STAGE = """
+            {"stageCode":"DEV","displayName":"Matrix Fixture","ownerRole":"DEVELOPER"}""";
+
+    /**
+     * {@code StageDtos.StageOrder}: the list is all there is.
+     *
+     * <p>The ids are deliberately not a real template's, so an allowed role gets a
+     * 400 from the completeness check rather than actually reordering a seeded
+     * ribbon underneath the rest of this matrix. The distinction this measures is
+     * 403-or-not, and 400 is on the allowed side of it.
+     */
+    private static final String STAGE_ORDER = """
+            {"stageIds":[1,2,3]}""";
+
+    /**
+     * B-042 · {@code StageDeprecationRequest}. One required boolean, and it names
+     * the state rather than toggling it — which is what makes the route idempotent
+     * and is why it is the one write on this screen with no {@code If-Match}.
+     *
+     * <p>{@code true} is deliberate over {@code false}: a matrix entry whose body
+     * is a no-op would measure the permission check and nothing after it, and the
+     * refusals this route can raise all sit on the retiring side.
+     */
+    private static final String STAGE_DEPRECATION = """
+            {"isDeprecated":true}""";
 
     /**
      * {@code TaskTypeWrite}: code, name, colour and defaultLevel are all
@@ -824,6 +895,19 @@ final class PermissionMatrix {
             // can only narrow what they already see and never widen it.
             everyRole("GET", "/api/v1/tickets"),
 
+            // ── bulk reassignment · C-063, S-17 and S-24 ─────────────────────
+            // Admin and PM, stated as an explicit matrix in the route's own
+            // contract text rather than named as a §2 capability — see
+            // BulkReassignController's note on why no seeded code has this
+            // exact grant set, and why ticket.assign (Admin, PM, Support) is
+            // the wrong one to borrow: this route is narrower by one role.
+            //
+            // *Which* tickets is not this file's question either way:
+            // ScopedTickets applies row scope inside the service, so a PM
+            // reaching past their own projects gets a per-ticket "Not found or
+            // out of scope" in the result, never a 403 (A-035).
+            adminAndPm("POST", "/api/v1/tickets/bulk-reassign", BULK_REASSIGN),
+
             // ── dashboard · A-054, and the same reasoning one step further ───
             //
             // Every role has a dashboard; denying the capability would leave a
@@ -982,6 +1066,79 @@ final class PermissionMatrix {
             // Retiring is the PATCH.
             adminOnly("POST", "/api/v1/masters/priorities", PRIORITY),
             adminOnly("PATCH", "/api/v1/masters/priorities/{priorityId}", EMPTY_PATCH),
+
+            // ── statuses and the transition matrix · S-13 tab 1 (B-039) ──────
+            // Both status reads open to all six, on the same §2 argument the
+            // levels above use and one step stronger: every role may raise a
+            // ticket (§2 row 3), every ticket carries a status, and a role that
+            // could not list statuses could not render its own ticket's chip.
+            everyRole("GET", "/api/v1/masters/statuses"),
+            everyRole("GET", "/api/v1/masters/statuses/{statusId}"),
+            // **The matrix read is open to all six too, and this is the row worth
+            // arguing rather than copying.** It looks like policy configuration,
+            // which reads Admin-only — but it is also the list of moves a ticket
+            // detail page offers, and Stream C's ribbon and status control have to
+            // know which buttons to render. Restricting it would not conceal the
+            // policy either: a user discovers a forbidden move by pressing it and
+            // being refused, so a 403 here would hide the answer from the screen
+            // while leaving it discoverable by anyone willing to click. Authoring
+            // the policy is Admin-only; seeing it is not.
+            everyRole("GET", "/api/v1/masters/status-transitions"),
+            // The writes are master.write — Admin alone — and unlike the levels
+            // above this one needs no argument at all. §2's row reads "Master data
+            // (task types, SLA, **workflow**, holidays)", S-13 is titled "Status,
+            // Stage & Workflow Template Master", and the transition matrix is the
+            // workflow policy itself.
+            //
+            // There is no DELETE row because there is no DELETE route, and the
+            // absence matters more here than on either master above. Nothing has a
+            // foreign key to `statuses`, so a delete would *succeed* — and unlike a
+            // level, a status is the left-hand side of every transition lookup, so
+            // deleting one strands every ticket in it with no move offered on any
+            // screen. Retiring is the PATCH, and even that refuses while tickets
+            // are still there.
+            adminOnly("POST", "/api/v1/masters/statuses", STATUS),
+            adminOnly("PATCH", "/api/v1/masters/statuses/{statusId}", EMPTY_PATCH),
+            adminOnly("PUT", "/api/v1/masters/status-transitions", STATUS_TRANSITIONS),
+
+            // ── workflow templates and their stages · S-13 tab 2 (B-040) ─────
+            // All three reads open to all six, and the argument is Stream C's
+            // rather than this screen's. The ribbon renders on every ticket page
+            // for every role, and it renders `displayName`, `icon` and `slaHours`
+            // from these rows — a Developer who could not read them could not see
+            // the segment they are standing in. `ownerRole` is the same case one
+            // step stronger: it is the answer to "why can I not move this ticket?",
+            // and §2's golden rule is better read than discovered by pressing a
+            // button and being refused.
+            everyRole("GET", "/api/v1/masters/workflow-templates"),
+            everyRole("GET", "/api/v1/masters/workflow-templates/{templateId}/stages"),
+            everyRole("GET", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}"),
+            // The writes are master.write — Admin alone — and this one needs no
+            // argument at all. §2's row reads "Master data (task types, SLA,
+            // **workflow**, holidays)", and a workflow template's stages are the
+            // most literal reading of that word anywhere in the product.
+            //
+            adminOnly("POST", "/api/v1/masters/workflow-templates/{templateId}/stages", STAGE),
+            adminOnly("PATCH", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}", EMPTY_PATCH),
+            adminOnly("PUT", "/api/v1/masters/workflow-templates/{templateId}/stages/order", STAGE_ORDER),
+            // B-042 · §7.4's "deprecated, never deleted", and the two rows that
+            // replaced B-040's note here saying there was no DELETE route.
+            //
+            // There is one now, and it is the narrower half of the pair: it serves
+            // only the complement of §7.4's clause — a stage nothing has entered,
+            // nothing stands in, nothing live returns to, and which is not the
+            // template's last live one. Everything else is the setter, and the 409
+            // says so rather than only saying no.
+            //
+            // The reason the DELETE needed the rule to land first has not changed:
+            // `ticket_stage_transitions` holds the stage code as text with no
+            // foreign key onto `workflow_stages`, so a delete on a used stage would
+            // succeed, cascade nothing, fail nowhere, and take every historical
+            // ribbon segment's meaning with it. Both rows are master.write for the
+            // same §2 reason as the three above — "Master data (task types, SLA,
+            // **workflow**, holidays)".
+            adminOnly("PUT", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}/deprecation", STAGE_DEPRECATION),
+            adminOnly("DELETE", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}"),
 
             // ── task types · S-11 (B-020) ────────────────────────────────────
             // Both reads open to all six, and the argument is §2's rather than

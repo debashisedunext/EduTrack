@@ -24,6 +24,14 @@ import java.time.Instant;
  *
  * <p>{@code isOpen} drives every open-ticket count on the dashboard;
  * {@code isTerminal} marks the states only a reopen moves a ticket out of.
+ *
+ * <p><b>{@code category} is not either of those renamed</b> — B-039 added it
+ * because blueprint §7.4's S-13 tab 1 asks for one and nothing here could answer
+ * it. NEW and REOPENED are To-do; ON_HOLD, AWAITING_INFO and REWORK are In
+ * progress; and all five carry {@code isOpen = true, isTerminal = false}. Five
+ * rows identical on both booleans, three categories apart. RESOLVED is the
+ * mirror case: {@code DONE} while {@code isOpen} stays true, because the
+ * category describes the work and {@code isOpen} describes the ticket record.
  */
 @Entity
 @Table(name = "statuses")
@@ -38,6 +46,17 @@ public class Status {
 
     @Column(name = "name", nullable = false, length = 40)
     private String name;
+
+    /**
+     * {@code TODO} · {@code IN_PROGRESS} · {@code DONE} — blueprint §7.4's S-13
+     * tab 1. A {@code String} against a {@code VARCHAR(20)} with a {@code CHECK},
+     * not a MySQL {@code ENUM}: PLAN.md §3.1's substitution, because an
+     * {@code ENUM} compares by ordinal and renumbers its whole set on every
+     * {@code ALTER}. The wire type is the closed {@code StatusCategory} enum; the
+     * refusal that keeps this column inside it lives in {@code StatusService}.
+     */
+    @Column(name = "category", nullable = false, length = 20)
+    private String category;
 
     @Column(name = "colour", length = 7)
     private String colour;
@@ -84,6 +103,14 @@ public class Status {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
     }
 
     public String getColour() {

@@ -47,4 +47,12 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type WorkflowTemplateTaskTypeId = number | null;
+/**
+ * When it was retired, and **not derivable from anything else**: the last
+hop into a stage says when it was last *used*, which is a different date
+from when it stopped being offered — the gap between the two is what
+makes the question worth asking. `null` while the stage is live; the two
+move together, and `ck_workflow_stages_deprecation` enforces it.
+
+ */
+export type StageDeprecatedAt = string | null;

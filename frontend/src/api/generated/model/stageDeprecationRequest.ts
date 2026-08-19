@@ -47,4 +47,15 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type WorkflowTemplateProjectId = number | null;
+/**
+ * B-042. The state to put the stage into, named rather than toggled — which is
+what makes the route idempotent and therefore what earns it its
+`NO_IF_MATCH` exemption. `true` retires, `false` restores.
+
+ */
+export interface StageDeprecationRequest {
+  /** Required. Absent is `400` rather than a silent restore, because the one
+request a client sends by mistake is an empty body.
+ */
+  isDeprecated: boolean;
+}

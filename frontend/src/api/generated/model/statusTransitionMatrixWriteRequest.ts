@@ -46,8 +46,13 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { StatusTransitionWrite } from './statusTransitionWrite';
 
-export type ListWorkflowTemplatesParams = {
-projectId?: number;
-taskTypeId?: number;
-};
+export interface StatusTransitionMatrixWriteRequest {
+  /** **The complete set of allowed moves.** Anything not listed is
+deactivated. An empty array is accepted by the schema and refused by
+the service, because it would leave no on-create row and no role able
+to raise a ticket.
+ */
+  transitions: StatusTransitionWrite[];
+}
