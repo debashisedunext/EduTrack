@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 import { getDb } from '@/mocks/db'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
@@ -727,6 +728,35 @@ describe('C-068 — Where it happened', () => {
       feature: 'Reprint with duplicate watermark',
       stepsToGenerate: '<p>1. Open Fees → Receipts</p>',
     })
+  })
+
+  it('says why the Module list is empty rather than opening onto nothing', async () => {
+    // `GET /masters/modules` is B-064 and unbuilt on the real backend — it
+    // answers 404 today, so this is the live state, not a hypothetical.
+    server.use(http.get('*/masters/modules', () => new HttpResponse(null, { status: 404 })))
+    renderPage()
+    await formReady()
+
+    expect(await screen.findByText(/module list could not be loaded/i)).toBeInTheDocument()
+  })
+
+  it('does not waive the requirement just because the master is unavailable', async () => {
+    // The tempting fix and the wrong one. Waiving it would let a network
+    // failure silently disable a validation rule, and every bug raised during
+    // the outage would carry no module — §7.5's data poisoning, invisible.
+    server.use(http.get('*/masters/modules', () => new HttpResponse(null, { status: 404 })))
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    fillTicketBody('Receipt reprint drops the duplicate watermark')
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+
+    expect(
+      await screen.findByText('Pick the module this bug is in — it is what routes it to the right team'),
+    ).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
   })
 
   it('does not offer a deactivated module', async () => {

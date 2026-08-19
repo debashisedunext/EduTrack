@@ -379,3 +379,18 @@ same `Controller` binding (`register()` cannot bind a contentEditable) and the
 same sanitising on the way out — §3.9 applies to whatever the client handles,
 and a rule that covers one of its two rich-text fields is the bug this stream
 has already fixed twice.
+
+### 🔴 Open for Stream B — `GET /masters/modules` is B-064 and unbuilt
+
+Against the real backend the endpoint answers **404**, so the Module dropdown is
+empty and **a bug-type ticket cannot be raised through this form at all**. This
+was expected and is not a defect in C-068: DEPENDENCIES §6's first rule says
+build against D-060's mock, and B-064 is what this integrates with later rather
+than what it waits for. It is recorded here because "the form is complete" and
+"the form works against a live server" are different claims today.
+
+The empty state says so in the field's hint rather than opening onto nothing.
+**The requirement is deliberately not waived when the master is unavailable** —
+that would let a network failure silently disable a validation rule, and every
+bug raised during the outage would carry no module, which is §7.5's data
+poisoning with the added property of being invisible. Two tests pin both halves.

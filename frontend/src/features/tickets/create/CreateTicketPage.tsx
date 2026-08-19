@@ -84,7 +84,7 @@ export function CreateTicketPage() {
     raise today's ticket against it — and `ModuleGuard` refuses that with a 400,
     so offering it is offering a refusal.
   */
-  const { data: modulesData } = useListModules()
+  const { data: modulesData, isError: modulesFailed } = useListModules()
 
   const projects = React.useMemo(() => projectsData?.data ?? [], [projectsData])
   const taskTypes = React.useMemo(
@@ -156,6 +156,7 @@ export function CreateTicketPage() {
     somebody has already read past.
   */
   const moduleRequired = taskTypeId != null && bugTypeIds.has(taskTypeId)
+  const modulesEmpty = modulesFailed || (modulesData != null && modules.length === 0)
 
   /**
    * C-012 · recomputed server-side on every change to the four inputs that move
@@ -840,9 +841,26 @@ export function CreateTicketPage() {
             required={moduleRequired}
             error={errors.moduleId?.message}
             hint={
-              moduleRequired
-                ? 'Required for bug-type tickets — it is what routes this to the right team.'
-                : 'Optional for change requests and internal work. Leave it blank rather than guessing.'
+              /*
+                The empty case is spelled out rather than left as a dropdown
+                that opens onto nothing. `GET /masters/modules` is B-064 and is
+                unbuilt on the real backend today — it answers 404 — so against
+                a live server this list *is* empty, and a bug-type ticket cannot
+                be raised until it lands.
+
+                **The requirement is not waived when the master is missing**,
+                which is the tempting fix and the wrong one: it would let a
+                network failure silently disable a validation rule, and the
+                tickets raised during the outage would carry no module at all —
+                the data poisoning §7.5 wrote the rule to prevent, except
+                invisible. Saying plainly why the field is empty is the honest
+                version of being blocked.
+              */
+              modulesEmpty
+                ? 'The module list could not be loaded, so there is nothing to choose from yet.'
+                : moduleRequired
+                  ? 'Required for bug-type tickets — it is what routes this to the right team.'
+                  : 'Optional for change requests and internal work. Leave it blank rather than guessing.'
             }
           >
             {(aria) => (
