@@ -70,7 +70,24 @@ public final class TicketWire {
             String currentStage,
             int currentIteration,
             int reworkCount,
-            int pctComplete) {
+            int pctComplete,
+
+            /*
+             * C-067 · §7.5's "Where it happened", appended rather than slotted in
+             * beside description. The contract's Ticket schema is additive by
+             * convention, and a record's component order is its JSON order under
+             * springdoc — inserting mid-record would reorder four other fields in
+             * the emitted spec and churn the generated client for nothing.
+             *
+             * moduleId is the id, not the name. The contract says so and gives the
+             * reason: a ticket raised against a module since retired still has to
+             * render, and the name is resolved through GET /masters/modules where
+             * the deactivated rows are also returned.
+             */
+            Integer moduleId,
+            String screenName,
+            String feature,
+            String stepsToGenerate) {
     }
 
     /** The entity as the contract's {@code Ticket}. */
@@ -82,6 +99,7 @@ public final class TicketWire {
                 t.getEstimatedEffortHrs(), t.getTotalEffortHrs(), t.getPlannedCloseDate(),
                 t.getActualCloseDate(), t.isReopened(), t.getReopenCount(), t.getCurrentCycleNo(),
                 t.isDelayed(), t.getCurrentStage(), t.getCurrentIteration(), t.getReworkCount(),
-                t.getPctComplete());
+                t.getPctComplete(),
+                t.getModuleId(), t.getScreenName(), t.getFeature(), t.getStepsToGenerate());
     }
 }

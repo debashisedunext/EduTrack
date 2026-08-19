@@ -379,5 +379,61 @@ class TicketListIT {
             assertThat(page.data()).isNotEmpty()
                     .allSatisfy(t -> assertThat(t.assignee()).isNull());
         }
+
+        // ── C-070 · §7.5's module filter ─────────────────────────────────────
+
+        @Test
+        @DisplayName("module filters within scope, and the row carries the id it filtered on")
+        void moduleFilters() {
+            Long fees = jdbc.queryForObject("SELECT id FROM product_modules WHERE code = 'FEES'", Long.class);
+            Long library = jdbc.queryForObject("SELECT id FROM product_modules WHERE code = 'LIBRARY'", Long.class);
+            jdbc.update("UPDATE tickets SET module_id = ? WHERE project_id = ? LIMIT 4", fees, mineProject);
+            jdbc.update("UPDATE tickets SET module_id = ? WHERE project_id = ? AND module_id IS NULL LIMIT 2",
+                    library, mineProject);
+
+            CursorPage<TicketListDtos.TicketSummary> page =
+                    service.list(caller(me, "ADMIN", List.of()), withModule(fees), null, null, 200);
+
+            assertThat(page.data()).hasSize(4)
+                    // The second half is the one that was broken rather than
+                    // missing: `toSummary` returned an unconditional null here,
+                    // so a grid could filter correctly and still render every
+                    // Module cell empty.
+                    .allSatisfy(t -> assertThat(t.moduleId()).isEqualTo(fees));
+        }
+
+        @Test
+        @DisplayName("a module id too large for the column matches nothing rather than truncating")
+        void moduleIdOutOfIntRange() {
+            // 4294967299 truncates to 3 through `intValue()`, and 3 is a real
+            // module — so the naive narrowing returns somebody else's tickets to
+            // a caller who asked for a module that cannot exist. Zero rows is
+            // the only honest answer.
+            Long fees = jdbc.queryForObject("SELECT id FROM product_modules WHERE code = 'FEES'", Long.class);
+            jdbc.update("UPDATE tickets SET module_id = ? WHERE project_id = ?", fees, mineProject);
+
+            CursorPage<TicketListDtos.TicketSummary> page = service.list(
+                    caller(me, "ADMIN", List.of()), withModule(4_294_967_299L), null, null, 200);
+
+            assertThat(page.data()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("no module filter still returns tickets that have no module")
+        void moduleFilterIsOptional() {
+            // Every column is nullable (§7.5) and tickets raised before the
+            // fields existed have no honest value. An unfiltered list that
+            // dropped them would hide most of the table.
+            CursorPage<TicketListDtos.TicketSummary> page =
+                    service.list(caller(me, "ADMIN", List.of()), mine(), null, null, 200);
+
+            assertThat(page.data()).hasSize(12)
+                    .anySatisfy(t -> assertThat(t.moduleId()).isNull());
+        }
+
+        private TicketListSpecs.Filters withModule(Long moduleId) {
+            return new TicketListSpecs.Filters(null, mineProject, null, null, moduleId, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null, null, null);
+        }
     }
 }

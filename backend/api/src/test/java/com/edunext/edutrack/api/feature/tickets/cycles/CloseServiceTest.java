@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.tickets.cycles;
 
+import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
@@ -58,8 +59,15 @@ class CloseServiceTest {
     private final TicketCycleRepository cycles = mock(TicketCycleRepository.class);
     private final TicketJournal journal = mock(TicketJournal.class);
 
+    /**
+     * D-037 · the §4B.6 producer this service now calls. Mocked and unasserted
+     * here: what it sends is `TicketEventNotifierTest`'s subject, and this file
+     * is about the write it must never interfere with.
+     */
+    private final TicketEventNotifier eventNotifier = mock(TicketEventNotifier.class);
+
     private final CloseService service = new CloseService(
-            tickets, cycles, journal, Clock.fixed(NOW, ZoneOffset.UTC));
+            tickets, cycles, journal, eventNotifier, Clock.fixed(NOW, ZoneOffset.UTC));
 
     /**
      * The three-argument constructor is load-bearing — {@code ReopenServiceTest}'s

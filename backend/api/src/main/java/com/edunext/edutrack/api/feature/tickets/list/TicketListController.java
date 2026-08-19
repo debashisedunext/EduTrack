@@ -31,11 +31,11 @@ import java.time.LocalDate;
  *
  * <h2>Every parameter the contract declares is accepted</h2>
  *
- * <p>Including {@code moduleId}, which is accepted and ignored: {@code tickets}
- * grows a module column in C-065, which is unbuilt. Rejecting a parameter the
- * generated client already sends would break the client for a column that does
- * not exist yet — accepting and ignoring it is the smaller lie, and it is
- * recorded here rather than left for somebody to discover.
+ * <p>Including {@code moduleId}, which was accepted and ignored until C-065
+ * added the column and C-070 wired the predicate. Accepting and ignoring it was
+ * the smaller lie while nothing could answer it — rejecting a parameter the
+ * generated client already sends would have broken the client over a column that
+ * did not exist. It now filters, which is the state this note was waiting for.
  */
 @RestController
 @RequestMapping("/api/v1/tickets")

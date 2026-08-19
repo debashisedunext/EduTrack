@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.tickets.comments;
 
+import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.permission.RolePermissions;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
@@ -79,6 +80,13 @@ class CommentService {
     private final CommentSanitizer sanitizer;
     private final CommentMentions mentions;
     private final CommentMentionNotifier mentionNotifier;
+    /**
+     * D-037 · §4B.6 row 9, "Comment added → Assignee, watchers". **Stream D's
+     * producer, injected into Stream C's service** — the arrangement
+     * `mentionNotifier` above already established. Flagged for Divyansh in the
+     * pull request rather than added quietly.
+     */
+    private final TicketEventNotifier eventNotifier;
     private final CommentProperties properties;
     private final Clock clock;
 
@@ -98,9 +106,10 @@ class CommentService {
                    CommentSanitizer sanitizer,
                    CommentMentions mentions,
                    CommentMentionNotifier mentionNotifier,
+                   TicketEventNotifier eventNotifier,
                    CommentProperties properties) {
-        this(tickets, comments, rows, people, sanitizer, mentions, mentionNotifier, properties,
-                Clock.systemUTC());
+        this(tickets, comments, rows, people, sanitizer, mentions, mentionNotifier, eventNotifier,
+                properties, Clock.systemUTC());
     }
 
     /**
@@ -115,6 +124,7 @@ class CommentService {
                    CommentSanitizer sanitizer,
                    CommentMentions mentions,
                    CommentMentionNotifier mentionNotifier,
+                   TicketEventNotifier eventNotifier,
                    CommentProperties properties,
                    Clock clock) {
         this.tickets = tickets;
@@ -124,6 +134,7 @@ class CommentService {
         this.sanitizer = sanitizer;
         this.mentions = mentions;
         this.mentionNotifier = mentionNotifier;
+        this.eventNotifier = eventNotifier;
         this.properties = properties;
         this.clock = clock;
     }
@@ -251,11 +262,28 @@ class CommentService {
         // After the row exists, because the notification deep-links to its id,
         // and last because nothing below it may fail the write. The notifier
         // swallows and logs its own failures for that reason.
+        CommentDtos.UserRef authorRef = resolved.people().get(author);
+        String authorName = authorRef == null ? null : authorRef.displayName();
+
         if (!mentioned.isEmpty()) {
-            CommentDtos.UserRef authorRef = resolved.people().get(author);
-            mentionNotifier.mentioned(ticket, saved.getId(), author,
-                    authorRef == null ? null : authorRef.displayName(), mentioned);
+            mentionNotifier.mentioned(ticket, saved.getId(), author, authorName, mentioned);
         }
+
+        /*
+         * D-037 · §4B.6's "Comment added → Assignee, watchers", which had no
+         * producer at all until now — the thread's own participants were the
+         * only people a comment never told.
+         *
+         * The mentioned users are passed so they can be *excluded*. §4B.6 lists
+         * mention and comment-added as two rows, and somebody who is both would
+         * otherwise get two mails about one sentence — of which D-035's
+         * one-per-recipient-per-ticket-per-minute limit would drop one
+         * silently, leaving which mail arrives to a race. Excluding here makes
+         * it deterministically the mention, which is the more specific of the
+         * two and says why they were singled out.
+         */
+        eventNotifier.commentAdded(ticket, saved.getId(), author, authorName,
+                mentioned.stream().map(CommentMentions.MentionedUser::id).toList());
 
         return dto(saved, resolved);
     }

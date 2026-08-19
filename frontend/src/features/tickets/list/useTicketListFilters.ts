@@ -8,6 +8,8 @@ export interface TicketListFilters {
   projectId: number | null
   clientId: number | null
   taskTypeId: number | null
+  /** C-070 · §7.5's module, blueprint line 986 — "filterable always". */
+  moduleId: number | null
   level: Level | null
   stage: string | null
   status: StatusCode | null
@@ -39,6 +41,7 @@ export const EMPTY_FILTERS: TicketListFilters = {
   projectId: null,
   clientId: null,
   taskTypeId: null,
+  moduleId: null,
   level: null,
   stage: null,
   status: null,
@@ -55,7 +58,7 @@ export const EMPTY_FILTERS: TicketListFilters = {
   reportedTo: null,
 }
 
-const NUMERIC_KEYS = ['projectId', 'clientId', 'taskTypeId', 'assigneeId'] as const
+const NUMERIC_KEYS = ['projectId', 'clientId', 'taskTypeId', 'moduleId', 'assigneeId'] as const
 const STRING_KEYS = [
   'level',
   'stage',

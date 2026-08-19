@@ -333,3 +333,64 @@ Also for Stream D, smaller:
 matches on the master's name instead, so a rename in the Task Type master
 silently disables the rule. `ticketForm.test.ts` has a test that spells out that
 failure mode. Move it onto a flag when one exists.
+
+## C-068 · the "Where it happened" group
+
+§7.5's fourth field group — Module, Screen name, Feature, Steps to generate —
+sits between Core and People because that is where §7.5's own field table puts
+it, not inside Extra.
+
+**Module is mandatory for bug-type task types only**, and that is the whole
+argument of the group. §7.5 states both halves: "a Production Bug without a
+module is a bug nobody can route", and "a change request may genuinely span
+three modules, and forcing a choice there just teaches people to pick the first
+item in the list, which poisons the very reporting the field exists for." Save
+as Draft waives it either way, the same shape the description rule already has.
+
+Three decisions in `ticketForm.ts` are worth knowing about:
+
+- **The bug-type rule matches on `code`, not on `name`.** `CLIENT_REQUIRING_TASK_TYPES`
+  directly above it matches display strings and carries an apology for it — a
+  rename in the Task Type master silently disables that rule, and there is a
+  test pinning that failure mode. `TaskType.code` is documented in the contract
+  as immutable once created, so the module rule survives an admin renaming
+  "Production Bug" in S-13. The three codes are **listed**, not derived from a
+  `_BUG` suffix: a suffix test captures whatever a future admin happens to type,
+  and a validation rule should change when somebody decides it changes.
+- **Server, Network, Browser and Performance issues are deliberately not bug
+  types.** Under-applying the rule costs a blank column; over-applying it costs
+  invented data in the one field the feature was requested for.
+- **Module is not carried into the next ticket by Save & Create Another**,
+  unlike task type and level beside it. A module pre-filled from the last ticket
+  makes accepting-the-default the path of least resistance on exactly the field
+  §7.5 warns about, on the one screen where a stale value is least likely to be
+  noticed. The cost is one dropdown per bug in a batch, and
+  `CreateTicketPage.test.tsx` pays it in the open.
+
+**The picker filters inactive modules out; the endpoint does not.**
+`GET /masters/modules` returns retired rows on purpose (D-060) — a grid still
+has to render the name of a module some old ticket was raised against — but
+offering one here would be offering a 400, since `ModuleGuard` refuses an
+inactive module on write. `Transport` is the fixture's retired row and there is
+a test for its absence.
+
+Steps to generate takes the same `RichTextEditor` the description does, with the
+same `Controller` binding (`register()` cannot bind a contentEditable) and the
+same sanitising on the way out — §3.9 applies to whatever the client handles,
+and a rule that covers one of its two rich-text fields is the bug this stream
+has already fixed twice.
+
+### 🔴 Open for Stream B — `GET /masters/modules` is B-064 and unbuilt
+
+Against the real backend the endpoint answers **404**, so the Module dropdown is
+empty and **a bug-type ticket cannot be raised through this form at all**. This
+was expected and is not a defect in C-068: DEPENDENCIES §6's first rule says
+build against D-060's mock, and B-064 is what this integrates with later rather
+than what it waits for. It is recorded here because "the form is complete" and
+"the form works against a live server" are different claims today.
+
+The empty state says so in the field's hint rather than opening onto nothing.
+**The requirement is deliberately not waived when the master is unavailable** —
+that would let a network failure silently disable a validation rule, and every
+bug raised during the outage would carry no module, which is §7.5's data
+poisoning with the added property of being invisible. Two tests pin both halves.

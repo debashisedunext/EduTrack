@@ -7,7 +7,12 @@ import { useListTickets } from '@/api/generated/tickets/tickets'
 import { useListProjects } from '@/api/generated/projects/projects'
 import { useListClients } from '@/api/generated/clients/clients'
 import { useListUsers } from '@/api/generated/users/users'
-import { useListTaskTypes, useListPriorities, useListWorkflowTemplates } from '@/api/generated/masters/masters'
+import {
+  useListModules,
+  useListTaskTypes,
+  useListPriorities,
+  useListWorkflowTemplates,
+} from '@/api/generated/masters/masters'
 import { useGetMe } from '@/api/generated/auth/auth'
 import type { Level } from '@/api/generated/model/level'
 import type { StatusCode } from '@/api/generated/model/statusCode'
@@ -183,7 +188,20 @@ export function TicketListPage() {
     () => new Map(taskTypes.filter((t) => t.id != null).map((t) => [t.id as number, t.name ?? `#${t.id}`])),
     [taskTypes],
   )
-  const renderContext: ColumnRenderContext = { taskTypeNames }
+  /*
+    C-070 · §7.5's module master. **Unfiltered — retired rows included, in both
+    the filter and the column.** The create form filters them out because
+    nothing should be raised against a retired module; a *list* is the opposite
+    case. "Every open Transport ticket" is a fair question about a module being
+    wound down, and it is the one question you cannot ask if the filter hides it
+    — while the column has to render the name whatever the master now says about
+    the row. Same reasoning D-060 gives for the endpoint returning them at all.
+  */
+  const { data: modulesData } = useListModules()
+  const modules = React.useMemo(() => modulesData?.data ?? [], [modulesData])
+  const moduleNames = React.useMemo(() => new Map(modules.map((m) => [m.id, m.name])), [modules])
+
+  const renderContext: ColumnRenderContext = { taskTypeNames, moduleNames }
 
   const { data: prioritiesData } = useListPriorities()
   const levelOptions = React.useMemo(
@@ -227,6 +245,7 @@ export function TicketListPage() {
       projectId: filters.projectId ?? undefined,
       clientId: filters.clientId ?? undefined,
       taskTypeId: filters.taskTypeId ?? undefined,
+      moduleId: filters.moduleId ?? undefined,
       level: filters.level ?? undefined,
       status: filters.status ?? undefined,
       stage: filters.stage ?? undefined,
@@ -399,6 +418,14 @@ export function TicketListPage() {
           onChange={(t) => updateFilter('taskTypeId', t?.id ?? null)}
           getKey={(t) => String(t.id)}
           getLabel={(t) => t.name ?? `#${t.id}`}
+        />
+        <FilterDropdown
+          label="Module"
+          options={modules}
+          value={modules.find((m) => m.id === filters.moduleId) ?? null}
+          onChange={(m) => updateFilter('moduleId', m?.id ?? null)}
+          getKey={(m) => String(m.id)}
+          getLabel={(m) => (m.isActive === false ? `${m.name} (retired)` : m.name)}
         />
         <FilterDropdown
           label="Level"

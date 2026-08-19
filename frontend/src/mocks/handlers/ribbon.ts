@@ -2,7 +2,7 @@ import { http } from 'msw';
 import { getDb, nextId } from '../db';
 import { buildRibbon, round } from './tickets';
 import {
-  currentUser, findTicket, notFound, ok, paginate, scopedTickets,
+  currentUser, findTicket, notFound, ok, paginate,
   ticketDto, unprocessable, url, userRef, validationFailed, workingMinutes,
 } from './util';
 
@@ -275,13 +275,50 @@ export const ribbonHandlers = [
   }),
 
   // ── stage queue ───────────────────────────────────────────────────────────
+  /**
+   * C-062 · S-31's team inbox.
+   *
+   * ## `scopedTickets` is deliberately not used here, and that is the whole task
+   *
+   * It applied `assigned_to = me` for Developer, QA and Deployment — §10.2's row
+   * scope, and correct everywhere else — which made this endpoint **return only
+   * what the caller is already holding**. A QA resource's "Waiting in QA" listed
+   * their own work and nothing queued, so the one screen §17 item 12 asks for
+   * ("without a shared 'waiting in QA' list, tickets stall between the handoff
+   * and someone noticing") showed exactly the stall it exists to prevent. The
+   * handler read plausibly and was empty in the only session that matters.
+   *
+   * Project membership instead — Admin sees every project, everybody else sees
+   * the projects they are on. This is `StageQueueSubscriptionScope`'s rule
+   * (D-014), which chose it for this screen and said so: the room grants on
+   * membership and its subscriber then "refetches `GET /stages/queue`, which
+   * applies whatever scope C-062 gives it". This is C-062 giving it.
+   *
+   * 🔴 **The server has not agreed to this yet.** `ScopeResolver` still answers
+   * `assigned_to = me` for these three roles on every ticket read, so on the
+   * real backend two things follow: `GET /stages/queue` does not exist at all,
+   * and a queue built on this rule would list tickets whose detail page 404s.
+   * That is a decision on Stream A's guard rather than one this file can make —
+   * raised with Shivendra rather than assumed. What is here is the shape S-31
+   * needs, which is what the screen is built and demoed against.
+   *
+   * Two narrowings that keep this honest and should survive whatever is decided:
+   * **`stage` is mandatory**, so this can never degrade into "every ticket on my
+   * projects", and closed tickets are excluded — a queue is work waiting, not an
+   * archive.
+   */
   http.get(url('/stages/queue'), ({ request }) => {
     const db = getDb();
     const q = new URL(request.url).searchParams;
     const stage = q.get('stage');
     const now = Date.now();
 
-    const rows = scopedTickets(db)
+    const me = currentUser(db);
+    const onMyProjects = (t: { projectId: number }) =>
+      me.role === 'ADMIN' || me.projectIds.includes(t.projectId);
+
+    const rows = db.tickets
+      .filter(onMyProjects)
       .filter((t) => t.currentStageCode === stage && t.status !== 'CLOSED')
       .filter((t) => !q.get('projectId') || t.projectId === Number(q.get('projectId')))
       .filter((t) => q.get('unassignedOnly') !== 'true' || t.assigneeId == null)

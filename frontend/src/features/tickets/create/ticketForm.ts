@@ -1,6 +1,9 @@
 import { z } from 'zod'
 import {
   createTicketBodyDescriptionMax,
+  createTicketBodyFeatureMax,
+  createTicketBodyScreenNameMax,
+  createTicketBodyStepsToGenerateMax,
   createTicketBodyTitleMax,
   createTicketBodyTitleMin,
 } from '@/api/generated/zod/tickets/tickets.zod'
@@ -51,6 +54,52 @@ export function clientRequiringTaskTypeIds(taskTypes: readonly TaskType[]): Read
 }
 
 /**
+ * C-068 · which task types make Module mandatory — blueprint §7.5:
+ * "**Mandatory for bug-type task types**, optional for change requests and
+ * internal work."
+ *
+ * **Matched on `code`, not on `name`, and that is the one difference from
+ * `CLIENT_REQUIRING_TASK_TYPES` above.** That rule matches display strings and
+ * says so apologetically — "a rename in the Task Type master silently disables
+ * the rule". `TaskType.code` is documented in the contract as *immutable once
+ * created* and is what both the migration seed and `db.ts` key on, so this
+ * rule survives an admin renaming "Production Bug" to "Prod Bug" in S-13.
+ *
+ * The three codes are listed rather than derived from a `_BUG` suffix. A suffix
+ * test would silently capture whatever a future admin happens to call a row,
+ * and this is a validation rule — it should change when somebody decides it
+ * changes, not when somebody picks a code.
+ *
+ * **Server Issue, Network Issue, Browser Issue and Performance Issue are
+ * deliberately out.** §7.5's argument for the rule is routing ("a Production Bug
+ * without a module is a bug nobody can route") and its argument against
+ * over-applying it is sharper: forcing a choice where the honest answer is "all
+ * of them" "teaches people to pick the first item in the list, which poisons the
+ * very reporting the field exists for". A server or network issue is usually not
+ * *in* a module at all. Under-applying costs a blank column on a ticket that
+ * could have had one; over-applying costs made-up data in the one field the
+ * whole feature was requested for. The cheaper mistake is the one to make.
+ */
+export const BUG_TASK_TYPE_CODES: readonly string[] = ['PRODUCTION_BUG', 'CLIENT_BUG', 'INTERNAL_BUG']
+
+export function bugTaskTypeIds(taskTypes: readonly TaskType[]): ReadonlySet<number> {
+  return new Set(
+    taskTypes
+      .filter((t) => t.code != null && BUG_TASK_TYPE_CODES.includes(t.code))
+      .map((t) => t.id)
+      .filter((id): id is number => id != null),
+  )
+}
+
+/** The two task-type-derived rules the schema needs, named so they cannot be transposed. */
+export interface TaskTypeRules {
+  /** §4B.2 — task types that cannot be raised without a client. */
+  clientRequired: ReadonlySet<number>
+  /** §7.5 — task types that cannot be raised without a module. */
+  bugTypes: ReadonlySet<number>
+}
+
+/**
  * The three save actions blueprint §7.5 asks for — C-013.
  *
  * `assign` is the primary and `another` differs from it only in what happens
@@ -73,6 +122,16 @@ export interface TicketFormValues {
   description: string
   taskTypeId: number | null
   level: Level | null
+  /**
+   * §7.5's "Where it happened" group — C-068. All four are nullable columns
+   * (§7.5: "Tickets raised before these fields existed have no honest value"),
+   * so mandatoriness is a rule of *this form* and of nothing below it.
+   */
+  moduleId: number | null
+  screenName: string
+  feature: string
+  /** Rich text, same editor and same sanitising round trip as the description. */
+  stepsToGenerate: string
   clientId: number | null
   clientContactId: number | null
   assigneeId: number | null
@@ -88,6 +147,10 @@ export const emptyTicketForm: TicketFormValues = {
   description: '',
   taskTypeId: null,
   level: null,
+  moduleId: null,
+  screenName: '',
+  feature: '',
+  stepsToGenerate: '',
   clientId: null,
   clientContactId: null,
   assigneeId: null,
@@ -131,10 +194,7 @@ const HOURS = /^\d+(\.\d{1,2})?$/
  * a draft missing any of those is a 400 whatever the UI allows. Level pre-fills
  * from the task type, so in practice a draft costs project + task type + title.
  */
-export function ticketFormSchema(
-  clientRequiredTaskTypeIds: ReadonlySet<number>,
-  action: TicketSaveAction = 'assign',
-) {
+export function ticketFormSchema(rules: TaskTypeRules, action: TicketSaveAction = 'assign') {
   const isDraft = action === 'draft'
 
   return z
@@ -172,6 +232,29 @@ export function ticketFormSchema(
         .nativeEnum(Level)
         .nullable()
         .refine((v) => v !== null, { message: 'Select a priority level' }),
+      // §7.5's "Where it happened" group. Optional on the wire and optional
+      // here for everything except a bug-type task type, which the
+      // `superRefine` below handles — the rule needs the task type, and a
+      // per-field schema cannot see its siblings.
+      moduleId: optionalId,
+      screenName: z
+        .string()
+        .trim()
+        .max(createTicketBodyScreenNameMax, `Keep the screen name under ${createTicketBodyScreenNameMax} characters`),
+      feature: z
+        .string()
+        .trim()
+        .max(createTicketBodyFeatureMax, `Keep the feature under ${createTicketBodyFeatureMax} characters`),
+      // Measured over the sanitised HTML for the same reason the description
+      // is: that is the string the column stores and Bean Validation rejects,
+      // and a value can only shrink through the sanitiser — bounding the raw
+      // form value would refuse steps the server would have accepted.
+      stepsToGenerate: z
+        .string()
+        .refine(
+          (html) => sanitizeRichText(html).length <= createTicketBodyStepsToGenerateMax,
+          `Keep the steps under ${createTicketBodyStepsToGenerateMax} characters`,
+        ),
       clientId: optionalId,
       clientContactId: optionalId,
       assigneeId: optionalId,
@@ -197,13 +280,28 @@ export function ticketFormSchema(
       if (
         !isDraft &&
         values.taskTypeId != null &&
-        clientRequiredTaskTypeIds.has(values.taskTypeId) &&
+        rules.clientRequired.has(values.taskTypeId) &&
         values.clientId == null
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['clientId'],
           message: 'This task type is client-facing — pick the client it was raised for',
+        })
+      }
+      // §7.5, and the same shape as the description rule directly above it:
+      // a blueprint rule rather than a contract one, so a draft waives it.
+      // "Save as Draft waives it either way" is the blueprint's own sentence.
+      if (
+        !isDraft &&
+        values.taskTypeId != null &&
+        rules.bugTypes.has(values.taskTypeId) &&
+        values.moduleId == null
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['moduleId'],
+          message: 'Pick the module this bug is in — it is what routes it to the right team',
         })
       }
       // A contact without its client is a dangling foreign key. The UI clears
@@ -251,6 +349,14 @@ export function toCreateRequest(
   // focused and left empty holds `<p><br></p>`, and sending that would store a
   // description that reads as blank and validates as present.
   const description = isRichTextEmpty(values.description) ? '' : sanitizeRichText(values.description).trim()
+  // Same round trip for the second rich-text field — §3.9 applies to whatever
+  // the client handles, and a rule that skips one of its two fields is the
+  // shape of bug this stream has already fixed twice.
+  const stepsToGenerate = isRichTextEmpty(values.stepsToGenerate)
+    ? ''
+    : sanitizeRichText(values.stepsToGenerate).trim()
+  const screenName = values.screenName.trim()
+  const feature = values.feature.trim()
   const estimatedHrs = values.estimatedHrs.trim()
 
   return {
@@ -271,6 +377,14 @@ export function toCreateRequest(
     isClientRaised: values.clientId != null && values.clientContactId != null,
     assigneeId: values.assigneeId,
     watcherIds: values.watcherIds,
+    // §7.5's four. Omitted when blank rather than sent as null, the rule every
+    // optional field here follows — and on these four the two are genuinely
+    // the same state, since all four columns are nullable and "not recorded"
+    // is their only empty meaning.
+    ...(values.moduleId != null ? { moduleId: values.moduleId } : {}),
+    ...(screenName ? { screenName } : {}),
+    ...(feature ? { feature } : {}),
+    ...(stepsToGenerate ? { stepsToGenerate } : {}),
     ...(description ? { description } : {}),
     ...(estimatedHrs ? { estimatedHrs: Number(estimatedHrs) } : {}),
     ...(values.plannedCloseDate
@@ -301,6 +415,17 @@ export function retainedForNextTicket(values: TicketFormValues): Partial<TicketF
     taskTypeId: values.taskTypeId,
     level: values.level,
     assigneeId: values.assigneeId,
+    // **Module is deliberately not carried over**, unlike task type and level
+    // beside it. It is the field §7.5's mandatoriness rule exists to make
+    // somebody think about, and the note under that rule is precisely about not
+    // letting people accept a default they did not choose: "forcing a choice
+    // there just teaches people to pick the first item in the list, which
+    // poisons the very reporting the field exists for". A module pre-filled from
+    // the previous ticket makes accepting-the-default the path of least
+    // resistance on exactly that field, on the one screen where a stale value is
+    // least likely to be noticed — the form has just reset and the eye goes to
+    // the empty title. Screen, feature and steps describe *this* concern and go
+    // for the ordinary reason the title and the estimate do.
     // Copied, not aliased — the array in the request body that was just sent
     // must not be the one the next ticket's picker mutates.
     watcherIds: [...values.watcherIds],
