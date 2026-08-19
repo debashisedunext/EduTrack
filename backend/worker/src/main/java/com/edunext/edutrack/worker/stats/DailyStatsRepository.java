@@ -17,12 +17,19 @@ import java.util.Optional;
  * verifier is the exception)}, and this class is neither the hash verifier nor
  * Stream D's. It was built by A-051 and extended by A-056 twice — once for
  * {@code type_counts}, once for {@code assigned_in_progress} below — then by
- * A-057 for the SLA columns and by A-062 for the resource-keyed aging and due
- * counts, so the precedent is established in the code and nowhere in the
- * ownership map.
+ * A-057 for the SLA columns, by A-062 for the resource-keyed aging and due
+ * counts, and now by A-059 for {@code client_daily_stats}, so the precedent is
+ * established in the code and nowhere in the ownership map.
  * <b>Flagged rather than edited quietly</b>, per CLAUDE.md. The ownership row
  * wants amending to carve out {@code worker/stats/} for Stream A the way the
  * hash verifier already is, or these edits keep arriving unannounced.
+ *
+ * <p>A-059 is the first of these to add a <em>table</em> rather than columns,
+ * which is DEPENDENCIES.md #20's stated deadline arriving: that row says the
+ * decision must land "before A-058", and A-059 has reached it first. The scope
+ * of what is being assumed has therefore grown — five edits ago this was two
+ * SUMs on an existing statement, and it is now a third summary table with its
+ * own refresh method on the scheduler's critical path.
  *
  * <h2>Recompute, never accumulate</h2>
  *
@@ -431,6 +438,91 @@ class DailyStatsRepository {
                 // 17:00 on the seventh day is inside the week and `< day+6`
                 // would drop it.
                 .param("weekEnd", day.plusDays(7).atStartOfDay())
+                .param("computedAt", computedAt)
+                .update();
+    }
+
+    /**
+     * A-059 · recompute {@code client_daily_stats} for one date — §S-05's
+     * widget 20 and, later, A-068's client report.
+     *
+     * <h2>Cleared and rewritten, not upserted over</h2>
+     *
+     * <p>The same argument {@link #refreshResourceStats} makes, and it applies
+     * here for a mutable column rather than a missing history table. A
+     * (project, client) pair <em>earns</em> its row by having something to
+     * report, so a pair can stop earning one: {@code tickets.client_id} is
+     * editable, and re-attributing a ticket — a support desk correcting the
+     * client on a mis-filed ticket, which is routine — changes who qualified on
+     * every day already summarised. An upsert cannot retract what it wrote, so
+     * the old client would keep its count while the new client gained the same
+     * ticket, and the bar chart would show that ticket twice under two names.
+     * {@code daily_ticket_stats} needs no equivalent, because every project
+     * gets a row on every day by construction.
+     *
+     * <p><b>Public deliberately</b>, for the reason spelled out on
+     * {@link #refreshResourceStats}: Spring's transaction attribute source
+     * ignores {@code @Transactional} on non-public methods and says nothing when
+     * it does, which would leave the DELETE and the INSERT autocommitted
+     * separately — and every dashboard reading that day in the gap between them
+     * would draw an empty chart. The class is package-private, so this widens
+     * nothing outside {@code stats}.
+     *
+     * <h2>Only client-attributed tickets</h2>
+     *
+     * <p>{@code client_id IS NOT NULL}: an internally-raised ticket belongs to
+     * no client and there is no bar for it to sit in. That makes this table a
+     * breakdown of client-attributed work rather than of all work, which is
+     * what "client-wise" asks for — and it is why the widget's total can be
+     * legitimately smaller than the KPI cards'.
+     */
+    @Transactional
+    public int refreshClientStats(LocalDate day, Instant computedAt) {
+        jdbc.sql("DELETE FROM client_daily_stats WHERE stat_date = :day")
+                .param("day", day)
+                .update();
+
+        return jdbc.sql("""
+                INSERT INTO client_daily_stats (
+                    stat_date, project_id, client_id, created, closed, open_total, computed_at)
+                SELECT :day, t.project_id, t.client_id,
+                    -- flow, bounded by the day itself
+                    COALESCE(SUM(t.date_reported >= :dayStart
+                                 AND t.date_reported < :dayEnd), 0) AS created_in_day,
+                    -- COALESCE is load-bearing here rather than house style:
+                    -- actual_close_date is NULL on an open ticket, `NULL < x`
+                    -- is NULL rather than false, and SUM skips NULLs — so a
+                    -- client holding nothing but open tickets sums to NULL, not
+                    -- to zero, and the NOT NULL column rejects the row. That
+                    -- client would then be missing from the chart entirely, for
+                    -- the offence of having closed nothing.
+                    COALESCE(SUM(t.actual_close_date >= :dayStart
+                                 AND t.actual_close_date < :dayEnd), 0) AS closed_in_day,
+                    -- stock: still open when the day ended. Deliberately the
+                    -- same predicate refreshTicketStats uses, so a client's
+                    -- open count and its projects' open counts are computed by
+                    -- one definition and reconcile.
+                    COALESCE(SUM(t.date_reported < :dayEnd
+                                 AND (t.actual_close_date IS NULL
+                                      OR t.actual_close_date >= :dayEnd)), 0) AS open_at_eod,
+                    :computedAt
+                FROM tickets t
+                WHERE t.client_id IS NOT NULL
+                  -- A ticket raised after this day cannot have been created in
+                  -- it, open at the end of it, or closed during it. Excluded
+                  -- here rather than summed to zero three times.
+                  AND t.date_reported < :dayEnd
+                GROUP BY t.project_id, t.client_id
+                -- A pair with nothing to report earns no row: reported before
+                -- the day and closed before it too. Without this every client
+                -- that has ever existed would get a row of zeroes on every day
+                -- for ever, and the table would grow by clients times projects
+                -- times days regardless of activity.
+                HAVING created_in_day > 0 OR closed_in_day > 0 OR open_at_eod > 0
+                """)
+                .param("day", day)
+                .param("dayStart", day.atStartOfDay())
+                .param("dayEnd", day.plusDays(1).atStartOfDay())
                 .param("computedAt", computedAt)
                 .update();
     }

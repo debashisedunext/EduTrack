@@ -116,6 +116,7 @@ class StatsRefreshIT {
     void seed() {
         jdbc.update("DELETE FROM daily_ticket_stats");
         jdbc.update("DELETE FROM resource_daily_stats");
+        jdbc.update("DELETE FROM client_daily_stats");
 
         // ticket_effort_logs is append-only and hash-chained: A-008's trigger
         // refuses DELETE outright, so a fixture cannot truncate it and must not
@@ -578,5 +579,161 @@ class StatsRefreshIT {
                     .as(bucket)
                     .isEqualTo(stat(DUE_DAY, bucket));
         }
+    }
+
+    // ── A-059 · client_daily_stats ───────────────────────────────────────────
+
+    /**
+     * The flow/stock split, on one day, with two different answers.
+     *
+     * <p>One ticket raised before the day and one raised during it: the day's
+     * volume is one and its open count is two. A recompute that read either
+     * column into the other would still produce a plausible number, which is
+     * why both are asserted on the same row rather than in two tests.
+     */
+    @Test
+    @DisplayName("volume counts what was raised, open counts what was still there")
+    void clientVolumeSeparatesFlowFromStock() {
+        long acme = client("Acme");
+        clientTicket(acme, "2026-08-08 09:00:00", null);
+        clientTicket(acme, "2026-08-10 09:00:00", null);
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(clientStat(d, acme, "created")).isEqualTo(1);
+        assertThat(clientStat(d, acme, "open_total")).isEqualTo(2);
+    }
+
+    /**
+     * 🔴 The NULL trap the COALESCE in the query exists for.
+     *
+     * <p>{@code actual_close_date} is NULL on an open ticket, {@code NULL < x}
+     * is NULL rather than false, and {@code SUM} skips NULLs — so a client
+     * holding nothing but open tickets sums {@code closed} to NULL and the
+     * NOT NULL column rejects the whole row. The symptom is not a zero in the
+     * wrong place: it is the client vanishing from the chart entirely, for
+     * having closed nothing.
+     */
+    @Test
+    @DisplayName("a client that has closed nothing still gets a row")
+    void clientWithNoClosuresStillGetsARow() {
+        long acme = client("Acme");
+        clientTicket(acme, "2026-08-10 09:00:00", null);
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(clientStat(d, acme, "closed")).isZero();
+        assertThat(clientStat(d, acme, "created")).isEqualTo(1);
+    }
+
+    /**
+     * An internally-raised ticket belongs to no client and has no bar to sit
+     * in. It must not be counted under another client, and it must not invent
+     * one.
+     */
+    @Test
+    @DisplayName("tickets with no client are summarised nowhere")
+    void ticketsWithoutAClientAreNotSummarised() {
+        long acme = client("Acme");
+        clientTicket(acme, "2026-08-10 09:00:00", null);
+        ticket("2026-08-10 09:00:00", null, "MEDIUM");   // no client_id
+        worker.refreshOnce();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COALESCE(SUM(created), 0) FROM client_daily_stats "
+                        + "WHERE stat_date = ? AND project_id = ?",
+                Integer.class, LocalDate.of(2026, 8, 10), projectId))
+                .as("the unattributed ticket is in daily_ticket_stats and nowhere here")
+                .isEqualTo(1);
+    }
+
+    /**
+     * 🔴 Why the refresh clears the day rather than upserting over it.
+     *
+     * <p>{@code tickets.client_id} is editable — a support desk correcting a
+     * mis-filed ticket is routine — and an upsert cannot retract the row it
+     * wrote for the old client. The old bar would keep its count while the new
+     * one gained the same ticket, so one ticket would be drawn twice under two
+     * names and the chart's total would exceed the tickets that exist.
+     */
+    @Test
+    @DisplayName("re-attributing a ticket retracts the old client's row")
+    void reattributionRetractsTheOldClientRow() {
+        long acme = client("Acme");
+        long globex = client("Globex");
+        long id = clientTicket(acme, "2026-08-10 09:00:00", null);
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(clientStat(d, acme, "created")).isEqualTo(1);
+
+        jdbc.update("UPDATE tickets SET client_id = ? WHERE id = ?", globex, id);
+        worker.refreshOnce();
+
+        assertThat(clientStat(d, globex, "created")).isEqualTo(1);
+        // Gone, not zeroed. A row of zeroes would still put the old client on
+        // the chart, and "raised nothing" is a different claim from "was never
+        // this client's ticket".
+        assertThat(clientRows(d, acme)).isZero();
+    }
+
+    /**
+     * A (project, client) pair with nothing to report earns no row, or the
+     * table would grow by clients times projects times days regardless of
+     * activity.
+     */
+    @Test
+    @DisplayName("a day with nothing to report earns no row")
+    void quietDaysEarnNoRow() {
+        long acme = client("Acme");
+        clientTicket(acme, "2026-08-07 09:00:00", "2026-08-08 15:00:00");
+        worker.refreshOnce();
+
+        assertThat(clientRows(LocalDate.of(2026, 8, 11), acme))
+                .as("nothing raised, nothing closed, nothing open").isZero();
+        // Absence is about having nothing to say, not about being old: the day
+        // it closed is still recorded.
+        assertThat(clientStat(LocalDate.of(2026, 8, 8), acme, "closed")).isEqualTo(1);
+    }
+
+    /** Recompute, never accumulate — the guarantee the other two tables make. */
+    @Test
+    @DisplayName("recomputing a day twice does not double the volume")
+    void clientRecomputeIsIdempotent() {
+        long acme = client("Acme");
+        clientTicket(acme, "2026-08-10 09:00:00", null);
+        worker.refreshOnce();
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(clientStat(d, acme, "created")).isEqualTo(1);
+        assertThat(clientRows(d, acme)).isEqualTo(1);
+    }
+
+    private long client(String name) {
+        int n = SEQ.incrementAndGet();
+        jdbc.update("INSERT INTO clients (client_code, name) VALUES (?, ?)",
+                "SC-" + n, name + " " + n);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    private long clientTicket(long clientId, String reportedAt, String closedAt) {
+        long id = ticket(reportedAt, closedAt, "MEDIUM");
+        jdbc.update("UPDATE tickets SET client_id = ? WHERE id = ?", clientId, id);
+        return id;
+    }
+
+    private Integer clientStat(LocalDate day, long clientId, String column) {
+        return jdbc.queryForObject(
+                "SELECT " + column + " FROM client_daily_stats "
+                        + "WHERE stat_date = ? AND project_id = ? AND client_id = ?",
+                Integer.class, day, projectId, clientId);
+    }
+
+    private Integer clientRows(LocalDate day, long clientId) {
+        return jdbc.queryForObject(
+                "SELECT COUNT(*) FROM client_daily_stats "
+                        + "WHERE stat_date = ? AND project_id = ? AND client_id = ?",
+                Integer.class, day, projectId, clientId);
     }
 }
