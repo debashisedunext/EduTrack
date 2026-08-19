@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.tickets.comments;
 
+import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
@@ -82,9 +83,16 @@ class CommentServiceTest {
      * reassigned by the tests that stand outside the window and a service built
      * in a field initialiser would have captured the old one.
      */
+    /**
+     * D-037 · the §4B.6 producer this service now calls. Mocked and unasserted
+     * here: what it sends is `TicketEventNotifierTest`'s subject, and this file
+     * is about the write it must never interfere with.
+     */
+    private final TicketEventNotifier eventNotifier = mock(TicketEventNotifier.class);
+
     private CommentService service() {
         return new CommentService(tickets, comments, rows, people, sanitizer, mentions,
-                mentionNotifier, properties, clock);
+                mentionNotifier, eventNotifier, properties, clock);
     }
 
     /**
@@ -93,7 +101,7 @@ class CommentServiceTest {
      * reassigns either. C-033's blocks call {@link #service()} instead.
      */
     private final CommentService service = new CommentService(
-            tickets, comments, rows, people, sanitizer, mentions, mentionNotifier, properties,
+            tickets, comments, rows, people, sanitizer, mentions, mentionNotifier, eventNotifier, properties,
             Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(4)), ZoneOffset.UTC));
 
     /**

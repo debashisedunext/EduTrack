@@ -3,6 +3,7 @@ package com.edunext.edutrack.api.feature.tickets.cycles;
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
+import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketCycle;
@@ -97,11 +98,19 @@ class CloseService {
     private final ScopedTickets tickets;
     private final TicketCycleRepository cycles;
     private final TicketJournal journal;
+    /**
+     * D-037 · §4B.6's producer for this event. **Stream D's class, injected
+     * into Stream C's service** — the arrangement `CommentService` already has
+     * with `CommentMentionNotifier`. Flagged for Divyansh in the pull request
+     * rather than added quietly.
+     */
+    private final TicketEventNotifier notifier;
     private final Clock clock;
 
     @Autowired
-    CloseService(ScopedTickets tickets, TicketCycleRepository cycles, TicketJournal journal) {
-        this(tickets, cycles, journal, Clock.systemUTC());
+    CloseService(ScopedTickets tickets, TicketCycleRepository cycles, TicketJournal journal,
+                 TicketEventNotifier notifier) {
+        this(tickets, cycles, journal, notifier, Clock.systemUTC());
     }
 
     /**
@@ -111,10 +120,12 @@ class CloseService {
      * asserting they agree could otherwise only do so to within however long
      * the method took to run.
      */
-    CloseService(ScopedTickets tickets, TicketCycleRepository cycles, TicketJournal journal, Clock clock) {
+    CloseService(ScopedTickets tickets, TicketCycleRepository cycles, TicketJournal journal,
+                 TicketEventNotifier notifier, Clock clock) {
         this.tickets = tickets;
         this.cycles = cycles;
         this.journal = journal;
+        this.notifier = notifier;
         this.clock = clock;
     }
 
@@ -202,6 +213,12 @@ class CloseService {
         // at that cycle's History tab would expect to see.
         journal.append(closedEntry(ticketId, cycleNo, caller, request.resolutionSummary()));
 
+        // D-037 · §4B.6 row 12 — reporter, client contact and watchers. After
+        // the history row, which is the record; a mail that cannot be queued
+        // must never roll back a close, and the notifier swallows its own
+        // failures for that reason.
+        notifier.closed(ticket, actorIdOrZero(caller));
+
         return TicketWire.of(ticket);
     }
 
@@ -256,6 +273,12 @@ class CloseService {
      * unidentifiable caller cannot reach here — {@link ReopenService#actorId}'s
      * identical guard and reasoning.
      */
+    /** D-037 · the caller, or 0 when there is none — `dev-noauth` has no principal. */
+    private static long actorIdOrZero(Authentication caller) {
+        Long id = actorId(caller);
+        return id == null ? 0L : id;
+    }
+
     private static Long actorId(Authentication caller) {
         return Optional.ofNullable(caller)
                 .flatMap(CallerIdentity::of)

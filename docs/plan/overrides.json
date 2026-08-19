@@ -51,9 +51,9 @@
   },
   "D-037": {
     "status": "blocked",
-    "pct": 33,
-    "reason": "Debashis — git reads this as done off the merge of branch feat/engines/d-037-mail-events, and the branch was named for the task while carrying only D-030's mail body and one of the fifteen events. 5 of §4B.6's 15 rows have a producer today: level raised to Critical, SLA breach, stage SLA breach, @mention and status requested. 8 have nowhere to fire from — handoff, sent back for rework, deployment done, reassigned within a stage, closed, reopened, created-and-assigned and comment added — because C-042's transition service, C-044's handoff dialog, C-038's reopen transaction, C-040's close dialog and C-049's within-stage reassignment are all unbuilt, and there is no event to hang a mail on until they exist. The remaining 2 rows are the digests and belong to D-038. The engine itself is finished — enqueue, render, thread, retry, rate limit and the preference lock — so what is left is wiring, not building",
-    "_blocked_by": "C-038, C-040, C-042, C-044, C-049 (Divyansh)"
+    "pct": 60,
+    "reason": "Debashis — git reads this as done off the merge of branch feat/engines/d-037-mail-events, and the branch was named for the task while carrying only D-030's mail body and one of the fifteen events. **Corrected 19 Aug: 9 of §4B.6's 15 rows now have a producer, not 5.** The previous wording said eight had nowhere to fire from because C-038, C-040, C-042, C-044 and C-049 were unbuilt — three of those have since landed and nobody re-read the note, which is the failure mode an override has when it is written once and quoted afterwards. TicketEventNotifier wires the four whose trigger now exists: created-and-assigned (TicketWriteService, C-067), comment added (CommentService, C-029), closed (CloseService, C-040) and reopened (ReopenService, C-038). Live already elsewhere: level raised to Critical, SLA breach, stage SLA breach, @mention and status requested. **4 still have no trigger** — handoff, sent back for rework and deployment done all fire from C-045's transition, which is in review, and reassigned-within-a-stage is C-049, unstarted. The remaining 2 rows are the digests and belong to D-038, which is done. The engine itself was finished long ago — enqueue, render, thread, retry, rate limit and the preference lock — so what is left is four call sites in code somebody else has not written yet",
+    "_blocked_by": "C-045 (Divyansh, in review), C-049 (Divyansh, unstarted)"
   },
   "A-030": {
     "status": "done",

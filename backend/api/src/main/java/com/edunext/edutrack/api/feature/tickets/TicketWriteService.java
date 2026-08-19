@@ -4,6 +4,7 @@ import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.UnscopedAccess;
 import com.edunext.edutrack.api.text.RichTextSanitizer;
+import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
@@ -77,10 +78,18 @@ public class TicketWriteService {
     private final ModuleGuard modules;
     private final RichTextSanitizer sanitizer;
     private final TicketJournal journal;
+    /**
+     * D-037 · §4B.6 row 1, "Ticket created and assigned → Assignee". **Stream
+     * D's producer, injected into Stream C's service** — the same arrangement
+     * `CommentService` already has with `CommentMentionNotifier`, and flagged
+     * for Divyansh in the pull request rather than added quietly.
+     */
+    private final TicketEventNotifier notifier;
 
     TicketWriteService(ScopedTickets tickets, TicketRepository repository, TicketCodeGenerator codes,
                        PlannedCloseDateService plannedCloseDates, ClientGate clients, ModuleGuard modules,
-                       RichTextSanitizer sanitizer, TicketJournal journal) {
+                       RichTextSanitizer sanitizer, TicketJournal journal,
+                       TicketEventNotifier notifier) {
         this.tickets = tickets;
         this.repository = repository;
         this.codes = codes;
@@ -89,6 +98,7 @@ public class TicketWriteService {
         this.modules = modules;
         this.sanitizer = sanitizer;
         this.journal = journal;
+        this.notifier = notifier;
     }
 
     @Transactional
@@ -128,6 +138,12 @@ public class TicketWriteService {
 
         Ticket saved = repository.save(ticket);
         journal.append(created(saved, caller));
+        // D-037 · after the history row, because the history is the record and
+        // a mail is a courtesy — if the enqueue throws, the notifier swallows
+        // it rather than costing somebody the ticket they just raised. Sends
+        // nothing when the ticket was saved unassigned: §4B.6's row is
+        // "created *and assigned*".
+        notifier.createdAndAssigned(saved, actorIdOrZero(caller), request.assigneeId());
         return TicketWire.of(saved);
     }
 
@@ -205,6 +221,12 @@ public class TicketWriteService {
         Long actor = actorId(caller);
         entry.setActorId(actor);
         entry.setActorType(actor == null ? "SYSTEM" : "USER");
+    }
+
+    /** The caller, or 0 when there is none — `dev-noauth` has no principal. */
+    private static long actorIdOrZero(Authentication caller) {
+        Long id = actorId(caller);
+        return id == null ? 0L : id;
     }
 
     private static Long actorId(Authentication caller) {

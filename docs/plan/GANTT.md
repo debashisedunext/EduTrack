@@ -65,17 +65,17 @@ Each of these is held up either by the one before it or by the fact that the sam
 | 2 | `B-040` | Ayush | Tab 2 — stages | 2 | Tue 18 Aug | Tue 18 Aug | `B-039` finished |
 | 3 | `C-042` | Divyansh | Transition service | 2.5 | Wed 19 Aug | Wed 19 Aug | `B-040` finished |
 | 4 | `C-044` | Divyansh | Handoff dialog — next stage | 2.5 | Wed 19 Aug | Wed 19 Aug | `C-042` finished |
-| 5 | `C-045` | Divyansh | On submit: seal the current row | 2 | Wed 19 Aug | Wed 19 Aug | `C-044` finished |
-| 6 | `C-032` | Divyansh | Stamping | 1 | Thu 20 Aug | Thu 20 Aug | Divyansh was busy on `C-045` |
+| 5 | `C-045` | Divyansh | On submit: seal the current row | 2 | Wed 19 Aug | Thu 20 Aug | `C-044` finished |
+| 6 | `C-032` | Divyansh | Stamping | 1 | Thu 20 Aug | Fri 21 Aug | Divyansh was busy on `C-045` |
 | 7 | `C-046` | Divyansh | Backward moves | 1.5 | Fri 21 Aug | Sat 22 Aug | Divyansh was busy on `C-032` |
-| 8 | `C-047` | Divyansh | Skip a stage | 1 | Sat 22 Aug | Tue 25 Aug | Divyansh was busy on `C-046` |
-| 9 | `C-048` | Divyansh | Force-move (OVERRIDE) — PM/Admin, logged as an overr | 1 | Tue 25 Aug | Wed 26 Aug | Divyansh was busy on `C-047` |
-| 10 | `C-049` | Divyansh | Reassignment within a stage does not create a new se | 1.5 | Wed 26 Aug | Thu 27 Aug | Divyansh was busy on `C-048` |
-| 11 | `C-050` | Divyansh | Unassigned receiving role → ticket falls to a projec | 1 | Fri 28 Aug | Fri 28 Aug | Divyansh was busy on `C-049` |
-| 12 | `C-051` | Divyansh | Ribbon component | 3 | Sat 29 Aug | Wed 02 Sep | Divyansh was busy on `C-050` |
-| 13 | `C-052` | Divyansh | Interactions | 2 | Thu 03 Sep | Fri 04 Sep | `C-051` finished |
+| 8 | `C-047` | Divyansh | Skip a stage | 1 | Tue 25 Aug | Tue 25 Aug | Divyansh was busy on `C-046` |
+| 9 | `C-048` | Divyansh | Force-move (OVERRIDE) — PM/Admin, logged as an overr | 1 | Wed 26 Aug | Wed 26 Aug | Divyansh was busy on `C-047` |
+| 10 | `C-049` | Divyansh | Reassignment within a stage does not create a new se | 1.5 | Thu 27 Aug | Fri 28 Aug | Divyansh was busy on `C-048` |
+| 11 | `C-050` | Divyansh | Unassigned receiving role → ticket falls to a projec | 1 | Fri 28 Aug | Sat 29 Aug | Divyansh was busy on `C-049` |
+| 12 | `C-051` | Divyansh | Ribbon component | 3 | Sat 29 Aug | Thu 03 Sep | Divyansh was busy on `C-050` |
+| 13 | `C-052` | Divyansh | Interactions | 2 | Thu 03 Sep | Sat 05 Sep | `C-051` finished |
 | 14 | `C-053` | Divyansh | Cycle selector above the ribbon; selecting cycle 1 r | 1.5 | Sat 05 Sep | Tue 08 Sep | Divyansh was busy on `C-052` |
-| 15 | `C-054` | Divyansh | Cycle 2 · Iteration 3 chips | 1 | Tue 08 Sep | Wed 09 Sep | Divyansh was busy on `C-053` |
+| 15 | `C-054` | Divyansh | Cycle 2 · Iteration 3 chips | 1 | Wed 09 Sep | Wed 09 Sep | Divyansh was busy on `C-053` |
 
 ---
 
@@ -248,7 +248,7 @@ gantt
 |  | `B-019` | Settings tab | 1.5 | `B-016` ᶦ | Fri 14 Aug | Fri 14 Aug | 18 | ✅ done |
 |  | `B-020` | Task type master — the 11 seeded types, Admin-extensible | 1.5 | `B-002` `C-003` ᶦ | Sat 15 Aug | Sat 15 Aug | 17 | ✅ done |
 |  | `B-021` | Priority master | 1.5 | `B-002` `C-003` | Sat 15 Aug | Sat 15 Aug | 16 | ✅ done |
-|  | `B-022` | Notification template master | 2 | `B-005` `C-003` | Sat 15 Aug | Sat 15 Aug | 9 | ✅ done |
+|  | `B-022` | Notification template master | 2 | `B-005` `C-003` | Sat 15 Aug | Sat 15 Aug | 5 | ✅ done |
 |  | `B-023` | Working calendar & holiday master | 2 | `B-005` `C-003` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 | 🔴 | `B-024` | Working-hours calculation service | 3 | `B-023` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `B-025` | Client list | 2 | `B-005` `C-003` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
@@ -315,7 +315,7 @@ gantt
 |  | `C-029` | Rich-text comment box under the description, always visible above… | 1.5 | `C-019` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
 |  | `C-030` | @mention type-ahead over project members, firing notification +… | 1.5 | `C-029` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `C-031` | Visibility toggle — default internal, always | 1 | `C-029` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
-| ▲ | `C-032` | Stamping | 1 | `C-029` `C-042` | Thu 20 Aug | Thu 20 Aug | 0 | ▫️ to do |
+| ▲ | `C-032` | Stamping | 1 | `C-029` `C-042` | Thu 20 Aug | Fri 21 Aug | 0 | ▫️ to do |
 |  | `C-033` | ~~5-minute edit window~~ no time limit | 1.5 | `C-029` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 | 🔴 | `C-034` | Interleave comments into the History tab | 1.5 | `C-029` `C-059` | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |
 |  | `C-035` | Effort logging, append-only, auto-stamped with current stage and… | 1.5 | `C-019` `A-040` | Tue 18 Aug | Tue 18 Aug | 0 | ✅ done |
@@ -328,22 +328,22 @@ gantt
 |  | `C-042` | Transition service | 2.5 | `A-042` `B-040` | Wed 19 Aug | Wed 19 Aug | 0 | ✅ done |
 | 🔴 | `C-043` | The golden rule — only the current stage owner | 1.5 | `C-042` `A-033` | Wed 19 Aug | Wed 19 Aug | 15 | ✅ done |
 | ▲ | `C-044` | Handoff dialog — next stage | 2.5 | `C-042` `C-035` | Wed 19 Aug | Wed 19 Aug | 0 | 🔵 in review |
-| ▲ | `C-045` | On submit: seal the current row | 2 | `C-044` `D-014` | Wed 19 Aug | Wed 19 Aug | 0 | 🔵 in review |
+| ▲ | `C-045` | On submit: seal the current row | 2 | `C-044` `D-014` | Wed 19 Aug | Thu 20 Aug | 0 | 🟡 50% |
 | ▲ | `C-046` | Backward moves | 1.5 | `C-042` ᶦ | Fri 21 Aug | Sat 22 Aug | 0 | ▫️ to do |
-| ▲ | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Sat 22 Aug | Tue 25 Aug | 0 | ▫️ to do |
-| ▲ | `C-048` | Force-move (OVERRIDE) — PM/Admin, logged as an override | 1 | `C-042` ᶦ | Tue 25 Aug | Wed 26 Aug | 0 | ▫️ to do |
-| ▲ | `C-049` | Reassignment within a stage does not create a new segment | 1.5 | `C-042` | Wed 26 Aug | Thu 27 Aug | 0 | ▫️ to do |
-| ▲ | `C-050` | Unassigned receiving role → ticket falls to a project-level queue… | 1 | `C-044` ᶦ | Fri 28 Aug | Fri 28 Aug | 0 | ▫️ to do |
-| ▲🔴 | `C-051` | Ribbon component | 3 | `B-050` | Sat 29 Aug | Wed 02 Sep | 0 | ▫️ to do |
-| ▲ | `C-052` | Interactions | 2 | `C-051` ᶦ | Thu 03 Sep | Fri 04 Sep | 0 | ▫️ to do |
+| ▲ | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Tue 25 Aug | Tue 25 Aug | 0 | ▫️ to do |
+| ▲ | `C-048` | Force-move (OVERRIDE) — PM/Admin, logged as an override | 1 | `C-042` ᶦ | Wed 26 Aug | Wed 26 Aug | 0 | ▫️ to do |
+| ▲ | `C-049` | Reassignment within a stage does not create a new segment | 1.5 | `C-042` | Thu 27 Aug | Fri 28 Aug | 0 | ▫️ to do |
+| ▲ | `C-050` | Unassigned receiving role → ticket falls to a project-level queue… | 1 | `C-044` ᶦ | Fri 28 Aug | Sat 29 Aug | 0 | ▫️ to do |
+| ▲🔴 | `C-051` | Ribbon component | 3 | `B-050` | Sat 29 Aug | Thu 03 Sep | 0 | ▫️ to do |
+| ▲ | `C-052` | Interactions | 2 | `C-051` ᶦ | Thu 03 Sep | Sat 05 Sep | 0 | ▫️ to do |
 | ▲ | `C-053` | Cycle selector above the ribbon; selecting cycle 1 renders that… | 1.5 | `C-051` `C-038` | Sat 05 Sep | Tue 08 Sep | 0 | ▫️ to do |
-| ▲ | `C-054` | Cycle 2 · Iteration 3 chips | 1 | `C-051` `C-046` | Tue 08 Sep | Wed 09 Sep | 0 | ▫️ to do |
+| ▲ | `C-054` | Cycle 2 · Iteration 3 chips | 1 | `C-051` `C-046` | Wed 09 Sep | Wed 09 Sep | 0 | ▫️ to do |
 |  | `C-059` | History tab | 1.5 | `C-019` `A-040` | Tue 18 Aug | Tue 18 Aug | 15 | ✅ done |
 |  | `C-060` | Attachments tab | 1 | `C-026` ᶦ | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |
 |  | `C-061` | Effort tab — every log line, sum per cycle + grand total | 1 | `C-041` ᶦ | Tue 18 Aug | Tue 18 Aug | 0 | ✅ done |
 |  | `C-063` | Bulk reassignment wizard | 2 | `C-017` `B-014` | Tue 18 Aug | Wed 19 Aug | 15 | ✅ done |
 |  | `C-064` | Ticket linking — blocks / is blocked by / duplicate of / relates to | 1.5 | `C-019` ᶦ | Wed 19 Aug | Wed 19 Aug | 15 | ✅ done |
-|  | `C-066` | Shared rich-text editor in components/ui/ + Storybook | 1.5 | `C-003` | Tue 11 Aug | Tue 11 Aug | 12 | ✅ done |
+|  | `C-066` | Shared rich-text editor in components/ui/ + Storybook | 1.5 | `C-003` | Tue 11 Aug | Tue 11 Aug | 8 | ✅ done |
 
 </details>
 
@@ -356,22 +356,22 @@ gantt
 | 🔴 | `C-056` | Active vs idle split | 1.5 | `C-055` | Wed 19 Aug | Wed 19 Aug | 14 | ✅ done |
 |  | `C-057` | Per-resource roll-up + cycle total + all-cycles total | 1.5 | `C-056` ᶦ | Wed 19 Aug | Wed 19 Aug | 15 | ✅ done |
 |  | `C-058` | Roll-up query | 1 | `C-055` | Wed 19 Aug | Wed 19 Aug | 9 | ✅ done |
-|  | `C-062` | Stage Queue / team inbox | 2 | `C-014` `C-042` | Wed 26 Aug | Wed 26 Aug | 8 | 🟡 50% |
+|  | `C-062` | Stage Queue / team inbox | 2 | `C-014` `C-042` | Tue 25 Aug | Wed 26 Aug | 6 | 🟡 50% |
 |  | `C-065` | product_modules master + the four columns on tickets — table | 0.5 | `D-060` | Wed 19 Aug | Wed 19 Aug | 0 | 🔵 in review |
-|  | `C-067` | Backend wiring for all four fields | 1 | `C-065` `C-010` | Wed 19 Aug | Wed 19 Aug | 6 | 🔵 in review |
-|  | `C-068` | Create form S-19 — the new "Where it happened" group | 1 | `C-066` `C-067` | Thu 20 Aug | Thu 20 Aug | 6 | 🔵 in review |
-|  | `C-069` | Detail page S-20 shows all four, inline-editable | 0.5 | `C-019` `C-067` | Thu 20 Aug | Thu 20 Aug | 7 | 🔵 in review |
-|  | `C-070` | List S-17 gains a Module filter | 0.5 | `C-014` `C-067` | Fri 21 Aug | Fri 21 Aug | 7 | 🔵 in review |
+|  | `C-067` | Backend wiring for all four fields | 1 | `C-065` `C-010` | Wed 19 Aug | Wed 19 Aug | 2 | 🔵 in review |
+|  | `C-068` | Create form S-19 — the new "Where it happened" group | 1 | `C-066` `C-067` | Thu 20 Aug | Thu 20 Aug | 2 | 🔵 in review |
+|  | `C-069` | Detail page S-20 shows all four, inline-editable | 0.5 | `C-019` `C-067` | Thu 20 Aug | Thu 20 Aug | 3 | 🔵 in review |
+|  | `C-070` | List S-17 gains a Module filter | 0.5 | `C-014` `C-067` | Fri 21 Aug | Fri 21 Aug | 3 | 🔵 in review |
 | 🔴 | `D-001` | OpenAPI contract for every endpoint in blueprint §13 | 3 | — | Thu 06 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `D-002` | Conventions baked into the spec | 1 | `D-001` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
 |  | `D-003` | springdoc config + codegen pipeline | 2 | `D-002` | Thu 06 Aug | Thu 06 Aug | 21 | ✅ done |
 | 🔴 | `D-004` | MSW mock server returning realistic fixtures for every endpoint | 2.5 | `D-002` | Thu 06 Aug | Tue 11 Aug | 0 | ✅ done |
 |  | `D-005` | CI staleness check | 1 | `D-003` | Thu 06 Aug | Sat 08 Aug | 22 | ✅ done |
-| 🔴 | `D-010` | Outbox worker pattern | 2.5 | `A-006` `A-012` | Fri 07 Aug | Fri 07 Aug | 15 | ✅ done |
+| 🔴 | `D-010` | Outbox worker pattern | 2.5 | `A-006` `A-012` | Fri 07 Aug | Fri 07 Aug | 11 | ✅ done |
 |  | `D-011` | @Scheduled + ShedLock | 1 | `D-010` ᶦ | Fri 07 Aug | Fri 07 Aug | 18 | ✅ done |
 |  | `D-012` | Spring WebSocket + STOMP config, Redis pub/sub relay for… | 2 | `A-012` ᶦ | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
 | 🔴 | `D-013` | Channel interceptor authorising subscriptions with the same scope… | 2 | `D-012` `A-034` | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-014` | Destination map per blueprint §9.3 | 1 | `D-012` | Fri 07 Aug | Fri 07 Aug | 3 | ✅ done |
+|  | `D-014` | Destination map per blueprint §9.3 | 1 | `D-012` | Fri 07 Aug | Fri 07 Aug | 1 | ✅ done |
 |  | `D-015` | Frontend STOMP client | 1.5 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 22 | ✅ done |
 | 🔴 | `D-020` | SLA scanner, every 15 minutes | 2 | `D-011` `B-024` `A-009` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-021` | 80%-of-SLA pre-breach warning to the assignee | 1 | `D-020` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
@@ -390,7 +390,7 @@ gantt
 |  | `D-034` | Bounce and complaint webhooks | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 23 | ✅ done |
 |  | `D-035` | Rate limit | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 23 | ✅ done |
 | 🔴 | `D-036` | "Critical mails cannot be disabled" | 1 | `D-029` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Fri 21 Aug | Sat 22 Aug | 8 | ⛔ blocked |
+|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Fri 21 Aug | Sat 22 Aug | 4 | ⛔ blocked |
 |  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |
 |  | `D-039` | Inbound webhook — reply-to-comment parsing with quoted text stripped | 2 | `D-032` ᶦ | Wed 12 Aug | Wed 12 Aug | 20 | ✅ done |
 |  | `D-040` | All 24 events from blueprint §11 across in-app / bell / email… | 2 | `D-012` `B-022` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
@@ -400,16 +400,16 @@ gantt
 |  | `D-044` | Persistent bell badge with unread count | 0.5 | `D-041` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-045` | Browser push via the Web Push API for users who opt in | 1.5 | `D-043` ᶦ | Tue 11 Aug | Fri 14 Aug | 18 | ✅ done |
 | 🔴 | `D-046` | Offline queueing | 1.5 | `D-043` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 18 | ✅ done |
+|  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 14 | ✅ done |
 |  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 22 | ✅ done |
 |  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 22 | ✅ done |
-|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Tue 25 Aug | Tue 25 Aug | 8 | ⛔ blocked |
+|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Sat 22 Aug | Tue 25 Aug | 5 | ⛔ blocked |
 |  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Thu 13 Aug | Thu 13 Aug | 19 | ✅ done |
 | 🔴 | `D-055` | Ask Status | 1.5 | `D-050` `C-036` | Thu 13 Aug | Thu 13 Aug | 18 | ✅ done |
 |  | `D-056` | Manager response time recorded as a reportable metric; status… | 1 | `D-055` ᶦ | Thu 13 Aug | Thu 13 Aug | 19 | ✅ done |
 | 🔴 | `D-057` | Chat immutable after a 5-minute edit window; deletions leave… | 1.5 | `D-050` | Sat 08 Aug | Sat 08 Aug | 22 | ✅ done |
-|  | `D-058` | Live ribbon advance | 1 | `D-014` `C-045` | Thu 27 Aug | Thu 27 Aug | 8 | ▫️ to do |
-|  | `D-059` | Team inbox live updates | 1 | `D-058` `C-062` | Fri 28 Aug | Fri 28 Aug | 8 | ▫️ to do |
+|  | `D-058` | Live ribbon advance | 1 | `D-014` `C-045` | Wed 26 Aug | Thu 27 Aug | 7 | ▫️ to do |
+|  | `D-059` | Team inbox live updates | 1 | `D-058` `C-062` | Thu 27 Aug | Fri 28 Aug | 8 | ▫️ to do |
 |  | `D-060` | Ticket "where it happened" fields in the contract and the mock… | 0.5 | `D-004` | Tue 11 Aug | Tue 11 Aug | 4 | ✅ done |
 | 🔴 | `D-061` | GET /tickets returns a body the contract does not declare | 1 | — | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |
 |  | `D-062` | Nothing compares a response body to its contract schema, and that… | 1 | — | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |

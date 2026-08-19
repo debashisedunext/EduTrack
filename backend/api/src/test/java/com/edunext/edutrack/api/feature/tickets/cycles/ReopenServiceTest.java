@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.tickets.cycles;
 
+import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.api.feature.tickets.PlannedCloseDateService;
 import com.edunext.edutrack.api.feature.tickets.SlaResolution;
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
@@ -84,8 +85,15 @@ class ReopenServiceTest {
     private final PlannedCloseDateService slaLadder = mock(PlannedCloseDateService.class);
     private final WorkingHoursService workingHours = mock(WorkingHoursService.class);
 
+    /**
+     * D-037 · the §4B.6 producer this service now calls. Mocked and unasserted
+     * here: what it sends is `TicketEventNotifierTest`'s subject, and this file
+     * is about the write it must never interfere with.
+     */
+    private final TicketEventNotifier eventNotifier = mock(TicketEventNotifier.class);
+
     private final ReopenService service = new ReopenService(
-            tickets, cycles, journal, stages, slaLadder, workingHours,
+            tickets, cycles, journal, stages, slaLadder, workingHours, eventNotifier,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
     /**
