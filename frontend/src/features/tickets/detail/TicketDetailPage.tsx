@@ -20,6 +20,8 @@ import { CommentThread } from '../comments/CommentThread'
 import { useTicketComments } from '../comments/useTicketComments'
 import { HistoryTab } from '../history/HistoryTab'
 import { useTicketHistory } from '../history/useTicketHistory'
+import { EffortTab } from '../effort/EffortTab'
+import { useEffortTab } from '../effort/useEffortTab'
 
 import { canChangeLevel } from './levelChange'
 import { PendingSection } from './PendingSection'
@@ -27,6 +29,7 @@ import { TicketAttachmentsSection } from './TicketAttachmentsSection'
 import { TicketDetailHeader } from './TicketDetailHeader'
 import { TicketDetailTabs, type DetailTab } from './TicketDetailTabs'
 import { TicketSummaryPanel } from './TicketSummaryPanel'
+import { totalEffortHrs } from './ticketSummary'
 
 const DEFAULT_TAB = 'journey'
 
@@ -42,7 +45,9 @@ const TAB_OWNERS: { id: string; label: string; owner: string; note?: string }[] 
   { id: 'history', label: 'History', owner: 'C-059', note: 'Cycle-grouped field changes and handoffs. Append-only: no edit or delete affordance exists for any role.' },
   { id: 'comments', label: 'Comments', owner: 'C-029', note: 'The comment stream, with the always-visible box above it.' },
   { id: 'attachments', label: 'Attachments', owner: 'C-060', note: 'The gallery, grouped by cycle and stage.' },
-  { id: 'effort', label: 'Effort', owner: 'C-061', note: 'Every effort line for the selected cycle, with per-cycle and grand totals.' },
+  // `note` is dead for this one too — `EffortTab` never reads it — kept for
+  // the same one-line-description reason C-059's identical comment gives.
+  { id: 'effort', label: 'Effort', owner: 'C-061', note: 'Every effort line, grouped by cycle, with per-cycle and grand totals.' },
   { id: 'chat', label: 'Chat', owner: 'D-047', note: 'The threaded ticket conversation.' },
 ]
 
@@ -167,6 +172,13 @@ export function TicketDetailPage() {
     at-a-glance purpose.
   */
   const attachmentsTab = useAttachmentsTab({ ticketId, enabled: ticketId.length > 0 && activeTab === 'attachments' })
+  // C-061 · gated on the tab being open — `useEffortTab`'s own note on why,
+  // and the identical rule `useTicketHistory`/`useAttachmentsTab` follow.
+  const effortTab = useEffortTab({ ticketId, cycle, enabled: ticketId.length > 0 && activeTab === 'effort' })
+  // `ticket` is still possibly undefined here — the pending/404 guards below
+  // haven't run yet at this point in the render — so this mirrors `taskTypeName`
+  // and `contactName` above rather than `TicketSummaryPanel`'s narrowed `ticket`.
+  const grandTotalHrs = ticket ? totalEffortHrs(ticket, detail?.cycles) : 0
 
   const tabs: DetailTab[] = React.useMemo(
     () =>
@@ -206,6 +218,17 @@ export function TicketDetailPage() {
               clientVisibleOnly={attachmentsTab.clientVisibleOnly}
               onClientVisibleOnlyChange={attachmentsTab.setClientVisibleOnly}
             />
+          ) : id === 'effort' ? (
+            <EffortTab
+              entries={effortTab.entries}
+              cycles={detail?.cycles}
+              grandTotalHrs={grandTotalHrs}
+              isLoading={effortTab.isLoading}
+              loadError={effortTab.loadError}
+              hasMore={effortTab.hasMore}
+              isLoadingMore={effortTab.isLoadingMore}
+              onLoadMore={effortTab.loadMore}
+            />
           ) : (
             <PendingSection title={`${label} tab`} owner={owner} note={note} />
           ),
@@ -234,6 +257,14 @@ export function TicketDetailPage() {
       attachmentsTab.loadError,
       attachmentsTab.clientVisibleOnly,
       attachmentsTab.setClientVisibleOnly,
+      effortTab.entries,
+      effortTab.isLoading,
+      effortTab.loadError,
+      effortTab.hasMore,
+      effortTab.isLoadingMore,
+      effortTab.loadMore,
+      detail?.cycles,
+      grandTotalHrs,
     ],
   )
 
