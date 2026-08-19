@@ -60,7 +60,7 @@ while withholding the value. **Needs Stream A sign-off** — either the
 contract drops the field, or this package is told the exposure is acceptable
 and starts returning `row.getRowHash()`.
 
-## `stageCode` and `iterationNo` are always null
+## `stageCode` and `iterationNo` are always null — except `stageCode` on a comment row
 
 Neither exists on `ticket_history` — a handoff's stage lives on
 `ticket_stage_transitions`, which C-042 has not built, and nothing pairs a
@@ -68,6 +68,26 @@ handoff's `ticket_history` row with its transition yet. `CommentDtos.CommentDto.
 documents the identical absence, for the identical reason: writing an invented
 value would be indistinguishable from a real first iteration, and worse than
 leaving the field honestly empty.
+
+⚠ **C-034 found one place that blanket statement did not actually hold.**
+`ticket_comments` stamps its own `stage_code` at write time — a comment
+written during QA reads as QA forever, even after the ribbon moves on — and
+`frontend/src/mocks/handlers/tickets.ts` has read it onto the interleaved row
+since C-059 shipped. `TicketHistoryDtos.HistoryEntryDto.ofComment` was passing
+`null` regardless, which is exactly the "works against every mock, differs on
+the real server" shape C-038 and C-028 each found once. `stageCode` now reads
+`TicketComment.getStageCode()` on a `COMMENTED` row; a real `ticket_history`
+row is unaffected and still has nothing to read.
+
+## `isClientVisible` — C-034, comment rows only
+
+Declared on `HistoryEntry` and set from `!TicketComment.isInternal()` on a
+`COMMENTED` row; null on every real `ticket_history` row, the same way
+`stageCode` is. Blueprint §4B.5's "two backgrounds are now both drawn" rule
+(`CommentCard`'s own) is what the interleaved stream was missing without it —
+a reader of the History tab alone had no way to tell an internal comment from
+a client-visible one, which is the one distinction §4B.5 treats as a leak
+risk worth a dedicated visual signal rather than an extra click to find out.
 
 ## `String ticketId`, not `long`
 

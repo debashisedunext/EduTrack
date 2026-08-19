@@ -100,6 +100,40 @@ describe('the History tab', () => {
   })
 
   /**
+   * C-034 · the fact this dropped on the way into the merged stream. "Fix is
+   * live" is seeded `isClientVisible: true, stageCode: 'SIGNOFF'`; the History
+   * tab is where PM, Admin and every other role reads a ticket's whole story,
+   * so it must carry the same leak-risk signal `CommentCard` shows rather than
+   * make every interleaved row read as the safe, internal kind.
+   */
+  it('shows a client-visible comment’s own stamped stage and the client-visible chip', async () => {
+    renderPage()
+    await waitForTicket()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Show comments/ }))
+
+    const cycle2 = within(await screen.findByRole('list', { name: 'Cycle 2' }))
+    const row = (await cycle2.findByText(/Fix is live/)).closest('li')
+    expect(row).not.toBeNull()
+    const rowScope = within(row as HTMLElement)
+    expect(rowScope.getByText(/Signoff/)).toBeInTheDocument()
+    expect(rowScope.getByText('Client visible')).toBeInTheDocument()
+  })
+
+  it('draws no client-visible chip on an internal comment', async () => {
+    renderPage()
+    await waitForTicket()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Show comments/ }))
+    fireEvent.click(await cycleButton(1))
+
+    const cycle1 = within(await screen.findByRole('list', { name: 'Cycle 1' }))
+    const row = (await cycle1.findByText(/Token refresh was missing/)).closest('li')
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLElement).queryByText('Client visible')).not.toBeInTheDocument()
+  })
+
+  /**
    * CLAUDE.md's append-only rule, read off the rendered page rather than
    * assumed from the absence of a wired-up button: the History tab must not
    * grow one by accident the way C-028's delete once existed on the client

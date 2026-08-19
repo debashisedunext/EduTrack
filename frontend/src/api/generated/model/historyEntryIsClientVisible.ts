@@ -46,36 +46,5 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { UserRef } from './userRef';
-import type { HistoryEntryActorType } from './historyEntryActorType';
-import type { HistoryEntryFieldName } from './historyEntryFieldName';
-import type { HistoryEntryOldValue } from './historyEntryOldValue';
-import type { HistoryEntryNewValue } from './historyEntryNewValue';
-import type { HistoryEntryNote } from './historyEntryNote';
-import type { HistoryEntryIsClientVisible } from './historyEntryIsClientVisible';
-import type { HistoryEntryStageCode } from './historyEntryStageCode';
-import type { HistoryEntryCorrectsEntryId } from './historyEntryCorrectsEntryId';
 
-/**
- * Append-only. Hash-chained per ticket; never updated or deleted.
- */
-export interface HistoryEntry {
-  id?: number;
-  action?: string;
-  actor?: UserRef;
-  /** `SYSTEM` for auto-escalation. */
-  actorType?: HistoryEntryActorType;
-  fieldName?: HistoryEntryFieldName;
-  oldValue?: HistoryEntryOldValue;
-  newValue?: HistoryEntryNewValue;
-  note?: HistoryEntryNote;
-  isClientVisible?: HistoryEntryIsClientVisible;
-  stageCode?: HistoryEntryStageCode;
-  cycleNo?: number;
-  iterationNo?: number;
-  isCorrection?: boolean;
-  correctsEntryId?: HistoryEntryCorrectsEntryId;
-  /** Chained to the previous entry for this ticket. */
-  entryHash?: string;
-  createdAt?: string;
-}
+export type HistoryEntryIsClientVisible = boolean | null;
