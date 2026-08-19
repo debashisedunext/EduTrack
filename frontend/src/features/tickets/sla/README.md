@@ -85,6 +85,22 @@ components. `toISOString().slice(0, 16)` would hand the input a UTC wall-clock
 reading and shift the date the user sees by their offset — 05:00 IST on the wire
 becoming 23:30 the previous day in the box.
 
+## C-021 · the client's own time zone
+
+`SlaPreview` takes an optional `clientTimezone`. §4B.2 asks for the due date
+to be readable in the client's zone as well as the viewer's — a promise of
+"Monday morning" means something different in Bengaluru than it does to a
+client in London. Shown as a second line under the computed date, only when
+it differs from `Intl.DateTimeFormat().resolvedOptions().timeZone`, via a
+small `formatInZone` helper rather than a new dependency: the one thing a
+fixed `date-fns` format string cannot do is follow an IANA zone name handed
+to it at runtime. `en-GB` is fixed for that line specifically so a locale swap
+between the two readings does not itself look like two different dates.
+
+This is a *display* change only — the client's `slaPolicyId` still cannot
+reach the resolution that produces the date at all; see `create/README.md`'s
+open note for Stream A/D on why that half of §4B.2 stops here.
+
 ## Where else this landed
 
 - **`create/CreateTicketPage.tsx`** — the preview sits below both date fields in

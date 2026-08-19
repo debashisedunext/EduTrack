@@ -30,6 +30,13 @@ import { useCurrentProjectStore } from '@/app/currentProjectStore'
 // B-029 · both new-ticket gates, stated once. Stream B's module, read by
 // Stream C's screen — the same crossing B-028 made for the first of the two.
 import { newTicketBlockReason } from '@/features/clients/ticketEligibility'
+// C-021 · the row editor behind S-33's Contacts tab, reused rather than
+// rebuilt. Same crossing as `ticketEligibility` above: Stream B's module,
+// read by Stream C's screen. It already knows how to add a contact under a
+// client and refresh whatever reads `useListClientContacts`; duplicating
+// that here would be the same form twice with one copy always slightly
+// behind the other.
+import { ContactEditorDialog } from '@/features/clients/ContactEditorDialog'
 
 import { useAttachmentLimits } from '../attachments/attachmentLimits'
 import { useTicketAttachments } from '../attachments/useTicketAttachments'
@@ -101,6 +108,7 @@ export function CreateTicketPage() {
     handleSubmit,
     watch,
     setValue,
+    getValues,
     setError,
     setFocus,
     reset,
@@ -149,18 +157,36 @@ export function CreateTicketPage() {
   // what deactivating a client blocks (blueprint line 523). The ticket list
   // filters tickets that already exist, so sending it there hid the history
   // the same sentence says must never be hidden.
+  //
+  // C-021 · `showAllClients` drops `projectId` rather than adding a second
+  // parameter — §4B.2 calls it a toggle on the same dropdown, not a second
+  // list beside it, and the client is still selectable and refused by the
+  // same `newTicketBlockReason` gate either way.
+  const [showAllClients, setShowAllClients] = React.useState(false)
   const { data: clientsData, isSuccess: clientsLoaded } = useListClients(
-    { projectId: projectId ?? undefined, isActive: true, limit: 200 },
+    { ...(showAllClients ? {} : { projectId: projectId ?? undefined }), isActive: true, limit: 200 },
     { query: { enabled: projectId != null } },
   )
   const clients = React.useMemo(() => clientsData?.data ?? [], [clientsData])
+
+  // C-021 · the account manager auto-fills onto watchers below whether or not
+  // they are staffed on this project — an account manager's job is client
+  // visibility, not project membership. `WatcherPicker` can only render a
+  // selected id it finds in its candidate list, so without this a manager who
+  // is not a project member would be sent on the wire and silently missing
+  // from their own chip.
+  const watcherCandidates = React.useMemo(() => {
+    const manager = clients.find((c) => c.id === clientId)?.accountManager
+    if (manager == null || members.some((u) => u.id === manager.id)) return members
+    return [...members, manager as User]
+  }, [members, clients, clientId])
 
   // B-027 · `includeInactive` is deliberately left off here, unlike on the
   // ticket *detail* page. This is a picker, and a contact removed from the
   // client master must stop being offered on new tickets — which is the whole
   // reason that parameter defaults to false. Stream B's edit, one argument
   // wide, flagged for Stream C.
-  const { data: contactsData } = useListClientContacts(clientId ?? 0, undefined, {
+  const { data: contactsData, isSuccess: contactsLoaded } = useListClientContacts(clientId ?? 0, undefined, {
     query: { enabled: clientId != null },
   })
   const contacts = React.useMemo(
@@ -169,6 +195,41 @@ export function CreateTicketPage() {
   )
 
   const canBackdateOrOverride = me?.data.role === 'ADMIN' || me?.data.role === 'PM'
+  // §4B.2's "All clients toggle for Admin/PM" — the same two roles §7.5
+  // already trusts to backdate or override the planned close date, kept as
+  // its own name here so the two rules do not read as one just because they
+  // happen to share a role check today.
+  const canViewAllClients = canBackdateOrOverride
+  // C-021 · `createClientContact` is `master.write` on the server
+  // (`ClientController`), which today is Admin alone — not the "support desk
+  // never has to leave the form" every role §4B.2 implies. Gated to match
+  // rather than let a Support agent fill the dialog in and hit a 403 the
+  // button never warned them about; see the folder README for the contract
+  // gap this leaves open for Stream B.
+  const canAddContact = me?.data.role === 'ADMIN'
+
+  /**
+   * C-021 · the inline "+ Add contact" dialog and the contact it hands back.
+   *
+   * `ContactEditorDialog` reports success only by invalidating the query
+   * `useListClientContacts` already reads here — it has no callback to hand
+   * a fresh id up to this screen, and it is Stream B's file rather than a
+   * seam this task should be widening without their sign-off. So the new
+   * contact is found the same way its own refetch does: snapshot which ids
+   * exist before the dialog opens, then watch `contacts` for the one id that
+   * was not in that snapshot.
+   */
+  const [contactDialogOpen, setContactDialogOpen] = React.useState(false)
+  const priorContactIdsRef = React.useRef<Set<number>>(new Set())
+  const awaitingNewContactRef = React.useRef(false)
+  React.useEffect(() => {
+    if (!awaitingNewContactRef.current) return
+    const created = contacts.find((c) => !priorContactIdsRef.current.has(c.id))
+    if (created) {
+      setValue('clientContactId', created.id, { shouldValidate: true, shouldDirty: true })
+      awaitingNewContactRef.current = false
+    }
+  }, [contacts, setValue])
 
   // One key per logical ticket, minted before the first attempt and rotated only
   // once a ticket actually exists. A key regenerated per click would make the
@@ -240,13 +301,26 @@ export function CreateTicketPage() {
   }, [taskTypeId, taskTypes, setValue])
 
   // A contact belongs to exactly one client, so it cannot survive the client changing.
+  //
+  // C-021 · the same real-change guard also carries §4B.2's "the account
+  // manager as a watcher" auto-fill. `setValue` rather than a chip the user
+  // cannot remove — it is a starting point, not a rule, so a desk that knows
+  // this ticket does not need the account manager watching can still take
+  // them off. Keyed off the same `previousClientId` transition as the contact
+  // clear above so Save & Create Another's retained client does not re-add a
+  // manager the user removed earlier in the same batch.
   const previousClientId = React.useRef(clientId)
   React.useEffect(() => {
     if (previousClientId.current !== clientId) {
       previousClientId.current = clientId
       setValue('clientContactId', null)
+      const manager = clients.find((c) => c.id === clientId)?.accountManager
+      if (manager?.id != null) {
+        const current = getValues('watcherIds')
+        if (!current.includes(manager.id)) setValue('watcherIds', [...current, manager.id])
+      }
     }
-  }, [clientId, setValue])
+  }, [clientId, clients, setValue, getValues])
 
   /**
    * B-029 · the last gate before a ticket is posted against a client that may
@@ -463,6 +537,7 @@ export function CreateTicketPage() {
                       setValue('clientContactId', null)
                       setValue('assigneeId', null)
                       setValue('watcherIds', [])
+                      setShowAllClients(false)
                       setCurrentProject(project)
                     }}
                     getKey={(project) => String(project.id)}
@@ -512,9 +587,24 @@ export function CreateTicketPage() {
             label="Client"
             error={errors.clientId?.message}
             hint={
-              taskTypeId != null && clientRequiredIds.has(taskTypeId)
-                ? 'Required for this task type.'
-                : 'Clients mapped to the selected project.'
+              <>
+                {taskTypeId != null && clientRequiredIds.has(taskTypeId)
+                  ? 'Required for this task type.'
+                  : showAllClients
+                    ? 'Every active client, not only this project’s.'
+                    : 'Clients mapped to the selected project.'}
+                {canViewAllClients && (
+                  <label className="ml-1 inline-flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={showAllClients}
+                      onChange={(event) => setShowAllClients(event.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    />
+                    Show all clients
+                  </label>
+                )}
+              </>
             }
           >
             {(aria) => (
@@ -564,29 +654,73 @@ export function CreateTicketPage() {
             id="clientContactId"
             label="Client contact"
             error={errors.clientContactId?.message}
-            hint="The person who reported it. Adding one without leaving the form is C-021."
+            hint={
+              canAddContact
+                ? 'The person who reported it.'
+                : 'The person who reported it. A new one takes an Admin, from the Client Master.'
+            }
           >
             {(aria) => (
-              <Controller
-                control={control}
-                name="clientContactId"
-                render={({ field }) => (
-                  <SearchableDropdown<Contact & { id: number }>
-                    {...aria}
-                    options={contacts}
-                    value={(selectedContact as (Contact & { id: number }) | null) ?? null}
-                    onChange={(contact) => field.onChange(contact.id)}
-                    getKey={(contact) => String(contact.id)}
-                    getLabel={(contact) => contact.name ?? contact.email ?? `Contact ${contact.id}`}
-                    getSearchable={(contact) => [contact.email ?? '']}
-                    placeholder={clientId == null ? 'Select a client first' : 'Search contacts…'}
-                    emptyText="This client has no contacts yet"
-                    disabled={clientId == null}
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <Controller
+                    control={control}
+                    name="clientContactId"
+                    render={({ field }) => (
+                      <SearchableDropdown<Contact & { id: number }>
+                        {...aria}
+                        options={contacts}
+                        value={(selectedContact as (Contact & { id: number }) | null) ?? null}
+                        onChange={(contact) => field.onChange(contact.id)}
+                        getKey={(contact) => String(contact.id)}
+                        getLabel={(contact) => contact.name ?? contact.email ?? `Contact ${contact.id}`}
+                        getSearchable={(contact) => [contact.email ?? '']}
+                        placeholder={clientId == null ? 'Select a client first' : 'Search contacts…'}
+                        emptyText="This client has no contacts yet"
+                        disabled={clientId == null}
+                      />
+                    )}
                   />
+                </div>
+                {/*
+                  C-021 · Admin only — see `canAddContact` above. `clientId`
+                  is non-null by the time this is reachable (the button is
+                  disabled otherwise), so the dialog below never mounts
+                  against a client that does not exist yet.
+                */}
+                {canAddContact && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="mt-0 shrink-0"
+                    // `!contactsLoaded` as well as `clientId == null`: opening
+                    // the dialog before this client's contacts have loaded
+                    // once would snapshot an empty prior-ids set, and the
+                    // effect below would then read the ordinary first load —
+                    // Sara Kapoor, say — as "the contact that was just added".
+                    disabled={clientId == null || !contactsLoaded || isSaving}
+                    onClick={() => {
+                      priorContactIdsRef.current = new Set(contacts.map((c) => c.id))
+                      awaitingNewContactRef.current = true
+                      setContactDialogOpen(true)
+                    }}
+                  >
+                    + Add contact
+                  </Button>
                 )}
-              />
+              </div>
             )}
           </FormField>
+
+          {clientId != null && (
+            <ContactEditorDialog
+              clientId={clientId}
+              contact={null}
+              open={contactDialogOpen}
+              onOpenChange={setContactDialogOpen}
+            />
+          )}
 
           <FormField
             id="title"
@@ -718,7 +852,7 @@ export function CreateTicketPage() {
                 render={({ field }) => (
                   <WatcherPicker
                     {...aria}
-                    candidates={members}
+                    candidates={watcherCandidates}
                     value={field.value}
                     onChange={field.onChange}
                     disabled={projectId == null}
@@ -771,6 +905,7 @@ export function CreateTicketPage() {
           <SlaPreview
             {...slaPreview}
             className="sm:col-span-2"
+            clientTimezone={selectedClient?.timezone}
             overrideValue={canBackdateOrOverride ? plannedCloseDate : ''}
             onUseComputed={
               canBackdateOrOverride

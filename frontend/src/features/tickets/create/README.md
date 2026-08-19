@@ -138,14 +138,111 @@ three streams depend on. Promote it when a second caller appears.
 
 | Not built | Owner |
 |---|---|
-| Inline planned-close-date preview | C-012 |
-| Inline "+ Add contact", client auto-fills (SLA, account manager as watcher, timezone) | C-021 |
-| Attachments, clipboard paste | C-023 · C-024 |
 | Opening comment, and the rich-text editor the description will share with it | C-029 |
 
-The description is a plain textarea for now. §7.5 wants rich text, and C-029
-wants a rich-text comment box — one editor should serve both, and that choice is
-worth making once rather than smuggling into this form.
+C-012 (the inline planned-close-date preview), C-021 (client dependent
+dropdowns, inline "+ Add contact" and the §4B.2 auto-fills) and C-023/C-024
+(attachments, clipboard paste) have since landed and are covered below and in
+the folder's other notes. The description uses the shared rich-text editor
+since C-066; C-029 still wants a rich-text comment box, which is why the
+control lives in `components/ui/` rather than here.
+
+## C-021 · the client dependent dropdowns and the §4B.2 auto-fills
+
+The client and client-contact dropdowns themselves, their type-ahead and the
+"filtered to this project" rule all landed with C-010/B-028/B-029 — see the
+`clientId`/`clientContactId` fields above. What C-021 adds is the rest of
+§4B.2's Client group:
+
+- **"Show all clients"**, Admin/PM only (`canViewAllClients`) — the toggle
+  beside the Client hint. It drops `projectId` from the `listClients` query
+  rather than adding a second list; the client is still shown-and-refused by
+  the same `newTicketBlockReason` gate either way, exactly as an in-project
+  client is.
+- **Inline "+ Add contact"**, Admin only (`canAddContact`) — reuses Stream
+  B's `ContactEditorDialog` (`features/clients/`) rather than a second copy of
+  the same form; see "Reused, not rebuilt" below for why that dialog has no
+  way to hand a fresh id back and how this screen finds it anyway.
+- **Auto-fill: the account manager as a watcher.** `Client.accountManager` is
+  added to `watcherIds` when a real client change is detected — the same
+  `previousClientId` transition that already clears the contact. It is a
+  starting point, not a rule: `setValue`, not a chip the user cannot remove,
+  and Save & Create Another's retained client does not re-add a manager
+  removed earlier in the same batch, because the ref only fires on an actual
+  change. `WatcherPicker`'s candidate list is widened to include the manager
+  even when they are not a project member — an account manager's job is
+  client visibility, not project staffing, and the picker can only render a
+  selected id it can find.
+- **Auto-fill: the client's time zone for due-date display.** `SlaPreview`
+  gained an optional `clientTimezone` prop; when it differs from the viewer's
+  own resolved zone, the preview adds a second line with the same instant
+  read in the client's zone. Shown only in the resolved-date state — there is
+  nothing to convert in the warning or error states.
+
+### Reused, not rebuilt — `ContactEditorDialog`
+
+S-33's Contacts tab already has the row editor `POST /clients/{id}/contacts`
+needs (`features/clients/ContactEditorDialog.tsx`, `contactForm.ts`,
+`contactQueries.ts`), built for B-027. This screen imports it rather than
+writing a second copy of the same fields and validation — the same crossing
+`newTicketBlockReason` already makes into `features/clients/` two fields
+above, both flagged the same way this one is.
+
+**The dialog has no callback for "here is the contact you just created."** It
+reports success only by invalidating the `useListClientContacts` query this
+screen already reads (`contactQueries.ts`'s `invalidate`), which is enough
+for the dropdown to refresh but not enough to auto-select what a support
+agent just typed. Widening the dialog with an `onCreated` prop would be a
+small, additive change, but it is Stream B's file and this task does not have
+their sign-off to make it. So the new contact is found the way the dialog's
+own refetch already proves it exists: `priorContactIdsRef` snapshots which
+contact ids exist right before the dialog opens, and an effect watches
+`contacts` for the first id outside that snapshot once `awaitingNewContactRef`
+is set. **The button that opens the dialog is disabled until this client's
+contacts have loaded at least once** (`contactsLoaded`) — without that, a
+click issued before the first fetch resolves snapshots an empty prior-ids
+set, and the effect reads the client's *existing* first contact as "the one
+that was just added." Caught by `CreateTicketPage.test.tsx`, not by
+inspection — the race does not reproduce on a warm cache, only against a
+client picked moments earlier.
+
+### 🔴 Open for Stream B — `createClientContact` is `master.write`, which is Admin alone
+
+§4B.2's line for this control is "so the support desk never has to leave the
+form," and the contract's own description of the endpoint says the same:
+"callable inline from the ticket form. Without that, the desk picks the wrong
+existing contact rather than taking the detour to the client master." But
+`ClientController.addContact` is `@PreAuthorize("hasAuthority('master.write')")`,
+and `master.write` is granted to `ADMIN` alone
+(`V20260806_0900__seed_roles_permissions.sql`). Support Desk — the role the
+sentence is about — cannot call it.
+
+`canAddContact` in this file matches the server rather than the blueprint's
+sentence: the button and its dialog are Admin-only, and every other role sees
+the hint "A new one takes an Admin, from the Client Master" instead of a
+button that would 403. Widening `master.write`, or carving out a narrower
+"add a contact" capability, is Stream B's and Stream A's call — this task
+flags the gap rather than closing over it with a frontend-only role check
+that the server would still refuse.
+
+### 🔴 Open for Stream A / D — the client's default SLA policy does not reach the preview
+
+§4B.2 also asks selecting a client to pre-fill "the default SLA policy," and
+`Client.slaPolicyId` exists on the wire. But `previewPlannedCloseDate`'s
+resolution ladder (`PROJECT_TASK_TYPE → PROJECT_LEVEL → ORG_DEFAULT →
+PRIORITY_DEFAULT → TASK_TYPE_DEFAULT`, `sla/README.md`) has no rung for a
+client's own policy, the endpoint takes no `clientId` or `slaPolicyId`
+parameter, and `TicketCreateRequest` still carries no `slaPolicyId` for a
+created ticket to record which one it used — the same gap `sla/README.md`
+already flags for C-038 and the breach report.
+
+Not built here, deliberately, rather than approximated: the SLA date is a
+server round trip precisely because it depends on the working calendar and
+leave the browser cannot see (see `sla/README.md`), so a client-side "apply
+the client's policy" would be a second, disagreeing implementation of the
+same resolution — exactly what that file argues against. Closing this needs
+a rung on the resolution ladder or a way to pass `slaPolicyId` through, which
+is Stream A/D's contract to extend.
 
 ## 🔴 Open for Stream D — a draft is not yet distinguishable from a ticket
 

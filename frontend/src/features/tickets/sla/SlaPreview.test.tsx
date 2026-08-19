@@ -117,6 +117,42 @@ describe('SlaPreview', () => {
     expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
   })
 
+  /**
+   * C-021 · §4B.2's "the client's time zone for due-date display". The
+   * expected string is formatted the same way the component does it, for the
+   * same reason as the plain preview above — a hardcoded reading is only
+   * right on one machine.
+   */
+  describe('the client time zone line — C-021', () => {
+    it('shows the due date again in the client zone when it differs from the viewer', () => {
+      render(<SlaPreview {...state({ clientTimezone: 'Europe/London' })} />)
+
+      const inLondon = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/London',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(parseISO(RESOLVED.plannedCloseDate as string))
+      expect(screen.getByText(new RegExp(`${inLondon}.*client's time zone`))).toBeInTheDocument()
+    })
+
+    it('says nothing extra when the client is in the viewer’s own zone', () => {
+      const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+      render(<SlaPreview {...state({ clientTimezone: viewerZone })} />)
+
+      expect(screen.queryByText(/client's time zone/)).not.toBeInTheDocument()
+    })
+
+    it('says nothing extra when the client has no time zone on file', () => {
+      render(<SlaPreview {...state({ clientTimezone: null })} />)
+
+      expect(screen.queryByText(/client's time zone/)).not.toBeInTheDocument()
+    })
+  })
+
   describe('when a PM has typed their own date', () => {
     it('reframes the computed date as the alternative, not the answer', () => {
       render(<SlaPreview {...state({ overrideValue: '2026-09-01T10:00' })} />)
