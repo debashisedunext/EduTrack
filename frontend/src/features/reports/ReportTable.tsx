@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { ArrowDown, ArrowUp, Minus } from 'lucide-react'
 import type { ReportEntityKind, ReportResponseDataColumnsItem } from '@/api/generated/model'
 import {
   clientPath,
@@ -19,6 +20,11 @@ import {
  * inspecting the value. Guessing from the value is what makes a report where
  * every row happens to be zero render its numbers as strings, left-aligned,
  * on the one day that matters.
+ *
+ * <p>B-061 · a `trend` column renders an arrow rather than a signed integer,
+ * which is what §7.8's scorecard line asks for. Driven by the type for the same
+ * reason every other format is: the alternative is a `column.key === 'trend'`
+ * branch, and the next report with a trend column would silently render `-3`.
  *
  * <p>B-060 · a cell links when its **column** says so. §7.8 gives the client
  * report a drill-in and gives four other reports one too eventually, and a
@@ -93,6 +99,10 @@ function Cell({
   column: ReportResponseDataColumnsItem
   row: Record<string, unknown>
 }) {
+  // Before `format`, because a trend is a rendered thing rather than a string.
+  // It never links: a delta names no entity, and `linkTo` is absent on it.
+  if (column.type === 'trend') return <Trend value={row[column.key]} />
+
   const text = format(row[column.key], column.type)
   const href = hrefFor(column, row)
 
@@ -105,6 +115,48 @@ function Cell({
     >
       {text}
     </Link>
+  )
+}
+
+/**
+ * A change against the comparable preceding window, as a direction and a
+ * magnitude.
+ *
+ * <p>**The direction is not coloured.** Up is not green. This same type will
+ * carry a reopen-rate trend, where up is the bad one, and a renderer that
+ * decided good from the sign would be wrong on half its uses — a report that
+ * quietly congratulates somebody for a rising reopen rate is worse than one
+ * that leaves the judgement to the reader. The arrow says which way; the column
+ * heading says of what.
+ *
+ * <p>The magnitude is printed unsigned, because the arrow already carries the
+ * sign — `↓ -3` reads as a double negative. The screen-reader text spells both
+ * out, since the arrow is `aria-hidden` and a bare "3" would lose the half of
+ * the value that matters.
+ */
+function Trend({ value }: { value: unknown }) {
+  // Same em dash as every other type: nothing recorded is not a flat trend.
+  // "No change" is a measurement — it says the previous window was measured and
+  // matched — and a person with no previous window has not made one.
+  if (value === null || value === undefined || value === '') return <>—</>
+
+  const delta = Number(value)
+  // A trend column carrying something non-numeric is a runner bug. Shown as-is
+  // rather than swallowed into an em dash, which would hide it.
+  if (!Number.isFinite(delta)) return <>{String(value)}</>
+
+  const Icon = delta > 0 ? ArrowUp : delta < 0 ? ArrowDown : Minus
+  const spoken =
+    delta === 0
+      ? 'unchanged from the previous period'
+      : `${delta > 0 ? 'up' : 'down'} ${Math.abs(delta)} on the previous period`
+
+  return (
+    <span className="inline-flex items-center justify-end gap-1">
+      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span aria-hidden>{Math.abs(delta)}</span>
+      <span className="sr-only">{spoken}</span>
+    </span>
   )
 }
 
@@ -137,7 +189,9 @@ function hrefFor(
 
 /** Numbers right, everything else left — the convention that makes a column of figures comparable down the page. */
 function alignFor(type: ReportResponseDataColumnsItem['type']) {
-  return type === 'number' || type === 'percent' || type === 'duration' ? 'text-right' : 'text-left'
+  return type === 'number' || type === 'percent' || type === 'duration' || type === 'trend'
+    ? 'text-right'
+    : 'text-left'
 }
 
 function format(value: unknown, type: ReportResponseDataColumnsItem['type']): string {

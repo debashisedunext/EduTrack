@@ -131,7 +131,11 @@ class XlsxReportExporter implements ReportExporter {
         }
 
         switch (type) {
-            case NUMBER, PERCENT, DURATION -> {
+            // B-061 · TREND is numeric here and an arrow on screen, deliberately.
+            // A spreadsheet cell holding "\u2191 3" cannot be sorted, summed or
+            // charted, and the whole reason somebody exports a scorecard is to do
+            // one of those. The direction is recoverable from the sign.
+            case NUMBER, PERCENT, DURATION, TREND -> {
                 if (value instanceof Number n) {
                     cell.setCellValue(n.doubleValue());
                 } else if (value instanceof BigDecimal d) {

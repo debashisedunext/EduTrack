@@ -17,6 +17,7 @@ import static com.edunext.edutrack.api.feature.reports.ReportDtos.ColumnType.DUR
 import static com.edunext.edutrack.api.feature.reports.ReportDtos.ColumnType.NUMBER;
 import static com.edunext.edutrack.api.feature.reports.ReportDtos.ColumnType.PERCENT;
 import static com.edunext.edutrack.api.feature.reports.ReportDtos.ColumnType.STRING;
+import static com.edunext.edutrack.api.feature.reports.ReportDtos.ColumnType.TREND;
 
 /**
  * A-066 · §7.8 report 1, the Resource Performance Scorecard.
@@ -45,6 +46,11 @@ import static com.edunext.edutrack.api.feature.reports.ReportDtos.ColumnType.STR
  * fortnight wants the previous fortnight; anything else answers a question they
  * did not ask, and a trend arrow that means something different depending on the
  * range is worse than no arrow.
+ *
+ * <p>B-061 · and it is now drawn as an arrow, which is what §7.8 asked for. The
+ * column was typed {@code NUMBER}, so the cell read {@code -3} and the bar chart
+ * plotted the delta as a series beside a percentage. {@code TREND} is the type
+ * that says a number is a change rather than a quantity.
  */
 @Component
 class ResourceScorecardRunner implements ReportRunner {
@@ -66,7 +72,7 @@ class ResourceScorecardRunner implements ReportRunner {
 
     @Override
     public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
-                      ReportFilters filters) {
+                      Long resourceSubject, ReportFilters filters) {
         List<ReportDtos.Column> columns = List.of(
                 new ReportDtos.Column("resource", "Resource", STRING),
                 new ReportDtos.Column("openNow", "Assigned now", NUMBER),
@@ -78,9 +84,17 @@ class ResourceScorecardRunner implements ReportRunner {
                 new ReportDtos.Column("variance", "Est vs actual", DURATION),
                 new ReportDtos.Column("reopenRate", "Reopen rate", PERCENT),
                 new ReportDtos.Column("utilisation", "Utilisation", PERCENT),
-                new ReportDtos.Column("trend", "Closed vs previous", NUMBER));
+                // B-061 · TREND rather than NUMBER. §7.8's column list ends
+                // with "Trend arrows" and this rendered as a signed integer; it
+                // was also being plotted on the bar chart as a series beside
+                // SLA % and cycle time. See ReportDtos.ColumnType.
+                new ReportDtos.Column("trend", "Closed vs previous", TREND));
 
-        Long subject = scope.resourceSubject(null);
+        // B-061 · the resolved subject, read rather than re-derived. This was
+        // `scope.resourceSubject(null)`, which answers null for everyone who is
+        // not a delivery role — so the Resource control this report declares
+        // narrowed nothing for the Admins and PMs it exists for.
+        Long subject = resourceSubject;
         List<TicketReportRepository.ScorecardRow> current =
                 tickets.scorecard(from, to, projectIds, scope.ownWorkOnly(), scope.userId(), subject);
 

@@ -263,6 +263,99 @@ class ReportRunnerContractTest {
         assertThat(ReportCatalogue.find("project-health", ownWork).orElseThrow().available()).isFalse();
     }
 
+    /**
+     * B-061 · §7.8 ends the scorecard's column list with "Trend arrows", and
+     * the column carrying one was typed {@code NUMBER}.
+     *
+     * <p>Asserted on the type rather than on the rendering, because the type is
+     * what the client switches on and what {@code ?export=} reads. A cell
+     * showing an arrow because a renderer matched {@code key === "trend"} would
+     * pass a screenshot and break the moment a second report grew one.
+     */
+    @Test
+    @DisplayName("the scorecard's trend column is typed as a trend, not as a number")
+    void trendIsItsOwnType() {
+        ReportDtos.Column trend = new ReportDtos.Column("trend", "Closed vs previous",
+                ReportDtos.ColumnType.TREND);
+
+        assertThat(trend.type()).isEqualTo(ReportDtos.ColumnType.TREND);
+        // The contract spells the enum lower-case and the generated client
+        // types the union from it, so a mismatch here is a compile error one
+        // repository over rather than a runtime surprise.
+        assertThat(ReportDtos.ColumnType.TREND.wire()).isEqualTo("trend");
+    }
+
+    /**
+     * The workload chart asserted a partition its own columns never made.
+     *
+     * <p>Stacking says the series add up to something. An open ticket is also
+     * counted under critical and under delayed, so the bar's height was already
+     * double-counting before B-061 added a percentage and two counts that would
+     * have stacked on top of it. Side-by-side bars make no claim about a sum.
+     *
+     * <p>This does not make the chart good — eight series on one axis is still
+     * hard to read — and that is recorded rather than fixed here, because the
+     * chart belongs to A-067.
+     */
+    @Test
+    @DisplayName("workload plots side by side, because its columns do not partition a total")
+    void workloadDoesNotStack() {
+        ReportDtos.Descriptor d = ReportCatalogue.declared().stream()
+                .filter(x -> x.key().equals(WorkloadCapacityRunner.KEY))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(d.chart()).isEqualTo("bar");
+    }
+
+    /**
+     * B-061 · the allocation total is a floor, and the card says so before
+     * somebody opens it looking for a total.
+     *
+     * <p>{@code allocation_pct} is nullable and means "not stated" — B-017 chose
+     * that over the contract's {@code default: 100} — so the sum covers only the
+     * memberships that stated a figure. Naming the limit on the card is the same
+     * call {@code client-report} made about the figure it does not have.
+     */
+    @Test
+    @DisplayName("workload's own description says the allocation total counts only stated figures")
+    void allocationLimitIsDeclared() {
+        ReportDtos.Descriptor d = ReportCatalogue.declared().stream()
+                .filter(x -> x.key().equals(WorkloadCapacityRunner.KEY))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(d.description()).containsIgnoringCase("only projects where one was stated");
+    }
+
+    /**
+     * B-061 · the five reports that declare a Resource control, listed here so
+     * that a sixth cannot be added without somebody meeting the case
+     * {@code ReportRunnersIT.ResourceFilter} makes.
+     *
+     * <p>Between A-066 and B-061 every one of these drew the control and applied
+     * nothing, because the runner re-derived the subject as {@code
+     * scope.resourceSubject(null)} instead of reading the one it was handed.
+     * The behaviour needs a database; the declaration does not, and this is the
+     * cheap half.
+     */
+    @Test
+    @DisplayName("five reports declare a Resource filter, and each has a runner that reads it")
+    void resourceFilterIsDeclaredByFive() {
+        List<String> declaring = ReportCatalogue.declared().stream()
+                .filter(ReportDtos.Descriptor::available)
+                .filter(d -> d.filters().contains(ReportFilterKind.RESOURCE))
+                .map(ReportDtos.Descriptor::key)
+                .toList();
+
+        assertThat(declaring).containsExactlyInAnyOrder(
+                ResourceScorecardRunner.KEY,
+                ResourceVelocityRunner.KEY,
+                EffortSummaryRunner.KEY,
+                ReopenAnalysisRunner.KEY,
+                WorkloadCapacityRunner.KEY);
+    }
+
     @Test
     @DisplayName("a rate with no denominator is null, never 0%")
     void ratesWithNoDenominator() {

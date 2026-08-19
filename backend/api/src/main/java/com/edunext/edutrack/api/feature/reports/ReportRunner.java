@@ -37,6 +37,25 @@ interface ReportRunner {
      *                   caller's scope by {@link ReportScope#projectFilter}.
      *                   Empty means unrestricted, matching the convention
      *                   everywhere else in this codebase.
+     * @param resourceSubject
+     *                   B-061 · whose rows the report is about, already
+     *                   resolved by {@link ReportScope#resourceSubject} — null
+     *                   for every person. The second of the two <b>resolved
+     *                   narrowings</b>, sitting beside {@code projectIds} for
+     *                   that reason and deliberately not inside
+     *                   {@link ReportFilters}: a filter may be ignored, and
+     *                   this one may not, because for §2's three delivery roles
+     *                   it has already been overruled to the caller themselves.
+     *                   <p><b>Read this parameter; never call
+     *                   {@code scope.resourceSubject(null)}.</b> Five runners
+     *                   did, which returned null for every Admin and PM and
+     *                   made {@code ?resourceId=} a control that changed
+     *                   nothing on five reports that declare it — while
+     *                   {@code meta.appliedScope} went on printing "one
+     *                   resource, across all projects". A filter that lies
+     *                   about having been applied is worse than one that is
+     *                   absent, and {@code ReportRunnersIT.ResourceFilter} is
+     *                   where each of the five is now pinned.
      * @param filters    B-060 · the non-scope filters the caller sent, never
      *                   null. A runner reads the ones its descriptor declares
      *                   and ignores the rest — the catalogue is what promises
@@ -45,7 +64,7 @@ interface ReportRunner {
      *                   that is checked.
      */
     Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
-               ReportFilters filters);
+               Long resourceSubject, ReportFilters filters);
 
     /**
      * @param rows one map per row, keyed by {@link ReportDtos.Column#key()}. A

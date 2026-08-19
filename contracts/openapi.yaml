@@ -10293,7 +10293,23 @@ components:
                 properties:
                   key: { type: string }
                   label: { type: string }
-                  type: { type: string, enum: [string, number, date, duration, percent] }
+                  # B-061 · `trend` is the one value here that is not a data
+                  # type. §7.8 ends the Resource Scorecard's column list with
+                  # "Trend arrows"; the value behind one is an ordinary signed
+                  # number, so the type says what the number *means* — a change
+                  # against the comparable preceding window — rather than what
+                  # it is. The client draws a direction and a magnitude, and
+                  # keeps the column out of the chart, where a signed delta
+                  # plotted beside an SLA percentage is a series with nothing
+                  # in common with its neighbours but being numeric.
+                  #
+                  # Direction is not a verdict: up is not drawn as good. The
+                  # same type will carry a reopen-rate trend, where up is bad.
+                  #
+                  # Exports write it as a *number*, not an arrow — a spreadsheet
+                  # cell holding an arrow glyph cannot be sorted or summed, and
+                  # that is what an export is for.
+                  type: { type: string, enum: [string, number, date, duration, percent, trend] }
                   # B-060 · the drill-in. §7.8 ends the Client Report's line
                   # with "drills into the client 360 view", and the generic
                   # column/row shape had no notion of a destination.

@@ -91,7 +91,7 @@ class ClientReportRunner implements ReportRunner {
 
     @Override
     public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
-                      ReportFilters filters) {
+                      Long resourceSubject, ReportFilters filters) {
 
         List<ReportDtos.Column> columns = List.of(
                 // The one linked column on any report so far. `clientId` is the

@@ -145,7 +145,7 @@ export const runReportResponse = zod.object({
   "columns": zod.array(zod.object({
   "key": zod.string(),
   "label": zod.string(),
-  "type": zod.enum(['string', 'number', 'date', 'duration', 'percent']),
+  "type": zod.enum(['string', 'number', 'date', 'duration', 'percent', 'trend']),
   "linkTo": zod.enum(['CLIENT', 'TICKET', 'PROJECT', 'RESOURCE']).optional().describe('B-060 · what a linked report cell names. Four kinds, matching the four path builders `entityLinks.ts` exports, so the client\'s mapping is total and a kind cannot be added here without a route to receive it.\nDeliberately not `ReportFilterKind`, which looks close enough to share and answers a different question. The vocabularies diverge at once: `DATE_RANGE` and `LEVEL` are not entities and nothing drills into them, while `TICKET` is an entity no report filters by.\n'),
   "linkIdKey": zod.string().optional().describe('Which row key holds the id to link to — `clientId`, not `client`. A separate key because the cell shows a \*name\* and the link needs an \*id\*; the id is carried in the row with no column of its own, so it stays out of the table and out of `?export=`, which iterates columns.\n')
 })).optional(),

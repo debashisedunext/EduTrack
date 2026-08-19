@@ -46,7 +46,7 @@ class EffortSummaryRunner implements ReportRunner {
 
     @Override
     public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
-                      ReportFilters filters) {
+                      Long resourceSubject, ReportFilters filters) {
         List<ReportDtos.Column> columns = List.of(
                 new ReportDtos.Column("resource", "Resource", STRING),
                 new ReportDtos.Column("project", "Project", STRING),
@@ -60,7 +60,9 @@ class EffortSummaryRunner implements ReportRunner {
                 from, to, projectIds, scope.ownWorkOnly(), scope.userId(),
                 // B-060 · the declared TASK_TYPE control, which reached the
                 // repository as null from A-066 until ReportFilters existed.
-                scope.resourceSubject(null), filters.taskTypeId())) {
+                // B-061 · was scope.resourceSubject(null), which discarded the
+                // Resource filter for every caller who could actually use it.
+                resourceSubject, filters.taskTypeId())) {
 
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("resource", r.fullName());

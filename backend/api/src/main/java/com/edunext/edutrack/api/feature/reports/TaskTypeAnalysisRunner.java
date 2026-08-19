@@ -47,7 +47,7 @@ class TaskTypeAnalysisRunner implements ReportRunner {
 
     @Override
     public Result run(ReportScope scope, LocalDate from, LocalDate to, List<Long> projectIds,
-                      ReportFilters filters) {
+                      Long resourceSubject, ReportFilters filters) {
         List<ReportDtos.Column> columns = List.of(
                 new ReportDtos.Column("taskType", "Task type", STRING),
                 new ReportDtos.Column("raised", "Raised", NUMBER),
