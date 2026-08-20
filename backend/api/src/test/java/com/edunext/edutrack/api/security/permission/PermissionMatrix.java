@@ -221,6 +221,17 @@ final class PermissionMatrix {
             {"toStageCode":"QA","reason":"Matrix fixture override — see PermissionMatrix's own header."}""";
 
     /**
+     * C-046 · {@code ReworkDtos.ReworkRequest}: {@code toStageCode} and
+     * {@code reason} are the only required fields. {@code action},
+     * {@code defects}, {@code toUserId} and {@code effortHours} are all
+     * omitted, on {@link #FORCE_MOVE}'s own reasoning — the strongest fixture
+     * is the bare minimum the contract allows, so it reaches authorisation
+     * without depending on a field this matrix has no opinion about.
+     */
+    private static final String REWORK = """
+            {"toStageCode":"DEV","reason":"Matrix fixture rework — see PermissionMatrix's own header."}""";
+
+    /**
      * C-049 · {@code AssignDtos.AssignRequest}: {@code assigneeId} is the only
      * {@code @NotNull} field. {@code note} is omitted deliberately, on
      * {@link #CHANGE_PRIORITY}'s own reasoning: the strongest fixture is the
@@ -928,6 +939,26 @@ final class PermissionMatrix {
             // before @PreAuthorize is consulted, on this file's own header's
             // warning.
             adminAndPm("POST", "/api/v1/tickets/{ticketId}/force-move", FORCE_MOVE),
+
+            // ── rework · C-046, §4A.1's four backward actions ─────────────────
+            //
+            // All six roles, exactly like the handoff row above and for the
+            // same reason: ticket.rework (V20260806_0900) is granted to every
+            // role, because the real restriction is the golden rule one layer
+            // down — only the current stage owner, PM or Admin may move a
+            // *given* ticket — and that is a row rule StageOwnership applies
+            // per ticket, which a capability cannot express. A narrower row
+            // here would assert a rule the route does not have.
+            //
+            // Deliberately not adminAndPm, despite "send it back" sounding
+            // like a manager's verb: §4A.1's whole point is that QA fails a
+            // ticket and Deployment rejects one, and both hold the capability.
+            //
+            // Carries a fixture because the handler takes a required
+            // @RequestBody — without one, argument resolution answers 400
+            // before @PreAuthorize is consulted, on this file's own header's
+            // warning.
+            everyRole("POST", "/api/v1/tickets/{ticketId}/rework", REWORK),
 
             // ── reopen · C-038, and the one ticket route where three roles is
             //    the whole answer rather than half a rule ────────────────────
