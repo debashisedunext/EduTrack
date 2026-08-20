@@ -540,7 +540,7 @@ export const changeOwnPassword = (
   
 
 
-export const getChangeOwnPasswordMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse,
+export const getChangeOwnPasswordMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeOwnPassword>>, TError,{data: ChangeOwnPasswordBody}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof changeOwnPassword>>, TError,{data: ChangeOwnPasswordBody}, TContext> => {
 
@@ -567,12 +567,12 @@ const {mutation: mutationOptions} = options ?
 
     export type ChangeOwnPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof changeOwnPassword>>>
     export type ChangeOwnPasswordMutationBody = ChangeOwnPasswordBody
-    export type ChangeOwnPasswordMutationError = ValidationFailedResponse | UnauthorizedResponse
+    export type ChangeOwnPasswordMutationError = ValidationFailedResponse | UnauthorizedResponse | TooManyRequestsResponse
 
     /**
  * @summary Change own password
  */
-export const useChangeOwnPassword = <TError = ValidationFailedResponse | UnauthorizedResponse,
+export const useChangeOwnPassword = <TError = ValidationFailedResponse | UnauthorizedResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeOwnPassword>>, TError,{data: ChangeOwnPasswordBody}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof changeOwnPassword>>,

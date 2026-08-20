@@ -65,14 +65,19 @@ import java.time.Instant;
  * that is all. Upper/lower/digit/symbol and no-reuse-of-last-3 are A-028, which
  * has to create the history table first.
  *
- * <p><b>No rate limit on {@code currentPassword} guesses.</b> A-021's counter
- * guards the login form and is deliberately <i>not</i> incremented here: someone
- * holding a stolen access token could otherwise spend five wrong guesses locking
- * the real user out of the login screen, turning a protective control into a
- * denial of service delivered by an attacker. The exposure that leaves — an
- * attacker with a valid token brute-forcing the current password to achieve full
- * takeover — belongs with A-074's rate limiting, alongside the two other holes
- * {@link AuthenticationService} lists.
+ * <p><b>{@code currentPassword} guesses are now bounded — A-074 closed this.</b>
+ * The paragraph that stood here recorded the gap: A-021's counter guards the
+ * login form and is deliberately <i>not</i> incremented from this method,
+ * because someone holding a stolen access token could otherwise spend five wrong
+ * guesses locking the real user out of the login screen — turning a protective
+ * control into a denial of service delivered on demand by the attacker.
+ *
+ * <p>That decision is unchanged and still load-bearing. What has changed is that
+ * the exposure it left — an attacker with a valid token brute-forcing the
+ * current password into a full takeover — is now bounded by
+ * {@link PasswordChangeRateLimiter}, which keeps its own budget keyed on the
+ * user id and refuses with 429 without touching the login lockout. Two counters
+ * rather than one, so that refusing the change never refuses the login.
  */
 @Service
 class PasswordChangeService {
@@ -84,17 +89,20 @@ class PasswordChangeService {
     private final PasswordEncoder passwordEncoder;
     private final AccessTokenBlacklist blacklist;
     private final PasswordPolicy passwordPolicy;
+    private final PasswordChangeRateLimiter rateLimiter;
 
     PasswordChangeService(AccessTokenVerifier accessTokens,
                           AuthUserRepository users,
                           PasswordEncoder passwordEncoder,
                           AccessTokenBlacklist blacklist,
-                          PasswordPolicy passwordPolicy) {
+                          PasswordPolicy passwordPolicy,
+                          PasswordChangeRateLimiter rateLimiter) {
         this.accessTokens = accessTokens;
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.blacklist = blacklist;
         this.passwordPolicy = passwordPolicy;
+        this.rateLimiter = rateLimiter;
     }
 
     /**
@@ -118,12 +126,30 @@ class PasswordChangeService {
             throw new InvalidAccessTokenException();
         }
 
+        // A-074 · consulted BEFORE the Argon2id verify below, which costs ~175 ms
+        // and 64 MB. A limiter that ran afterwards would have already spent what
+        // it exists to protect. Safe to run first because the key is the
+        // authenticated user id — it discloses nothing the caller's own token
+        // did not already establish.
+        rateLimiter.check(userId).ifPresent(retryAfter -> {
+            log.warn("auth: password change throttled for user {} — too many wrong currentPassword guesses", userId);
+            throw new TooManyPasswordChangeAttemptsException(retryAfter);
+        });
+
         if (!passwordEncoder.matches(request.currentPassword(), user.passwordHash())) {
-            // Not counted towards A-021's lockout — see the class javadoc for
-            // why that would hand an attacker a denial of service.
+            // Charged to A-074's own budget, and still deliberately NOT to
+            // A-021's lockout — see the class javadoc for why counting it there
+            // would hand an attacker a denial of service against the real owner.
+            rateLimiter.recordFailure(userId);
             log.info("auth: password change refused for user {} — current password incorrect", userId);
             throw new InvalidCurrentPasswordException();
         }
+
+        // The guess was right, so the evidence the counter represents is spent.
+        // Cleared here rather than at the end of the method: everything below
+        // can still refuse the change for reasons that are not wrong guesses
+        // (unchanged, reused), and those must not leave a budget partly spent.
+        rateLimiter.recordSuccess(userId);
 
         // A plain equality check, not a second `matches()`. `currentPassword` has
         // just been proved to be this user's real password, so comparing the two

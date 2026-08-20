@@ -152,28 +152,70 @@ class AuthLogoutIT {
         return rest.postForEntity("/api/v1/auth/login", new HttpEntity<>(body, headers), String.class);
     }
 
+    /**
+     * A-074 · the double submit is sent on every logout, exactly as a browser
+     * would send it.
+     *
+     * <p>It is redundant whenever an access token is present — {@code
+     * oauth2ResourceServer} exempts any bearer-carrying request from CSRF — but
+     * it is <b>not</b> redundant for the cases that deliberately omit the bearer.
+     * There, {@code CsrfFilter} runs first and answers 403, so a test written to
+     * assert "logout without an access token is 401" would be measuring CSRF
+     * instead of authentication, and would keep passing for the wrong reason if
+     * the auth check were ever removed.
+     */
     private ResponseEntity<String> logout(String accessToken, String refreshToken) {
         HttpHeaders headers = new HttpHeaders();
         if (accessToken != null) headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken);
-        if (refreshToken != null) headers.set(HttpHeaders.COOKIE, "refresh_token=" + refreshToken);
+        String csrfCookie = "XSRF-TOKEN=logout-it-csrf";
+        headers.set(HttpHeaders.COOKIE,
+                refreshToken != null ? "refresh_token=" + refreshToken + "; " + csrfCookie : csrfCookie);
+        headers.set("X-XSRF-TOKEN", "logout-it-csrf");
         return rest.exchange("/api/v1/auth/logout", HttpMethod.POST,
                 new HttpEntity<>(null, headers), String.class);
     }
 
+    /**
+     * A-074 · {@code /auth/refresh} is CSRF-protected and carries no bearer to
+     * be exempted by, so this helper sends the double submit a browser would.
+     * The logout helper above needs none: its requests carry a bearer token,
+     * which {@code oauth2ResourceServer} exempts from CSRF because a
+     * cross-origin page cannot set that header.
+     */
     private ResponseEntity<String> refresh(String refreshToken) {
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.USER_AGENT, CHROME);
-        headers.set(HttpHeaders.COOKIE, "refresh_token=" + refreshToken);
+        headers.set(HttpHeaders.COOKIE, "refresh_token=" + refreshToken + "; XSRF-TOKEN=logout-it-csrf");
+        headers.set("X-XSRF-TOKEN", "logout-it-csrf");
         return rest.exchange("/api/v1/auth/refresh", HttpMethod.POST,
                 new HttpEntity<>(null, headers), String.class);
     }
 
     private static String cookieValue(ResponseEntity<String> response) {
-        List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
-        assertThat(cookies).isNotNull().hasSize(1);
-        String header = cookies.getFirst();
+        String header = refreshCookieHeader(response);
         String withoutName = header.substring(header.indexOf('=') + 1);
         return withoutName.substring(0, withoutName.indexOf(';'));
+    }
+
+    /**
+     * A-074 · the refresh cookie, picked by name rather than by being the only one.
+     *
+     * <p>This asserted {@code hasSize(1)} until CSRF tokens landed. Responses now
+     * carry {@code XSRF-TOKEN} as well, so a count is the wrong shape — but
+     * simply dropping the assertion would be a weaker test than the one it
+     * replaces. Naming what is permitted keeps the original intent intact: one
+     * refresh cookie, and nothing else except the CSRF token. A stray third
+     * cookie still fails.
+     */
+    private static String refreshCookieHeader(ResponseEntity<String> response) {
+        List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
+        assertThat(cookies).as("the response must set the refresh cookie").isNotNull();
+        assertThat(cookies)
+                .as("no cookie beyond the refresh token and A-074's CSRF token")
+                .allMatch(cookie -> cookie.startsWith("refresh_token=") || cookie.startsWith("XSRF-TOKEN="));
+        List<String> refresh = cookies.stream().filter(c -> c.startsWith("refresh_token=")).toList();
+        assertThat(refresh).as("exactly one refresh_token cookie").hasSize(1);
+        return refresh.getFirst();
     }
 
     private static JsonNode json(ResponseEntity<String> response) throws Exception {
@@ -201,9 +243,12 @@ class AuthLogoutIT {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(response.getBody()).isNull();
-        List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
-        assertThat(cookies).isNotNull().hasSize(1);
-        assertThat(cookies.getFirst()).contains("refresh_token=").contains("Max-Age=0");
+        // A-074 · the response also carries XSRF-TOKEN, so the refresh cookie is
+        // picked by name rather than by being the only one. The assertion that
+        // matters is unchanged: the credential is expired, here and now.
+        assertThat(refreshCookieHeader(response))
+                .contains("refresh_token=")
+                .contains("Max-Age=0");
     }
 
     /**
@@ -396,12 +441,25 @@ class AuthLogoutIT {
                 .isPresent();
     }
 
+    /**
+     * <b>A-074 · the CSRF token here is not incidental.</b> {@code CsrfFilter}
+     * runs before the bearer filter, and the exemption for bearer-carrying
+     * requests keys on the {@code Bearer} scheme — which is precisely what this
+     * request does not use. Without a token the answer is 403 from CSRF, and the
+     * test would pass or fail on the wrong mechanism entirely.
+     *
+     * <p>So the request presents one, the way a browser would, and the assertion
+     * goes back to being about the thing it is named for: a non-Bearer scheme is
+     * refused with 401.
+     */
     @Test
     @DisplayName("a non-Bearer Authorization header is rejected")
     void requiresTheBearerScheme() {
         seedOnce();
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==");
+        headers.add(HttpHeaders.COOKIE, "XSRF-TOKEN=logout-scheme-probe");
+        headers.add("X-XSRF-TOKEN", "logout-scheme-probe");
 
         ResponseEntity<String> response = rest.exchange("/api/v1/auth/logout", HttpMethod.POST,
                 new HttpEntity<>(null, headers), String.class);

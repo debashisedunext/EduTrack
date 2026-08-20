@@ -1,12 +1,23 @@
 package com.edunext.edutrack.api.security;
 
 import com.edunext.edutrack.api.security.jwt.JwtAuthoritiesConverter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
+import org.springframework.security.web.header.writers.CrossOriginOpenerPolicyHeaderWriter;
+import org.springframework.security.web.header.writers.CrossOriginResourcePolicyHeaderWriter;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
+import org.springframework.security.web.util.matcher.RequestMatcher;
+
+import java.time.Duration;
+
+import static org.springframework.security.config.Customizer.withDefaults;
 
 /**
  * A-032 · the real filter chain, replacing {@code ScaffoldSecurityConfig}'s
@@ -86,32 +97,48 @@ import org.springframework.security.web.SecurityFilterChain;
  * already {@code show-details: when-authorized}, so an anonymous caller learns
  * only up or down.
  *
- * <p><b>springdoc is permitted, and that is a deliberate temporary.</b>
- * {@code /v3/api-docs} publishes the entire API surface, which is a gift to
- * someone mapping the system. It stays open because {@code make api} advertises
- * Swagger UI and every developer uses it, and because closing it is a
- * deployment-shaped decision — public in local, closed in production — which
- * belongs with A-074's hardening rather than being smuggled in here.
+ * <p><b>springdoc is closed by default — A-074 resolved the temporary.</b> The
+ * paragraph that stood here said {@code /v3/api-docs} publishes the entire API
+ * surface, that it stayed open because {@code make api} advertises Swagger UI,
+ * and that closing it was a deployment-shaped decision belonging to A-074. It is
+ * now closed unless {@code API_DOCS_ENABLED} says otherwise, and the paths are
+ * only permitted below when it does. Flipping the switch without also closing
+ * the chain would leave springdoc unreachable but still listed as public, which
+ * reads as an open door in the one file people audit for open doors.
  *
- * <h2>CSRF is disabled, deliberately</h2>
+ * <p>It is switched on in the {@code local} profile, so {@code make api} is
+ * unchanged, and in the api module's test-scope properties, because
+ * {@code ContractConformanceTest} fetches {@code /v3/api-docs} from the running
+ * application and D-005's client generation depends on it. <b>Closed by default,
+ * opened explicitly where something needs it</b> — the direction
+ * {@code WebhookSignatureVerifier} already takes, whose own comment is that an
+ * open endpoint is a worse default than a broken one.
+ *
+ * <h2>CSRF: enabled on the cookie routes, off everywhere else</h2>
  *
  * <p><b>Not copied from the scaffold.</b> The access token travels in an
  * {@code Authorization} header put there by our own JavaScript, and a browser
  * never attaches headers automatically — so no bearer-authenticated route can be
- * forged from another origin, which is every route that does anything.
+ * forged from another origin, which is every route that does anything. Those
+ * routes are still not CSRF-protected and that remains deliberate: a token on a
+ * bearer route defends against nothing and costs every client a header.
  *
- * <p>The one cookie-authenticated route is {@code POST /auth/refresh}. Its
- * cookie is {@code SameSite=Strict}, so a browser will not send it on a
- * cross-site request at all; and the new access token comes back in a response
- * body the attacking page cannot read. The residual risk is that somebody could
- * force a session rotation — an unexpected sign-out, not a compromise.
+ * <p>What changed is the other half. {@code POST /auth/refresh} and
+ * {@code POST /auth/logout} authenticate from a cookie the browser attaches by
+ * itself, and A-032 deferred their tokens to A-074 on the grounds that
+ * {@code SameSite=Strict} made the residual risk a forced sign-out rather than a
+ * compromise. That was true and still is; the reason to close it anyway is that
+ * {@code SameSite} is enforced entirely by the browser and treats a compromised
+ * sibling subdomain as same-site. {@link CookieRouteCsrf} carries the full
+ * reasoning and the mechanism.
  *
- * <p><b>The condition that ends this reasoning:</b> the moment any endpoint
- * authenticates from a cookie alone, this is no longer a nuisance and CSRF
- * tokens stop being deferrable. Also revisit if EduTrack is ever deployed
- * alongside other applications on a shared parent domain, since {@code
- * SameSite}'s protection then depends on every sibling subdomain staying
- * uncompromised. Full CSRF tokens are A-074's, with CSP and security headers.
+ * <h2>Security headers</h2>
+ *
+ * <p>The other half of A-074's line item. Spring already emitted
+ * {@code X-Frame-Options}, {@code X-Content-Type-Options} and HSTS from its
+ * defaults; what was missing is everything below them —
+ * {@code Content-Security-Policy} above all, which is assembled per deployment
+ * by {@link ContentSecurityPolicy} rather than written out as a constant.
  *
  * <h2>Stateless</h2>
  *
@@ -135,17 +162,90 @@ public class SecurityConfig {
     static final String[] PUBLIC_INFRA_PATHS = {
             "/ws/**",
             "/actuator/health", "/actuator/health/**", "/actuator/info",
+    };
+
+    /**
+     * Public only while springdoc is switched on — see the class javadoc.
+     * Separated from {@link #PUBLIC_INFRA_PATHS} rather than filtered out of it,
+     * so that "what is permanently public" and "what is public in a documented
+     * environment" are two lists a reader can tell apart.
+     */
+    static final String[] API_DOCS_PATHS = {
             "/v3/api-docs", "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**",
     };
+
+    /**
+     * Camera, microphone, geolocation and the rest: a ticketing tool asks for
+     * none of them, so the honest policy is to surrender the capability rather
+     * than to rely on never calling the API. It also means a compromised
+     * dependency cannot prompt a user for their webcam under our origin's name.
+     */
+    private static final String PERMISSIONS_POLICY = String.join(", ",
+            "accelerometer=()", "autoplay=()", "camera=()", "display-capture=()",
+            "encrypted-media=()", "fullscreen=(self)", "geolocation=()", "gyroscope=()",
+            "magnetometer=()", "microphone=()", "midi=()", "payment=()",
+            "picture-in-picture=()", "usb=()", "xr-spatial-tracking=()");
+
+    private final boolean apiDocsEnabled;
+
+    public SecurityConfig(@Value("${springdoc.api-docs.enabled:false}") boolean apiDocsEnabled) {
+        this.apiDocsEnabled = apiDocsEnabled;
+    }
 
     @Bean
     SecurityFilterChain apiSecurityChain(HttpSecurity http,
                                          ProblemErrorResponses problems,
-                                         JwtAuthoritiesConverter authorities) throws Exception {
+                                         JwtAuthoritiesConverter authorities,
+                                         ContentSecurityPolicy csp,
+                                         CsrfTokenRepository csrfTokens,
+                                         CsrfTokenRequestHandler csrfTokenRequests,
+                                         RequestMatcher cookieAuthenticatedRoutes) throws Exception {
         return http
-                // See the class javadoc. Disabled on purpose, with the condition
-                // that would reverse the decision written down beside it.
-                .csrf(csrf -> csrf.disable())
+                // A-074. Enabled for the two cookie-authenticated routes and no
+                // others — CookieRouteCsrf explains both halves of that.
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(csrfTokens)
+                        .csrfTokenRequestHandler(csrfTokenRequests)
+                        .requireCsrfProtectionMatcher(cookieAuthenticatedRoutes))
+
+                // A-074. CSP is computed from what this deployment actually
+                // serves; the rest are fixed. Spring's defaults already covered
+                // frameOptions, contentTypeOptions and HSTS — restated here so
+                // the whole header set is readable in one place rather than half
+                // here and half in a framework default somebody has to know
+                // about.
+                .headers(headers -> headers
+                        .contentSecurityPolicy(policy -> policy.policyDirectives(csp.policyDirectives()))
+                        // Belt and braces with the CSP's frame-ancestors 'none':
+                        // the header is what older browsers understand and costs
+                        // nothing to keep.
+                        .frameOptions(frame -> frame.deny())
+                        .contentTypeOptions(withDefaults())
+                        // Two years, subdomains included. Emitted only over
+                        // HTTPS, so local development on http is unaffected;
+                        // preload is deliberately NOT requested — it is a
+                        // submission to a browser-vendor list that is slow and
+                        // painful to undo, and that is A-075's call to make with
+                        // a domain in hand.
+                        .httpStrictTransportSecurity(hsts -> hsts
+                                .includeSubDomains(true)
+                                .maxAgeInSeconds(Duration.ofDays(730).toSeconds()))
+                        // A ticket URL carries a ticket code, and a full Referer
+                        // would leak it to any third-party host a user reaches
+                        // from the app. Origin-only when crossing origins, full
+                        // path within our own.
+                        .referrerPolicy(referrer -> referrer
+                                .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                        .permissionsPolicyHeader(permissions -> permissions.policy(PERMISSIONS_POLICY))
+                        // same-origin rather than same-site: EduTrack shares
+                        // nothing with a sibling subdomain, which is the same
+                        // assumption CookieRouteCsrf declines to make about
+                        // SameSite.
+                        .crossOriginOpenerPolicy(coop -> coop
+                                .policy(CrossOriginOpenerPolicyHeaderWriter.CrossOriginOpenerPolicy.SAME_ORIGIN))
+                        .crossOriginResourcePolicy(corp -> corp
+                                .policy(CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy.SAME_ORIGIN)))
+
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
                 // Spring's defaults answer 401 with an empty body; problemTypes.ts
@@ -154,20 +254,41 @@ public class SecurityConfig {
                         .authenticationEntryPoint(problems)
                         .accessDeniedHandler(problems))
 
-                .authorizeHttpRequests(auth -> auth
-                        // CORS preflight carries no credentials and must never be
-                        // challenged; a 401 here fails the real request that follows
-                        // with an error naming CORS rather than authentication.
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers(PUBLIC_API_PATHS).permitAll()
-                        .requestMatchers(PUBLIC_INFRA_PATHS).permitAll()
-                        // Ordered after the public list: first match wins, so this
-                        // closes everything the lines above did not open. New
-                        // endpoints are therefore protected by default rather than
-                        // by somebody remembering to add them.
-                        .requestMatchers("/api/**", "/actuator/**").authenticated()
-                        // The SPA shell and its client-side routes.
-                        .anyRequest().permitAll())
+                .authorizeHttpRequests(auth -> {
+                    // CORS preflight carries no credentials and must never be
+                    // challenged; a 401 here fails the real request that follows
+                    // with an error naming CORS rather than authentication.
+                    auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                            .requestMatchers(PUBLIC_API_PATHS).permitAll()
+                            .requestMatchers(PUBLIC_INFRA_PATHS).permitAll();
+
+                    // A-074. Permitted only where the documentation is switched
+                    // on. Where it is not, these answer 404: they are not under
+                    // /api/**, so the authenticated rule below never reaches
+                    // them, and they fall to anyRequest().permitAll() and then
+                    // find no handler, because springdoc registered none.
+                    // SpaResourceConfig lists v3/api-docs and swagger-ui among
+                    // its backend prefixes, so they are refused honestly rather
+                    // than answered with the SPA shell — a 200 carrying
+                    // index.html is what a scanner would read as "documentation
+                    // present". ApiDocsClosedIT pins the 404 on all five paths.
+                    //
+                    // A statement rather than a ternary over an empty array:
+                    // requestMatchers rejects an empty pattern list, so the
+                    // "documentation off" case would fail at startup — the one
+                    // configuration nobody runs locally.
+                    if (apiDocsEnabled) {
+                        auth.requestMatchers(API_DOCS_PATHS).permitAll();
+                    }
+
+                    // Ordered after the public list: first match wins, so this
+                    // closes everything the lines above did not open. New
+                    // endpoints are therefore protected by default rather than
+                    // by somebody remembering to add them.
+                    auth.requestMatchers("/api/**", "/actuator/**").authenticated()
+                            // The SPA shell and its client-side routes.
+                            .anyRequest().permitAll();
+                })
 
                 // Consumes the single JwtDecoder bean, which carries the signature,
                 // issuer, expiry and A-025 revocation checks together.

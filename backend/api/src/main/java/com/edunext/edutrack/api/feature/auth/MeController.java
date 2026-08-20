@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.auth;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -143,6 +144,36 @@ class MeController {
                                               "status": 401,
                                               "detail": "The current password is incorrect."
                                             }""")}))
+    @ApiResponse(
+            responseCode = "429",
+            description = """
+                    A-074 · too many wrong `currentPassword` guesses for this account — five \
+                    in fifteen minutes. `Retry-After` carries the seconds remaining.
+
+                    Keyed on the authenticated user rather than on the caller's address, and \
+                    deliberately **separate from the sign-in lockout**: counting these \
+                    towards that one would let somebody holding a stolen token lock the real \
+                    owner out of signing in at all, which turns the defence into the attack. \
+                    Being refused here never affects the ability to log in.
+
+                    Only wrong guesses are charged. A successful change costs nothing and \
+                    clears the count.""",
+            headers = @Header(
+                    name = "Retry-After",
+                    description = "Seconds until the budget frees up.",
+                    schema = @Schema(type = "integer")),
+            content = @Content(
+                    mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class),
+                    examples = @ExampleObject(
+                            name = "too-many-password-change-attempts",
+                            value = """
+                                    {
+                                      "type": "https://edutrack/errors/too-many-password-change-attempts",
+                                      "title": "Too many requests",
+                                      "status": 429,
+                                      "detail": "Too many password change attempts. Try again shortly."
+                                    }""")))
     ResponseEntity<Void> changeOwnPassword(
             // Hidden for the reason AuthController#logout documents: the header
             // is supplied by the `bearerAuth` security scheme, and declaring it

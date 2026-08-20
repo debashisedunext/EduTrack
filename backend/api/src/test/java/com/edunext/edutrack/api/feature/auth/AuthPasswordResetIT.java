@@ -184,20 +184,45 @@ class AuthPasswordResetIT {
                 String.class);
     }
 
+    /**
+     * A-074 · {@code /auth/refresh} is CSRF-protected and carries no bearer to
+     * be exempted by, so this sends the double submit a browser would. Without
+     * it these cases would be refused 403 before reaching the revocation logic
+     * they are about.
+     */
     private ResponseEntity<String> refresh(String refreshToken) {
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.USER_AGENT, CHROME);
-        headers.set(HttpHeaders.COOKIE, "refresh_token=" + refreshToken);
+        headers.set(HttpHeaders.COOKIE, "refresh_token=" + refreshToken + "; XSRF-TOKEN=reset-it-csrf");
+        headers.set("X-XSRF-TOKEN", "reset-it-csrf");
         return rest.exchange("/api/v1/auth/refresh", HttpMethod.POST,
                 new HttpEntity<>(null, headers), String.class);
     }
 
     private static String cookieValue(ResponseEntity<String> response) {
-        List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
-        assertThat(cookies).isNotNull().hasSize(1);
-        String header = cookies.getFirst();
+        String header = refreshCookieHeader(response);
         String withoutName = header.substring(header.indexOf('=') + 1);
         return withoutName.substring(0, withoutName.indexOf(';'));
+    }
+
+    /**
+     * A-074 · the refresh cookie, picked by name rather than by being the only one.
+     *
+     * <p>This asserted {@code hasSize(1)} until CSRF tokens landed. Responses now
+     * carry {@code XSRF-TOKEN} as well, so a count is the wrong shape — but
+     * dropping the assertion would be weaker than the test it replaces. Naming
+     * what is permitted keeps the intent: one refresh cookie, and nothing else
+     * except the CSRF token.
+     */
+    private static String refreshCookieHeader(ResponseEntity<String> response) {
+        List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
+        assertThat(cookies).as("the response must set the refresh cookie").isNotNull();
+        assertThat(cookies)
+                .as("no cookie beyond the refresh token and A-074's CSRF token")
+                .allMatch(cookie -> cookie.startsWith("refresh_token=") || cookie.startsWith("XSRF-TOKEN="));
+        List<String> refresh = cookies.stream().filter(c -> c.startsWith("refresh_token=")).toList();
+        assertThat(refresh).as("exactly one refresh_token cookie").hasSize(1);
+        return refresh.getFirst();
     }
 
     private static JsonNode json(ResponseEntity<String> response) throws Exception {

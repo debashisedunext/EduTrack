@@ -52,6 +52,7 @@ class PasswordChangeServiceTest {
     private PasswordEncoder passwordEncoder;
     private AccessTokenBlacklist blacklist;
     private PasswordPolicy passwordPolicy;
+    private PasswordChangeRateLimiter rateLimiter;
     private PasswordChangeService service;
 
     @BeforeEach
@@ -61,8 +62,16 @@ class PasswordChangeServiceTest {
         passwordEncoder = mock(PasswordEncoder.class);
         blacklist = mock(AccessTokenBlacklist.class);
         passwordPolicy = mock(PasswordPolicy.class);
+        // A-074. Stubbed to "not throttled" explicitly rather than left to
+        // Mockito's default — which happens to be Optional.empty() for an Optional
+        // return and would work, but silently, so a reader could not tell whether
+        // the cases below pass because the limiter allows them or because nobody
+        // wired it. The throttle cases at the end override this.
+        rateLimiter = mock(PasswordChangeRateLimiter.class);
+        when(rateLimiter.check(anyLong())).thenReturn(Optional.empty());
         service = new PasswordChangeService(
-                new AccessTokenVerifier(jwtDecoder), users, passwordEncoder, blacklist, passwordPolicy);
+                new AccessTokenVerifier(jwtDecoder), users, passwordEncoder, blacklist, passwordPolicy,
+                rateLimiter);
     }
 
     private void givenAValidSession() {
@@ -401,5 +410,87 @@ class PasswordChangeServiceTest {
                 .isThrownBy(() -> service.change(HEADER, request("wrong", NEW)));
 
         verify(passwordPolicy, never()).enforceNotReused(anyLong(), anyString());
+    }
+
+    // ── A-074 · the throttle on currentPassword guesses ─────────────────────
+
+    /**
+     * The gap this class's own javadoc described as turning "a fifteen-minute
+     * stolen token into permanent account takeover" — closed by bounding the
+     * guesses rather than by making any single guess harder.
+     */
+    @Test
+    @DisplayName("a throttled caller is refused before the expensive verify runs")
+    void aThrottledCallerIsRefusedBeforeTheKdf() {
+        givenAValidSession();
+        when(rateLimiter.check(USER_ID)).thenReturn(Optional.of(Duration.ofSeconds(300)));
+
+        assertThatExceptionOfType(TooManyPasswordChangeAttemptsException.class)
+                .isThrownBy(() -> service.change(HEADER, new ChangePasswordRequest(CURRENT, NEW)))
+                .satisfies(e -> assertThat(e.retryAfter()).isEqualTo(Duration.ofSeconds(300)));
+
+        // The whole reason the check runs first: Argon2id costs ~175 ms and 64 MB,
+        // and a limiter that ran after it has already spent what it protects.
+        verify(passwordEncoder, never()).matches(anyString(), anyString());
+        verify(users, never()).updatePassword(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("a wrong current password is charged to the throttle")
+    void aWrongGuessIsCharged() {
+        givenAValidSession();
+        when(passwordEncoder.matches(CURRENT, CURRENT_HASH)).thenReturn(false);
+
+        assertThatExceptionOfType(InvalidCurrentPasswordException.class)
+                .isThrownBy(() -> service.change(HEADER, new ChangePasswordRequest(CURRENT, NEW)));
+
+        verify(rateLimiter).recordFailure(USER_ID);
+    }
+
+    /**
+     * The other half of the decision this class already pins in "a wrong current
+     * password does NOT count towards the login lockout". A-074 adds a budget of
+     * its own; it must not have added the login one back by the side door,
+     * because that is what would let a stolen token lock the real owner out.
+     */
+    @Test
+    @DisplayName("a wrong guess is charged to A-074's budget and still not to the login lockout")
+    void theTwoBudgetsStaySeparate() {
+        givenAValidSession();
+        when(passwordEncoder.matches(CURRENT, CURRENT_HASH)).thenReturn(false);
+
+        assertThatExceptionOfType(InvalidCurrentPasswordException.class)
+                .isThrownBy(() -> service.change(HEADER, new ChangePasswordRequest(CURRENT, NEW)));
+
+        verify(rateLimiter).recordFailure(USER_ID);
+        verify(users, never()).incrementFailedAttempts(anyLong());
+        verify(users, never()).applyLock(anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("a correct current password clears the budget")
+    void aCorrectGuessClearsTheBudget() {
+        givenAValidSession();
+
+        service.change(HEADER, new ChangePasswordRequest(CURRENT, NEW));
+
+        verify(rateLimiter).recordSuccess(USER_ID);
+        verify(rateLimiter, never()).recordFailure(anyLong());
+    }
+
+    /**
+     * Being refused for reuse or for submitting the same password back is not a
+     * wrong guess — the caller proved they knew the current password. Charging
+     * those would ration legitimate attempts rather than bounding guessing.
+     */
+    @Test
+    @DisplayName("a refusal that is not a wrong guess costs no budget")
+    void nonGuessRefusalsCostNothing() {
+        givenAValidSession();
+
+        assertThatExceptionOfType(PasswordUnchangedException.class)
+                .isThrownBy(() -> service.change(HEADER, new ChangePasswordRequest(CURRENT, CURRENT)));
+
+        verify(rateLimiter, never()).recordFailure(anyLong());
     }
 }

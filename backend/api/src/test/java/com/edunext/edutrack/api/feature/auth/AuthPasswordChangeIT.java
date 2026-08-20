@@ -14,6 +14,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -158,6 +159,16 @@ class AuthPasswordChangeIT {
                 // cannot be shared with a test that changes one — JUnit's method
                 // order is deterministic but unspecified, and a shared row would
                 // make this suite pass or fail depending on it.
+                // A-074 · two rows split off from itp.wrongcurrent, for the reason
+                // ITP009 above already gives. wrongCurrentPasswordsDoNotLockTheAccount
+                // spends six wrong guesses deliberately, which is more than the
+                // PasswordChangeRateLimiter budget of five — so every later test
+                // sharing that row was answered 429 before it reached the check it
+                // was written to make. The throttle did not create the
+                // order-dependency; it revealed one this fixture table had already
+                // decided it did not want.
+                {"ITP010", "itp.wrongonce", "itp.wrongonce@edunext.test", "Wrong Once", "1", "1"},
+                {"ITP011", "itp.echoprobe", "itp.echoprobe@edunext.test", "Echo Probe", "1", "1"},
                 {"ITP009", "itp.firstlogin", "itp.firstlogin@edunext.test", "First Login", "1", "1"}}) {
             jdbc.update("""
                     INSERT INTO users (emp_code, username, email, password_hash, full_name,
@@ -321,8 +332,8 @@ class AuthPasswordChangeIT {
     @Test
     @DisplayName("a wrong current password is refused and changes nothing")
     void aWrongCurrentPasswordChangesNothing() throws Exception {
-        ResponseEntity<String> session = login("itp.wrongcurrent", TEMP_PASSWORD);
-        String hashBefore = storedHashOf("itp.wrongcurrent");
+        ResponseEntity<String> session = login("itp.wrongonce", TEMP_PASSWORD);
+        String hashBefore = storedHashOf("itp.wrongonce");
 
         ResponseEntity<String> refused =
                 changePassword(accessToken(session), "not-my-password", NEW_PASSWORD);
@@ -330,25 +341,41 @@ class AuthPasswordChangeIT {
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(json(refused).path("type").asText())
                 .isEqualTo("https://edutrack/errors/invalid-credentials");
-        assertThat(storedHashOf("itp.wrongcurrent")).isEqualTo(hashBefore);
-        assertThat(mustChangePasswordOf("itp.wrongcurrent")).isTrue();
+        assertThat(storedHashOf("itp.wrongonce")).isEqualTo(hashBefore);
+        assertThat(mustChangePasswordOf("itp.wrongonce")).isTrue();
     }
 
     /**
      * A-021's lockout guards the login form. Counting failures here would let a
      * stolen token lock the real user out of signing in — a denial of service
      * delivered by the control meant to protect them.
+     *
+     * <p><b>A-074 · this is now also where the two budgets are seen to be
+     * separate.</b> Six wrong guesses exceeds
+     * {@code PasswordChangeRateLimiter.MAX_FAILURES}, so the later attempts are
+     * refused 429 by the change throttle — and the account is still able to log
+     * in, which is the whole point. That is the property A-021's note asked for
+     * stated as an assertion rather than as prose: <i>refusing the change never
+     * refuses the login</i>.
+     *
+     * <p>The loop is left at six rather than trimmed to five. It is what makes
+     * the throttle fire, and a test that stopped short of it would no longer
+     * exercise the interaction it now documents.
      */
     @Test
-    @DisplayName("wrong current passwords do not accumulate towards the login lockout")
+    @DisplayName("wrong current passwords throttle the change and still never lock the login")
     void wrongCurrentPasswordsDoNotLockTheAccount() throws Exception {
         ResponseEntity<String> session = login("itp.wrongcurrent", TEMP_PASSWORD);
         String token = accessToken(session);
 
+        HttpStatusCode last = null;
         for (int attempt = 0; attempt < 6; attempt++) {
-            changePassword(token, "guess-" + attempt, NEW_PASSWORD);
+            last = changePassword(token, "guess-" + attempt, NEW_PASSWORD).getStatusCode();
         }
 
+        assertThat(last)
+                .as("A-074 · the sixth guess is past the five-failure budget and must be refused")
+                .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(jdbc.queryForObject(
                 "SELECT failed_attempts FROM users WHERE username = 'itp.wrongcurrent'", Integer.class))
                 .isZero();
@@ -479,7 +506,7 @@ class AuthPasswordChangeIT {
     @Test
     @DisplayName("no refusal echoes either password")
     void refusalsEchoNothing() throws Exception {
-        ResponseEntity<String> session = login("itp.wrongcurrent", TEMP_PASSWORD);
+        ResponseEntity<String> session = login("itp.echoprobe", TEMP_PASSWORD);
 
         String body = changePassword(accessToken(session), "wrong-guess-value", "Rejected-Value-9!")
                 .getBody();
