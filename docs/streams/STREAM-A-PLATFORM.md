@@ -470,6 +470,11 @@
 
 ---
 
+### The project dashboard
+
+- [ ] **A-077** **Project dashboard — the placeholder S-20 links to, and it has never had a task.** `PROJECT_ROUTE` renders `ScreenPlaceholder title="Project dashboard"`. The route exists because S-20's traceability rule makes every entity in the ticket summary panel a link, and `TicketDetailPage`'s own comment assigns the destinations: *"the project dashboard and the resource 360 (A-069 / S-28) to Stream A, the client 360 to Stream B… Each owner replaces one element."* **A-069 was done and its sibling was not** — `ResourceProfilePage` is real, this one is still a stand-in, and no task in any backlog names it. Raised by Debashis on the project lead's instruction after an audit of the router's placeholders; the scope and shape are yours. Every ticket that names a project already links here, so the cost of leaving it is a dead end on the most-used screen in the product.
+
+
 ## Decisions you own
 
 Answer before M2 (PLAN.md §5): **G-4** — does an auto-escalated level revert after closure? *(Recommended: no; keep `original_level` and report both.)*

@@ -176,6 +176,20 @@ that map moves too, or each of these needs Divyansh's sign-off before it is touc
 ### Remaining tabs & screens
 - [ ] **C-062** Stage Queue / team inbox — "Waiting in QA", "Waiting in Deployment", sorted by time-in-stage descending. The landing page for QA and Deployment. **S-31**
 
+### The chat screen — S-25
+
+- [x] **D-065** 🔴 **The chat React surface — S-25 has no frontend and the plan cannot see it.** `/chat` renders `ScreenPlaceholder title="Chat"` and `frontend/src/features/chat/` does not exist. Every backend half is done and has been for days: D-050 the three-surface engine, D-051 typing/receipts/unread, D-052 mentions, D-053's search, D-054 ticket cards, D-055/D-056 Ask Status, D-057 the edit window and tombstones. **The gap is invisible to the tracker** because D-050 carries screen code `S-25` and is marked done — so the schedule reports S-25 complete while the product shows a placeholder. That is the same blind spot D-062 closed for response shapes: the plan can only see what a task claims. D-050's own entry says "Backend only — the React surfaces need D-015 merged", and D-015 landed 8 Aug, so the stated prerequisite has been clear since. Scope is the three surfaces the engine already serves — ticket thread, direct message, project channel — over `/chat` and the shell's chat bar, subscribing through D-015's STOMP client and D-013's channel interceptor. **Not in scope:** file share and emoji, which are D-053's blocked halves and stay blocked.
+  - **Shipped 20 Aug.** `frontend/src/features/chat/` — `ChatPage` (two-pane: grouped thread sidebar, message pane, composer), `MessageList`, `chatEvents` and `threadDestination`. All three surfaces list, read and post. 23 tests.
+  - **The contract cannot name two of the three rooms, and that is mine to fix.** The engine publishes a ticket thread to `/topic/ticket.{id}` and a project channel to `/topic/project.{id}`, both keyed on the **numeric** row id — while `ChatThread` carries `ticketId` as a *string* (the human code, per the `TicketId` schema) and no project id at all. So the client genuinely cannot address the rooms its own backend publishes to. `threadDestination` returns null and says why, rather than guessing a destination that would look live and receive nothing. Those threads **poll at 10s** instead, so every surface updates; direct messages subscribe properly through the own queue. **Follow-up: add a numeric anchor to `ChatThread`** — contract, backend and regenerated client, all Stream D.
+  - **Found by `tsc`, not by the tests.** The first implementation called `ticketTopic(thread.ticketId)` and 21 tests passed, because the fixture I wrote used a number. The compiler is what noticed the contract says string. A test written from the same misunderstanding as the code agrees with it.
+
+
+
+### The level vocabulary — a coordinated change
+
+- [ ] **D-066** 🟡 **S-12 promises "Admin can add levels" and the contract cannot express it.** [`DEPENDENCIES.md`](../DEPENDENCIES.md) row 22, and it is **not deliverable by one stream**. Opening the contract's `Level` enum retypes `Ticket.level`, `Ticket.originalLevel` and `TaskType.defaultLevel`, so it needs the contract (**mine**), the chip colour maps (**Divyansh**) and the ticket schemas (**Shivendra**) moving together. My half is the contract change and the mock server; raising it here so the coordination has an owner rather than three halves each waiting to be asked. **Sequencing and whether to do it at all is a product call** — a fixed four-level vocabulary is a defensible answer, and if that is the answer S-12 should stop advertising the button.
+
+
 ## Decisions you own
 
 Answer during M5:

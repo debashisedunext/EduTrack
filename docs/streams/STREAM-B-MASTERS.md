@@ -687,6 +687,18 @@ Split with Stream A. Typically yours:
 
 ---
 
+### Client 360
+
+- [ ] **B-066** **Client 360 — the placeholder S-20 links to, and it has never had a task.** `CLIENT_ROUTE` renders `ScreenPlaceholder title="Client 360"`. Same origin as A-077: S-20 makes every entity in the ticket summary panel a link, and `TicketDetailPage`'s comment assigns this destination to Stream B — *"the client 360 to Stream B… Each owner replaces one element."* Stream A's sibling (A-069 / S-28, resource 360) shipped; this one and the project dashboard did not, and neither had a task until now. Raised by Debashis on the project lead's instruction after auditing the router's placeholders; scope and shape are yours. The client master (S-33/B-029) is the maintenance screen — this is the read-across view a PM opens from a ticket.
+
+
+### The two screens the sidebar promises and nothing builds
+
+- [ ] **B-067** **Masters index — the sidebar's Masters entry lands on a placeholder.** `/masters` renders `ScreenPlaceholder title="Masters"` with a hand-made list of links to the masters that do exist. Its comment says "the masters index arrives with the rest of M3" — M3 has largely landed and no task names it, so the stand-in has quietly become the screen. Scope is small: the index over the masters that exist, permission-filtered so a role that cannot open a master does not see a dead card. Raised by Debashis on the project lead's instruction after auditing the router's placeholders.
+
+- [ ] **B-068** 🟡 **Org settings screen — or the decision that the API is enough.** `/settings` renders `ScreenPlaceholder title="Settings"`. This is [`DEPENDENCIES.md`](../DEPENDENCIES.md) row 24, still open: `PUT /attachments/limits` exists and is `master.write`, §11's sidebar has a Settings entry, and **no S-number specifies an org-wide settings screen** — so today an Admin sets the caps by asking somebody rather than from a page. The register records the owner as uncertain ("masters' surface by shape, C's by feature — Ayush?"). **Raised so it stops being invisible, not to settle it.** If the answer is that the API is enough, close this with that reason and the placeholder should say so rather than promising a screen.
+
+
 ## Decisions you own
 
 Answer during M3 (PLAN.md §5, blueprint §16):

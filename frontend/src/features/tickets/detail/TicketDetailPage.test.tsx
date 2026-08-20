@@ -323,13 +323,35 @@ describe('S-20 Ticket detail shell — C-019', () => {
     )
   })
 
-  it('names the tasks that fill the ribbon and the tabs rather than rendering an empty shell', async () => {
+  it('names the tasks that fill the still-open tabs rather than rendering an empty shell', async () => {
+    signInAsAdmin()
+    renderPage()
+    await waitForTicket()
+
+    // Chat has no owning task built yet; the ribbon (C-051) and Journey,
+    // History, Comments, Attachments and Effort (all done) render for real.
+    await screen.findByRole('tab', { name: 'Chat' })
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'Chat' }))
+    expect(screen.getByText(/D-047/)).toBeInTheDocument()
+  })
+
+  // C-051 · real segment tiles from the aggregated payload's ribbon, not the
+  // placeholder every other still-open section shows.
+  it('renders the real ribbon strip, not the C-051 placeholder', async () => {
     signInAsAdmin()
     renderPage()
     await waitForTicket()
 
     const ribbon = screen.getByRole('region', { name: 'Workflow ribbon' })
-    expect(within(ribbon).getByText(/C-051/)).toBeInTheDocument()
+    expect(within(ribbon).queryByText(/C-051/)).not.toBeInTheDocument()
+
+    const list = within(ribbon).getByRole('list', { name: 'Workflow stages' })
+    const items = within(list).getAllByRole('listitem')
+    // Blueprint §4A.1's eight stages, minus CLOSED — the mock's `buildRibbon`
+    // never draws a ninth tile for the terminal state.
+    expect(items).toHaveLength(7)
+    expect(within(ribbon).getByText('Intake')).toBeInTheDocument()
+    expect(within(ribbon).getByText('Sign-off')).toBeInTheDocument()
   })
 
   describe('where it happened — C-069', () => {
