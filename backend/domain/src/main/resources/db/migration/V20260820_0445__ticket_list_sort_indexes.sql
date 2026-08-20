@@ -1,0 +1,141 @@
+-- =====================================================================
+-- A-073 · the three indexes the ticket list has been missing since A-004
+--
+-- Found by the index review in tools/perf/README.md, against real
+-- EXPLAIN ANALYZE output on the 50,000-row corpus tools/perf/seed-50k.sql
+-- builds — not by reading the DDL and guessing. Every number below is
+-- reproducible with `docker exec -i edutrack-mysql mysql ... <
+-- tools/perf/explain.sql`.
+--
+-- WHAT WAS WRONG
+--
+-- TicketListSpecs.DEFAULT_SORT is "-createdAt" and its SORTABLE map
+-- carries a comment saying the sortable columns are "all of which are
+-- indexed or the primary key". Three of the five were not:
+-- `created_at`, `date_reported` and `level` had no index at all. The
+-- comment was true when it was written of `ticket_code`
+-- (uq_tickets_code) and defensible of `planned_close_date`
+-- (ix_tickets_pcd_open covers the open half) — but the default sort,
+-- the one every caller gets who never touches the sort control, was a
+-- full table scan and a filesort.
+--
+-- At 200 fixture rows that is invisible. At 50,000:
+--
+--   Admin, default list          table scan 50,000 + filesort   25.4 ms
+--   PM, project scope            table scan 50,000 + filesort   19.3 ms
+--   Developer, assignee scope    ix_tickets_assignee_status
+--                                  2,530 rows + filesort         3.1 ms
+--
+-- and those are `SELECT id` on a warm buffer pool with one connection.
+-- The number that matters is not 25 ms, it is that the work is
+-- proportional to the table rather than to the page — the list gets
+-- slower every day the product is used, and cursor pagination (A-053)
+-- makes it worse rather than better, because every deep page repeats the
+-- whole scan and sort to throw away everything before the cursor.
+--
+-- WHAT THIS ADDS, AND WHY EXACTLY THESE THREE
+--
+--   ix_tickets_created (created_at, id)
+--       The default sort, for every caller whose scope does not narrow
+--       much — Admin, and any PM holding most of the projects. Turns the
+--       scan-and-sort into a reverse index scan that stops at 51 rows:
+--       25.4 ms -> 1.2 ms. It is also what makes A-053's keyset cursor
+--       work as designed: a deep page (created_at < ? OR (= ? AND id < ?))
+--       becomes a range scan of 51 entries, 0.04 ms, instead of the same
+--       full sort every page. `id` is in the index because it is in the
+--       ORDER BY — TicketListSpecs.SortKey.toSort() puts it there so ties
+--       resume correctly — and without it the tie-break re-introduces a
+--       sort the index was bought to remove.
+--
+--   ix_tickets_assignee_created (assigned_to, created_at, id)
+--       The Developer/QA/Deployment scope, which ScopeResolver expresses
+--       as assigned_to = me. 3.1 ms -> 0.12 ms. It does NOT displace
+--       ix_tickets_assignee_status: with a status filter present the
+--       optimiser correctly keeps that one and sorts the 68 rows it
+--       returns (0.17 ms), which is the right plan. Both earn their keep.
+--
+--   ix_tickets_reported (date_reported, id)
+--       This one is a COUNTERWEIGHT, and it is the reason to read this
+--       header before removing anything here. See below.
+--
+-- THE PART THAT IS NOT OBVIOUS: ix_tickets_created ALONE MAKES A REAL
+-- QUERY THREE TIMES WORSE
+--
+-- Every dashboard widget drill-down opens the ticket list with a
+-- reported-date window — A-060 added reportedFrom/reportedTo to
+-- TicketListSpecs precisely so the drill-down filters the span the widget
+-- was showing. That query is a narrow range on `date_reported` under the
+-- default `created_at` sort, and with only ix_tickets_created available
+-- the optimiser takes it, to avoid the filesort, and then walks backwards
+-- through 46,090 index entries looking for 51 rows that all sit at the
+-- far end of the table:
+--
+--   drill-down, one week, 16 months back
+--     no index at all                 table scan + filesort    19.5 ms
+--     ix_tickets_created only         reverse scan, 46,090     66.3 ms   <-- worse
+--     + ix_tickets_reported           range scan, 552 rows      2.4 ms
+--
+-- So the third index is not a nice-to-have found alongside the other two.
+-- Adding the first two without it would have shipped a 3x regression on
+-- every drill-down in S-05 while the ticket list got 20x faster, and the
+-- dashboard is where that would have been noticed — a long way from the
+-- migration that caused it. With ix_tickets_reported present the
+-- optimiser abandons the bad plan on cost and the sort it falls back to
+-- is over 552 rows, which is free.
+--
+-- This is the general shape worth remembering: an index that removes a
+-- sort can cost more than the sort, because the optimiser will prefer it
+-- on the strength of the ORDER BY and then read most of the table to
+-- satisfy a WHERE it cannot use.
+--
+-- WHAT IS DELIBERATELY NOT ADDED
+--
+--   (project_id, created_at, id) — the PM scope's obvious composite, and
+--   the one a symmetry argument would demand. Measured, and refused:
+--
+--     PM on 2 of 3 projects   optimiser ignores it, uses
+--                             ix_tickets_created            0.18 ms
+--     PM on 1 project         optimiser uses it             0.03 ms
+--                             without it                    0.59 ms
+--     PM + level + status     forced onto it                23.7 ms
+--                             optimiser's own choice
+--                             (ix_tickets_project_status)    0.87 ms
+--
+--   A 0.56 ms gain in one case, on a fourth index on the most heavily
+--   written table in the product, where ix_tickets_project_status already
+--   answers every filtered variant better. The forced-plan row is not the
+--   argument on its own — the optimiser chose correctly every time it was
+--   left alone — but it shows the same trap as the drill-down above is
+--   sitting there, and nothing in the 0.56 ms is worth buying it.
+--
+--   (level, ...) — `level` has four values. Sorting by it alone is a
+--   filesort whatever we do, and no report or screen sorts by level
+--   without something more selective alongside it.
+--
+--   (planned_close_date, ...) — ix_tickets_pcd_open (A-009) already
+--   indexes it for open tickets, via the generated column standing in for
+--   PostgreSQL's partial index. Sorting *closed* tickets by their planned
+--   close date is not a question anyone asks.
+--
+-- COST
+--
+--   Space   1.5-2.5 MB each at 50,000 rows, against a 45 MB table.
+--   Writes  49,800 bulk inserts: 4.891 s -> 5.376 s, +9.9%.
+--
+--   And the structural half of the write argument, which matters more
+--   than the 9.9%: none of `created_at`, `assigned_to` or `date_reported`
+--   is touched by the hot update path. A ticket changing status, stage,
+--   iteration, effort or pct_complete moves no entry in any of these
+--   three. Only INSERT pays in full, and reassignment pays for one.
+--
+-- REVIEW
+--
+-- CLAUDE.md requires Stream A's review for any migration touching
+-- `tickets`. This is Stream A's own task; the numbers above are the
+-- review, and tools/perf/explain.sql re-runs it on demand.
+-- =====================================================================
+
+ALTER TABLE tickets
+  ADD INDEX ix_tickets_created (created_at, id),
+  ADD INDEX ix_tickets_assignee_created (assigned_to, created_at, id),
+  ADD INDEX ix_tickets_reported (date_reported, id);
