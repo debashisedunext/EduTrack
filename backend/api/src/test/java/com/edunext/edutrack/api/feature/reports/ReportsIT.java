@@ -132,9 +132,11 @@ class ReportsIT {
             // The hub does not hide cards by role. Hiding them would collapse
             // "not built", "not permitted" and "does not exist" into one state.
             // Availability differs per caller; the card is always present.
-            assertThat(service.catalogue(admin()).reports()).hasSize(18);
-            assertThat(service.catalogue(pm()).reports()).hasSize(18);
-            assertThat(service.catalogue(developer()).reports()).hasSize(18);
+            // Nineteen, not §7.8's eighteen: A-070's critical-origin is the
+            // first card the blueprint does not list.
+            assertThat(service.catalogue(admin()).reports()).hasSize(19);
+            assertThat(service.catalogue(pm()).reports()).hasSize(19);
+            assertThat(service.catalogue(developer()).reports()).hasSize(19);
         }
 
         /**

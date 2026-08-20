@@ -102,6 +102,9 @@ class ReportRunnersIT {
         ticketIds.clear();
 
         myProject = project("RNA");
+        // A-070 · its own project, so the four-quadrant assertions read one row
+        // rather than sharing a table with six other nested classes' fixtures.
+        criticalProject = project("RNC");
         otherProject = project("RNB");
         me = user("rn.me");
         colleague = user("rn.them");
@@ -163,6 +166,23 @@ class ReportRunnersIT {
 
     private CallerIdentity developer() {
         return new CallerIdentity(me, "DEVELOPER", List.of(myProject));
+    }
+
+    /**
+     * A-070's callers, scoped to its own project.
+     *
+     * <p>Reusing {@link #pm()} here returns nothing and looks like a broken
+     * query: it is scoped to {@code myProject}, and {@code ReportScope} narrows
+     * a requested project to the caller's own rather than widening to it — so
+     * asking for {@code criticalProject} as that PM intersects to empty, which
+     * is the guard working exactly as intended.
+     */
+    private CallerIdentity criticalPm() {
+        return new CallerIdentity(2L, "PM", List.of(criticalProject));
+    }
+
+    private CallerIdentity criticalDeveloper() {
+        return new CallerIdentity(me, "DEVELOPER", List.of(criticalProject));
     }
 
     /** Bounded to this test's project — see the class note on isolation. */
@@ -595,6 +615,211 @@ class ReportRunnersIT {
         }
     }
 
+
+    @Nested
+    @DisplayName("A-070 · born critical vs became critical")
+    class CriticalOrigin {
+
+        /**
+         * The four quadrants of {@code original_level} against {@code level},
+         * asserted together on one row.
+         *
+         * <p>Together rather than in four tests, because the mistake worth
+         * catching is a predicate that overlaps another — counting a
+         * de-escalated ticket as both born and became, say — and that is
+         * invisible unless the four numbers are read against the same fixture
+         * at the same time.
+         */
+        @Test
+        @DisplayName("separates arrived-critical from raised-to-critical, and counts both ways back")
+        void theFourQuadrants() {
+            seedCriticalCohort();
+
+            List<Map<String, Object>> rows = run(criticalPm(), CriticalOriginRunner.KEY, criticalProject);
+
+            assertThat(rows).hasSize(1);
+            assertThat(cell(rows, 0, "tickets")).isEqualTo(5L);
+            // born:    arrived CRITICAL, whatever it is now — c1 and c4
+            assertThat(cell(rows, 0, "bornCritical")).isEqualTo(2L);
+            // became:  arrived lower and is CRITICAL now — c2 and c3
+            assertThat(cell(rows, 0, "becameCritical")).isEqualTo(2L);
+            // de-esc:  arrived CRITICAL and is not now — c4 alone
+            assertThat(cell(rows, 0, "deEscalated")).isEqualTo(1L);
+            // now:     c1 (born, still) + c2 + c3 (became) = 3
+            assertThat(cell(rows, 0, "criticalNow")).isEqualTo(3L);
+
+            // The identity the report prints and a reader can check on screen.
+            assertThat((Long) cell(rows, 0, "criticalNow"))
+                    .isEqualTo((Long) cell(rows, 0, "bornCritical")
+                            - (Long) cell(rows, 0, "deEscalated")
+                            + (Long) cell(rows, 0, "becameCritical"));
+        }
+
+        /**
+         * 🔴 The attribution, which is the half that carries the management
+         * insight.
+         *
+         * <p>"Became critical" is mostly self-inflicted — §6 raises a ticket
+         * when its Planned Close Date passes — and separating the scanner's
+         * escalations from a person's decisions is what distinguishes "we ran
+         * late" from "somebody judged this urgent". A report that lumped them
+         * would show a number nobody can act on.
+         */
+        @Test
+        @DisplayName("splits became-critical into the scanner's doing and a person's")
+        void attribution() {
+            seedCriticalCohort();
+
+            List<Map<String, Object>> rows = run(criticalPm(), CriticalOriginRunner.KEY, criticalProject);
+
+            // c2 was escalated by the SLA scanner, c3 raised by a manager.
+            assertThat(cell(rows, 0, "escalatedBySla")).isEqualTo(1L);
+            assertThat(cell(rows, 0, "raisedByPerson")).isEqualTo(1L);
+            // Both of this fixture's became-critical tickets carry a history
+            // row, so nothing is left unattributed.
+            assertThat(cell(rows, 0, "unrecorded")).isEqualTo(0L);
+            // The three partition becameCritical by construction — two counted
+            // from one mutually-exclusive expression and the third derived —
+            // so this can never disagree with its own total.
+            assertThat((Long) cell(rows, 0, "escalatedBySla")
+                    + (Long) cell(rows, 0, "raisedByPerson")
+                    + (Long) cell(rows, 0, "unrecorded"))
+                    .isEqualTo(cell(rows, 0, "becameCritical"));
+        }
+
+        /**
+         * 🔴 A ticket can cross CRITICAL more than once.
+         *
+         * <p>Escalated by the scanner, downgraded by a manager, raised again by
+         * hand: {@code EXISTS (… actor_type = 'SYSTEM')} would call that an SLA
+         * escalation, which is what it was two changes ago and not what it is.
+         * The query takes the most recent row that set CRITICAL, so this
+         * belongs to the person who last raised it.
+         */
+        @Test
+        @DisplayName("attribution follows the latest change to critical, not the first")
+        void attributionFollowsTheLatestChange() {
+            long tt = taskType("Rework");
+            criticalTicket("cx", criticalProject, tt, "LOW", "CRITICAL", "2026-08-03");
+            // The scanner got there first…
+            levelChange("cx", "LOW", "CRITICAL", "SYSTEM", null, "2026-08-05 10:00:00");
+            // …a manager stood it down…
+            levelChange("cx", "CRITICAL", "MEDIUM", "USER", 2L, "2026-08-06 10:00:00");
+            // …and then raised it again by hand. That is who it belongs to.
+            levelChange("cx", "MEDIUM", "CRITICAL", "USER", 2L, "2026-08-07 10:00:00");
+
+            List<Map<String, Object>> rows = run(criticalPm(), CriticalOriginRunner.KEY, criticalProject);
+
+            assertThat(rows).hasSize(1);
+            assertThat(cell(rows, 0, "becameCritical")).isEqualTo(1L);
+            assertThat(cell(rows, 0, "escalatedBySla"))
+                    .as("the SYSTEM row is older than the USER one that set it where it stands")
+                    .isEqualTo(0L);
+            assertThat(cell(rows, 0, "raisedByPerson")).isEqualTo(1L);
+        }
+
+        /**
+         * 🔴 A became-critical ticket with no history row is its own answer.
+         *
+         * <p>The first version made this the remainder of "escalated by the
+         * scanner" and labelled it "raised by a person" — sound arithmetic and
+         * a false label. Running against the B-007 corpus made it plain: 77 of
+         * its tickets are critical without having arrived that way and only 7
+         * carry a {@code LEVEL_CHANGED} row, so seventy would have been
+         * reported as somebody's decision when nothing recorded one.
+         *
+         * <p>It should be zero in production — every real change is journalled
+         * by {@code PriorityChangeController} or {@code SlaEscalation} — which
+         * is precisely why a number there is worth seeing rather than
+         * absorbing into a column that names an actor.
+         */
+        @Test
+        @DisplayName("with no history row at all, the change is reported as unrecorded")
+        void unattributedIsItsOwnColumn() {
+            long tt = taskType("Silent");
+            criticalTicket("cy", criticalProject, tt, "LOW", "CRITICAL", "2026-08-03");
+
+            List<Map<String, Object>> rows = run(criticalPm(), CriticalOriginRunner.KEY, criticalProject);
+
+            assertThat(cell(rows, 0, "becameCritical")).isEqualTo(1L);
+            assertThat(cell(rows, 0, "escalatedBySla")).isEqualTo(0L);
+            // Not attributed to anybody, because nobody is recorded.
+            assertThat(cell(rows, 0, "raisedByPerson")).isEqualTo(0L);
+            assertThat(cell(rows, 0, "unrecorded")).isEqualTo(1L);
+        }
+
+        /**
+         * The share is against what is critical <em>now</em>, not against the
+         * cohort — "how much of our critical load did we create", not "what
+         * fraction of all work escalated". The second moves when quiet work is
+         * added, which has nothing to do with escalation.
+         */
+        @Test
+        @DisplayName("the share is of the current critical load, not of every ticket raised")
+        void shareIsOfTheCriticalLoad() {
+            seedCriticalCohort();
+
+            List<Map<String, Object>> rows = run(criticalPm(), CriticalOriginRunner.KEY, criticalProject);
+
+            // 2 became out of 3 critical now = 66.7%, not 2 of 5 raised = 40%.
+            assertThat(cell(rows, 0, "becameShare")).hasToString("66.7");
+        }
+
+        /**
+         * A row where nothing was ever critical is every other project and
+         * type, and printing them would bury the ones that matter —
+         * {@code ReopenAnalysisRunner} omits its quiet rows for the same
+         * reason.
+         */
+        @Test
+        @DisplayName("a project with nothing critical is left out entirely")
+        void quietRowsAreOmitted() {
+            long tt = taskType("Calm");
+            criticalTicket("cq", criticalProject, tt, "LOW", "LOW", "2026-08-03");
+            criticalTicket("cq2", criticalProject, tt, "MEDIUM", "MEDIUM", "2026-08-04");
+
+            List<Map<String, Object>> rows = run(criticalPm(), CriticalOriginRunner.KEY, criticalProject);
+
+            assertThat(rows).isEmpty();
+        }
+
+        /**
+         * The cohort is the reported-date window, for both halves. A ticket
+         * raised before it does not appear even though it became critical
+         * inside it — one denominator, one comparable share, and the lag is
+         * stated in the report's own description rather than hidden.
+         */
+        @Test
+        @DisplayName("the window is the reporting date, so an older ticket that escalated is out")
+        void cohortIsTheReportedWindow() {
+            long tt = taskType("Older");
+            // Reported well before FROM, escalated inside the window.
+            criticalTicket("cold", criticalProject, tt, "LOW", "CRITICAL", "2026-05-01");
+            levelChange("cold", "LOW", "CRITICAL", "SYSTEM", null, "2026-08-05 10:00:00");
+
+            assertThat(run(criticalPm(), CriticalOriginRunner.KEY, criticalProject)).isEmpty();
+        }
+
+        /**
+         * §2's row rule, through a report that has no per-person table behind
+         * it. A delivery role reads their own tickets and nobody else's.
+         */
+        @Test
+        @DisplayName("a delivery role sees only the tickets assigned to them")
+        void deliveryRolesSeeOnlyTheirOwn() {
+            long tt = taskType("Scoped");
+            criticalTicketFor("cme", criticalProject, tt, "LOW", "CRITICAL", "2026-08-03", me);
+            criticalTicketFor("cthem", criticalProject, tt, "LOW", "CRITICAL", "2026-08-03", colleague);
+
+            List<Map<String, Object>> asPm = run(criticalPm(), CriticalOriginRunner.KEY, criticalProject);
+            List<Map<String, Object>> asDev = run(criticalDeveloper(), CriticalOriginRunner.KEY, criticalProject);
+
+            assertThat(cell(asPm, 0, "becameCritical")).isEqualTo(2L);
+            assertThat(cell(asDev, 0, "becameCritical"))
+                    .as("their own, not the colleague's")
+                    .isEqualTo(1L);
+        }
+    }
     // ── fixture ────────────────────────────────────────────────────
 
     private long client(String code, String name) {
@@ -685,5 +910,83 @@ class ReportRunnersIT {
                 VALUES (?, ?, ?, ?, 0, 0, 0, '2026-08-20 06:00:00')
                 ON DUPLICATE KEY UPDATE closed = VALUES(closed), effort_hours = VALUES(effort_hours)
                 """, day, userId, closed, new BigDecimal(effortHours));
+    }
+
+    // ── A-070 fixture ────────────────────────────────────────────────────────
+
+    /**
+     * Its own project, so the four-quadrant assertions read one row.
+     *
+     * <p>The shared {@code ticket()} helper writes every ticket at MEDIUM/MEDIUM
+     * and is depended on by six other nested classes; A-070 needs the two level
+     * columns to differ, so it has its own writer rather than a seventh
+     * parameter on that one.
+     */
+    private long criticalProject;
+
+    private void criticalTicket(String label, long projectId, long taskTypeId,
+                                String originalLevel, String level, String reported) {
+        criticalTicketFor(label, projectId, taskTypeId, originalLevel, level, reported, me);
+    }
+
+    private void criticalTicketFor(String label, long projectId, long taskTypeId,
+                                   String originalLevel, String level, String reported,
+                                   long assignee) {
+        String code = label.toUpperCase(java.util.Locale.ROOT) + "-" + SEQ.incrementAndGet();
+        jdbc.update("""
+                INSERT INTO tickets (ticket_code, project_id, title, task_type_id, level, original_level,
+                                     status, date_reported, reported_by, assigned_to, current_cycle_no)
+                VALUES (?, ?, 'Critical origin IT', ?, ?, ?, 'IN_PROGRESS', ?, ?, ?, 1)
+                """, code, projectId, taskTypeId, level, originalLevel,
+                reported + " 09:00:00", assignee, assignee);
+        ticketIds.put(label, jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class));
+    }
+
+    /**
+     * One {@code LEVEL_CHANGED} row, written straight in.
+     *
+     * <p>Hashes are placeholders, as {@code effort()} above does: the journal's
+     * chain is A-042's subject and this report reads {@code actor_type},
+     * {@code new_value} and the ordering — nothing that a real hash changes.
+     *
+     * <p>{@code created_at} is set explicitly rather than defaulted, because the
+     * attribution turns on <em>which</em> row is most recent and a default would
+     * make three rows written in one statement share a timestamp and fall back
+     * on insertion order.
+     */
+    private void levelChange(String label, String from, String to, String actorType,
+                             Long actorId, String at) {
+        jdbc.update("""
+                INSERT INTO ticket_history (ticket_id, cycle_no, event_type, field_name,
+                                            old_value, new_value, actor_id, actor_type,
+                                            created_at, prev_hash, row_hash)
+                VALUES (?, 1, 'LEVEL_CHANGED', 'level', ?, ?, ?, ?, ?, 'x', ?)
+                """, ticketIds.get(label), from, to, actorId, actorType, at,
+                "h" + SEQ.incrementAndGet());
+    }
+
+    /**
+     * Five tickets covering all four quadrants, plus one that was never
+     * critical at all so the cohort is larger than the critical set.
+     *
+     * <pre>
+     *   c1  CRITICAL → CRITICAL   born, still critical
+     *   c2  LOW      → CRITICAL   became, by the SLA scanner
+     *   c3  MEDIUM   → CRITICAL   became, raised by a person
+     *   c4  CRITICAL → MEDIUM     de-escalated
+     *   c5  LOW      → LOW        never critical — the cohort denominator
+     * </pre>
+     */
+    private void seedCriticalCohort() {
+        long tt = taskType("Escalating");
+        criticalTicket("c1", criticalProject, tt, "CRITICAL", "CRITICAL", "2026-08-02");
+        criticalTicket("c2", criticalProject, tt, "LOW", "CRITICAL", "2026-08-02");
+        criticalTicket("c3", criticalProject, tt, "MEDIUM", "CRITICAL", "2026-08-03");
+        criticalTicket("c4", criticalProject, tt, "CRITICAL", "MEDIUM", "2026-08-03");
+        criticalTicket("c5", criticalProject, tt, "LOW", "LOW", "2026-08-04");
+
+        levelChange("c2", "LOW", "CRITICAL", "SYSTEM", null, "2026-08-06 10:00:00");
+        levelChange("c3", "MEDIUM", "CRITICAL", "USER", 2L, "2026-08-06 11:00:00");
+        levelChange("c4", "CRITICAL", "MEDIUM", "USER", 2L, "2026-08-06 12:00:00");
     }
 }

@@ -138,6 +138,30 @@ public final class ReportCatalogue {
             built("task-type-analysis", "Task Type Analysis",
                     "Volume raised against average resolution time per type — what is eating the team.",
                     QUALITY, "donut", List.of(DATE_RANGE, PROJECT)),
+            /*
+             * A-070 · the nineteenth report, and the first that is not one of
+             * §7.8's eighteen. Blueprint §6 asks for it by name — "how many
+             * were born critical vs became critical, an insight managers ask
+             * for immediately" — and it is the whole reason `original_level`
+             * exists and is never overwritten.
+             *
+             * QUALITY rather than DELIVERY, beside reopen analysis, because it
+             * is the same shape of question: not how much work there is, but
+             * where something is going wrong. Most of "became critical" is a
+             * ticket that ran past its date, which is a statement about us.
+             *
+             * The description says the lag out loud. Becoming critical happens
+             * later than arriving, both halves are counted over the same
+             * reported-date cohort, and a reader drawing a trend from recent
+             * windows would otherwise conclude things were improving when the
+             * only thing that had happened is that the tickets are young.
+             */
+            built("critical-origin", "Born Critical vs Became Critical",
+                    "How much of the critical load arrived that way and how much we created by "
+                            + "running late. Counted over the tickets raised in the window, so a "
+                            + "recent range understates becoming — young tickets have not had time "
+                            + "to breach.",
+                    QUALITY, "stacked-bar", List.of(DATE_RANGE, PROJECT, RESOURCE, TASK_TYPE)),
 
             // ── WORKFLOW ────────────────────────────────────────────────────
             built("stage-funnel", "Stage Funnel",

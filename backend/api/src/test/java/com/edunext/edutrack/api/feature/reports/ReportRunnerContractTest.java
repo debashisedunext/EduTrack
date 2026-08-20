@@ -50,12 +50,12 @@ class ReportRunnerContractTest {
     }
 
     @Test
-    @DisplayName("thirteen reports run in total — A-063's one, A-066's six, A-067's five, B-060's one")
+    @DisplayName("fourteen reports run — A-063 one, A-066 six, A-067 five, B-060 one, A-070 one")
     void totalAvailable() {
         // Pinned as a count so a report flipped on without a runner, or a runner
         // added without flipping the card, is caught here rather than by a 500.
         assertThat(ReportCatalogue.declared().stream().filter(ReportDtos.Descriptor::available).count())
-                .isEqualTo(13);
+                .isEqualTo(14);
     }
 
     /**
@@ -340,8 +340,8 @@ class ReportRunnerContractTest {
      * cheap half.
      */
     @Test
-    @DisplayName("five reports declare a Resource filter, and each has a runner that reads it")
-    void resourceFilterIsDeclaredByFive() {
+    @DisplayName("six reports declare a Resource filter, and each has a runner that reads it")
+    void resourceFilterIsDeclaredBySix() {
         List<String> declaring = ReportCatalogue.declared().stream()
                 .filter(ReportDtos.Descriptor::available)
                 .filter(d -> d.filters().contains(ReportFilterKind.RESOURCE))
@@ -353,7 +353,12 @@ class ReportRunnerContractTest {
                 ResourceVelocityRunner.KEY,
                 EffortSummaryRunner.KEY,
                 ReopenAnalysisRunner.KEY,
-                WorkloadCapacityRunner.KEY);
+                WorkloadCapacityRunner.KEY,
+                // A-070 · declares it as a filter and not as a grouping column —
+                // an escalation is often something that happened to a ticket
+                // while nobody was looking, so a default view with names
+                // against it would read as a blame list.
+                CriticalOriginRunner.KEY);
     }
 
     @Test

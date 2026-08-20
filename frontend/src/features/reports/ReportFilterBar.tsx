@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router-dom'
 import { useListClients } from '@/api/generated/clients/clients'
 import { useListProjects } from '@/api/generated/projects/projects'
+import { useListTaskTypes } from '@/api/generated/masters/masters'
 import { useListUsers } from '@/api/generated/users/users'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import type { ReportFilterKind } from '@/api/generated/model'
@@ -16,13 +17,17 @@ import type { ReportFilterKind } from '@/api/generated/model'
  * screen is broken — which is worse than the control being absent, because a
  * missing control asks no question.
  *
- * <p>B-060 adds the fourth control, CLIENT, for the client report. **TASK_TYPE
- * and LEVEL are still undrawn** — declared by `sla-breach` and `effort-summary`
- * and honoured by their runners since B-060 threaded `ReportFilters`, but with
- * no control here yet. That is a capability reachable by URL and export and not
- * from the bar, which is a gap rather than the failure above: nothing on screen
- * claims to filter and then does not. One branch each, and they belong to those
- * two reports' owner.
+ * <p>B-060 added the fourth control, CLIENT, for the client report. **A-070 adds
+ * the fifth, TASK_TYPE.** It had been declared by `sla-breach` and
+ * `effort-summary` since A-066 and honoured by their runners since B-060
+ * threaded `ReportFilters`, with no way to set it but editing the URL — a
+ * filter that worked and could not be reached. A-070 declares it too, and
+ * shipping a report that promises a cut nobody can make is the failure this
+ * per-report list exists to prevent, so it is drawn rather than inherited.
+ * Those two reports gain the control for free.
+ *
+ * <p>**LEVEL is still undrawn**, declared by `sla-breach` alone. One branch, and
+ * it belongs to that report — the pattern to copy is directly below.
  *
  * <h2>The lists are only fetched when they are drawn</h2>
  *
@@ -38,6 +43,13 @@ export function ReportFilterBar({ filters }: { filters: ReportFilterKind[] }) {
   const wantsResource = filters.includes('RESOURCE')
   const wantsDates = filters.includes('DATE_RANGE')
   const wantsClient = filters.includes('CLIENT')
+  // A-070 · the fifth control. TASK_TYPE has been declared by sla-breach and
+  // effort-summary since A-066 and honoured by their runners, with no way to
+  // set it except by editing the URL — a filter that works and cannot be
+  // reached. A-070 declares it too, and a report that promises a cut nobody
+  // can make is the thing this component's per-report filter list exists to
+  // prevent, so the gap is closed here rather than inherited.
+  const wantsTaskType = filters.includes('TASK_TYPE')
 
   // `enabled` rather than a conditional hook — hooks cannot be called
   // conditionally, and the query simply does not run when the control is absent.
@@ -52,10 +64,15 @@ export function ReportFilterBar({ filters }: { filters: ReportFilterKind[] }) {
     *new* tickets and never hides historical ones, and a report is history.
   */
   const clients = useListClients(undefined, { query: { enabled: wantsClient } })
+  // No params argument on this one, unlike the three above — listTaskTypes
+  // takes no query parameters, so the generated hook's first argument is the
+  // options object itself.
+  const taskTypes = useListTaskTypes({ query: { enabled: wantsTaskType } })
 
   const projectList = projects.data?.data ?? []
   const userList = users.data?.data ?? []
   const clientList = clients.data?.data ?? []
+  const taskTypeList = taskTypes.data?.data ?? []
 
   function set(key: string, value: string | undefined) {
     const next = new URLSearchParams(params)
@@ -133,6 +150,26 @@ export function ReportFilterBar({ filters }: { filters: ReportFilterKind[] }) {
           onChange={(u) => set('resourceId', u ? String(u.id) : undefined)}
           getKey={(u) => String(u.id)}
           getLabel={(u) => u.displayName ?? `#${u.id}`}
+          searchable
+        />
+      )}
+
+      {wantsTaskType && (
+        <FilterDropdown
+          label="Task type"
+          /*
+            Whatever the master returns, unfiltered. `listTaskTypes` is
+            active-only by default (B-021), and that is right for a *create*
+            form and arguable here — a retired type still has historical
+            tickets worth reporting on. Left as the endpoint's default rather
+            than widened, because widening it is a decision about every screen
+            that calls this endpoint and not one to take inside a filter bar.
+          */
+          options={taskTypeList}
+          value={taskTypeList.find((t) => String(t.id) === params.get('taskTypeId')) ?? null}
+          onChange={(t) => set('taskTypeId', t ? String(t.id) : undefined)}
+          getKey={(t) => String(t.id)}
+          getLabel={(t) => t.name ?? `#${t.id}`}
           searchable
         />
       )}
