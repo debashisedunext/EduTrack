@@ -229,6 +229,33 @@ describe('the screen, against the mock server', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(box).toHaveValue(''))
   })
+
+  it('sends an emoji picked mid-sentence, in the place it was picked — D-053', async () => {
+    renderChat()
+    await screen.findByRole('navigation', { name: 'Conversations' })
+
+    const box = screen.getByLabelText('Message') as HTMLTextAreaElement
+    await userEvent.type(box, 'deployed to prod')
+
+    // Back to just after "deployed", which is the case appending gets wrong
+    // and which no manual test performs.
+    box.setSelectionRange(8, 8)
+    await userEvent.click(screen.getByRole('button', { name: 'Insert emoji' }))
+    await userEvent.click(screen.getByRole('button', { name: /Work emoji 7:/ }))
+
+    await waitFor(() => expect(box).toHaveValue('deployed🚀 to prod'))
+    // And the caret is left where the sentence continues, not at the end.
+    expect(box.selectionStart).toBe(10)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(box).toHaveValue(''))
+
+    // Through the mock server and back out of `GET …/messages` — the round
+    // trip is the point. `chat_messages.body` is utf8mb4 on the real column,
+    // so nothing about the four-byte character needs special handling on
+    // either side, and this proves the client does not add any.
+    expect(await screen.findByText('deployed🚀 to prod')).toBeInTheDocument()
+  })
 })
 
 describe('a message arriving while the screen is open', () => {
