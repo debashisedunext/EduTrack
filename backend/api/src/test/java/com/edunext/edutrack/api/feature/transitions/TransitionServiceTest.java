@@ -28,6 +28,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -55,9 +56,10 @@ class TransitionServiceTest {
     private final TicketJournal journal = mock(TicketJournal.class);
     private final WorkflowStageRepository stages = mock(WorkflowStageRepository.class);
     private final WorkingHoursService workingHours = mock(WorkingHoursService.class);
+    private final ReceivingRoleRepository receivingRoles = mock(ReceivingRoleRepository.class);
 
     private final TransitionService service = new TransitionService(
-            tickets, journal, stages, workingHours, Clock.fixed(NOW, ZoneOffset.UTC));
+            tickets, journal, stages, workingHours, receivingRoles, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private final Authentication caller = new TestingAuthenticationToken(
             new DevPrincipal(ACTOR, "priya", "Priya Nair", "PM", List.of(PROJECT), List.of()),
@@ -235,6 +237,77 @@ class TransitionServiceTest {
             assertThat(entry.getActorId()).isEqualTo(ACTOR);
             assertThat(entry.getActorType()).isEqualTo("USER");
             assertThat(entry.getRemarks()).isEqualTo("failed QA");
+        }
+    }
+
+    // ── the project queue — C-050 ───────────────────────────────────────────
+
+    @Nested
+    @DisplayName("the receiving role has nobody on the project — C-050")
+    class ProjectQueue {
+
+        // Stage code and role code are deliberately different strings here
+        // ("DEPLOY" vs "DEPLOYMENT") — with C-011/C-051's fixtures they can
+        // coincide (a "QA" stage owned by role "QA"), which would let a test
+        // pass even if the production code passed the stage code where the
+        // role code belongs. A mutation test caught exactly that gap.
+
+        @Test
+        @DisplayName("no assigneeId and no active member of the receiving role: falls unassigned")
+        void fallsToTheQueue() {
+            // assignedBy starts non-null so "left untouched" is a real
+            // assertion below, not a coincidence of the fixture's default.
+            ticket.setAssignedBy(ACTOR);
+            when(stages.findByTemplateIdAndStageCode(TEMPLATE, "DEPLOY"))
+                    .thenReturn(Optional.of(stage("DEPLOY", "DEPLOYMENT")));
+            when(receivingRoles.hasActiveMember(PROJECT, "DEPLOYMENT")).thenReturn(false);
+
+            service.advance(caller, TICKET, request("FORWARD", "DEPLOY", null));
+
+            assertThat(capturedHop().getToUserId()).isNull();
+            assertThat(ticket.getAssignedTo()).isNull();
+            // Nobody chose this — the queue did. assignedBy still names the
+            // last person who made a real assignment, not this transition's
+            // caller, and not null either.
+            assertThat(ticket.getAssignedBy()).isEqualTo(ACTOR);
+        }
+
+        @Test
+        @DisplayName("no assigneeId but the receiving role has an active member: keeps the outgoing owner")
+        void keepsOwnerWhenRoleIsStaffed() {
+            when(stages.findByTemplateIdAndStageCode(TEMPLATE, "DEPLOY"))
+                    .thenReturn(Optional.of(stage("DEPLOY", "DEPLOYMENT")));
+            when(receivingRoles.hasActiveMember(PROJECT, "DEPLOYMENT")).thenReturn(true);
+
+            service.advance(caller, TICKET, request("FORWARD", "DEPLOY", null));
+
+            assertThat(capturedHop().getToUserId()).isEqualTo(CURRENT_ASSIGNEE);
+            assertThat(ticket.getAssignedTo()).isEqualTo(CURRENT_ASSIGNEE);
+        }
+
+        @Test
+        @DisplayName("an explicit assigneeId wins with no membership lookup at all")
+        void explicitAssigneeSkipsTheCheck() {
+            when(stages.findByTemplateIdAndStageCode(TEMPLATE, "DEPLOY"))
+                    .thenReturn(Optional.of(stage("DEPLOY", "DEPLOYMENT")));
+
+            service.advance(caller, TICKET, new TransitionDtos.TransitionRequest(
+                    "FORWARD", "DEPLOY", 99L, null, null));
+
+            assertThat(capturedHop().getToUserId()).isEqualTo(99L);
+            assertThat(ticket.getAssignedTo()).isEqualTo(99L);
+            verify(receivingRoles, never()).hasActiveMember(anyLong(), any());
+        }
+
+        @Test
+        @DisplayName("a ticket with no workflow template cannot resolve a role, so the owner carries forward")
+        void noTemplateKeepsOwner() {
+            ReflectionTestUtils.setField(ticket, "workflowTemplateId", null);
+
+            service.advance(caller, TICKET, request("FORWARD", "QA", null));
+
+            assertThat(ticket.getAssignedTo()).isEqualTo(CURRENT_ASSIGNEE);
+            verify(receivingRoles, never()).hasActiveMember(anyLong(), any());
         }
     }
 
@@ -446,8 +519,13 @@ class TransitionServiceTest {
     }
 
     private static WorkflowStage stage(String code) {
+        return stage(code, null);
+    }
+
+    private static WorkflowStage stage(String code, String ownerRole) {
         WorkflowStage s = new WorkflowStage();
         ReflectionTestUtils.setField(s, "stageCode", code);
+        ReflectionTestUtils.setField(s, "ownerRole", ownerRole);
         return s;
     }
 }

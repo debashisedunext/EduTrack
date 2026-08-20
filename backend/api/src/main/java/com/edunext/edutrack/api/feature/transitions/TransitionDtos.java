@@ -20,7 +20,10 @@ final class TransitionDtos {
      *                    which defaults to the next stage in the ticket's
      *                    workflow template
      * @param assigneeId  the receiving owner; {@code null} keeps the current
-     *                    one
+     *                    one — unless the destination stage's role has
+     *                    nobody active on the project, in which case the
+     *                    ticket is left unassigned rather than kept with an
+     *                    owner who no longer holds the role (C-050)
      * @param handoffNote optional, carried on the hop as written
      * @param reason      mandatory on a backward move —
      *                    {@link com.edunext.edutrack.domain.journal.TicketJournal}
