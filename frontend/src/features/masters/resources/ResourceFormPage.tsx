@@ -21,7 +21,7 @@ import { toast } from '@/components/ui/use-toast'
 import { WeeklyOffPicker } from '../calendar/WeeklyOffPicker'
 import type { IsoDay } from '../calendar/workingWeek'
 
-import { ROLE_LABEL } from './columns'
+import { ROLE_LABEL } from '@/lib/roleLabel'
 import { FieldGroup, FormField, ReadOnlyField } from './FormField'
 import { SkillsInput } from './SkillsInput'
 import { ProjectAssignmentsEditor } from './ProjectAssignmentsEditor'
