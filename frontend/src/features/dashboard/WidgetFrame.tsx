@@ -2,7 +2,7 @@ import * as React from 'react'
 
 import type { GetDashboardWidgetParams } from '@/api/generated/model'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useWidget } from './useWidgetBatch'
+import { useWidget } from './widgetBatchContext'
 
 /**
  * A-056 · the card every widget 7–12 sits in.

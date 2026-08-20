@@ -1,6 +1,6 @@
 import type { GetDashboardWidgetParams } from '@/api/generated/model'
 
-import { DashboardWidgetBatch } from './useWidgetBatch'
+import { DashboardWidgetBatch } from './DashboardWidgetBatch'
 import type { WidgetKey } from './WidgetFrame'
 import { WidgetFrame } from './WidgetFrame'
 import { useDashboardVariant } from './useDashboardVariant'
