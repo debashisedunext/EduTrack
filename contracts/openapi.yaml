@@ -662,6 +662,64 @@ paths:
               schema: { $ref: '#/components/schemas/Profile360Response' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /users/{userId}/timesheet:
+    parameters: [{ $ref: '#/components/parameters/UserId' }]
+    get:
+      tags: [users]
+      operationId: getUserTimesheet
+      summary: A resource's week, stage by stage (B-063)
+      description: |
+        B-063 · blueprint §21's timesheet, made stage-aware. One person, one
+        week, every hour they logged — laid out as rows of *ticket × stage*
+        against the seven days, which is what "stage-aware" buys: six hours on
+        one ticket reads very differently when four of them are a second pass
+        through QA.
+
+        **Capacity comes from the working calendar**, not from seven times
+        eight. `capacityHours` on each day honours weekly-off days, org and
+        project holidays and that resource's approved leave, so a Monday
+        holiday shows zero available rather than eight — every utilisation
+        figure on the screen is wrong otherwise. It is the same
+        `WorkingHoursService` every SLA and duration figure in the system
+        routes through.
+
+        **Correction rows are included and may be negative.** `ticket_effort_logs`
+        is append-only: a mistake is reversed by a compensating row, never by an
+        edit, so a week containing one nets out and `hasCorrection` marks the
+        row it happened on. A timesheet that filtered them out would disagree
+        with the ticket's own effort tab.
+
+        **Who may look at whom is blueprint §2's "View team member history"
+        row**, exactly as `GET /users/{userId}/profile-360` reads it: Admin
+        anyone, PM their reportees *or* anybody on their projects, Support
+        anybody on their projects, and the three delivery roles nobody but
+        themselves. A caller who may not see the subject gets the same `404` as
+        one asking for a user who does not exist — distinguishing them would let
+        anyone enumerate the staff list by id.
+
+        **No approval step.** §21 also asks for one, and it is not here: an
+        approval cannot be a flag on an append-only, hash-chained table, and the
+        policy it would enforce — the backdating window and who signs off — is
+        still an open governance question. Raised rather than invented.
+      parameters:
+        - name: weekOf
+          in: query
+          schema: { type: string, format: date }
+          description: >
+            Any date inside the week wanted; the server answers the ISO week
+            (Monday–Sunday) containing it, and echoes the resolved bounds in
+            `weekStart`/`weekEnd`. Omitted means the week containing today. A
+            caller sending Monday and a caller sending the Thursday of the same
+            week get the same payload, so a client never has to compute a week
+            boundary to ask a question about a week.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimesheetResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /users/{userId}/reportees:
     parameters: [{ $ref: '#/components/parameters/UserId' }]
     get:
@@ -7015,6 +7073,119 @@ components:
       properties:
         stage: { type: string }
         openCount: { type: integer }
+
+    # ── timesheet · B-063 ─────────────────────────────────────────────────
+    TimesheetResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Timesheet' }
+
+    Timesheet:
+      type: object
+      required: [person, weekStart, weekEnd, days, rows, totalHours, capacityHours]
+      description: |
+        One resource's week. `days` is always seven entries, Monday first, even
+        where nothing was logged and nothing was available — a week that dropped
+        its empty days would render as a grid whose columns move, and a Tuesday
+        holiday is exactly the day a reader is looking for when the totals look
+        thin.
+      properties:
+        person: { $ref: '#/components/schemas/UserRef' }
+        weekStart:
+          type: string
+          format: date
+          description: The Monday of the ISO week the server resolved from `weekOf`.
+        weekEnd: { type: string, format: date }
+        days:
+          type: array
+          items: { $ref: '#/components/schemas/TimesheetDay' }
+        rows:
+          type: array
+          description: >
+            One row per ticket × stage × iteration the person logged against
+            this week, busiest first. Stage and iteration are part of the key,
+            not decoration: a second pass through QA is a different row from the
+            first, which is the whole of what "stage-aware" means here.
+          items: { $ref: '#/components/schemas/TimesheetRow' }
+        totalHours:
+          type: number
+          format: double
+          description: Σ of every entry in the week, corrections included and signed.
+        capacityHours:
+          type: number
+          format: double
+          description: >
+            Σ of the seven days' `capacityHours`, from the working calendar.
+        utilisationPct:
+          type: [number, 'null']
+          format: double
+          description: >
+            `totalHours / capacityHours × 100`. Null rather than 0 when the week
+            offered no working hours at all — a person on leave all week has no
+            utilisation, and reporting 0% would read as having done nothing with
+            a week they were never expected to work.
+
+    TimesheetDay:
+      type: object
+      required: [date, capacityHours, loggedHours, isWorkingDay]
+      properties:
+        date: { type: string, format: date }
+        capacityHours:
+          type: number
+          format: double
+          description: >
+            What the working calendar makes available to *this* resource on this
+            date — weekly-off days, org and project holidays and their own
+            approved leave all removed, and a half-day leave counted as half.
+        loggedHours: { type: number, format: double }
+        isWorkingDay:
+          type: boolean
+          description: >
+            `capacityHours > 0`. Carried explicitly so the grid can grey a
+            weekend without inferring it from a zero, which is also what a
+            working day somebody is fully on leave for looks like.
+
+    TimesheetRow:
+      type: object
+      required: [ticketId, ticketTitle, iterationNo, cycleNo, hours, totalHours]
+      properties:
+        # The code, like every other surface — `TicketId` is a string in this
+        # contract. A second numeric id beside it would be the only place in the
+        # API where a ticket has two names.
+        ticketId: { $ref: '#/components/schemas/TicketId' }
+        ticketTitle: { type: string }
+        project: { $ref: '#/components/schemas/ProjectRef' }
+        stage:
+          type: [string, 'null']
+          description: >
+            The ribbon stage the hours were stamped with at the moment they were
+            logged, not the ticket's stage now. Null for entries predating the
+            ribbon, which render under an unattributed row rather than being
+            dropped.
+        stageName:
+          type: [string, 'null']
+          description: >
+            The stage's display name on that ticket's own workflow template. Two
+            templates may name the same code differently, so this is resolved
+            per ticket rather than from a global list.
+        iterationNo: { type: integer }
+        cycleNo: { type: integer }
+        hours:
+          type: object
+          additionalProperties: { type: number, format: double }
+          description: >
+            Hours keyed by ISO date, carrying only the days this row has
+            something on. A dense seven-key map would make an eight-row
+            timesheet mostly zeros, and the grid already knows the week.
+        totalHours: { type: number, format: double }
+        hasCorrection:
+          type: boolean
+          description: >
+            At least one entry in this row is a correction, and may be negative.
+            Marked rather than hidden: `ticket_effort_logs` is append-only, so a
+            fixed mistake is a compensating row, and a timesheet that dropped
+            them would not add up to the ticket's own effort tab.
 
     # ── projects ──────────────────────────────────────────────────────────
     ProjectRef:

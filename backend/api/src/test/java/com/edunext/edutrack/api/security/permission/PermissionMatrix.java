@@ -1030,6 +1030,14 @@ final class PermissionMatrix {
             // id exists and let anyone enumerate the staff list by counting up.
             everyRole("GET", "/api/v1/users/{userId}/profile-360"),
 
+            // B-063 · the timesheet, which is the same row question one screen
+            // over: a Developer is entitled to their own week and to nobody
+            // else's, and who else they may open is decided by the same
+            // Profile360Repository.isVisibleTo — reused rather than copied, so
+            // there is one rule here and not two that can drift apart. Also a
+            // 404 rather than a 403, for the reason above.
+            everyRole("GET", "/api/v1/users/{userId}/timesheet"),
+
             // The runner. Same reasoning, plus the one thing that is genuinely
             // withheld: ?resourceId= is ignored for the three delivery roles
             // rather than honoured, so "Own perf." cannot be widened into a

@@ -279,6 +279,48 @@ worker a dependency on the web module. `ApiSchedulingConfig` is opt-in and
 switched on in `application.yml`; with it off there is no `@EnableScheduling`,
 which is what keeps ShedLock away from a Redis that test contexts do not run.
 
+## The timesheet (B-063)
+
+`GET /users/{userId}/timesheet` — blueprint §21, one resource's week across all
+tickets, stage by stage. Four files: `TimesheetController`, `TimesheetService`,
+`TimesheetRepository`, `TimesheetDtos`.
+
+**It is not a report and it is not in the catalogue.** No `ReportRunner`, no
+descriptor, no `?format=` export. A runner answers "columns and rows for a
+window against a scope"; a timesheet is one person, one week, pivoted into a
+grid, and forcing it through the catalogue would have meant a report whose only
+filter is a week and whose shape no exporter can lay out.
+
+**It is here for the visibility rule, not for the arithmetic.** "Whose timesheet
+may I open" is blueprint §2's *View team member history* row — already written
+once, as `Profile360Repository.isVisibleTo`. That method is package-private, so
+building this under `feature/masters` would have meant a **second copy of a
+row-level access rule**, which is the arrangement B-062 spent a task dismantling
+three files away from here. Reused instead, along with `subject()`, so a
+timesheet and a profile can never disagree about who may see whom.
+
+**Stage-aware means the row key is four columns.** Ticket, stage, iteration and
+cycle — the same four `ticket_effort_logs` carries and the same four the §4A.4
+roll-up joins on, for PLAN.md §3.4's reason: drop `cycleNo` and a reopened
+ticket folds cycle 1's hours into cycle 2's line.
+
+**Capacity comes from `WorkingHoursService`, one call per day.** Seven calls
+rather than one across the week, because the per-day figure *is* the column
+header and a grid that cannot grey a holiday cannot explain a thin total. No
+`projectId` is passed: a week spans projects, and one project's holiday calendar
+would answer for a person it does not describe.
+
+**No approval step, deliberately.** §21 asks for one. `ticket_effort_logs` is
+append-only and hash-chained, so an approval flag on it cannot exist; a separate
+table is a migration, Stream A's review, and a policy nobody has decided — the
+backdating window and who signs off are still open, as `feature/tickets/effort/README.md`
+already records. Raised as its own task rather than settled by accident here.
+
+⚠ **Stream B, in Stream A's directory** — the M6 split B-060, B-061 and B-062
+were written under. No migration (`ix_effort_user_date` has existed since the
+A-006 baseline), so no schema review; one `PermissionMatrix` row, `everyRole`,
+because who may open whose week is a row question answered with a 404.
+
 ## Not here yet
 
 - ~~**Scheduling**~~ — landed with A-065. See below.

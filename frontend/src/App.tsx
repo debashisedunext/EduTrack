@@ -25,6 +25,7 @@ import { ProjectSettingsPage } from './features/masters/projects/ProjectSettings
 import { ProjectTeamPage } from './features/masters/projects/ProjectTeamPage'
 import { SlaMatrixPage } from './features/masters/projects/SlaMatrixPage'
 import { NotificationTemplateListPage } from './features/masters/notificationTemplates/NotificationTemplateListPage'
+import { TimesheetPage } from './features/masters/timesheet/TimesheetPage'
 import { PriorityListPage } from './features/masters/priorities/PriorityListPage'
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
@@ -128,6 +129,21 @@ export default function App() {
               screen does not exist.
             */}
             <Route path="/audit-logs" element={<AuditLogPage />} />
+            {/*
+              B-063 · §21's timesheet. A top-level path for the audit log's
+              reason one route up: it is not a master anybody edits, and the
+              person who opens it every Friday should not have to know it was
+              built by the masters stream.
+
+              Two routes, one page. `/timesheet` is your own week — the common
+              case, and the only target a sidebar entry can have — and
+              `/timesheet/:userId` is somebody else's, which is a link a manager
+              follows and a URL they send. The server decides whether they may
+              see it and answers 404 if not, so the route is deliberately not
+              role-gated here.
+            */}
+            <Route path="/timesheet" element={<TimesheetPage />} />
+            <Route path="/timesheet/:userId" element={<TimesheetPage />} />
             <Route
               path="/masters"
               element={
