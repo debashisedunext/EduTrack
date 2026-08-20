@@ -48,9 +48,32 @@ on:
     branches: [develop, main]
     paths-ignore: ['docs/**', '**/*.md']
 
+# ── Why pushes are NOT cancelled ─────────────────────────────────────────────
+#
+# `cancel-in-progress: true` was applied to every event. On a PR branch that is
+# right: push twice in a minute and the first run is wasted work. On a push to
+# develop it is actively harmful, because the group key is the ref — so every
+# merge cancels the verification of the merge before it.
+#
+# On 20 Aug that emptied the signal completely. Backend takes ~27 minutes and
+# merges were landing every 2-12, so SIX consecutive develop runs were killed
+# mid-flight (7a3add6e, 32384bc0, aa1107d7, 50d982d4, b3e3c97d, f0f68924). The
+# last develop commit with a completed run was c164f766 at 05:15; twenty-two
+# commits went in behind it verified by nothing at all.
+#
+# That is the same green-on-nothing failure the `changes` job comment above
+# describes, arriving by a different door — 046f0ace made pushes run the full
+# suite, and this line stopped them finishing it. A cancelled run reports as
+# neither pass nor fail, so nothing looked red while it happened.
+#
+# So: cancel on pull_request, never on push. And give each push its own group
+# so develop runs verify in parallel rather than queueing behind a 27-minute
+# backend job — the repo is public, the minutes are unlimited, and a merge that
+# waits half an hour for its own verification gets merged past.
+# ─────────────────────────────────────────────────────────────────────────────
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'push' && format('-{0}', github.sha) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ---------------------------------------------------------------- changes
