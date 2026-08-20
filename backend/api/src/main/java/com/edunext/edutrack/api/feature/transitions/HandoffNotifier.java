@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.transitions;
 
+import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.domain.identity.User;
 import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.notifications.NewNotification;
@@ -8,6 +9,8 @@ import com.edunext.edutrack.domain.notifications.NotificationWriter;
 import com.edunext.edutrack.domain.outbox.NewMail;
 import com.edunext.edutrack.domain.outbox.OutboxEnqueuer;
 import com.edunext.edutrack.domain.tickets.Ticket;
+import com.edunext.edutrack.domain.workflow.WorkflowStage;
+import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -38,14 +41,22 @@ class HandoffNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(HandoffNotifier.class);
 
+    /** §4A.1's Deployment stage, by the role that owns it rather than by code. */
+    private static final String DEPLOYMENT = "DEPLOYMENT";
+
     private final NotificationWriter notifications;
     private final OutboxEnqueuer mail;
     private final UserRepository users;
+    private final WorkflowStageRepository stages;
+    private final TicketEventNotifier events;
 
-    HandoffNotifier(NotificationWriter notifications, OutboxEnqueuer mail, UserRepository users) {
+    HandoffNotifier(NotificationWriter notifications, OutboxEnqueuer mail, UserRepository users,
+                    WorkflowStageRepository stages, TicketEventNotifier events) {
         this.notifications = notifications;
         this.mail = mail;
         this.users = users;
+        this.stages = stages;
+        this.events = events;
     }
 
     /**
@@ -57,7 +68,26 @@ class HandoffNotifier {
      *                    only so a future SYSTEM-driven handoff does not
      *                    have to revisit this signature
      */
-    void received(Ticket ticket, long toUserId, Long fromUserId, String toStageCode) {
+    void received(Ticket ticket, long toUserId, Long fromUserId, String toStageCode, String fromStageCode) {
+        if (leavesDeployment(ticket, fromStageCode)) {
+            // D-037 · §4B.6 row 5, "Deployment done → Developer". Instead of
+            // HANDOFF_RECEIVED, not alongside it. Both rows point at the same
+            // person for this one hop — the stage being entered is owned by
+            // DEVELOPER — and both are marked "❌ never", so sending both would
+            // put two unsuppressible mails about one event in front of
+            // D-035's one-per-recipient-per-ticket-per-minute limit, which
+            // drops one of them silently and leaves which one arrives to a
+            // race. See TicketEventNotifier#deploymentDone for the long form.
+            //
+            // The self-handoff guard below is not repeated: a Deployment
+            // engineer handing to themselves is a real case on a small team,
+            // and "deployed, please verify" is still the thing they need in
+            // their inbox as a record — unlike "you handed this to you", which
+            // is only noise.
+            events.deploymentDone(ticket, fromUserId == null ? 0L : fromUserId, toUserId);
+            return;
+        }
+
         if (fromUserId != null && fromUserId == toUserId) {
             // A PM or Admin covering a stage solo hands a ticket to
             // themselves via the same dialog — no "you handed this to you"
@@ -103,6 +133,26 @@ class HandoffNotifier {
             log.error("transitions: could not enqueue handoff mail for user {} on ticket {}",
                     toUserId, ticket.getId(), e);
         }
+    }
+
+    /**
+     * Whether this hop is a ticket leaving Deployment.
+     *
+     * <p>By {@code owner_role}, not by the literal stage code {@code DEPLOY}.
+     * A stage code is a workflow template's own label and B-034 lets an Admin
+     * write another one; the role that owns the stage is what §4A.1 fixes and
+     * what {@code TransitionService.resolveAssignee} already keys on. A ticket
+     * with no template has no stage to ask about and is not a deployment.
+     */
+    private boolean leavesDeployment(Ticket ticket, String fromStageCode) {
+        Long templateId = ticket.getWorkflowTemplateId();
+        if (templateId == null || fromStageCode == null || fromStageCode.isBlank()) {
+            return false;
+        }
+        return stages.findByTemplateIdAndStageCode(templateId, fromStageCode)
+                .map(WorkflowStage::getOwnerRole)
+                .filter(DEPLOYMENT::equals)
+                .isPresent();
     }
 
     /** {@code full_name}, falling back to the username — {@code TransitionUserRefs}' rule, verbatim. */

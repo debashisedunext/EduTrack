@@ -286,6 +286,123 @@ class TicketEventNotifierTest {
         }
     }
 
+    @Nested
+    @DisplayName("§4B.6 row 3 — reassigned within a stage")
+    class Reassigned {
+
+        @Test
+        @DisplayName("mails the new assignee with the row's own subject")
+        void mailsTheNewAssignee() {
+            when(recipients.user(9L)).thenReturn(Optional.of(person(9)));
+            when(recipients.user(4L)).thenReturn(Optional.of(person(4)));
+
+            notifier.reassignedWithinStage(ticket(), ACTOR, 4L, 9L);
+
+            assertThat(queued())
+                    .filteredOn(m -> m.toUserId() == 9L)
+                    .singleElement()
+                    .extracting(NewMail::subject, NewMail::eventCode)
+                    .containsExactly("Reassigned to you", NotificationEvent.TICKET_ASSIGNED.name());
+        }
+
+        @Test
+        @DisplayName("the previous assignee is told, and told who took it")
+        void tellsThePreviousAssignee() {
+            when(recipients.user(9L)).thenReturn(Optional.of(person(9)));
+            when(recipients.user(4L)).thenReturn(Optional.of(person(4)));
+
+            notifier.reassignedWithinStage(ticket(), ACTOR, 4L, 9L);
+
+            // §4B.6 asks for them on the cc line, and the outbox has no cc —
+            // NewMail carries one address and the rate limit, preferences and
+            // threading are all keyed per recipient. TICKET_REASSIGNED_AWAY is
+            // §11's answer for the same fact, and it is Mail.NEVER, so
+            // OutboxEnqueuer suppresses the mail and the bell entry stands.
+            assertThat(raised())
+                    .filteredOn(n -> n.userId() == 4L)
+                    .singleElement()
+                    .extracting(NewNotification::event, NewNotification::title)
+                    .containsExactly(NotificationEvent.TICKET_REASSIGNED_AWAY, "Reassigned to User 9");
+        }
+
+        @Test
+        @DisplayName("a first assignment tells nobody they lost anything")
+        void firstAssignmentHasNoPrevious() {
+            when(recipients.user(9L)).thenReturn(Optional.of(person(9)));
+
+            notifier.reassignedWithinStage(ticket(), ACTOR, null, 9L);
+
+            assertThat(raised()).extracting(NewNotification::event)
+                    .containsExactly(NotificationEvent.TICKET_ASSIGNED);
+        }
+
+        @Test
+        @DisplayName("reassigning to the current holder does not tell them they lost it")
+        void sameUserBothSides() {
+            when(recipients.user(9L)).thenReturn(Optional.of(person(9)));
+
+            notifier.reassignedWithinStage(ticket(), ACTOR, 9L, 9L);
+
+            assertThat(raised()).extracting(NewNotification::event)
+                    .containsExactly(NotificationEvent.TICKET_ASSIGNED);
+        }
+
+        @Test
+        @DisplayName("nobody is told they reassigned a ticket to themselves")
+        void actorIsNotTold() {
+            when(recipients.user(ACTOR)).thenReturn(Optional.of(person(ACTOR)));
+            when(recipients.user(4L)).thenReturn(Optional.of(person(4)));
+
+            notifier.reassignedWithinStage(ticket(), ACTOR, 4L, ACTOR);
+
+            assertThat(raised()).extracting(NewNotification::userId).containsExactly(4L);
+        }
+    }
+
+    @Nested
+    @DisplayName("§4B.6 row 5 — deployment done")
+    class DeploymentDone {
+
+        @Test
+        @DisplayName("mails the developer the blueprint's own subject")
+        void mailsTheDeveloper() {
+            when(recipients.user(3L)).thenReturn(Optional.of(person(3)));
+
+            notifier.deploymentDone(ticket(), ACTOR, 3L);
+
+            assertThat(queued())
+                    .singleElement()
+                    .extracting(NewMail::toUserId, NewMail::subject, NewMail::eventCode)
+                    .containsExactly(3L, "Deployed to production — please verify",
+                            NotificationEvent.DEPLOYMENT_DONE_VERIFY.name());
+        }
+
+        @Test
+        @DisplayName("deep-links to the ribbon, which is what 'please verify' means")
+        void linksToTheRibbon() {
+            when(recipients.user(3L)).thenReturn(Optional.of(person(3)));
+
+            notifier.deploymentDone(ticket(), ACTOR, 3L);
+
+            assertThat(raised()).singleElement()
+                    .extracting(NewNotification::linkUrl)
+                    .isEqualTo("/tickets/CRM-26-00347?tab=ribbon");
+        }
+
+        @Test
+        @DisplayName("a deployment engineer who verifies their own work is still told")
+        void selfHandoffStillMails() {
+            // Unlike the generic handoff mail, which is suppressed for a
+            // self-handoff as noise. "Deployed, please verify" is a record of
+            // what happened, and a one-person team still wants it in the thread.
+            when(recipients.user(ACTOR)).thenReturn(Optional.of(person(ACTOR)));
+
+            notifier.deploymentDone(ticket(), 99L, ACTOR);
+
+            assertThat(queued()).hasSize(1);
+        }
+    }
+
     @Test
     @DisplayName("an inactive or unknown recipient is simply not written to")
     void unknownRecipient() {

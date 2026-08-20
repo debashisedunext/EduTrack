@@ -175,7 +175,7 @@ class HandoffServiceTest {
                     .isInstanceOf(NotCurrentStageOwnerException.class);
 
             verify(journal, never()).append(any(TicketEffortLog.class));
-            verify(notifier, never()).received(any(), anyLong(), any(), any());
+            verify(notifier, never()).received(any(), anyLong(), any(), any(), any());
         }
     }
 
@@ -188,7 +188,10 @@ class HandoffServiceTest {
         void notifiesAfterAdvance() {
             service.handoff(pm, TICKET_CODE, request("QA", 99L, new BigDecimal("2.00")));
 
-            verify(notifier).received(ticket, 99L, ACTOR, "QA");
+            // "DEV" is the stage being left, captured before advance moved the
+            // ticket on — D-037 needs it to tell a deployment hop from any
+            // other one, and it is the same value the effort entry is stamped with.
+            verify(notifier).received(ticket, 99L, ACTOR, "QA", "DEV");
         }
 
         @Test
@@ -196,7 +199,10 @@ class HandoffServiceTest {
         void notifiesEvenWithNoEffortLogged() {
             service.handoff(pm, TICKET_CODE, request("QA", 99L, BigDecimal.ZERO));
 
-            verify(notifier).received(ticket, 99L, ACTOR, "QA");
+            // "DEV" is the stage being left, captured before advance moved the
+            // ticket on — D-037 needs it to tell a deployment hop from any
+            // other one, and it is the same value the effort entry is stamped with.
+            verify(notifier).received(ticket, 99L, ACTOR, "QA", "DEV");
         }
     }
 
