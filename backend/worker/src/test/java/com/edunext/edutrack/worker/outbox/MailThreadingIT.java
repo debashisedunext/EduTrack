@@ -89,6 +89,13 @@ class MailThreadingIT {
         when(templates.findByEventCodeAndChannel(anyString(), anyString())).thenReturn(Optional.empty());
         MailContextRepository context = mock(MailContextRepository.class);
         when(context.forTicket(anyLong())).thenReturn(MailContext.empty());
+        // A-065 moved the no-ticket path from the static `MailContext.empty()`
+        // to `context.base()`, so that call now lands on this mock — and an
+        // unstubbed Mockito method returns null, which is what a system mail
+        // then rendered against. Stubbed rather than switched to a real
+        // repository: the point of mocking here is that a *threading* test
+        // should not depend on a seeded template row, and that is still true.
+        when(context.base()).thenReturn(MailContext.empty());
 
         ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
         resolver.setPrefix("templates/");
