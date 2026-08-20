@@ -199,6 +199,15 @@ final class PermissionMatrix {
             {"reportKey":"date-wise","cadence":"WEEKLY","recipients":["nobody@example.test"]}""";
 
     /**
+     * C-049 · {@code AssignDtos.AssignRequest}: {@code assigneeId} is the only
+     * {@code @NotNull} field. {@code note} is omitted deliberately, on
+     * {@link #CHANGE_PRIORITY}'s own reasoning: the strongest fixture is the
+     * bare minimum the contract allows.
+     */
+    private static final String ASSIGN = """
+            {"assigneeId":1}""";
+
+    /**
      * C-020 · {@code PriorityChangeDtos.ChangePriorityRequest}: {@code level} is
      * the only {@code @NotBlank} field.
      *
@@ -929,6 +938,24 @@ final class PermissionMatrix {
             // the day somebody grants ticket.assign to a custom S-09 role, this
             // is what says so.
             adminPmAndSupport("PATCH", "/api/v1/tickets/{ticketId}/priority", CHANGE_PRIORITY),
+
+            // ── assign · C-049, blueprint §2's "Assign / reassign ticket" row ─
+            //
+            // Admin, PM and Support — §2's own row, and unlike the priority row
+            // immediately above, not a borrowing: ticket.assign literally is
+            // "Assign or reassign a ticket to a resource" (V20260806_0900's own
+            // description), so this is the row that capability was named for
+            // rather than one reusing it under an argument.
+            //
+            // A genuine capability on the reopen row's test: whether a Developer
+            // may reassign does not depend on which ticket, who holds it now, or
+            // the clock — the three things that forced the comment and
+            // attachment rules down into their services.
+            //
+            // *Which* tickets is still not this file's question: ScopedTickets
+            // answers 404 for a ticket outside the caller's scope (A-035)
+            // whatever capability they hold.
+            adminPmAndSupport("POST", "/api/v1/tickets/{ticketId}/assign", ASSIGN),
 
             // The list, for the same reason and one more: a Developer who could
             // not call it would have no ticket screen at all. ScopeResolver
