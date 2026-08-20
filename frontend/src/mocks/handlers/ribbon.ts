@@ -2,7 +2,7 @@ import { http } from 'msw';
 import { getDb, nextId } from '../db';
 import { buildRibbon, round } from './tickets';
 import {
-  currentUser, findTicket, notFound, ok, paginate,
+  currentUser, findTicket, notFound, ok, paginate, problem,
   ticketDto, unprocessable, url, userRef, validationFailed, workingMinutes,
 } from './util';
 
@@ -172,6 +172,86 @@ export const ribbonHandlers = [
       id: nextId(db, 'history'), ticketId: t.ticketId, action: 'REWORK',
       actorId: db.currentUserId, actorType: 'USER',
       fieldName: 'iterationNo', oldValue: String(t.iterationNo - 1), newValue: String(t.iterationNo),
+      note: body.reason, stageCode: target.stageCode,
+      cycleNo: t.cycleNo, iterationNo: t.iterationNo,
+      isCorrection: false, correctsEntryId: null,
+      entryHash: `sha256:${nextId(db, 'hash').toString(16)}`, createdAt: now,
+    });
+    return ok(buildRibbon(t.ticketId, t.cycleNo));
+  }),
+
+  // ── force-move ────────────────────────────────────────────────────────────
+  /**
+   * C-048 · §2's "Force-move ribbon backwards", any stage to any stage.
+   *
+   * Added by D-004's coverage guard rather than by C-048 itself: the operation
+   * reached `contracts/openapi.yaml` with no handler behind it, and
+   * `coverage.test.ts` is the test that refuses to let a contract operation
+   * ship unmocked. `frontend/src/mocks/` is Stream D's, so this is mine to
+   * write rather than to hand back.
+   *
+   * **Three things this deliberately does not check, because the route does
+   * not.** There is no golden-rule check — C-048's own contract text says the
+   * current-stage-owner rule "is not the point of this route; the capability
+   * already is" — no `canReturnTo` check, since the whole purpose is to move
+   * where the template does not allow, and no direction: forward, backward and
+   * sideways are all one action. A mock that enforced any of them would refuse
+   * requests the server accepts, and a client would be built around a
+   * restriction that does not exist.
+   *
+   * **`OVERRIDE` regardless of which way it moves**, which is the one rule that
+   * *is* the point: the history has to say somebody overrode the workflow, not
+   * that the ticket went backwards. And `iterationNo` does **not** increment
+   * even on a backward move — iteration counts rework, and an override is not
+   * rework. That is the pair this handler exists to get right.
+   */
+  http.post(url('/tickets/:ticketId/force-move'), async ({ params, request }) => {
+    const db = getDb();
+    const t = findTicket(String(params.ticketId), db);
+    if (!t) return notFound('Ticket');
+
+    const me = currentUser(db);
+    // `ticket.force_move` is Admin's and PM's alone — a capability, not a
+    // golden-rule row. 403 rather than the 422 `skip-stage` uses one handler
+    // down: the caller is refused for who they are, not for the state the
+    // ticket is in, and CONVENTIONS.md keeps those two apart.
+    if (me.role !== 'PM' && me.role !== 'ADMIN') {
+      return problem(403, 'forbidden', 'Only a PM or Admin may force-move a ticket');
+    }
+
+    const body = (await request.json()) as {
+      toStageCode: string; reason: string; toUserId?: number;
+    };
+    if (!body.toStageCode?.trim()) {
+      return validationFailed({ toStageCode: ['is always required — an override has no default destination'] });
+    }
+    if (!body.reason?.trim()) {
+      return validationFailed({ reason: ['is mandatory so the override is self-explaining in the history'] });
+    }
+
+    const target = db.stages.find((s) => s.stageCode === body.toStageCode);
+    if (!target) return validationFailed({ toStageCode: ['is not a stage on this workflow'] });
+
+    const now = new Date().toISOString();
+    const leaving = sealCurrent(t.ticketId, t.cycleNo, now);
+    if (leaving) leaving.action = 'OVERRIDE';
+
+    t.currentStageCode = target.stageCode;
+    t.assigneeId = body.toUserId ?? t.assigneeId;
+    t.version += 1;
+    t.updatedAt = now;
+
+    db.transitions.push({
+      id: nextId(db, 'transition'), ticketId: t.ticketId,
+      cycleNo: t.cycleNo, iterationNo: t.iterationNo,
+      stageCode: target.stageCode, ownerId: t.assigneeId, ownerRole: target.ownerRole,
+      enteredAt: now, exitedAt: null, durationMins: null,
+      action: 'OVERRIDE', note: body.reason, skipReason: null,
+    });
+    db.history.push({
+      id: nextId(db, 'history'), ticketId: t.ticketId, action: 'OVERRIDE',
+      actorId: db.currentUserId, actorType: 'USER',
+      fieldName: 'currentStageCode', oldValue: leaving?.stageCode ?? null, newValue: target.stageCode,
       note: body.reason, stageCode: target.stageCode,
       cycleNo: t.cycleNo, iterationNo: t.iterationNo,
       isCorrection: false, correctsEntryId: null,
