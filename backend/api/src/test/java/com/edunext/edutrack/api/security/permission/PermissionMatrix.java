@@ -1038,6 +1038,21 @@ final class PermissionMatrix {
             // here, because it is a row rule and this file is about capability.
             everyRole("GET", "/api/v1/reports/{reportKey}"),
 
+            // ── global search · A-072, §7.2 ─────────────────────────────────
+            //
+            // Every role, and narrowed by rows rather than by capability. Every
+            // role has a top bar and every role has tickets it can open; what
+            // differs is which, and SearchScope decides that per row — §10.2
+            // restated for SQL, because MATCH … AGAINST cannot be expressed as
+            // a JPA Specification.
+            //
+            // The property that matters here and is asserted in SearchIT: an
+            // out-of-scope ticket code returns NO RESULT rather than a refusal.
+            // A search box that answered "that exists but is not yours" would
+            // let anybody confirm a ticket's existence by pasting codes, which
+            // is the same existence leak /tickets/{id} answers 404 to avoid.
+            everyRole("GET", "/api/v1/search"),
+
             // ── scheduled reports · A-065, §7.8 ─────────────────────────────
             //
             // All four reachable by every role, for the reason the runner above

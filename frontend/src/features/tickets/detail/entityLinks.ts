@@ -45,3 +45,46 @@ export const resourcePath = (userId: number): string => `/resources/${userId}`
  */
 export const cycleEffortPath = (ticketId: string, cycleNo: number): string =>
   `${ticketPath(ticketId)}?cycle=${cycleNo}&tab=effort`
+
+/**
+ * A-072 · does this look like a ticket code?
+ *
+ * <p>The contract's `TicketId` pattern. It lives here rather than in the search
+ * box because this module already owns the relationship between an entity and
+ * its URL, and the top bar's only use for it is deciding *which* URL to go to.
+ *
+ * <p>The generated zod client carries the same expression per route
+ * (`listAttachmentsPathTicketIdRegExp` and friends), and one of those could be
+ * imported instead — but naming an attachments route as the source of truth for
+ * "what a ticket code looks like" would be a stranger coupling than restating
+ * the pattern, and it would break silently the day that route is renamed.
+ *
+ * <p><b>Shape only, never existence.</b> The server decides whether such a
+ * ticket exists and whether this caller may see it; a code for somebody else's
+ * project finds nothing, which is §2's rule and why `/tickets/{id}` answers 404
+ * rather than 403.
+ */
+const TICKET_CODE = /^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$/
+
+/**
+ * The pasted code in `raw`, or null.
+ *
+ * <p>Accepts what a paste actually contains: surrounding whitespace, the
+ * `[CRM-26-00347]` brackets from a mail subject (D-031 puts them there), or a
+ * whole ticket URL out of an address bar. Mirrors the server's `TicketCode`,
+ * which has to accept the same inputs because the two see the same paste.
+ */
+export function ticketCodeIn(raw: string): string | null {
+  const cleaned = raw.trim().toUpperCase().replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '')
+  if (TICKET_CODE.test(cleaned)) return cleaned
+
+  const lastSlash = cleaned.lastIndexOf('/')
+  if (lastSlash >= 0 && lastSlash < cleaned.length - 1) {
+    const segment = cleaned
+      .slice(lastSlash + 1)
+      .split(/[?#]/, 1)[0]
+      .replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '')
+    if (TICKET_CODE.test(segment)) return segment
+  }
+  return null
+}

@@ -4186,6 +4186,69 @@ export const restHandlers = [
     return HttpResponse.json({ data: { ...row, ownedByMe: true } }, { status: 201 });
   }),
 
+  /*
+    A-072 · global search.
+
+    ⚠️ Stream A, in Stream D's handler file — flagged, not quiet, exactly as
+    A-065's schedule handlers were. The mock-coverage test refuses a contract
+    operation with no handler, and this one is reached by every test that
+    mounts the shell, because the command palette lives there.
+
+    The mock models the *shape* of the server's three answers rather than its
+    matching: a code is exact, words match tickets, a prefix matches people.
+    Substring rather than full text, because MSW has no index — what a screen
+    built against this must not come to rely on is relevance ordering, which is
+    the one thing only MySQL can produce.
+  */
+  http.get(url('/search'), ({ request }) => {
+    const db = getDb();
+    const raw = (new URL(request.url).searchParams.get('q') ?? '').trim();
+    if (raw === '') {
+      return ok({ exactTicket: null, tickets: [], people: [] });
+    }
+
+    const hit = (t: (typeof db.tickets)[number]) => ({
+      ticketId: t.ticketId,
+      title: t.title,
+      level: t.level ?? null,
+      status: t.status ?? null,
+    });
+
+    // The same shapes the server accepts: a bare code, one in brackets from a
+    // mail subject, or a whole ticket URL out of an address bar.
+    const cleaned = raw.toUpperCase().replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '');
+    const candidate = cleaned.includes('/')
+      ? cleaned.slice(cleaned.lastIndexOf('/') + 1).split(/[?#]/, 1)[0]
+      : cleaned;
+    const exact = /^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$/.test(candidate)
+      ? (db.tickets.find((t) => t.ticketId === candidate) ?? null)
+      : null;
+
+    const needle = raw.toLowerCase();
+    const tickets = db.tickets
+      .filter((t) => t.ticketId !== exact?.ticketId)
+      .filter((t) =>
+        t.title?.toLowerCase().includes(needle)
+        || t.description?.toLowerCase().includes(needle))
+      .slice(0, 6)
+      .map(hit);
+
+    const people = db.users
+      .filter((u) =>
+        u.displayName?.toLowerCase().startsWith(needle)
+        || u.username?.toLowerCase().startsWith(needle))
+      .slice(0, 6)
+      .map((u) => ({
+        id: u.id,
+        displayName: u.displayName,
+        username: u.username ?? null,
+        email: u.email ?? null,
+        role: u.role ?? null,
+      }));
+
+    return ok({ exactTicket: exact ? hit(exact) : null, tickets, people });
+  }),
+
   http.get(url('/reports/schedules'), () => {
     const db = getDb();
     // Cancelled ones included, as the contract says: "why did this stop
