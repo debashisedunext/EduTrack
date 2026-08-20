@@ -12,10 +12,10 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 207 of 244 (85%) | 308.5 of 365.8 (84%) |
-| In flight | 9 | 11.8 |
+| Complete | 208 of 244 (85%) | 309.5 of 365.8 (85%) |
+| In flight | 8 | 10.8 |
 | On the driving chain | 11 | 16.8 |
-| Zero float (no slack at all) | 23 | 38.5 |
+| Zero float (no slack at all) | 20 | 35.0 |
 
 ### By developer
 
@@ -23,7 +23,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 |---|---|---:|---:|---:|---:|---:|---|
 | **A** | Shivendra | 65 | 57 | 95.0 | 28 | 339% ⚠️ | Wed 09 Sep |
 | **B** | Ayush | 55 | 44 | 89.8 | 28 | 321% ⚠️ | Thu 10 Sep |
-| **C** | Divyansh | 59 | 46 | 90.0 | 28 | 321% ⚠️ | Sat 05 Sep |
+| **C** | Divyansh | 59 | 47 | 90.0 | 28 | 321% ⚠️ | Fri 04 Sep |
 | **D** | Debashis | 65 | 60 | 91.0 | 28 | 325% ⚠️ | Wed 26 Aug |
 
 ### Slipping
@@ -121,7 +121,7 @@ gantt
     excludes weekends
     section Milestones
     Sprint 0 — weeks 1–2 :done, c0, 2026-08-06, 3d
-    M4 — Tickets — weeks 3–14 :active, c1, 2026-08-08, 21d
+    M4 — Tickets — weeks 3–14 :active, c1, 2026-08-08, 20d
 ```
 
 ### Stream D — Engines & Realtime · Debashis
@@ -304,7 +304,7 @@ gantt
 |  | `C-016` | Row colour cues | 0.5 | `C-014` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `C-017` | Bulk select → reassign / change level / close (PM & Admin only) | 1.5 | `C-014` `A-034` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `C-018` | My Tasks | 2.5 | `C-014` ᶦ | Tue 11 Aug | Tue 11 Aug | 20 | ✅ done |
-|  | `C-019` | Detail shell + summary panel — every entity a link | 2 | `C-005` `D-004` | Tue 11 Aug | Tue 11 Aug | 2 | ✅ done |
+|  | `C-019` | Detail shell + summary panel — every entity a link | 2 | `C-005` `D-004` | Tue 11 Aug | Tue 11 Aug | 4 | ✅ done |
 |  | `C-020` | Priority dropdown | 1.5 | `C-019` `B-021` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `C-021` | Client + client-contact dependent dropdowns, type-ahead over… | 2 | `C-019` `B-028` | Wed 19 Aug | Wed 19 Aug | 15 | ✅ done |
 |  | `C-022` | Client-raised flag driving client-wise reports, CSAT and the… | 0.5 | `C-021` ᶦ | Wed 19 Aug | Wed 19 Aug | 16 | ✅ done |
@@ -320,7 +320,7 @@ gantt
 |  | `C-032` | Stamping | 1 | `C-029` `C-042` | Thu 20 Aug | Thu 20 Aug | 0 | 🔵 in review |
 |  | `C-033` | ~~5-minute edit window~~ no time limit | 1.5 | `C-029` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 | 🔴 | `C-034` | Interleave comments into the History tab | 1.5 | `C-029` `C-059` | Tue 18 Aug | Tue 18 Aug | 17 | ✅ done |
-|  | `C-035` | Effort logging, append-only, auto-stamped with current stage and… | 1.5 | `C-019` `A-040` | Tue 18 Aug | Tue 18 Aug | 0 | ✅ done |
+|  | `C-035` | Effort logging, append-only, auto-stamped with current stage and… | 1.5 | `C-019` `A-040` | Tue 18 Aug | Tue 18 Aug | 1 | ✅ done |
 |  | `C-036` | Quick Update slide-over | 2.5 | `C-018` `C-035` ᶦ | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |
 |  | `C-037` | Quick Update must not expose | 0.5 | `C-036` ᶦ | Tue 18 Aug | Tue 18 Aug | 17 | ✅ done |
 | 🔴 | `C-038` | Reopen transaction — seal cycle N | 2.5 | `C-013` `A-040` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
@@ -332,22 +332,22 @@ gantt
 |  | `C-044` | Handoff dialog — next stage | 2.5 | `C-042` `C-035` | Thu 20 Aug | Thu 20 Aug | 0 | 🔵 in review |
 |  | `C-045` | On submit: seal the current row | 2 | `C-044` `D-014` | Fri 21 Aug | Fri 21 Aug | 0 | 🟡 50% |
 |  | `C-046` | Backward moves | 1.5 | `C-042` ᶦ | Wed 26 Aug | Thu 27 Aug | 1 | ▫️ to do |
-|  | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Fri 28 Aug | Fri 28 Aug | 1 | ▫️ to do |
+|  | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Thu 27 Aug | Fri 28 Aug | 2 | ▫️ to do |
 |  | `C-048` | Force-move (OVERRIDE) — PM/Admin, logged as an override | 1 | `C-042` ᶦ | Sat 22 Aug | Sat 22 Aug | 0 | 🟡 50% |
-|  | `C-049` | Reassignment within a stage does not create a new segment | 1.5 | `C-042` | Sat 22 Aug | Sat 22 Aug | 0 | 🔵 in review |
-|  | `C-050` | Unassigned receiving role → ticket falls to a project-level queue… | 1 | `C-044` ᶦ | Tue 25 Aug | Tue 25 Aug | 0 | 🔵 in review |
-| 🔴 | `C-051` | Ribbon component | 3 | `B-050` | Thu 20 Aug | Thu 20 Aug | 7 | ✅ done |
-|  | `C-052` | Interactions | 2 | `C-051` ᶦ | Sat 29 Aug | Tue 01 Sep | 1 | ▫️ to do |
-|  | `C-053` | Cycle selector above the ribbon; selecting cycle 1 renders that… | 1.5 | `C-051` `C-038` | Wed 02 Sep | Thu 03 Sep | 1 | ▫️ to do |
-|  | `C-054` | Cycle 2 · Iteration 3 chips | 1 | `C-051` `C-046` | Thu 03 Sep | Fri 04 Sep | 2 | ▫️ to do |
+|  | `C-049` | Reassignment within a stage does not create a new segment | 1.5 | `C-042` | Sat 22 Aug | Sat 22 Aug | 1 | 🔵 in review |
+|  | `C-050` | Unassigned receiving role → ticket falls to a project-level queue… | 1 | `C-044` ᶦ | Thu 20 Aug | Thu 20 Aug | 15 | ✅ done |
+| 🔴 | `C-051` | Ribbon component | 3 | `B-050` | Thu 20 Aug | Thu 20 Aug | 8 | ✅ done |
+|  | `C-052` | Interactions | 2 | `C-051` ᶦ | Fri 28 Aug | Tue 01 Sep | 3 | ▫️ to do |
+|  | `C-053` | Cycle selector above the ribbon; selecting cycle 1 renders that… | 1.5 | `C-051` `C-038` | Tue 01 Sep | Wed 02 Sep | 4 | ▫️ to do |
+|  | `C-054` | Cycle 2 · Iteration 3 chips | 1 | `C-051` `C-046` | Thu 03 Sep | Thu 03 Sep | 4 | ▫️ to do |
 |  | `C-059` | History tab | 1.5 | `C-019` `A-040` | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |
 |  | `C-060` | Attachments tab | 1 | `C-026` ᶦ | Tue 18 Aug | Tue 18 Aug | 17 | ✅ done |
 |  | `C-061` | Effort tab — every log line, sum per cycle + grand total | 1 | `C-041` ᶦ | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |
 |  | `C-063` | Bulk reassignment wizard | 2 | `C-017` `B-014` | Tue 18 Aug | Wed 19 Aug | 16 | ✅ done |
 |  | `C-064` | Ticket linking — blocks / is blocked by / duplicate of / relates to | 1.5 | `C-019` ᶦ | Wed 19 Aug | Wed 19 Aug | 16 | ✅ done |
 |  | `C-066` | Shared rich-text editor in components/ui/ + Storybook | 1.5 | `C-003` | Tue 11 Aug | Tue 11 Aug | 21 | ✅ done |
-| 🔴 | `C-071` | Per-project settings are configurable and ignored | 1 | — | Tue 25 Aug | Wed 26 Aug | 0 | ▫️ to do |
-|  | `C-072` | A deactivated priority can still be chosen | 1 | — | Fri 04 Sep | Sat 05 Sep | 3 | ▫️ to do |
+| 🔴 | `C-071` | Per-project settings are configurable and ignored | 1 | — | Tue 25 Aug | Tue 25 Aug | 1 | ▫️ to do |
+|  | `C-072` | A deactivated priority can still be chosen | 1 | — | Fri 04 Sep | Fri 04 Sep | 4 | ▫️ to do |
 
 </details>
 
@@ -375,7 +375,7 @@ gantt
 |  | `D-011` | @Scheduled + ShedLock | 1 | `D-010` ᶦ | Fri 07 Aug | Fri 07 Aug | 19 | ✅ done |
 |  | `D-012` | Spring WebSocket + STOMP config, Redis pub/sub relay for… | 2 | `A-012` ᶦ | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
 | 🔴 | `D-013` | Channel interceptor authorising subscriptions with the same scope… | 2 | `D-012` `A-034` | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-014` | Destination map per blueprint §9.3 | 1 | `D-012` | Fri 07 Aug | Fri 07 Aug | 7 | ✅ done |
+|  | `D-014` | Destination map per blueprint §9.3 | 1 | `D-012` | Fri 07 Aug | Fri 07 Aug | 9 | ✅ done |
 |  | `D-015` | Frontend STOMP client | 1.5 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 23 | ✅ done |
 | 🔴 | `D-020` | SLA scanner, every 15 minutes | 2 | `D-011` `B-024` `A-009` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-021` | 80%-of-SLA pre-breach warning to the assignee | 1 | `D-020` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |

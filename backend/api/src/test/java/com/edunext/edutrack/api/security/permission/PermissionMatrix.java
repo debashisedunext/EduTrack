@@ -199,6 +199,28 @@ final class PermissionMatrix {
             {"reportKey":"date-wise","cadence":"WEEKLY","recipients":["nobody@example.test"]}""";
 
     /**
+     * C-044 · {@code HandoffDtos.HandoffRequest}: {@code toStageCode} and
+     * {@code toUserId} are the only required fields. {@code effortHours} is
+     * omitted deliberately, on {@link #CHANGE_PRIORITY}'s own reasoning — it
+     * is business-mandatory (G-1) rather than {@code @NotNull} on the DTO, so
+     * a fixture without it still reaches authorisation and answers 400 from
+     * {@code HandoffService}, not from Bean Validation, which would defeat
+     * the row just as surely as an actually-invalid body.
+     */
+    private static final String HANDOFF = """
+            {"toStageCode":"QA","toUserId":1}""";
+
+    /**
+     * C-048 · {@code ForceMoveDtos.ForceMoveRequest}: {@code toStageCode} and
+     * {@code reason} are the only required fields — {@code toUserId} is
+     * omitted, on {@link #HANDOFF}'s own reasoning: keeping the current
+     * assignee is the strongest fixture, since it reaches authorisation
+     * without depending on a field this matrix has no opinion about.
+     */
+    private static final String FORCE_MOVE = """
+            {"toStageCode":"QA","reason":"Matrix fixture override — see PermissionMatrix's own header."}""";
+
+    /**
      * C-020 · {@code PriorityChangeDtos.ChangePriorityRequest}: {@code level} is
      * the only {@code @NotBlank} field.
      *
@@ -857,6 +879,46 @@ final class PermissionMatrix {
              * A-034's question, already answered before this one is asked.
              */
             everyRole("GET", "/api/v1/tickets/{ticketId}/journey"),
+
+            // ── handoff · C-044, §4A, the ribbon's golden rule ────────────────
+            //
+            // ticket.handoff is granted to all six roles (V20260806_0900) — the
+            // capability says everybody may advance SOME ticket, and C-043's
+            // StageOwnership.mayAdvance (checked inside TransitionService.advance,
+            // 422 not 403) decides which. Not a row rule this file states
+            // narrower, on ticket-detail's own reasoning immediately above: the
+            // right to ask is everybody's, so a permission denial here would be
+            // the wrong tool.
+            //
+            // *Which* tickets is not this file's question either: ScopedTickets
+            // answers 404 for a ticket outside the caller's scope (A-035)
+            // whatever capability they hold.
+            //
+            // Carries a fixture because the handler takes a required
+            // @RequestBody — without one, argument resolution answers 400 before
+            // @PreAuthorize is consulted, on this file's own header's warning.
+            everyRole("POST", "/api/v1/tickets/{ticketId}/handoff", HANDOFF),
+
+            // ── force-move · C-048, §2's "Force-move ribbon backwards" row ────
+            //
+            // Admin and PM, and unlike the handoff row immediately above this
+            // is a genuine capability rather than a row rule wearing one.
+            // ticket.force_move (V20260806_0900) is granted to exactly these
+            // two — nobody else holds it — so the capability itself is the
+            // whole authorisation question ForceMoveController asks; there is
+            // no StageOwnership narrowing underneath it the way handoff/rework
+            // have, because both roles that hold the capability already
+            // satisfy StageOwnership.mayAdvance regardless of assignment.
+            //
+            // *Which* tickets is still not this file's question: ScopedTickets
+            // answers 404 for a ticket outside the caller's scope (A-035)
+            // whatever capability they hold.
+            //
+            // Carries a fixture because the handler takes a required
+            // @RequestBody — without one, argument resolution answers 400
+            // before @PreAuthorize is consulted, on this file's own header's
+            // warning.
+            adminAndPm("POST", "/api/v1/tickets/{ticketId}/force-move", FORCE_MOVE),
 
             // ── reopen · C-038, and the one ticket route where three roles is
             //    the whole answer rather than half a rule ────────────────────
