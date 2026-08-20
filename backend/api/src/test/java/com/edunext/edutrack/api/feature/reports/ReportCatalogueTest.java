@@ -18,13 +18,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ReportCatalogueTest {
 
     @Test
-    @DisplayName("declares all eighteen reports of §7.8, so the hub is not silently short")
-    void hasEighteen() {
-        // §7.8's table plus S-28's Resource 360 is the module's full scope;
-        // A-066 to A-068 enumerate exactly eighteen between them. A count is a
-        // crude assertion and the right one here: the failure it catches is a
-        // report quietly dropped during a merge, which nothing else would show.
-        assertThat(ReportCatalogue.declared()).hasSize(18);
+    @DisplayName("declares §7.8's eighteen plus §6's, so the hub is not silently short")
+    void declaresEveryReport() {
+        // §7.8's table is eighteen, and A-070 adds §6's "born critical versus
+        // became critical" as the nineteenth — the one report the blueprint
+        // asks for outside that table, and the reason `original_level` exists.
+        //
+        // A count is a crude assertion and the right one here: the failure it
+        // catches is a report quietly dropped during a merge, which nothing
+        // else would show. It is meant to fail when a report is added — the
+        // number moving is how the addition gets stated rather than absorbed.
+        assertThat(ReportCatalogue.declared()).hasSize(19);
     }
 
     @Test
@@ -122,7 +126,10 @@ class ReportCatalogueTest {
                 WorkloadCapacityRunner.KEY,
                 StageFunnelRunner.KEY,
                 StageCycleTimeRunner.KEY,
-                ClientReportRunner.KEY);
+                ClientReportRunner.KEY,
+                // A-070 · the nineteenth, and the first outside §7.8's eighteen —
+                // blueprint §6 asks for it by name.
+                CriticalOriginRunner.KEY);
     }
 
     /**

@@ -37,6 +37,10 @@ export function ReportViewerPage() {
   const projectId = params.get('projectId')
   const resourceId = params.get('resourceId')
   const clientId = params.get('clientId')
+  // A-070 · sent now that ReportFilterBar can set it. Declared in the contract
+  // since A-066 and accepted by ReportController since B-060; this screen was
+  // the last link missing, so the control had nowhere to send its value.
+  const taskTypeId = params.get('taskTypeId')
 
   // The catalogue is already cached by the hub in the ordinary case — this is
   // a second consumer of one query, not a second request. Fetched here at all
@@ -54,6 +58,7 @@ export function ReportViewerPage() {
     // not declare CLIENT has no control to set it, so the parameter is only
     // ever present when the filter bar put it in the URL.
     clientId: clientId ? Number(clientId) : undefined,
+    taskTypeId: taskTypeId ? Number(taskTypeId) : undefined,
   })
 
   if (catalogue.isLoading) {

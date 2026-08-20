@@ -684,4 +684,164 @@ class TicketReportRepository {
     record ClientRow(long clientId, String clientName, String clientCode, long raised, long closed,
                      long openNow, long slaCommitted, long slaMet, BigDecimal avgResolutionHours) {
     }
+
+    // ── A-070 · born critical versus became critical (§6) ────────────────────
+
+    /**
+     * A-070 · the four quadrants of {@code original_level} against {@code level}.
+     *
+     * <h2>Why this needs no new column, and what it rests on</h2>
+     *
+     * <p>{@code tickets.original_level} is written once at creation and the
+     * schema calls it "never mutated"; {@code level} carries the current
+     * answer. Between them every ticket sits in one of four states — arrived
+     * critical and still is, arrived critical and was downgraded, arrived lower
+     * and was raised, arrived lower and still is. The escalation engine
+     * (D-028's {@code SlaEscalation}) updates {@code level} alone <em>for this
+     * report</em>, and says so in its own javadoc.
+     *
+     * <h2>The cohort is the window, and both halves share it</h2>
+     *
+     * <p>Everything here is bounded by {@code date_reported}, including the
+     * became-critical count — even though becoming critical happens later, and
+     * often much later. That is deliberate and it is the decision a reader
+     * should check first.
+     *
+     * <p>The alternative is to count born-critical by when the ticket arrived
+     * and became-critical by when the history row was written, which produces
+     * two numbers measured on different clocks that cannot be added, shared or
+     * compared. One cohort — "of the tickets raised in this window" — gives one
+     * denominator and a share that means something.
+     *
+     * <p><b>The cost is that recent windows understate becoming.</b> A ticket
+     * raised yesterday has not had time to breach, so "last week" will always
+     * look better than "last quarter". {@code CriticalOriginRunner} puts that
+     * in the report's own description rather than leaving it to be discovered
+     * by somebody drawing a trend from it.
+     *
+     * <h2>Attribution reads the latest row, not any row</h2>
+     *
+     * <p>A ticket can cross CRITICAL more than once: escalated by the scanner,
+     * downgraded by a manager, raised again by hand. {@code EXISTS (… actor_type
+     * = 'SYSTEM')} would call that one an SLA escalation, which is what it was
+     * two changes ago and not what it is. The subquery therefore takes the
+     * <em>most recent</em> {@code LEVEL_CHANGED} row that set CRITICAL and asks
+     * who wrote it — the change that put the ticket where it is now.
+     *
+     * <p>Ordered by {@code created_at} then {@code id}, because two rows can
+     * share a microsecond and {@code id} is the tiebreak the journal's own
+     * chain walk uses.
+     *
+     * <h2>🔴 Three outcomes, not two, because "no record" is not "a person"</h2>
+     *
+     * <p>The first version returned {@code escalated_by_sla} alone and had the
+     * runner derive "raised by a person" as the remainder. The arithmetic was
+     * sound and the label was a small lie, which running it against the B-007
+     * corpus made obvious: 77 tickets there are critical without having arrived
+     * that way and only 7 carry a {@code LEVEL_CHANGED} row, so seventy would
+     * have been reported as somebody's decision when the truth is that nothing
+     * recorded one.
+     *
+     * <p>So both branches are counted here, from the <em>same</em> subquery
+     * expression — mutually exclusive by construction, since a row is written
+     * by one actor type or the other — and the runner derives the third as what
+     * is left. The three partition {@code became_critical} exactly and can
+     * never disagree with their own total.
+     *
+     * <p>The third column earns its place beyond honesty: in production it
+     * should be zero. Every real level change goes through
+     * {@code PriorityChangeController}, which journals it as a person, or
+     * {@code SlaEscalation}, which journals it as SYSTEM. A non-zero count
+     * means something moved {@code level} without writing history, which is
+     * worth seeing on a report rather than silently folded into a column that
+     * names an actor.
+     */
+    List<CriticalOriginRow> criticalOrigin(LocalDate from, LocalDate to, List<Long> projectIds,
+                                           boolean ownWork, long userId, Long resourceId,
+                                           Long taskTypeId) {
+        return jdbc.sql("""
+                        SELECT p.name  AS project_name,
+                               tt.name AS task_type,
+                               COUNT(*) AS tickets,
+                               SUM(t.original_level = 'CRITICAL')                     AS born_critical,
+                               SUM(t.level = 'CRITICAL' AND t.original_level <> 'CRITICAL')
+                                                                                      AS became_critical,
+                               SUM(t.original_level = 'CRITICAL' AND t.level <> 'CRITICAL')
+                                                                                      AS de_escalated,
+                               SUM(t.level = 'CRITICAL')                              AS critical_now,
+                               SUM(t.level = 'CRITICAL' AND t.original_level <> 'CRITICAL'
+                                   AND (SELECT h.actor_type
+                                          FROM ticket_history h
+                                         WHERE h.ticket_id = t.id
+                                           AND h.event_type = 'LEVEL_CHANGED'
+                                           AND h.new_value = 'CRITICAL'
+                                         ORDER BY h.created_at DESC, h.id DESC
+                                         LIMIT 1) = 'SYSTEM')                         AS escalated_by_sla,
+                               SUM(t.level = 'CRITICAL' AND t.original_level <> 'CRITICAL'
+                                   AND (SELECT h.actor_type
+                                          FROM ticket_history h
+                                         WHERE h.ticket_id = t.id
+                                           AND h.event_type = 'LEVEL_CHANGED'
+                                           AND h.new_value = 'CRITICAL'
+                                         ORDER BY h.created_at DESC, h.id DESC
+                                         LIMIT 1) = 'USER')                           AS raised_by_person
+                          FROM tickets t
+                          JOIN projects p    ON p.id = t.project_id
+                          JOIN task_types tt ON tt.id = t.task_type_id
+                         WHERE t.date_reported >= :from
+                           AND t.date_reported < :toExclusive
+                           AND (:unscoped = 1 OR t.project_id IN (:projectIds))
+                           AND (:ownWork = 0 OR t.assigned_to = :userId)
+                           AND (:resourceId IS NULL OR t.assigned_to = :resourceId)
+                           AND (:taskTypeId IS NULL OR t.task_type_id = :taskTypeId)
+                      GROUP BY p.name, tt.name
+                        -- A row where nothing was ever critical is not an
+                        -- absence of a problem worth printing — it is every
+                        -- other project and type, and it would bury the ones
+                        -- that are. ReopenAnalysisRunner omits its quiet rows
+                        -- for the same reason.
+                        HAVING born_critical > 0 OR became_critical > 0
+                        -- Became first: it is the half the team can do
+                        -- something about, and the half that is a statement
+                        -- about us rather than about what was sent to us.
+                      ORDER BY became_critical DESC, born_critical DESC, p.name, tt.name
+                        """)
+                .param("from", from)
+                .param("toExclusive", to.plusDays(1))
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .param("ownWork", ownWork ? 1 : 0)
+                .param("userId", userId)
+                .param("resourceId", resourceId)
+                .param("taskTypeId", taskTypeId)
+                .query((rs, n) -> new CriticalOriginRow(
+                        rs.getString("project_name"), rs.getString("task_type"),
+                        rs.getLong("tickets"), rs.getLong("born_critical"),
+                        rs.getLong("became_critical"), rs.getLong("de_escalated"),
+                        rs.getLong("critical_now"), rs.getLong("escalated_by_sla"),
+                        rs.getLong("raised_by_person")))
+                .list();
+    }
+
+    /**
+     * @param bornCritical   arrived critical, whatever it is now
+     * @param becameCritical arrived lower and is critical now
+     * @param deEscalated    arrived critical and is not any more — the quadrant
+     *                       nobody asks for and would notice the absence of
+     * @param criticalNow    {@code bornCritical - deEscalated + becameCritical},
+     *                       returned rather than derived so the identity is
+     *                       checkable against the row on screen
+     * @param escalatedBySla of {@code becameCritical}, the ones whose latest
+     *                       change to CRITICAL was written by the SLA scanner
+     * @param raisedByPerson of {@code becameCritical}, the ones whose latest
+     *                       change to CRITICAL was written by somebody. What is
+     *                       left over after these two is the ones with no
+     *                       history row at all — derived by the runner rather
+     *                       than counted, and not the same claim as either of
+     *                       these two.
+     */
+    record CriticalOriginRow(String projectName, String taskType, long tickets,
+                             long bornCritical, long becameCritical, long deEscalated,
+                             long criticalNow, long escalatedBySla, long raisedByPerson) {
+    }
 }
