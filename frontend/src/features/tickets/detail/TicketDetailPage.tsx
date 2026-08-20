@@ -28,6 +28,7 @@ import { JourneyTab } from '../journey/JourneyTab'
 import { useJourneyTab } from '../journey/useJourneyTab'
 import { useEffortTab } from '../effort/useEffortTab'
 
+import { CycleSelector } from './CycleSelector'
 import { canChangeLevel } from './levelChange'
 import { StepsToGenerateSection } from './WhereItHappenedControls'
 import { PendingSection } from './PendingSection'
@@ -111,6 +112,28 @@ export function TicketDetailPage() {
   const { data, isPending, isError, error, refetch } = useGetTicketDetail(ticketId, cycle ? { cycle } : undefined, {
     query: { enabled: ticketId.length > 0, retry: false },
   })
+
+  /*
+   * C-053 · the cycle selector above the ribbon. Sets `?cycle=` the same way
+   * `selectTab` sets `?tab=` — a second on-page switch over data this page
+   * already fetched, not a citation link — so whichever tab is open stays
+   * open across a cycle change. `replace: true` for the same reason `selectTab`
+   * uses it: stepping through a ticket's cycles should not bury the list six
+   * entries deep in the back button.
+   */
+  const selectCycle = React.useCallback(
+    (cycleNo: number) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.set('cycle', String(cycleNo))
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
 
   const detail = data?.data
   const ticket = detail?.ticket
@@ -415,6 +438,8 @@ export function TicketDetailPage() {
 
       <div className="grid flex-1 gap-4 p-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-4">
+          <CycleSelector cycles={detail?.cycles} selectedCycleNo={selectedCycleNo} onSelect={selectCycle} />
+
           {isEarlierCycle && (
             <p role="status" className="rounded-control bg-subtle px-3 py-2 text-caption text-content-muted">
               Showing cycle {selectedCycleNo}, which is sealed and read-only. Its journey, effort and history are
