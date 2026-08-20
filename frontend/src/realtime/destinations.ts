@@ -56,6 +56,24 @@ export function ticketTopic(ticketId: number): string {
  * destination: "QA.1" on project 7 and "QA" on project 1 both produce
  * plausible-looking rooms, so a subscriber could land in another team's queue.
  */
+/**
+ * Whether `stageCode` can be turned into a stage room at all.
+ *
+ * {@link stageTopic} throws on a code it cannot address, which is right for a
+ * call site with a literal — a mistyped destination is otherwise accepted and
+ * silently receives nothing forever, and this file exists to make that loud.
+ *
+ * It is wrong for a call site whose code came from a **workflow template an
+ * Admin edits** (S-31's stage picker, D-059). A throw during render is a white
+ * screen on a queue that would otherwise work perfectly well without live
+ * updates. Callers in that position ask first and skip the subscription — the
+ * queue then behaves exactly as it did before D-059, which is a degradation
+ * rather than a failure.
+ */
+export function canAddressStage(stageCode: string): boolean {
+  return STAGE_CODE.test(stageCode);
+}
+
 export function stageTopic(stageCode: string, projectId: number): string {
   if (!STAGE_CODE.test(stageCode)) {
     throw new Error(`stage code must match ${STAGE_CODE.source} but was: ${stageCode}`);
