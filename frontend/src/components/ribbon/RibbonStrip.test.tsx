@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 import type { Ribbon } from '@/api/generated/model/ribbon'
 import type { RibbonSegment as RibbonSegmentData } from '@/api/generated/model/ribbonSegment'
@@ -62,9 +63,10 @@ describe('RibbonStrip · C-051', () => {
     expect(screen.getAllByTestId('ribbon-connector')).toHaveLength(1)
   })
 
-  // C-052 owns interactions. A tile with no `onSelect` renders as a plain,
-  // unfocusable group — the strip must not offer a control that does nothing.
-  it('renders read-only tiles, since no interaction is wired here yet', () => {
+  // No `onSelectSegment` given at all is still read-only — a sealed cycle's
+  // strip, or any caller that has not wired selection, must not offer a
+  // control that does nothing.
+  it('renders read-only tiles when the caller wires no onSelectSegment', () => {
     render(<RibbonStrip ribbon={ribbon([seg()])} />)
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     expect(screen.getByRole('listitem')).toBeInTheDocument()
@@ -79,5 +81,127 @@ describe('RibbonStrip · C-051', () => {
   it('shows the same empty state when no ribbon was returned at all', () => {
     render(<RibbonStrip ribbon={undefined} />)
     expect(screen.getByText('No workflow ribbon')).toBeInTheDocument()
+  })
+})
+
+describe('RibbonStrip · C-052 selection', () => {
+  it('makes every tile a button and forwards the clicked segment', async () => {
+    const onSelectSegment = vi.fn()
+    const intake = seg({ stageCode: 'INTAKE', displayName: 'Intake' })
+    render(<RibbonStrip ribbon={ribbon([intake])} onSelectSegment={onSelectSegment} />)
+
+    await userEvent.click(screen.getByRole('button'))
+    expect(onSelectSegment).toHaveBeenCalledWith(intake)
+  })
+
+  it('marks the segment matching selectedSegment as selected, and no other', () => {
+    render(
+      <RibbonStrip
+        ribbon={ribbon([
+          seg({ stageCode: 'INTAKE', displayName: 'Intake', iterationNo: 1 }),
+          seg({ stageCode: 'TRIAGE', displayName: 'Triage', iterationNo: 1 }),
+        ])}
+        selectedSegment={{ stageCode: 'TRIAGE', iterationNo: 1 }}
+        onSelectSegment={() => {}}
+      />,
+    )
+
+    const buttons = screen.getAllByRole('button')
+    expect(buttons[0]).toHaveAttribute('aria-pressed', 'false')
+    expect(buttons[1]).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  // A stage can recur across iterations after a loop-back — matching on stage
+  // code alone would select the wrong iteration's tile.
+  it('does not select a same-stage tile from a different iteration', () => {
+    render(
+      <RibbonStrip
+        ribbon={ribbon([seg({ stageCode: 'DEVELOPMENT', iterationNo: 2 })])}
+        selectedSegment={{ stageCode: 'DEVELOPMENT', iterationNo: 1 }}
+        onSelectSegment={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('button')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('selects even on a sealed cycle — filtering a past cycle is still useful', () => {
+    render(
+      <RibbonStrip
+        ribbon={{ cycleNo: 1, iterationNo: 1, isSealed: true, canAdvance: false, segments: [seg()] }}
+        onSelectSegment={() => {}}
+      />,
+    )
+    expect(screen.getByRole('button')).toBeInTheDocument()
+  })
+})
+
+describe('RibbonStrip · C-052 the contextual action', () => {
+  it('renders an honest, disabled handoff placeholder on the current segment when the caller can advance', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: false,
+          canAdvance: true,
+          segments: [
+            seg({ stageCode: 'DEVELOPMENT', displayName: 'Development', state: SegmentState.CURRENT }),
+            seg({ stageCode: 'QA', displayName: 'QA', state: SegmentState.PENDING }),
+          ],
+        }}
+      />,
+    )
+
+    const action = screen.getByRole('button', { name: 'Hand off to QA →' })
+    expect(action).toBeDisabled()
+  })
+
+  it('names the plain verb when the current segment is the last one', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: false,
+          canAdvance: true,
+          segments: [seg({ stageCode: 'SIGNOFF', displayName: 'Sign-off', state: SegmentState.CURRENT })],
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Hand off →' })).toBeInTheDocument()
+  })
+
+  it('renders no action when the caller may not advance — hidden for everyone else', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: false,
+          canAdvance: false,
+          segments: [seg({ state: SegmentState.CURRENT })],
+        }}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: /Hand off/ })).not.toBeInTheDocument()
+  })
+
+  it('renders no action when nothing is current, even if canAdvance is true', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: true,
+          canAdvance: true,
+          segments: [seg({ state: SegmentState.COMPLETED })],
+        }}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: /Hand off/ })).not.toBeInTheDocument()
   })
 })

@@ -1,4 +1,5 @@
 import { CircleDashed, Check, PauseCircle, RotateCcw, SkipForward, Loader } from 'lucide-react'
+import { format, parseISO } from 'date-fns'
 
 import type { RibbonSegment } from '@/api/generated/model/ribbonSegment'
 import { SegmentState } from '@/api/generated/model/segmentState'
@@ -176,4 +177,74 @@ export function segmentAriaLabel(segment: RibbonSegment, elapsedMins?: number | 
   }
 
   return parts.join(', ')
+}
+
+const TOOLTIP_TIMESTAMP_FORMAT = 'd MMM yyyy, HH:mm'
+
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return '—'
+  const parsed = parseISO(value)
+  if (Number.isNaN(parsed.getTime())) return '—'
+  return format(parsed, TOOLTIP_TIMESTAMP_FORMAT)
+}
+
+/** C-052 · the rich hover tooltip's content, structured rather than one string
+ * so `RibbonSegment` can lay it out as a definition list. Pure and tested
+ * without a DOM, the same reason `segmentAriaLabel` lives here. */
+export interface SegmentTooltipDetails {
+  entered: string
+  exited: string
+  owner: string
+  note: string
+  effort: string
+  active: string
+  idle: string
+  /** Idle at or past half of duration — the tile's own reading aid. */
+  isIdleDominated: boolean
+}
+
+/**
+ * §4A.3's hover: "entered/exited/owner/note/effort/idle-vs-active". Six
+ * fields, all formatted here so `RibbonSegment` only ever renders strings.
+ *
+ * **Its own idle-vs-active threshold, not `journeyFormat.ts`'s `isQueueBound`.**
+ * `journeyFormat.ts`'s own note names this file as the place that split
+ * belongs, rather than importing the Journey grid's copy — `journey/` is a
+ * feature and `components/ribbon/` is shared, and `lib/duration.ts`'s header
+ * already declines that import direction for the same reason. The 50%
+ * threshold is repeated rather than shared, on the same number and the same
+ * blueprint example ("2 days duration, 2 hours effort") the grid used to
+ * choose it, so a stage read as queue-bound in one place reads the same way
+ * in the other.
+ */
+export function segmentTooltipDetails(segment: RibbonSegment): SegmentTooltipDetails {
+  const isCurrent = segment.state === SegmentState.CURRENT
+  const { durationMins, idleMins } = segment
+  const measured = durationMins != null && idleMins != null
+
+  return {
+    entered: formatTimestamp(segment.enteredAt),
+    exited: segment.exitedAt ? formatTimestamp(segment.exitedAt) : isCurrent ? 'Still open' : '—',
+    owner: ownerLabel(segment),
+    note:
+      segment.state === SegmentState.SKIPPED && segment.skipReason
+        ? `Skipped: ${segment.skipReason}`
+        : (segment.handoffNote ?? '—'),
+    effort: formatEffortHrs(segment.effortHrs),
+    active: measured ? formatDuration(Math.max(durationMins - idleMins, 0)) : isCurrent ? 'Not yet measured' : '—',
+    idle: measured ? formatDuration(idleMins) : isCurrent ? 'Not yet measured' : '—',
+    isIdleDominated: measured && durationMins > 0 && idleMins / durationMins >= 0.5,
+  }
+}
+
+/**
+ * §4A.3's inline action label, `Hand off to QA →` — the next stage's name,
+ * read from the segment straight after the current one rather than invented.
+ * `undefined` (the last stage, or an index the strip could not resolve) falls
+ * back to the plain verb.
+ */
+export function nextStageLabel(segments: RibbonSegment[], currentIndex: number): string {
+  const next = segments[currentIndex + 1]
+  const name = next?.displayName ?? next?.stageCode
+  return name ? `Hand off to ${name} →` : 'Hand off →'
 }

@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { format, parseISO } from 'date-fns'
 
 import type { RibbonSegment as RibbonSegmentData } from '@/api/generated/model/ribbonSegment'
 import { SegmentState } from '@/api/generated/model/segmentState'
 import { RibbonSegment } from './RibbonSegment'
+
+// Matches `segmentState.ts`'s own `TOOLTIP_TIMESTAMP_FORMAT`. Computed rather
+// than hardcoded: `format` renders in the machine's local timezone (CLAUDE.md
+// — "user timezone is applied in the presentation layer only"), so a literal
+// clock-time string here would pass in UTC and fail everywhere east of it.
+function stamp(iso: string): string {
+  return format(parseISO(iso), 'd MMM yyyy, HH:mm')
+}
 
 /**
  * The five data points §4A.3 requires, in all six states, plus the two things
@@ -87,16 +96,6 @@ describe('RibbonSegment · the six states', () => {
     render(<RibbonSegment segment={seg({ state })} />)
     expect(screen.getByText(word)).toBeInTheDocument()
     expect(screen.getByTestId('ribbon-segment').querySelector('[data-state]')).toHaveAttribute('data-state', state)
-  })
-
-  it('puts the skip reason where a hover can find it', () => {
-    render(<RibbonSegment segment={seg({ state: SegmentState.SKIPPED, skipReason: 'no QA needed' })} />)
-    expect(screen.getByRole('group')).toHaveAttribute('title', 'Skipped: no QA needed')
-  })
-
-  it('falls back to the handoff note when there is no skip reason', () => {
-    render(<RibbonSegment segment={seg({ handoffNote: 'passed to Anil for regression' })} />)
-    expect(screen.getByRole('group')).toHaveAttribute('title', 'passed to Anil for regression')
   })
 
   it('marks the current segment as the current step for assistive tech', () => {
@@ -229,6 +228,90 @@ describe('RibbonSegment · selection', () => {
   it('renders the contextual action slot the current segment carries', () => {
     render(<RibbonSegment segment={seg({ state: SegmentState.CURRENT })} actionSlot={<button>Hand off to QA</button>} />)
     expect(screen.getByRole('button', { name: 'Hand off to QA' })).toBeInTheDocument()
+  })
+})
+
+describe('RibbonSegment · C-052 the rich hover tooltip', () => {
+  it('shows entered, exited, owner, effort and the idle-vs-active split on hover', async () => {
+    // idleMins 600 against durationMins 2940 (20%) stays under the
+    // idle-dominated threshold, so the idle figure carries no sr-only
+    // suffix here — that combination is its own test below.
+    render(<RibbonSegment segment={seg({ idleMins: 600 })} />)
+
+    await userEvent.hover(screen.getByRole('group'))
+    const tooltip = await screen.findByRole('tooltip')
+
+    expect(within(tooltip).getByText(stamp('2026-08-01T09:00:00Z'))).toBeInTheDocument()
+    expect(within(tooltip).getByText(stamp('2026-08-03T13:00:00Z'))).toBeInTheDocument()
+    expect(within(tooltip).getByText('Ravi Kumar')).toBeInTheDocument()
+    expect(within(tooltip).getByText('14.5 h')).toBeInTheDocument()
+    // durationMins 2940, idleMins 600 → active 2340 = 1d 15h.
+    expect(within(tooltip).getByText('1d 15h')).toBeInTheDocument()
+    expect(within(tooltip).getByText('10h')).toBeInTheDocument()
+  })
+
+  it('is reachable by keyboard focus, not only pointer hover', async () => {
+    render(<RibbonSegment segment={seg()} onSelect={vi.fn()} />)
+
+    await userEvent.tab()
+    expect(await screen.findByRole('tooltip')).toBeInTheDocument()
+  })
+
+  it('puts the skip reason in the note field', async () => {
+    render(<RibbonSegment segment={seg({ state: SegmentState.SKIPPED, skipReason: 'no QA needed' })} />)
+
+    await userEvent.hover(screen.getByRole('group'))
+    const tooltip = await screen.findByRole('tooltip')
+    expect(within(tooltip).getByText('Skipped: no QA needed')).toBeInTheDocument()
+  })
+
+  it('falls back to the handoff note when there is no skip reason', async () => {
+    render(<RibbonSegment segment={seg({ handoffNote: 'passed to Anil for regression' })} />)
+
+    await userEvent.hover(screen.getByRole('group'))
+    const tooltip = await screen.findByRole('tooltip')
+    expect(within(tooltip).getByText('passed to Anil for regression')).toBeInTheDocument()
+  })
+
+  it('shows a dash for the note when neither exists', async () => {
+    render(<RibbonSegment segment={seg({ handoffNote: undefined })} />)
+
+    await userEvent.hover(screen.getByRole('group'))
+    const tooltip = await screen.findByRole('tooltip')
+    expect(within(tooltip).getByText('—')).toBeInTheDocument()
+  })
+
+  it('reads still-open and not-yet-measured on the live current stage', async () => {
+    render(
+      <RibbonSegment
+        segment={seg({ state: SegmentState.CURRENT, exitedAt: null, durationMins: null, idleMins: null })}
+      />,
+    )
+
+    await userEvent.hover(screen.getByRole('group'))
+    const tooltip = await screen.findByRole('tooltip')
+    // Exited reads "still open"; active and idle both read "not yet measured"
+    // — durationMins and idleMins are both null until the hop seals.
+    expect(within(tooltip).getByText('Still open')).toBeInTheDocument()
+    expect(within(tooltip).getAllByText('Not yet measured')).toHaveLength(2)
+  })
+
+  // A stage where waiting dominates is marked, colour is never the only
+  // signal — the Journey grid's own idle column follows the identical rule.
+  it('flags an idle-dominated stage for sighted and screen-reader users alike', async () => {
+    render(<RibbonSegment segment={seg({ durationMins: 2940, idleMins: 2070 })} />)
+
+    await userEvent.hover(screen.getByRole('group'))
+    await screen.findByRole('tooltip')
+    expect(screen.getByText(/^— most of this stage was spent waiting, not working$/)).toBeInTheDocument()
+  })
+
+  it('does not flag a stage where active time dominates', async () => {
+    render(<RibbonSegment segment={seg({ durationMins: 480, idleMins: 60 })} />)
+
+    await userEvent.hover(screen.getByRole('group'))
+    const tooltip = await screen.findByRole('tooltip')
+    expect(within(tooltip).queryByText(/most of this stage was spent waiting/)).not.toBeInTheDocument()
   })
 })
 

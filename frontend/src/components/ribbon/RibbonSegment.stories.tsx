@@ -81,7 +81,12 @@ export const CurrentWithLiveTimer: Story = {
   },
 }
 
-/** §4A.3's inline contextual action, which C-044 fills in. */
+/**
+ * §4A.3's inline contextual action. `actionSlot` is a plain render prop here —
+ * `RibbonStrip.stories.tsx`'s own `WithHandoffAction` shows what actually
+ * fills it in production: C-052's honestly-disabled placeholder, gated on
+ * `ribbon.canAdvance`, until C-044's dialog replaces it.
+ */
 export const CurrentWithAction: Story = {
   args: {
     segment: seg({ state: SegmentState.CURRENT, durationMins: null, exitedAt: null }),

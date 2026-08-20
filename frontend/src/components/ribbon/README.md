@@ -11,26 +11,45 @@ task IDs still needs the ordinary sign-off.
 
 | File | Task | What it is |
 |---|---|---|
-| `RibbonSegment.tsx` | B-050 | One segment. Six states, five data points. |
-| `segmentState.ts` | B-050 | State → words, icon and treatment; the ARIA label. Pure. |
+| `RibbonSegment.tsx` | B-050, C-052 | One segment. Six states, five data points, the rich hover tooltip. |
+| `segmentState.ts` | B-050, C-052 | State → words, icon and treatment; the ARIA label; the tooltip's six fields. Pure. |
 | `useElapsedMins.ts` | B-050 | The current segment's running timer. |
-| `RibbonStrip.tsx` | C-051 | Lays the segments out in order, as a labelled list. Read-only. |
+| `RibbonStrip.tsx` | C-051, C-052 | Lays the segments out in order; wires selection and the current segment's contextual action. |
 
-## What C-051 does not build
+## What C-052 built, and what still sits above this directory
 
-`C-052` decides what a click does and builds the rich hover tooltip —
-`RibbonStrip` wires no `onSelect`, so every tile renders as B-050's read-only
-`<div role="group">` fallback. `C-053` adds the cycle selector above the
-strip, `C-054` the `Cycle 2 · Iteration 3` chips. `B-051` is the compact dot
-for the ticket list, `B-052` roving keyboard navigation across the strip,
-`B-053` the auto-centred scroll and the collapsed `…` group at eight stages —
-`RibbonStrip` only goes as far as `overflow-x-auto`, the floor a strip needs
-not to visibly break before that lands.
+Selection: `RibbonStrip` takes `selectedSegment`/`onSelectSegment`, forwards
+clicks and marks the matching tile — but owns none of the filtering itself.
+`TicketDetailPage` holds the selection state and narrows History and Effort to
+it (`features/tickets/detail/segmentFilter.ts`); Chat will join them once
+`D-047` lands a real tab for a filter to reach. Selection is wired even on a
+sealed, past cycle — reading an old cycle's own History and Effort one stage
+at a time is exactly as useful as it is on the live cycle.
 
-The props `RibbonSegment` accepts are the contract between B-050 and C-051:
-`segment`, `isLast`, `onSelect`, `isSelected`, `actionSlot`, `className`. A
-segment with no `onSelect` renders as a labelled `<div>`, not a dead button —
-that is what a sealed cycle's read-only ribbon gets.
+The contextual action: `RibbonStrip` renders an honestly-disabled placeholder
+on the current segment when `ribbon.canAdvance` is true — "hidden for everyone
+else" is `canAdvance`'s own contract wording. The dialog behind it is still
+`C-044`; `TicketDetailHeader`'s `HEADER_ACTIONS` used the identical
+rendered-disabled pattern for Close and Reopen before their tasks landed, and
+this reuses it rather than inventing a second one.
+
+The hover tooltip: `RibbonSegment` wraps itself in `components/ui/tooltip.tsx`
+(`@radix-ui/react-tooltip`, new here) and shows `segmentTooltipDetails` —
+entered, exited, owner, note, effort, and the idle-vs-active split, reachable
+by keyboard focus as well as pointer hover, which the native `title` it
+replaces never was.
+
+Still above this directory: `C-053`'s cycle selector, `C-054`'s
+`Cycle 2 · Iteration 3` chips, `B-051`'s compact dot for the ticket list,
+`B-052`'s roving keyboard navigation across the whole strip, and `B-053`'s
+auto-centred scroll and collapsed `…` group at eight stages — `RibbonStrip`
+still only goes as far as `overflow-x-auto`, the floor a strip needs not to
+visibly break before that lands.
+
+The props `RibbonSegment` accepts are the contract between B-050/C-052 and
+C-051: `segment`, `isLast`, `onSelect`, `isSelected`, `actionSlot`,
+`className`. A segment with no `onSelect` renders as a labelled `<div>`, not a
+dead button — that is what a caller that has not wired selection gets.
 
 ## Three things the contract cannot express yet
 

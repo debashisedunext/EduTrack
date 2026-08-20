@@ -6,7 +6,8 @@ import type { RibbonSegment as RibbonSegmentData } from '@/api/generated/model/r
 import { SegmentState } from '@/api/generated/model/segmentState'
 import { formatDuration, formatEffortHrs } from '@/lib/duration'
 import { cn } from '@/lib/utils'
-import { ownerLabel, segmentAriaLabel, treatmentFor } from './segmentState'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { ownerLabel, segmentAriaLabel, segmentTooltipDetails, treatmentFor } from './segmentState'
 import { useElapsedMins } from './useElapsedMins'
 
 /**
@@ -28,21 +29,26 @@ import { useElapsedMins } from './useElapsedMins'
  *
  * ## What this task is not
  *
- * - **`C-052`'s interactions.** `onSelect` exists and fires; what a click
- *   *does* — filtering History, Effort and Chat to this stage and iteration —
- *   is C's, and so is the rich hover tooltip. The `title` attributes here are
- *   the browser's native fallback and the minimum §4A.3 asks for on skip
- *   reason and handoff note; they are not the tooltip.
+ * - **C-052's tooltip is built, its filtering is not.** The tile now wraps
+ *   itself in the shared `Tooltip` (`components/ui/tooltip.tsx`) and shows
+ *   `segmentTooltipDetails` on hover and focus — entered, exited, owner,
+ *   note, effort and the idle-vs-active split §4A.3 asks for. *What a click
+ *   does* — filtering History and Effort below to this stage and iteration —
+ *   is `RibbonStrip`'s and `TicketDetailPage`'s, which own the selection
+ *   state this tile only reports through `onSelect`/`isSelected`.
  * - **`B-052`'s keyboard navigation.** A segment given `onSelect` is a real
  *   `<button>`, so it is focusable and Enter/Space work today. Arrow-key
  *   roving across the strip belongs to the strip.
  * - **`B-051`'s compact dot** and **`B-053`'s horizontal scroll and collapsed
  *   grouping**. This tile is fixed-width and content-sized; who scrolls it is
  *   the strip's problem.
- * - **The contextual action button** (*Hand off to QA →*) that §4A.3 puts on
- *   the current segment. It is gated on `Ribbon.canAdvance`, which is a
- *   property of the ribbon and not of a segment, and the dialog behind it is
- *   `C-044`. `actionSlot` is where it goes when it exists.
+ * - **The contextual action button's own content** (*Hand off to QA →*) that
+ *   §4A.3 puts on the current segment is `RibbonStrip`'s to build — it needs
+ *   `Ribbon.canAdvance` and the sibling segments to name the next stage,
+ *   neither of which this tile has. `actionSlot` is only where it renders.
+ *   The dialog it opens is still `C-044`; until then it is C-052's own
+ *   honestly-disabled placeholder, the same pattern `TicketDetailHeader`'s
+ *   `HEADER_ACTIONS` used for Close and Reopen before their tasks landed.
  *
  * ## The stage's own icon is not rendered, and that is deliberate
  *
@@ -104,14 +110,10 @@ export function RibbonSegment({
   const loops = segment.loopBackCount ?? 0
   const { Icon } = treatment
 
-  // Native-title fallbacks, in priority order. §4A.3 asks for the skip reason
-  // and who authorised it on hover; the contract carries the reason and has no
-  // field for the authoriser, so this shows what exists rather than a name it
-  // would have to invent.
-  const hoverText =
-    segment.state === SegmentState.SKIPPED && segment.skipReason
-      ? `Skipped: ${segment.skipReason}`
-      : (segment.handoffNote ?? undefined)
+  // C-052 · §4A.3's hover: entered/exited/owner/note/effort/idle-vs-active.
+  // `segmentTooltipDetails` is pure and tested on its own; this only lays the
+  // six fields out.
+  const tooltip = segmentTooltipDetails(segment)
 
   const body = (
     <>
@@ -185,35 +187,69 @@ export function RibbonSegment({
     className,
   )
 
+  const trigger = onSelect ? (
+    <button
+      type="button"
+      className={card}
+      onClick={() => onSelect(segment)}
+      aria-label={segmentAriaLabel(segment, elapsedMins)}
+      aria-current={isCurrent ? 'step' : undefined}
+      aria-pressed={isSelected}
+      data-state={segment.state}
+    >
+      {body}
+    </button>
+  ) : (
+    <div
+      className={card}
+      // Still announced as one thing with one name. A sealed cycle's ribbon
+      // is read-only, not invisible.
+      role="group"
+      aria-label={segmentAriaLabel(segment, elapsedMins)}
+      aria-current={isCurrent ? 'step' : undefined}
+      data-state={segment.state}
+    >
+      {body}
+    </div>
+  )
+
   return (
     <div className="flex min-w-0 items-center" data-testid="ribbon-segment">
-      {onSelect ? (
-        <button
-          type="button"
-          className={card}
-          onClick={() => onSelect(segment)}
-          aria-label={segmentAriaLabel(segment, elapsedMins)}
-          aria-current={isCurrent ? 'step' : undefined}
-          aria-pressed={isSelected}
-          title={hoverText}
-          data-state={segment.state}
-        >
-          {body}
-        </button>
-      ) : (
-        <div
-          className={card}
-          // Still announced as one thing with one name. A sealed cycle's ribbon
-          // is read-only, not invisible.
-          role="group"
-          aria-label={segmentAriaLabel(segment, elapsedMins)}
-          aria-current={isCurrent ? 'step' : undefined}
-          title={hoverText}
-          data-state={segment.state}
-        >
-          {body}
-        </div>
-      )}
+      {/* Its own provider rather than one shared from `App.tsx` — keeps this
+          tile self-contained for Storybook and any future standalone use,
+          `components/ui/tooltip.tsx`'s own note on why. */}
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+          <TooltipContent>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+              <dt className="text-content-muted">Entered</dt>
+              <dd>{tooltip.entered}</dd>
+              <dt className="text-content-muted">Exited</dt>
+              <dd>{tooltip.exited}</dd>
+              <dt className="text-content-muted">Owner</dt>
+              <dd>{tooltip.owner}</dd>
+              <dt className="text-content-muted">Note</dt>
+              <dd>{tooltip.note}</dd>
+              <dt className="text-content-muted">Effort</dt>
+              <dd>{tooltip.effort}</dd>
+              <dt className="text-content-muted">Active</dt>
+              <dd>{tooltip.active}</dd>
+              <dt className={cn('text-content-muted', tooltip.isIdleDominated && 'font-medium text-warning-text')}>
+                Idle
+              </dt>
+              <dd className={cn(tooltip.isIdleDominated && 'font-medium text-warning-text')}>
+                {tooltip.idle}
+                {/* Colour is never the only signal — the same rule the Journey
+                    grid's own idle column follows for the identical reading. */}
+                {tooltip.isIdleDominated && (
+                  <span className="sr-only"> — most of this stage was spent waiting, not working</span>
+                )}
+              </dd>
+            </dl>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
       {/* The connector belongs to the segment on its left — §4A.3 describes it
           as part of that state's treatment ("filled connector to the right",

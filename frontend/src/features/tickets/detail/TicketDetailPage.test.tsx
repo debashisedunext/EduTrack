@@ -354,6 +354,34 @@ describe('S-20 Ticket detail shell — C-019', () => {
     expect(within(ribbon).getByText('Sign-off')).toBeInTheDocument()
   })
 
+  /**
+   * C-052 · end to end through the real ribbon and the real History tab —
+   * `RibbonStrip.test.tsx` and `HistoryTab.test.tsx` already pin the pieces in
+   * isolation; this proves `TicketDetailPage` actually wires a click on one to
+   * a filter on the other.
+   *
+   * The walkthrough ticket is cycle 2 of a reopened ticket, and cycle 1 also
+   * visited Development (twice) — exactly the trap `segmentFilter.ts` names:
+   * matching on stage and iteration alone would pull cycle 1's rows into
+   * cycle 2's filter. The SLA auto-escalation (`TicketHistory.test.tsx`'s own
+   * fixture) is stamped Development/iteration 1/**cycle 2**, so its presence
+   * here proves the filter reached the right cycle, not just the right stage.
+   */
+  it('filters the History tab to the stage and iteration a ribbon segment was clicked for', async () => {
+    signInAsAdmin()
+    renderPage(`/tickets/${TICKET}?tab=history`)
+    await waitForTicket()
+
+    const ribbon = screen.getByRole('region', { name: 'Workflow ribbon' })
+    fireEvent.click(within(ribbon).getByRole('button', { name: /^Development,/ }))
+
+    expect(await screen.findByText('Filtered to Development')).toBeInTheDocument()
+    expect(screen.getByText('Level changed HIGH → CRITICAL')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filter: Development' }))
+    expect(screen.queryByText('Filtered to Development')).not.toBeInTheDocument()
+  })
+
   describe('where it happened — C-069', () => {
     it('puts Module, Screen and Feature in the summary panel directly under Type', async () => {
       signInAsAdmin()
