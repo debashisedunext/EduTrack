@@ -14,14 +14,18 @@ task IDs still needs the ordinary sign-off.
 | `RibbonSegment.tsx` | B-050 | One segment. Six states, five data points. |
 | `segmentState.ts` | B-050 | State → words, icon and treatment; the ARIA label. Pure. |
 | `useElapsedMins.ts` | B-050 | The current segment's running timer. |
+| `RibbonStrip.tsx` | C-051 | Lays the segments out in order, as a labelled list. Read-only. |
 
-## What B-050 does not build
+## What C-051 does not build
 
-`C-051` composes these into the strip. `C-052` decides what a click does and
-builds the rich hover tooltip. `C-053` adds the cycle selector, `C-054` the
-`Cycle 2 · Iteration 3` chips. `B-051` is the compact dot for the ticket list,
-`B-052` roving keyboard navigation across the strip, `B-053` the horizontal
-scroll and the collapsed `…` group at eight stages.
+`C-052` decides what a click does and builds the rich hover tooltip —
+`RibbonStrip` wires no `onSelect`, so every tile renders as B-050's read-only
+`<div role="group">` fallback. `C-053` adds the cycle selector above the
+strip, `C-054` the `Cycle 2 · Iteration 3` chips. `B-051` is the compact dot
+for the ticket list, `B-052` roving keyboard navigation across the strip,
+`B-053` the auto-centred scroll and the collapsed `…` group at eight stages —
+`RibbonStrip` only goes as far as `overflow-x-auto`, the floor a strip needs
+not to visibly break before that lands.
 
 The props `RibbonSegment` accepts are the contract between B-050 and C-051:
 `segment`, `isLast`, `onSelect`, `isSelected`, `actionSlot`, `className`. A

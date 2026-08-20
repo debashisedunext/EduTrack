@@ -13,6 +13,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { RichTextView } from '@/components/ui/rich-text-view'
 import { ensureRichText } from '@/components/ui/rich-text'
 
+import { RibbonStrip } from '@/components/ribbon/RibbonStrip'
+
 import { AttachmentsTab } from '../attachments/AttachmentsTab'
 import { useAttachmentsTab } from '../attachments/useAttachmentsTab'
 import { CommentBox } from '../comments/CommentBox'
@@ -373,11 +375,7 @@ export function TicketDetailPage() {
             aria-label="Workflow ribbon"
             className="rounded-card border border-border bg-surface p-2 shadow-rest"
           >
-            <PendingSection
-              title="Workflow ribbon"
-              owner="C-051"
-              note="Eight segments, their owners, time in stage and effort, with the cycle selector above them."
-            />
+            <RibbonStrip ribbon={detail?.ribbon} />
           </section>
 
           <section
