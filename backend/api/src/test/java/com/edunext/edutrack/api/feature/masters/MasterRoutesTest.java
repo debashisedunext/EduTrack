@@ -51,6 +51,7 @@ class MasterRoutesTest {
             "com.edunext.edutrack.api.feature.masters.statuses.StatusController",
             "com.edunext.edutrack.api.feature.masters.stages.StageController",
             "com.edunext.edutrack.api.feature.masters.tasktypes.TaskTypeController",
+            "com.edunext.edutrack.api.feature.masters.modules.ModuleController",
             "com.edunext.edutrack.api.feature.masters.notificationtemplates"
                     + ".NotificationTemplateController",
             "com.edunext.edutrack.api.feature.masters.projects.ProjectController",
@@ -135,6 +136,34 @@ class MasterRoutesTest {
     @DisplayName("the task type master is where the contract says it is")
     void taskTypeMasterIsMountedWhereTheContractPutsIt() {
         assertThat(paths(load("com.edunext.edutrack.api.feature.masters.tasktypes.TaskTypeController")
+                .getAnnotation(RequestMapping.class)))
+                .containsExactly("/api/v1/masters");
+    }
+
+    /**
+     * B-064 · §7.3's module master, and the pattern this file was opened for
+     * has now produced its <b>seventh</b> — the one with the most already built
+     * on top of it.
+     *
+     * <p>{@code listModules} has been in the contract, in the MSW mock and in
+     * the generated TypeScript client since D-060 with no controller anywhere
+     * in the backend, while three of Stream C's screens shipped against it:
+     * {@code CreateTicketPage}'s module picker (C-068), S-20's "Where it
+     * happened" group and its inline editor (C-069), and S-17's module filter
+     * and grid column (C-070).
+     *
+     * <p>What is worth recording is how the failure would have presented. The
+     * other six 404'd loudly on their first real request. This one degrades
+     * quietly: {@code moduleName()} returns {@code undefined} when the master
+     * has not loaded, the cell renders an em dash, and every ticket in the
+     * product reads as "no module was recorded" — which is a plausible state a
+     * ticket can genuinely be in. A route nobody mounted would have looked like
+     * data nobody filled in.
+     */
+    @Test
+    @DisplayName("the module master is where the contract says it is")
+    void moduleMasterIsMountedWhereTheContractPutsIt() {
+        assertThat(paths(load("com.edunext.edutrack.api.feature.masters.modules.ModuleController")
                 .getAnnotation(RequestMapping.class)))
                 .containsExactly("/api/v1/masters");
     }
