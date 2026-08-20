@@ -82,6 +82,25 @@ const MENTION = {
   eventCode: 'MENTIONED',
   title: 'Ravi Kumar mentioned you',
   body: 'in CRM-26-00347',
+  link: '/tickets/CRM-26-00347',
+}
+
+/**
+ * The same frame, pointing into chat.
+ *
+ * This fixture used to *be* `MENTION` — its link was `/chat/threads/12`, and
+ * every toast assertion in this file was therefore written against a
+ * notification that no longer toasts. The link is what decides now
+ * (`isChatNotification`), so the two cases need two fixtures, and a comment
+ * mention on a ticket is what `MENTION` was always describing anyway: that is
+ * the shape the mock database seeds it in.
+ */
+const CHAT_MESSAGE = {
+  event: 'notification.created',
+  id: 92,
+  eventCode: 'CHAT_MESSAGE',
+  title: 'Meera Iyer sent you a message',
+  body: 'in CRM-26-00347',
   link: '/chat/threads/12',
 }
 
@@ -210,7 +229,7 @@ describe('Open', () => {
     await screen.findAllByText(MENTION.title)
     await user.click(toastAction(/open/i))
 
-    expect(navigate).toHaveBeenCalledWith('/chat/threads/12')
+    expect(navigate).toHaveBeenCalledWith('/tickets/CRM-26-00347')
   })
 })
 
@@ -349,5 +368,53 @@ describe('a read landing from another tab', () => {
 
     await waitFor(() => expect(invalidate).toHaveBeenCalled())
     expect(noToastShowing()).toBe(true)
+  })
+})
+
+/**
+ * Chat does not toast — it goes to the header's chat panel.
+ *
+ * <p>A toast is an interruption, and a conversation is the one source that
+ * generates them faster than anybody can read them: an exchange between two
+ * other people raised a card per message, and D-046's replay popped every one
+ * of them again on the next page load. `ChatBadge` is where they land instead,
+ * and the point of it is that it shows nothing until somebody opens it.
+ *
+ * <p>These assert the *negative* deliberately, which is the direction that
+ * rots quietly: the guard is one early return, and without a test that fails
+ * when it is removed, a later refactor takes the popups back and nothing goes
+ * red. The second case is what stops that being a vacuous pass — a frame that
+ * did nothing at all would satisfy the first assertion just as well.
+ */
+describe('a chat message arriving', () => {
+  it('does not toast', async () => {
+    renderStream()
+
+    push(CHAT_MESSAGE)
+
+    // Nothing to await — proving absence needs a beat for the toast that
+    // would have been raised synchronously not to appear.
+    await waitFor(() => expect(noToastShowing()).toBe(true))
+    expect(screen.queryByText(CHAT_MESSAGE.title)).not.toBeInTheDocument()
+  })
+
+  it('moves the chat badge instead, so the panel is where it is read', async () => {
+    const { invalidate } = renderStream()
+
+    push(CHAT_MESSAGE)
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ['/chat/threads'] }),
+      ),
+    )
+  })
+
+  it('still toasts everything that is not chat', async () => {
+    renderStream()
+
+    push(MENTION)
+
+    expect(await screen.findByText(MENTION.title)).toBeVisible()
   })
 })

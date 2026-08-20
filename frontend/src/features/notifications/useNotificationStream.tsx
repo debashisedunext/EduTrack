@@ -9,9 +9,14 @@ import {
 } from '@/api/generated/notifications/notifications'
 import { ToastAction } from '@/components/ui/toast'
 import { toast } from '@/components/ui/use-toast'
+import { getListChatThreadsQueryKey } from '@/api/generated/chat/chat'
 import { ownQueue } from '@/realtime/destinations'
 import { useRealtime } from '@/realtime/useRealtime'
-import { parseNotificationEvent, type NotificationCreated } from './notificationEvents'
+import {
+  isChatNotification,
+  parseNotificationEvent,
+  type NotificationCreated,
+} from './notificationEvents'
 
 /**
  * D-043 · the toast · D-044 · the live badge.
@@ -74,8 +79,31 @@ export function useNotificationStream(): void {
     void queryClient.invalidateQueries({ queryKey: getListNotificationsQueryKey() })
   }, [queryClient])
 
+  /**
+   * Move the header chat panel's badge instead of raising a toast.
+   *
+   * <p>The same move as `refreshBadge` one line up, for the same reason:
+   * `ChatBadge` already reads `useListChatThreads`, so invalidating that key
+   * updates its count and its thread list with no change to that file, and
+   * without a count kept by arithmetic here that a missed frame would leave
+   * permanently wrong.
+   */
+  const refreshChat = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: getListChatThreadsQueryKey() })
+  }, [queryClient])
+
   const raise = useCallback(
     (created: NotificationCreated) => {
+      // Chat is read in the header panel, not thrown over the screen — see
+      // `isChatNotification`. Guarded here rather than at the call sites
+      // because there are three of them: the live frame, D-046's replay, and a
+      // snooze re-raising itself ten minutes later. The top of `raise` is the
+      // one place a fourth caller cannot forget.
+      if (isChatNotification(created)) {
+        refreshChat()
+        return
+      }
+
       const open = () => {
         // Opening is reading. Dismissing is not — a toast that marked itself
         // read on the way out would empty the bell of everything the user
@@ -107,7 +135,7 @@ export function useNotificationStream(): void {
         ),
       })
     },
-    [markRead, navigate],
+    [markRead, navigate, refreshChat],
   )
 
   useRealtime(ownQueue(), (payload) => {
