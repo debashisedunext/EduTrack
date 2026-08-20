@@ -26,7 +26,8 @@ import {
 import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 
-import { RESOURCE_COLUMNS, ROLE_LABEL } from './columns'
+import { RESOURCE_COLUMNS } from './columns'
+import { ROLE_LABEL } from '@/lib/roleLabel'
 import {
   BulkStatusBar,
   BulkStatusResultDialog,

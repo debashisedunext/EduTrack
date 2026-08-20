@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { Chip } from '@/components/ui/chip'
 import type { User } from '@/api/generated/model/user'
-import type { RoleCode } from '@/api/generated/model/roleCode'
+import { ROLE_LABEL } from '@/lib/roleLabel'
 
 /**
  * B-010 · the S-07 columns, in blueprint §7.4's order.
@@ -17,15 +17,6 @@ export interface ResourceColumn {
   widthClassName?: string
   align?: 'left' | 'right'
   render: (resource: User) => React.ReactNode
-}
-
-export const ROLE_LABEL: Record<RoleCode, string> = {
-  ADMIN: 'Admin',
-  PM: 'PM',
-  DEVELOPER: 'Developer',
-  QA: 'QA',
-  DEPLOYMENT: 'Deployment',
-  SUPPORT: 'Support',
 }
 
 /**
