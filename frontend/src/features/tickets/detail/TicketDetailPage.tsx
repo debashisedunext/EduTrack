@@ -28,6 +28,7 @@ import { JourneyTab } from '../journey/JourneyTab'
 import { useJourneyTab } from '../journey/useJourneyTab'
 import { useEffortTab } from '../effort/useEffortTab'
 
+import { CycleIterationBadge } from './CycleIterationBadge'
 import { CycleSelector } from './CycleSelector'
 import { canChangeLevel } from './levelChange'
 import { StepsToGenerateSection } from './WhereItHappenedControls'
@@ -438,7 +439,10 @@ export function TicketDetailPage() {
 
       <div className="grid flex-1 gap-4 p-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-4">
-          <CycleSelector cycles={detail?.cycles} selectedCycleNo={selectedCycleNo} onSelect={selectCycle} />
+          <div className="flex flex-wrap items-center gap-2">
+            <CycleSelector cycles={detail?.cycles} selectedCycleNo={selectedCycleNo} onSelect={selectCycle} />
+            <CycleIterationBadge ribbon={detail?.ribbon} />
+          </div>
 
           {isEarlierCycle && (
             <p role="status" className="rounded-control bg-subtle px-3 py-2 text-caption text-content-muted">

@@ -234,6 +234,28 @@ describe('S-20 Ticket detail shell — C-019', () => {
     expect(within(tabs).getByRole('tab', { name: 'History' })).toHaveAttribute('aria-selected', 'true')
   })
 
+  /**
+   * C-054 · the `Cycle 2 · Iteration 3` chip beside the selector. The
+   * walkthrough fixture's cycle 2 has never bounced (iteration 1); its sealed
+   * cycle 1 reached iteration 2 after the QA rework — proving the badge reads
+   * whichever cycle `?cycle=` scoped the ribbon to, not the ticket's live
+   * counters, the same cross-cycle trap `segmentFilter.ts` was written for.
+   */
+  it("reads the selected cycle's own iteration count, not the ticket's live one", async () => {
+    signInAsAdmin()
+    renderPage(`/tickets/${TICKET}`)
+    await waitForTicket()
+
+    expect(screen.getByText('Cycle 2 · Iteration 1')).toBeInTheDocument()
+
+    const selector = screen.getByRole('group', { name: 'Cycle' })
+    await userEvent.setup().click(within(selector).getByRole('button', { name: 'View cycle 1' }))
+    await waitForTicket()
+
+    expect(screen.getByText('Cycle 1 · Iteration 2')).toBeInTheDocument()
+    expect(screen.queryByText('Cycle 2 · Iteration 1')).not.toBeInTheDocument()
+  })
+
   it('refetches for an earlier cycle and says plainly that it is sealed', async () => {
     signInAsAdmin()
     renderPage(`/tickets/${TICKET}?cycle=1`)
