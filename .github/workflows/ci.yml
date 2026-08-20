@@ -404,7 +404,46 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v5
+
+      # A-074 · dependency-review reads GitHub's Dependency graph, which is a
+      # REPOSITORY SETTING and not something a branch can turn on. With it off
+      # the action does not report "nothing found" — it errors:
+      #
+      #   Dependency review is not supported on this repository.
+      #   Please ensure that Dependency graph is enabled.
+      #
+      # and it does that on EVERY pull request, so a red check nobody can fix
+      # from a branch sits in front of every merge until an admin flips a switch
+      # most people do not know exists. That is precisely the shape CLAUDE.md
+      # warns about — a verification step nobody can afford is a verification
+      # step nobody performs — and the way it actually ends is somebody deleting
+      # the job, taking the real check with it.
+      #
+      # So probe first, and be loud about the answer. Deliberately NOT
+      # `continue-on-error` on the review itself: that would swallow a genuine
+      # high-severity finding exactly as quietly as it swallows this, and not
+      # doing that is the entire job.
+      #
+      # Note what is still covered while this is off: `security-scan` runs
+      # OSV-Scanner and `npm audit` over both ecosystems nightly and on every
+      # push, and neither needs the Dependency graph. What is lost is the
+      # per-PR, diff-scoped check — the one that can attribute a finding to the
+      # author who introduced it.
+      - name: Is the Dependency graph enabled?
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/dependency-graph/compare/${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" >/dev/null 2>&1; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            echo '✓ Dependency graph is enabled — running the review.'
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo "::warning title=Dependency review skipped::The Dependency graph is disabled for this repository, so per-PR dependency review cannot run. Enable it under Settings → Code security and analysis. Dependencies are still scanned nightly and on push by the 'Security — dependency & image scan' job."
+          fi
+
       - uses: actions/dependency-review-action@v4
+        if: steps.probe.outputs.available == 'true'
         with:
           # Moderate and below are reported in the PR comment but do not fail
           # it. The bar to block a merge is a vulnerability somebody would
