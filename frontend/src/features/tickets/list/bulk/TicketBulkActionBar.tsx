@@ -17,17 +17,11 @@ import {
   ModalTitle,
 } from '@/components/ui/modal'
 
+import { levelLabel } from '../columns'
 import { failedResults, summariseBulkResult } from './bulkActions'
 
 const TEXTAREA_CLASS =
   'w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-content placeholder:text-content-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1'
-
-const LEVEL_LABEL: Record<Level, string> = {
-  LOW: 'Low',
-  MEDIUM: 'Medium',
-  HIGH: 'High',
-  CRITICAL: 'Critical',
-}
 
 /** The minimum every `reason` and `resolutionSummary` field on the wire enforces. */
 const MIN_REASON = 3
@@ -326,7 +320,7 @@ export function BulkLevelDialog({
     <DialogShell
       title={`Change the level of ${selectedCount} ${selectedCount === 1 ? 'ticket' : 'tickets'}`}
       description="Each planned close date is recomputed against the working calendar from that ticket's own start. The level a ticket was born at is never overwritten, so born-critical stays distinguishable from became-critical."
-      confirmLabel={level ? `Set ${LEVEL_LABEL[level]}` : 'Set level'}
+      confirmLabel={level ? `Set ${levelLabel(level)}` : 'Set level'}
       confirmDisabled={!ready}
       isPending={isPending}
       error={error}
@@ -351,7 +345,7 @@ export function BulkLevelDialog({
                 onChange={() => setLevel(option)}
                 className="h-4 w-4 accent-primary"
               />
-              {LEVEL_LABEL[option]}
+              {levelLabel(option)}
             </label>
           ))}
         </div>

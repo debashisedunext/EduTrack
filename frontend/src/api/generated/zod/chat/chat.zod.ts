@@ -154,13 +154,17 @@ export const resolveTicketCardsQueryParams = zod.object({
 })
 
 export const resolveTicketCardsResponseDataItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+export const resolveTicketCardsResponseDataItemLevelMax = 20;
+
+
+export const resolveTicketCardsResponseDataItemLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const resolveTicketCardsResponse = zod.object({
   "data": zod.array(zod.object({
   "ticketId": zod.string().regex(resolveTicketCardsResponseDataItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "level": zod.string().min(1).max(resolveTicketCardsResponseDataItemLevelMax).regex(resolveTicketCardsResponseDataItemLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -238,6 +242,10 @@ export const listChatMessagesQueryParams = zod.object({
 })
 
 export const listChatMessagesResponseDataItemKindDefault = "TEXT";export const listChatMessagesResponseDataItemTicketRefsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+export const listChatMessagesResponseDataItemTicketRefsItemLevelMax = 20;
+
+
+export const listChatMessagesResponseDataItemTicketRefsItemLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const listChatMessagesResponse = zod.object({
@@ -295,7 +303,7 @@ export const listChatMessagesResponse = zod.object({
   "ticketRefs": zod.array(zod.object({
   "ticketId": zod.string().regex(listChatMessagesResponseDataItemTicketRefsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "level": zod.string().min(1).max(listChatMessagesResponseDataItemTicketRefsItemLevelMax).regex(listChatMessagesResponseDataItemTicketRefsItemLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -372,6 +380,10 @@ export const editChatMessageBody = zod.object({
 })
 
 export const editChatMessageResponseDataKindDefault = "TEXT";export const editChatMessageResponseDataTicketRefsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+export const editChatMessageResponseDataTicketRefsItemLevelMax = 20;
+
+
+export const editChatMessageResponseDataTicketRefsItemLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const editChatMessageResponse = zod.object({
@@ -429,7 +441,7 @@ export const editChatMessageResponse = zod.object({
   "ticketRefs": zod.array(zod.object({
   "ticketId": zod.string().regex(editChatMessageResponseDataTicketRefsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "level": zod.string().min(1).max(editChatMessageResponseDataTicketRefsItemLevelMax).regex(editChatMessageResponseDataTicketRefsItemLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -466,6 +478,10 @@ export const deleteChatMessageParams = zod.object({
 })
 
 export const deleteChatMessageResponseDataKindDefault = "TEXT";export const deleteChatMessageResponseDataTicketRefsItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+export const deleteChatMessageResponseDataTicketRefsItemLevelMax = 20;
+
+
+export const deleteChatMessageResponseDataTicketRefsItemLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const deleteChatMessageResponse = zod.object({
@@ -523,7 +539,7 @@ export const deleteChatMessageResponse = zod.object({
   "ticketRefs": zod.array(zod.object({
   "ticketId": zod.string().regex(deleteChatMessageResponseDataTicketRefsItemTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "level": zod.string().min(1).max(deleteChatMessageResponseDataTicketRefsItemLevelMax).regex(deleteChatMessageResponseDataTicketRefsItemLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({

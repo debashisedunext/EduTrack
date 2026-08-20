@@ -4,7 +4,6 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 
-import { Level } from '@/api/generated/model/level'
 import { SlaSource } from '@/api/generated/model/slaSource'
 import { server } from '@/mocks/server'
 
@@ -58,7 +57,8 @@ function wrapper({ children }: { children: ReactNode }) {
 const inputs: PlannedCloseDateInput = {
   projectId: 1,
   taskTypeId: 2,
-  level: Level.HIGH,
+  // D-066 · a level is a code from the S-12 master now, not an enum member.
+  level: 'HIGH',
   assigneeId: null,
 }
 

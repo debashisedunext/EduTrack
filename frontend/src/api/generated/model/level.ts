@@ -47,13 +47,39 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type Level = typeof Level[keyof typeof Level];
+/**
+ * D-066 · **a priority code from the S-12 master, not a fixed
+vocabulary.** Blueprint §9 S-12: *"Admin can add further levels without
+a release."* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and
+`CRITICAL`, and they will be the only four on most installations — but
+they are seed data, not the type.
 
+**This was an `enum` until D-066, and that was the bug.** The server has
+never agreed with it: `UnknownLevelException` validates against the
+priority master and says so in its own javadoc — *"validated against the
+master rather than an enum because S-12 lets an administrator add a
+level without a release … the day a fifth level is added, the contract
+is the thing that will be behind."* `PriorityChangeRequest.level` and
+`TicketCreateRequest.level` are `@NotBlank String` on the wire for the
+same reason. So the closed enum did not protect anything; it only
+stopped the generated client from ever *sending* a level an Admin had
+just created through a screen the blueprint promises them.
 
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const Level = {
-  LOW: 'LOW',
-  MEDIUM: 'MEDIUM',
-  HIGH: 'HIGH',
-  CRITICAL: 'CRITICAL',
-} as const;
+**What a client must therefore not do.** Do not switch exhaustively on
+this value, and do not index a lookup table with it without a fallback —
+a colour, a label or a sort weight keyed on the four seeded codes will
+be handed a fifth the day somebody adds one, and the failure is a blank
+chip rather than an error. Resolve presentation through
+`GET /masters/priorities`, which carries each level's colour, default
+SLA hours, escalation flag and rank, and treat a code missing from that
+master as unknown rather than as an assertion failure.
+
+**Ordering is `rank` from the master, never string order.** `CRITICAL`
+sorts before `LOW` alphabetically and after it by severity, and a fifth
+level has no defensible alphabetical position at all.
+
+ * @minLength 1
+ * @maxLength 20
+ * @pattern ^[A-Z][A-Z0-9_]{0,19}$
+ */
+export type Level = string;
