@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.security.permission;
 
+import jakarta.servlet.http.Cookie;
 import com.edunext.edutrack.api.security.TestPrincipals;
 import com.edunext.edutrack.api.security.jwt.JwtAuthoritiesConverter;
 import com.edunext.edutrack.api.security.permission.PermissionMatrix.Entry;
@@ -350,6 +351,41 @@ class PermissionMatrixTest {
     // helpers
     // ------------------------------------------------------------------
 
+    /** Any value at all: the repository compares cookie against header, it does not mint them. */
+    private static final String CSRF_TOKEN = "matrix-csrf-token";
+    private static final String CSRF_COOKIE = "XSRF-TOKEN";
+    private static final String CSRF_HEADER = "X-XSRF-TOKEN";
+
+    /**
+     * A-074 · the CSRF double submit, on every request this suite makes.
+     *
+     * <p><b>Why it is needed, and why it does not weaken the matrix.</b>
+     * {@code POST /auth/refresh} and {@code POST /auth/logout} are now
+     * CSRF-protected, and a request without a token is answered <b>403</b> — the
+     * one status this suite reads as "authorisation refused". Twelve rows failed
+     * on exactly that, six roles × two routes, each reporting that a role
+     * holding the capability had been denied. What had actually happened is that
+     * no well-formed browser request was being made.
+     *
+     * <p>So this makes one. A browser sends the cookie; the SPA echoes it in the
+     * header; MockMvc has to be told to do both. The matrix then goes back to
+     * measuring the thing it exists to measure — whether the role is allowed —
+     * rather than accidentally measuring CSRF, which {@code SecurityHardeningIT}
+     * and {@code CookieRouteCsrfTest} own and assert far more precisely.
+     *
+     * <p>Applied to <i>every</i> request rather than to those two paths, and
+     * that is the deliberate part: a list of CSRF-protected routes here would be
+     * a second copy of a decision made in {@code CookieRouteCsrf}, and the next
+     * route to become protected would fail these rows again with the same
+     * misleading message. On an unprotected route the extra cookie and header
+     * are simply ignored.
+     */
+    private static MockHttpServletRequestBuilder withCsrf(MockHttpServletRequestBuilder request) {
+        return request
+                .cookie(new Cookie(CSRF_COOKIE, CSRF_TOKEN))
+                .header(CSRF_HEADER, CSRF_TOKEN);
+    }
+
     private MockHttpServletRequestBuilder request(Entry entry, String role) {
         if (PermissionMatrix.MULTIPART.equals(entry.body())) {
             // B-032 · a route declaring `consumes = multipart/form-data` answers
@@ -361,15 +397,15 @@ class PermissionMatrixTest {
             //
             // The part is a valid two-line CSV, so an allowed caller fails past
             // the guard on something real rather than on a malformed upload.
-            return MockMvcRequestBuilders.multipart(entry.requestPath())
+            return withCsrf(MockMvcRequestBuilders.multipart(entry.requestPath())
                     .file(new MockMultipartFile("file", "matrix-fixture.csv", "text/csv",
                             "Client Code,Name\nACME,Acme Corporation\n".getBytes(StandardCharsets.UTF_8)))
-                    .with(authentication(TestPrincipals.of(authorities, role)));
+                    .with(authentication(TestPrincipals.of(authorities, role))));
         }
 
-        MockHttpServletRequestBuilder request =
+        MockHttpServletRequestBuilder request = withCsrf(
                 MockMvcRequestBuilders.request(HttpMethod.valueOf(entry.method()), entry.requestPath())
-                        .with(authentication(TestPrincipals.of(authorities, role)));
+                        .with(authentication(TestPrincipals.of(authorities, role))));
 
         if (entry.body() != null) {
             request.contentType(MediaType.APPLICATION_JSON).content(entry.body());

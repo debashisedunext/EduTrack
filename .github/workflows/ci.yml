@@ -47,6 +47,14 @@ on:
   push:
     branches: [develop, main]
     paths-ignore: ['docs/**', '**/*.md']
+  # A-074 · the nightly half of dependency scanning. The `security-scan` job
+  # explains why a full vulnerability scan runs here rather than on pull
+  # requests: a CVE published overnight is not a defect in somebody's branch,
+  # and failing their PR for it is exactly how a security gate becomes the
+  # thing people learn to route around.
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
 
 # ── Why pushes are NOT cancelled ─────────────────────────────────────────────
 #
@@ -391,6 +399,214 @@ jobs:
           # break surfaces in whichever unrelated PR next touches the frontend.
           npx tsc --noEmit -p tsconfig.app.json
 
+  # ------------------------------------------------------- dependency-review
+  # A-074 · the pull-request half of dependency scanning.
+  #
+  # This asks one question only: does THIS pull request introduce a dependency
+  # with a known vulnerability? It diffs the manifests against the base branch,
+  # so it can only ever fail on something the author actually did.
+  #
+  # That distinction is the whole design. The obvious implementation — run a
+  # vulnerability scanner on every PR and fail on any finding — makes a CVE
+  # published against an unrelated transitive dependency at 3am fail the next
+  # six PRs, none of which caused it and none of which can fix it. CLAUDE.md
+  # already records where that road ends: "a verification step nobody can
+  # afford is a verification step nobody performs". The full scan still
+  # happens; it happens nightly, below, where it blocks nobody and can be
+  # loud.
+  #
+  # First-party GitHub action, no key, and it needs the repository to be public
+  # or to have the dependency graph enabled — which it is, since 17 Aug.
+  dependency-review:
+    name: Security — dependency review
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+
+      # A-074 · dependency-review reads GitHub's Dependency graph, which is a
+      # REPOSITORY SETTING and not something a branch can turn on. With it off
+      # the action does not report "nothing found" — it errors:
+      #
+      #   Dependency review is not supported on this repository.
+      #   Please ensure that Dependency graph is enabled.
+      #
+      # and it does that on EVERY pull request, so a red check nobody can fix
+      # from a branch sits in front of every merge until an admin flips a switch
+      # most people do not know exists. That is precisely the shape CLAUDE.md
+      # warns about — a verification step nobody can afford is a verification
+      # step nobody performs — and the way it actually ends is somebody deleting
+      # the job, taking the real check with it.
+      #
+      # So probe first, and be loud about the answer. Deliberately NOT
+      # `continue-on-error` on the review itself: that would swallow a genuine
+      # high-severity finding exactly as quietly as it swallows this, and not
+      # doing that is the entire job.
+      #
+      # Note what is still covered while this is off: `security-scan` runs
+      # OSV-Scanner and `npm audit` over both ecosystems nightly and on every
+      # push, and neither needs the Dependency graph. What is lost is the
+      # per-PR, diff-scoped check — the one that can attribute a finding to the
+      # author who introduced it.
+      - name: Is the Dependency graph enabled?
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/dependency-graph/compare/${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" >/dev/null 2>&1; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            echo '✓ Dependency graph is enabled — running the review.'
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo "::warning title=Dependency review skipped::The Dependency graph is disabled for this repository, so per-PR dependency review cannot run. Enable it under Settings → Code security and analysis. Dependencies are still scanned nightly and on push by the 'Security — dependency & image scan' job."
+          fi
+
+      - uses: actions/dependency-review-action@v4
+        if: steps.probe.outputs.available == 'true'
+        with:
+          # Moderate and below are reported in the PR comment but do not fail
+          # it. The bar to block a merge is a vulnerability somebody would
+          # actually stop a release for.
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+          # GPL/AGPL in a proprietary product is a legal problem discovered at
+          # the worst possible time. Cheap to check while we are already here.
+          deny-licenses: AGPL-3.0, GPL-3.0
+
+  # ------------------------------------------------------------ security-scan
+  # A-074 · the full sweep. Nightly, on pushes to develop and main, and on
+  # demand — deliberately NOT on pull requests. See dependency-review above.
+  #
+  # WHAT IS AND IS NOT SCANNED HERE, stated plainly because the task line item
+  # says "dependency and container scanning" and only one of those is fully
+  # possible today:
+  #
+  #   · Dependencies — yes. OSV-Scanner reads backend/**/pom.xml and
+  #     frontend/package-lock.json and covers both ecosystems in one pass, with
+  #     no NVD API key and none of OWASP dependency-check's ~10 minute startup.
+  #
+  #   · npm audit — yes, and it is not redundant. It resolves the lockfile the
+  #     way npm itself does, so it catches advisories against the exact
+  #     resolved tree rather than the declared ranges.
+  #
+  #   · The application container — THERE ISN'T ONE. This repository builds a
+  #     single executable jar (see the `package` job) and has no Dockerfile;
+  #     docker-compose.yml runs MySQL, Redis, MinIO and Mailpit for local
+  #     development only. Image scanning arrives with A-075, which owns
+  #     deployment and is the task that will introduce an image to scan.
+  #     Saying so here beats a scanner pointed at nothing and reporting green.
+  #
+  #   · The images we DO pin — yes, and report-only. We choose the tags in
+  #     docker-compose.yml, so a critical in mysql:8.4 is worth knowing about,
+  #     but it is not something a developer can fix in a branch and it must
+  #     never redden the build. `continue-on-error` is the honest expression of
+  #     "tell me, do not stop me".
+  security-scan:
+    name: Security — dependency & image scan
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+    env:
+      # One tool, one pinned digest-able tag, run through Docker. Deliberately
+      # not a marketplace action, for the reason the `changes` job gives about
+      # computing a diff: a scanner is a binary we can pin, and an action is a
+      # supply-chain dependency inside the job that exists to police the supply
+      # chain. Trivy covers Maven, npm, config and images in one place, so this
+      # is one tool rather than three.
+      TRIVY: aquasec/trivy:0.58.1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: temurin
+          cache: maven
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build the jar, so the scan sees what actually ships
+        run: |
+          # Scanning pom.xml reads declared ranges; scanning the assembled jar
+          # reads the versions Maven actually resolved, transitive dependencies
+          # included. Those differ, and the second one is what runs in
+          # production. No tests and no frontend — this is about the dependency
+          # set, not about correctness, which the `backend` job already covers.
+          cd backend && ./mvnw -q -ntp package -DskipTests -DskipFrontend
+
+      - name: Vulnerable dependencies — the shipped jar and the npm lockfile
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$TRIVY" filesystem \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --timeout 15m \
+            backend/api/target frontend/package-lock.json
+
+      - name: npm audit — the resolved tree, not the declared ranges
+        working-directory: frontend
+        run: |
+          # Not redundant with the above. npm resolves the lockfile the way npm
+          # does, and its advisory database is not Trivy's — the two disagree
+          # often enough that running both is cheaper than picking one and
+          # being wrong.
+          npm ci --no-audit --no-fund
+          npm audit --audit-level=high
+
+      - name: Misconfiguration in docker-compose.yml
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$TRIVY" config \
+            --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            docker-compose.yml
+
+      - name: Base images pinned by docker-compose (report only)
+        continue-on-error: true
+        run: |
+          # Report-only on purpose — see the job header. These are upstream
+          # images on tags we choose, so a critical is worth knowing about, but
+          # it is not fixable in a branch and must never redden a build.
+          #
+          # Parsed out of the compose file rather than listed here, so adding a
+          # service to local development cannot silently go unscanned.
+          IMAGES=$(grep -oP '^\s+image:\s*\K\S+' docker-compose.yml | sort -u)
+          echo "Scanning: $IMAGES"
+          for image in $IMAGES; do
+            echo "── $image ─────────────────────────────────"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY" image \
+              --scanners vuln \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              --timeout 10m \
+              "$image" || echo "::warning::trivy could not scan $image"
+          done
+
+      - name: There is no application image to scan yet
+        run: |
+          # A guard, not a comment. If somebody adds a Dockerfile without
+          # extending this job, the one image we actually build and ship would
+          # go unscanned while this job continued reporting green — which is
+          # precisely the failure it exists to prevent.
+          FOUND=$(find . -name Dockerfile -not -path './node_modules/*' \
+                         -not -path './frontend/node_modules/*' -not -path './.git/*')
+          if [ -n "$FOUND" ]; then
+            echo "::error::A Dockerfile now exists ($FOUND), but this job only scans"
+            echo "::error::the base images from docker-compose.yml. Add an image scan"
+            echo "::error::for the application image — that is A-075's step, and this"
+            echo "::error::guard is how A-074 makes sure it is not quietly forgotten."
+            exit 1
+          fi
+          echo "✓ No application image yet — image scanning lands with A-075."
+
   # ---------------------------------------------------------------- package
   package:
     name: Package — single deployable jar
@@ -527,6 +743,37 @@ jobs:
           #
           # This is Stream A's surface — flagged for Shivendra's review.
           check /api/v1/nope          401   # not the HTML shell; auth answers first
+
+          # A-074 · the CSP, against the real artefact.
+          #
+          # This is the ONLY place the built index.html meets the policy
+          # builder. ContentSecurityPolicy hashes whatever inline script it
+          # finds in classpath:/static/index.html, and that file only exists
+          # once the frontend has been built into the jar — which is this job
+          # and nowhere else. Every unit test necessarily uses a substitute
+          # document, and every integration test runs with no frontend at all.
+          #
+          # So the failure this catches is specific and otherwise invisible:
+          # Vite changes how it emits the theme script, the hash stops matching,
+          # and the application renders blank in production while the whole
+          # suite stays green. Nothing in a unit test parses CSP.
+          CSP=$(curl -s -o /dev/null -D - -w '' http://localhost:8099/ | tr -d '\r' \
+                | grep -i '^content-security-policy:' | cut -d' ' -f2-)
+          echo "  CSP: $CSP"
+          if [ -z "$CSP" ]; then
+            echo "::error::No Content-Security-Policy header on the SPA document."; fail=1
+          elif ! echo "$CSP" | grep -q "script-src 'self' 'sha256-"; then
+            echo "::error::script-src carries no inline-script hash. The jar contains an"
+            echo "::error::index.html with an inline <script> (D-15's theme script), so a"
+            echo "::error::hash must be there — without it that script is blocked and the"
+            echo "::error::app renders with a flash of the wrong theme, or not at all."
+            fail=1
+          elif echo "$CSP" | grep -q "script-src[^;]*'unsafe-inline'"; then
+            echo "::error::script-src allows 'unsafe-inline', which defeats the policy."; fail=1
+          else
+            echo "  ✓ CSP carries an inline-script hash and no 'unsafe-inline' script-src"
+          fi
+
           kill $APP 2>/dev/null || true
           if [ $fail -ne 0 ]; then tail -60 /tmp/app.log; exit 1; fi
           echo "✓ the packaged jar starts and serves"

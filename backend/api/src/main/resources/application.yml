@@ -92,11 +92,28 @@ management:
 springdoc:
   api-docs:
     path: /v3/api-docs
+    # A-074 · CLOSED BY DEFAULT. /v3/api-docs publishes the whole API surface —
+    # every path, every parameter, every schema — which is the single most
+    # useful document an attacker mapping this system could be handed.
+    #
+    # Switched on where something genuinely depends on it, and nowhere else:
+    #   · the `local` profile below, so `make api` still serves Swagger UI
+    #   · api/src/test/resources/application.properties, because
+    #     ContractConformanceTest fetches this endpoint from the running app
+    #   · the CI packaging job, which smoke-tests it on the built jar
+    #
+    # SecurityConfig reads this same flag and only permits the springdoc paths
+    # when it is true, so the switch closes the door rather than just removing
+    # what is behind it.
+    enabled: ${API_DOCS_ENABLED:false}
     # Stable ordering. springdoc emits reflection order otherwise, so the
     # generated client churns between runs and CI's staleness check (D-005)
     # fails on a diff that means nothing.
     version: openapi_3_1
   swagger-ui:
+    # Follows api-docs: a UI with no document behind it is a blank page that
+    # looks like a bug rather than a decision.
+    enabled: ${API_DOCS_ENABLED:false}
     path: /swagger-ui.html
     operations-sorter: alpha
     tags-sorter: alpha
@@ -404,6 +421,15 @@ spring:
 logging:
   level:
     com.edunext.edutrack: DEBUG
+
+# A-074 · the API documentation is closed by default; `make api` is the reason
+# the switch exists rather than the default being flipped. A developer running
+# locally is the one caller who should have the whole surface in front of them.
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
 
 edutrack:
   attachments:

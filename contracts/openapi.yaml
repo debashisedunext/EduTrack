@@ -263,6 +263,26 @@ paths:
         '204': { description: Changed. }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        # STREAM A ADDITION (A-074) — flagged for Debashis's review rather than
+        # made silently, like the 2FA block below (CLAUDE.md, code ownership:
+        # Stream D owns this file).
+        #
+        # One line, and it closes a gap rather than opening one.
+        # PasswordChangeService has recorded since A-026 that `currentPassword`
+        # guesses are unbounded — somebody holding a stolen access token can
+        # brute-force their way from a session to a full takeover — and parked
+        # the fix on A-074. This is that fix becoming visible in the contract.
+        #
+        # Reuses the TooManyRequests response that /auth/login and
+        # /auth/forgot-password already point at, so there is no new schema and
+        # the generated client changes shape not at all.
+        #
+        # Worth a sentence for the reviewer: this throttle is deliberately NOT
+        # the sign-in lockout. Counting these failures there would let somebody
+        # with a stolen token lock the real owner out of signing in, so it keeps
+        # its own budget keyed on the user id. Being refused here never affects
+        # the ability to sign in.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   # ── A-029 · two-factor enrolment ────────────────────────────────────────────
   #

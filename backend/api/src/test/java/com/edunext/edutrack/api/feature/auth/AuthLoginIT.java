@@ -682,10 +682,30 @@ class AuthLoginIT {
      * {@code SameSite} away would let the assertion pass on a cookie that no
      * browser would treat as strict.
      */
+    /**
+     * The refresh cookie, picked by name rather than by being the only one.
+     *
+     * <p><b>A-074 changed what "exactly one cookie" means here.</b> This asserted
+     * a single {@code Set-Cookie}, which was the right assertion while the
+     * refresh token was the only cookie this application issued. It now issues
+     * {@code XSRF-TOKEN} as well, on every response.
+     *
+     * <p>The assertion was not simply relaxed. What it was really protecting is
+     * that a login hands out one credential and nothing else, and a bare count
+     * expressed that only as long as the count happened to be one. Naming the
+     * two permitted cookies keeps that guarantee and makes it explicit: a third
+     * cookie appearing on a login response still fails, which a
+     * {@code hasSizeGreaterThan} or a dropped assertion would not.
+     */
     private static String setCookieHeader(ResponseEntity<String> response) {
         List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
-        assertThat(cookies).as("the login response must set exactly one cookie").hasSize(1);
-        return cookies.getFirst();
+        assertThat(cookies).as("the login response must set the refresh cookie").isNotNull();
+        assertThat(cookies)
+                .as("a login must hand out the refresh token and A-074's CSRF token, and nothing else")
+                .allMatch(cookie -> cookie.startsWith("refresh_token=") || cookie.startsWith("XSRF-TOKEN="));
+        List<String> refresh = cookies.stream().filter(c -> c.startsWith("refresh_token=")).toList();
+        assertThat(refresh).as("exactly one refresh_token cookie").hasSize(1);
+        return refresh.getFirst();
     }
 
     private static String cookieValue(ResponseEntity<String> response) {
@@ -759,12 +779,32 @@ class AuthLoginIT {
         assertThat(second.matchesDevice(USER_AGENT)).isFalse();
     }
 
+    /**
+     * <b>A-074 · "no cookie at all" became "no credential at all".</b> A refused
+     * login may now carry {@code XSRF-TOKEN}, because the CSRF filter runs on
+     * every request and does not know or care whether the login succeeded. That
+     * cookie is not a credential — on its own it authenticates nothing, and it
+     * is issued to anonymous callers by design.
+     *
+     * <p>What must still be true is the sentence the original assertion was
+     * written for, and it is asserted here directly rather than through a proxy:
+     * a failed login hands out <b>no refresh token</b>.
+     */
     @Test
-    @DisplayName("a refused login sets no cookie at all")
+    @DisplayName("a refused login hands out no session")
     void aRefusedLoginIssuesNothing() {
-        assertThat(login("it.asha", "Wrong-Horse-9!").getHeaders().get(HttpHeaders.SET_COOKIE))
+        assertThat(refreshCookiesOf(login("it.asha", "Wrong-Horse-9!")))
                 .as("a refresh token handed out on a failed login is a session handed to a stranger")
-                .isNull();
-        assertThat(login("it.nobody", PASSWORD).getHeaders().get(HttpHeaders.SET_COOKIE)).isNull();
+                .isEmpty();
+        assertThat(refreshCookiesOf(login("it.nobody", PASSWORD)))
+                .as("nor for a username that has never existed")
+                .isEmpty();
+    }
+
+    private static List<String> refreshCookiesOf(ResponseEntity<String> response) {
+        List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
+        return cookies == null
+                ? List.of()
+                : cookies.stream().filter(cookie -> cookie.startsWith("refresh_token=")).toList();
     }
 }

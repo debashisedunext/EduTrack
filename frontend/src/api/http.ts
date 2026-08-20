@@ -85,6 +85,56 @@ export function newIdempotencyKey(): string {
   return crypto.randomUUID();
 }
 
+/**
+ * A-074 · the CSRF cookie the backend issues, and the header it wants back.
+ *
+ * **STREAM A ADDITION — flagged for Debashis rather than made silently**
+ * (CLAUDE.md, code ownership: Stream D owns this file). It is here because this
+ * file's own header says it is — *"if you need behaviour on every request, add it
+ * here rather than wrapping calls at the feature level"* — and because there is
+ * no alternative: the generated `refreshSession()` takes only an `AbortSignal`,
+ * so a per-call header would need a contract change to a route that does not
+ * otherwise want one.
+ *
+ * Only `POST /auth/refresh` and `POST /auth/logout` are CSRF-protected server
+ * side; everything else authenticates from the `Authorization` header, which a
+ * browser never attaches by itself. The header is sent on every unsafe request
+ * anyway rather than special-casing those two paths here — a list of protected
+ * routes in the client is a second copy of a server-side decision, and the copy
+ * that drifts is the one that produces a 403 nobody can reproduce. An unwanted
+ * `X-XSRF-TOKEN` costs a few dozen bytes and is ignored.
+ *
+ * `/auth/refresh` is the call that actually needs it: the startup refresh runs
+ * before any access token exists, so it is the one request the server cannot
+ * exempt on the strength of a bearer header.
+ */
+const CSRF_COOKIE = 'XSRF-TOKEN';
+const CSRF_HEADER = 'X-XSRF-TOKEN';
+
+/** `CsrfFilter` exempts these, so sending the header on them is noise. */
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function csrfToken(): string | null {
+  // `document` is absent in a node test environment, and throwing here would
+  // take down every request rather than one header.
+  if (typeof document === 'undefined') return null;
+
+  for (const entry of document.cookie.split(';')) {
+    const separator = entry.indexOf('=');
+    if (separator < 0) continue;
+    if (entry.slice(0, separator).trim() !== CSRF_COOKIE) continue;
+    // A cookie value is defined as percent-encoded. The server encodes nothing,
+    // but a decode that throws on a stray '%' must not break the request.
+    const raw = entry.slice(separator + 1).trim();
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+  return null;
+}
+
 export interface RequestConfig {
   url: string;
   /** Orval emits these uppercase. */
@@ -118,6 +168,9 @@ export async function http<T>({
   responseType,
 }: RequestConfig): Promise<T> {
   const isForm = data instanceof FormData;
+  // A-074. Read per request, never cached: the cookie is rotated by the server
+  // and a value captured at module load would be stale by the first refresh.
+  const csrf = UNSAFE_METHODS.has(method) ? csrfToken() : null;
   const response = await fetch(`${BASE}${url}${query(params)}`, {
     method,
     signal,
@@ -126,6 +179,8 @@ export async function http<T>({
     headers: {
       ...(isForm ? {} : data !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...(csrf ? { [CSRF_HEADER]: csrf } : {}),
+      // Spread last, so an explicit per-call header still wins.
       ...headers,
     },
     body: isForm ? data : data !== undefined ? JSON.stringify(data) : undefined,

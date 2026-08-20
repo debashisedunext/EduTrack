@@ -162,21 +162,61 @@ class AuthRefreshIT {
         return refresh(token, CHROME);
     }
 
+    /**
+     * A-074 · the CSRF double submit every request in this class carries.
+     *
+     * <p>{@code POST /auth/refresh} authenticates from a cookie, so it is
+     * CSRF-protected — and it carries no bearer token, so the exemption that
+     * covers {@code /auth/logout} does not apply to it. This is the one route in
+     * the product where the client genuinely has to send the header.
+     *
+     * <p>Without it, every case below would be answered 403 by {@code CsrfFilter}
+     * before reaching any rotation logic, and this suite would silently become a
+     * test of CSRF rather than of refresh. The value is arbitrary:
+     * {@code CookieCsrfTokenRepository} compares the cookie against the header,
+     * it does not mint or remember them.
+     */
+    private static final String CSRF_TOKEN = "refresh-it-csrf-token";
+
     private ResponseEntity<String> refresh(String token, String userAgent) {
         HttpHeaders headers = new HttpHeaders();
         if (userAgent != null) headers.set(HttpHeaders.USER_AGENT, userAgent);
-        if (token != null) headers.set(HttpHeaders.COOKIE, "refresh_token=" + token);
+        // Both cookies ride in the one Cookie header. The CSRF half is sent even
+        // when the refresh token is absent, so a case probing "no refresh
+        // cookie" still fails on the refresh token rather than on CSRF.
+        String csrfCookie = "XSRF-TOKEN=" + CSRF_TOKEN;
+        headers.set(HttpHeaders.COOKIE,
+                token != null ? "refresh_token=" + token + "; " + csrfCookie : csrfCookie);
+        headers.set("X-XSRF-TOKEN", CSRF_TOKEN);
         return rest.exchange("/api/v1/auth/refresh", HttpMethod.POST,
                 new HttpEntity<>(null, headers), String.class);
     }
 
     /** The opaque value out of a {@code Set-Cookie}, without normalising anything away. */
     private static String cookieValue(ResponseEntity<String> response) {
-        List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
-        assertThat(cookies).as("expected exactly one Set-Cookie").isNotNull().hasSize(1);
-        String header = cookies.getFirst();
+        String header = refreshCookieHeader(response);
         String withoutName = header.substring(header.indexOf('=') + 1);
         return withoutName.substring(0, withoutName.indexOf(';'));
+    }
+
+    /**
+     * A-074 · the refresh cookie, picked by name rather than by being the only one.
+     *
+     * <p>This asserted "expected exactly one Set-Cookie" until CSRF tokens
+     * landed. Responses now carry {@code XSRF-TOKEN} as well, so a count is the
+     * wrong shape — but dropping the assertion would be weaker than the test it
+     * replaces. Naming what is permitted keeps the intent: one refresh cookie,
+     * and nothing else except the CSRF token.
+     */
+    private static String refreshCookieHeader(ResponseEntity<String> response) {
+        List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
+        assertThat(cookies).as("the response must set the refresh cookie").isNotNull();
+        assertThat(cookies)
+                .as("no cookie beyond the refresh token and A-074's CSRF token")
+                .allMatch(cookie -> cookie.startsWith("refresh_token=") || cookie.startsWith("XSRF-TOKEN="));
+        List<String> refresh = cookies.stream().filter(c -> c.startsWith("refresh_token=")).toList();
+        assertThat(refresh).as("exactly one refresh_token cookie").hasSize(1);
+        return refresh.getFirst();
     }
 
     private static JsonNode json(ResponseEntity<String> response) throws Exception {

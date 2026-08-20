@@ -54,6 +54,8 @@ class AuthExceptionHandler {
             URI.create("https://edutrack/errors/too-many-reset-requests");
     private static final URI TOO_MANY_LOGIN_ATTEMPTS =
             URI.create("https://edutrack/errors/too-many-login-attempts");
+    private static final URI TOO_MANY_PASSWORD_CHANGE_ATTEMPTS =
+            URI.create("https://edutrack/errors/too-many-password-change-attempts");
 
     private final RefreshTokenIssuer refreshTokens;
 
@@ -393,6 +395,35 @@ class AuthExceptionHandler {
         problem.setType(TOO_MANY_LOGIN_ATTEMPTS);
         problem.setTitle("Too many requests");
         problem.setDetail("Too many sign-in attempts. Try again shortly.");
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.retryAfter().toSeconds()))
+                .body(problem);
+    }
+
+    /**
+     * A-074 · {@code 429} with {@code Retry-After} on
+     * {@code PATCH /me/password}.
+     *
+     * <p>A third type URI rather than reusing the login throttle's, for the
+     * reason that one does not reuse the reset throttle's: these are different
+     * situations to be in and a shared URI makes them indistinguishable to the
+     * frontend and in logs. This one is the most serious of the three — the
+     * caller is authenticated, so a burst of these means somebody is trying to
+     * escalate a session they already hold, and that must be greppable on its
+     * own.
+     *
+     * <p><b>The detail deliberately does not say how many guesses remain</b>, nor
+     * whether the account is otherwise healthy. The caller already knows they got
+     * the password wrong; a countdown would only help the case where they are not
+     * the owner.
+     */
+    @ExceptionHandler(TooManyPasswordChangeAttemptsException.class)
+    ResponseEntity<ProblemDetail> handleTooManyPasswordChangeAttempts(
+            TooManyPasswordChangeAttemptsException exception) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.TOO_MANY_REQUESTS);
+        problem.setType(TOO_MANY_PASSWORD_CHANGE_ATTEMPTS);
+        problem.setTitle("Too many requests");
+        problem.setDetail("Too many password change attempts. Try again shortly.");
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.retryAfter().toSeconds()))
                 .body(problem);

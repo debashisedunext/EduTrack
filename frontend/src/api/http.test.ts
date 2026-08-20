@@ -172,3 +172,102 @@ describe('newIdempotencyKey', () => {
     expect(newIdempotencyKey()).not.toBe(newIdempotencyKey());
   });
 });
+
+// ── A-074 · the CSRF double submit ────────────────────────────────────────────
+
+describe('http · CSRF', () => {
+  /**
+   * jsdom's `document.cookie` accumulates, so each test sets its own value and
+   * the expiry below clears it again. Without that, a token set in one test
+   * leaks into the next and the "no cookie" case passes for the wrong reason.
+   */
+  const setCookie = (value: string | null) => {
+    if (value === null) {
+      document.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    } else {
+      document.cookie = `XSRF-TOKEN=${value}; path=/`;
+    }
+  };
+
+  beforeEach(() => setCookie(null));
+  afterEach(() => setCookie(null));
+
+  it('echoes the XSRF-TOKEN cookie as a header on an unsafe request', async () => {
+    fetchMock.mockImplementation(async () => ok({ data: {} }));
+    setCookie('token-from-the-server');
+
+    await http({ url: '/auth/refresh', method: 'POST' });
+
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+      'X-XSRF-TOKEN': 'token-from-the-server',
+    });
+  });
+
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'] as const)(
+    'sends the header on %s',
+    async (method) => {
+      fetchMock.mockImplementation(async () => ok({ data: {} }));
+      setCookie('t');
+
+      await http({ url: '/tickets', method });
+
+      expect(fetchMock.mock.calls[0][1].headers).toHaveProperty('X-XSRF-TOKEN', 't');
+    },
+  );
+
+  it('does not send the header on GET — CsrfFilter exempts safe methods', async () => {
+    fetchMock.mockImplementation(async () => ok({ data: {} }));
+    setCookie('t');
+
+    await http({ url: '/tickets', method: 'GET' });
+
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('X-XSRF-TOKEN');
+  });
+
+  /**
+   * The startup refresh runs before any cookie exists on a first-ever visit.
+   * Sending `X-XSRF-TOKEN: undefined` would be worse than sending nothing — the
+   * server would compare it against the absent cookie and refuse for a reason
+   * that reads like a bug.
+   */
+  it('sends no header when there is no cookie', async () => {
+    fetchMock.mockImplementation(async () => ok({ data: {} }));
+
+    await http({ url: '/auth/refresh', method: 'POST' });
+
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('X-XSRF-TOKEN');
+  });
+
+  it('reads the right cookie when others are present', async () => {
+    fetchMock.mockImplementation(async () => ok({ data: {} }));
+    document.cookie = 'other=first; path=/';
+    setCookie('the-one-we-want');
+    document.cookie = 'XSRF-TOKEN-DECOY=nope; path=/';
+
+    await http({ url: '/auth/logout', method: 'POST' });
+
+    expect(fetchMock.mock.calls[0][1].headers).toHaveProperty(
+      'X-XSRF-TOKEN',
+      'the-one-we-want',
+    );
+
+    document.cookie = 'other=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    document.cookie = 'XSRF-TOKEN-DECOY=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+  });
+
+  it('lets an explicit per-call header win', async () => {
+    fetchMock.mockImplementation(async () => ok({ data: {} }));
+    setCookie('from-the-cookie');
+
+    await http({
+      url: '/auth/refresh',
+      method: 'POST',
+      headers: { 'X-XSRF-TOKEN': 'explicitly-set' },
+    });
+
+    expect(fetchMock.mock.calls[0][1].headers).toHaveProperty(
+      'X-XSRF-TOKEN',
+      'explicitly-set',
+    );
+  });
+});

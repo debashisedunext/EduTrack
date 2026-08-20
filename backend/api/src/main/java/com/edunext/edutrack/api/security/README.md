@@ -88,6 +88,25 @@ Ticket t = tickets.require(caller, id);   // no Optional, no status code, nothin
 
 `CallerIdentity` (in this package, not `scope/`) is the one reading of "who is calling", resolved from either principal — `JwtAuthenticationToken` on the real chain, `DevPrincipal` under `dev-noauth`. It is the shared home the two copied `CurrentUser` classes in `feature/chat` and `feature/notifications` were waiting for.
 
+## Transport hardening (A-074)
+
+Three concerns, all in this package, all about what a *browser* can be made to do rather than about who the caller is.
+
+`ContentSecurityPolicy` builds the CSP once at startup. Two parts of it are computed rather than written down, and both matter:
+
+- **The inline-script hash comes from the `index.html` that is actually served.** That file has one inline script (D-15's pre-paint theme, inline for reasons its own comment gives at length). A hardcoded `'sha256-…'` would need re-deriving by hand every time that script changed, and the failure mode is a blank application in production with a green test suite. Hashing the built artefact also survives Vite minifying it.
+- **The object-store origin comes from `ObjectStorageProperties`.** Attachments are presigned URLs on MinIO or S3 — a different origin — so `img-src` and `connect-src` have to name it, and it differs per deployment.
+
+`style-src` keeps `'unsafe-inline'`. A real limit, not an oversight: every Radix dialog depends on `react-remove-scroll`, which injects a `<style>` element at runtime, and there is no nonce to give it.
+
+`CookieRouteCsrf` adds CSRF tokens to `POST /auth/refresh` and `POST /auth/logout` — the only two routes that authenticate from a cookie. **Everything else stays exempt on purpose:** a bearer route cannot be forged cross-origin, so a token on it is ceremony.
+
+> **The part that will surprise you.** `oauth2ResourceServer` registers its own CSRF override that ignores any request carrying `Authorization: Bearer`. So `POST /auth/logout` with a bearer token succeeds carrying no CSRF token at all, which reads as a hole. It is not one — a cross-origin page cannot set that header, so anything an attacker can actually forge arrives without it and *is* checked. `SecurityHardeningIT` pins both directions so nobody has to rediscover it.
+
+The token cookie's `Max-Age` matches `refresh_token`'s seven days deliberately. A session cookie there would look correct in every test and then sign out every returning user the next morning, because `refresh_token` survives a browser restart and a session-scoped CSRF cookie does not.
+
+**The API documentation is closed by default.** `springdoc.api-docs.enabled` is `${API_DOCS_ENABLED:false}`, and `SecurityConfig` permits the springdoc paths only when it is true — otherwise the switch would leave them unreachable but still listed as public, which reads as an open door in the one file people audit for open doors. Switched on in the `local` profile (so `make api` is unchanged) and in this module's test-scope `application.properties` (because `ContractConformanceTest` reads `/v3/api-docs` from the running app). With it off those paths answer **404**, not 401: they are not under `/api/**`, and `SpaResourceConfig` refuses to hand them the SPA shell.
+
 ## permission/
 
 `Permissions` — the eighteen codes as constants. `RolePermissions` — the §2 matrix as a static map.
@@ -109,5 +128,9 @@ Permissions are trusted from the token rather than re-read per request, so a rev
 | `TicketScopeIT` | A-034 — which rows each role actually gets back, against real MySQL. |
 | `ScopedNotFoundIT` | A-035 — out-of-scope and never-existed are byte-identical, from a real login. |
 | `arch/ScopeGuardRulesTest` | A-037 — the guard cannot be walked around: no `TicketRepository` outside `scope/`, no `@PostAuthorize` anywhere. No Docker. |
+| `ContentSecurityPolicyTest` | A-074 — how the policy is assembled: hashes over exact bytes, origins reduced from endpoints, a malformed endpoint dropped rather than emitted. No Docker. |
+| `CookieRouteCsrfTest` | A-074 — what the matcher protects and what it deliberately does not, and the cookie's flags. **Includes an "the matcher is not inert" case:** a matcher that matches nothing leaves the whole suite green and CSRF switched off. No Docker. |
+| `SecurityHardeningIT` | A-074 — the headers on real responses (including refusals), and CSRF enforced end to end, bearer exemption included. |
+| `ApiDocsClosedIT` | A-074 — the *shipped* default, which every other test in the module overrides. The only place `/v3/api-docs` is proved closed. |
 
 The rest of the suite is the allow-path net: everything runs as an authenticated principal and would start answering 403 if an annotation over-restricted. Keeping it green is part of the check, not incidental to it.
