@@ -1,10 +1,11 @@
 package com.edunext.edutrack.api.feature.masters.resources;
 
+import com.edunext.edutrack.api.feature.reports.export.ExportDelivery;
+import com.edunext.edutrack.api.feature.reports.export.ReportExporter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -21,8 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 
@@ -87,17 +86,26 @@ import java.util.Locale;
 @Tag(name = "users")
 class ResourceController {
 
-    private static final String XLSX = "xlsx";
-    private static final String CSV = "csv";
+    /**
+     * B-062 · the two formats this route offers, deliberately not
+     * {@code Format.values()}.
+     *
+     * <p>The engine writes three. {@code /users/export} declares two, and the
+     * same reasoning {@code AuditExportService} records applies: the contract is
+     * what a client reads, and a route that quietly answers a format its schema
+     * does not list is a route whose behaviour cannot be discovered.
+     */
+    private static final List<ReportExporter.Format> OFFERED =
+            List.of(ReportExporter.Format.XLSX, ReportExporter.Format.CSV);
 
     private final ResourceService resources;
-    private final ResourceExportWriter exporter;
+    private final ExportDelivery exports;
     private final ResourceWriteService writes;
 
-    ResourceController(ResourceService resources, ResourceExportWriter exporter,
+    ResourceController(ResourceService resources, ExportDelivery exports,
                        ResourceWriteService writes) {
         this.resources = resources;
-        this.exporter = exporter;
+        this.exports = exports;
         this.writes = writes;
     }
 
@@ -346,27 +354,20 @@ class ResourceController {
     private void writeExport(ResourceFilter filter, String format, HttpServletResponse response)
             throws IOException {
 
-        if (!XLSX.equals(format) && !CSV.equals(format)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "format must be 'xlsx' or 'csv'");
-        }
+        // B-062 · still only the two the contract declares. The engine can write
+        // a PDF and this route does not offer one: `/users/export` declares
+        // `format: [xlsx, csv]`, and widening it here would be a server serving
+        // a format no client knows to ask for and no schema describes. A third
+        // format is a contract change and Stream D's file, not a side effect of
+        // changing which class does the writing.
+        ReportExporter.Format chosen = ReportExporter.Format.of(format)
+                .filter(OFFERED::contains)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "format must be 'xlsx' or 'csv'"));
 
-        response.setStatus(HttpStatus.OK.value());
-        response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
-        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
-                "attachment; filename=\"" + filename(format) + "\"");
-
-        if (XLSX.equals(format)) {
-            exporter.writeXlsx(filter, response.getOutputStream());
-        } else {
-            exporter.writeCsv(filter, response.getOutputStream());
-        }
-        response.flushBuffer();
-    }
-
-    /** Dated so that two exports a week apart do not overwrite each other in Downloads. */
-    private static String filename(String format) {
-        return "resources-" + LocalDate.now(ZoneOffset.UTC) + "." + format;
+        exports.writeTo(response, chosen, ResourceExportRows.FILENAME_STEM,
+                ResourceExportRows.TITLE, ResourceExportRows.describe(filter),
+                ResourceExportRows.COLUMNS, ResourceExportRows.of(resources, filter));
     }
 
     /**

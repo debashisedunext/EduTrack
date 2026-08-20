@@ -4,7 +4,6 @@ import com.edunext.edutrack.api.feature.reports.ReportDtos;
 
 import java.io.OutputStream;
 import java.util.List;
-import java.util.Map;
 
 /**
  * A-064 · one report, one file. §7.8: "export to Excel/CSV/PDF".
@@ -31,6 +30,13 @@ import java.util.Map;
  * a year of them is the largest thing this product hands anybody; buffering it
  * whole is a heap spike per concurrent export, and the two formats that matter
  * for size — CSV and xlsx — can both be written a row at a time.
+ *
+ * <p><b>B-062 · that is now true of the input as well.</b> Rows arrive as an
+ * {@link ExportRows} source rather than a materialised {@code List}, so a caller
+ * that pages — {@code /users/export} walks a keyset cursor in batches of 500 —
+ * can use this engine instead of writing a second one. It could not before, and
+ * the second one it wrote is the reason the formula-injection guard existed in
+ * three places.
  */
 public interface ReportExporter {
 
@@ -45,9 +51,11 @@ public interface ReportExporter {
      *                     into the file itself, because a spreadsheet outlives the
      *                     screen it came from and "your projects" is not
      *                     recoverable from the rows once it has been emailed on.
+     * @param rows         walked once, in order. An implementation must not
+     *                     assume it can count them first — see {@link ExportRows}.
      */
     void write(OutputStream out, String reportTitle, String appliedScope,
-               List<ReportDtos.Column> columns, List<Map<String, Object>> rows) throws Exception;
+               List<ReportDtos.Column> columns, ExportRows rows) throws Exception;
 
     enum Format {
 

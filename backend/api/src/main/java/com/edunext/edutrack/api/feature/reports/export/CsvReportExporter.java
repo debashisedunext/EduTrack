@@ -9,7 +9,6 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Map;
 
 /**
  * A-064 · CSV. RFC 4180, plus the two things RFC 4180 does not cover and every
@@ -58,7 +57,7 @@ class CsvReportExporter implements ReportExporter {
 
     @Override
     public void write(OutputStream out, String reportTitle, String appliedScope,
-                      List<ReportDtos.Column> columns, List<Map<String, Object>> rows) throws Exception {
+                      List<ReportDtos.Column> columns, ExportRows rows) throws Exception {
 
         Writer writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8));
 
@@ -77,8 +76,26 @@ class CsvReportExporter implements ReportExporter {
 
         writeRow(writer, columns.stream().map(ReportDtos.Column::label).toList());
 
-        for (Map<String, Object> row : rows) {
-            writeRow(writer, columns.stream().map(c -> render(row.get(c.key()))).toList());
+        // B-062 · pulled from the source a row at a time rather than iterated
+        // over a list. Nothing else changes here: CSV was always written row by
+        // row, and it is now fed that way too, so a five-thousand-row directory
+        // costs one batch of memory rather than the whole set.
+        //
+        // The sink cannot throw a checked exception, so an IOException from the
+        // writer is wrapped and unwrapped either side. Letting it escape as an
+        // unchecked exception would reach the caller as a 500 with the cause
+        // buried, when what it means is the client hung up mid-download.
+        try {
+            rows.forEach(row -> {
+                try {
+                    writeRow(writer, columns.stream().map(c -> render(row.get(c.key()))).toList());
+                } catch (Exception e) {
+                    throw new java.io.UncheckedIOException(
+                            e instanceof java.io.IOException io ? io : new java.io.IOException(e));
+                }
+            });
+        } catch (java.io.UncheckedIOException e) {
+            throw e.getCause();
         }
 
         // Flushed rather than closed: the stream belongs to the servlet

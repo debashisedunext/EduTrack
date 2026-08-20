@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.audit;
 
 import com.edunext.edutrack.api.feature.reports.ReportDtos;
+import com.edunext.edutrack.api.feature.reports.export.ExportRows;
 import com.edunext.edutrack.api.feature.reports.export.ReportExporter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.ContentDisposition;
@@ -120,8 +121,17 @@ class AuditExportService {
         response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
 
         try {
+            // B-062 · the engine takes a row source rather than a list, so that
+            // a caller which pages can use it. This one holds a page of audit
+            // entries already, so it wraps them and nothing else here changes.
+            //
+            // The delivery around this call — headers, filename, no-store, the
+            // truncated-file rethrow — is ExportDelivery now, and this is a second copy.
+            // Left in place: feature/audit is Stream A's and this is Stream B's
+            // task, so the call to make is theirs. Recorded in STREAM-B-MASTERS.md
+            // rather than done quietly from outside the package.
             exporter.write(response.getOutputStream(), TITLE, appliedFilters, COLUMNS,
-                    entries.stream().map(AuditExportService::asRow).toList());
+                    ExportRows.of(entries.stream().map(AuditExportService::asRow).toList()));
         } catch (IOException e) {
             throw e;
         } catch (Exception e) {
