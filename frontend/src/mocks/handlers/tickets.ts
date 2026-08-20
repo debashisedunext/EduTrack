@@ -703,6 +703,9 @@ export const ticketHandlers = [
           // fact the Comments tab shows, so a reader of the History tab alone
           // isn't left guessing which of these were internal.
           isClientVisible: c.isClientVisible,
+          // C-032 · the same stamped-role fallback `commentDto` uses, read
+          // onto the interleaved row exactly as `stageCode` already was.
+          actorRole: c.authorRole ?? db.users.find((u) => u.id === c.authorId)?.role ?? null,
           stageCode: c.stageCode, cycleNo: c.cycleNo, iterationNo: c.iterationNo,
           isCorrection: false, correctsEntryId: null,
           entryHash: 'sha256:comment', createdAt: c.createdAt,
@@ -872,6 +875,9 @@ export const ticketHandlers = [
       // than an extra click.
       isClientVisible: body.isClientVisible ?? false,
       isEdited: false, isDeleted: false,
+      // C-032 · stamped once, at write time — see `Comment.authorRole`'s own
+      // note on why this is not a live lookup.
+      authorRole: db.users.find((u) => u.id === db.currentUserId)?.role ?? null,
       stageCode: t.currentStageCode, cycleNo: t.cycleNo, iterationNo: t.iterationNo,
       mentionIds: body.mentionUserIds ?? [], createdAt: new Date().toISOString(),
     };
@@ -1361,7 +1367,9 @@ export function commentDto(c: import('../db').Comment) {
     body: c.isDeleted ? '' : c.body,
     originalBody: c.isDeleted ? null : c.originalBody,
     author: userRef(c.authorId, db),
-    authorRole: db.users.find((u) => u.id === c.authorId)?.role,
+    // C-032 · the stamped role wins; a fixture predating the field falls back
+    // to the author's current one, `CommentDto.of`'s own fallback.
+    authorRole: c.authorRole ?? db.users.find((u) => u.id === c.authorId)?.role,
     isClientVisible: c.isClientVisible, isEdited: c.isEdited, isDeleted: c.isDeleted,
     // D-14 · always null, because there is no deadline. NOT "cannot edit" —
     // `CommentDto.of` sends the same null for the same reason, and

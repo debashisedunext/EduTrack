@@ -2120,6 +2120,38 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/UnprocessableTransition' }
 
+  /tickets/{ticketId}/force-move:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    post:
+      tags: [ribbon]
+      operationId: forceMoveTicket
+      summary: Force-move to any stage — PM and Admin only (C-048)
+      description: |
+        **Any stage to any stage** — forward, backward, or sideways — logged as
+        `OVERRIDE` rather than as whichever direction it happens to move. Unlike
+        `rework`/`skip`, there is no default destination: `toStageCode` is
+        always required.
+
+        Gated on `ticket.force_move` alone (Admin and PM hold it, nobody else
+        — blueprint §2's "Force-move ribbon backwards" row); the golden rule's
+        current-stage-owner check is not the point of this route; the
+        capability already is. `reason` is mandatory so the override is
+        self-explaining in the ribbon's history the way a rework's is.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForceMoveRequest' }
+      responses:
+        '200':
+          description: Moved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RibbonResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+
   /tickets/{ticketId}/journey:
     parameters: [{ $ref: '#/components/parameters/TicketId' }]
     get:
@@ -8023,6 +8055,13 @@ components:
         # the merged stream sees the same internal/client-visible fact the
         # Comments tab shows, without having to cross-reference the other list.
         isClientVisible: { type: [boolean, 'null'] }
+        # C-032 · the actor's role AT THE TIME OF WRITING, on a COMMENTED row
+        # only — the blueprint's own §7 sample transcript names it there
+        # ("Ravi Kumar (Developer)") and nowhere else in the stream. Null for
+        # every real ticket_history row (there is no stamped role to read for
+        # a field change or a handoff) and null on a comment posted before
+        # Comment.authorRole's own stamp existed.
+        actorRole: { $ref: '#/components/schemas/RoleCode' }
         stageCode: { type: [string, 'null'] }
         cycleNo: { type: integer }
         iterationNo: { type: integer }
@@ -8156,6 +8195,21 @@ components:
           description: Expected on a QA failure.
         toUserId: { type: [integer, 'null'], format: int64 }
         effortHours: { type: [number, 'null'], format: double }
+    ForceMoveRequest:
+      type: object
+      required: [toStageCode, reason]
+      properties:
+        toStageCode:
+          type: string
+          description: |
+            Any stage of the ticket's workflow template — forward, backward or
+            sideways. Unlike `rework`/`skip` there is no default; the caller
+            always names the destination.
+        reason: { type: string, minLength: 3, maxLength: 2000 }
+        toUserId:
+          type: [integer, 'null']
+          format: int64
+          description: The receiving owner. Omitted keeps the current assignee.
     JourneyRow:
       type: object
       properties:

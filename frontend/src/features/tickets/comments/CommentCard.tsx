@@ -8,6 +8,7 @@ import { RichTextView } from '@/components/ui/rich-text-view'
 import { RICH_TEXT_COMPACT_TOOLBAR, isRichTextEmpty } from '@/components/ui/rich-text'
 import { cn } from '@/lib/utils'
 
+import { titleCase } from '../stageDisplay'
 import {
   canDeleteComment,
   canEditComment,
@@ -117,6 +118,26 @@ export function CommentCard({
         {comment.authorRole && (
           <span className="text-caption text-content-muted">{comment.authorRole}</span>
         )}
+
+        {/*
+          §4B.5's stage-and-iteration stamp (C-032) — blueprint §7's own sample
+          transcript draws the identical fact under the History tab:
+          `Ravi Kumar (Developer) · Development · iteration 2`.
+
+          Iteration is drawn only beside a stage, never alone: a reader seeing
+          a stage with no iteration cannot tell whether the iteration is
+          missing or whether the concept does not apply to this comment, so
+          the two rise and fall together. `iterationNo` can be absent on a
+          comment written before the ticket's first stage transition, or one
+          posted before this task shipped — CommentDtos.CommentDto's own note.
+        */}
+        {comment.stageCode && (
+          <span className="text-caption text-content-muted">
+            {titleCase(comment.stageCode)}
+            {comment.iterationNo != null && ` · iteration ${comment.iterationNo}`}
+          </span>
+        )}
+
         {comment.createdAt && (
           <time dateTime={comment.createdAt} className="text-caption text-content-muted">
             {formatPosted(comment.createdAt)}

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -57,9 +58,11 @@ class TransitionServiceTest {
     private final WorkflowStageRepository stages = mock(WorkflowStageRepository.class);
     private final WorkingHoursService workingHours = mock(WorkingHoursService.class);
     private final ReceivingRoleRepository receivingRoles = mock(ReceivingRoleRepository.class);
+    private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
     private final TransitionService service = new TransitionService(
-            tickets, journal, stages, workingHours, receivingRoles, Clock.fixed(NOW, ZoneOffset.UTC));
+            tickets, journal, stages, workingHours, receivingRoles, events,
+            Clock.fixed(NOW, ZoneOffset.UTC));
 
     private final Authentication caller = new TestingAuthenticationToken(
             new DevPrincipal(ACTOR, "priya", "Priya Nair", "PM", List.of(PROJECT), List.of()),
@@ -308,6 +311,36 @@ class TransitionServiceTest {
 
             assertThat(ticket.getAssignedTo()).isEqualTo(CURRENT_ASSIGNEE);
             verify(receivingRoles, never()).hasActiveMember(anyLong(), any());
+        }
+    }
+
+    // ── C-045: the live-update event ────────────────────────────────────────
+
+    @Nested
+    @DisplayName("the live-update event")
+    class LiveUpdateEvent {
+
+        @Test
+        @DisplayName("raises TicketStageAdvanced with the ticket, project and both stages")
+        void raisesEvent() {
+            service.advance(caller, TICKET, request("FORWARD", "QA", null));
+
+            ArgumentCaptor<TicketStageAdvanced> captor = ArgumentCaptor.forClass(TicketStageAdvanced.class);
+            verify(events).publishEvent(captor.capture());
+            TicketStageAdvanced published = captor.getValue();
+            assertThat(published.ticketId()).isEqualTo(TICKET);
+            assertThat(published.projectId()).isEqualTo(PROJECT);
+            assertThat(published.fromStage()).isEqualTo("DEV");
+            assertThat(published.toStage()).isEqualTo("QA");
+        }
+
+        @Test
+        @DisplayName("a refused advance raises no event")
+        void refusalRaisesNoEvent() {
+            assertThatThrownBy(() -> service.advance(caller, TICKET, request("EXPLODE", "QA", null)))
+                    .isInstanceOf(UnknownActionCodeException.class);
+
+            verify(events, never()).publishEvent(any());
         }
     }
 

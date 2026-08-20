@@ -278,6 +278,45 @@ alternatives were moving three thousand lines into `domain` or giving a mail
 worker a dependency on the web module. `ApiSchedulingConfig` is opt-in and
 switched on in `application.yml`; with it off there is no `@EnableScheduling`,
 which is what keeps ShedLock away from a Redis that test contexts do not run.
+## The export engine is the product's, not this package's (B-062)
+
+`ReportExporter` was always written to be generic — "an exporter never knows
+which report it is writing". What it was not was *reachable*. Its `write` took a
+materialised `List<Map<String, Object>>`, so a caller that pages could not use
+it, and `ReportExportService` took a `ReportService.Rendered`, so a caller
+without a report could not use that either.
+
+Both limits produced a second implementation. `feature/audit` reused the writers
+and rewrote the delivery; `feature/masters/resources` rewrote both, and its copy
+carried a **third copy of the formula-injection guard** — the one thing in here
+that is a security control rather than a formatting choice.
+
+Two changes closed it:
+
+| | What it is |
+|---|---|
+| `ExportRows` | rows as a push source, not a list. `of(list)` for a caller that holds them, `batched(…)` for one that pages a cursor. `knownCount()` is `null` when counting would mean a second query. |
+| `ExportDelivery` | filename, headers, `no-store`, and the rethrow that aborts rather than delivering a truncated file. Public, because three features need it. |
+
+`ReportExportService` is the reports adapter over that: it resolves the
+catalogue title and nothing else.
+
+**Three consequences worth knowing.** The PDF now plots the same hundred rows it
+prints, rather than charting a set the table below it did not contain. Filenames
+are stamped **UTC** — this path read the server's zone. And
+`ReportExportContractTest` drives every catalogue descriptor through all three
+formats, which is the assertion A-064's central claim never had: a report added
+tomorrow is proven exportable rather than assumed to be.
+
+**A-065's scheduled path goes through the same engine.** `toBytes` buffers where
+the interactive path streams — a run nobody is waiting on needs a length for a
+`PutObject` anyway — but it is the same exporter over the same columns and rows,
+so the emailed file and the downloaded one cannot disagree about the applied
+scope.
+
+**Owed to Stream A:** `AuditExportService` still carries its own copy of the
+delivery block. It takes the one line the signature change forces and no more —
+`feature/audit` is not in the M6 split that put B-060 and B-062 in here.
 
 ## The timesheet (B-063)
 
@@ -323,7 +362,7 @@ because who may open whose week is a row question answered with a 404.
 
 ## Not here yet
 
-- ~~**Scheduling**~~ — landed with A-065. See below.
+- ~~**Scheduling**~~ — landed with A-065. See *Scheduled reports* above.
 - **Five reports** — A-068 and whoever takes `resource-contribution`,
   `rework-analysis`, `deployment-report`, `audit-compliance` and
   `email-delivery-log`. Thirteen run today: `date-wise` (A-063), §7.8's first six

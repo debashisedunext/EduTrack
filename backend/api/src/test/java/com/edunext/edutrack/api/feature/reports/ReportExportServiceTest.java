@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.reports;
 
+import com.edunext.edutrack.api.feature.reports.export.ExportDelivery;
+import com.edunext.edutrack.api.feature.reports.export.ExportRows;
 import com.edunext.edutrack.api.feature.reports.export.ReportExporter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -7,6 +9,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -46,22 +49,34 @@ class ReportExportServiceTest {
 
             @Override
             public void write(java.io.OutputStream out, String reportTitle, String appliedScope,
-                              List<ReportDtos.Column> columns, List<Map<String, Object>> rows) throws Exception {
-                out.write((reportTitle + "|" + appliedScope + "|" + rows.size()).getBytes());
+                              List<ReportDtos.Column> columns, ExportRows rows) throws Exception {
+                int[] count = {0};
+                rows.forEach(row -> count[0]++);
+                out.write((reportTitle + "|" + appliedScope + "|" + count[0]).getBytes());
             }
         };
     }
 
-    private final ReportExportService service = new ReportExportService(
-            List.of(stub(ReportExporter.Format.CSV), stub(ReportExporter.Format.XLSX)));
+    /*
+      B-062 · a real ExportDelivery over stub exporters, rather than a mock of it.
+      What this file is about — the catalogue title, the filename, the headers,
+      the bytes actually reaching the response — is the seam between the two, and
+      a mocked delivery would assert only that a method was called with arguments
+      this test itself supplied.
+    */
+    private final ReportExportService service = new ReportExportService(new ExportDelivery(
+            List.of(stub(ReportExporter.Format.CSV), stub(ReportExporter.Format.XLSX))));
 
     @Test
     @DisplayName("names the file after the report and the day it was taken")
     void filename() {
         // Three files called date-wise.xlsx are indistinguishable a week later;
         // "(2)" tells you the order they arrived and nothing about the contents.
+        // B-062 · UTC. This used to read the server's zone, so the same export
+        // named itself differently depending on which host answered — and the
+        // resource export, which already stamped UTC, disagreed with it.
         assertThat(ReportExportService.filenameFor("date-wise", ReportExporter.Format.XLSX))
-                .isEqualTo("date-wise-" + LocalDate.now() + ".xlsx");
+                .isEqualTo("date-wise-" + LocalDate.now(ZoneOffset.UTC) + ".xlsx");
     }
 
     @Test

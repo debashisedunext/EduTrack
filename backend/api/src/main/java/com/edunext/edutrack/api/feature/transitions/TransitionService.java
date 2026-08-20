@@ -11,6 +11,7 @@ import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import com.edunext.edutrack.domain.workflow.WorkflowStage;
 import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,9 +59,17 @@ import java.util.Set;
  *       {@code reworkTicket} and {@code skipStage}; each is built by the task
  *       that owns it (C-044…C-048) and maps its own request shape onto
  *       {@link TransitionDtos.TransitionRequest}.</li>
- *   <li><b>No notification, no WebSocket push.</b> C-045's "on submit" list
- *       names both, and both need D's STOMP topics, which this does not wait
- *       on.</li>
+ *   <li><b>No in-app notification, no mail.</b> Who gets told a ticket
+ *       landed on them, and with what wording, is specific to the action
+ *       code — {@code HANDOFF_RECEIVED} for a forward handoff,
+ *       {@code QA_FAILED_REWORK} for a rework, and so on — so each stays with
+ *       the route that knows which one applies ({@link HandoffNotifier} for
+ *       C-045's route today). What <em>is</em> raised here, action-agnostic,
+ *       is {@link TicketStageAdvanced} — C-045's wiring of the seam
+ *       {@code StageQueueBroadcaster}'s own javadoc left open, and D-058's
+ *       {@code stage.changed} push, both fired after commit by
+ *       {@link RibbonLiveBroadcaster} since every action code changes the
+ *       stage the same way.</li>
  *   <li><b>No mandatory-effort-confirmation, no reassignment-within-a-stage.</b>
  *       The first is a {@code ticket_effort_logs} write with its own required
  *       fields (stage, iteration, hours, work date) that a generic transition
@@ -123,6 +132,7 @@ class TransitionService {
     private final WorkflowStageRepository stages;
     private final WorkingHoursService workingHours;
     private final ReceivingRoleRepository receivingRoles;
+    private final ApplicationEventPublisher events;
     private final Clock clock;
 
     /*
@@ -134,8 +144,9 @@ class TransitionService {
                       TicketJournal journal,
                       WorkflowStageRepository stages,
                       WorkingHoursService workingHours,
-                      ReceivingRoleRepository receivingRoles) {
-        this(tickets, journal, stages, workingHours, receivingRoles, Clock.systemUTC());
+                      ReceivingRoleRepository receivingRoles,
+                      ApplicationEventPublisher events) {
+        this(tickets, journal, stages, workingHours, receivingRoles, events, Clock.systemUTC());
     }
 
     TransitionService(ScopedTickets tickets,
@@ -143,12 +154,14 @@ class TransitionService {
                       WorkflowStageRepository stages,
                       WorkingHoursService workingHours,
                       ReceivingRoleRepository receivingRoles,
+                      ApplicationEventPublisher events,
                       Clock clock) {
         this.tickets = tickets;
         this.journal = journal;
         this.stages = stages;
         this.workingHours = workingHours;
         this.receivingRoles = receivingRoles;
+        this.events = events;
         this.clock = clock;
     }
 
@@ -263,6 +276,12 @@ class TransitionService {
         if (backward) {
             ticket.setReworkCount((short) (ticket.getReworkCount() + 1));
         }
+
+        // C-045 · the seam StageQueueBroadcaster's own javadoc names as
+        // waiting on this task, plus D-058's ticket-topic push — both
+        // action-agnostic, so raised here rather than by whichever route
+        // called advance. RibbonLiveBroadcaster delivers both after commit.
+        events.publishEvent(new TicketStageAdvanced(ticketId, ticket.getProjectId(), open.getToStage(), toStage));
 
         return TicketWire.of(ticket);
     }

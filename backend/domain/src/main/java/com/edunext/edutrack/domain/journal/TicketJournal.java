@@ -475,6 +475,33 @@ public class TicketJournal {
     }
 
     /**
+     * C-044 · one cycle's hops, in ribbon order — every segment the handoff
+     * response (and, later, {@code GET /tickets/{id}/ribbon}, C-051/C-053) has
+     * to draw.
+     *
+     * <p>{@link TicketStageTransitionRepository#findByTicketIdAndCycleNoOrderBySeqNoAsc}
+     * already existed — C-053's own groundwork note names it as "one cycle's
+     * journey — cycle 2 renders without cycle 1's hops" — but nothing in
+     * {@code api.feature.transitions} had a sanctioned way to reach it, on
+     * {@link #openHopFor}'s own precedent for the identical gap: A-037 forbids
+     * depending on {@link TicketStageTransitionRepository} from outside this
+     * package, for reads as well as writes.
+     *
+     * <p>⚠ <b>Touches Stream A's {@code domain/journal/}</b> (TEAM-PLAN.md §6).
+     * Added for C-044 on {@link #openHopFor}'s own precedent, which cites
+     * {@code ScopedTickets#byIds} for the identical reasoning; flagged for
+     * Shivendra's sign-off rather than done quietly.
+     *
+     * @return every hop of the cycle, oldest first — {@code seqNo} order, which
+     *         is also insertion order within one cycle
+     */
+    @Transactional(readOnly = true)
+    public List<TicketStageTransition> hopsFor(Long ticketId, short cycleNo) {
+        require(ticketId != null, "a ticket id is required to read a cycle's hops");
+        return transitions.findByTicketIdAndCycleNoOrderBySeqNoAsc(ticketId, cycleNo);
+    }
+
+    /**
      * C-042 · where a ticket's ribbon is right now, if anywhere.
      *
      * <p>The transition service builds its next hop from this row —

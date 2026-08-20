@@ -119,7 +119,7 @@ message turns out not to be enough.
 | `ResourceWriteRepository` | B-011 · the detail read, the insert, the dynamic update, the membership sync |
 | `ResourceExceptionHandler` | B-011 · RFC 9457 problems, scoped to this controller |
 | `TemporaryPasswords` | B-011 · the auto-generated password S-08 asks for |
-| `ResourceExportWriter` | SXSSF `.xlsx` and RFC 4180 `.csv`, from the same batches |
+| `ResourceExportRows` | B-062 · the directory as columns and rows, for the shared export engine |
 | `ResourceCursor` | Keyset cursor over `(full_name, id)` |
 | `ResourceFilter` | The four S-07 filters plus search, as one value |
 | `ResourceDtos` | Wire shapes, matching `contracts/openapi.yaml` §users |
@@ -186,6 +186,32 @@ import template, applied on the way out.
 **Every text cell is neutralised against formula injection.** A department typed
 as `-Ops` is inert in the database and a negation in Excel. `=`, `+`, `-`, `@`,
 tab and CR get a leading apostrophe.
+
+### B-062 · both of those are the engine's now, and `ResourceExportWriter` is gone
+
+Its 262 lines carried a **third copy of the formula guard**, alongside the SXSSF
+window, the byte-order mark and the RFC-4180 quoting — all of which already
+existed in `feature/reports/export`, correct and tested. Three copies of a
+security control is where a fix applied once leaves two live.
+
+B-010's reason for writing its own was real: the engine's `write` took a
+materialised `List` and this export streams a cursor in batches of 500. B-062
+gave it `ExportRows`, so it does not. `ResourceExportRows` is what is left —
+twelve `ReportDtos.Column` declarations and a row mapper.
+
+Three things changed in the file, and each is the point rather than a cost:
+
+- **The header labels and column order did not.** People reconcile this against a
+  payroll extract by heading. `headerLabelsUnchanged` holds that.
+- **Open Tickets is a number in both formats.** It was numeric in the xlsx and
+  text in the CSV, because two hand-written writers disagreed and nothing said
+  they should not.
+- **The file states its filters.** A directory narrowed to one project used to be
+  indistinguishable from the whole organisation, and whoever it was forwarded to
+  read 14 rows as the headcount.
+
+**PDF is still refused here** although the engine writes one — `/users/export`
+declares two formats and a route must not answer what its schema does not list.
 
 ## B-011 · the form
 
@@ -363,7 +389,7 @@ a local workaround becomes the permanent hole.
 
 - `ResourceCursorTest` — round trip, names containing the separator, malformed input decoding to "first page" rather than a 400
 - `ResourceServiceTest` — the probe row, the exact-multiple off-by-one, batched hydration, every bulk outcome, and the singular route's four translations
-- `ResourceExportWriterTest` — both formats read back, the BOM, RFC 4180 quoting, formula neutralisation, 250 rows against a 100-row window
+- `ResourceExportRowsTest` — B-062 · the row mapping and the scope line, plus every assertion ported from `ResourceExportWriterTest`: both formats read back, the BOM, RFC 4180 quoting, formula neutralisation, the frozen header and 250 rows against a 100-row window — now driven through the real engine, so a refactor routing this export somewhere unguarded fails here rather than shipping
 - `ResourceControllerTest` — query string to filter, role validation, export format validation, the separate-route guard, and that the status route is mounted where the contract puts it
 - `ResourceListIT` — real MySQL: `LIKE` escaping, the collation, keyset paging across duplicate names, `is_open`, the `DATETIME(6)` round trip, and that the deactivation refusal clears once the tickets have a new owner
 - `TemporaryPasswordsTest` — every generated password meets §10.3, over 2,000 samples rather than by construction-and-hope
