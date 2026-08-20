@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.tickets.assign;
 
+import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
@@ -58,11 +59,14 @@ class AssignService {
     private final ScopedTickets tickets;
     private final UserRepository users;
     private final TicketJournal journal;
+    private final TicketEventNotifier notifier;
 
-    AssignService(ScopedTickets tickets, UserRepository users, TicketJournal journal) {
+    AssignService(ScopedTickets tickets, UserRepository users, TicketJournal journal,
+                  TicketEventNotifier notifier) {
         this.tickets = tickets;
         this.users = users;
         this.journal = journal;
+        this.notifier = notifier;
     }
 
     /**
@@ -94,6 +98,19 @@ class AssignService {
         ticket.setAssignedTo(assigneeId);
         ticket.setAssignedBy(actor);
         journal.append(reassignedEntry(ticket, previous, assigneeId, actor, request.note()));
+
+        // D-037 · §4B.6 row 3, "Reassigned within a stage". Last, after every
+        // refusal above has had its chance and the history row is written —
+        // HandoffService's own ordering rule, for the same reason: nobody is
+        // told about a reassignment that did not happen. The notifier swallows
+        // and logs its own failures, so an unreachable SMTP host cannot roll
+        // this transaction back.
+        //
+        // A SYSTEM actor (null) is not reachable on this route — the capability
+        // check refuses an unidentified caller long before here — and is
+        // tolerated rather than asserted, so a future SYSTEM-driven reassignment
+        // does not have to revisit this line.
+        notifier.reassignedWithinStage(ticket, actor == null ? 0L : actor, previous, assigneeId);
 
         return TicketWire.of(ticket);
     }

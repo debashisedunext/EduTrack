@@ -20,12 +20,13 @@ import java.util.Optional;
 /**
  * D-037 · the shared producer for §4B.6's ticket events.
  *
- * <p>Four of the fifteen rows are wired here — created-and-assigned, comment
- * added, closed and reopened. They are the four whose trigger now exists:
- * {@code TicketWriteService.create} (C-067), {@code CommentService.post}
- * (C-029), {@code CloseService} (C-040) and {@code ReopenService} (C-038) are
- * all built and none of them told anybody. The other eleven are accounted for
- * at the bottom of this comment.
+ * <p>Six of the fifteen rows are wired here — created-and-assigned, comment
+ * added, closed, reopened, reassigned-within-a-stage and deployment-done. They
+ * are the ones whose trigger exists: {@code TicketWriteService.create}
+ * (C-067), {@code CommentService.post} (C-029), {@code CloseService} (C-040),
+ * {@code ReopenService} (C-038), {@code AssignService.assign} (C-049) and
+ * C-045's forward hop out of Deployment. The other nine are accounted for at
+ * the bottom of this comment.
  *
  * <h2>One producer, not one per feature package</h2>
  *
@@ -74,9 +75,21 @@ import java.util.Optional;
  *       ({@code PriorityChangeService}), SLA breach and stage SLA breach
  *       (D-023's scanners), @mention ({@code CommentMentionNotifier}), status
  *       requested ({@code StatusRequestNotifier}).</li>
- *   <li><b>Still without a trigger:</b> handoff, sent back for rework and
- *       deployment done all fire from C-045's transition, which is in review;
- *       reassigned within a stage is C-049, unstarted.</li>
+ *   <li><b>Live already, elsewhere (continued):</b> handoff —
+ *       {@code HandoffNotifier}, written by C-045 rather than by this task and
+ *       deliberately left where it is.</li>
+ *   <li><b>Still without a trigger — one row, and it is not waiting on this
+ *       class:</b> <b>sent back for rework</b>. {@code TransitionService}
+ *       understands {@code REWORK}, {@code VERIFY_FAILED},
+ *       {@code DEPLOY_FAILED} and {@code SIGNOFF_REJECTED}, and
+ *       {@code POST /tickets/{ticketId}/rework} is in the contract and in the
+ *       mock — but <b>no controller serves it</b>. The only two callers of
+ *       {@code advance} in this codebase are {@code HandoffService}, which
+ *       hard-codes {@code FORWARD}, and {@code ForceMoveService}, which uses
+ *       {@code OVERRIDE}. So nothing in the running application has ever moved
+ *       a ticket backwards, and the mail has nowhere to fire from. The route is
+ *       Stream C's; when it lands, this is one call at the end of it, and the
+ *       recipient list §4B.6 gives is "Developer, cc PM".</li>
  *   <li><b>Not this task:</b> the daily digest and the weekly manager summary
  *       are D-038, and they are done.</li>
  * </ul>
@@ -203,6 +216,100 @@ public class TicketEventNotifier {
                 "Reopened — cycle " + cycleNo,
                 ticket.getTicketCode() + " · " + ticket.getTitle(),
                 link(ticket, cycleNo));
+    }
+
+    /**
+     * §4B.6 row 3 — "Reassigned within a stage → New assignee, cc previous",
+     * never optional. The trigger is C-049's {@code AssignService}, which
+     * moves {@code assigned_to} and writes one {@code STAGE_REASSIGNED} history
+     * row without touching {@code ticket_stage_transitions} — no hop is sealed,
+     * so this is emphatically not a handoff and must not read like one.
+     *
+     * <h2>"cc previous" is a bell, not a mail, and that is a deviation</h2>
+     *
+     * <p>§4B.6's row asks for the previous assignee on the cc line of the new
+     * assignee's mail. <b>The outbox has no cc.</b> {@code NewMail} carries one
+     * {@code toEmail} and {@code email_outbox} one address column, and D-035's
+     * rate limit, D-042's preferences and D-031's threading are all keyed per
+     * recipient — a cc list would be a schema change and a second delivery
+     * model, not a field.
+     *
+     * <p>So the previous assignee is told through {@code
+     * TICKET_REASSIGNED_AWAY}, which §11's per-event matrix already declares
+     * with {@code Mail.NEVER} — and that is the reconciliation rather than a
+     * dodge: the prose row and the matrix disagree, and D-036 established which
+     * one wins when they do ("that sentence is a summary; the table beneath it
+     * is the precise version"). The person losing a ticket gets a bell, the
+     * person gaining one gets the mandatory mail. Recorded here and in the pull
+     * request rather than left for somebody to discover from an absent cc.
+     *
+     * <h2>Two events, so the subjects can differ</h2>
+     *
+     * <p>One {@code fanOut} over both would have to pick a single subject, and
+     * "Reassigned to you" is wrong for the person it was taken from. They also
+     * carry different §11 rows — {@code POPS_UP} for the incoming, {@code QUIET}
+     * for the outgoing — which is the whole reason the enum has both.
+     *
+     * @param previousAssigneeId null when the ticket was unassigned, which is a
+     *        first assignment rather than a reassignment; nobody is told they
+     *        lost something they never had
+     */
+    public void reassignedWithinStage(Ticket ticket, long actorId,
+                                      Long previousAssigneeId, long newAssigneeId) {
+        List<Recipient> incoming = new ArrayList<>();
+        recipients.user(newAssigneeId).ifPresent(incoming::add);
+        fanOut(ticket, actorId, NotificationEvent.TICKET_ASSIGNED, incoming,
+                "Reassigned to you",
+                ticket.getTicketCode() + " · " + ticket.getTitle(),
+                link(ticket, null));
+
+        if (previousAssigneeId == null || previousAssigneeId == newAssigneeId) {
+            return;
+        }
+        List<Recipient> outgoing = new ArrayList<>();
+        recipients.user(previousAssigneeId).ifPresent(outgoing::add);
+        String taker = recipients.user(newAssigneeId).map(Recipient::displayName).orElse("someone else");
+        fanOut(ticket, actorId, NotificationEvent.TICKET_REASSIGNED_AWAY, outgoing,
+                "Reassigned to " + taker,
+                ticket.getTicketCode() + " · " + ticket.getTitle(),
+                link(ticket, null));
+    }
+
+    /**
+     * §4B.6 row 5 — "Deployment done → Developer", never optional, subject
+     * "Deployed to production — please verify".
+     *
+     * <h2>It replaces the handoff mail for that hop; it is not a second one</h2>
+     *
+     * <p>The trigger is a forward hop <em>out of</em> a stage owned by
+     * {@code DEPLOYMENT} — leaving Deployment forwards is what "deployment
+     * done" means in §4A.1's flow, and the stage it lands in ({@code VERIFY})
+     * is owned by {@code DEVELOPER}, so §4B.6's "Developer" and the new stage
+     * owner are the same person.
+     *
+     * <p><strong>Which is exactly the problem.</strong> §4B.6's handoff row
+     * points at that same person for that same hop, and both rows are marked
+     * "❌ never" — so wiring this naively sends two mandatory mails to one
+     * inbox about one event, and D-035's one-per-recipient-per-ticket-per-minute
+     * limit would drop one of them <em>silently</em>, leaving which one arrives
+     * to a race. That is the failure this task already refused to create once,
+     * for @mention against comment-added, and it is worse here because both are
+     * unsuppressible and therefore both are things somebody is relying on.
+     *
+     * <p>So {@code HandoffNotifier} sends this one <em>instead of</em>
+     * {@code HANDOFF_RECEIVED} when the stage being left is Deployment-owned.
+     * One mail, the more specific subject, no race. The generic handoff mail
+     * says "Handed to you at Verification by Karan Bose"; this says what
+     * actually happened and what is now expected.
+     */
+    public void deploymentDone(Ticket ticket, long actorId, long developerId) {
+        List<Recipient> people = new ArrayList<>();
+        recipients.user(developerId).ifPresent(people::add);
+
+        fanOut(ticket, actorId, NotificationEvent.DEPLOYMENT_DONE_VERIFY, people,
+                "Deployed to production — please verify",
+                ticket.getTicketCode() + " · " + ticket.getTitle(),
+                link(ticket, null) + "?tab=ribbon");
     }
 
     // ── the shared half ─────────────────────────────────────────────────────

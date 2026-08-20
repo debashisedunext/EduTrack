@@ -124,7 +124,7 @@ class HandoffService {
         // C-045 · the receiving owner is told — after advance succeeded, on
         // the same reasoning as logEffort above: a refused handoff must
         // never notify anybody about work that did not happen.
-        notifier.received(ticket, request.toUserId(), actorId(caller), request.toStageCode());
+        notifier.received(ticket, request.toUserId(), actorId(caller), request.toStageCode(), leavingStage);
 
         boolean canAdvance = CallerIdentity.of(caller)
                 .map(identity -> StageOwnership.mayAdvance(identity, ticket))

@@ -50,8 +50,11 @@ class AssignServiceTest {
     private final ScopedTickets tickets = mock(ScopedTickets.class);
     private final UserRepository users = mock(UserRepository.class);
     private final TicketJournal journal = mock(TicketJournal.class);
+    /** D-037 · §4B.6 row 3 fires from this service; nothing here asserts on it. */
+    private final com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier notifier =
+            mock(com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier.class);
 
-    private final AssignService service = new AssignService(tickets, users, journal);
+    private final AssignService service = new AssignService(tickets, users, journal, notifier);
 
     /**
      * The three-argument constructor is load-bearing — {@code PriorityChangeServiceTest}'s
@@ -220,6 +223,42 @@ class AssignServiceTest {
         ArgumentCaptor<TicketHistory> captor = ArgumentCaptor.forClass(TicketHistory.class);
         verify(journal).append(captor.capture());
         return captor.getValue();
+    }
+
+    @org.junit.jupiter.api.Nested
+    @DisplayName("D-037 · §4B.6 row 3, reassigned within a stage")
+    class Notification {
+
+        @Test
+        @DisplayName("tells the new assignee and the previous one, after the history row")
+        void notifiesBothSides() {
+            service.assign(caller, TICKET_CODE, request(NEW_ASSIGNEE, null));
+
+            // Both ids are passed rather than read back: this runs inside the
+            // service's own @Transactional, so a re-read would be querying a
+            // row its own transaction has not committed.
+            verify(notifier).reassignedWithinStage(ticket, ACTOR, PREVIOUS_ASSIGNEE, NEW_ASSIGNEE);
+        }
+
+        @Test
+        @DisplayName("a re-confirm of the existing assignment tells nobody")
+        void noOpNotifiesNobody() {
+            service.assign(caller, TICKET_CODE, request(PREVIOUS_ASSIGNEE, null));
+
+            verifyNoInteractions(notifier);
+        }
+
+        @Test
+        @DisplayName("a refused assignee never reaches the notifier")
+        void refusalNotifiesNobody() {
+            when(users.existsById(NEW_ASSIGNEE)).thenReturn(false);
+
+            org.assertj.core.api.Assertions
+                    .assertThatThrownBy(() -> service.assign(caller, TICKET_CODE, request(NEW_ASSIGNEE, null)))
+                    .isInstanceOf(UnknownAssigneeException.class);
+
+            verifyNoInteractions(notifier);
+        }
     }
 
     private static AssignDtos.AssignRequest request(long assigneeId, String note) {
