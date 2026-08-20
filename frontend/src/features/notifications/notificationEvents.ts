@@ -82,3 +82,31 @@ export function parseNotificationEvent(payload: unknown): NotificationEvent | nu
       return null;
   }
 }
+
+/**
+ * Is this notification a chat message?
+ *
+ * <p>Chat no longer toasts. It lands in the header's chat panel — its own
+ * element beside the bell — and is read there, deliberately, when somebody
+ * chooses to open it. A toast is an interruption, and a conversation is the one
+ * thing that produces interruptions faster than anybody can absorb them: a
+ * ten-message exchange between two other people raised ten cards over whatever
+ * the reader was doing, and D-046's replay popped every one of them again on
+ * the next page load. That combination is what made the shell feel like it was
+ * arguing with you.
+ *
+ * <p>**Keyed on the link, not on `eventCode`.** Two backend notifiers raise
+ * chat notifications today — `MentionNotifier` (D-052) and
+ * `StatusRequestNotifier` (D-056) — and they use different event codes while
+ * building the same `/chat/threads/{id}` link. A third one would be a third
+ * code to add here and a silent regression until somebody noticed the toasts
+ * were back; the link is what every chat notification has in common, because it
+ * is what makes it a chat notification at all.
+ *
+ * <p>Everything else — a handoff, an SLA breach, an approval — still toasts. It
+ * arrives a few times a day and wants answering now, which is what a toast is
+ * for.
+ */
+export function isChatNotification(created: NotificationCreated): boolean {
+  return created.link?.startsWith('/chat/') ?? false;
+}
