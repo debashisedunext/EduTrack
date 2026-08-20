@@ -687,6 +687,11 @@ Split with Stream A. Typically yours:
 
 ---
 
+### Client 360
+
+- [ ] **B-066** **Client 360 — the placeholder S-20 links to, and it has never had a task.** `CLIENT_ROUTE` renders `ScreenPlaceholder title="Client 360"`. Same origin as A-077: S-20 makes every entity in the ticket summary panel a link, and `TicketDetailPage`'s comment assigns this destination to Stream B — *"the client 360 to Stream B… Each owner replaces one element."* Stream A's sibling (A-069 / S-28, resource 360) shipped; this one and the project dashboard did not, and neither had a task until now. Raised by Debashis on the project lead's instruction after auditing the router's placeholders; scope and shape are yours. The client master (S-33/B-029) is the maintenance screen — this is the read-across view a PM opens from a ticket.
+
+
 ## Decisions you own
 
 Answer during M3 (PLAN.md §5, blueprint §16):

@@ -176,6 +176,11 @@ that map moves too, or each of these needs Divyansh's sign-off before it is touc
 ### Remaining tabs & screens
 - [ ] **C-062** Stage Queue / team inbox — "Waiting in QA", "Waiting in Deployment", sorted by time-in-stage descending. The landing page for QA and Deployment. **S-31**
 
+### The chat screen — S-25
+
+- [ ] **D-065** 🔴 **The chat React surface — S-25 has no frontend and the plan cannot see it.** `/chat` renders `ScreenPlaceholder title="Chat"` and `frontend/src/features/chat/` does not exist. Every backend half is done and has been for days: D-050 the three-surface engine, D-051 typing/receipts/unread, D-052 mentions, D-053's search, D-054 ticket cards, D-055/D-056 Ask Status, D-057 the edit window and tombstones. **The gap is invisible to the tracker** because D-050 carries screen code `S-25` and is marked done — so the schedule reports S-25 complete while the product shows a placeholder. That is the same blind spot D-062 closed for response shapes: the plan can only see what a task claims. D-050's own entry says "Backend only — the React surfaces need D-015 merged", and D-015 landed 8 Aug, so the stated prerequisite has been clear since. Scope is the three surfaces the engine already serves — ticket thread, direct message, project channel — over `/chat` and the shell's chat bar, subscribing through D-015's STOMP client and D-013's channel interceptor. **Not in scope:** file share and emoji, which are D-053's blocked halves and stay blocked.
+
+
 ## Decisions you own
 
 Answer during M5:
