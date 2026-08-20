@@ -204,6 +204,36 @@ describe('S-20 Ticket detail shell — C-019', () => {
     )
   })
 
+  /**
+   * C-053 · the cycle selector above the ribbon — distinct from the summary
+   * rail's "Cycles" row, whose links jump straight to the Effort tab
+   * (`cycleEffortPath`, asserted above). This one switches the whole page's
+   * cycle context — the ribbon included — without moving the reader off
+   * whichever tab they are already on.
+   */
+  it('switches cycle from the selector above the ribbon, leaving the active tab untouched', async () => {
+    signInAsAdmin()
+    renderPage(`/tickets/${TICKET}?tab=history`)
+    await waitForTicket()
+
+    const selector = screen.getByRole('group', { name: 'Cycle' })
+    expect(within(selector).getByRole('button', { name: 'View cycle 2' })).toHaveAttribute('aria-current', 'true')
+
+    await userEvent.setup().click(within(selector).getByRole('button', { name: 'View cycle 1' }))
+
+    // The query key changes with the cycle, so the page's own `isPending`
+    // guard shows the skeleton again for the round trip — the same refetch
+    // `waitForTicket` already waits out after the reopen/close dialogs.
+    await waitForTicket()
+    await waitFor(() => expect(detailRequests.at(-1)?.searchParams.get('cycle')).toBe('1'))
+    expect(screen.getByTestId('location')).toHaveTextContent('tab=history')
+    expect(screen.getByTestId('location')).toHaveTextContent('cycle=1')
+    expect(screen.getByRole('status')).toHaveTextContent(/cycle 1, which is sealed and read-only/)
+    // Still on History, not bounced to a default tab by the cycle switch.
+    const tabs = screen.getByRole('tablist', { name: 'Ticket detail' })
+    expect(within(tabs).getByRole('tab', { name: 'History' })).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('refetches for an earlier cycle and says plainly that it is sealed', async () => {
     signInAsAdmin()
     renderPage(`/tickets/${TICKET}?cycle=1`)

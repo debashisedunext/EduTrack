@@ -12,6 +12,7 @@ contents of the six tabs each belong to their own task and are not here.
 | `TicketLevelControl.tsx` | C-020 · §4B.1's level editor — colour chips, the PCD preview, the conditional reason. |
 | `levelChange.ts` | C-020 · who may change it, when the reason is mandatory, and where the SLA clock starts. |
 | `TicketDetailTabs.tsx` | The tab strip. APG keyboard pattern, `?tab=` in the URL. |
+| `CycleSelector.tsx` | C-053 · the cycle selector above the ribbon. `?cycle=` in the URL, same mechanism as `?tab=`. |
 | `ticketSummary.ts` | The panel's arithmetic, pure and clock-injected. |
 | `entityLinks.ts` | Every destination path, in one place. |
 | `PendingSection.tsx` | A named "built by task X" region, so an unbuilt tab does not read as a broken one. |
@@ -98,6 +99,28 @@ No Storybook entry for anything in this folder: every component here is
 detail-page-specific (the panel takes a `Ticket`, the header takes
 `availableActions`), the same exemption `SavedViewsMenu`, `ColumnChooserMenu`
 and `DensityToggle` carry.
+
+### C-053 · the cycle selector is a second switch over `?cycle=`, not a rename of the Cycles row
+
+The summary rail's "Cycles" row (above) and this selector both read and write
+`?cycle=`, and that is deliberate rather than a duplication to clean up later.
+They answer different questions. `cycleEffortPath` is a **citation** — "here is
+cycle 1's effort" — and always carries `tab=effort` so the link lands exactly
+there from anywhere the reader pastes it. The selector above the ribbon is a
+**switch** — "show me this ticket's journey as of cycle 1" — and deliberately
+leaves `?tab=` alone, because jumping the reader to Effort every time they
+step back a cycle while reading History would be its own small bug.
+
+Both still write the same URL param and both still trigger the one re-fetch
+C-019 already built (`?cycle=` is never a client-side filter — an earlier
+cycle is a different, sealed journey). Two affordances, one fact.
+
+**Buttons via `setSearchParams`, not `Link`s** — `TicketDetailTabs` already
+made this call for `?tab=`, for the same reason: a widget over data the page
+already has, not a citation meant to be pasted on its own. Hidden entirely
+below two cycles — a ticket that has never been reopened has nothing to
+select between, and a one-item selector reads as a live control rather than
+as the fact that there is only one journey.
 
 ### `AvatarStack` is hidden from assistive tech here
 
