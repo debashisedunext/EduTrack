@@ -1,10 +1,35 @@
-import { beforeAll, describe, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 
 import { getDb } from '@/mocks/db'
+import { realtime, type RealtimeHandler } from '@/realtime/client'
 import { StageQueuePage } from './StageQueuePage'
+
+/**
+ * D-059 · the page subscribes on mount, so the client is stubbed at
+ * `subscribe` — `useNotificationStream.test.tsx`'s pattern. Without it every
+ * test in this file opens a real STOMP connection to `/ws`, which jsdom answers
+ * with an unhandled-request warning and a reconnect timer that outlives the
+ * test.
+ */
+let subscribedTo: string[] = []
+let push: RealtimeHandler = () => {
+  throw new Error('nothing subscribed')
+}
+
+beforeEach(() => {
+  subscribedTo = []
+  push = () => {
+    throw new Error('nothing subscribed')
+  }
+  vi.spyOn(realtime, 'subscribe').mockImplementation((destination, handler) => {
+    subscribedTo.push(destination)
+    push = handler
+    return () => {}
+  })
+})
 
 /** Radix's popover primitives need measurement and pointer-capture APIs jsdom lacks. */
 beforeAll(() => {
@@ -189,5 +214,65 @@ describe('S-31 Stage Queue — C-062', () => {
     const table = await rows()
     const link = within(table[0]).getByRole('link')
     expect(link.getAttribute('href')).toMatch(/^\/tickets\/\S+-26-\d+$/)
+  })
+})
+
+describe('D-059 · the queue updates without a refresh', () => {
+  it('opens a room per project the viewer is on, for the stage on screen', async () => {
+    signInAsQa()
+    renderPage()
+    await headingSays('QA')
+
+    // Anil is on projects 1 and 2 in the fixture. The assertion is on the
+    // shape rather than the exact list: what must hold is that every room is
+    // this stage's, and that there is more than one, because a queue spans
+    // projects and a single-room subscription would silently miss most of it.
+    expect(subscribedTo.length).toBeGreaterThan(0)
+    for (const destination of subscribedTo) {
+      expect(destination).toMatch(/^\/topic\/stage\.QA\.\d+$/)
+    }
+  })
+
+  it('narrows to one room when the URL names a project', async () => {
+    signInAsQa()
+    renderPage('/stages/queue?stage=QA&projectId=1')
+    await headingSays('QA')
+
+    expect(subscribedTo).toEqual(['/topic/stage.QA.1'])
+  })
+
+  it('refetches the queue when a ticket arrives, once per burst', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      signInAsQa()
+      renderPage('/stages/queue?stage=QA&projectId=1')
+      await headingSays('QA')
+      const before = await rows()
+
+      // A ticket lands in QA on project 1 — and a second one right behind it.
+      // Two frames, one refetch: the frame carries no ticket, so two requests
+      // would return the same list twice.
+      const db = getDb()
+      const waiting = db.tickets.find((t) => t.currentStageCode === 'QA' && t.projectId === 1)
+      expect(waiting).toBeDefined()
+      db.tickets
+        .filter((t) => t.projectId === 1 && t.status !== 'CLOSED' && t.currentStageCode !== 'QA')
+        .slice(0, 2)
+        .forEach((t) => {
+          t.currentStageCode = 'QA'
+        })
+
+      await act(async () => {
+        push({ event: 'stage.arrived', stageCode: 'QA', projectId: 1 })
+        push({ event: 'stage.arrived', stageCode: 'QA', projectId: 1 })
+        await vi.advanceTimersByTimeAsync(400)
+      })
+
+      await waitFor(async () => expect((await rows()).length).toBeGreaterThan(before.length), {
+        timeout: 4000,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

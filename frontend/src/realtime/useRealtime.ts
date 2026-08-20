@@ -29,3 +29,34 @@ export function useRealtime(destination: string | null, handler: RealtimeHandler
     return realtime.subscribe(destination, (payload) => handlerRef.current(payload));
   }, [destination]);
 }
+
+/**
+ * Subscribe to **several** destinations at once, for as long as the component
+ * is mounted — D-059's shape, and the reason it is not just a loop over
+ * {@link useRealtime}: a hook cannot be called a variable number of times.
+ *
+ * A team inbox is one screen over one stage across *n* projects, and §9.3 keys
+ * a stage room on `(stageCode, projectId)`. So the number of rooms is a
+ * property of the viewer's memberships, which changes.
+ *
+ * `destinations` does **not** have to be memoised. The effect depends on the
+ * joined string rather than the array's identity, so a fresh array of the same
+ * rooms on every render does not tear down and re-open every subscription —
+ * the mistake {@link useRealtime}'s handler ref exists to prevent, one
+ * dimension over. Duplicates are collapsed; order does not matter but is kept
+ * stable by the caller.
+ */
+export function useRealtimeAll(destinations: readonly string[], handler: RealtimeHandler): void {
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
+  const key = Array.from(new Set(destinations)).join('\n');
+
+  useEffect(() => {
+    if (!key) return;
+    const unsubscribes = key
+      .split('\n')
+      .map((destination) => realtime.subscribe(destination, (payload) => handlerRef.current(payload)));
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [key]);
+}

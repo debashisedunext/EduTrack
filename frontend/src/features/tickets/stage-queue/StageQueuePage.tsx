@@ -14,8 +14,11 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
+import { useRealtimeAll } from '@/realtime/useRealtime'
+
 import { formatDuration } from '../journey/journeyFormat'
 import { LEVEL_VARIANT } from '../list/columns'
+import { stageRooms } from './liveQueue'
 import { defaultStageFor, findStage, isBreached, queueStages, queueTitle } from './stageQueue'
 
 /**
@@ -107,6 +110,55 @@ export function StageQueuePage() {
     // earns a 400 that has nothing to do with what the user did.
     { query: { enabled: Boolean(selectedStageCode) } },
   )
+
+  /*
+   * One refetch per burst, not one per frame. A stage frame carries no ticket
+   * (`StageQueueBroadcaster`'s own design), so two arrivals are indivisible
+   * from this side and two requests would return the same list twice — and a
+   * bulk reassign (C-063) moves a whole selection at once. The trailing edge
+   * is deliberate: the last frame of a burst is the one whose row has
+   * certainly committed.
+   */
+  const refetchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  React.useEffect(
+    () => () => {
+      if (refetchTimer.current) clearTimeout(refetchTimer.current)
+    },
+    [],
+  )
+  const refetchSoon = React.useCallback(() => {
+    if (refetchTimer.current) clearTimeout(refetchTimer.current)
+    refetchTimer.current = setTimeout(() => {
+      refetchTimer.current = null
+      void refetch()
+    }, 250)
+  }, [refetch])
+
+  /*
+   * D-059 · the queue updates without a refresh — §17 item 12's whole reason
+   * for this screen existing: *"QA and Deployment are queue-driven teams …
+   * without a shared 'waiting in QA' list, tickets stall between the handoff
+   * and someone noticing."* A list that is only right when you reload it
+   * recreates exactly that gap in a smaller window.
+   *
+   * Rooms come from `selectedStage?.stageCode`, the stage the *template*
+   * declares, rather than from the raw `?stage=` param — the param is
+   * whatever was in the URL, and `stageRooms` would otherwise be handed a
+   * value that never names a real queue.
+   */
+  const rooms = React.useMemo(
+    () =>
+      stageRooms({
+        stageCode: selectedStage?.stageCode,
+        selectedProjectId: projectId ? Number(projectId) : null,
+        myProjectIds: me?.data.projectIds,
+        allProjectIds: projects.map((p) => p.id),
+        isAdmin: me?.data.role === 'ADMIN',
+      }),
+    [selectedStage, projectId, me, projects],
+  )
+
+  useRealtimeAll(rooms, refetchSoon)
 
   const rows = data?.data ?? []
   const breachedCount = rows.filter(isBreached).length
