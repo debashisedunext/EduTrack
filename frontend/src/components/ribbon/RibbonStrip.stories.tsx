@@ -1,8 +1,9 @@
+import * as React from 'react'
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import type { RibbonSegment as RibbonSegmentData } from '@/api/generated/model/ribbonSegment'
 import { SegmentState } from '@/api/generated/model/segmentState'
-import { RibbonStrip } from './RibbonStrip'
+import { RibbonStrip, type SelectedSegment } from './RibbonStrip'
 
 const meta: Meta<typeof RibbonStrip> = {
   title: 'Ribbon/RibbonStrip',
@@ -12,9 +13,9 @@ const meta: Meta<typeof RibbonStrip> = {
     docs: {
       description: {
         component:
-          'C-051 · the Workflow Ribbon strip — blueprint §4A.3, B-050\'s segment tiles laid out in ' +
-          'order. Read-only: interactions (C-052), the cycle selector (C-053) and the iteration chip ' +
-          '(C-054) all sit outside this component.',
+          'C-051 lays out B-050\'s segment tiles in order; C-052 wires what a click does and the ' +
+          'current segment\'s contextual action. The cycle selector (C-053) and the iteration chip ' +
+          '(C-054) still sit outside this component.',
       },
     },
   },
@@ -123,4 +124,67 @@ export const WithASkippedStage: Story = {
 /** A cycle 1 template-less ticket, or one B-050's README notes never emits: nothing to draw. */
 export const NoTemplate: Story = {
   args: { ribbon: { cycleNo: 1, iterationNo: 1, isSealed: false, canAdvance: false, segments: [] } },
+}
+
+/**
+ * C-052 · click a tile and it filters. `TicketDetailPage` owns the selection
+ * state and narrows History/Effort below it in the real page; here the story
+ * just proves a click marks the right tile — `RibbonSegment`'s own
+ * `aria-pressed` and ring are what a caller relies on.
+ */
+export const Interactive: Story = {
+  render: () => {
+    const segments = [
+      seg({ stageCode: 'INTAKE', displayName: 'Intake', sequence: 1 }),
+      seg({
+        stageCode: 'TRIAGE', displayName: 'Triage / Planning', sequence: 2,
+        owner: { id: 2, displayName: 'Meera Prasad' }, ownerRole: 'PM',
+      }),
+      seg({
+        stageCode: 'DEVELOPMENT', displayName: 'Development', sequence: 3, state: SegmentState.CURRENT,
+        owner: { id: 7, displayName: 'Ravi Kumar' }, ownerRole: 'DEVELOPER',
+        durationMins: null, exitedAt: null,
+      }),
+    ]
+    const [selected, setSelected] = React.useState<SelectedSegment | undefined>(undefined)
+    return (
+      <RibbonStrip
+        ribbon={{ cycleNo: 1, iterationNo: 1, isSealed: false, canAdvance: false, segments }}
+        selectedSegment={selected}
+        onSelectSegment={(segment) =>
+          setSelected((prev) =>
+            prev?.stageCode === segment.stageCode ? undefined : { stageCode: segment.stageCode ?? '' },
+          )
+        }
+      />
+    )
+  },
+}
+
+/** `ribbon.canAdvance` — the golden rule, resolved server-side — puts C-052's
+ * honestly-disabled handoff placeholder on the current segment. `C-044`'s
+ * dialog replaces it; until then it names the task that will. */
+export const WithHandoffAction: Story = {
+  args: {
+    ribbon: {
+      cycleNo: 1,
+      iterationNo: 1,
+      isSealed: false,
+      currentStageCode: 'DEVELOPMENT',
+      canAdvance: true,
+      segments: [
+        seg({ stageCode: 'INTAKE', displayName: 'Intake', sequence: 1 }),
+        seg({
+          stageCode: 'DEVELOPMENT', displayName: 'Development', sequence: 2, state: SegmentState.CURRENT,
+          owner: { id: 7, displayName: 'Ravi Kumar' }, ownerRole: 'DEVELOPER',
+          durationMins: null, exitedAt: null,
+        }),
+        seg({
+          stageCode: 'QA', displayName: 'QA', sequence: 3, state: SegmentState.PENDING,
+          owner: undefined, ownerRole: 'QA',
+          enteredAt: null, exitedAt: null, durationMins: null, effortHrs: undefined, loopBackCount: 0,
+        }),
+      ],
+    },
+  },
 }

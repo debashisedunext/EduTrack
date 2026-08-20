@@ -1,15 +1,18 @@
 import * as React from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, X } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 
 import type { Cycle } from '@/api/generated/model/cycle'
 import type { EffortLog } from '@/api/generated/model/effortLog'
 import { Button } from '@/components/ui/button'
+import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 
+import type { SegmentFilter } from '../detail/segmentFilter'
+import { matchesSegmentFilter } from '../detail/segmentFilter'
 import { cycleEffortHrs, hoursLabel } from '../detail/ticketSummary'
 
 const DATE_FORMAT = 'd MMM yyyy'
@@ -32,7 +35,19 @@ const DATE_FORMAT = 'd MMM yyyy'
  * "Logged" row and its per-cycle links already trust. Summing `entries`
  * instead would make a cycle's total depend on how many pages of it this tab
  * happens to have fetched, and disagree with the panel the moment "Load more"
- * has not been pressed yet.
+ * has not been pressed yet. **`filter` narrows which rows are listed and never
+ * this total** — the same reason: a stage filter changing the number beside
+ * "Grand total" would disagree with the identical figure on the summary panel
+ * a few hundred pixels to the right.
+ *
+ * ## `filter` — C-052, a click on the ribbon above
+ *
+ * Client-side, over `entries` already in hand — `listEffortLogs` does carry
+ * `stage`/`iteration` query params (`ListEffortLogsParams`), unlike History's
+ * endpoint, but re-fetching to narrow rows this tab already has in full would
+ * still be the waterfall C-060's `clientVisibleOnly` note declined for
+ * Attachments. `matchesSegmentFilter` explains why `cycleNo` is part of the
+ * match and not just stage and iteration.
  */
 export function EffortTab({
   entries,
@@ -43,6 +58,8 @@ export function EffortTab({
   hasMore,
   isLoadingMore,
   onLoadMore,
+  filter,
+  onClearFilter,
 }: {
   entries: EffortLog[]
   /** From the aggregated `/full` payload — every cycle, regardless of `?cycle=`. */
@@ -53,12 +70,37 @@ export function EffortTab({
   hasMore: boolean
   isLoadingMore: boolean
   onLoadMore: () => void
+  /** Narrows to one ribbon segment's stage, iteration and cycle — `undefined` for none. */
+  filter?: SegmentFilter
+  onClearFilter?: () => void
 }) {
-  const groups = React.useMemo(() => groupByCycle(entries), [entries])
+  const filtered = React.useMemo(
+    () => (filter ? entries.filter((entry) => matchesSegmentFilter(entry, filter)) : entries),
+    [entries, filter],
+  )
+  const groups = React.useMemo(() => groupByCycle(filtered), [filtered])
   const latestCycle = groups[0]?.cycleNo
 
   return (
     <div className="flex flex-col gap-4">
+      {filter && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Chip variant="info" className="gap-1.5">
+            Filtered to {filter.displayName}
+            {filter.iterationNo != null && filter.iterationNo > 1 ? ` · Iteration ${filter.iterationNo}` : ''}
+            <button
+              type="button"
+              onClick={onClearFilter}
+              className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-label={`Clear filter: ${filter.displayName}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </Chip>
+          <span className="text-caption text-content-muted">Totals below still cover the whole cycle.</span>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="flex flex-col gap-3" aria-busy="true">
           <Skeleton className="h-16 w-full" />
@@ -68,30 +110,45 @@ export function EffortTab({
         <p role="alert" className="text-caption text-danger-text">
           {loadError}
         </p>
-      ) : groups.length === 0 ? (
-        <EmptyState
-          title="No effort logged yet"
-          description="Hours logged against this ticket will appear here, grouped by cycle."
-        />
       ) : (
         <>
-          <p className="text-body font-medium text-content">
-            Grand total <span className="tabular-nums">{hoursLabel(grandTotalHrs)}</span>
-          </p>
+          {/* A filter narrowing every row out of view still leaves a grand
+              total to show — it is the whole ticket's materialised figure,
+              not a sum of what is currently listed, so an empty filtered
+              view does not make it disappear. With no filter, an empty
+              ticket shows only the empty state, unchanged from before. */}
+          {(groups.length > 0 || filter) && (
+            <p className="text-body font-medium text-content">
+              Grand total <span className="tabular-nums">{hoursLabel(grandTotalHrs)}</span>
+            </p>
+          )}
 
-          {groups.map((group) => (
-            <CycleGroup
-              key={group.cycleNo}
-              group={group}
-              cycleTotalHrs={cycleEffortHrs(cycles, group.cycleNo)}
-              defaultOpen={group.cycleNo === latestCycle}
+          {groups.length === 0 ? (
+            <EmptyState
+              title={filter ? `No effort logged for ${filter.displayName}` : 'No effort logged yet'}
+              description={
+                filter
+                  ? 'Nothing was logged against this stage and iteration.'
+                  : 'Hours logged against this ticket will appear here, grouped by cycle.'
+              }
             />
-          ))}
+          ) : (
+            <>
+              {groups.map((group) => (
+                <CycleGroup
+                  key={group.cycleNo}
+                  group={group}
+                  cycleTotalHrs={cycleEffortHrs(cycles, group.cycleNo)}
+                  defaultOpen={group.cycleNo === latestCycle}
+                />
+              ))}
 
-          {hasMore && (
-            <Button size="sm" variant="secondary" onClick={onLoadMore} disabled={isLoadingMore}>
-              {isLoadingMore ? 'Loading…' : 'Load more'}
-            </Button>
+              {hasMore && (
+                <Button size="sm" variant="secondary" onClick={onLoadMore} disabled={isLoadingMore}>
+                  {isLoadingMore ? 'Loading…' : 'Load more'}
+                </Button>
+              )}
+            </>
           )}
         </>
       )}

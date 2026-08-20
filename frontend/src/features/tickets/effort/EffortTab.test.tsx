@@ -157,6 +157,57 @@ describe('EffortTab — loading, error and empty states', () => {
   })
 })
 
+describe('EffortTab — C-052 the ribbon filter', () => {
+  it('narrows the rows shown to the filtered stage, iteration and cycle', () => {
+    renderTab(
+      [
+        entry({ stageCode: 'DEVELOPMENT', iterationNo: 1, cycleNo: 1, note: 'first pass' }),
+        entry({ stageCode: 'QA', iterationNo: 1, cycleNo: 1, note: 'testing' }),
+        entry({ stageCode: 'DEVELOPMENT', iterationNo: 2, cycleNo: 1, note: 'rework' }),
+      ],
+      { filter: { stageCode: 'DEVELOPMENT', iterationNo: 1, cycleNo: 1, displayName: 'Development' } },
+    )
+
+    expect(screen.getByText('first pass')).toBeInTheDocument()
+    expect(screen.queryByText('testing')).not.toBeInTheDocument()
+    expect(screen.queryByText('rework')).not.toBeInTheDocument()
+  })
+
+  it('leaves the grand total reading the whole ticket, not the filtered rows', () => {
+    renderTab([entry({ stageCode: 'DEVELOPMENT', iterationNo: 1, cycleNo: 1 })], {
+      grandTotalHrs: 38,
+      filter: { stageCode: 'QA', iterationNo: 1, cycleNo: 1, displayName: 'QA' },
+    })
+    expect(screen.getByText(/Grand total/)).toHaveTextContent('38.0 h')
+  })
+
+  it('names the filtered stage in the chip and the empty state', () => {
+    renderTab([entry({ stageCode: 'QA' })], {
+      filter: { stageCode: 'DEVELOPMENT', iterationNo: 1, cycleNo: 1, displayName: 'Development' },
+    })
+    expect(screen.getByText('Filtered to Development')).toBeInTheDocument()
+    expect(screen.getByText('No effort logged for Development')).toBeInTheDocument()
+  })
+
+  it('names the iteration in the chip once the stage has looped', () => {
+    renderTab([entry({ stageCode: 'DEVELOPMENT', iterationNo: 2 })], {
+      filter: { stageCode: 'DEVELOPMENT', iterationNo: 2, cycleNo: 1, displayName: 'Development' },
+    })
+    expect(screen.getByText('Filtered to Development · Iteration 2')).toBeInTheDocument()
+  })
+
+  it('reports a clear-filter click back to its caller', () => {
+    const onClearFilter = vi.fn()
+    renderTab([entry({ stageCode: 'QA' })], {
+      filter: { stageCode: 'DEVELOPMENT', iterationNo: 1, cycleNo: 1, displayName: 'Development' },
+      onClearFilter,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear filter: Development/ }))
+    expect(onClearFilter).toHaveBeenCalled()
+  })
+})
+
 describe('EffortTab — "Load more"', () => {
   it('is withheld until the server says there is more', () => {
     renderTab([entry()], { hasMore: false })
