@@ -1,5 +1,6 @@
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './app/AppShell'
+import { ChatPage } from './features/chat/ChatPage'
 import { ScreenPlaceholder } from './app/ScreenPlaceholder'
 import { CreateTicketPage } from './features/tickets/create/CreateTicketPage'
 import { TicketDetailPage } from './features/tickets/detail/TicketDetailPage'
@@ -108,7 +109,10 @@ export default function App() {
             {/* A-069 · S-28. C-019 registered this pattern against a placeholder
                 so every assignee name in the product already linked here. */}
             <Route path={RESOURCE_ROUTE} element={<ResourceProfilePage />} />
-            <Route path="/chat" element={<ScreenPlaceholder title="Chat" />} />
+            {/* D-065 · S-25. The placeholder this replaces was the last thing
+                standing between a finished chat engine and anybody being able
+                to use it — D-050 through D-057 have all been merged for days. */}
+            <Route path="/chat" element={<ChatPage />} />
             {/*
               A-063 · the hub and its viewer. The viewer is a nested path rather
               than a modal because a filtered report is a URL people send to
