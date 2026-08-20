@@ -181,6 +181,11 @@ that map moves too, or each of these needs Divyansh's sign-off before it is touc
 - [ ] **D-065** 🔴 **The chat React surface — S-25 has no frontend and the plan cannot see it.** `/chat` renders `ScreenPlaceholder title="Chat"` and `frontend/src/features/chat/` does not exist. Every backend half is done and has been for days: D-050 the three-surface engine, D-051 typing/receipts/unread, D-052 mentions, D-053's search, D-054 ticket cards, D-055/D-056 Ask Status, D-057 the edit window and tombstones. **The gap is invisible to the tracker** because D-050 carries screen code `S-25` and is marked done — so the schedule reports S-25 complete while the product shows a placeholder. That is the same blind spot D-062 closed for response shapes: the plan can only see what a task claims. D-050's own entry says "Backend only — the React surfaces need D-015 merged", and D-015 landed 8 Aug, so the stated prerequisite has been clear since. Scope is the three surfaces the engine already serves — ticket thread, direct message, project channel — over `/chat` and the shell's chat bar, subscribing through D-015's STOMP client and D-013's channel interceptor. **Not in scope:** file share and emoji, which are D-053's blocked halves and stay blocked.
 
 
+### The level vocabulary — a coordinated change
+
+- [ ] **D-066** 🟡 **S-12 promises "Admin can add levels" and the contract cannot express it.** [`DEPENDENCIES.md`](../DEPENDENCIES.md) row 22, and it is **not deliverable by one stream**. Opening the contract's `Level` enum retypes `Ticket.level`, `Ticket.originalLevel` and `TaskType.defaultLevel`, so it needs the contract (**mine**), the chip colour maps (**Divyansh**) and the ticket schemas (**Shivendra**) moving together. My half is the contract change and the mock server; raising it here so the coordination has an owner rather than three halves each waiting to be asked. **Sequencing and whether to do it at all is a product call** — a fixed four-level vocabulary is a defensible answer, and if that is the answer S-12 should stop advertising the button.
+
+
 ## Decisions you own
 
 Answer during M5:

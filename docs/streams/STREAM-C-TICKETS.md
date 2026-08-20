@@ -332,6 +332,13 @@ Added 11 Aug 2026 at the client's request; blueprint revision 1.3 (§7.5, §8.2)
 
 ---
 
+### Settings that exist and are not obeyed
+
+- [ ] **C-071** 🔴 **Per-project settings are configurable and ignored.** [`DEPENDENCIES.md`](../DEPENDENCIES.md) row 21. B-019's project settings endpoint has shipped and **nothing enforces it**: `CreateTicketPage` must filter its task-type picker on `restrictsTaskTypes` + `taskTypes[].isAllowed`, and require the fields named in `mandatoryFields`. Until it does, a PM can restrict a project's task types and watch tickets be raised outside them — which is worse than not offering the setting, because the screen says it took effect. Backend half is `api/feature/tickets`, frontend half is `CreateTicketPage`; both yours.
+
+- [ ] **C-072** **A deactivated priority can still be chosen.** [`DEPENDENCIES.md`](../DEPENDENCIES.md) row 23. `listPriorities` is active-only by default, but `CreateTicketPage` and `TicketListPage` map the response straight into their pickers **without filtering `isActive`** — so an Admin deactivates a level in S-12 and it keeps appearing. Small, and the task-type picker next to it already filters correctly, which is the pattern to copy.
+
+
 ## Decisions you own
 
 Answer before M4 (PLAN.md §5):
