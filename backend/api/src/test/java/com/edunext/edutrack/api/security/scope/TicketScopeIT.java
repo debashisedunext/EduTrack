@@ -316,4 +316,78 @@ class TicketScopeIT {
         return Optional.ofNullable(jdbc.queryForObject(sql, Long.class, key))
                 .orElseThrow(() -> new IllegalStateException("fixture not seeded: " + key));
     }
+
+    /**
+     * A-073 · the three indexes {@code V20260820_0445} adds, asserted for
+     * existence rather than for a plan.
+     *
+     * <h2>Why existence and not a timing</h2>
+     *
+     * <p>Borrowed from {@code StageMasterIT.theLiveIndexExists}, and the
+     * reasoning is the same one twice over: a missing index is a migration that
+     * ran differently from the one that was reviewed, and the handful of rows
+     * this suite seeds will never show it in a timing. Asserting a plan would
+     * be worse than useless here — at eight fixture rows MySQL correctly
+     * ignores every one of these indexes and does a table scan, so a
+     * plan assertion would fail while the schema was perfectly right.
+     *
+     * <p>The real evidence for these indexes is 50,000 rows and
+     * {@code tools/perf/explain.sql}, which cannot run in CI. This test is the
+     * part of that review that <em>can</em>: it pins the schema the review was
+     * conducted against, so a later migration cannot quietly drop one and leave
+     * the numbers in the review describing a database that no longer exists.
+     *
+     * <h2>Why it lives in this suite</h2>
+     *
+     * <p>These indexes exist to serve exactly the scoped queries the rest of
+     * this class asserts the correctness of — {@code assigned_to = me} and
+     * {@code project_id IN (…)} under the default {@code -createdAt} sort. It is
+     * also Stream A's file, which the migration is, and it already starts a
+     * container: the suite is at 54 of those and a 55th for three
+     * one-line assertions is not a trade worth making.
+     */
+    @Test
+    @DisplayName("A-073's ticket-list sort indexes exist")
+    void theTicketListSortIndexesExist() {
+        assertThat(indexExists("ix_tickets_created"))
+                .as("ix_tickets_created (created_at, id) — the default -createdAt sort and "
+                        + "every A-053 keyset page")
+                .isTrue();
+        assertThat(indexExists("ix_tickets_assignee_created"))
+                .as("ix_tickets_assignee_created (assigned_to, created_at, id) — the "
+                        + "Developer/QA/Deployment scope")
+                .isTrue();
+        // Not redundant with ix_tickets_created, and the one most likely to be
+        // removed by someone who thinks it is: without it the optimiser takes
+        // ix_tickets_created for A-060's reported-date drill-down and reads
+        // 46,090 rows to return 51 — three times slower than having no index at
+        // all. tools/perf/README.md has the measurement.
+        assertThat(indexExists("ix_tickets_reported"))
+                .as("ix_tickets_reported (date_reported, id) — the counterweight that keeps "
+                        + "the widget drill-down off ix_tickets_created")
+                .isTrue();
+    }
+
+    /**
+     * Counts index <em>entries</em>, not indexes: {@code information_schema}
+     * carries one row per column, so a composite that lost a column still
+     * matches on name. The column list is what these indexes are, so it is what
+     * is asserted.
+     */
+    private boolean indexExists(String indexName) {
+        List<String> columns = jdbc.queryForList("""
+                SELECT column_name FROM information_schema.statistics
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'tickets'
+                   AND index_name = ?
+                 ORDER BY seq_in_index
+                """, String.class, indexName);
+        return switch (indexName) {
+            case "ix_tickets_created" -> columns.equals(List.of("created_at", "id"));
+            case "ix_tickets_assignee_created" ->
+                    columns.equals(List.of("assigned_to", "created_at", "id"));
+            case "ix_tickets_reported" -> columns.equals(List.of("date_reported", "id"));
+            default -> throw new IllegalArgumentException("unknown index: " + indexName);
+        };
+    }
 }
