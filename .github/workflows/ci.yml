@@ -19,9 +19,16 @@ name: CI
 #      on the merge push 30 seconds later.
 #   3. Every intermediate push to an in-progress branch cost a full run.
 #
-# Hence: paths-ignore, a PR-only test pass with the merge push proving only the
-# combined jar, per-path job gating, and no CI on drafts. Roughly 600 min/day
-# to roughly 72.
+# Hence: paths-ignore, per-path job gating on pull requests, and no CI on
+# drafts. Roughly 600 min/day to roughly 72.
+#
+# UPDATE 20 Aug 2026 — the repository went public on 17 Aug, so Actions minutes
+# are unlimited again and the cost ceiling above no longer binds. One economy
+# from that period has been REVERSED here: "a PR-only test pass with the merge
+# push proving only the combined jar". It was not a saving. It made develop's
+# post-merge signal green-on-nothing, which is worse than no signal, and it is
+# what let A-065 break every open backend PR from behind a passing tick. Pushes
+# to develop and main now run the full suite. See the `changes` job.
 #
 # If the team outgrows this, the answer is a self-hosted runner (free and
 # unlimited on any tier) rather than trimming further. Note that the `backend`
@@ -58,7 +65,24 @@ jobs:
   changes:
     name: What changed
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    # 🔴 The draft guard is about DRAFTS. It must not also be an event guard.
+    #
+    # This read `github.event_name == 'pull_request' && ...draft == false`, and
+    # the first clause silenced every push to develop and main: all four test
+    # jobs below `needs: changes`, so a skipped gate skipped the lot and the
+    # push reported success on the jar alone. `package` was the only job that
+    # ever ran there.
+    #
+    # That is how A-065 sat on a green develop while breaking every open
+    # backend PR (19 Aug). Its own PR #230 was red and was merged three seconds
+    # after CI started, and nothing downstream could contradict it, because the
+    # post-merge run tested nothing and said so in green.
+    #
+    # A push to develop is not a duplicate of the PR run that preceded it. It
+    # is the only run that sees the MERGED result — two PRs each green against
+    # an older base can still be red together, which is exactly the A-065 and
+    # B-022 pair. There is no other place to catch that.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
@@ -69,8 +93,22 @@ jobs:
           fetch-depth: 0
       - id: filter
         run: |
-          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || true)
-          echo "$FILES"
+          # On a pull_request there is a base to diff against and per-path
+          # gating is worth having. On a push there is not — `base_ref` is
+          # empty — and more to the point a push to develop is the integration
+          # signal, so it runs the whole suite rather than a subset chosen from
+          # a diff. Deliberately not `event.before...HEAD`: that is empty on a
+          # force-push and wrong on the first push of a branch.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || true)
+            echo "$FILES"
+          else
+            echo "Push to ${{ github.ref_name }} — running every job on the merged result."
+            echo "backend=true"  >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "contract=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # 🔴 An empty diff means "we do not know", never "nothing changed".
           #
