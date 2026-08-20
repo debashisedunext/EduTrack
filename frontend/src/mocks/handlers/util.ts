@@ -167,12 +167,33 @@ export function ticketSummaryDto(t: Ticket, db: Db = getDb()) {
   };
 }
 
+/**
+ * D-058 · the numeric row id the contract's `Ticket.id` carries.
+ *
+ * The fixture keys tickets by their code, because that is what every route and
+ * every screen uses. The §9.3 destinations do not — `/topic/ticket.{id}` is
+ * keyed on the row — so the mock has to answer with something, and it has to be
+ * the *same* something on every read or a subscribed component would resubscribe
+ * to a different room after a refetch.
+ *
+ * Position in `db.tickets`, one-based. Stable for the life of a `db`, unique,
+ * positive (`destinations.ts` rejects anything else), and it needs no field on
+ * the fixture and no id sequence for the three seed sites and `POST /tickets` to
+ * remember — a new ticket is appended and gets the next number for free.
+ * Matched by code rather than by reference so a caller holding a copy of a row
+ * gets the same answer.
+ */
+export function ticketRowId(t: Ticket, db: Db = getDb()): number {
+  return db.tickets.findIndex((row) => row.ticketId === t.ticketId) + 1;
+}
+
 export function ticketDto(t: Ticket, db: Db = getDb()) {
   const project = db.projects.find((p) => p.id === t.projectId)!;
   const effort = db.effortLogs
     .filter((e) => e.ticketId === t.ticketId)
     .reduce((sum, e) => sum + e.hours, 0);
   return {
+    id: ticketRowId(t, db),
     ticketId: t.ticketId,
     title: t.title,
     description: t.description,

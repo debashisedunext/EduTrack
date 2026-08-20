@@ -37,6 +37,7 @@ import { TicketDetailHeader } from './TicketDetailHeader'
 import { TicketDetailTabs, type DetailTab } from './TicketDetailTabs'
 import { TicketSummaryPanel } from './TicketSummaryPanel'
 import { totalEffortHrs } from './ticketSummary'
+import { useLiveRibbon } from './useLiveRibbon'
 
 const DEFAULT_TAB = 'journey'
 
@@ -114,6 +115,21 @@ export function TicketDetailPage() {
 
   const detail = data?.data
   const ticket = detail?.ticket
+
+  /*
+   * D-058 · the ribbon advances while this page is open — `stage.changed` on
+   * `/topic/ticket.{id}`, published after C-045's transaction commits.
+   *
+   * Placed here rather than inside `RibbonStrip` because a handoff moves far
+   * more than the strip: stage, assignee, status, the journey grid, the
+   * history tab and the effort ledger all change together, and the hook
+   * invalidates the ticket's whole query surface. A subscription owned by one
+   * of the six things that has to refetch would be the wrong shape.
+   *
+   * `ticket?.id` is the numeric row id, which is `undefined` until the detail
+   * response lands — `useRealtime` does not subscribe until it has it.
+   */
+  useLiveRibbon(ticketId, ticket?.id)
 
   /*
    * C-052 · the ribbon segment filtering History and Effort below it. Local
