@@ -212,6 +212,8 @@ export * from './emailLogListResponse';
 export * from './exportUsersFormat';
 export * from './exportUsersParams';
 export * from './forbiddenResponse';
+export * from './forceMoveRequest';
+export * from './forceMoveRequestToUserId';
 export * from './forgotPasswordBody';
 export * from './getClient360Params';
 export * from './getDashboardSummaryParams';
