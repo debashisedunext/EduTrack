@@ -13,7 +13,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 217 of 244 (89%) | 322.2 of 365.8 (88%) |
-| In flight | 0 | 0.0 |
+| In flight | 1 | 1.5 |
 | On the driving chain | 9 | 15.0 |
 | Zero float (no slack at all) | 16 | 29.5 |
 
@@ -332,23 +332,23 @@ gantt
 | 🔴 | `C-043` | The golden rule — only the current stage owner | 1.5 | `C-042` `A-033` | Wed 19 Aug | Wed 19 Aug | 15 | ✅ done |
 |  | `C-044` | Handoff dialog — next stage | 2.5 | `C-042` `C-035` | Wed 19 Aug | Wed 19 Aug | 11 | ✅ done |
 |  | `C-045` | On submit: seal the current row | 2 | `C-044` `D-014` | Wed 19 Aug | Wed 19 Aug | 12 | ✅ done |
-|  | `C-046` | Backward moves | 1.5 | `C-042` ᶦ | Fri 21 Aug | Sat 22 Aug | 6 | ▫️ to do |
-|  | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Sat 22 Aug | Tue 25 Aug | 7 | ▫️ to do |
+|  | `C-046` | Backward moves | 1.5 | `C-042` ᶦ | Sat 22 Aug | Tue 25 Aug | 5 | ▫️ to do |
+|  | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Tue 25 Aug | Wed 26 Aug | 6 | ▫️ to do |
 |  | `C-048` | Force-move (OVERRIDE) — PM/Admin, logged as an override | 1 | `C-042` ᶦ | Thu 20 Aug | Thu 20 Aug | 14 | ✅ done |
 |  | `C-049` | Reassignment within a stage does not create a new segment | 1.5 | `C-042` | Thu 20 Aug | Thu 20 Aug | 11 | ✅ done |
 |  | `C-050` | Unassigned receiving role → ticket falls to a project-level queue… | 1 | `C-044` ᶦ | Thu 20 Aug | Thu 20 Aug | 14 | ✅ done |
-| 🔴 | `C-051` | Ribbon component | 3 | `B-050` | Thu 20 Aug | Thu 20 Aug | 10 | ✅ done |
+| 🔴 | `C-051` | Ribbon component | 3 | `B-050` | Thu 20 Aug | Thu 20 Aug | 4 | ✅ done |
 |  | `C-052` | Interactions | 2 | `C-051` ᶦ | Thu 20 Aug | Thu 20 Aug | 14 | ✅ done |
-|  | `C-053` | Cycle selector above the ribbon; selecting cycle 1 renders that… | 1.5 | `C-051` `C-038` | Tue 25 Aug | Wed 26 Aug | 8 | ▫️ to do |
-|  | `C-054` | Cycle 2 · Iteration 3 chips | 1 | `C-051` `C-046` | Thu 27 Aug | Thu 27 Aug | 8 | ▫️ to do |
+|  | `C-053` | Cycle selector above the ribbon; selecting cycle 1 renders that… | 1.5 | `C-051` `C-038` | Thu 20 Aug | Thu 20 Aug | 5 | 🟡 50% |
+|  | `C-054` | Cycle 2 · Iteration 3 chips | 1 | `C-051` `C-046` | Wed 26 Aug | Thu 27 Aug | 7 | ▫️ to do |
 |  | `C-059` | History tab | 1.5 | `C-019` `A-040` | Tue 18 Aug | Tue 18 Aug | 15 | ✅ done |
 |  | `C-060` | Attachments tab | 1 | `C-026` ᶦ | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |
 |  | `C-061` | Effort tab — every log line, sum per cycle + grand total | 1 | `C-041` ᶦ | Tue 18 Aug | Tue 18 Aug | 15 | ✅ done |
 |  | `C-063` | Bulk reassignment wizard | 2 | `C-017` `B-014` | Tue 18 Aug | Wed 19 Aug | 15 | ✅ done |
 |  | `C-064` | Ticket linking — blocks / is blocked by / duplicate of / relates to | 1.5 | `C-019` ᶦ | Wed 19 Aug | Wed 19 Aug | 15 | ✅ done |
 |  | `C-066` | Shared rich-text editor in components/ui/ + Storybook | 1.5 | `C-003` | Tue 11 Aug | Tue 11 Aug | 20 | ✅ done |
-| 🔴 | `C-071` | Per-project settings are configurable and ignored | 1 | — | Thu 20 Aug | Thu 20 Aug | 6 | ▫️ to do |
-|  | `C-072` | A deactivated priority can still be chosen | 1 | — | Fri 28 Aug | Fri 28 Aug | 8 | ▫️ to do |
+| 🔴 | `C-071` | Per-project settings are configurable and ignored | 1 | — | Fri 21 Aug | Fri 21 Aug | 5 | ▫️ to do |
+|  | `C-072` | A deactivated priority can still be chosen | 1 | — | Thu 27 Aug | Fri 28 Aug | 8 | ▫️ to do |
 
 </details>
 
