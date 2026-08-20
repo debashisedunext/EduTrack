@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -68,6 +69,17 @@ import java.util.Set;
  *       every action code here does.</li>
  * </ul>
  *
+ * <h2>C-050 · the receiving role with nobody on the project</h2>
+ *
+ * <p>{@link #resolveAssignee} is the one piece of assignee logic this class
+ * does own, and it is narrow: an explicit {@code assigneeId} is trusted
+ * outright, and the only case that differs from C-042's original "keep the
+ * current owner" default is a destination stage whose role has no active
+ * project member at all, which leaves the ticket unassigned rather than
+ * silently misattributed. Everything else about who a handoff dialog would
+ * offer as a candidate — current load, project membership generally — is
+ * still C-044's screen, not this engine.
+ *
  * <h2>What advancing a ticket that has never had a first hop does</h2>
  *
  * <p>Refuses, with {@link NoOpenStageException}. Opening the very first hop
@@ -110,6 +122,7 @@ class TransitionService {
     private final TicketJournal journal;
     private final WorkflowStageRepository stages;
     private final WorkingHoursService workingHours;
+    private final ReceivingRoleRepository receivingRoles;
     private final Clock clock;
 
     /*
@@ -120,19 +133,22 @@ class TransitionService {
     TransitionService(ScopedTickets tickets,
                       TicketJournal journal,
                       WorkflowStageRepository stages,
-                      WorkingHoursService workingHours) {
-        this(tickets, journal, stages, workingHours, Clock.systemUTC());
+                      WorkingHoursService workingHours,
+                      ReceivingRoleRepository receivingRoles) {
+        this(tickets, journal, stages, workingHours, receivingRoles, Clock.systemUTC());
     }
 
     TransitionService(ScopedTickets tickets,
                       TicketJournal journal,
                       WorkflowStageRepository stages,
                       WorkingHoursService workingHours,
+                      ReceivingRoleRepository receivingRoles,
                       Clock clock) {
         this.tickets = tickets;
         this.journal = journal;
         this.stages = stages;
         this.workingHours = workingHours;
+        this.receivingRoles = receivingRoles;
         this.clock = clock;
     }
 
@@ -200,7 +216,7 @@ class TransitionService {
         boolean backward = BACKWARD_ACTIONS.contains(actionCode);
         short iterationNo = backward ? (short) (open.getIterationNo() + 1) : open.getIterationNo();
         int seqNo = open.getSeqNo() + 1;
-        Long toUserId = request.assigneeId() != null ? request.assigneeId() : ticket.getAssignedTo();
+        Long toUserId = resolveAssignee(ticket, toStage, request.assigneeId());
 
         Instant now = Instant.now(clock).truncatedTo(ChronoUnit.MICROS);
 
@@ -232,6 +248,13 @@ class TransitionService {
         if (request.assigneeId() != null) {
             ticket.setAssignedTo(request.assigneeId());
             ticket.setAssignedBy(actorId(caller));
+        } else if (!Objects.equals(toUserId, ticket.getAssignedTo())) {
+            // C-050 · resolveAssignee found nobody: the receiving role has no
+            // member on this project, so the ticket falls to the project-level
+            // queue rather than keeping the outgoing owner, who does not hold
+            // the role that now owns the stage. assignedBy is left as whoever
+            // last made a real assignment — nobody chose this, the queue did.
+            ticket.setAssignedTo(null);
         }
         // rework_count counts backward moves over the ticket's whole life
         // (A-070) and is never reset — ReopenService's own note on the same
@@ -267,6 +290,41 @@ class TransitionService {
             throw new UnknownTransitionStageException(stageCode, templateId);
         }
         return stageCode;
+    }
+
+    /**
+     * C-050 · blueprint §4A.6 — "if the receiving role has no member on the
+     * project, the handoff falls to a project-level queue."
+     *
+     * <p>An explicit {@code assigneeId} always wins with no lookup here:
+     * C-044's dialog only ever offers a member of the receiving role, so a
+     * caller that names somebody has already answered this question. Absent
+     * one, the ticket keeps its outgoing owner — unchanged since C-042 — with
+     * one exception: if the destination stage's role genuinely has nobody
+     * active on this project, carrying the old owner forward would leave a
+     * Developer silently "owning" a stage QA is meant to run, which is a
+     * worse failure than no owner at all, because it looks like the ribbon is
+     * fine when the queue is actually stuck. {@code null} here is what D-026's
+     * scanner already watches for and alerts the PM about after two working
+     * hours — this method does not need to know that, only to stop hiding it.
+     *
+     * <p>A ticket with no workflow template has no stage to look up a role
+     * for, so it is left exactly as {@code advance} always left it —
+     * {@link #resolveToStage}'s own precedent for the same gap.
+     */
+    private Long resolveAssignee(Ticket ticket, String toStage, Long requestedAssigneeId) {
+        if (requestedAssigneeId != null) {
+            return requestedAssigneeId;
+        }
+        Long templateId = ticket.getWorkflowTemplateId();
+        String ownerRole = templateId == null ? null
+                : stages.findByTemplateIdAndStageCode(templateId, toStage)
+                        .map(WorkflowStage::getOwnerRole)
+                        .orElse(null);
+        if (ownerRole == null || receivingRoles.hasActiveMember(ticket.getProjectId(), ownerRole)) {
+            return ticket.getAssignedTo();
+        }
+        return null;
     }
 
     /** The template's stage immediately after {@code fromStage}, left to right. */
