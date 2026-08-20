@@ -311,6 +311,9 @@ class TransitionServiceTest {
 
             assertThat(ticket.getAssignedTo()).isEqualTo(CURRENT_ASSIGNEE);
             verify(receivingRoles, never()).hasActiveMember(anyLong(), any());
+        }
+    }
+
     // ── C-045: the live-update event ────────────────────────────────────────
 
     @Nested

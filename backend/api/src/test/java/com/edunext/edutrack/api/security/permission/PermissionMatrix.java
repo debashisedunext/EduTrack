@@ -199,7 +199,6 @@ final class PermissionMatrix {
             {"reportKey":"date-wise","cadence":"WEEKLY","recipients":["nobody@example.test"]}""";
 
     /**
-<<<<<<< HEAD
      * C-044 · {@code HandoffDtos.HandoffRequest}: {@code toStageCode} and
      * {@code toUserId} are the only required fields. {@code effortHours} is
      * omitted deliberately, on {@link #CHANGE_PRIORITY}'s own reasoning — it
@@ -220,7 +219,8 @@ final class PermissionMatrix {
      */
     private static final String FORCE_MOVE = """
             {"toStageCode":"QA","reason":"Matrix fixture override — see PermissionMatrix's own header."}""";
-=======
+
+    /**
      * C-049 · {@code AssignDtos.AssignRequest}: {@code assigneeId} is the only
      * {@code @NotNull} field. {@code note} is omitted deliberately, on
      * {@link #CHANGE_PRIORITY}'s own reasoning: the strongest fixture is the
@@ -228,7 +228,6 @@ final class PermissionMatrix {
      */
     private static final String ASSIGN = """
             {"assigneeId":1}""";
->>>>>>> origin/feat/tickets/c-049-stage-reassignment
 
     /**
      * C-020 · {@code PriorityChangeDtos.ChangePriorityRequest}: {@code level} is
