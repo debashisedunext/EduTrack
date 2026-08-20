@@ -24,6 +24,8 @@ import {
   belongsToThread,
 } from './threadDestination'
 import { parseChatMessageEvent } from './chatEvents'
+import { EmojiPicker } from './EmojiPicker'
+import { insertEmoji } from './emoji'
 
 /**
  * D-065 · S-25, the chat screen.
@@ -213,6 +215,41 @@ function ThreadSidebar({
 function Composer({ threadId, onSent }: { threadId: number | undefined; onSent: (threadId: number) => void }) {
   const [body, setBody] = React.useState('')
   const post = usePostChatMessage()
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+
+  /*
+   * D-053 · emoji, §7.6.
+   *
+   * Nothing about this touches the server. `chat_messages.body` is `utf8mb4`
+   * — checked against the live column, not only the DDL — so an emoji is
+   * already storable and searchable, and the mention parser reads `@handle`
+   * rather than scanning code points. What was missing was only a way to
+   * reach one without leaving the keyboard.
+   *
+   * Inserted at the caret, and the caret is put back after it, so picking an
+   * emoji mid-sentence does not send the user to the end of their own
+   * message. `setSelectionRange` has to run after React has re-rendered with
+   * the new value, hence the effect below rather than a call here.
+   */
+  const pendingCaret = React.useRef<number | null>(null)
+  React.useEffect(() => {
+    const caret = pendingCaret.current
+    if (caret == null) return
+    pendingCaret.current = null
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.focus()
+    textarea.setSelectionRange(caret, caret)
+  }, [body])
+
+  const pickEmoji = (emoji: string) => {
+    const textarea = textareaRef.current
+    const start = textarea?.selectionStart ?? body.length
+    const end = textarea?.selectionEnd ?? start
+    const next = insertEmoji(body, start, end, emoji)
+    pendingCaret.current = next.caret
+    setBody(next.body)
+  }
 
   const trimmed = body.trim()
   // Disabled rather than posting and letting the server reject: `body` is
@@ -246,6 +283,7 @@ function Composer({ threadId, onSent }: { threadId: number | undefined; onSent: 
       </label>
       <textarea
         id="chat-composer"
+        ref={textareaRef}
         value={body}
         onChange={(event) => setBody(event.target.value)}
         onKeyDown={(event) => {
@@ -261,6 +299,7 @@ function Composer({ threadId, onSent }: { threadId: number | undefined; onSent: 
         placeholder="Write a message…"
         className="min-h-0 flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-ink"
       />
+      <EmojiPicker onPick={pickEmoji} disabled={typeof threadId !== 'number'} />
       <Button type="submit" disabled={!canSend}>
         Send
       </Button>

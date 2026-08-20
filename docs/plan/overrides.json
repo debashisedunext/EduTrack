@@ -45,9 +45,12 @@
   },
   "D-053": {
     "status": "blocked",
-    "pct": 40,
-    "reason": "Debashis — git reads this as done, and the backlog entry says otherwise in its own first line: search shipped, the other two are blocked. File/image share has nowhere to put the row (ticket_attachments.ticket_id is NOT NULL, so an attachment on a DM or project channel is unrepresentable) and no storage layer — C-024/C-025 own upload, MinIO keys, MIME sniffing and AV scan, and a second pipeline here would put two answers next to each other for 'is this file safe'. Needs Divyansh's sign-off on the table shape. Emoji has no backend at all and belongs to S-25's composer",
-    "_blocked_by": "C-024, C-025 (Divyansh)"
+    "pct": 70,
+    "reason": "Debashis — git reads this as done, and the backlog entry says otherwise in its own first line. **Corrected 20 Aug: search and emoji are shipped; file share is the one half left.** Emoji landed once D-065 built the chat composer, which is what it was actually waiting on — it needed no backend at all: chat_messages.body is utf8mb4 (checked against the live column), nothing sanitises the body, and the mention parser reads @handle rather than scanning code points. File/image share still has nowhere to put the row: ticket_attachments.ticket_id is NOT NULL, so an attachment on a DM or project channel is unrepresentable, and there is no chat_attachments table. PostMessage.attachmentIds is on the contract and on the DTO and is accepted and silently ignored. Two shapes are possible — a chat_message_attachments join, or ticket_attachments.ticket_id made nullable with a chat_message_id beside it — and both are Stream C's table and Stream C's upload pipeline (C-024/C-025 own MinIO keys, MIME sniffing and AV scan); a second pipeline here would put two answers next to each other for 'is this file safe'. Needs Divyansh's sign-off on the table shape.",
+    "_blocked_by": [
+      "C-024",
+      "C-025"
+    ]
   },
   "D-037": {
     "status": "blocked",
