@@ -28,6 +28,8 @@ import { JourneyTab } from '../journey/JourneyTab'
 import { useJourneyTab } from '../journey/useJourneyTab'
 import { useEffortTab } from '../effort/useEffortTab'
 
+import { CycleIterationBadge } from './CycleIterationBadge'
+import { CycleSelector } from './CycleSelector'
 import { canChangeLevel } from './levelChange'
 import { StepsToGenerateSection } from './WhereItHappenedControls'
 import { PendingSection } from './PendingSection'
@@ -37,6 +39,7 @@ import { TicketDetailHeader } from './TicketDetailHeader'
 import { TicketDetailTabs, type DetailTab } from './TicketDetailTabs'
 import { TicketSummaryPanel } from './TicketSummaryPanel'
 import { totalEffortHrs } from './ticketSummary'
+import { useLiveRibbon } from './useLiveRibbon'
 
 const DEFAULT_TAB = 'journey'
 
@@ -112,8 +115,45 @@ export function TicketDetailPage() {
     query: { enabled: ticketId.length > 0, retry: false },
   })
 
+  /*
+   * C-053 · the cycle selector above the ribbon. Sets `?cycle=` the same way
+   * `selectTab` sets `?tab=` — a second on-page switch over data this page
+   * already fetched, not a citation link — so whichever tab is open stays
+   * open across a cycle change. `replace: true` for the same reason `selectTab`
+   * uses it: stepping through a ticket's cycles should not bury the list six
+   * entries deep in the back button.
+   */
+  const selectCycle = React.useCallback(
+    (cycleNo: number) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.set('cycle', String(cycleNo))
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
   const detail = data?.data
   const ticket = detail?.ticket
+
+  /*
+   * D-058 · the ribbon advances while this page is open — `stage.changed` on
+   * `/topic/ticket.{id}`, published after C-045's transaction commits.
+   *
+   * Placed here rather than inside `RibbonStrip` because a handoff moves far
+   * more than the strip: stage, assignee, status, the journey grid, the
+   * history tab and the effort ledger all change together, and the hook
+   * invalidates the ticket's whole query surface. A subscription owned by one
+   * of the six things that has to refetch would be the wrong shape.
+   *
+   * `ticket?.id` is the numeric row id, which is `undefined` until the detail
+   * response lands — `useRealtime` does not subscribe until it has it.
+   */
+  useLiveRibbon(ticketId, ticket?.id)
 
   /*
    * C-052 · the ribbon segment filtering History and Effort below it. Local
@@ -415,6 +455,11 @@ export function TicketDetailPage() {
 
       <div className="grid flex-1 gap-4 p-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <CycleSelector cycles={detail?.cycles} selectedCycleNo={selectedCycleNo} onSelect={selectCycle} />
+            <CycleIterationBadge ribbon={detail?.ribbon} />
+          </div>
+
           {isEarlierCycle && (
             <p role="status" className="rounded-control bg-subtle px-3 py-2 text-caption text-content-muted">
               Showing cycle {selectedCycleNo}, which is sealed and read-only. Its journey, effort and history are

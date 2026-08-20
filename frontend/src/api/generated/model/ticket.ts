@@ -64,6 +64,27 @@ import type { TicketDelayedSince } from './ticketDelayedSince';
 import type { TicketEstimatedHrs } from './ticketEstimatedHrs';
 
 export interface Ticket {
+  /** D-058 · **the realtime anchor, and the only reason this is on the
+wire.** Every §9.3 destination is keyed on the numeric row id —
+`/topic/ticket.{id}` — while every path and payload in this
+contract identifies a ticket by its `ticketId` code. Without this
+field a client holding a ticket cannot name the room its own
+updates arrive on, so `stage.changed` (D-058), the chat ticket
+thread (D-050) and every later ticket topic are unsubscribable
+from the browser. `threadDestination.ts` records the same gap and
+names it as mine to close.
+
+**Not an alternative identifier.** No route accepts it, nothing
+renders it, and `ticketId` stays the ticket's identity everywhere
+a human or a URL is involved — a sequential integer is guessable
+and a ticket code is not. Reading it confers nothing: it arrives
+only on a ticket the caller could already read, and a subscription
+is authorised independently by D-013's channel interceptor.
+
+Optional because the ticket returned by a list row does not carry
+it — only a ticket you are looking at needs a room.
+ */
+  id?: number;
   ticketId: TicketId;
   title: string;
   description?: string;
