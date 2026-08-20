@@ -447,6 +447,15 @@ export interface Comment {
   stageCode: string | null; cycleNo: number; iterationNo: number;
   mentionIds: number[]; createdAt: string;
   /**
+   * C-032 · the author's role AT THE TIME OF WRITING, stamped alongside
+   * `stageCode`/`cycleNo`/`iterationNo` — never joined from the live user, or
+   * a promotion after the fact would rewrite what the comment looked like
+   * when it was posted. Optional because the fixtures below predate this
+   * field; `commentDto` falls back to the author's current role for those,
+   * mirroring `CommentDto.of`'s identical fallback for a pre-C-032 row.
+   */
+  authorRole?: RoleCode | null;
+  /**
    * C-033 · the tombstone. Both null until the comment is removed, and both
    * stamped by the same write — a row carrying one without the other is not a
    * state the server produces. Deliberately the same shape as `Attachment`'s

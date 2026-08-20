@@ -53,6 +53,7 @@ import type { HistoryEntryOldValue } from './historyEntryOldValue';
 import type { HistoryEntryNewValue } from './historyEntryNewValue';
 import type { HistoryEntryNote } from './historyEntryNote';
 import type { HistoryEntryIsClientVisible } from './historyEntryIsClientVisible';
+import type { RoleCode } from './roleCode';
 import type { HistoryEntryStageCode } from './historyEntryStageCode';
 import type { HistoryEntryCorrectsEntryId } from './historyEntryCorrectsEntryId';
 
@@ -70,6 +71,7 @@ export interface HistoryEntry {
   newValue?: HistoryEntryNewValue;
   note?: HistoryEntryNote;
   isClientVisible?: HistoryEntryIsClientVisible;
+  actorRole?: RoleCode;
   stageCode?: HistoryEntryStageCode;
   cycleNo?: number;
   iterationNo?: number;

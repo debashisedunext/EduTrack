@@ -17,17 +17,15 @@ import type { CommentViewer } from './commentPermissions'
  *
  * ## What this still does not draw
  *
- * The stamp is **written but not rendered**. `CommentService` copies the ticket's
- * cycle and stage onto every comment, because a stamp is the one field that
- * cannot be backfilled once the ticket has moved on — but drawing "Development ·
- * iteration 2" beside an author is C-032's, and it needs C-042's iteration number
- * to be anything other than misleading. Half a stamp on screen is worse than
- * none: a reader who sees a stage and no iteration has no way to know the
- * iteration is missing rather than one.
+ * `@mention` highlighting inside a rendered body — C-030 resolves the mentions
+ * and the type-ahead composes them, but colouring a resolved `@handle` at rest
+ * is a change to `CommentCard`'s body rendering with its own review, and is
+ * left for whoever picks it up next.
  *
- * Also absent: `@mention` highlighting inside a rendered body (C-030 resolves the
- * mentions and the type-ahead composes them; colouring them at rest is C-032's,
- * with the rest of the stamp).
+ * The stage-and-iteration stamp itself is drawn as of C-032: `CommentCard`
+ * shows "Development · iteration 2" beside the author, once `iterationNo` is
+ * something other than misleading — C-042's `TicketJournal#openHopFor` is
+ * what made it readable at all.
  *
  * ## C-033 · a card now has state, so a card is now a component
  *

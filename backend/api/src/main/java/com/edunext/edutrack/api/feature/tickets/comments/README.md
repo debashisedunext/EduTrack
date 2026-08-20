@@ -45,13 +45,11 @@ PLAN.md §5 records it as an accepted deviation. The boxed `Boolean` on the
 request is what makes an omitted field, an older client, an email importer and
 a fixture all get the safe answer. Four tests pin it.
 
-**3. The stamp is written here even though C-032 displays it.** Cycle and stage
-are copied onto every comment at write time because a stamp is the one field
-that cannot be backfilled — once the ticket moves on, what stage it was in when
-a comment was written is gone. `iterationNo` stays **null**: it lives on the
-open `ticket_stage_transitions` row and nothing can read one until C-042.
-Writing `1` would be worse than nothing, because a real first iteration is also
-`1` and C-032 would have no way to find the rows needing repair.
+**3. The stamp — see C-032, below, for the part written here since C-029 and
+the part this task adds.** Cycle and stage were copied onto every comment at
+write time from the start, because a stamp is the one field that cannot be
+backfilled — once the ticket moves on, what stage it was in when a comment was
+written is gone.
 
 ## Deliberately absent
 
@@ -275,8 +273,59 @@ server cap silently *overrode* it with nothing in any log.
 ⚠ **Still open, deliberately.** The `COMMENT_EDITED` and `COMMENT_DELETED`
 history rows belong with C-034's timeline, alongside the `ATTACHMENT_ADDED` row
 C-025 left for the same reason: there is still no ticket-history write service.
-`iteration_no` on a comment stays null until C-042 (C-032's dependency), and
 `PLAN.md §3.9`'s `MEDIUMTEXT` is still `TEXT`.
+
+---
+
+# C-032 · stamping — author, role, stage and iteration at time of writing
+
+Blueprint §4B.5's own line: *"every comment records author, author's role, the
+**stage** and **iteration** the ticket was in when it was written, and the
+timestamp."* Author and timestamp needed nothing — `CommentDto.author` and
+`.createdAt` have carried them since C-029, and `CommentCard` has rendered
+both since C-031. The other three needed this task, each for its own reason.
+
+**Role — a new column, because there was nowhere to stamp one.** `authorRole`
+has been on `CommentDto` since C-029, reading `roles.get(row.getAuthorId())` —
+the author's role **now**, not the role held when they wrote the comment,
+which is what §4B.5 actually asks for and which the field's own javadoc has
+named as this task's since it was written. `ticket_comments` had no column to
+hold it, so `V20260819_1700__ticket_comment_author_role.sql` adds
+`author_role VARCHAR(20)`, stamped by `CommentService.stamp` alongside
+`cycleNo`/`stageCode`, and read back by `CommentDto.of` in preference to the
+lookup — which stays, as the fallback for a comment posted before the column
+existed. **Touches a table another stream reads — flagged for Stream A**,
+`V20260818_1030`'s precedent.
+
+**Iteration — no schema change, because C-042 built the read this needed.**
+`CommentService.stamp` has copied `cycleNo` and `stageCode` off the ticket row
+since C-029; an iteration number lives one level down, on the ticket's open
+`ticket_stage_transitions` row, which nothing in this codebase could read
+until `TicketJournal#openHopFor` landed with C-042. `stamp` now calls it and
+takes `iterationNo` off the open hop — **filtered to the ticket's own
+`cycleNo`**, not trusted blind: `ReopenService` can leave a stale open hop at
+the *previous* cycle's last stage (its own javadoc names the gap, and
+`TransitionService#advance` guards the identical staleness before building the
+next hop), and stamping that hop's iteration onto a fresh cycle's comment
+would read as real — a wrong small number is indistinguishable from a right
+one once it is on the row. Still null for a comment written before the
+ticket's first stage transition, which is the one case that was never a defect
+to begin with.
+
+**Displaying it — `CommentCard` and the interleaved History row both, because
+blueprint §7's own sample transcript draws it in both places**: `Ravi Kumar
+(Developer) · Development · iteration 2` under the History tab's comment line,
+and the identical fact under the Comments tab's own card. `HistoryEntry` gains
+`actorRole` for this — additive, **Stream D sign-off** — read straight off
+`TicketComment.getAuthorRole()` on a `COMMENTED` row and null on every real
+`ticket_history` row, next to `stageCode` and `iterationNo`'s identical
+one-sided nullability.
+
+⚠ **`frontend/src/mocks/` is Stream D's, and needs the same three fields the
+real server now stamps** — `author_role` and `iteration_no` on
+`POST /comments`, and `actorRole` read onto the interleaved `COMMENTED` row —
+so `npm run dev` renders the same stamp production does rather than the
+half-drawn one C-029 shipped with.
 
 ---
 

@@ -209,6 +209,40 @@ describe('the Comments tab', () => {
   })
 
   /**
+   * C-032 · §4B.5's stage-and-iteration stamp. Priya's seeded first comment is
+   * stamped `stageCode: 'INTAKE', iterationNo: 1`.
+   */
+  it('C-032 · names the stage and iteration the ticket was in when it was written', async () => {
+    renderPage()
+    await waitForTicket()
+    openComments()
+
+    const first = (await commentsIn())[0]
+    expect(within(first).getByText(/Intake/)).toBeInTheDocument()
+    expect(within(first).getByText(/iteration 1/)).toBeInTheDocument()
+  })
+
+  /**
+   * A freshly posted comment is stamped from the ticket's own live position —
+   * `CommentService.stamp`'s mock stand-in — not left blank the way it would
+   * have been before this task made `iterationNo` readable at all.
+   */
+  it('C-032 · stamps a freshly posted comment with the ticket’s current stage and iteration', async () => {
+    renderPage()
+    await waitForTicket()
+    openComments()
+    await screen.findByText(/Reproduced on prod with two Acme accounts/)
+
+    write('<p>Confirmed closed, no further action needed.</p>')
+    fireEvent.click(screen.getByRole('button', { name: 'Post' }))
+
+    const posted = await postedCard('Confirmed closed, no further action needed')
+    // The walkthrough ticket is CLOSED, cycle 2, iteration 1.
+    expect(within(posted).getByText(/Closed/)).toBeInTheDocument()
+    expect(within(posted).getByText(/iteration 1/)).toBeInTheDocument()
+  })
+
+  /**
    * A comment going to the client that looks exactly like one that is not is
    * the mistake §4B.5 exists to prevent — so the label, and since C-031 the two
    * backgrounds §4B.5 specifies as well.
