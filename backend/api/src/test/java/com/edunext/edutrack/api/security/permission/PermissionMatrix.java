@@ -996,6 +996,21 @@ final class PermissionMatrix {
             // delivery role, scoped to themselves.
             everyRole("GET", "/api/v1/dashboard/widget/{widgetKey}"),
 
+            // A-073 · the batch form of the route directly above, and it must
+            // hold exactly the same answer for exactly the same reason. Batching
+            // is a transport decision: it changes how many requests carry the ten
+            // widgets, not who may see them. Every widget still renders through
+            // WidgetService against DashboardScope, so a delivery role gets the
+            // same unavailableReason here that it gets there.
+            //
+            // Worth stating rather than leaving implied, because a batch route is
+            // precisely where an authorisation difference would hide. Were this
+            // line ever tightened relative to the single route, the dashboard
+            // would 403 as a whole for a role that can legitimately load every
+            // tile one at a time — and the natural reading of that failure is
+            // "the dashboard is broken", not "the two routes disagree".
+            everyRole("GET", "/api/v1/dashboard/widgets"),
+
             // ── reports · A-063, and the dashboard's argument a third time ───
             //
             // §2's own matrix grants a reports section to all six roles, in

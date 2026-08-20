@@ -46,5 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { DashboardWidget } from './dashboardWidget';
 
-export type WidgetResponseDataUnavailableReason = string | null;
+export interface DashboardWidgetsResponse {
+  data: DashboardWidget[];
+}

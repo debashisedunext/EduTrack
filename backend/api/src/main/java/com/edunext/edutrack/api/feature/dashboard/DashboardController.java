@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * A-054 · {@code GET /dashboard/summary} — S-05's shell and its three filters.
@@ -112,6 +113,62 @@ class DashboardController {
             response = response.eTag(rendered.etag());
         }
         return response.body(new WidgetDtos.WidgetResponse(rendered.widget()));
+    }
+
+    /**
+     * A-073 · every widget S-05 needs, in one request.
+     *
+     * <p>The single-widget route above stays exactly as it is — this is
+     * additive. A drill-down or a filter change that re-fetches one tile should
+     * still fetch one tile, and the per-widget ETag is a finer validator than
+     * this one can be. What this route exists for is the <em>first paint</em>,
+     * where the client knows all ten keys up front and the old shape cost eleven
+     * round trips to say so.
+     *
+     * <p>A-073's measurements, in {@code tools/perf/README.md}: at 50,000 tickets
+     * a widget's own work is ~7 ms of a ~20 ms call and all ten widgets are within
+     * 12 ms of one another, so per-request cost dominates and no query
+     * optimisation reaches it. The waterfall is the thing to remove, which is the
+     * conclusion blueprint §9.4 already drew for {@code /tickets/:id/full}.
+     *
+     * <p>{@code keys} is required and repeatable
+     * ({@code ?keys=type-donut&keys=velocity}, or comma-separated — Spring binds
+     * both). Unknown keys are dropped rather than refused; see
+     * {@link WidgetService#widgets}.
+     *
+     * <p>Authorisation is deliberately identical to the single route —
+     * {@code isAuthenticated()} — because this serves the same data by the same
+     * scope rules. It reads through {@link WidgetService}, so {@link
+     * DashboardScope} applies per widget exactly as before; batching changes the
+     * transport and nothing about who may see what.
+     */
+    @GetMapping(path = "/widgets", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    @Operation(operationId = "getDashboardWidgets",
+            summary = "Several widgets' series in one request (S-05 first paint)")
+    ResponseEntity<WidgetDtos.WidgetsResponse> widgetBatch(
+            Authentication caller,
+            @RequestParam List<String> keys,
+            @RequestHeader(name = "If-None-Match", required = false) String ifNoneMatch,
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+
+        CallerIdentity identity = CallerIdentity.of(caller)
+                .orElseThrow(() -> new IllegalStateException(
+                        "an authenticated request reached the dashboard with no CallerIdentity"));
+
+        WidgetService.RenderedBatch rendered = widgets.widgets(identity, keys, projectId, from, to);
+
+        if (rendered.etag() != null && matches(ifNoneMatch, rendered.etag())) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(rendered.etag()).build();
+        }
+
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok();
+        if (rendered.etag() != null) {
+            response = response.eTag(rendered.etag());
+        }
+        return response.body(new WidgetDtos.WidgetsResponse(rendered.widgets()));
     }
 
     /**

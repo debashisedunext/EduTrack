@@ -63,8 +63,10 @@ import type {
 
 import type {
   DashboardSummaryResponse,
+  DashboardWidgetsResponse,
   GetDashboardSummaryParams,
   GetDashboardWidgetParams,
+  GetDashboardWidgetsParams,
   NotFoundResponse,
   UnauthorizedResponse,
   WidgetResponse
@@ -268,6 +270,127 @@ export function useGetDashboardWidget<TData = Awaited<ReturnType<typeof getDashb
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetDashboardWidgetQueryOptions(widgetKey,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * A-073 · S-05's first paint, in one round trip instead of eleven.
+
+The single-widget route above is unchanged and is still the right call
+for re-fetching one tile after a drill-down or a filter change, where
+its per-widget `ETag` is the finer validator. This route exists for the
+**first paint**, where the client knows every key up front.
+
+**Why it exists is a measurement, not a preference.** A-073's load test
+found the cost of a widget call is almost entirely *per request* rather
+than per widget — at 50,000 tickets a widget's own work is ~7 ms of a
+~20 ms call, and all ten widgets land within 12 ms of each other. There
+is no slow widget to fix; ten times a fixed cost is the problem. This is
+the same conclusion §9.4 already drew for the ticket detail page, where
+`/tickets/{id}/full` exists "to avoid a waterfall of 6 calls".
+
+It also removes nine redundant `SELECT MAX(computed_at)` per paint and
+closes a real inconsistency: served separately, tiles could each carry a
+different `asOf` if the summary refresh committed mid-paint, showing two
+moments side by side as though they were one.
+
+**A key nothing implements is dropped, not refused.** Failing the whole
+batch over one unimplemented key turns a missing tile into a blank
+dashboard. The response array may therefore be shorter than `keys` —
+match on each widget's own `key` and do not assume position.
+
+Returns one `ETag` covering the whole set, over the keys actually
+served.
+
+ * @summary Several widgets' series in one request
+ */
+export const getDashboardWidgets = (
+    params: GetDashboardWidgetsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<DashboardWidgetsResponse>(
+      {url: `/dashboard/widgets`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetDashboardWidgetsQueryKey = (params?: GetDashboardWidgetsParams,) => {
+    return [
+    `/dashboard/widgets`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getGetDashboardWidgetsQueryOptions = <TData = Awaited<ReturnType<typeof getDashboardWidgets>>, TError = void | UnauthorizedResponse>(params: GetDashboardWidgetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidgets>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDashboardWidgetsQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDashboardWidgets>>> = ({ signal }) => getDashboardWidgets(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidgets>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDashboardWidgetsQueryResult = NonNullable<Awaited<ReturnType<typeof getDashboardWidgets>>>
+export type GetDashboardWidgetsQueryError = void | UnauthorizedResponse
+
+
+export function useGetDashboardWidgets<TData = Awaited<ReturnType<typeof getDashboardWidgets>>, TError = void | UnauthorizedResponse>(
+ params: GetDashboardWidgetsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidgets>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDashboardWidgets>>,
+          TError,
+          Awaited<ReturnType<typeof getDashboardWidgets>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardWidgets<TData = Awaited<ReturnType<typeof getDashboardWidgets>>, TError = void | UnauthorizedResponse>(
+ params: GetDashboardWidgetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidgets>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDashboardWidgets>>,
+          TError,
+          Awaited<ReturnType<typeof getDashboardWidgets>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardWidgets<TData = Awaited<ReturnType<typeof getDashboardWidgets>>, TError = void | UnauthorizedResponse>(
+ params: GetDashboardWidgetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidgets>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Several widgets' series in one request
+ */
+
+export function useGetDashboardWidgets<TData = Awaited<ReturnType<typeof getDashboardWidgets>>, TError = void | UnauthorizedResponse>(
+ params: GetDashboardWidgetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidgets>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetDashboardWidgetsQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
