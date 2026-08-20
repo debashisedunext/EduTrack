@@ -1,8 +1,8 @@
 import * as React from 'react'
 
-import { useGetDashboardWidget } from '@/api/generated/dashboard/dashboard'
 import type { GetDashboardWidgetParams } from '@/api/generated/model'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useWidget } from './widgetBatchContext'
 
 /**
  * A-056 · the card every widget 7–12 sits in.
@@ -110,10 +110,10 @@ export function WidgetFrame({
   children,
   wide = false,
 }: WidgetFrameProps) {
-  const { data, isPending, isError } = useGetDashboardWidget(widgetKey, params)
+  const { data, isPending, isError } = useWidget(widgetKey, params)
 
-  const series = normalise(data?.data?.series)
-  const unavailable = data?.data?.unavailableReason
+  const series = normalise(data?.series)
+  const unavailable = data?.unavailableReason
   const hasPoints = series.some((s) => s.points.length > 0)
 
   return (

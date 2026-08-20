@@ -256,7 +256,48 @@ claim demonstrated rather than asserted — page 40 costs less than page 1, beca
 pays for the full row fetch. Before this migration the same query repeated a
 50,000-row sort on every page.
 
-## Dashboard — does not meet the budget
+## Dashboard — the fan-out, and what replacing it did
+
+**A-073 replaced the eleven-request first paint with two** (`/dashboard/summary`
+plus `/dashboard/widgets`). Measured back to back on the same machine and corpus,
+40 concurrent users with think time — `FANOUT=1` restores the old shape, so this
+is re-measurable rather than a claim:
+
+| First-paint API time | p50 | p95 |
+|---|---|---|
+| Eleven requests (before) | 79 ms | **4.33 s** |
+| Two requests (after) | ~200 ms | **0.72 – 1.45 s** |
+
+**The p95 improved roughly 4–6×. The median got worse, and that is a real trade
+rather than noise.** Batching runs all ten widgets' queries inside one request,
+where the fan-out could spread them across parallel connections. At low
+concurrency the fan-out is genuinely quicker to first byte; at the concurrency
+this criterion is about it collapses, because eleven fixed per-request costs per
+viewer is far more total work than two. The dashboard is the screen everyone
+opens at 09:00, so the tail is what matters — but anyone benchmarking a single
+idle user will see batching lose, and should know why before "fixing" it.
+
+**The budget is still not reliably met, and that is stated rather than rounded
+away.** Three consecutive runs gave p95 719 ms, 1.45 s and 885 ms against the
+500 ms API half-budget. An earlier run landed at 496 ms; it was not
+representative, and quoting that one would have been the easiest and most
+misleading thing to do in this whole task.
+
+Two honest caveats on the numbers:
+
+- **The 500 ms figure is a split I chose**, not something the plan states. The
+  plan says 1.5 s to first paint; the ~1000 ms browser / ~500 ms API division is
+  a judgement, and the browser half remains unmeasured here.
+- **The measuring machine is the machine under test** — one laptop running MySQL,
+  Redis, MinIO, the API and k6 together. An earlier set of runs was further
+  contended by a stats worker left on a 1-minute refresh, five times
+  production's rate; the figures above are with it stopped.
+
+What can be said without qualification: the fan-out was the dominant cost, it is
+gone, and the p95 improved several-fold. What cannot: that first paint is under
+1.5 s at p95 on production hardware, because that has not been measured.
+
+## The diagnosis the change came from
 
 | Metric | p50 | p95 | Budget | |
 |---|---|---|---|---|

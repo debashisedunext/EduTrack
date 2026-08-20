@@ -117,3 +117,61 @@ export const getDashboardWidgetResponse = zod.object({
 })
 })
 
+/**
+ * A-073 · S-05's first paint, in one round trip instead of eleven.
+
+The single-widget route above is unchanged and is still the right call
+for re-fetching one tile after a drill-down or a filter change, where
+its per-widget `ETag` is the finer validator. This route exists for the
+**first paint**, where the client knows every key up front.
+
+**Why it exists is a measurement, not a preference.** A-073's load test
+found the cost of a widget call is almost entirely *per request* rather
+than per widget — at 50,000 tickets a widget's own work is ~7 ms of a
+~20 ms call, and all ten widgets land within 12 ms of each other. There
+is no slow widget to fix; ten times a fixed cost is the problem. This is
+the same conclusion §9.4 already drew for the ticket detail page, where
+`/tickets/{id}/full` exists "to avoid a waterfall of 6 calls".
+
+It also removes nine redundant `SELECT MAX(computed_at)` per paint and
+closes a real inconsistency: served separately, tiles could each carry a
+different `asOf` if the summary refresh committed mid-paint, showing two
+moments side by side as though they were one.
+
+**A key nothing implements is dropped, not refused.** Failing the whole
+batch over one unimplemented key turns a missing tile into a blank
+dashboard. The response array may therefore be shorter than `keys` —
+match on each widget's own `key` and do not assume position.
+
+Returns one `ETag` covering the whole set, over the keys actually
+served.
+
+ * @summary Several widgets' series in one request
+ */
+export const getDashboardWidgetsQueryParams = zod.object({
+  "keys": zod.array(zod.enum(['type-donut', 'daily-stacked', 'velocity', 'resource-load', 'priority-bar', 'aging-buckets', 'calendar-heatmap', 'sla-gauge', 'project-treemap', 'stage-funnel', 'rework', 'stage-duration', 'handoff-latency', 'client-volume'])).describe('The widget keys to render. Repeat the parameter or pass one comma-separated value.\n'),
+  "projectId": zod.number().optional(),
+  "from": zod.string().date().optional(),
+  "to": zod.string().date().optional()
+})
+
+export const getDashboardWidgetsHeader = zod.object({
+  "If-None-Match": zod.string().optional()
+})
+
+export const getDashboardWidgetsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "key": zod.string().optional(),
+  "asOf": zod.string().datetime({}).optional(),
+  "unavailableReason": zod.string().nullish(),
+  "series": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "points": zod.array(zod.object({
+  "x": zod.union([zod.string(),zod.number()]).optional(),
+  "y": zod.number().optional(),
+  "drillDown": zod.string().nullish()
+})).optional()
+})).optional()
+}))
+})
+

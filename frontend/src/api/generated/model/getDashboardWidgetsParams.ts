@@ -46,5 +46,15 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { GetDashboardWidgetsKeysItem } from './getDashboardWidgetsKeysItem';
 
-export type WidgetResponseDataSeriesItemPointsItemDrillDown = string | null;
+export type GetDashboardWidgetsParams = {
+/**
+ * The widget keys to render. Repeat the parameter or pass one comma-separated value.
+
+ */
+keys: GetDashboardWidgetsKeysItem[];
+projectId?: number;
+from?: string;
+to?: string;
+};

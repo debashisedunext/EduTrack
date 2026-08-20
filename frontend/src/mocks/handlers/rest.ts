@@ -61,6 +61,49 @@ const NOTIFICATION_EVENTS = [
 const isMandatoryMail = (category: string) =>
   category === 'ASSIGNMENT' || category === 'ESCALATION' || category === 'STATUS_REQUEST';
 
+/**
+ * A-073 · one widget's mock payload, shared by `/dashboard/widget/{key}` and
+ * `/dashboard/widgets`.
+ *
+ * Extracted so the single and batch routes cannot disagree. Two mocks computing
+ * the same widget two ways would drift, and the first assertion to break would
+ * be one checking that the batched dashboard renders what the per-widget one
+ * did — the exact property A-073's change has to preserve.
+ */
+function widgetPayload(db: ReturnType<typeof getDb>, key: string) {
+  const rows = scopedTickets(db);
+  let series;
+  if (key === 'type-donut') {
+    series = [{
+      name: 'By task type',
+      points: db.taskTypes.map((tt) => ({
+        x: tt.name,
+        y: rows.filter((t) => t.taskTypeId === tt.id).length,
+        drillDown: `/tickets?taskTypeId=${tt.id}`,
+      })),
+    }];
+  } else if (key === 'stage-funnel') {
+    series = [{
+      name: 'By stage',
+      points: db.stages.map((s) => ({
+        x: s.displayName,
+        y: rows.filter((t) => t.currentStageCode === s.stageCode).length,
+        drillDown: `/tickets?stage=${s.stageCode}`,
+      })),
+    }];
+  } else {
+    series = [{
+      name: key,
+      points: Array.from({ length: 14 }, (_, i) => ({
+        x: new Date(Date.UTC(2026, 6, 24 + i)).toISOString().slice(0, 10),
+        y: 3 + ((i * 5) % 11),
+        drillDown: null,
+      })),
+    }];
+  }
+  return { key, asOf: new Date().toISOString(), series };
+}
+
 function preferenceMatrix(db: ReturnType<typeof getDb>) {
   const stored = db.notificationPreferences ?? [];
   return NOTIFICATION_EVENTS.map((event) => {
@@ -4162,37 +4205,44 @@ export const restHandlers = [
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag } });
     }
-    const rows = scopedTickets(db);
-    let series;
-    if (key === 'type-donut') {
-      series = [{
-        name: 'By task type',
-        points: db.taskTypes.map((tt) => ({
-          x: tt.name,
-          y: rows.filter((t) => t.taskTypeId === tt.id).length,
-          drillDown: `/tickets?taskTypeId=${tt.id}`,
-        })),
-      }];
-    } else if (key === 'stage-funnel') {
-      series = [{
-        name: 'By stage',
-        points: db.stages.map((s) => ({
-          x: s.displayName,
-          y: rows.filter((t) => t.currentStageCode === s.stageCode).length,
-          drillDown: `/tickets?stage=${s.stageCode}`,
-        })),
-      }];
-    } else {
-      series = [{
-        name: key,
-        points: Array.from({ length: 14 }, (_, i) => ({
-          x: new Date(Date.UTC(2026, 6, 24 + i)).toISOString().slice(0, 10),
-          y: 3 + ((i * 5) % 11),
-          drillDown: null,
-        })),
-      }];
+    return ok(widgetPayload(db, key), undefined, { headers: { ETag: etag } });
+  }),
+  /*
+    A-073 · the batch form of the widget route above, for S-05's first paint.
+
+    **Stream A adding a handler in Stream D's file (D-004)** — same situation
+    `/reports` below documents, and flagged the same way rather than done
+    quietly. `coverage.test.ts` refuses a contract operation with no handler, so
+    the alternative is a red `develop`.
+
+    Shares `widgetPayload` with the single route deliberately. Two mocks
+    computing the same widget two ways would drift, and the first thing to break
+    would be a test asserting that the batched dashboard renders what the
+    per-widget one did — which is precisely the property this change has to
+    keep.
+
+    Mirrors the server on the two decisions that matter: unknown keys are
+    dropped rather than 404ing the set, and one ETag covers the keys actually
+    served.
+  */
+  http.get(url('/dashboard/widgets'), ({ request }) => {
+    const db = getDb();
+    // Repeated ?keys= and one comma-separated ?keys= are both accepted, because
+    // Spring binds both and a mock that took only one shape would pass tests the
+    // real server would reject.
+    const requested = new URL(request.url).searchParams
+      .getAll('keys')
+      .flatMap((value) => value.split(','))
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const served = requested.filter((key, i) => requested.indexOf(key) === i);
+    const etag = `W/"widgets-${served.join(',')}"`;
+    if (request.headers.get('If-None-Match') === etag) {
+      return new Response(null, { status: 304, headers: { ETag: etag } });
     }
-    return ok({ key, asOf: new Date().toISOString(), series }, undefined, { headers: { ETag: etag } });
+    return ok(served.map((key) => widgetPayload(db, key)), undefined, {
+      headers: { ETag: etag },
+    });
   }),
   /*
     A-063 · the report catalogue behind S-27's card grid.

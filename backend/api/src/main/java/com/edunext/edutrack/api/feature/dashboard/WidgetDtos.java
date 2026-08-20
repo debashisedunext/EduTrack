@@ -23,6 +23,24 @@ final class WidgetDtos {
     }
 
     /**
+     * A-073 · what {@code GET /dashboard/widgets} answers with.
+     *
+     * <p><b>A list rather than a map keyed by widget key.</b> Every
+     * {@link Widget} already carries its own {@code key}, so a map would state it
+     * twice and the two could disagree; springdoc also renders a map as
+     * {@code additionalProperties}, which generates as an index signature in
+     * TypeScript and loses the per-widget typing the client actually wants.
+     *
+     * <p><b>The list may be shorter than the keys requested</b>, because
+     * {@link WidgetService#widgets} drops keys nothing implements rather than
+     * failing the whole batch — see its javadoc for why a blank dashboard is a
+     * worse answer than a missing tile. Clients match on {@code key} and must not
+     * assume position.
+     */
+    record WidgetsResponse(List<Widget> data) {
+    }
+
+    /**
      * @param asOf              when the summary tables were last recomputed.
      *                          Same reasoning as the cards: these rows are up
      *                          to five minutes old by design (A-051), and a

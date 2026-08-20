@@ -5516,6 +5516,69 @@ paths:
         '304': { description: Not modified. }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /dashboard/widgets:
+    get:
+      tags: [dashboard]
+      operationId: getDashboardWidgets
+      summary: Several widgets' series in one request
+      description: |
+        A-073 · S-05's first paint, in one round trip instead of eleven.
+
+        The single-widget route above is unchanged and is still the right call
+        for re-fetching one tile after a drill-down or a filter change, where
+        its per-widget `ETag` is the finer validator. This route exists for the
+        **first paint**, where the client knows every key up front.
+
+        **Why it exists is a measurement, not a preference.** A-073's load test
+        found the cost of a widget call is almost entirely *per request* rather
+        than per widget — at 50,000 tickets a widget's own work is ~7 ms of a
+        ~20 ms call, and all ten widgets land within 12 ms of each other. There
+        is no slow widget to fix; ten times a fixed cost is the problem. This is
+        the same conclusion §9.4 already drew for the ticket detail page, where
+        `/tickets/{id}/full` exists "to avoid a waterfall of 6 calls".
+
+        It also removes nine redundant `SELECT MAX(computed_at)` per paint and
+        closes a real inconsistency: served separately, tiles could each carry a
+        different `asOf` if the summary refresh committed mid-paint, showing two
+        moments side by side as though they were one.
+
+        **A key nothing implements is dropped, not refused.** Failing the whole
+        batch over one unimplemented key turns a missing tile into a blank
+        dashboard. The response array may therefore be shorter than `keys` —
+        match on each widget's own `key` and do not assume position.
+
+        Returns one `ETag` covering the whole set, over the keys actually
+        served.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+        - name: keys
+          in: query
+          required: true
+          description: >
+            The widget keys to render. Repeat the parameter or pass one
+            comma-separated value.
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                [type-donut, daily-stacked, velocity, resource-load, priority-bar,
+                 aging-buckets, calendar-heatmap, sla-gauge, project-treemap,
+                 stage-funnel, rework, stage-duration, handoff-latency, client-volume]
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK. May carry fewer widgets than were requested.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardWidgetsResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /reports:
     get:
       tags: [reports]
@@ -10531,43 +10594,70 @@ components:
                   deltaPct: { type: [number, 'null'] }
                   sparkline: { type: array, items: { type: number } }
                   drillDown: { type: string, examples: ['/tickets?status=OPEN&level=CRITICAL'] }
+    # A-073 · extracted out of `WidgetResponse.data`, where it used to be
+    # inline, so that `WidgetResponse` and `DashboardWidgetsResponse` describe
+    # one shape rather than two copies of it. Two copies would have drifted the
+    # first time a field was added to either — and the batch route exists to
+    # serve exactly the same widgets as the single route, so a difference
+    # between them is always a bug and never a feature.
+    #
+    # Structurally identical to what was inline here, so the generated
+    # TypeScript stays assignable and no caller changes.
+    DashboardWidget:
+      type: object
+      properties:
+        key: { type: string }
+        asOf: { type: string, format: date-time }
+        # A-056 · additive and optional. Non-null when the caller's role has
+        # no summary table that can answer this widget — the delivery roles
+        # read `resource_daily_stats`, which carries no task-type split, no
+        # four-way priority breakdown and no aging buckets.
+        #
+        # Deliberately not an empty `series` and not a 404. An empty series
+        # renders as "no tickets matched", which is a claim about the data
+        # and is false; a 404 on a route the role legitimately holds reads
+        # as a bug and has the client retry. Stating it also stops the
+        # frontend re-deriving the role rule for itself, which is the drift
+        # `DashboardScope` exists on the server to prevent.
+        #
+        # ⚠️ contracts/ is Stream D's — flagged for Debashis (D-001).
+        unavailableReason: { type: [string, 'null'] }
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              points:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    x: { type: [string, number] }
+                    y: { type: number }
+                    drillDown: { type: [string, 'null'] }
     WidgetResponse:
       type: object
       required: [data]
       properties:
+        data: { $ref: '#/components/schemas/DashboardWidget' }
+    # A-073 · the batch form. An ARRAY rather than an object keyed by widget
+    # key: every widget already carries its own `key`, so a keyed object would
+    # state it twice and the two could disagree, and an `additionalProperties`
+    # map generates as a TypeScript index signature which loses the per-widget
+    # type the client wants.
+    #
+    # The array MAY be shorter than the `keys` requested. A key nothing
+    # implements is dropped rather than failing the whole batch — a missing
+    # tile is a better answer than a blank dashboard — so clients match on
+    # `key` and must not assume position.
+    DashboardWidgetsResponse:
+      type: object
+      required: [data]
+      properties:
         data:
-          type: object
-          properties:
-            key: { type: string }
-            asOf: { type: string, format: date-time }
-            # A-056 · additive and optional. Non-null when the caller's role has
-            # no summary table that can answer this widget — the delivery roles
-            # read `resource_daily_stats`, which carries no task-type split, no
-            # four-way priority breakdown and no aging buckets.
-            #
-            # Deliberately not an empty `series` and not a 404. An empty series
-            # renders as "no tickets matched", which is a claim about the data
-            # and is false; a 404 on a route the role legitimately holds reads
-            # as a bug and has the client retry. Stating it also stops the
-            # frontend re-deriving the role rule for itself, which is the drift
-            # `DashboardScope` exists on the server to prevent.
-            #
-            # ⚠️ contracts/ is Stream D's — flagged for Debashis (D-001).
-            unavailableReason: { type: [string, 'null'] }
-            series:
-              type: array
-              items:
-                type: object
-                properties:
-                  name: { type: string }
-                  points:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        x: { type: [string, number] }
-                        y: { type: number }
-                        drillDown: { type: [string, 'null'] }
+          type: array
+          items: { $ref: '#/components/schemas/DashboardWidget' }
     ReportCategory:
       type: string
       description: >

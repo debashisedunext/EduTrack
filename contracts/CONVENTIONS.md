@@ -172,7 +172,22 @@ product already enforces:
 | `/chat/ticket-cards` | Bounded by the caller's own `codes` list, and capped below that |
 | `/projects/{id}/members` | One project's team — tens of people, and the S-10 Team tab totals their allocations, so it reads the whole set every time regardless |
 
+| `/dashboard/widgets` | A-073 — the caller supplies the keys, and the `keys` enum is closed at 14 |
+
 These return `data` with no `meta`. That is the signal that the list is complete.
+
+`/dashboard/widgets` (A-073) is the `/chat/ticket-cards` argument applied exactly:
+**you cannot page a lookup whose keys you supplied.** A client asks for the widgets
+it is about to draw — ten on the fullest dashboard, two on a Developer's — and the
+contract's own closed enum caps any request at fourteen, so no caller can name a
+fifteenth.
+
+Worth saying why a cursor here would be actively wrong rather than merely
+unnecessary: this endpoint exists to remove round trips from S-05's first paint, and
+a second page would be a second round trip — the very cost it was built to delete.
+Unlike `/reports/schedules`, its ceiling is not a habit that could quietly stop
+holding; it is the enum. The only way this exemption becomes false is somebody
+adding a fifteenth widget key, which is a contract change and gets read.
 
 `/notifications/pending` (D-046) is the one exemption that is not a size bound.
 It is a **queue**: the client acknowledges what it showed, and the next call

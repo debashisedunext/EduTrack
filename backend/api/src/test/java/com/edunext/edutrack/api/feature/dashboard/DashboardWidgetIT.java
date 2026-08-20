@@ -991,6 +991,132 @@ class DashboardWidgetIT {
         }
     }
 
+    // ── A-073 · the batch route ──────────────────────────────────────────────
+
+    /**
+     * Batching is a transport change. The instant a widget renders even
+     * slightly differently in a batch than it does alone, this endpoint stops
+     * being an optimisation and becomes a second implementation of the
+     * dashboard — so the first test here compares the two directly rather than
+     * asserting values a divergent copy could also satisfy.
+     */
+    @Nested
+    @DisplayName("A-073 · several widgets in one request")
+    class Batch {
+
+        /**
+         * The equivalence test, over the whole implemented set rather than a
+         * sample — the failure it guards against is one widget taking a
+         * different path through the switch, and a sample is exactly how that
+         * one gets missed.
+         */
+        @Test
+        @DisplayName("renders every widget identically to the single route")
+        void batchMatchesTheSingleRoute() {
+            List<String> keys = List.of("type-donut", "daily-stacked", "velocity", "resource-load",
+                    "priority-bar", "aging-buckets", "calendar-heatmap", "sla-gauge",
+                    "project-treemap", "client-volume");
+
+            List<WidgetDtos.Widget> batched =
+                    service.widgets(caller(me, "ADMIN", List.of()), keys, null, D1, D3).widgets();
+
+            assertThat(batched).extracting(WidgetDtos.Widget::key).containsExactlyElementsOf(keys);
+            for (String key : keys) {
+                WidgetDtos.Widget alone = widget("ADMIN", key, null);
+                WidgetDtos.Widget together = batched.stream()
+                        .filter(w -> key.equals(w.key())).findFirst().orElseThrow();
+                assertThat(together)
+                        .as("widget '%s' must render the same in a batch as it does alone", key)
+                        .isEqualTo(alone);
+            }
+        }
+
+        /**
+         * A blank dashboard is a worse answer than a missing tile. The single
+         * route's 404 is right when the key is the whole request; here it would
+         * take out the other nine.
+         */
+        @Test
+        @DisplayName("drops a key nothing implements rather than failing the set")
+        void unimplementedKeysAreDroppedNotFatal() {
+            WidgetService.RenderedBatch batch = service.widgets(
+                    caller(me, "ADMIN", List.of()),
+                    List.of("type-donut", "stage-funnel", "velocity"), null, D1, D3);
+
+            assertThat(batch.widgets()).extracting(WidgetDtos.Widget::key)
+                    .containsExactly("type-donut", "velocity");
+        }
+
+        /**
+         * The inconsistency the per-request version could produce and this one
+         * cannot: served separately each tile read {@code computed_at} for
+         * itself, so a refresh committing mid-paint could leave the screen
+         * showing two moments side by side while presenting them as one.
+         */
+        @Test
+        @DisplayName("every widget in a batch carries the same asOf")
+        void oneAsOfForTheWholePaint() {
+            List<WidgetDtos.Widget> batched = service.widgets(
+                    caller(me, "ADMIN", List.of()),
+                    List.of("type-donut", "daily-stacked", "priority-bar"), null, D1, D3).widgets();
+
+            assertThat(batched).extracting(WidgetDtos.Widget::asOf).doesNotContainNull();
+            assertThat(batched).extracting(WidgetDtos.Widget::asOf)
+                    .containsOnly(batched.getFirst().asOf());
+        }
+
+        /** Asking twice for one key must not render it twice. */
+        @Test
+        @DisplayName("collapses duplicates and keeps the order asked for")
+        void duplicatesCollapse() {
+            List<WidgetDtos.Widget> batched = service.widgets(
+                    caller(me, "ADMIN", List.of()),
+                    List.of("velocity", "type-donut", "velocity"), null, D1, D3).widgets();
+
+            assertThat(batched).extracting(WidgetDtos.Widget::key)
+                    .containsExactly("velocity", "type-donut");
+        }
+
+        /**
+         * The validator covers the keys SERVED, not the keys asked for.
+         * Otherwise two genuinely different responses share an ETag whenever an
+         * unimplemented key is dropped, and a client that changed its request
+         * would be told nothing had changed.
+         */
+        @Test
+        @DisplayName("the ETag follows the keys served, not the keys requested")
+        void etagCoversTheKeysServed() {
+            CallerIdentity admin = caller(me, "ADMIN", List.of());
+
+            String one = service.widgets(admin, List.of("type-donut"), null, D1, D3).etag();
+            String two = service.widgets(admin, List.of("type-donut", "velocity"), null, D1, D3).etag();
+            String alsoOne = service.widgets(admin,
+                    List.of("type-donut", "stage-funnel"), null, D1, D3).etag();
+
+            assertThat(one).isNotNull().isNotEqualTo(two);
+            // stage-funnel is dropped, so this served exactly what the first did.
+            assertThat(alsoOne).isEqualTo(one);
+        }
+
+        /**
+         * A delivery role has no summary table that answers the donut and says
+         * so per widget. The batch must carry that sentence through rather than
+         * refusing the request — a Developer still gets the widgets their table
+         * can answer.
+         */
+        @Test
+        @DisplayName("an unavailable widget explains itself without failing the batch")
+        void unavailableWidgetsSurviveTheBatch() {
+            List<WidgetDtos.Widget> batched = service.widgets(
+                    caller(me, "DEVELOPER", List.of()),
+                    List.of("type-donut", "velocity"), null, D1, D3).widgets();
+
+            assertThat(batched).hasSize(2);
+            assertThat(batched.getFirst().unavailableReason()).isNotNull();
+            assertThat(batched.getLast().unavailableReason()).isNull();
+        }
+    }
+
     // ── fixture ──────────────────────────────────────────────────────────────
 
     private WidgetDtos.Widget widget(String role, String key, List<Long> projects) {

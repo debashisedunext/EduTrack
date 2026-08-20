@@ -1,5 +1,7 @@
 import type { GetDashboardWidgetParams } from '@/api/generated/model'
 
+import { DashboardWidgetBatch } from './DashboardWidgetBatch'
+import type { WidgetKey } from './WidgetFrame'
 import { WidgetFrame } from './WidgetFrame'
 import { useDashboardVariant } from './useDashboardVariant'
 import { AgingBuckets } from './charts/AgingBuckets'
@@ -51,37 +53,65 @@ import { VelocityLines } from './charts/VelocityLines'
  * subset with the word "only" — a deliberate omission, not an oversight, and a
  * one-line change here if the variant should grow.
  */
+/**
+ * A-073 · the keys each variant renders, listed once so the batch asks for
+ * exactly what is drawn.
+ *
+ * These must stay in step with the `WidgetFrame`s below. A key rendered but not
+ * listed still works — `useWidget` falls back to its own request — but silently
+ * costs the extra round trip this batching exists to remove; a key listed but
+ * not rendered costs a query for a chart nobody sees. `DashboardWidgetsBatchTest`
+ * pins both directions so the drift is a failing test rather than a slow page.
+ */
+const OWN_WORK_KEYS = ['velocity', 'aging-buckets'] as const satisfies readonly WidgetKey[]
+
+const FULL_KEYS = [
+  'type-donut',
+  'daily-stacked',
+  'velocity',
+  'resource-load',
+  'priority-bar',
+  'aging-buckets',
+  'calendar-heatmap',
+  'sla-gauge',
+  'project-treemap',
+  'client-volume',
+] as const satisfies readonly WidgetKey[]
+
 export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams }) {
   const variant = useDashboardVariant()
 
   if (variant === 'own-work') {
     return (
-      <div className="grid gap-3 xl:grid-cols-2">
-        <WidgetFrame
-          widgetKey="velocity"
-          title="My velocity (tickets closed per week)"
-          categoryLabel="Week beginning"
-          params={params}
-        >
-          {(series) => <VelocityLines series={series} />}
-        </WidgetFrame>
+      <DashboardWidgetBatch keys={OWN_WORK_KEYS} params={params}>
+        <div className="grid gap-3 xl:grid-cols-2">
+          <WidgetFrame
+            widgetKey="velocity"
+            title="My velocity (tickets closed per week)"
+            categoryLabel="Week beginning"
+            params={params}
+          >
+            {(series) => <VelocityLines series={series} />}
+          </WidgetFrame>
 
-        <WidgetFrame
-          widgetKey="aging-buckets"
-          // Titled as theirs. The server scopes it to them either way, and a
-          // bar chart headed "Ticket aging" beside five figures that are all
-          // "mine" invites being read as the organisation's.
-          title="My ticket aging"
-          categoryLabel="Age range"
-          params={params}
-        >
-          {(series) => <AgingBuckets series={series} />}
-        </WidgetFrame>
-      </div>
+          <WidgetFrame
+            widgetKey="aging-buckets"
+            // Titled as theirs. The server scopes it to them either way, and a
+            // bar chart headed "Ticket aging" beside five figures that are all
+            // "mine" invites being read as the organisation's.
+            title="My ticket aging"
+            categoryLabel="Age range"
+            params={params}
+          >
+            {(series) => <AgingBuckets series={series} />}
+          </WidgetFrame>
+        </div>
+      </DashboardWidgetBatch>
     )
   }
 
   return (
+    <DashboardWidgetBatch keys={FULL_KEYS} params={params}>
     <div className="grid gap-3 xl:grid-cols-2">
       <WidgetFrame
         widgetKey="type-donut"
@@ -181,5 +211,6 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
         {(series) => <ClientVolumeBar series={series} />}
       </WidgetFrame>
     </div>
+    </DashboardWidgetBatch>
   )
 }

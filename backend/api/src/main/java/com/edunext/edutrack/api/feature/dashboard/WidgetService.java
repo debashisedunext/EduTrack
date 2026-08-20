@@ -132,13 +132,129 @@ class WidgetService {
             return Optional.empty();
         }
 
+        Window window = window(from, to);
+        DashboardScope scope = DashboardScope.of(caller);
+        Instant asOf = summaries.computedAt(window.start(), window.end()).orElse(null);
+
+        WidgetDtos.Widget widget = render(widgetKey, scope, projectId, window, asOf);
+
+        // An unavailable widget gets no validator. Its answer does not depend on
+        // computed_at at all — it depends on the caller's role — so an ETag
+        // built from the summary tables would let a 304 outlive a role change
+        // and keep showing somebody the refusal after they had been promoted.
+        String etag = widget.unavailableReason() != null
+                ? null
+                : etagOf(widgetKey, scope, projectId, window.start(), window.end(), asOf);
+
+        return Optional.of(new Rendered(widget, etag));
+    }
+
+    /**
+     * A-073 · every requested widget, in one request and one transaction.
+     *
+     * <h2>Why this exists — a latency argument, not a tidiness one</h2>
+     *
+     * <p>S-05's first paint asks for ten widgets. Served one HTTP request each
+     * that is eleven round trips counting {@code /dashboard/summary}, and A-073's
+     * load test showed the cost is almost entirely <em>per request</em> rather
+     * than per widget: at 50,000 tickets a widget's own work measured ~7 ms
+     * against ~20 ms for the whole call, and all ten widgets landed within 12 ms
+     * of each other. There is no slow widget to find. Ten times a fixed cost is
+     * the problem, so the only thing that helps is asking ten times less often.
+     *
+     * <p>Blueprint §9.4 reached this conclusion once already, for the ticket
+     * detail page: <i>"Ticket detail loads in one aggregated endpoint
+     * ({@code /tickets/:id/full}) to avoid a waterfall of 6 calls."</i> The
+     * dashboard had a waterfall of eleven and no equivalent. This is it.
+     *
+     * <h2>What is saved beyond the round trips</h2>
+     *
+     * <p>{@code computed_at} was read once per widget — ten identical
+     * {@code SELECT MAX(computed_at)} per paint for a value that is the same for
+     * all of them by construction. Here the window is resolved once and
+     * {@code asOf} read once.
+     *
+     * <p>That also closes a real inconsistency the per-request version could
+     * produce: if A-051 committed a refresh midway through a paint, the ten tiles
+     * could each carry a different {@code asOf} and the screen would show two
+     * different moments side by side while presenting them as one.
+     *
+     * <h2>An unknown key is omitted, not a 400</h2>
+     *
+     * <p>The single-widget route answers 404 for a key nothing implements, which
+     * is right when that key is the whole request. It is wrong here: a batch that
+     * fails entirely because one of ten keys is unimplemented turns a missing tile
+     * into a blank dashboard. So unknown keys are dropped and the rest served —
+     * every widget carries its own {@code key}, so a client matches on that and
+     * can see what did not come back. Same degrade-per-tile principle
+     * {@code unavailableReason} already applies to a role that cannot be served:
+     * one tile explains itself, the page still renders.
+     *
+     * <p>Duplicates collapse and order is preserved, so a client asking twice for
+     * one key pays once.
+     */
+    @Transactional(readOnly = true)
+    RenderedBatch widgets(CallerIdentity caller, List<String> widgetKeys,
+                          Long projectId, LocalDate from, LocalDate to) {
+        List<String> keys = widgetKeys.stream()
+                .filter(WidgetService::isImplemented)
+                .distinct()
+                .toList();
+
+        Window window = window(from, to);
+        DashboardScope scope = DashboardScope.of(caller);
+        Instant asOf = summaries.computedAt(window.start(), window.end()).orElse(null);
+
+        List<WidgetDtos.Widget> rendered = keys.stream()
+                .map(key -> render(key, scope, projectId, window, asOf))
+                .toList();
+
+        // One validator for the whole set, over the keys actually SERVED. A
+        // per-widget ETag cannot be reused — the client holds one response and so
+        // can send only one If-None-Match — and hashing the keys as requested
+        // rather than as served would let two genuinely different responses share
+        // a validator whenever an unimplemented key was dropped.
+        //
+        // Null when any widget is unavailable, for the reason the single route
+        // drops it too: availability turns on the caller's role, which no
+        // summary-table timestamp can witness, so a 304 would outlive a promotion.
+        boolean anyUnavailable = rendered.stream().anyMatch(w -> w.unavailableReason() != null);
+        String etag = anyUnavailable
+                ? null
+                : etagOf(String.join(",", keys), scope, projectId, window.start(), window.end(), asOf);
+
+        return new RenderedBatch(rendered, etag);
+    }
+
+    /** {@link #widgets}' return: the widgets served, and one validator for the set. */
+    record RenderedBatch(List<WidgetDtos.Widget> widgets, String etag) {
+    }
+
+    /**
+     * The resolved window. Extracted so {@link #widget} and {@link #widgets}
+     * cannot drift on §S-05's default range — the reason {@link Rendered}'s note
+     * gives for the controller not defaulting the dates itself applies twice as
+     * hard now there are two entry points.
+     */
+    private record Window(LocalDate start, LocalDate end) {
+    }
+
+    private Window window(LocalDate from, LocalDate to) {
         LocalDate end = to != null ? to : LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
         LocalDate start = from != null ? from : end.minusDays(DEFAULT_WINDOW_DAYS - 1L);
+        return new Window(start, end);
+    }
 
-        DashboardScope scope = DashboardScope.of(caller);
-        Instant asOf = summaries.computedAt(start, end).orElse(null);
-
-        WidgetDtos.Widget widget = switch (widgetKey) {
+    /**
+     * The switch, with the window and {@code asOf} already resolved. Both entry
+     * points route through here, so a widget cannot be rendered one way singly
+     * and another way in a batch.
+     */
+    private WidgetDtos.Widget render(String widgetKey, DashboardScope scope, Long projectId,
+                                     Window window, Instant asOf) {
+        LocalDate start = window.start();
+        LocalDate end = window.end();
+        return switch (widgetKey) {
             case "type-donut" -> typeDonut(scope, projectId, start, end, asOf);
             case "daily-stacked" -> dailyStacked(scope, projectId, start, end, asOf);
             case "velocity" -> velocity(scope, start, end, asOf);
@@ -151,16 +267,6 @@ class WidgetService {
             case "client-volume" -> clientVolume(scope, projectId, start, end, asOf);
             default -> throw new IllegalStateException("implemented key with no branch: " + widgetKey);
         };
-
-        // An unavailable widget gets no validator. Its answer does not depend on
-        // computed_at at all — it depends on the caller's role — so an ETag
-        // built from the summary tables would let a 304 outlive a role change
-        // and keep showing somebody the refusal after they had been promoted.
-        String etag = widget.unavailableReason() != null
-                ? null
-                : etagOf(widgetKey, scope, projectId, start, end, asOf);
-
-        return Optional.of(new Rendered(widget, etag));
     }
 
     /**

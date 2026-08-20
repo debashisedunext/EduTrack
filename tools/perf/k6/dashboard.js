@@ -63,6 +63,11 @@ const TOKEN = __ENV.TOKEN || ''
 // higher. THINK=0 turns this back into a capacity measurement.
 const THINK = Number(__ENV.THINK ?? 20)
 
+// FANOUT=1 restores the pre-A-073 shape — one request per widget — so the
+// change can be re-measured on demand instead of believed. Default is the
+// current design: /dashboard/widgets, one request for the set.
+const FANOUT = __ENV.FANOUT === '1'
+
 // The ten keys WidgetService.IMPLEMENTED actually serves. Hitting a key
 // it does not implement returns 404 and would be scored as a fast
 // success, which is the quietest way for a load test to measure nothing.
@@ -130,23 +135,44 @@ export default function () {
     })
   })
 
-  group('fan-out', () => {
-    // http.batch, not a loop: the browser issues these in parallel and a
-    // serial loop would report a p95 that no user ever experiences —
-    // flattering on queueing and pessimistic on total time, wrong in both
-    // directions at once.
-    const requests = WIDGETS.map((key) => [
-      'GET',
-      `${BASE}/api/v1/dashboard/widget/${key}`,
-      null,
-      params,
-    ])
-    const responses = http.batch(requests)
-    responses.forEach((res, i) => {
-      widgetTime.add(res.timings.duration)
-      check(res, {
-        [`widget ${WIDGETS[i]} 200`]: (r) => r.status === 200,
+  group('widgets', () => {
+    if (FANOUT) {
+      // The pre-A-073 shape, kept so the improvement can be re-measured
+      // rather than taken on trust — FANOUT=1 restores one request per
+      // widget. http.batch and not a loop, because the browser issued these
+      // in parallel and a serial loop would report a p95 nobody ever saw.
+      const requests = WIDGETS.map((key) => [
+        'GET',
+        `${BASE}/api/v1/dashboard/widget/${key}`,
+        null,
+        params,
+      ])
+      http.batch(requests).forEach((res, i) => {
+        widgetTime.add(res.timings.duration)
+        check(res, { [`widget ${WIDGETS[i]} 200`]: (r) => r.status === 200 })
       })
+      return
+    }
+
+    // A-073 · what the dashboard does now — one request for all ten.
+    const res = http.get(
+      `${BASE}/api/v1/dashboard/widgets?keys=${WIDGETS.join(',')}`,
+      params,
+    )
+    widgetTime.add(res.timings.duration)
+    check(res, {
+      'widgets 200': (r) => r.status === 200,
+      // The COUNT is checked, not merely the status. A batch that quietly
+      // returned three widgets would be fast and wrong — it would improve
+      // every number in this run while breaking the screen, which is the one
+      // failure a load test must never reward.
+      'widgets: all ten served': (r) => {
+        try {
+          return JSON.parse(r.body).data.length === WIDGETS.length
+        } catch (e) {
+          return false
+        }
+      },
     })
   })
 

@@ -35,13 +35,16 @@ import { DashboardWidgets } from './DashboardWidgets'
 const MANAGER_WIDGETS = 10
 
 const useGetDashboardWidget = vi.fn()
+const useGetDashboardWidgets = vi.fn()
 vi.mock('@/api/generated/dashboard/dashboard', () => ({
   useGetDashboardWidget: (...args: unknown[]) => useGetDashboardWidget(...args),
+  useGetDashboardWidgets: (...args: unknown[]) => useGetDashboardWidgets(...args),
 }))
 
 /** Every frame renders its title before its request settles, which is what these assert on. */
 function pending() {
   useGetDashboardWidget.mockReturnValue({ data: undefined, isPending: true, isError: false })
+  useGetDashboardWidgets.mockReturnValue({ data: undefined, isPending: true, isError: false })
 }
 
 function signedInAs(role: string | undefined) {
@@ -63,9 +66,23 @@ function renderWidgets() {
   )
 }
 
-/** The key of every widget the grid asked the server for, in render order. */
+/**
+ * The key of every widget the grid asked the server for, in render order.
+ *
+ * A-073 · read off the batch call rather than the per-widget one. The grid now
+ * asks for its whole variant in a single request, so the keys it sends are the
+ * `keys` parameter — and reading them from the per-widget hook would still
+ * "pass" while asserting nothing about what was fetched, because `useWidget`
+ * calls that hook for every frame regardless and merely disables it inside a
+ * batch. Asserting on the disabled call would be the quietest possible way for
+ * this suite to stop testing the thing it exists for.
+ */
 function requestedKeys(): string[] {
-  return useGetDashboardWidget.mock.calls.map((call) => call[0] as string)
+  const calls = useGetDashboardWidgets.mock.calls
+  if (calls.length === 0) {
+    return []
+  }
+  return ((calls[0][0] as { keys?: string[] }).keys ?? []).slice()
 }
 
 beforeEach(() => {
