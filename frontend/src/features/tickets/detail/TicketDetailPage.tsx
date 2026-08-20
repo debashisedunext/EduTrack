@@ -6,6 +6,7 @@ import { useListModules, useListTaskTypes } from '@/api/generated/masters/master
 import { useListClientContacts } from '@/api/generated/clients/clients'
 import { useGetMe } from '@/api/generated/auth/auth'
 import { ApiError } from '@/api/http'
+import type { RibbonSegment as RibbonSegmentData } from '@/api/generated/model/ribbonSegment'
 
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -30,6 +31,7 @@ import { useEffortTab } from '../effort/useEffortTab'
 import { canChangeLevel } from './levelChange'
 import { StepsToGenerateSection } from './WhereItHappenedControls'
 import { PendingSection } from './PendingSection'
+import type { SegmentFilter } from './segmentFilter'
 import { TicketAttachmentsSection } from './TicketAttachmentsSection'
 import { TicketDetailHeader } from './TicketDetailHeader'
 import { TicketDetailTabs, type DetailTab } from './TicketDetailTabs'
@@ -112,6 +114,53 @@ export function TicketDetailPage() {
 
   const detail = data?.data
   const ticket = detail?.ticket
+
+  /*
+   * C-052 · the ribbon segment filtering History and Effort below it. Local
+   * state, not the URL: it is a reading filter over data the page already
+   * has, the same category `includeComments` and `clientVisibleOnly` are
+   * already in, not a fact about which ticket state is on screen the way
+   * `?cycle=` and `?tab=` are.
+   *
+   * `cycleNo` is stamped from `detail.ribbon.cycleNo` — the cycle whose
+   * segments were actually clicked — because `segmentFilter.ts`'s own note
+   * explains why stage and iteration alone can fold a later cycle's rows into
+   * an earlier cycle's filter after a reopen.
+   *
+   * Clicking the already-selected segment clears the filter, the ordinary
+   * toggle a filter chip's own dismiss button also drives.
+   */
+  const [selectedSegment, setSelectedSegment] = React.useState<SegmentFilter | undefined>(undefined)
+
+  const selectSegment = React.useCallback(
+    (segment: RibbonSegmentData) => {
+      const stageCode = segment.stageCode
+      if (!stageCode) return
+      setSelectedSegment((prev) =>
+        prev &&
+        prev.stageCode === stageCode &&
+        (prev.iterationNo ?? 1) === (segment.iterationNo ?? 1) &&
+        prev.cycleNo === detail?.ribbon?.cycleNo
+          ? undefined
+          : {
+              stageCode,
+              iterationNo: segment.iterationNo,
+              cycleNo: detail?.ribbon?.cycleNo,
+              displayName: segment.displayName ?? stageCode,
+            },
+      )
+    },
+    [detail?.ribbon?.cycleNo],
+  )
+
+  const clearSegmentFilter = React.useCallback(() => setSelectedSegment(undefined), [])
+
+  // A different ticket or a different cycle's ribbon invalidates whichever
+  // segment was selected — its stage codes belong to the journey that just
+  // left the screen.
+  React.useEffect(() => {
+    setSelectedSegment(undefined)
+  }, [ticketId, cycle])
 
   /*
    * C-033 · who is reading, which decides which comment cards offer Edit and
@@ -232,6 +281,8 @@ export function TicketDetailPage() {
               hasMore={history.hasMore}
               isLoadingMore={history.isLoadingMore}
               onLoadMore={history.loadMore}
+              filter={selectedSegment}
+              onClearFilter={clearSegmentFilter}
             />
           ) : id === 'attachments' ? (
             <AttachmentsTab
@@ -251,6 +302,8 @@ export function TicketDetailPage() {
               hasMore={effortTab.hasMore}
               isLoadingMore={effortTab.isLoadingMore}
               onLoadMore={effortTab.loadMore}
+              filter={selectedSegment}
+              onClearFilter={clearSegmentFilter}
             />
           ) : id === 'journey' ? (
             <JourneyTab
@@ -287,6 +340,8 @@ export function TicketDetailPage() {
       history.hasMore,
       history.isLoadingMore,
       history.loadMore,
+      selectedSegment,
+      clearSegmentFilter,
       viewer,
       attachmentsTab.rows,
       attachmentsTab.isLoading,
@@ -375,7 +430,7 @@ export function TicketDetailPage() {
             aria-label="Workflow ribbon"
             className="rounded-card border border-border bg-surface p-2 shadow-rest"
           >
-            <RibbonStrip ribbon={detail?.ribbon} />
+            <RibbonStrip ribbon={detail?.ribbon} selectedSegment={selectedSegment} onSelectSegment={selectSegment} />
           </section>
 
           <section
