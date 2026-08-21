@@ -21,7 +21,7 @@ package com.edunext.edutrack.api.feature.tickets.attachments;
  * profile-guarded opt-in ({@code edutrack.attachments.scan.fail-open}) that
  * {@link AttachmentScanConfig} refuses to start with anywhere else.
  */
-interface AttachmentScanner {
+public interface AttachmentScanner {
 
     enum Verdict {
 

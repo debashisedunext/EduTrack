@@ -4635,11 +4635,79 @@ export const restHandlers = [
     const { page, meta } = paginate(rows, new URL(request.url));
     return ok(page, meta);
   }),
+  /**
+   * D-053 · §7.6's file and image share.
+   *
+   * The mock seals CLEAN immediately where the server queues an AV scan and
+   * answers PENDING. That is a deliberate divergence and the only one: a mock
+   * that stayed PENDING for ever would give the client no way to reach the
+   * rendered state at all, and PENDING is still reachable — a fixture can set
+   * `scanStatus` on a row directly, which is how "not downloadable until
+   * CLEAN" is tested.
+   */
+  http.post(url('/chat/threads/:threadId/attachments'), ({ params }) => {
+    const db = getDb();
+    const thread = db.chatThreads.find((t) => t.id === Number(params.threadId));
+    // Existence only, matching every other chat handler in this file.
+    //
+    // ⚠ The **server** additionally requires participation and answers 404 for
+    // a thread the caller is not in — the same 404-not-403 rule row scoping
+    // follows. This mock has never modelled chat participation on any route
+    // (`GET …/messages` and `POST …/messages` both check existence alone), and
+    // enforcing it on this one route only would make the mock internally
+    // inconsistent in a way that reads as a bug in whichever screen hits it.
+    // Modelling it properly is one change across every chat handler, and it
+    // belongs to whoever needs it rather than being smuggled in here.
+    if (!thread) return notFound('Thread');
+
+    // ⚠ **The uploaded file is deliberately not read**, exactly as
+    // `POST /imports/:schema/upload` above does not read its own — and for the
+    // reason documented there and at length in `useTicketAttachments.test.tsx`:
+    // under vitest no genuine multipart body reaches a handler, because jsdom
+    // supplies FormData while Node supplies Request. `request.formData()` here
+    // does not fail, it *hangs*, and every test that uploads times out with no
+    // hint why.
+    //
+    // So the row is echoed from constants. That costs one thing worth stating:
+    // this handler cannot prove the *name* round-trips. The composer therefore
+    // shows the browser's own `File.name` on its pending chip — which is the
+    // name the user picked and the honest thing to show before a server has
+    // answered — and the rendered message shows the server's, which is what
+    // the constant below exercises.
+    const contentType = 'image/png';
+    const row = {
+      id: nextId(db, 'chatAttachment'),
+      threadId: thread.id,
+      messageId: null,
+      fileName: 'screenshot.png',
+      contentType,
+      sizeBytes: 4096,
+      scanStatus: 'CLEAN' as const,
+      uploadedById: db.currentUserId,
+      createdAt: new Date().toISOString(),
+    };
+    db.chatAttachments.push(row);
+    return ok(
+      {
+        id: row.id, fileName: row.fileName, contentType: row.contentType,
+        sizeBytes: row.sizeBytes, scanStatus: row.scanStatus,
+        isImage: contentType.startsWith('image/'),
+        downloadUrl: `/mock-files/chat/${row.id}`,
+        uploadedBy: userRef(row.uploadedById, db),
+        createdAt: row.createdAt,
+      },
+      undefined,
+      { status: 201 },
+    );
+  }),
+
   http.post(url('/chat/threads/:threadId/messages'), async ({ params, request }) => {
     const db = getDb();
     const thread = db.chatThreads.find((t) => t.id === Number(params.threadId));
     if (!thread) return notFound('Thread');
-    const { body } = (await request.json()) as { body: string };
+    const { body, attachmentIds } = (await request.json()) as {
+      body: string; attachmentIds?: number[];
+    };
     if (!body?.trim()) return validationFailed({ body: ['must not be blank'] });
     const m = {
       id: nextId(db, 'message'), threadId: thread.id, body,
@@ -4649,6 +4717,17 @@ export const restHandlers = [
     };
     db.chatMessages.push(m);
     thread.lastMessageAt = m.createdAt;
+
+    // D-053 · bind the uploaded files. An id that is not this thread's, or is
+    // already carried, is skipped rather than refused — the server's own rule:
+    // refusing lets a caller probe for which ids exist by watching which sends
+    // fail, and loses the message rather than one file the sender can re-attach.
+    for (const id of attachmentIds ?? []) {
+      const file = db.chatAttachments.find(
+        (a) => a.id === id && a.threadId === thread.id && a.messageId === null,
+      );
+      if (file) file.messageId = m.id;
+    }
 
     // D-056. A reply closes whatever it answers, here as on the server —
     // otherwise the badge and the awaiting-response list would only ever grow
@@ -5420,6 +5499,32 @@ export function ticketCardsFor(codes: string[], db = getDb()) {
     }));
 }
 
+/**
+ * D-053 · one message's shared files.
+ *
+ * `downloadUrl` only for a CLEAN row — the server's own rule, and the one
+ * worth mirroring: the requirement is that an unscanned file not become
+ * *readable*, and an absent URL is what enforces that. A mock that always
+ * handed one back would let the client be built without the pending state.
+ */
+function chatAttachmentsFor(messageId: number, db: import('../db').Db = getDb()) {
+  return db.chatAttachments
+    .filter((a) => a.messageId === messageId)
+    .map((a) => ({
+      id: a.id,
+      fileName: a.fileName,
+      contentType: a.contentType,
+      sizeBytes: a.sizeBytes,
+      scanStatus: a.scanStatus,
+      // From the sniffed type, never the file name — a client that renders an
+      // <img> off an extension will happily try it on a renamed executable.
+      isImage: a.contentType.startsWith('image/'),
+      downloadUrl: a.scanStatus === 'CLEAN' ? `/mock-files/chat/${a.id}` : null,
+      uploadedBy: userRef(a.uploadedById, db),
+      createdAt: a.createdAt,
+    }));
+}
+
 function messageDto(m: import('../db').ChatMessage) {
   return {
     // The tombstone: the row is still here, the words are not (D-057). A mock
@@ -5428,7 +5533,11 @@ function messageDto(m: import('../db').ChatMessage) {
     id: m.id, body: m.isDeleted ? null : m.body, author: userRef(m.authorId), kind: m.kind,
     isEdited: m.isEdited, isDeleted: m.isDeleted,
     editableUntil: new Date(Date.parse(m.createdAt) + 5 * 60_000).toISOString(),
-    attachments: [], readBy: m.readBy,
+    // D-053 · §7.6's file share. Empty on a tombstone, exactly as on the
+    // server: a deleted message's content is withheld, and a file list is
+    // content. The rows survive.
+    attachments: m.isDeleted ? [] : chatAttachmentsFor(m.id),
+    readBy: m.readBy,
     // Resolved per read against the caller's scope, never stored on the row —
     // and always empty on a tombstone, whose body named nothing the reader can
     // still see.

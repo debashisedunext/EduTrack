@@ -51,7 +51,7 @@ import java.io.ByteArrayOutputStream;
  * no privacy gain, since a colour profile describes a monitor and not a person.
  */
 @Component
-class ImageMetadataStripper {
+public class ImageMetadataStripper {
 
     private static final Logger log = LoggerFactory.getLogger(ImageMetadataStripper.class);
 
@@ -62,7 +62,7 @@ class ImageMetadataStripper {
      *         no metadata ({@link AttachmentType#carriesMetadata()}) or could not
      *         be parsed
      */
-    byte[] strip(AttachmentType type, byte[] content) {
+    public byte[] strip(AttachmentType type, byte[] content) {
         if (content == null || content.length == 0 || !type.carriesMetadata()) {
             return content;
         }

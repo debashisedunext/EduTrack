@@ -515,6 +515,21 @@ export interface ChatThread {
   id: number; kind: 'TICKET' | 'DIRECT' | 'PROJECT'; title: string;
   ticketId: string | null; participantIds: number[]; lastMessageAt: string | null;
 }
+/**
+ * D-053 · a file shared into a thread (§7.6).
+ *
+ * Held on the db rather than in a handler module for `resetDb()`'s reason —
+ * state outside this object survives a reset and leaks between tests.
+ */
+export interface ChatAttachment {
+  id: number; threadId: number;
+  /** Null between the upload and the message that carries it — two requests, by design. */
+  messageId: number | null;
+  fileName: string; contentType: string; sizeBytes: number;
+  /** PENDING | CLEAN | INFECTED. The mock seals CLEAN immediately; the server waits for clamd. */
+  scanStatus: 'PENDING' | 'CLEAN' | 'INFECTED';
+  uploadedById: number; createdAt: string;
+}
 export interface ChatMessage {
   id: number; threadId: number; body: string; authorId: number;
   kind: 'TEXT' | 'STATUS_REQUEST' | 'SYSTEM'; isEdited: boolean; isDeleted: boolean;
@@ -562,6 +577,7 @@ export interface Db {
   attachments: Attachment[]; ticketLinks: TicketLink[]; notifications: Notification[];
   notificationPreferences: NotificationPreference[];
   emailLog: EmailLogEntry[]; chatThreads: ChatThread[]; chatMessages: ChatMessage[];
+  chatAttachments: ChatAttachment[];
   statusRequests: StatusRequest[];
   currentUserId: number;
   seq: Record<string, number>;
@@ -1485,7 +1501,7 @@ export function createDb(): Db {
     pushSubscriptions: [],
     tickets: [], cycles: [], transitions: [], effortLogs: [], history: [],
     comments: [], attachments: [], ticketLinks: [], notifications: [], notificationPreferences: [], emailLog: [],
-    chatThreads: [], chatMessages: [], statusRequests: [],
+    chatThreads: [], chatMessages: [], chatAttachments: [], statusRequests: [],
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
     seq: {},
     twoFactor: {}, // opt-in, so nobody starts enrolled

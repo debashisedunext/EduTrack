@@ -6247,6 +6247,59 @@ paths:
               schema: { $ref: '#/components/schemas/ChatSearchResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /chat/threads/{threadId}/attachments:
+    parameters:
+      - name: threadId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [chat]
+      operationId: uploadChatAttachment
+      summary: Share a file or image into a thread (§7.6)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Multipart, for `uploadAttachment`'s reason: a base64 JSON body inflates
+        the payload by a third and buffers the whole file as a String before
+        anything has decided whether it is acceptable.
+
+        **Upload and send are separate requests on purpose.** The file is
+        sniffed, EXIF-stripped, stored privately and queued for the AV scan
+        while the author is still typing, so the send is instant and a file that
+        is going to be refused is refused *before* they have written anything
+        rather than after, with their message lost. Pass the returned `id` in
+        `attachmentIds` when posting the message.
+
+        Answers `201` with `scanStatus: PENDING` and **no** `downloadUrl` —
+        the honest description of what has happened: the bytes are stored,
+        nothing can read them, and a verdict is pending.
+
+        Scope is thread participation, and a caller who is not in the thread
+        gets **404** — the rule every other chat read follows, so a thread
+        somebody is not in is indistinguishable from one that does not exist.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Stored; `scanStatus` is `PENDING` until the scan completes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatAttachmentResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: The file is larger than `edutrack.attachments.max-file-bytes`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /chat/threads/{threadId}/messages:
     parameters:
       - { name: threadId, in: path, required: true, schema: { type: integer, format: int64 } }
@@ -8495,6 +8548,61 @@ components:
         stageCode: { type: [string, 'null'] }
         cycleNo: { type: integer }
         createdAt: { type: string, format: date-time }
+    ChatAttachment:
+      type: object
+      description: |
+        D-053 · one file shared into a chat thread (§7.6).
+
+        **The same safety pipeline as a ticket attachment**, and deliberately
+        so: the bytes are sniffed and reconciled against the declared name,
+        EXIF is stripped, and the file is virus-scanned before it becomes
+        readable. Chat and tickets call the same beans, so there is one answer
+        to "is this file safe" rather than two that can drift.
+
+        What differs is everything a chat file does not have. There is no
+        `isClientVisible` — §7.6's three surfaces are all internal and no
+        client portal serves them, and a flag that is always false is one
+        somebody eventually sets true. There is no `stageCode` or `cycleNo`; a
+        thread has neither. And there is no 15-minute delete window of its own:
+        D-057 already governs chat immutability, and an attachment follows the
+        tombstone of the message that carries it rather than inventing a
+        second, differently-sized window over the same evidence.
+      properties:
+        id: { type: integer, format: int64 }
+        fileName: { type: string }
+        contentType:
+          type: string
+          description: |
+            **Sniffed from the bytes, never taken from the upload's declared
+            type.** `isImage` is derived from this and nothing else — a client
+            that renders an `<img>` off a file extension will happily try it on
+            a renamed executable.
+        sizeBytes: { type: integer, format: int64 }
+        scanStatus:
+          type: string
+          enum: [PENDING, CLEAN, INFECTED]
+          description: |
+            Returned, never hidden. Hiding a pending row would make a scan
+            delay indistinguishable from a failed upload and leave a user
+            re-attaching the same file; the requirement is that the file not
+            become **readable**, and the absent `downloadUrl` is what enforces
+            that.
+        isImage:
+          type: boolean
+          description: Whether the client should render it inline, decided from `contentType`.
+        downloadUrl:
+          type: [string, 'null']
+          description: |
+            Short-lived signed URL, and present **only** for a `CLEAN` row that
+            has not been tombstoned. Never a public bucket path. A URL that is
+            never issued is stronger than a row that is merely hidden.
+        uploadedBy: { $ref: '#/components/schemas/UserRef' }
+        createdAt: { type: string, format: date-time }
+    ChatAttachmentResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ChatAttachment' }
     AttachmentResponse:
       type: object
       required: [data]
@@ -11207,7 +11315,19 @@ components:
         isEdited: { type: boolean }
         isDeleted: { type: boolean }
         editableUntil: { type: [string, 'null'], format: date-time }
-        attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+        attachments:
+          type: array
+          items: { $ref: '#/components/schemas/ChatAttachment' }
+          description: |
+            D-053 · §7.6's file and image share. **Not `Attachment`**, which is
+            the ticket shape: that carries `isClientVisible`, `stageCode` and
+            `cycleNo`, none of which a chat file has, and advertising fields
+            that are permanently null is how a client comes to branch on one.
+
+            Always empty on a deleted message — §7.6 withholds a tombstoned
+            message's content on read and a file list is content. The rows
+            survive; they are simply not handed back with a message that has
+            been retracted.
         readBy: { type: array, items: { type: integer, format: int64 } }
         mentions:
           type: array

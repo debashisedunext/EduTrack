@@ -43,7 +43,7 @@ import java.util.Optional;
  * derives the stored type from the reconciled family instead.
  */
 @Component
-class AttachmentTypePolicy {
+public class AttachmentTypePolicy {
 
     private final AttachmentSniffer sniffer;
 
@@ -59,7 +59,7 @@ class AttachmentTypePolicy {
      *                  family and the corroborated extension — never from the
      *                  client's declaration
      */
-    record Accepted(AttachmentType type, String mediaType) {
+    public record Accepted(AttachmentType type, String mediaType) {
     }
 
     /**
@@ -70,7 +70,7 @@ class AttachmentTypePolicy {
      *         list, the bytes are unrecognisable, or the two disagree — 415 in
      *         every case, per the contract's {@code uploadAttachment}
      */
-    Accepted reconcile(String fileName, byte[] content) {
+    public Accepted reconcile(String fileName, byte[] content) {
         String extension = AttachmentType.extensionOf(fileName);
 
         // Order matters, exactly as it does in the browser's

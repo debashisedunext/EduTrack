@@ -2,6 +2,8 @@ import { type ChatMessage, ChatMessageKind } from '@/api/generated/model'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
 
+import { ChatAttachments } from './ChatAttachments'
+
 /**
  * D-065 · one thread's messages, oldest at the top.
  *
@@ -76,6 +78,15 @@ function MessageRow({ message }: { message: ChatMessage }) {
       ) : (
         <p className="whitespace-pre-wrap text-sm text-ink">{message.body}</p>
       )}
+
+      {/*
+        D-053 · §7.6's file and image share. Below the body, not beside it —
+        an image is usually the point of the message and a caption above it
+        reads as one. Never on a tombstone: the server withholds a deleted
+        message's attachments, and this is the same rule rendered, so a client
+        that somehow received one still does not display it.
+      */}
+      {!message.isDeleted && <ChatAttachments attachments={message.attachments} />}
 
     </li>
   )

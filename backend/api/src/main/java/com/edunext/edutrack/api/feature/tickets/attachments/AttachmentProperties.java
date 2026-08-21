@@ -53,7 +53,7 @@ import java.time.Duration;
  * @param thumbnail C-026's reductions
  */
 @ConfigurationProperties("edutrack.attachments")
-record AttachmentProperties(
+public record AttachmentProperties(
 
         @DefaultValue("PT5M") Duration signedUrlTtl,
         @DefaultValue("10485760") long maxFileBytes,
@@ -82,7 +82,7 @@ record AttachmentProperties(
      *                 scan <em>before the file becomes visible</em>", and a file
      *                 that was never scanned has not satisfied that.
      */
-    record Scan(
+    public record Scan(
             @DefaultValue("false") boolean enabled,
             @DefaultValue("localhost") String host,
             @DefaultValue("3310") int port,
@@ -113,7 +113,7 @@ record AttachmentProperties(
      *                camera's full frame, far above any screenshot and far below
      *                anything that could hurt
      */
-    record Thumbnail(
+    public record Thumbnail(
             @DefaultValue("true") boolean enabled,
             @DefaultValue("320") int maxEdge,
             @DefaultValue("50000000") long maxSourcePixels) {

@@ -22,7 +22,7 @@ import java.io.Serial;
  * product behaviour a user is entitled to know, and is on screen in the picker
  * already.
  */
-class UnsupportedAttachmentTypeException extends RuntimeException {
+public class UnsupportedAttachmentTypeException extends RuntimeException {
 
     @Serial
     private static final long serialVersionUID = 1L;

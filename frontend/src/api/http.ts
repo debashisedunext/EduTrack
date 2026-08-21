@@ -158,6 +158,14 @@ function query(params?: Record<string, unknown>): string {
   return qs ? `?${qs}` : '';
 }
 
+/** Every header except `Content-Type`, matched case-insensitively — HTTP header names are. */
+function withoutContentType(headers: Record<string, string> | undefined): Record<string, string> {
+  if (!headers) return {};
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-type'),
+  );
+}
+
 export async function http<T>({
   url,
   method,
@@ -180,8 +188,22 @@ export async function http<T>({
       ...(isForm ? {} : data !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...(csrf ? { [CSRF_HEADER]: csrf } : {}),
-      // Spread last, so an explicit per-call header still wins.
-      ...headers,
+      // Spread last, so an explicit per-call header still wins — except
+      // Content-Type on a multipart body, which nobody may set.
+      //
+      // **orval emits `'Content-Type': 'multipart/form-data'` on every
+      // generated upload**, and that header is unusable without the boundary
+      // parameter that only the FormData serialiser knows. Setting it means
+      // the request goes out announcing a multipart body with no boundary, and
+      // the server answers "missing boundary in content-type header" — a
+      // failure that reads as a broken upload endpoint rather than as a header
+      // nobody should have written.
+      //
+      // Dropping it lets `fetch` set `multipart/form-data; boundary=…` itself,
+      // which is the only way the header can be correct. This is not a
+      // workaround for one route: it is true of every multipart request the
+      // generated client will ever make (D-053 found it on the first one).
+      ...(isForm ? withoutContentType(headers) : headers),
     },
     body: isForm ? data : data !== undefined ? JSON.stringify(data) : undefined,
   });

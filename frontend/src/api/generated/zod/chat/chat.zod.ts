@@ -221,6 +221,40 @@ export const searchChatMessagesResponse = zod.object({
 })
 
 /**
+ * Multipart, for `uploadAttachment`'s reason: a base64 JSON body inflates
+the payload by a third and buffers the whole file as a String before
+anything has decided whether it is acceptable.
+
+**Upload and send are separate requests on purpose.** The file is
+sniffed, EXIF-stripped, stored privately and queued for the AV scan
+while the author is still typing, so the send is instant and a file that
+is going to be refused is refused *before* they have written anything
+rather than after, with their message lost. Pass the returned `id` in
+`attachmentIds` when posting the message.
+
+Answers `201` with `scanStatus: PENDING` and **no** `downloadUrl` —
+the honest description of what has happened: the bytes are stored,
+nothing can read them, and a verdict is pending.
+
+Scope is thread participation, and a caller who is not in the thread
+gets **404** — the rule every other chat read follows, so a thread
+somebody is not in is indistinguishable from one that does not exist.
+
+ * @summary Share a file or image into a thread (§7.6)
+ */
+export const uploadChatAttachmentParams = zod.object({
+  "threadId": zod.number()
+})
+
+export const uploadChatAttachmentHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const uploadChatAttachmentBody = zod.object({
+  "file": zod.instanceof(File)
+})
+
+/**
  * @summary Messages, newest first
  */
 export const listChatMessagesParams = zod.object({
@@ -258,13 +292,11 @@ export const listChatMessagesResponse = zod.object({
   "attachments": zod.array(zod.object({
   "id": zod.number().optional(),
   "fileName": zod.string().optional(),
-  "contentType": zod.string().optional(),
+  "contentType": zod.string().optional().describe('\*\*Sniffed from the bytes, never taken from the upload\'s declared\ntype.\*\* `isImage` is derived from this and nothing else — a client\nthat renders an `<img>` off a file extension will happily try it on\na renamed executable.\n'),
   "sizeBytes": zod.number().optional(),
-  "scanStatus": zod.enum(['PENDING', 'CLEAN', 'INFECTED']).optional().describe('Not downloadable until `CLEAN`.'),
-  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL. Never a public bucket path.'),
-  "thumbnailUrl": zod.string().nullish(),
-  "isClientVisible": zod.boolean().optional(),
-  "isDeleted": zod.boolean().optional(),
+  "scanStatus": zod.enum(['PENDING', 'CLEAN', 'INFECTED']).optional().describe('Returned, never hidden. Hiding a pending row would make a scan\ndelay indistinguishable from a failed upload and leave a user\nre-attaching the same file; the requirement is that the file not\nbecome \*\*readable\*\*, and the absent `downloadUrl` is what enforces\nthat.\n'),
+  "isImage": zod.boolean().optional().describe('Whether the client should render it inline, decided from `contentType`.'),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, and present \*\*only\*\* for a `CLEAN` row that\nhas not been tombstoned. Never a public bucket path. A URL that is\nnever issued is stronger than a row that is merely hidden.\n'),
   "uploadedBy": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -272,18 +304,8 @@ export const listChatMessagesResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "deletedBy": zod.object({
-  "id": zod.number(),
-  "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
-  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}).optional(),
-  "deletedAt": zod.string().datetime({}).nullish(),
-  "stageCode": zod.string().nullish(),
-  "cycleNo": zod.number().optional(),
   "createdAt": zod.string().datetime({}).optional()
-})).optional(),
+}).describe('D-053 · one file shared into a chat thread (§7.6).\n\n\*\*The same safety pipeline as a ticket attachment\*\*, and deliberately\nso: the bytes are sniffed and reconciled against the declared name,\nEXIF is stripped, and the file is virus-scanned before it becomes\nreadable. Chat and tickets call the same beans, so there is one answer\nto \"is this file safe\" rather than two that can drift.\n\nWhat differs is everything a chat file does not have. There is no\n`isClientVisible` — §7.6\'s three surfaces are all internal and no\nclient portal serves them, and a flag that is always false is one\nsomebody eventually sets true. There is no `stageCode` or `cycleNo`; a\nthread has neither. And there is no 15-minute delete window of its own:\nD-057 already governs chat immutability, and an attachment follows the\ntombstone of the message that carries it rather than inventing a\nsecond, differently-sized window over the same evidence.\n')).optional().describe('D-053 · §7.6\'s file and image share. \*\*Not `Attachment`\*\*, which is\nthe ticket shape: that carries `isClientVisible`, `stageCode` and\n`cycleNo`, none of which a chat file has, and advertising fields\nthat are permanently null is how a client comes to branch on one.\n\nAlways empty on a deleted message — §7.6 withholds a tombstoned\nmessage\'s content on read and a file list is content. The rows\nsurvive; they are simply not handed back with a message that has\nbeen retracted.\n'),
   "readBy": zod.array(zod.number()).optional(),
   "mentions": zod.array(zod.object({
   "id": zod.number(),
@@ -392,13 +414,11 @@ export const editChatMessageResponse = zod.object({
   "attachments": zod.array(zod.object({
   "id": zod.number().optional(),
   "fileName": zod.string().optional(),
-  "contentType": zod.string().optional(),
+  "contentType": zod.string().optional().describe('\*\*Sniffed from the bytes, never taken from the upload\'s declared\ntype.\*\* `isImage` is derived from this and nothing else — a client\nthat renders an `<img>` off a file extension will happily try it on\na renamed executable.\n'),
   "sizeBytes": zod.number().optional(),
-  "scanStatus": zod.enum(['PENDING', 'CLEAN', 'INFECTED']).optional().describe('Not downloadable until `CLEAN`.'),
-  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL. Never a public bucket path.'),
-  "thumbnailUrl": zod.string().nullish(),
-  "isClientVisible": zod.boolean().optional(),
-  "isDeleted": zod.boolean().optional(),
+  "scanStatus": zod.enum(['PENDING', 'CLEAN', 'INFECTED']).optional().describe('Returned, never hidden. Hiding a pending row would make a scan\ndelay indistinguishable from a failed upload and leave a user\nre-attaching the same file; the requirement is that the file not\nbecome \*\*readable\*\*, and the absent `downloadUrl` is what enforces\nthat.\n'),
+  "isImage": zod.boolean().optional().describe('Whether the client should render it inline, decided from `contentType`.'),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, and present \*\*only\*\* for a `CLEAN` row that\nhas not been tombstoned. Never a public bucket path. A URL that is\nnever issued is stronger than a row that is merely hidden.\n'),
   "uploadedBy": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -406,18 +426,8 @@ export const editChatMessageResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "deletedBy": zod.object({
-  "id": zod.number(),
-  "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
-  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}).optional(),
-  "deletedAt": zod.string().datetime({}).nullish(),
-  "stageCode": zod.string().nullish(),
-  "cycleNo": zod.number().optional(),
   "createdAt": zod.string().datetime({}).optional()
-})).optional(),
+}).describe('D-053 · one file shared into a chat thread (§7.6).\n\n\*\*The same safety pipeline as a ticket attachment\*\*, and deliberately\nso: the bytes are sniffed and reconciled against the declared name,\nEXIF is stripped, and the file is virus-scanned before it becomes\nreadable. Chat and tickets call the same beans, so there is one answer\nto \"is this file safe\" rather than two that can drift.\n\nWhat differs is everything a chat file does not have. There is no\n`isClientVisible` — §7.6\'s three surfaces are all internal and no\nclient portal serves them, and a flag that is always false is one\nsomebody eventually sets true. There is no `stageCode` or `cycleNo`; a\nthread has neither. And there is no 15-minute delete window of its own:\nD-057 already governs chat immutability, and an attachment follows the\ntombstone of the message that carries it rather than inventing a\nsecond, differently-sized window over the same evidence.\n')).optional().describe('D-053 · §7.6\'s file and image share. \*\*Not `Attachment`\*\*, which is\nthe ticket shape: that carries `isClientVisible`, `stageCode` and\n`cycleNo`, none of which a chat file has, and advertising fields\nthat are permanently null is how a client comes to branch on one.\n\nAlways empty on a deleted message — §7.6 withholds a tombstoned\nmessage\'s content on read and a file list is content. The rows\nsurvive; they are simply not handed back with a message that has\nbeen retracted.\n'),
   "readBy": zod.array(zod.number()).optional(),
   "mentions": zod.array(zod.object({
   "id": zod.number(),
@@ -486,13 +496,11 @@ export const deleteChatMessageResponse = zod.object({
   "attachments": zod.array(zod.object({
   "id": zod.number().optional(),
   "fileName": zod.string().optional(),
-  "contentType": zod.string().optional(),
+  "contentType": zod.string().optional().describe('\*\*Sniffed from the bytes, never taken from the upload\'s declared\ntype.\*\* `isImage` is derived from this and nothing else — a client\nthat renders an `<img>` off a file extension will happily try it on\na renamed executable.\n'),
   "sizeBytes": zod.number().optional(),
-  "scanStatus": zod.enum(['PENDING', 'CLEAN', 'INFECTED']).optional().describe('Not downloadable until `CLEAN`.'),
-  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL. Never a public bucket path.'),
-  "thumbnailUrl": zod.string().nullish(),
-  "isClientVisible": zod.boolean().optional(),
-  "isDeleted": zod.boolean().optional(),
+  "scanStatus": zod.enum(['PENDING', 'CLEAN', 'INFECTED']).optional().describe('Returned, never hidden. Hiding a pending row would make a scan\ndelay indistinguishable from a failed upload and leave a user\nre-attaching the same file; the requirement is that the file not\nbecome \*\*readable\*\*, and the absent `downloadUrl` is what enforces\nthat.\n'),
+  "isImage": zod.boolean().optional().describe('Whether the client should render it inline, decided from `contentType`.'),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, and present \*\*only\*\* for a `CLEAN` row that\nhas not been tombstoned. Never a public bucket path. A URL that is\nnever issued is stronger than a row that is merely hidden.\n'),
   "uploadedBy": zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -500,18 +508,8 @@ export const deleteChatMessageResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "deletedBy": zod.object({
-  "id": zod.number(),
-  "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish(),
-  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
-  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}).optional(),
-  "deletedAt": zod.string().datetime({}).nullish(),
-  "stageCode": zod.string().nullish(),
-  "cycleNo": zod.number().optional(),
   "createdAt": zod.string().datetime({}).optional()
-})).optional(),
+}).describe('D-053 · one file shared into a chat thread (§7.6).\n\n\*\*The same safety pipeline as a ticket attachment\*\*, and deliberately\nso: the bytes are sniffed and reconciled against the declared name,\nEXIF is stripped, and the file is virus-scanned before it becomes\nreadable. Chat and tickets call the same beans, so there is one answer\nto \"is this file safe\" rather than two that can drift.\n\nWhat differs is everything a chat file does not have. There is no\n`isClientVisible` — §7.6\'s three surfaces are all internal and no\nclient portal serves them, and a flag that is always false is one\nsomebody eventually sets true. There is no `stageCode` or `cycleNo`; a\nthread has neither. And there is no 15-minute delete window of its own:\nD-057 already governs chat immutability, and an attachment follows the\ntombstone of the message that carries it rather than inventing a\nsecond, differently-sized window over the same evidence.\n')).optional().describe('D-053 · §7.6\'s file and image share. \*\*Not `Attachment`\*\*, which is\nthe ticket shape: that carries `isClientVisible`, `stageCode` and\n`cycleNo`, none of which a chat file has, and advertising fields\nthat are permanently null is how a client comes to branch on one.\n\nAlways empty on a deleted message — §7.6 withholds a tombstoned\nmessage\'s content on read and a file list is content. The rows\nsurvive; they are simply not handed back with a message that has\nbeen retracted.\n'),
   "readBy": zod.array(zod.number()).optional(),
   "mentions": zod.array(zod.object({
   "id": zod.number(),
