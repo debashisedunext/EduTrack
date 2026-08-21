@@ -68,6 +68,17 @@ class TaskTypeMasterIT {
     @Autowired
     JdbcTemplate jdbc;
 
+    /**
+     * D-066 · the priority master itself, which is now the only authority on
+     * what a level is. This IT used to assert against
+     * {@code TaskTypeService.CONTRACT_LEVELS} — a hardcoded four that existed
+     * solely because the contract's {@code Level} was a closed enum. That
+     * constant is gone, and asserting against the table is what the test's own
+     * name always said it was doing.
+     */
+    @Autowired
+    com.edunext.edutrack.domain.masters.PriorityRepository priorities;
+
     @BeforeEach
     @AfterEach
     void clearFixtureRows() {
@@ -109,8 +120,13 @@ class TaskTypeMasterIT {
     void seededDefaultLevelsResolve() {
         // The create path enforces this. The seed predates the create path, so
         // nothing had ever checked that B-002 and B-002's own priorities agree.
+        List<String> active = priorities.findByIsActiveTrueOrderBySeqAsc().stream()
+                .map(com.edunext.edutrack.domain.masters.Priority::getCode)
+                .toList();
+
+        assertThat(active).isNotEmpty();
         assertThat(seededOnly()).allSatisfy(type ->
-                assertThat(TaskTypeService.CONTRACT_LEVELS).contains(type.defaultLevel()));
+                assertThat(active).contains(type.defaultLevel()));
     }
 
     @Test

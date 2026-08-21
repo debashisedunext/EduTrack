@@ -88,10 +88,20 @@ public class StatusService {
     /**
      * The eight the contract's {@code StatusCode} enum declares.
      *
-     * <p>Mirrors {@code PriorityService.CONTRACT_LEVELS} exactly, and exists for
-     * exactly its reason: a ninth code stored here serialises into a response the
-     * generated client's own zod rejects, and Stream C's status chips key off
+     * <p>A ninth code stored here serialises into a response the generated
+     * client's own zod rejects, and Stream C's status chips key off
      * {@code Record<StatusCode, …>} maps a ninth key would leave undefined.
+     *
+     * <p>This used to say it mirrored {@code PriorityService.CONTRACT_LEVELS}.
+     * <b>That constant is gone</b> — D-066 opened the contract's {@code Level}
+     * because S-12 promises an Admin can add a level without a release, and the
+     * allow-list that refused a fifth one went with it. <b>{@code StatusCode} is
+     * deliberately not following.</b> Nothing in the blueprint offers an Admin a
+     * ninth status: §7.4's S-13 lets them rename, recolour, recategorise and
+     * reorder the eight, and the workflow matrix is where the vocabulary is
+     * shaped. An open status vocabulary would also mean an open
+     * {@code StatusCategory} mapping and an open transition matrix, neither of
+     * which any screen asks for.
      */
     static final Set<String> CONTRACT_CODES = Set.of(
             "NEW", "IN_PROGRESS", "ON_HOLD", "AWAITING_INFO",
