@@ -12,8 +12,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 223 of 244 (91%) | 330.2 of 365.8 (90%) |
-| In flight | 2 | 3.0 |
+| Complete | 224 of 244 (92%) | 331.2 of 365.8 (91%) |
+| In flight | 2 | 4.0 |
 | On the driving chain | 9 | 15.0 |
 | Zero float (no slack at all) | 13 | 23.5 |
 
@@ -24,7 +24,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | **A** | Shivendra | 65 | 59 | 95.0 | 28 | 339% ⚠️ | Tue 08 Sep |
 | **B** | Ayush | 55 | 46 | 89.8 | 28 | 321% ⚠️ | Thu 10 Sep |
 | **C** | Divyansh | 59 | 56 | 90.0 | 28 | 321% ⚠️ | Tue 25 Aug |
-| **D** | Debashis | 65 | 62 | 91.0 | 28 | 325% ⚠️ | Sat 22 Aug |
+| **D** | Debashis | 65 | 63 | 91.0 | 28 | 325% ⚠️ | Fri 21 Aug |
 
 ### Slipping
 
@@ -137,10 +137,10 @@ gantt
     Sprint 0 — weeks 1–2 :done, d0, 2026-08-06, 4d
     Infrastructure — weeks 3–5 :done, d1, 2026-08-07, 26d
     M5 — SLA  escalation & mail — weeks 6–11 :active, d2, 2026-08-07, 11d
-    M7 — Chat & realtime — weeks 12–16 :active, d3, 2026-08-08, 11d
+    M7 — Chat & realtime — weeks 12–16 :active, d3, 2026-08-08, 10d
     Contract changes :done, d4, 2026-08-11, 1d
     S-05 and S-17 corrections — raised 18 Aug 2026 :done, d5, 2026-08-18, 1d
-    M4 — Tickets — weeks 3–14 :active, d6, 2026-08-19, 3d
+    M4 — Tickets — weeks 3–14 :done, d6, 2026-08-19, 3d
 ```
 
 ---
@@ -247,7 +247,7 @@ gantt
 |  | `B-019` | Settings tab | 1.5 | `B-016` ᶦ | Fri 14 Aug | Fri 14 Aug | 19 | ✅ done |
 |  | `B-020` | Task type master — the 11 seeded types, Admin-extensible | 1.5 | `B-002` `C-003` ᶦ | Sat 15 Aug | Sat 15 Aug | 18 | ✅ done |
 |  | `B-021` | Priority master | 1.5 | `B-002` `C-003` | Sat 15 Aug | Sat 15 Aug | 17 | ✅ done |
-|  | `B-022` | Notification template master | 2 | `B-005` `C-003` | Sat 15 Aug | Sat 15 Aug | 13 | ✅ done |
+|  | `B-022` | Notification template master | 2 | `B-005` `C-003` | Sat 15 Aug | Sat 15 Aug | 14 | ✅ done |
 |  | `B-023` | Working calendar & holiday master | 2 | `B-005` `C-003` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 | 🔴 | `B-024` | Working-hours calculation service | 3 | `B-023` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `B-025` | Client list | 2 | `B-005` `C-003` ᶦ | Sun 16 Aug | Sun 16 Aug | 0 | ✅ done |
@@ -372,7 +372,7 @@ gantt
 |  | `D-003` | springdoc config + codegen pipeline | 2 | `D-002` | Thu 06 Aug | Thu 06 Aug | 22 | ✅ done |
 | 🔴 | `D-004` | MSW mock server returning realistic fixtures for every endpoint | 2.5 | `D-002` | Thu 06 Aug | Tue 11 Aug | 0 | ✅ done |
 |  | `D-005` | CI staleness check | 1 | `D-003` | Thu 06 Aug | Sat 08 Aug | 23 | ✅ done |
-| 🔴 | `D-010` | Outbox worker pattern | 2.5 | `A-006` `A-012` | Fri 07 Aug | Fri 07 Aug | 19 | ✅ done |
+| 🔴 | `D-010` | Outbox worker pattern | 2.5 | `A-006` `A-012` | Fri 07 Aug | Fri 07 Aug | 20 | ✅ done |
 |  | `D-011` | @Scheduled + ShedLock | 1 | `D-010` ᶦ | Fri 07 Aug | Fri 07 Aug | 21 | ✅ done |
 |  | `D-012` | Spring WebSocket + STOMP config, Redis pub/sub relay for… | 2 | `A-012` ᶦ | Fri 07 Aug | Fri 07 Aug | 0 | ✅ done |
 | 🔴 | `D-013` | Channel interceptor authorising subscriptions with the same scope… | 2 | `D-012` `A-034` | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
@@ -395,7 +395,7 @@ gantt
 |  | `D-034` | Bounce and complaint webhooks | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 24 | ✅ done |
 |  | `D-035` | Rate limit | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 24 | ✅ done |
 | 🔴 | `D-036` | "Critical mails cannot be disabled" | 1 | `D-029` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
-|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Fri 21 Aug | Fri 21 Aug | 12 | 🟡 100% |
+|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Fri 21 Aug | Fri 21 Aug | 13 | 🟡 100% |
 |  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Tue 18 Aug | Tue 18 Aug | 17 | ✅ done |
 |  | `D-039` | Inbound webhook — reply-to-comment parsing with quoted text stripped | 2 | `D-032` ᶦ | Wed 12 Aug | Wed 12 Aug | 21 | ✅ done |
 |  | `D-040` | All 24 events from blueprint §11 across in-app / bell / email… | 2 | `D-012` `B-022` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
@@ -408,7 +408,7 @@ gantt
 |  | `D-050` | Chat engine, three surfaces one engine | 3 | `D-014` `C-005` | Sat 08 Aug | Sat 08 Aug | 21 | ✅ done |
 |  | `D-051` | Typing indicator, read receipts, unread counts | 2 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 23 | ✅ done |
 |  | `D-052` | @mentions firing notifications | 1.5 | `D-050` ᶦ | Sat 08 Aug | Sat 08 Aug | 23 | ✅ done |
-|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Sat 22 Aug | Sat 22 Aug | 13 | ⛔ blocked |
+|  | `D-053` | File and image share, emoji, message search | 2 | `D-050` ᶦ | Fri 21 Aug | Fri 21 Aug | 14 | 🟡 100% |
 |  | `D-054` | TKT-xxxx link preview rendering as a rich ticket card | 1 | `D-050` ᶦ | Thu 13 Aug | Thu 13 Aug | 20 | ✅ done |
 | 🔴 | `D-055` | Ask Status | 1.5 | `D-050` `C-036` | Thu 13 Aug | Thu 13 Aug | 19 | ✅ done |
 |  | `D-056` | Manager response time recorded as a reportable metric; status… | 1 | `D-055` ᶦ | Thu 13 Aug | Thu 13 Aug | 20 | ✅ done |
@@ -421,7 +421,7 @@ gantt
 |  | `D-063` | S-17 grid — the actual close date column | 1 | — | Tue 18 Aug | Tue 18 Aug | 17 | ✅ done |
 |  | `D-064` | S-06 drill-down | 1 | — | Tue 18 Aug | Tue 18 Aug | 17 | ✅ done |
 | 🔴 | `D-065` | The chat React surface | 3 | — | Thu 20 Aug | Thu 20 Aug | 15 | ✅ done |
-|  | `D-066` | 🟡 S-12 promises "Admin can add levels" and the contract cannot… | 1 | — | Fri 21 Aug | Fri 21 Aug | 13 | 🔵 in review |
+|  | `D-066` | 🟡 S-12 promises "Admin can add levels" and the contract cannot… | 1 | — | Thu 20 Aug | Fri 21 Aug | 14 | ✅ done |
 
 </details>
 
