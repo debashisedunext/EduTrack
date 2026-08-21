@@ -7,8 +7,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -21,6 +23,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * A-052 · the aggregated detail read.
@@ -35,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * just the mocked one {@code TicketDetailServiceTest} exercises.
  */
 @SpringBootTest
+@AutoConfigureMockMvc
 @Testcontainers
 class TicketDetailIT {
 
@@ -63,6 +69,9 @@ class TicketDetailIT {
     }
 
     @Autowired
+    private MockMvc mvc;
+
+    @Autowired
     TicketDetailService service;
 
     @Autowired
@@ -72,6 +81,7 @@ class TicketDetailIT {
     private long otherProjectId;
     private long userId;
     private long ticketId;
+    private String ticketCode;
 
     @BeforeEach
     void seed() {
@@ -96,6 +106,7 @@ class TicketDetailIT {
         userId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
 
         ticketId = insertTicket(projectId, (short) 2);
+        ticketCode = codeOf(ticketId);
 
         // Two cycles' worth of journal, so the cycle filter has something to cut.
         insertHistory(ticketId, (short) 1, "CREATED");
@@ -105,6 +116,16 @@ class TicketDetailIT {
         insertComment(ticketId, (short) 1, "first cycle note");
         insertCycle(ticketId, (short) 1, true);
         insertCycle(ticketId, (short) 2, false);
+    }
+
+    /**
+     * The detail route is addressed by ticket CODE, so the fixtures — which
+     * build by id like every other table — need the code back out. Reading it
+     * from the row rather than rebuilding the string keeps this honest if the
+     * code format ever changes.
+     */
+    private String codeOf(long id) {
+        return jdbc.queryForObject("SELECT ticket_code FROM tickets WHERE id = ?", String.class, id);
     }
 
     private long insertTicket(long project, short currentCycle) {
@@ -195,7 +216,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("returns every section the detail page needs")
         void returnsEverySection() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, null);
 
             assertThat(d.ticket().id()).isEqualTo(ticketId);
             assertThat(d.ticket().ticketCode()).isNotBlank();
@@ -215,7 +236,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("ribbon is null until C-051's stage sequence exists")
         void ribbonIsNullNotInvented() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, null);
 
             assertThat(d.ribbon())
                     .as("a ribbon needs C-042's transitions and B's workflow stages; the second half is still missing")
@@ -231,9 +252,60 @@ class TicketDetailIT {
         @Test
         @DisplayName("availableActions offers handoff/rework to the current owner")
         void availableActionsOffersAdvanceToTheOwner() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, null);
 
             assertThat(d.availableActions()).containsExactlyInAnyOrder("handoff", "rework");
+        }
+    }
+
+    // ── the route, not just the service ──────────────────────────────────────
+
+    /**
+     * The bug this class did not catch for three weeks, and why it did not.
+     *
+     * <p>Every other test here calls {@link TicketDetailService} directly, and
+     * the service was never wrong. What was wrong was one character of binding
+     * in {@code TicketDetailController}: {@code @PathVariable long ticketId}
+     * against a contract whose {@code TicketId} is a ticket <em>code</em>
+     * (<code>^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$</code>). Spring could not convert
+     * {@code CRM-26-00001} to a {@code long}, so the route answered <b>400 to
+     * every request a real client could send</b> — while this suite stayed green,
+     * because a test that hands the service a {@code long} never asks the
+     * question the binding answers.
+     *
+     * <p>It survived because the frontend had only ever run against the MSW
+     * mock, which routes on the string and so agreed with the contract rather
+     * than with the server. {@code CloseController} found the same bug in its
+     * own route on 20 Aug and raised these; this is the test that closes them.
+     *
+     * <p>So this goes through MockMvc on purpose. It is the only test in the
+     * file that would have failed, and the assertion is deliberately the dullest
+     * possible one — the page loads at all.
+     */
+    @Nested
+    @DisplayName("the HTTP route accepts what the contract says it accepts")
+    class Binding {
+
+        @Test
+        @DisplayName("GET /tickets/{code}/full answers 200 for a real ticket code")
+        void theRouteTakesTheTicketCode() throws Exception {
+            mvc.perform(get("/api/v1/tickets/{ticketId}/full", ticketCode)
+                            .with(authentication(admin())))
+                    .andExpect(status().isOk());
+        }
+
+        /**
+         * The old shape, asserted from the other side: a bare row id is not a
+         * ticket code and must not resolve. Without this, changing the binding
+         * back to {@code long} would make the test above fail for a reason
+         * nobody could read.
+         */
+        @Test
+        @DisplayName("a bare row id is not an identifier this route accepts")
+        void theRouteDoesNotTakeTheRowId() throws Exception {
+            mvc.perform(get("/api/v1/tickets/{ticketId}/full", String.valueOf(ticketId))
+                            .with(authentication(admin())))
+                    .andExpect(status().isNotFound());
         }
     }
 
@@ -253,7 +325,7 @@ class TicketDetailIT {
         void outOfScopeIsNotFound() {
             long theirs = insertTicket(otherProjectId, (short) 1);
 
-            assertThatThrownBy(() -> service.detail(caller("PM", List.of(projectId)), theirs, null))
+            assertThatThrownBy(() -> service.detail(caller("PM", List.of(projectId)), codeOf(theirs), null))
                     .as("A-035: indistinguishable from a ticket that never existed")
                     .isInstanceOf(TicketNotFoundException.class);
         }
@@ -261,7 +333,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("a ticket that never existed fails identically")
         void missingTicketFailsTheSameWay() {
-            assertThatThrownBy(() -> service.detail(admin(), 999_999_999L, null))
+            assertThatThrownBy(() -> service.detail(admin(), "ZZ-26-99999", null))
                     .isInstanceOf(TicketNotFoundException.class);
         }
 
@@ -282,7 +354,7 @@ class TicketDetailIT {
                             "SUPPORT", List.of(projectId), List.of()),
                     null, List.of());
 
-            TicketDetailDtos.Detail d = service.detail(otherSupport, ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(otherSupport, ticketCode, null);
 
             assertThat(d.ticket().id()).isEqualTo(ticketId);
             assertThat(d.availableActions()).isEmpty();
@@ -298,7 +370,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("defaults to the ticket's current cycle")
         void defaultsToCurrentCycle() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, null);
 
             assertThat(d.history()).allSatisfy(h ->
                     assertThat(h.cycleNo()).as("current cycle is 2").isEqualTo((short) 2));
@@ -309,7 +381,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("an earlier cycle returns that cycle's journals")
         void earlierCycleIsReadable() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, 1);
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, 1);
 
             assertThat(d.history()).isNotEmpty().allSatisfy(h ->
                     assertThat(h.cycleNo()).isEqualTo((short) 1));
@@ -325,8 +397,8 @@ class TicketDetailIT {
         @Test
         @DisplayName("cycles list and comments are not filtered by the selected cycle")
         void ticketScopedSectionsAreNotFiltered() {
-            TicketDetailDtos.Detail current = service.detail(admin(), ticketId, null);
-            TicketDetailDtos.Detail earlier = service.detail(admin(), ticketId, 1);
+            TicketDetailDtos.Detail current = service.detail(admin(), ticketCode, null);
+            TicketDetailDtos.Detail earlier = service.detail(admin(), ticketCode, 1);
 
             assertThat(earlier.cycles()).as("the selector needs every cycle to offer")
                     .hasSameSizeAs(current.cycles());

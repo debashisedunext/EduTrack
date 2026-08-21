@@ -121,11 +121,18 @@ class TicketDetailService {
      *         may not see — A-035, indistinguishable on purpose
      */
     @Transactional(readOnly = true)
-    TicketDetailDtos.Detail detail(Authentication caller, long ticketId, Integer requestedCycle) {
+    TicketDetailDtos.Detail detail(Authentication caller, String ticketCode, Integer requestedCycle) {
         // Scope first, and only once. Everything below reads by ticket id, so a
         // caller who got past this line would see another project's history and
         // no later query would notice.
-        Ticket ticket = tickets.require(caller, ticketId);
+        //
+        // The parameter is the ticket CODE, not the row id. The contract's
+        // TicketId schema is a code (`^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$`) and
+        // it is the same $ref every ticket sub-resource uses, so a code is what
+        // every real caller puts in this path segment. This method took a long
+        // until 21 Aug and answered 400 to all of them.
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
 
         short cycle = requestedCycle == null
                 ? ticket.getCurrentCycleNo()
