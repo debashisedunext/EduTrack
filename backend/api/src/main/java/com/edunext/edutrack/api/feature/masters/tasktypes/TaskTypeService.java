@@ -53,25 +53,6 @@ import java.util.Set;
 @Service
 public class TaskTypeService {
 
-    /**
-     * The four values {@code Level} can carry on the wire.
-     *
-     * <p><b>This is not the vocabulary a default level is validated against</b>
-     * — {@code priorities} is, because B-021's whole point is that an Admin can
-     * add a level and a hardcoded set is what B-015 removed from
-     * {@code ResourceController}. This is the narrower second check: the
-     * contract types {@code defaultLevel} as a closed four-value enum, so a
-     * fifth priority stored here would serialise into a response the generated
-     * TypeScript client's own zod schema rejects — a screen that breaks on read
-     * because of what somebody saved on a different screen.
-     *
-     * <p>Opening {@code Level} touches Streams A, C and D ({@code tickets.level}
-     * is typed by it everywhere) and is B-021's call, not this task's. Until
-     * then the refusal is explicit and says which of the two rules it is, rather
-     * than the fifth level being accepted and discovered later as a rendering
-     * failure.
-     */
-    static final Set<String> CONTRACT_LEVELS = Set.of("LOW", "MEDIUM", "HIGH", "CRITICAL");
 
     /** New types sort to the end, a gap apart, so a manual reorder has room. */
     private static final short SEQ_STEP = 10;
@@ -250,12 +231,12 @@ public class TaskTypeService {
                     + "level. A task type defaulting to it would pre-fill the create form with a "
                     + "value its own level picker no longer offers.");
         }
-        if (!CONTRACT_LEVELS.contains(level)) {
-            throw new TaskTypeValidationException("defaultLevel", "'" + level + "' exists in the "
-                    + "priority master but cannot be carried by the API's Level type, which is a "
-                    + "closed four-value enum. Opening it is B-021's change and touches the ticket "
-                    + "contract in three other streams; until then a task type cannot default to it.");
-        }
+        // D-066 · the CONTRACT_LEVELS check that stood here is gone, not
+        // relaxed. `Level` is an open string in the contract now, so a task
+        // type may default to any level the priority master declares — which
+        // is what the two checks above already decide. Its own javadoc named
+        // this as the outcome: "opening Level touches Streams A, C and D … and
+        // is B-021's call, not this task's."
         return level;
     }
 

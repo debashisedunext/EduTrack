@@ -138,18 +138,32 @@ class PriorityServiceTest {
     class Create {
 
         /**
-         * The headline refusal of this task, and the one S-12 asks for and does
-         * not get. It is a limitation of the wire format, so the message says
-         * which of the two rules it is rather than "invalid".
+         * D-066 · the headline of this task, inverted. It used to assert the
+         * refusal — "closed four-value enum … Record&lt;Level&gt;" — because the
+         * contract typed {@code Level} as an enum and a fifth level would have
+         * serialised into a response the generated client's own schema rejects.
+         * {@code Level} is an open string now, so S-12's promise is kept, and
+         * the test that recorded the gap becomes the test that proves it closed.
          */
         @Test
-        @DisplayName("a fifth level is refused, and the message names what has to change")
-        void aFifthLevelIsRefused() {
+        @DisplayName("a fifth level is accepted — S-12's 'Admin can add levels'")
+        void aFifthLevelIsAccepted() {
+            service.create(write("URGENT", "Urgent", "#EF4444", null, null, null, null));
+
+            verify(priorities).save(any());
+        }
+
+        @Test
+        @DisplayName("a code that would not survive a URL or a mail subject is still refused")
+        void anUnusableCodeIsRefused() {
+            // Open is not unvalidated. A level code travels in filter params
+            // and mail subjects, so a space or a dot changes what it means
+            // rather than merely looking untidy — the contract's Level pattern,
+            // mirrored.
             assertThatThrownBy(() -> service.create(
-                    write("URGENT", "Urgent", "#EF4444", null, null, null, null)))
+                    write("VERY URGENT", "Very urgent", "#EF4444", null, null, null, null)))
                     .isInstanceOf(PriorityService.PriorityValidationException.class)
-                    .hasMessageContaining("closed four-value enum")
-                    .hasMessageContaining("Record<Level");
+                    .hasMessageContaining("not a usable level code");
 
             verify(priorities, never()).save(any());
         }

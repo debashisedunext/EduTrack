@@ -99,7 +99,12 @@ export function resolveSla(
   const orgDefault = active.filter((p) => p.projectId == null && p.taskTypeId == null).sort(byId)[0];
   if (orgDefault) return fromPolicy('ORG_DEFAULT', orgDefault);
 
-  const priorityDefault = PRIORITY_DEFAULT_HRS[level];
+  // D-066 · a level added through S-12 is not in this table, and falling to
+  // the task-type rung is the right answer rather than a bug: the master's own
+  // `defaultSlaHrs` is what a new level carries, and the mock has no policy for
+  // it either. Written as an explicit `?? 0` because `Level` is no longer a
+  // closed union, so the index is genuinely partial — it only *looked* total.
+  const priorityDefault = PRIORITY_DEFAULT_HRS[level] ?? 0;
   if (priorityDefault > 0) {
     return { source: 'PRIORITY_DEFAULT', slaPolicyId: null, responseHrs: null, resolutionHrs: priorityDefault };
   }

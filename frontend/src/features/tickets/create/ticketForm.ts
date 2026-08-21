@@ -7,7 +7,7 @@ import {
   createTicketBodyTitleMax,
   createTicketBodyTitleMin,
 } from '@/api/generated/zod/tickets/tickets.zod'
-import { Level } from '@/api/generated/model/level'
+import type { Level } from '@/api/generated/model/level'
 import type { TaskType } from '@/api/generated/model/taskType'
 import type { TicketCreateRequest } from '@/api/generated/model/ticketCreateRequest'
 import { isRichTextEmpty, sanitizeRichText } from '@/components/ui/rich-text'
@@ -97,6 +97,20 @@ export interface TaskTypeRules {
   clientRequired: ReadonlySet<number>
   /** §7.5 — task types that cannot be raised without a module. */
   bugTypes: ReadonlySet<number>
+  /**
+   * D-066 · the level codes the priority master currently declares.
+   *
+   * The `Level` schema stopped being a fixed enum because S-12 promises an
+   * Admin can add one without a release, so there is no compile-time set left
+   * to validate against — and there never should have been: the server has
+   * always checked this against the master (`UnknownLevelException`), and the
+   * enum only stopped the client sending a level somebody had just created.
+   *
+   * Empty while the master is loading, which is deliberate — see the schema's
+   * own note. `LevelPicker` is fed the same list, so this cannot disagree with
+   * what the user was offered.
+   */
+  levels: ReadonlySet<string>
 }
 
 /**
@@ -229,9 +243,17 @@ export function ticketFormSchema(rules: TaskTypeRules, action: TicketSaveAction 
         ),
       taskTypeId: requiredId('Select a task type'),
       level: z
-        .nativeEnum(Level)
+        .string()
         .nullable()
-        .refine((v) => v !== null, { message: 'Select a priority level' }),
+        .refine((v) => v !== null, { message: 'Select a priority level' })
+        // Against the master, not against a literal union — D-066. An empty
+        // set means the master has not loaded, and refusing every level in
+        // that window would put "Select a priority level" under a control the
+        // user has not been given any options in yet. The server checks the
+        // same thing and answers 400, so the floor does not move.
+        .refine((v) => v === null || rules.levels.size === 0 || rules.levels.has(v), {
+          message: 'That priority level no longer exists — pick one of the ones offered',
+        }),
       // §7.5's "Where it happened" group. Optional on the wire and optional
       // here for everything except a bug-type task type, which the
       // `superRefine` below handles — the rule needs the task type, and a

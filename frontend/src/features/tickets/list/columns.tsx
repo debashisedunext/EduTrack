@@ -49,11 +49,52 @@ export interface ColumnDef {
   render: (ticket: Ticket, ctx: ColumnRenderContext) => ReactNode
 }
 
+/**
+ * The §12.1 chip token for each seeded level.
+ *
+ * **Not total, and deliberately left that way — D-066.** `Level` stopped being
+ * a four-value enum because S-12 promises an Admin can add one without a
+ * release, so this map can be handed a code it has never seen. It answers
+ * `undefined`, and `Chip`'s own `defaultVariants: { variant: 'neutral' }` turns
+ * that into a neutral chip carrying the level's code as its label — a legible
+ * degradation rather than a blank, pinned by a test.
+ *
+ * The alternative — a hex colour straight from the priority master — is worse:
+ * §12.1 owns these tokens and the token variants are the pairs that pass AA at
+ * chip text size, which an arbitrary hex an Admin typed will not.
+ */
 export const LEVEL_VARIANT: Record<Level, ChipProps['variant']> = {
   LOW: 'low',
   MEDIUM: 'medium',
   HIGH: 'high',
   CRITICAL: 'critical',
+}
+
+/** Sentence case for the four seeded levels. */
+const LEVEL_LABEL: Record<Level, string> = {
+  LOW: 'Low',
+  MEDIUM: 'Medium',
+  HIGH: 'High',
+  CRITICAL: 'Critical',
+}
+
+/**
+ * A level's human label — D-066.
+ *
+ * A blank filter option is the one degradation a chip's neutral fallback does
+ * not cover: a `<select>` row with no text is unreadable and unclickable-by-name,
+ * where a neutral chip still shows the code. So an unrecognised code is
+ * humanised — `VERY_HIGH` reads as "Very high" — rather than left undefined.
+ *
+ * Shared rather than copied into each screen: it was two identical maps in
+ * `TicketListPage` and `TicketBulkActionBar` before this, which is two places
+ * for a fifth level to be forgotten.
+ */
+export function levelLabel(level: Level): string {
+  const known = LEVEL_LABEL[level]
+  if (known) return known
+  const words = level.replace(/_/g, ' ').toLowerCase()
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 export const STATUS_VARIANT: Record<StatusCode, ChipProps['variant']> = {

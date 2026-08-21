@@ -41,7 +41,7 @@ import { DensityToggle } from './DensityToggle'
 import { SavedViewsMenu } from './SavedViewsMenu'
 import { useTicketListFilters, type TicketListFilters } from './useTicketListFilters'
 import { useListPreferences } from './useListPreferences'
-import { COLUMNS, STATUS_LABEL, rowCueClassName, type ColumnRenderContext } from './columns'
+import { COLUMNS, STATUS_LABEL, levelLabel, rowCueClassName, type ColumnRenderContext } from './columns'
 import {
   TicketBulkActionBar,
   BulkReassignDialog,
@@ -60,8 +60,6 @@ import { useBulkChangeLevel, useBulkClose, useBulkReassign } from './bulk/useBul
 
 const PAGE_SIZE = 25
 const SEARCH_DEBOUNCE_MS = 300
-
-const LEVEL_LABEL: Record<Level, string> = { LOW: 'Low', MEDIUM: 'Medium', HIGH: 'High', CRITICAL: 'Critical' }
 
 const STATUS_OPTIONS = (Object.keys(STATUS_LABEL) as StatusCode[]).map((value) => ({
   value,
@@ -209,7 +207,7 @@ export function TicketListPage() {
       (prioritiesData?.data ?? [])
         .map((p) => p.level)
         .filter((l): l is Level => l != null)
-        .map((value) => ({ value, label: LEVEL_LABEL[value] })),
+        .map((value) => ({ value, label: levelLabel(value) })),
     [prioritiesData],
   )
 

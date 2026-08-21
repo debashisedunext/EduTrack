@@ -207,24 +207,22 @@ class TaskTypeServiceTest {
         }
 
         @Test
-        @DisplayName("a level the contract's Level enum cannot carry is refused, naming B-021")
-        void levelOutsideTheContractEnumIsRefused() {
-            // The trap this closes: stored happily, then serialised into a
-            // response the generated client's own zod schema rejects — a screen
-            // that breaks on read because of a save made on a different screen.
+        @DisplayName("a level added through S-12 may be defaulted to — D-066")
+        void aLevelBeyondTheSeededFourIsAccepted() {
+            // This used to assert the opposite, naming B-021: the contract
+            // typed Level as a closed enum, so a task type defaulting to a
+            // fifth level would have serialised into a response the generated
+            // client's own zod schema rejects — a screen that breaks on read
+            // because of a save made on a different screen. Level is an open
+            // string now, and the two checks that remain are the ones that
+            // matter: the level must exist in the master and must not be
+            // retired.
             when(priorities.findByCode("URGENT")).thenReturn(Optional.of(priority("URGENT", true)));
 
-            assertThatThrownBy(() -> service.create(
-                    new TaskTypeDtos.TaskTypeWrite("X", "X", null, "#4F46E5", "urgent", null, null, null)))
-                    .isInstanceOf(TaskTypeService.TaskTypeValidationException.class)
-                    .hasMessageContaining("B-021");
-        }
+            service.create(
+                    new TaskTypeDtos.TaskTypeWrite("X", "X", null, "#4F46E5", "urgent", null, null, null));
 
-        @Test
-        @DisplayName("the four contract levels are exactly the four the enum declares")
-        void contractLevelsMatchTheEnum() {
-            assertThat(TaskTypeService.CONTRACT_LEVELS)
-                    .containsExactlyInAnyOrder("LOW", "MEDIUM", "HIGH", "CRITICAL");
+            verify(taskTypes).save(any());
         }
     }
 

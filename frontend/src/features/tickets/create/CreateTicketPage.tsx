@@ -103,9 +103,13 @@ export function CreateTicketPage() {
 
   const clientRequiredIds = React.useMemo(() => clientRequiringTaskTypeIds(taskTypes), [taskTypes])
   const bugTypeIds = React.useMemo(() => bugTaskTypeIds(taskTypes), [taskTypes])
+  // D-066 · the same list `LevelPicker` is fed, so the form cannot refuse a
+  // level the user was just offered — and cannot accept one the master has
+  // since retired.
+  const levelCodes = React.useMemo(() => new Set<string>(levels), [levels])
   const taskTypeRules = React.useMemo(
-    () => ({ clientRequired: clientRequiredIds, bugTypes: bugTypeIds }),
-    [clientRequiredIds, bugTypeIds],
+    () => ({ clientRequired: clientRequiredIds, bugTypes: bugTypeIds, levels: levelCodes }),
+    [clientRequiredIds, bugTypeIds, levelCodes],
   )
 
   /**

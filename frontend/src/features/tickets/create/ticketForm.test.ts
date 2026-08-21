@@ -22,7 +22,8 @@ const TASK_TYPES = [
 
 const clientRequired = clientRequiringTaskTypeIds(TASK_TYPES)
 const bugTypes = bugTaskTypeIds(TASK_TYPES)
-const rules = { clientRequired, bugTypes }
+/** D-066 · the four the priority master seeds; `Level` is no longer a type to check against. */
+const rules = { clientRequired, bugTypes, levels: new Set(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']) }
 const schema = ticketFormSchema(rules)
 
 const valid: TicketFormValues = {

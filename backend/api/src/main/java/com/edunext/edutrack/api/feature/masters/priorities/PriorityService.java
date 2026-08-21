@@ -63,35 +63,20 @@ import java.util.Set;
 public class PriorityService {
 
     /**
-     * The four values the contract's {@code Level} can carry, and therefore the
-     * only codes this master may hold.
+     * D-066 · what a level code may look like, mirroring the contract's
+     * {@code Level} pattern exactly.
      *
-     * <p><b>S-12 says "Admin can add further levels without a release", and this
-     * set is why that is not yet true.</b> The decision was taken deliberately
-     * in B-021 rather than inherited: {@code Level} types {@code Ticket.level},
-     * {@code Ticket.originalLevel}, {@code TaskType.defaultLevel},
-     * {@code SlaPolicyWrite.level}, {@code SlaPolicyCell.level},
-     * {@code ChangeTicketPriorityBody.level} and two query parameters. A fifth
-     * code stored here would serialise into a response the generated TypeScript
-     * client's own zod schema rejects — a screen that breaks on read because of
-     * what somebody saved on a different screen — and Stream C's
-     * {@code LevelPicker} and {@code columns.tsx} key their chip variants off
-     * {@code Record<Level, …>} maps a fifth key would leave {@code undefined}.
-     *
-     * <p>Opening it is a coordinated change across Streams A, C and D, not one
-     * this screen can make alone. Until then the refusal is explicit and names
-     * what has to change, rather than the fifth level being accepted and
-     * discovered later as a rendering failure. Every other field S-12 lists —
-     * name, colour, default SLA hours, escalation flag, order, retire — is
-     * fully editable.
-     *
-     * <p>{@code TaskTypeService.CONTRACT_LEVELS} holds the same four for the
-     * mirror-image check on {@code defaultLevel}. Not extracted to a shared
-     * constant on purpose: the two are equal today because both track the same
-     * contract enum, and the day that enum opens they are deleted rather than
-     * edited. A shared constant would look like a vocabulary worth keeping.
+     * <p><b>This replaced a closed four-value allow-list.</b> Until D-066 this
+     * class refused any code outside {@code LOW/MEDIUM/HIGH/CRITICAL}, because
+     * the contract typed {@code Level} as an enum and a fifth level would have
+     * serialised into a response the generated client's own schema rejects —
+     * S-12 promised a button that could not work. {@code Level} is an open
+     * string now, so the question is no longer "is it one of the four" but "is
+     * it a code that survives a URL, a filter param and a mail subject", which
+     * is what this asks.
      */
-    static final Set<String> CONTRACT_LEVELS = Set.of("LOW", "MEDIUM", "HIGH", "CRITICAL");
+    private static final java.util.regex.Pattern LEVEL_CODE =
+            java.util.regex.Pattern.compile("^[A-Z][A-Z0-9_]{0,19}$");
 
     /** New levels sort to the end, a gap apart, so a manual reorder has room. */
     private static final short SEQ_STEP = 10;
@@ -397,14 +382,12 @@ public class PriorityService {
      */
     private static String normaliseLevel(String raw) {
         String level = raw.trim().toUpperCase(Locale.ROOT);
-        if (!CONTRACT_LEVELS.contains(level)) {
-            throw new PriorityValidationException("level", "'" + level + "' cannot be carried by "
-                    + "the API's Level type, which is a closed four-value enum "
-                    + "(LOW, MEDIUM, HIGH, CRITICAL). S-12 does promise that an Admin can add "
-                    + "levels; delivering it means opening that enum, which retypes six ticket "
-                    + "and SLA schemas and needs Stream C's two Record<Level, …> chip maps made "
-                    + "total. Until then a fifth level cannot be stored, because it would "
-                    + "serialise into a response the generated client's own schema rejects.");
+        if (!LEVEL_CODE.matcher(level).matches()) {
+            throw new PriorityValidationException("level", "'" + level + "' is not a usable level "
+                    + "code. A level code is what the contract's Level schema accepts — up to 20 "
+                    + "characters, starting with a letter, then letters, digits and underscores. "
+                    + "It travels in URLs, filter params and mail subjects, so a space or a dot "
+                    + "would change what it means rather than merely look untidy.");
         }
         return level;
     }

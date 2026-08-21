@@ -59,6 +59,10 @@ Deployment to `assignedTo = me`. The caller cannot widen it.
 export const listTicketsQueryLimitDefault = 50;
 export const listTicketsQueryLimitMax = 200;
 
+export const listTicketsQueryLevelMax = 20;
+
+
+export const listTicketsQueryLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 export const listTicketsQuerySortDefault = "-createdAt";
 
 export const listTicketsQueryParams = zod.object({
@@ -69,7 +73,7 @@ export const listTicketsQueryParams = zod.object({
   "clientId": zod.number().optional(),
   "taskTypeId": zod.number().optional(),
   "moduleId": zod.number().optional().describe('Product module the concern was raised against (§7.5).'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(listTicketsQueryLevelMax).regex(listTicketsQueryLevelRegExp).optional(),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']).optional(),
   "stage": zod.string().optional(),
   "assigneeId": zod.number().optional(),
@@ -89,7 +93,15 @@ export const listTicketsQueryParams = zod.object({
 
 export const listTicketsResponseDataItemTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const listTicketsResponseDataItemProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const listTicketsResponseDataItemProjectAutoAssignRuleDefault = "MANUAL";
+export const listTicketsResponseDataItemProjectAutoAssignRuleDefault = "MANUAL";export const listTicketsResponseDataItemLevelMax = 20;
+
+
+export const listTicketsResponseDataItemLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+export const listTicketsResponseDataItemOriginalLevelMax = 20;
+
+
+export const listTicketsResponseDataItemOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+
 
 export const listTicketsResponse = zod.object({
   "data": zod.array(zod.object({
@@ -123,8 +135,8 @@ export const listTicketsResponse = zod.object({
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
   "moduleId": zod.number().nullish(),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(listTicketsResponseDataItemLevelMax).regex(listTicketsResponseDataItemLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
+  "originalLevel": zod.string().min(1).max(listTicketsResponseDataItemOriginalLevelMax).regex(listTicketsResponseDataItemOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -208,6 +220,10 @@ export const createTicketBodyFeatureMax = 120;
 
 export const createTicketBodyStepsToGenerateMax = 20000;
 
+export const createTicketBodyLevelMax = 20;
+
+
+export const createTicketBodyLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 export const createTicketBodyIsClientRaisedDefault = false;export const createTicketBodySaveAsDraftDefault = false;
 
 export const createTicketBody = zod.object({
@@ -219,7 +235,7 @@ export const createTicketBody = zod.object({
   "screenName": zod.string().max(createTicketBodyScreenNameMax).nullish(),
   "feature": zod.string().max(createTicketBodyFeatureMax).nullish(),
   "stepsToGenerate": zod.string().max(createTicketBodyStepsToGenerateMax).nullish().describe('Sanitised HTML — PLAN.md §3.9.'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "level": zod.string().min(1).max(createTicketBodyLevelMax).regex(createTicketBodyLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "clientId": zod.number().nullish(),
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional().describe('Ignored on write — §4B.2: the server derives this from whether\n`clientId` and `clientContactId` are both set, never from what the\ncaller sends. Present on the request only so a client that still\nround-trips a `Ticket` it read back onto a new one is not refused\nfor an extra field; the value that matters is on the response.\n'),
@@ -267,10 +283,16 @@ form is still being filled in*.
 
  * @summary Resolve the SLA policy and preview the planned close date (C-012)
  */
+export const previewPlannedCloseDateQueryLevelMax = 20;
+
+
+export const previewPlannedCloseDateQueryLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+
+
 export const previewPlannedCloseDateQueryParams = zod.object({
   "projectId": zod.number().describe('The SLA matrix is per project; resolving without one would answer with the org-wide default.'),
   "taskTypeId": zod.number().optional().describe('Optional — without it the first rung cannot match and resolution\nstarts at the project\'s default for the level, so the form can\npreview before a task type is picked.\n'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "level": zod.string().min(1).max(previewPlannedCloseDateQueryLevelMax).regex(previewPlannedCloseDateQueryLevelRegExp),
   "assigneeId": zod.number().optional().describe('Whose approved leave stops the clock. Omitted honours only the org\nand project calendar — correct rather than a shortcut, since nothing\nelse knows whose leave would apply.\n'),
   "from": zod.string().datetime({}).optional().describe('When the clock starts, defaulting to now. Present because §7.5 lets a\nPM or Admin backdate Date Reported, and a preview measured from the\nwrong instant is worse than no preview.\n')
 })
@@ -380,6 +402,10 @@ export const bulkChangeTicketLevelHeader = zod.object({
 export const bulkChangeTicketLevelBodyTicketIdsItemRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const bulkChangeTicketLevelBodyTicketIdsMax = 500;
 
+export const bulkChangeTicketLevelBodyLevelMax = 20;
+
+
+export const bulkChangeTicketLevelBodyLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 export const bulkChangeTicketLevelBodyReasonMin = 3;
 export const bulkChangeTicketLevelBodyReasonMax = 500;
 
@@ -387,7 +413,7 @@ export const bulkChangeTicketLevelBodyReasonMax = 500;
 
 export const bulkChangeTicketLevelBody = zod.object({
   "ticketIds": zod.array(zod.string().regex(bulkChangeTicketLevelBodyTicketIdsItemRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n')).min(1).max(bulkChangeTicketLevelBodyTicketIdsMax),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "level": zod.string().min(1).max(bulkChangeTicketLevelBodyLevelMax).regex(bulkChangeTicketLevelBodyLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "reason": zod.string().min(bulkChangeTicketLevelBodyReasonMin).max(bulkChangeTicketLevelBodyReasonMax)
 })
 
@@ -519,6 +545,14 @@ export const updateTicketResponseDataFeatureMax = 120;
 
 export const updateTicketResponseDataStepsToGenerateMax = 20000;
 
+export const updateTicketResponseDataLevelMax = 20;
+
+
+export const updateTicketResponseDataLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+export const updateTicketResponseDataOriginalLevelMax = 20;
+
+
+export const updateTicketResponseDataOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const updateTicketResponseDataPctCompleteMin = 0;
@@ -563,8 +597,8 @@ export const updateTicketResponse = zod.object({
   "screenName": zod.string().max(updateTicketResponseDataScreenNameMax).nullish(),
   "feature": zod.string().max(updateTicketResponseDataFeatureMax).nullish(),
   "stepsToGenerate": zod.string().max(updateTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(updateTicketResponseDataLevelMax).regex(updateTicketResponseDataLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
+  "originalLevel": zod.string().min(1).max(updateTicketResponseDataOriginalLevelMax).regex(updateTicketResponseDataOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -630,12 +664,24 @@ export const getTicketDetailResponseDataTicketFeatureMax = 120;
 
 export const getTicketDetailResponseDataTicketStepsToGenerateMax = 20000;
 
+export const getTicketDetailResponseDataTicketLevelMax = 20;
+
+
+export const getTicketDetailResponseDataTicketLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+export const getTicketDetailResponseDataTicketOriginalLevelMax = 20;
+
+
+export const getTicketDetailResponseDataTicketOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const getTicketDetailResponseDataTicketPctCompleteMin = 0;
 export const getTicketDetailResponseDataTicketPctCompleteMax = 100;
 
 export const getTicketDetailResponseDataLinkedTicketsItemTicketTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
+export const getTicketDetailResponseDataLinkedTicketsItemTicketLevelMax = 20;
+
+
+export const getTicketDetailResponseDataLinkedTicketsItemTicketLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const getTicketDetailResponse = zod.object({
@@ -676,8 +722,8 @@ export const getTicketDetailResponse = zod.object({
   "screenName": zod.string().max(getTicketDetailResponseDataTicketScreenNameMax).nullish(),
   "feature": zod.string().max(getTicketDetailResponseDataTicketFeatureMax).nullish(),
   "stepsToGenerate": zod.string().max(getTicketDetailResponseDataTicketStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(getTicketDetailResponseDataTicketLevelMax).regex(getTicketDetailResponseDataTicketLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
+  "originalLevel": zod.string().min(1).max(getTicketDetailResponseDataTicketOriginalLevelMax).regex(getTicketDetailResponseDataTicketOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -898,7 +944,7 @@ export const getTicketDetailResponse = zod.object({
   "ticket": zod.object({
   "ticketId": zod.string().regex(getTicketDetailResponseDataLinkedTicketsItemTicketTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "level": zod.string().min(1).max(getTicketDetailResponseDataLinkedTicketsItemTicketLevelMax).regex(getTicketDetailResponseDataLinkedTicketsItemTicketLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED'])
 }).describe('The linked ticket\'s own identity, enough to render a chip without a second fetch.'),
   "createdAt": zod.string().datetime({}).optional(),
@@ -1005,6 +1051,14 @@ export const assignTicketResponseDataFeatureMax = 120;
 
 export const assignTicketResponseDataStepsToGenerateMax = 20000;
 
+export const assignTicketResponseDataLevelMax = 20;
+
+
+export const assignTicketResponseDataLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+export const assignTicketResponseDataOriginalLevelMax = 20;
+
+
+export const assignTicketResponseDataOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const assignTicketResponseDataPctCompleteMin = 0;
@@ -1049,8 +1103,8 @@ export const assignTicketResponse = zod.object({
   "screenName": zod.string().max(assignTicketResponseDataScreenNameMax).nullish(),
   "feature": zod.string().max(assignTicketResponseDataFeatureMax).nullish(),
   "stepsToGenerate": zod.string().max(assignTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(assignTicketResponseDataLevelMax).regex(assignTicketResponseDataLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
+  "originalLevel": zod.string().min(1).max(assignTicketResponseDataOriginalLevelMax).regex(assignTicketResponseDataOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -1099,12 +1153,16 @@ export const changeTicketPriorityParams = zod.object({
   "ticketId": zod.string().regex(changeTicketPriorityPathTicketIdRegExp)
 })
 
+export const changeTicketPriorityBodyLevelMax = 20;
+
+
+export const changeTicketPriorityBodyLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 export const changeTicketPriorityBodyReasonMax = 500;
 
 
 
 export const changeTicketPriorityBody = zod.object({
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  "level": zod.string().min(1).max(changeTicketPriorityBodyLevelMax).regex(changeTicketPriorityBodyLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "reason": zod.string().max(changeTicketPriorityBodyReasonMax).optional()
 })
 
@@ -1116,6 +1174,14 @@ export const changeTicketPriorityResponseDataFeatureMax = 120;
 
 export const changeTicketPriorityResponseDataStepsToGenerateMax = 20000;
 
+export const changeTicketPriorityResponseDataLevelMax = 20;
+
+
+export const changeTicketPriorityResponseDataLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+export const changeTicketPriorityResponseDataOriginalLevelMax = 20;
+
+
+export const changeTicketPriorityResponseDataOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const changeTicketPriorityResponseDataPctCompleteMin = 0;
@@ -1160,8 +1226,8 @@ export const changeTicketPriorityResponse = zod.object({
   "screenName": zod.string().max(changeTicketPriorityResponseDataScreenNameMax).nullish(),
   "feature": zod.string().max(changeTicketPriorityResponseDataFeatureMax).nullish(),
   "stepsToGenerate": zod.string().max(changeTicketPriorityResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(changeTicketPriorityResponseDataLevelMax).regex(changeTicketPriorityResponseDataLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
+  "originalLevel": zod.string().min(1).max(changeTicketPriorityResponseDataOriginalLevelMax).regex(changeTicketPriorityResponseDataOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -1242,6 +1308,14 @@ export const quickUpdateTicketResponseDataFeatureMax = 120;
 
 export const quickUpdateTicketResponseDataStepsToGenerateMax = 20000;
 
+export const quickUpdateTicketResponseDataLevelMax = 20;
+
+
+export const quickUpdateTicketResponseDataLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+export const quickUpdateTicketResponseDataOriginalLevelMax = 20;
+
+
+export const quickUpdateTicketResponseDataOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const quickUpdateTicketResponseDataPctCompleteMin = 0;
@@ -1286,8 +1360,8 @@ export const quickUpdateTicketResponse = zod.object({
   "screenName": zod.string().max(quickUpdateTicketResponseDataScreenNameMax).nullish(),
   "feature": zod.string().max(quickUpdateTicketResponseDataFeatureMax).nullish(),
   "stepsToGenerate": zod.string().max(quickUpdateTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(quickUpdateTicketResponseDataLevelMax).regex(quickUpdateTicketResponseDataLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
+  "originalLevel": zod.string().min(1).max(quickUpdateTicketResponseDataOriginalLevelMax).regex(quickUpdateTicketResponseDataOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -1512,6 +1586,14 @@ export const resolveTicketResponseDataFeatureMax = 120;
 
 export const resolveTicketResponseDataStepsToGenerateMax = 20000;
 
+export const resolveTicketResponseDataLevelMax = 20;
+
+
+export const resolveTicketResponseDataLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+export const resolveTicketResponseDataOriginalLevelMax = 20;
+
+
+export const resolveTicketResponseDataOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const resolveTicketResponseDataPctCompleteMin = 0;
@@ -1556,8 +1638,8 @@ export const resolveTicketResponse = zod.object({
   "screenName": zod.string().max(resolveTicketResponseDataScreenNameMax).nullish(),
   "feature": zod.string().max(resolveTicketResponseDataFeatureMax).nullish(),
   "stepsToGenerate": zod.string().max(resolveTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(resolveTicketResponseDataLevelMax).regex(resolveTicketResponseDataLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
+  "originalLevel": zod.string().min(1).max(resolveTicketResponseDataOriginalLevelMax).regex(resolveTicketResponseDataOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -1623,6 +1705,14 @@ export const closeTicketResponseDataFeatureMax = 120;
 
 export const closeTicketResponseDataStepsToGenerateMax = 20000;
 
+export const closeTicketResponseDataLevelMax = 20;
+
+
+export const closeTicketResponseDataLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+export const closeTicketResponseDataOriginalLevelMax = 20;
+
+
+export const closeTicketResponseDataOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const closeTicketResponseDataPctCompleteMin = 0;
@@ -1667,8 +1757,8 @@ export const closeTicketResponse = zod.object({
   "screenName": zod.string().max(closeTicketResponseDataScreenNameMax).nullish(),
   "feature": zod.string().max(closeTicketResponseDataFeatureMax).nullish(),
   "stepsToGenerate": zod.string().max(closeTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(closeTicketResponseDataLevelMax).regex(closeTicketResponseDataLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
+  "originalLevel": zod.string().min(1).max(closeTicketResponseDataOriginalLevelMax).regex(closeTicketResponseDataOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
@@ -1744,6 +1834,14 @@ export const reopenTicketResponseDataFeatureMax = 120;
 
 export const reopenTicketResponseDataStepsToGenerateMax = 20000;
 
+export const reopenTicketResponseDataLevelMax = 20;
+
+
+export const reopenTicketResponseDataLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
+export const reopenTicketResponseDataOriginalLevelMax = 20;
+
+
+export const reopenTicketResponseDataOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
 export const reopenTicketResponseDataPctCompleteMin = 0;
@@ -1788,8 +1886,8 @@ export const reopenTicketResponse = zod.object({
   "screenName": zod.string().max(reopenTicketResponseDataScreenNameMax).nullish(),
   "feature": zod.string().max(reopenTicketResponseDataFeatureMax).nullish(),
   "stepsToGenerate": zod.string().max(reopenTicketResponseDataStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
-  "level": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  "originalLevel": zod.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  "level": zod.string().min(1).max(reopenTicketResponseDataLevelMax).regex(reopenTicketResponseDataLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
+  "originalLevel": zod.string().min(1).max(reopenTicketResponseDataOriginalLevelMax).regex(reopenTicketResponseDataOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
   "currentStageCode": zod.string().nullish(),
   "assignee": zod.object({
