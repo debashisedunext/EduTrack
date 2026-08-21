@@ -46,16 +46,11 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { DashboardSummaryResponseDataUnavailableReason } from './dashboardSummaryResponseDataUnavailableReason';
-import type { DashboardSummaryResponseDataCardsItem } from './dashboardSummaryResponseDataCardsItem';
 
-export type DashboardSummaryResponseData = {
-  /** Summary tables refresh every five minutes. */
-  asOf?: string;
-  /** Why these figures are withheld, in words a person reads, or null
+/**
+ * Why these figures are withheld, in words a person reads, or null
 when they are served. Set when the requested project is outside
 the caller's scope; `cards` is empty and `asOf` is null.
+
  */
-  unavailableReason?: DashboardSummaryResponseDataUnavailableReason;
-  cards?: DashboardSummaryResponseDataCardsItem[];
-};
+export type DashboardSummaryResponseDataUnavailableReason = string | null;

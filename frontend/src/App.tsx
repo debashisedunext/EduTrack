@@ -40,6 +40,8 @@ import { LoginPage } from './features/auth/LoginPage'
 import { RequireAuth } from './features/auth/RequireAuth'
 import { ResetPasswordPage } from './features/auth/ResetPasswordPage'
 import { AuditLogPage } from './features/audit/AuditLogPage'
+import { ProjectDashboardPage } from './features/projects/ProjectDashboardPage'
+import { ProjectIndexPage } from './features/projects/ProjectIndexPage'
 import { ReportsHubPage } from './features/reports/ReportsHubPage'
 import { ReportViewerPage } from './features/reports/ReportViewerPage'
 import { ScheduledReportsPage } from './features/reports/ScheduledReportsPage'
@@ -93,7 +95,10 @@ export default function App() {
             */}
             <Route path="/tickets/bulk-reassign" element={<BulkReassignWizardPage />} />
             <Route path={TICKET_ROUTE} element={<TicketDetailPage />} />
-            <Route path="/projects" element={<ScreenPlaceholder title="Projects" />} />
+            {/* A-077 · the index the sidebar leads to. Not Stream B's project
+                master, which stays at /masters/projects and owns every write —
+                this lists projects and opens their dashboards, nothing else. */}
+            <Route path="/projects" element={<ProjectIndexPage />} />
             {/*
               S-20's traceability rule is that every entity in the summary panel
               is a link, and three of those destinations belong to other streams:
@@ -104,7 +109,10 @@ export default function App() {
               which reads as a broken link rather than an unbuilt screen. Each
               owner replaces one element.
             */}
-            <Route path={PROJECT_ROUTE} element={<ScreenPlaceholder title="Project dashboard" />} />
+            {/* A-077 · the second of the three placeholders replaced. C-019
+                registered this pattern the same way it registered the resource
+                one, so every project name on every ticket already linked here. */}
+            <Route path={PROJECT_ROUTE} element={<ProjectDashboardPage />} />
             <Route path={CLIENT_ROUTE} element={<ScreenPlaceholder title="Client 360" />} />
             {/* A-069 · S-28. C-019 registered this pattern against a placeholder
                 so every assignee name in the product already linked here. */}

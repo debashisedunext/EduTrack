@@ -194,6 +194,7 @@ export * from './dashboardSummaryResponse';
 export * from './dashboardSummaryResponseData';
 export * from './dashboardSummaryResponseDataCardsItem';
 export * from './dashboardSummaryResponseDataCardsItemDeltaPct';
+export * from './dashboardSummaryResponseDataUnavailableReason';
 export * from './dashboardWidget';
 export * from './dashboardWidgetSeriesItem';
 export * from './dashboardWidgetSeriesItemPointsItem';

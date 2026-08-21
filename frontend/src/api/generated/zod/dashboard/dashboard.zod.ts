@@ -66,6 +66,7 @@ export const getDashboardSummaryQueryParams = zod.object({
 export const getDashboardSummaryResponse = zod.object({
   "data": zod.object({
   "asOf": zod.string().datetime({}).optional().describe('Summary tables refresh every five minutes.'),
+  "unavailableReason": zod.string().nullish().describe('Why these figures are withheld, in words a person reads, or null\nwhen they are served. Set when the requested project is outside\nthe caller\'s scope; `cards` is empty and `asOf` is null.\n'),
   "cards": zod.array(zod.object({
   "key": zod.string().optional(),
   "label": zod.string().optional(),

@@ -47,10 +47,19 @@ import java.util.List;
  * <h2>The caller's filters narrow; they never widen</h2>
  *
  * <p>{@code ?projectId=} is ANDed with the caller's scope rather than replacing
- * it, exactly as the ticket list does. A PM asking for a project they do not
- * hold gets zeroes, not that project. {@code ?assigneeId=} is accepted only
+ * it, exactly as the ticket list does. {@code ?assigneeId=} is accepted only
  * where it is meaningful and is otherwise the caller's own id — a Developer
  * cannot ask for somebody else's numbers by naming them.
+ *
+ * <p><b>A-077 · a PM asking for a project they do not hold is told so, and this
+ * paragraph used to say they "get zeroes".</b> They did, and the AND above is
+ * why that was never a leak — but zero is a measurement, and six cards reading
+ * 0 state that a project holding a hundred open tickets has none. The refusal
+ * is now explicit, in {@link WidgetService#NOT_YOUR_PROJECT}, matching the
+ * charts beneath the cards so the two cannot answer differently. The old
+ * wording is quoted rather than deleted because {@code DashboardScopeIT} pinned
+ * it as an expectation, and reading only the new sentence would leave whoever
+ * finds that test's history unsure which behaviour was intended.
  */
 @Service
 class DashboardService {
@@ -91,6 +100,20 @@ class DashboardService {
         // reads the same one. Stated twice, it drifts — and the way it drifts
         // is a Developer seeing their own cards above a chart of everybody's.
         DashboardScope scope = DashboardScope.of(caller);
+
+        // A-077 · a project the caller is not a member of. The queries below are
+        // safe without this — they AND the scope with the requested project and
+        // match nothing — but "nothing" becomes six cards reading 0, and a KPI
+        // row of zeroes is a measurement, not an absence. Refused in the same
+        // words WidgetService uses so the cards and the charts beneath them give
+        // one answer rather than two.
+        //
+        // Ahead of the resource branch deliberately: ?assigneeId= with an
+        // out-of-scope ?projectId= must not slip past on the resource table,
+        // which is keyed by person and carries no project column to bound it.
+        if (!scope.coversProject(projectId)) {
+            return new DashboardDtos.Summary(null, List.of(), WidgetService.NOT_YOUR_PROJECT);
+        }
 
         // A-062 · the one place "whose rows, if anybody's" is decided, and it is
         // DashboardScope's own method rather than a third statement of the rule.
@@ -151,10 +174,10 @@ class DashboardService {
         // the branch above.
         if (subject != null) {
             return new DashboardDtos.Summary(asOf,
-                    resourceCards(flow, stock, priorFlow, priorStock, series, subject, start, end));
+                    resourceCards(flow, stock, priorFlow, priorStock, series, subject, start, end), null);
         }
         return new DashboardDtos.Summary(asOf,
-                cards(flow, stock, priorFlow, priorStock, series, projectId, start, end));
+                cards(flow, stock, priorFlow, priorStock, series, projectId, start, end), null);
     }
 
     /**
