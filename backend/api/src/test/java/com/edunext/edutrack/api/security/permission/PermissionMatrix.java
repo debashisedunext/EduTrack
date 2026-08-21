@@ -721,6 +721,17 @@ final class PermissionMatrix {
             // issued. A capability here would answer the same for every code,
             // which is the wrong instrument for the same reason as above.
             everyRole("GET", "/api/v1/chat/ticket-cards"),
+            // D-053 · §7.6's file share. Same answer and the same reason as the
+            // messages route it accompanies: whether the caller is in this thread
+            // is decided per-row inside the feature, and a capability would answer
+            // the same for every thread.
+            //
+            // MULTIPART rather than a JSON fixture, on B-032's reasoning exactly:
+            // the handler declares `consumes = multipart/form-data`, so a JSON
+            // request is refused with 415 during handler mapping — before
+            // @PreAuthorize runs — and all six rows would pass without
+            // authorisation having been consulted at all.
+            everyRole("POST", "/api/v1/chat/threads/{threadId}/attachments", MULTIPART),
 
             // ── status requests · S-25, and the same reasoning ───────────────
             everyRole("POST", "/api/v1/tickets/{ticketId}/ask-status"),
