@@ -31,6 +31,7 @@ import { PriorityListPage } from './features/masters/priorities/PriorityListPage
 import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
 import { StatusMasterPage } from './features/masters/statuses/StatusMasterPage'
+import { WorkflowDesignerPage } from './features/masters/designer/WorkflowDesignerPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
 import { TaskTypeListPage } from './features/masters/taskTypes/TaskTypeListPage'
 import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
@@ -244,9 +245,24 @@ export default function App() {
               S-13, B-039 builds tab 1. `/masters/statuses` rather than
               `/masters/workflow`, because the tab an Admin lands on is the status
               list and B-040/B-041 add tabs to this page rather than routes beside
-              it — a template designer gets its own route (S-30) when B-043 lands.
+              it — and the template designer got its own route (S-30), below, which
+              is what that arrangement was leaving room for.
             */}
             <Route path="/masters/statuses" element={<StatusMasterPage />} />
+            {/*
+              B-043 · S-30, the workflow template designer — the route the note
+              above reserved. `/masters/workflow/...` rather than a fourth tab on
+              `/masters/statuses`, because S-13's three tabs are §7.4's and a
+              canvas needs the width of a page; and under `/masters/workflow/`
+              rather than beside `/masters/statuses/:id`, so a template id can
+              never be read as a status id. Reached from tab 3, not from the
+              sidebar: S-30 is the builder *inside* S-13, and a nav entry beside
+              it would read as a second, competing master.
+            */}
+            <Route
+              path="/masters/workflow/designer/:templateId"
+              element={<WorkflowDesignerPage />}
+            />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
                 fields, so create and edit are dialogs on the grid rather than a
