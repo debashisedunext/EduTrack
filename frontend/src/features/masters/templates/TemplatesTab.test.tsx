@@ -108,6 +108,22 @@ describe('the live ribbon preview', () => {
 
     expect(await screen.findByText('No stages yet', undefined, SLOW)).toBeInTheDocument()
   })
+
+  /**
+   * B-043. This tab previews the flow; S-30's designer is where it is built, and
+   * a link is the only thing joining them. Asserting the `href` rather than that
+   * a link exists, because the failure worth catching is the route in `App.tsx`
+   * and the path here drifting apart — which produces a working-looking link onto
+   * a blank page, and no other test on either side would see it.
+   */
+  it('links to the designer for the template being previewed', async () => {
+    await openTemplatesTab()
+
+    expect(await screen.findByRole('link', { name: 'Open designer' }, SLOW)).toHaveAttribute(
+      'href',
+      '/masters/workflow/designer/1',
+    )
+  })
 })
 
 describe('what the screen refuses to offer', () => {
