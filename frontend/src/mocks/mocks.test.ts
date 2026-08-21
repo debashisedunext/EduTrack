@@ -873,6 +873,18 @@ describe('mock file storage', () => {
     expect(bytes.length).toBeGreaterThan(320 * (320 * 3 + 1) * 0.5);
   });
 
+  // 20s rather than the 5s default, and the test is CPU-bound rather than slow
+  // for any interesting reason. It is the only case in this file that builds the
+  // **full-size** image: `solidPng(1200, 800)` pushes 2.88M bytes into a JS array
+  // and then DEFLATEs them, in jsdom, where the neighbouring cases only ever ask
+  // for the 320x320 thumbnail.
+  //
+  // It has been sitting a few hundred milliseconds under the default and failing
+  // roughly one run in three on a loaded machine — B-041 found it by adding six
+  // handlers to `rest.ts`, which is enough registration overhead to tip it over
+  // more often but is not what makes it slow. Raised rather than left, because a
+  // test that fails on a coin flip teaches everyone to re-run CI instead of
+  // reading it.
   it('serves the full-size file larger than its thumbnail', async () => {
     // So the strip visibly loads the reduction and the lightbox visibly loads
     // the original, which is the whole point of storing two objects.
@@ -882,7 +894,7 @@ describe('mock file storage', () => {
     expect(new DataView(full.bytes.buffer).getUint32(16)).toBeGreaterThan(
       new DataView(thumbnail.bytes.buffer).getUint32(16),
     );
-  });
+  }, 20_000);
 
   it('gives different files different colours, and the same file the same one', async () => {
     // Identical swatches would make a navigation or ordering bug in the

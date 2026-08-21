@@ -1804,37 +1804,408 @@ export const listWorkflowTemplatesResponse = zod.object({
 })
 
 /**
- * **Stages in use are deprecated, never deleted** — deleting one breaks every
-historical ribbon that referenced it. Live tickets keep the template
-version they started on, so editing a template never rewrites a journey
-already in flight.
+ * **Declared since D-001 and served for the first time by B-041** — the
+seventh route in this contract found with a mock and a generated client
+and no controller behind it, and the second on this screen after
+`listWorkflowTemplates`. B-040 found that one and deliberately left this
+one alone, because the shape it was declared with could not be served
+honestly and there was no table to fix it against.
 
- * @summary Create or version a workflow template (S-30)
+**Two fields have left the request**, the same two B-040 removed from the
+response. `projectId` and `taskTypeId` were scalars on the template,
+which reads as though a template belongs to one project x task-type pair
+— and §4A.9 refutes that in the paragraph that introduces it, mapping
+Standard Dev Flow to Production Bug, Change Request *and* Future Release.
+Two scalars cannot hold three pairs. The mapping is now its own resource:
+`listTemplateMappings` and `replaceTemplateMappings`.
+
+**`stages` has left it too**, for a smaller reason. `createStage` already
+writes a stage, holding the `canReturnTo` direction check, the
+code-uniqueness check and the `seq` spacing; a second path in would be a
+second copy of those rules to keep true.
+
+**`copyStagesFromTemplateId` replaces it**, and is §7.4's *"built by
+picking stages"* done the way A-005's own header says a template must be
+versioned — **by copy**. The new template starts as a duplicate of an
+existing ribbon and tab 2 edits it from there. Deprecated stages are
+copied along with the rest: the copy is a new ribbon whose shape is the
+old one, and silently dropping the retired segments would produce a
+template differing from its source in a way nobody asked for and nothing
+records.
+
+Omitting it creates a template with no stages, which is legal — it is the
+empty canvas B-043's designer fills. Such a template cannot be made the
+default, because a workflow with nothing live routes no ticket anywhere
+and no screen would notice.
+
+ * @summary Create a workflow template (S-13 tab 3)
  */
 export const createWorkflowTemplateHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
 })
 
-export const createWorkflowTemplateBodyNameMax = 150;
+export const createWorkflowTemplateBodyNameMax = 80;
 
+export const createWorkflowTemplateBodyDescriptionMax = 255;
 
 
 
 export const createWorkflowTemplateBody = zod.object({
   "name": zod.string().min(1).max(createWorkflowTemplateBodyNameMax),
+  "description": zod.string().max(createWorkflowTemplateBodyDescriptionMax).nullish(),
+  "isDefault": zod.boolean().nullish().describe('Honoured only if the new template ends up with a live stage —\notherwise `409 empty-template`. Setting it clears the flag from\nwhichever template held it, in the same transaction.\n'),
+  "copyStagesFromTemplateId": zod.number().nullish().describe('Clone this template\'s ribbon into the new one. §7.4\'s \"built by\npicking stages\", and A-005\'s \"versioned by copy, never edited in\nplace\". Omit for an empty template.\n')
+}).describe('\*\*Reshaped by B-041 when it was finally served.\*\* `projectId` and\n`taskTypeId` are gone — a template maps to \*many\* pairs (§4A.9), so two\nscalars could never have held it, and the mapping is now\n`replaceTemplateMappings`. `stages` is gone because `createStage` already\nwrites one and holds every rule about doing so.\n\n`maxLength` on `name` drops from 150 to 80: `workflow_templates.name` is\n`VARCHAR(80)`, and the declared 150 would have been accepted here and\ntruncated by MySQL.\n')
+
+/**
+ * §4A.9 lets an Admin "define a template per project and per task type".
+This answers the question that configuration exists to answer, for one
+pair, **and says which rule produced the answer**.
+
+`rung` is the field this route exists for. A template id alone would let
+a caller route a ticket and would not let S-13 tab 3 distinguish *an
+Admin wrote this rule* from *nothing matched, so this is the default* —
+and a pair silently falling through to the default is the one failure
+mode §4A.9's configuration has no other way to surface.
+
+**The ladder, most specific first:**
+
+| `rung` | Matched |
+|---|---|
+| `EXACT` | a rule naming this project **and** this task type |
+| `PROJECT` | a rule naming this project, any task type |
+| `TASK_TYPE` | a rule naming this task type, any project |
+| `ANY` | an explicit catch-all rule somebody wrote |
+| `DEFAULT` | no rule matched; `workflow_templates.is_default` |
+| `NONE` | no rule matched and no template is the default |
+
+**Project beats task type on a tie**, and the choice is a real one: a
+project is the narrower population, so "everything on this engagement
+follows that flow" outranks "this kind of work usually follows this one".
+The opposite precedence is defensible and would produce different
+tickets, which is why it is written down rather than left to whichever
+`ORDER BY` was typed first.
+
+**Both parameters are optional**, and omitting one is a question rather
+than an error — "what does this task type resolve to on a project with no
+rule of its own?" is exactly what an Admin checking their configuration
+wants to know.
+
+**Nothing calls this from ticket creation yet.** `tickets.workflow_template_id`
+has existed since A-004 and is written by nothing but the fixtures, which
+is why `RibbonAssembler` has a documented "ticket with no template" path.
+Wiring it in is Stream C's — `TicketService` is theirs — so B-041 ships
+the table, the ladder and this route, and the call site follows.
+
+No `ETag`: there is no row here to precondition a write on. This is a
+computed answer over three tables, and a tag would move whenever any of
+them did while meaning nothing to any operation.
+
+Every role may read it. "Which flow will my ticket follow?" is a question
+a Developer raising one is better off reading than discovering, and every
+input to the answer is already readable by them.
+
+ * @summary Which template a project x task type routes to (S-13 tab 3)
+ */
+export const resolveWorkflowTemplateQueryParams = zod.object({
+  "projectId": zod.number().nullish().describe('Omit to ask about a project with no rule of its own.'),
+  "taskTypeId": zod.number().nullish().describe('Omit to ask about a task type with no rule of its own.')
+})
+
+export const resolveWorkflowTemplateResponse = zod.object({
+  "data": zod.object({
+  "templateId": zod.number().nullish().describe('Null only when `rung` is `NONE` — no rule matched \*and\* no template\nis the default. Nothing in the schema forbids that state, so the\nhonest answer is that the pair resolves to nothing; a hard-coded\nfallback would hide it.\n'),
+  "templateName": zod.string().nullish(),
+  "rung": zod.enum(['EXACT', 'PROJECT', 'TASK_TYPE', 'ANY', 'DEFAULT', 'NONE']).describe('Which rung of §4A.9\'s ladder answered — B-041. `DEFAULT` means no rule\nmatched and `workflow_templates.is_default` was used; `NONE` means not\neven that existed.\n\n\*\*The field the resolution route exists for.\*\* A template id alone lets a\ncaller route a ticket and does not let S-13 tab 3 tell \*an Admin wrote\nthis rule\* from \*nothing matched\* — and a pair silently falling through\nto the default is the failure mode §4A.9\'s configuration has no other way\nto surface.\n'),
+  "mappingId": zod.number().nullish().describe('The rule that answered, so the screen can highlight the row. Null on\n`DEFAULT` and `NONE`, where no rule was involved.\n')
+})
+})
+
+/**
+ * The detail read tab 3 opens a template with, and the `ETag` its `PATCH`
+and `DELETE` precondition on.
+
+**`WorkflowTemplateDetail` is not `WorkflowTemplate`**, and the split is
+the one B-040 drew between `Stage` and `WorkflowStage`, one level up. The
+list shape is the ribbon as a *label* — enough for tab 2's selector and
+for S-25's stage filter, which reads it on every ticket list. This is the
+template as a *row to edit*, carrying three counts and two computed
+permissions that mean nothing to a filter and would put four grouped
+`COUNT`s behind a response every ticket list reads.
+
+**The three counts answer three different questions**, and each is a fact
+about other rows a client holding only the list could not derive:
+`stageCount` is how long the ribbon is, `mappingCount` is how many
+routing rules point here, `ticketCount` is how many tickets ever started
+on it.
+
+**`isDeletable` and `isDeactivatable` are computed here** rather than
+restated in TypeScript — B-040's `isCodeEditable` argument and B-042's
+`isDeletable` argument arriving a third time. A second copy of the rule
+greys out controls the server would accept, or offers ones it will
+refuse.
+
+All six roles may read it, for the reason `listWorkflowTemplates` gives:
+a ribbon renders on every ticket page and names its template.
+
+ * @summary One workflow template (S-13 tab 3)
+ */
+export const getWorkflowTemplateParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n')
+})
+
+export const getWorkflowTemplateResponseDataNameMax = 80;
+
+export const getWorkflowTemplateResponseDataDescriptionMax = 255;
+
+
+
+export const getWorkflowTemplateResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(getWorkflowTemplateResponseDataNameMax),
+  "description": zod.string().max(getWorkflowTemplateResponseDataDescriptionMax).nullish(),
+  "isDefault": zod.boolean().describe('The last rung of `resolveWorkflowTemplate`\'s ladder — what an\nunmapped project x task type routes to. Exactly one template carries\nit, held by the service rather than by a constraint, and it can only\nbe moved to another template, never cleared.\n'),
+  "isActive": zod.boolean(),
+  "stageCount": zod.number().describe('How long the ribbon is. \*\*Every stage, deprecated ones included\*\* —\nthat is the length a historical ticket renders, and a retired stage\nkeeps rendering on every ribbon it is already on (B-042). Tab 2 is\nwhere \"how many are live?\" is asked.\n'),
+  "mappingCount": zod.number().describe('How many routing rules point here. What makes deactivation\nrefusable, and what tells a template in use from one drafted and\nabandoned.\n'),
+  "ticketCount": zod.number().describe('How many tickets ever started on this template — closed ones\nincluded, because a closed ticket still renders its ribbon and the\ndelete would cascade away the stages those segments resolve through.\n'),
+  "isDeletable": zod.boolean().describe('Nothing has run on it, nothing routes to it, and it is not the\ndefault. Computed server-side rather than derived in TypeScript,\nbecause all three inputs are facts about other rows.\n'),
+  "isDeactivatable": zod.boolean().describe('Active, not the default, and no rule points at it. False on an\nalready-inactive template — the field answers \"may I switch this\noff?\", not \"is it off?\".\n'),
+  "createdAt": zod.string().datetime({}).nullish(),
+  "updatedAt": zod.string().datetime({}).nullish()
+}).describe('One template as S-13 tab 3 edits it — B-041.\n\n\*\*Not `WorkflowTemplate`\*\*, which is the same row as tab 2\'s selector\nsees it. The split is B-040\'s `Stage` \/ `WorkflowStage` split one level\nup, and for the same reason: `WorkflowTemplate` is read on every ticket\nlist (S-25\'s stage filter has built itself from it since C-013), so the\nthree grouped `COUNT`s below have no business being in it.\n')
+})
+
+/**
+ * Rename, re-describe, activate or deactivate, or hand the default flag
+over. `null` on a field means **leave it alone**.
+
+**Exactly one template is the default, and it can only be moved.**
+`is_default` is the last rung of `resolveWorkflowTemplate`'s ladder, so
+two of them means a ticket's ribbon depends on row order and none of them
+means every unmapped pair routes nowhere. The database asserts neither —
+it is a plain `TINYINT` with an index — so setting a new default clears
+the old one in the same transaction, and clearing the current default
+without naming a replacement is `409 last-default`. That is B-039's *at
+least one on-create transition must survive* rule on a different table,
+and for the same reason: this is the only screen that could undo it.
+
+**Deactivation is refused by `mappingCount`, not by history** — by what
+the template is *for* rather than by what it has done. A template three
+rules route to cannot be switched off, because the next ticket on any of
+those pairs would resolve to a template the master says is out of
+service. A template with ten thousand closed tickets and no live rule may
+be retired freely, and retiring it is the right thing to do.
+
+**A template with no live stage cannot be made the default** — `409
+empty-template`. It would route no ticket anywhere and no screen would
+notice: the ticket would be created, resolve to the template, and find no
+first stage to enter. B-042's last-live-stage argument, one table up.
+
+`isActive` and `isDefault` are ordinary fields here rather than separate
+setter routes. B-042 put stage deprecation on its own route to avoid a
+boolean carrying three wire states under the patch convention; that
+objection was about a write with a consequence for tickets already in
+flight, and neither of these has one.
+
+ * @summary Edit a workflow template (S-13 tab 3)
+ */
+export const updateWorkflowTemplateParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n')
+})
+
+export const updateWorkflowTemplateHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateWorkflowTemplateBodyNameMax = 80;
+
+export const updateWorkflowTemplateBodyDescriptionMax = 255;
+
+
+
+export const updateWorkflowTemplateBody = zod.object({
+  "name": zod.string().min(1).max(updateWorkflowTemplateBodyNameMax).optional(),
+  "description": zod.string().max(updateWorkflowTemplateBodyDescriptionMax).nullish(),
+  "isDefault": zod.boolean().nullish().describe('`true` moves the default here and clears it from wherever it was, in\none transaction. `false` on the template that currently holds it is\n`409 last-default`: the flag is moved, never dropped.\n'),
+  "isActive": zod.boolean().nullish()
+}).describe('Every field optional; `null` means \*\*leave it alone\*\* —\n`CONVENTIONS.md`\'s patch rule.\n')
+
+export const updateWorkflowTemplateResponseDataNameMax = 80;
+
+export const updateWorkflowTemplateResponseDataDescriptionMax = 255;
+
+
+
+export const updateWorkflowTemplateResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(updateWorkflowTemplateResponseDataNameMax),
+  "description": zod.string().max(updateWorkflowTemplateResponseDataDescriptionMax).nullish(),
+  "isDefault": zod.boolean().describe('The last rung of `resolveWorkflowTemplate`\'s ladder — what an\nunmapped project x task type routes to. Exactly one template carries\nit, held by the service rather than by a constraint, and it can only\nbe moved to another template, never cleared.\n'),
+  "isActive": zod.boolean(),
+  "stageCount": zod.number().describe('How long the ribbon is. \*\*Every stage, deprecated ones included\*\* —\nthat is the length a historical ticket renders, and a retired stage\nkeeps rendering on every ribbon it is already on (B-042). Tab 2 is\nwhere \"how many are live?\" is asked.\n'),
+  "mappingCount": zod.number().describe('How many routing rules point here. What makes deactivation\nrefusable, and what tells a template in use from one drafted and\nabandoned.\n'),
+  "ticketCount": zod.number().describe('How many tickets ever started on this template — closed ones\nincluded, because a closed ticket still renders its ribbon and the\ndelete would cascade away the stages those segments resolve through.\n'),
+  "isDeletable": zod.boolean().describe('Nothing has run on it, nothing routes to it, and it is not the\ndefault. Computed server-side rather than derived in TypeScript,\nbecause all three inputs are facts about other rows.\n'),
+  "isDeactivatable": zod.boolean().describe('Active, not the default, and no rule points at it. False on an\nalready-inactive template — the field answers \"may I switch this\noff?\", not \"is it off?\".\n'),
+  "createdAt": zod.string().datetime({}).nullish(),
+  "updatedAt": zod.string().datetime({}).nullish()
+}).describe('One template as S-13 tab 3 edits it — B-041.\n\n\*\*Not `WorkflowTemplate`\*\*, which is the same row as tab 2\'s selector\nsees it. The split is B-040\'s `Stage` \/ `WorkflowStage` split one level\nup, and for the same reason: `WorkflowTemplate` is read on every ticket\nlist (S-25\'s stage filter has built itself from it since C-013), so the\nthree grouped `COUNT`s below have no business being in it.\n')
+})
+
+/**
+ * **Refuses most of the templates it can be pointed at**, and the surviving
+case is the narrow one B-042 left for its own delete: a template nothing
+has ever run on and nothing routes to — one created by mistake and caught
+the same afternoon.
+
+Everything else is `409 template-in-use` carrying `ticketCount` and
+`mappingCount` **and** `canDeactivate`, because an Admin told "no" with
+no alternative concludes the row cannot be got rid of at all.
+
+**Deletion is refused by history, and deactivation by rules** — the two
+guards are different counts on purpose. Deleting a template cascades its
+`workflow_stages` rows, and every historical ribbon segment resolves its
+display name, icon and owner role through those. One difference from
+B-042 worth recording: `tickets.workflow_template_id` is a *real* foreign
+key, so unlike a stage-code delete the database would refuse this on its
+own. The service check exists so the refusal arrives as a sentence with a
+number in it, and so the screen can decline to offer the button rather
+than discovering the rule by pressing it.
+
+The default template is refused outright — `409 last-default`.
+
+**`If-Match` is required here and optional nowhere else on this screen**,
+the same asymmetry B-042 drew on the stage delete. The entire guard is
+that two counts are zero, and both are inside the tag, so a ticket
+created or a rule pointed at the template while the confirmation dialog
+sits open moves the tag and the request is refused with `412` rather than
+performed on evidence that stopped being true.
+
+ * @summary Delete an unused workflow template (S-13 tab 3)
+ */
+export const deleteWorkflowTemplateParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n')
+})
+
+export const deleteWorkflowTemplateHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+/**
+ * §7.4 tab 3's *"mapped to project x task type"*. One rule per row, most
+specific first — the order `resolveWorkflowTemplate` evaluates them in,
+because a list showing the wildcards above the exact rules reads as
+though the wildcards win.
+
+**A null `projectId` or `taskTypeId` means "any", not "unknown".** That
+is what lets an organisation running one flow across a project say so in
+one row instead of one row per task type, and a twelfth the day somebody
+adds a task type.
+
+**Both ends are named in the response** rather than left to the client to
+join. The screen would otherwise hold three lists and do the join itself,
+and it would be wrong in the case that matters: a project deactivated
+after the rule was written is absent from the picker the client populates
+from, so the rule would render with a blank where its subject should be.
+The rule still routes; a row that cannot say what it routes is worse than
+one naming something retired.
+
+**Carries an `ETag`** — the third collection read in the contract to do
+so, after B-039's transition matrix and B-040's stage list, and for the
+identical reason: the set *is* the unit of edit, `replaceTemplateMappings`
+replaces it whole, and there is no per-row verb to precondition on.
+Without a tag here that write would need a `NO_IF_MATCH` exemption on
+exactly the shape of write where a lost update is least visible — the
+loser's rules vanish with nothing to indicate they were ever there.
+
+ * @summary One template's project x task-type rules (S-13 tab 3)
+ */
+export const listTemplateMappingsParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n')
+})
+
+export const listTemplateMappingsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
   "projectId": zod.number().nullish(),
+  "projectCode": zod.string().nullish(),
+  "projectName": zod.string().nullish(),
   "taskTypeId": zod.number().nullish(),
-  "stages": zod.array(zod.object({
-  "stageCode": zod.string().optional(),
-  "displayName": zod.string().optional(),
-  "sequence": zod.number().optional(),
-  "ownerRole": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
-  "icon": zod.string().nullish(),
-  "stageSlaHrs": zod.number().nullish(),
-  "isOptional": zod.boolean().optional(),
-  "canReturnTo": zod.array(zod.string()).optional().describe('Allowed backward targets. Stored as JSON — MySQL has no array type.'),
-  "isDeprecated": zod.boolean().optional().describe('Retired — accepts no new entry, and keeps rendering on every ribbon it\nis already on. \*\*Served from the column as of B-042\*\*; it was a\nhard-coded `false` from D-001 until then, which is why `TicketListPage`\nhas had a branch skipping deprecated codes since C-013 that could not\nrun.\n')
-}).describe('A stage as it is written into a template by `createWorkflowTemplate`\n(B-041\/B-043, still unmounted). \*\*`Stage` is the served shape\*\* — it is\nwhat `listStages` returns, and it carries the identity and the two usage\ncounts this one has no way to know at write time.\n')).min(1)
+  "taskTypeCode": zod.string().nullish(),
+  "taskTypeName": zod.string().nullish(),
+  "specificity": zod.number().describe('2 for an exact pair, 1 for a half-wildcard, 0 for the catch-all.\nWhat the list is sorted by, and what the resolver breaks ties on\n(project before task type at 1).\n')
+}).describe('One routing rule of §4A.9 — B-041. \*\*A null id means \"any\", not\n\"unknown\"\*\*, and the screen renders the word.\n'))
+})
+
+/**
+ * A whole-set replace rather than a `POST` and `DELETE` per rule, on
+B-039's reasoning for the transition matrix: the set is what the Admin
+edited, there is no per-row verb on this screen, and a delta protocol
+needs the client to describe removals — which is exactly the message that
+goes missing.
+
+**Matched on the pair rather than on the id**, so an unchanged rule keeps
+its row and its `created_at`. That is why `TemplateMappingEntry` carries
+no id: echoing one back would describe a row this operation may not keep.
+
+**Rules absent from the request are deleted, not deactivated** — the
+opposite of what B-017, B-018 and B-039 chose for their tables, and the
+distinction is what the row holds. Those record something somebody
+*stated*, so a cleared one is worth telling apart from one never
+configured. A mapping is a pure (pair -> template) edge with no payload;
+a deactivated one would be a routing rule that does not route, which is
+indistinguishable from its own absence except in the ways it could go
+wrong.
+
+**A pair belongs to one template**, and `409 mapping-claimed` names the
+other one. The unique key already guarantees uniqueness; what it cannot
+do is say *which* template holds the pair — it arrives as a duplicate-key
+violation with an index name in it — and that is the only piece of
+information the Admin needs, because the remedy is on the other
+template's screen. `claimedByTemplateId` and `claimedByTemplateName` ride
+on the problem document so the screen renders a link.
+
+An empty list is legal and means "nothing routes to this template". It is
+not the same as deleting the template, and it is the state every template
+starts in.
+
+Unknown project or task-type ids are `400` keyed to the field, not `404`:
+the route's own subject is the template in the path, and that one exists.
+The foreign keys would refuse the same id at flush time with no field
+name on it, which is the difference between a highlighted row and a stack
+trace.
+
+ * @summary Replace a template's project x task-type rules (S-13 tab 3)
+ */
+export const replaceTemplateMappingsParams = zod.object({
+  "templateId": zod.number().describe('`workflow_templates.id` — a `BIGINT`, unlike the `INT` keys of the\nreference masters, because A-005 declared it beside the ticket tables\nrather than beside `statuses`.\n\n\*\*Not `TemplateId`\*\*, which S-15\'s notification templates already hold.\nTwo parameters of the same name are one parameter in YAML: the second\nsilently replaces the first, and the generated client would have typed one\nof the two screens\' paths against the other\'s key.\n')
+})
+
+export const replaceTemplateMappingsHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const replaceTemplateMappingsBody = zod.object({
+  "mappings": zod.array(zod.object({
+  "projectId": zod.number().nullish(),
+  "taskTypeId": zod.number().nullish()
+}).describe('One rule in the whole-set replace. \*\*No `id`\*\* — the `PUT` matches on the\npair, so an echoed id would describe a row the operation may not keep,\nand matching on the pair is what lets an unchanged rule keep its own.\n\nBoth fields nullable, and `null` means \*\*any\*\*. `{}` is the explicit\ncatch-all: every project, every task type.\n')).describe('The complete set. Rules absent from it are \*\*deleted\*\*, not\ndeactivated — a mapping is a pure edge with no payload, so a\ndeactivated one would be a routing rule that does not route. An empty\narray is legal and means nothing routes here.\n')
+})
+
+export const replaceTemplateMappingsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number().nullish(),
+  "projectCode": zod.string().nullish(),
+  "projectName": zod.string().nullish(),
+  "taskTypeId": zod.number().nullish(),
+  "taskTypeCode": zod.string().nullish(),
+  "taskTypeName": zod.string().nullish(),
+  "specificity": zod.number().describe('2 for an exact pair, 1 for a half-wildcard, 0 for the catch-all.\nWhat the list is sorted by, and what the resolver breaks ties on\n(project before task type at 1).\n')
+}).describe('One routing rule of §4A.9 — B-041. \*\*A null id means \"any\", not\n\"unknown\"\*\*, and the screen renders the word.\n'))
 })
 
 /**

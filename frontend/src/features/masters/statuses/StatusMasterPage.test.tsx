@@ -49,22 +49,22 @@ async function openEditor(name: string) {
 
 describe('the three tabs', () => {
   /**
-   * Present but disabled, not absent. A screen that grows a tab later is a screen
-   * whose shape nobody could see coming.
+   * **All three tabs are live as of B-041**, and this assertion has now been
+   * rewritten twice — once when B-040 filled in tab 2, and once here. Each
+   * version was true for exactly as long as it should have been, which is what a
+   * test naming the task that will change it is for.
    *
-   * **B-040 filled in tab 2, so this now asserts one disabled tab rather than
-   * two.** The original wording — "tabs 2 and 3 disabled" — was true for exactly
-   * as long as it should have been, which is what a test naming the task that
-   * will change it is for. Tab 2's own behaviour is `StagesTab.test.tsx`.
+   * What it does *not* do is assert that three tabs exist and stop there. A
+   * count would pass whatever any of them did. What matters is that each one is
+   * reachable and none is a stub, so each is opened and checked for something
+   * only its own panel renders.
    */
-  it('shows tab 3 disabled, naming the task that will build it', async () => {
+  it('has all three tabs of §7.4 enabled, none of them a stub', async () => {
     renderPage()
 
-    expect(await screen.findByRole('tab', { name: 'Stages' }, SLOW)).not.toBeDisabled()
-    expect(screen.getByRole('tab', { name: 'Workflow templates' }))
-      .toBeDisabled()
-    expect(screen.getByRole('tab', { name: 'Workflow templates' }))
-      .toHaveAttribute('title', expect.stringContaining('B-041'))
+    for (const name of ['Statuses', 'Stages', 'Workflow templates']) {
+      expect(await screen.findByRole('tab', { name }, SLOW)).not.toBeDisabled()
+    }
   })
 
   it('opens on the statuses tab', async () => {

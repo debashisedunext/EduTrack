@@ -46,38 +46,59 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { WorkflowTemplateWriteRequestDescription } from './workflowTemplateWriteRequestDescription';
-import type { WorkflowTemplateWriteRequestIsDefault } from './workflowTemplateWriteRequestIsDefault';
-import type { WorkflowTemplateWriteRequestCopyStagesFromTemplateId } from './workflowTemplateWriteRequestCopyStagesFromTemplateId';
+import type { WorkflowTemplateDetailDescription } from './workflowTemplateDetailDescription';
+import type { WorkflowTemplateDetailCreatedAt } from './workflowTemplateDetailCreatedAt';
+import type { WorkflowTemplateDetailUpdatedAt } from './workflowTemplateDetailUpdatedAt';
 
 /**
- * **Reshaped by B-041 when it was finally served.** `projectId` and
-`taskTypeId` are gone — a template maps to *many* pairs (§4A.9), so two
-scalars could never have held it, and the mapping is now
-`replaceTemplateMappings`. `stages` is gone because `createStage` already
-writes one and holds every rule about doing so.
+ * One template as S-13 tab 3 edits it — B-041.
 
-`maxLength` on `name` drops from 150 to 80: `workflow_templates.name` is
-`VARCHAR(80)`, and the declared 150 would have been accepted here and
-truncated by MySQL.
+**Not `WorkflowTemplate`**, which is the same row as tab 2's selector
+sees it. The split is B-040's `Stage` / `WorkflowStage` split one level
+up, and for the same reason: `WorkflowTemplate` is read on every ticket
+list (S-25's stage filter has built itself from it since C-013), so the
+three grouped `COUNT`s below have no business being in it.
 
  */
-export interface WorkflowTemplateWriteRequest {
-  /**
-   * @minLength 1
-   * @maxLength 80
-   */
+export interface WorkflowTemplateDetail {
+  id: number;
+  /** @maxLength 80 */
   name: string;
   /** @maxLength 255 */
-  description?: WorkflowTemplateWriteRequestDescription;
-  /** Honoured only if the new template ends up with a live stage —
-otherwise `409 empty-template`. Setting it clears the flag from
-whichever template held it, in the same transaction.
+  description?: WorkflowTemplateDetailDescription;
+  /** The last rung of `resolveWorkflowTemplate`'s ladder — what an
+unmapped project x task type routes to. Exactly one template carries
+it, held by the service rather than by a constraint, and it can only
+be moved to another template, never cleared.
  */
-  isDefault?: WorkflowTemplateWriteRequestIsDefault;
-  /** Clone this template's ribbon into the new one. §7.4's "built by
-picking stages", and A-005's "versioned by copy, never edited in
-place". Omit for an empty template.
+  isDefault: boolean;
+  isActive: boolean;
+  /** How long the ribbon is. **Every stage, deprecated ones included** —
+that is the length a historical ticket renders, and a retired stage
+keeps rendering on every ribbon it is already on (B-042). Tab 2 is
+where "how many are live?" is asked.
  */
-  copyStagesFromTemplateId?: WorkflowTemplateWriteRequestCopyStagesFromTemplateId;
+  stageCount: number;
+  /** How many routing rules point here. What makes deactivation
+refusable, and what tells a template in use from one drafted and
+abandoned.
+ */
+  mappingCount: number;
+  /** How many tickets ever started on this template — closed ones
+included, because a closed ticket still renders its ribbon and the
+delete would cascade away the stages those segments resolve through.
+ */
+  ticketCount: number;
+  /** Nothing has run on it, nothing routes to it, and it is not the
+default. Computed server-side rather than derived in TypeScript,
+because all three inputs are facts about other rows.
+ */
+  isDeletable: boolean;
+  /** Active, not the default, and no rule points at it. False on an
+already-inactive template — the field answers "may I switch this
+off?", not "is it off?".
+ */
+  isDeactivatable: boolean;
+  createdAt?: WorkflowTemplateDetailCreatedAt;
+  updatedAt?: WorkflowTemplateDetailUpdatedAt;
 }
