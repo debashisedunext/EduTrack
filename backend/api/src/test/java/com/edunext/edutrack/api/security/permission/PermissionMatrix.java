@@ -706,14 +706,17 @@ final class PermissionMatrix {
             // authorisation question, and it is a row question the feature
             // answers per thread — a non-participant gets 404, never 403.
             //
-            // No fixture body, unlike the write rows above it. This handler
-            // takes a multipart `@RequestParam("file")` rather than a `@Valid
-            // @RequestBody`, and a missing request *param* is resolved after
-            // `@PreAuthorize` rather than before it — so authorisation is
-            // reached without one. That is the opposite of this file's header
-            // warning about JSON bodies, and it is worth stating rather than
-            // leaving the absent fixture to look like an oversight.
-            everyRole("POST", "/api/v1/chat/threads/{threadId}/attachments"),
+            // D-053 · §7.6's file share, and it carries MULTIPART rather than
+            // nothing. The first draft of this row argued the fixture was
+            // unnecessary because a missing `@RequestParam` is resolved after
+            // `@PreAuthorize`, so the guard would be reached anyway. True of the
+            // param, irrelevant to the route: the handler declares `consumes =
+            // multipart/form-data`, and a request that is not multipart is
+            // refused with 415 during handler *mapping* — earlier than either.
+            // All six rows would have passed on a 415, green, with authorisation
+            // never consulted. B-032 met this exact shape and MULTIPART is what
+            // it left behind.
+            everyRole("POST", "/api/v1/chat/threads/{threadId}/attachments", MULTIPART),
             // D-054. Scoped per row inside the feature like the rest of chat, and
             // more strictly than it reads: the codes come from the caller, and
             // every one of them goes through A-034 — a ticket they may not see is
@@ -721,17 +724,6 @@ final class PermissionMatrix {
             // issued. A capability here would answer the same for every code,
             // which is the wrong instrument for the same reason as above.
             everyRole("GET", "/api/v1/chat/ticket-cards"),
-            // D-053 · §7.6's file share. Same answer and the same reason as the
-            // messages route it accompanies: whether the caller is in this thread
-            // is decided per-row inside the feature, and a capability would answer
-            // the same for every thread.
-            //
-            // MULTIPART rather than a JSON fixture, on B-032's reasoning exactly:
-            // the handler declares `consumes = multipart/form-data`, so a JSON
-            // request is refused with 415 during handler mapping — before
-            // @PreAuthorize runs — and all six rows would pass without
-            // authorisation having been consulted at all.
-            everyRole("POST", "/api/v1/chat/threads/{threadId}/attachments", MULTIPART),
 
             // ── status requests · S-25, and the same reasoning ───────────────
             everyRole("POST", "/api/v1/tickets/{ticketId}/ask-status"),
