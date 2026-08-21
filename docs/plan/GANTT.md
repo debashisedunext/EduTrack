@@ -47,8 +47,8 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | `A-008` Immutability triggers — two per table | Shivendra | Thu 06 Aug | Fri 21 Aug | +11d |
 | `A-009` Generated columns + indexes replacing PostgreSQL | Shivendra | Thu 06 Aug | Fri 21 Aug | +11d |
 | `A-011` CI pipeline | Shivendra | Thu 06 Aug | Fri 21 Aug | +11d |
-| `A-052` /tickets/{id}/full aggregated endpoint | Shivendra | Fri 18 Sep | Sun 16 Aug | +10d |
-| `C-028` Delete within 15 minutes by the uploader; after  | Divyansh | Fri 18 Sep | Sun 16 Aug | +10d |
+| `A-052` /tickets/{id}/full aggregated endpoint | Shivendra | Fri 18 Sep | Sun 16 Aug | +9d |
+| `C-028` Delete within 15 minutes by the uploader; after  | Divyansh | Fri 18 Sep | Sun 16 Aug | +9d |
 | `B-034` Step 4 — dry-run validation preview | Ayush | Wed 02 Sep | Mon 17 Aug | +8d |
 
 *…and 6 more — see the interactive chart.*
@@ -136,7 +136,7 @@ gantt
     section Milestones
     Sprint 0 — weeks 1–2 :done, d0, 2026-08-06, 4d
     Infrastructure — weeks 3–5 :done, d1, 2026-08-07, 26d
-    M5 — SLA  escalation & mail — weeks 6–11 :done, d2, 2026-08-07, 10d
+    M5 — SLA  escalation & mail — weeks 6–11 :done, d2, 2026-08-07, 11d
     M7 — Chat & realtime — weeks 12–16 :done, d3, 2026-08-08, 10d
     Contract changes :done, d4, 2026-08-11, 1d
     S-05 and S-17 corrections — raised 18 Aug 2026 :done, d5, 2026-08-18, 1d
@@ -388,14 +388,14 @@ gantt
 | 🔴 | `D-027` | Every calculation routes through Stream B's working-hours service | 1 | `D-020` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-028` | original_level preserved so "born critical vs became critical"… | 1 | `D-020` ᶦ | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
 |  | `D-029` | Thymeleaf templates driven by Stream B's notification template… | 1.5 | `D-010` `B-022` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
-|  | `D-030` | Mail body | 1.5 | `D-029` ᶦ | Mon 17 Aug | Mon 17 Aug | 13 | ✅ done |
+|  | `D-030` | Mail body | 1.5 | `D-029` ᶦ | Mon 17 Aug | Mon 17 Aug | 12 | ✅ done |
 |  | `D-031` | Subject pattern with the ticket ID first so it threads and searches… | 0.5 | `D-029` ᶦ | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 | 🔴 | `D-032` | Threading | 1.5 | `D-031` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
 |  | `D-033` | Every send logged in email_log with status, provider message ID and… | 1 | `D-010` | Fri 07 Aug | Fri 07 Aug | 23 | ✅ done |
 |  | `D-034` | Bounce and complaint webhooks | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 24 | ✅ done |
 |  | `D-035` | Rate limit | 1 | `D-033` ᶦ | Fri 07 Aug | Fri 07 Aug | 24 | ✅ done |
-| 🔴 | `D-036` | "Critical mails cannot be disabled" | 1 | `D-029` | Mon 10 Aug | Mon 10 Aug | 14 | ✅ done |
-|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Mon 17 Aug | Thu 20 Aug | 14 | ✅ done |
+| 🔴 | `D-036` | "Critical mails cannot be disabled" | 1 | `D-029` | Mon 10 Aug | Mon 10 Aug | 13 | ✅ done |
+|  | `D-037` | All 15 mail events from §4B.6 wired | 2 | `D-030` `D-036` ᶦ | Mon 17 Aug | Fri 21 Aug | 13 | ✅ done |
 |  | `D-038` | Daily digest 08:30 and weekly manager summary | 1.5 | `D-037` ᶦ | Tue 18 Aug | Tue 18 Aug | 17 | ✅ done |
 |  | `D-039` | Inbound webhook — reply-to-comment parsing with quoted text stripped | 2 | `D-032` ᶦ | Wed 12 Aug | Wed 12 Aug | 21 | ✅ done |
 |  | `D-040` | All 24 events from blueprint §11 across in-app / bell / email… | 2 | `D-012` `B-022` | Mon 17 Aug | Mon 17 Aug | 0 | ✅ done |
