@@ -248,21 +248,45 @@ class PriorityMasterIT {
     }
 
     /**
-     * S-12's unfulfilled promise, asserted against a real database so that the
-     * day the contract's {@code Level} enum opens, this test is what fails and
-     * points at the decision rather than the day being discovered by a broken
-     * screen.
+     * S-12's promise, kept — and this test is the reason it was kept on purpose
+     * rather than by accident. It was written as a tripwire: <em>"asserted
+     * against a real database so that the day the contract's {@code Level} enum
+     * opens, this test is what fails and points at the decision rather than the
+     * day being discovered by a broken screen."</em> D-066 is that day, and the
+     * tripwire did its job — it went red in CI, naming the decision, before any
+     * screen could. What it asserts is now the other half of the same fact: the
+     * fifth level is created, and it is really in the table.
+     *
+     * <p>The IT earns its place over {@link PriorityServiceTest}'s mocked
+     * equivalent because {@code priorities.code} is a real column with a real
+     * width and a real unique index. A level the service accepts and the schema
+     * truncates is a failure only a database can show.
      */
     @Test
-    @DisplayName("a fifth level cannot be created, and the refusal names what has to change")
-    void aFifthLevelIsStillRefused() {
-        assertThatThrownBy(() -> service.create(new PriorityDtos.PriorityWrite(
-                "URGENT", "Urgent", "#EF4444", null, null, null, null)))
-                .isInstanceOf(PriorityService.PriorityValidationException.class)
-                .hasMessageContaining("closed four-value enum");
+    @DisplayName("a fifth level can be created — S-12's 'Admin can add levels', against a real schema")
+    void aFifthLevelIsAccepted() {
+        service.create(new PriorityDtos.PriorityWrite(
+                "URGENT", "Urgent", "#EF4444", null, null, null, null));
 
         assertThat(jdbc.queryForObject(
-                "SELECT COUNT(*) FROM priorities WHERE code = 'URGENT'", Integer.class)).isZero();
+                "SELECT COUNT(*) FROM priorities WHERE code = 'URGENT'", Integer.class)).isOne();
+    }
+
+    /**
+     * Open is not unvalidated. A level code travels in a URL, a filter param
+     * and a mail subject, so the service mirrors the contract's {@code Level}
+     * pattern rather than accepting anything a {@code VARCHAR} would hold.
+     */
+    @Test
+    @DisplayName("a code that would not survive a URL or a mail subject is still refused")
+    void anUnusableCodeIsRefused() {
+        assertThatThrownBy(() -> service.create(new PriorityDtos.PriorityWrite(
+                "VERY URGENT", "Very urgent", "#EF4444", null, null, null, null)))
+                .isInstanceOf(PriorityService.PriorityValidationException.class)
+                .hasMessageContaining("not a usable level code");
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM priorities WHERE code = 'VERY URGENT'", Integer.class)).isZero();
     }
 
     // ------------------------------------------------------------------
