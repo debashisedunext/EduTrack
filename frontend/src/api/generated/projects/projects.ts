@@ -1032,6 +1032,11 @@ Every role may read it. All six can raise a ticket, and the create form
 cannot mark a field mandatory or filter its task-type picker without
 this.
 
+**C-071 enforces it**: `createTicket` refuses a task type outside the
+allow-list and any `mandatoryFields` the request left empty, and
+`CreateTicketPage` filters its picker and marks its controls from this
+response.
+
  * @summary Project settings — allowed task types, mandatory fields, auto-assign
  */
 export const getProjectSettings = (
@@ -1148,11 +1153,13 @@ held to is master data. `autoAssignRule` is also already PM-writable
 through `PATCH /projects/{projectId}`, so narrowing this to Admin would
 take away a capability PMs hold today.
 
-**Nothing enforces these settings yet.** Ticket creation is Stream C's
-(`api/feature/tickets`, `CreateTicketPage`); B-019 stores and serves the
-configuration and C consumes it. Said here rather than left to be
-discovered, because a settings screen whose settings do nothing is a
-screen that looks finished.
+**These settings are enforced as of C-071**, in `createTicket` and in
+`CreateTicketPage` — B-019 stores and serves the configuration, and
+Stream C consumes it. Between the two tasks they did nothing at all,
+which is worse than not offering them: the screen said they had taken
+effect. Recorded here rather than left to be discovered, because a
+settings screen whose settings do nothing is a screen that looks
+finished.
 
  * @summary Replace project settings
  */

@@ -43,6 +43,14 @@ import java.util.Optional;
  * {@link RichTextSanitizer} before anything is persisted — the same allow-list
  * the comment box uses, which is the point of it being shared.
  *
+ * <h2>The project's own settings are obeyed on create, and only on create</h2>
+ *
+ * <p>C-071. B-019's Settings tab restricts which task types a project accepts
+ * and which otherwise-optional fields it requires; {@link ProjectSettingsGate}
+ * is what makes those two true, and its class note carries the reasoning —
+ * including why the rules do not run on {@link #patch} and why
+ * {@code saveAsDraft} does not waive them.
+ *
  * <h2>One FIELD_CHANGED row per field that actually changed</h2>
  *
  * <p>Not one row per request. A PATCH naming four fields where two differ writes
@@ -76,6 +84,8 @@ public class TicketWriteService {
     private final PlannedCloseDateService plannedCloseDates;
     private final ClientGate clients;
     private final ModuleGuard modules;
+    /** C-071 · B-019's per-project settings, which until now nothing obeyed. */
+    private final ProjectSettingsGate projectSettings;
     private final RichTextSanitizer sanitizer;
     private final TicketJournal journal;
     /**
@@ -88,7 +98,7 @@ public class TicketWriteService {
 
     TicketWriteService(ScopedTickets tickets, TicketRepository repository, TicketCodeGenerator codes,
                        PlannedCloseDateService plannedCloseDates, ClientGate clients, ModuleGuard modules,
-                       RichTextSanitizer sanitizer, TicketJournal journal,
+                       ProjectSettingsGate projectSettings, RichTextSanitizer sanitizer, TicketJournal journal,
                        TicketEventNotifier notifier) {
         this.tickets = tickets;
         this.repository = repository;
@@ -96,6 +106,7 @@ public class TicketWriteService {
         this.plannedCloseDates = plannedCloseDates;
         this.clients = clients;
         this.modules = modules;
+        this.projectSettings = projectSettings;
         this.sanitizer = sanitizer;
         this.journal = journal;
         this.notifier = notifier;
@@ -108,6 +119,21 @@ public class TicketWriteService {
         // and the gap is permanent.
         clients.requireSelectable(request.clientId());
         modules.requireActive(request.moduleId());
+        // C-071 · the allow-list first, because it needs nothing computed and a
+        // task type the project refuses makes every later question moot — the
+        // SLA ladder resolves *by* task type, so a preview computed for one this
+        // project will not accept is work done for a ticket that cannot exist.
+        projectSettings.requireTaskTypeAllowed(request.projectId(), request.taskTypeId());
+
+        // Resolved here rather than at the assignment below, so PLANNED_CLOSE_DATE
+        // can be judged on the date the ticket would actually carry. It also
+        // brings the SLA resolution above `nextTicketCode`, which is the same
+        // discipline the paragraph above states: a preview that throws now costs
+        // a lookup instead of a permanent gap in the project's ticket codes.
+        Instant plannedCloseDate = request.plannedCloseDate() != null
+                ? request.plannedCloseDate()
+                : computedPlannedCloseDate(request);
+        projectSettings.requireMandatoryFields(request.projectId(), request, plannedCloseDate);
 
         Ticket ticket = new Ticket();
         ticket.setTicketCode(codes.nextTicketCode(request.projectId()));
@@ -132,9 +158,7 @@ public class TicketWriteService {
         ticket.setFeature(request.feature());
         ticket.setStepsToGenerate(sanitizer.sanitize(request.stepsToGenerate()));
 
-        ticket.setPlannedCloseDate(request.plannedCloseDate() != null
-                ? request.plannedCloseDate()
-                : computedPlannedCloseDate(request));
+        ticket.setPlannedCloseDate(plannedCloseDate);
 
         Ticket saved = repository.save(ticket);
         journal.append(created(saved, caller));

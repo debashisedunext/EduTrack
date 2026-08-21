@@ -18,10 +18,17 @@ Ticket CRUD, detail, cycles, reopen, comments, attachments, effort. Screens S-17
 | [`attachments/`](attachments/README.md) | C-025 | Attachment security — sniffing, EXIF stripping, AV scan, signed URLs. Its own README |
 | [`effort/`](effort/README.md) | C-035 | Effort logging, append-only, auto-stamped with the ticket's current stage and iteration. Its own README |
 | [`history/`](history/README.md) | C-059 | `GET /tickets/{ticketId}/history` — read only, cycle-grouped, optionally interleaved with comments. Its own README |
+| `TicketWriteController`, `TicketWriteService`, `TicketCreateDtos`, `TicketWire` | C-067 | `POST /tickets` and `PATCH /tickets/{ticketId}` |
+| `ClientGate`, `ModuleGuard` | B-028/B-029, C-067 | The two write gates — an unselectable client, a deactivated module |
+| `ProjectSettingsGate`, `ProjectTicketRules` | C-071 | B-019's per-project settings, enforced on create |
+| `TaskTypeNotAllowedException`, `MandatoryFieldsMissingException` | C-071 | What a project's own configuration refuses |
+| `TicketWriteExceptionHandler` | C-067, C-071 | RFC 9457 problems for the write routes |
 
-There is still **no ticket write service**. `POST /tickets` does not exist on the
-server; the create form runs against D-004's mock. C-013's note records what the
-save chain still needs and who owns each part.
+**The write service landed in C-067.** The paragraph that stood here said there
+was none and that the create form ran against D-004's mock; that was true when
+C-013 wrote it and stopped being true when `TicketWriteController` was added.
+Corrected rather than left, because a README that under-reports what exists is
+how the same thing gets built twice.
 
 ## C-020 — the level change
 
@@ -177,3 +184,42 @@ two need opposite fixes.
 - **Not verified by a run.** Only JDK 8 is installed on the machine this was
   written on, so nothing in `backend/` was compiled or tested locally — CI's
   Temurin 25 is the first thing to execute it.
+
+## C-071 — the project's own settings
+
+B-019 stores and serves them; **this package is where they become true.** Between
+the two tasks a PM could restrict a project to two task types, watch S-10 confirm
+the save, and watch tickets be raised outside them — worse than not offering the
+setting, because the screen said it took effect.
+
+`ProjectSettingsGate` runs on `create()` and on nothing else. Its class note
+carries the reasoning; the three decisions worth finding from here:
+
+- **An empty allow-list is unrestricted.** Every project has no
+  `project_task_types` rows until somebody configures one, so reading the absence
+  as "nothing may be raised" would stop ticket creation organisation-wide the
+  first time the gate ran. Stated in `ProjectTicketRules.taskTypeRefused` and
+  pinned by a test rather than left as a property of the query.
+- **`saveAsDraft` waives nothing.** The flag is accepted by `TicketCreateRequest`
+  and acted on nowhere — a "draft" is stored as an ordinary ticket — so waiving
+  on it would hand every caller a one-field opt-out of a project's configuration.
+  A rule any client can switch off is not a rule. That is the paragraph to
+  revisit when a draft becomes a real server-side state.
+- **`PLANNED_CLOSE_DATE` is measured against the resolved date**, which is why
+  `create()` now resolves it before `nextTicketCode` rather than at the
+  assignment. Requiring the caller to *send* one would make it the single setting
+  the four roles who may not override the date could never satisfy.
+
+Both refusals are **400 keyed on the request property**, not 404: the project,
+its allow-list and the field vocabulary are all readable by every role through
+`getProjectSettings`, so there is no existence to leak. The key matters as much
+as the status — `CreateTicketPage` maps `errors: {field: [messages]}` onto its
+controls by that name, so `moduleId` marks the Module picker and `module` marks
+nothing at all.
+
+It reads `projects.mandatory_fields` and `project_task_types` directly, the way
+`ClientGate` reads `clients` and `ModuleGuard` reads `product_modules`. An HTTP
+call to `feature/masters/projects` instead would buy a network hop, a second
+failure mode and a race against the settings changing mid-request; two `SELECT`s
+inside the creation transaction mean the settings that are read are the settings
+in force when the row lands.

@@ -8,8 +8,10 @@ import {
   createTicketBodyTitleMin,
 } from '@/api/generated/zod/tickets/tickets.zod'
 import type { Level } from '@/api/generated/model/level'
+import type { ProjectSettings } from '@/api/generated/model/projectSettings'
 import type { TaskType } from '@/api/generated/model/taskType'
 import type { TicketCreateRequest } from '@/api/generated/model/ticketCreateRequest'
+import type { TicketFieldCode } from '@/api/generated/model/ticketFieldCode'
 import { isRichTextEmpty, sanitizeRichText } from '@/components/ui/rich-text'
 
 /**
@@ -114,6 +116,76 @@ export interface TaskTypeRules {
 }
 
 /**
+ * C-071 · what the *selected project* asks of this ticket — B-019's Settings
+ * tab, which until now nothing obeyed.
+ *
+ * Two rules, and the difference between them is worth stating: the task-type
+ * rules above come from the task-type master and are the same on every project,
+ * while these change the moment the project picker changes. Everything derived
+ * from them is therefore keyed on `projectId` and starts empty, which is the
+ * safe direction — an unconfigured project and a project whose settings have not
+ * arrived yet must both behave exactly like today.
+ */
+export interface ProjectRules {
+  /**
+   * Task type ids this project accepts.
+   *
+   * **`null` means unrestricted, and an empty set would mean the opposite.**
+   * That distinction is the whole of B-019's design decision, restated as a type
+   * so it cannot be lost: every project has no `project_task_types` rows until
+   * somebody configures one, and reading that absence as "none are allowed"
+   * would empty the task-type picker on every project in the organisation.
+   * `restrictsTaskTypes` on the wire exists for exactly this, so it is read
+   * rather than inferred from the array's length.
+   */
+  allowedTaskTypeIds: ReadonlySet<number> | null
+  /** Otherwise-optional fields this project requires. Empty until the settings load. */
+  mandatoryFields: ReadonlySet<TicketFieldCode>
+}
+
+/** No project picked, or its settings not back yet — today's behaviour, unchanged. */
+export const noProjectRules: ProjectRules = {
+  allowedTaskTypeIds: null,
+  mandatoryFields: new Set<TicketFieldCode>(),
+}
+
+export function projectRulesFrom(settings: ProjectSettings | undefined): ProjectRules {
+  if (!settings) return noProjectRules
+  return {
+    allowedTaskTypeIds: settings.restrictsTaskTypes
+      ? new Set(settings.taskTypes.filter((t) => t.isAllowed).map((t) => t.taskTypeId))
+      : null,
+    mandatoryFields: new Set(settings.mandatoryFields),
+  }
+}
+
+/**
+ * The task types this project will actually accept.
+ *
+ * **Filtered out of the picker rather than shown and refused**, which is the
+ * opposite of what the Client control does two fields down — and the two are
+ * right for opposite reasons. A client blocked by B-028 is shown greyed because
+ * the person raising the ticket is usually the person who can go and fix the
+ * client master, so naming the obstacle is actionable. A task type this project
+ * does not accept is not an obstacle to fix: it is a deliberate configuration
+ * that only a PM or Admin can change, on a screen most of the six roles cannot
+ * open. Offering it would be offering a refusal.
+ *
+ * An **inactive** type is dropped either way. It stays in the settings response
+ * on purpose — B-019's checkbox grid must render an allowed-but-retired row or
+ * the next save would silently drop it — but a retired type is one nobody may
+ * raise regardless of what this project's allow-list still says.
+ */
+export function allowedTaskTypes(
+  taskTypes: readonly TaskType[],
+  rules: ProjectRules,
+): readonly TaskType[] {
+  const allowed = rules.allowedTaskTypeIds
+  if (allowed == null) return taskTypes
+  return taskTypes.filter((t) => t.id != null && allowed.has(t.id))
+}
+
+/**
  * The three save actions blueprint §7.5 asks for — C-013.
  *
  * `assign` is the primary and `another` differs from it only in what happens
@@ -207,8 +279,17 @@ const HOURS = /^\d+(\.\d{1,2})?$/
  * `TicketCreateRequest.required` is `[projectId, title, taskTypeId, level]`, so
  * a draft missing any of those is a 400 whatever the UI allows. Level pre-fills
  * from the task type, so in practice a draft costs project + task type + title.
+ *
+ * `project` is C-071's third input and the only one that changes while the form
+ * is open — it arrives with the selected project's settings and is
+ * `noProjectRules` until they do. A draft does not relax it; the `superRefine`
+ * says why.
  */
-export function ticketFormSchema(rules: TaskTypeRules, action: TicketSaveAction = 'assign') {
+export function ticketFormSchema(
+  rules: TaskTypeRules,
+  action: TicketSaveAction = 'assign',
+  project: ProjectRules = noProjectRules,
+) {
   const isDraft = action === 'draft'
 
   return z
@@ -336,7 +417,108 @@ export function ticketFormSchema(rules: TaskTypeRules, action: TicketSaveAction 
           message: 'Select the client before its contact',
         })
       }
+      // C-071 · a task type the project does not accept. The picker no longer
+      // offers one, so this fires on the path a filtered list cannot cover:
+      // a type chosen on one project and carried into another by Save & Create
+      // Another, whose `retainedForNextTicket` keeps the task type on purpose.
+      // The server refuses it either way; catching it here is what puts the
+      // message on the control rather than in a toast after a round trip.
+      if (
+        values.taskTypeId != null &&
+        project.allowedTaskTypeIds != null &&
+        !project.allowedTaskTypeIds.has(values.taskTypeId)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['taskTypeId'],
+          message: 'This project does not accept that task type — pick one from the list',
+        })
+      }
+      // C-071 · B-019's mandatory fields.
+      //
+      // **A draft does not waive these, where it waives the description, the
+      // estimate and the client rule above.** Those three are the blueprint's
+      // rules about what a ticket ought to say, and a draft exists precisely to
+      // hold a ticket that cannot say them yet. These are a *project's* rules,
+      // and `saveAsDraft` is accepted by the server and acted on nowhere — a
+      // draft is stored as an ordinary ticket today. Waiving them on the flag
+      // would mean one click turns a project's configuration off and produces a
+      // ticket indistinguishable from any other, which is the same "setting that
+      // does nothing" this task exists to fix. `ProjectSettingsGate` refuses a
+      // draft the same way, so the form and the server agree.
+      for (const [code, path, rich] of MANDATORY_FIELD_PATHS) {
+        if (project.mandatoryFields.has(code) && isEmptyValue(values[path], rich)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [path],
+            message: PROJECT_REQUIRES[code],
+          })
+        }
+      }
     })
+}
+
+/**
+ * The contract's `TicketFieldCode`, paired with the form field that answers it —
+ * `ProjectTicketRules.RequiredField` on the server is the same table, keyed to
+ * the same names, and the two have to stay in step or a field is required on one
+ * side only.
+ *
+ * **`PLANNED_CLOSE_DATE` is deliberately absent.** Blank does not mean absent
+ * there: it means "compute it from the SLA policy", the server does, and the
+ * ticket ends up with a date. The control is read-only for four of the six roles
+ * anyway, so a rule here would refuse a form those roles cannot fix. The server
+ * measures that code against the *resolved* date and fails only when no rung of
+ * the ladder answered either — which is a project misconfiguration rather than
+ * something the person raising the ticket left out.
+ */
+const MANDATORY_FIELD_PATHS: ReadonlyArray<
+  readonly [TicketFieldCode, keyof TicketFormValues, boolean]
+> = [
+  ['DESCRIPTION', 'description', true],
+  ['MODULE', 'moduleId', false],
+  ['SCREEN_NAME', 'screenName', false],
+  ['FEATURE', 'feature', false],
+  ['STEPS_TO_GENERATE', 'stepsToGenerate', true],
+  ['CLIENT', 'clientId', false],
+  ['CLIENT_CONTACT', 'clientContactId', false],
+  ['ASSIGNEE', 'assigneeId', false],
+  ['ESTIMATED_HRS', 'estimatedHrs', false],
+]
+
+/** Worded as the project's rule, not the form's — it is why the asterisk is there. */
+const PROJECT_REQUIRES: Record<TicketFieldCode, string> = {
+  DESCRIPTION: 'This project requires a task description on every ticket',
+  MODULE: 'This project requires a module on every ticket',
+  SCREEN_NAME: 'This project requires a screen name on every ticket',
+  FEATURE: 'This project requires a feature on every ticket',
+  STEPS_TO_GENERATE: 'This project requires steps to generate on every ticket',
+  CLIENT: 'This project requires a client on every ticket',
+  CLIENT_CONTACT: 'This project requires a client contact on every ticket',
+  ASSIGNEE: 'This project requires an assignee on every ticket',
+  ESTIMATED_HRS: 'This project requires an effort estimate on every ticket',
+  PLANNED_CLOSE_DATE: 'This project requires a planned close date on every ticket',
+}
+
+/**
+ * Empty across the shapes a form value takes here.
+ *
+ * The two rich-text fields are measured with `isRichTextEmpty` rather than by
+ * length, for C-066's reason: an editor the user focused and left holds
+ * `<p><br></p>`, and thirteen characters of nothing is not an answer.
+ * `ProjectTicketRules.hasRichText` is the same rule server-side, down to
+ * counting a lone pasted image as content.
+ *
+ * **The plain fields are not measured that way, and the flag is what keeps them
+ * apart.** `isRichTextEmpty` sanitises before it looks, so a screen name a user
+ * typed as `<3` would be stripped to nothing and reported as blank — a rule
+ * refusing a value the server stores happily.
+ */
+function isEmptyValue(value: TicketFormValues[keyof TicketFormValues], rich: boolean): boolean {
+  if (value == null) return true
+  if (Array.isArray(value)) return value.length === 0
+  if (typeof value === 'string') return rich ? isRichTextEmpty(value) : value.trim() === ''
+  return false
 }
 
 /**
