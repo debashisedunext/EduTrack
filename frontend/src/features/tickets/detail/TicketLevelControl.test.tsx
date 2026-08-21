@@ -82,6 +82,29 @@ function renderControl(props: Partial<Parameters<typeof TicketLevelControl>[0]> 
   return { onChanged, user: userEvent.setup() }
 }
 
+/**
+ * `GET /masters/priorities` as it will answer once its active-only default
+ * widens: every level, the retired one carrying `isActive: false`. A literal
+ * rather than the shared fixture, for the reason the file header gives about
+ * `frontend/src/mocks/` belonging to Stream D.
+ */
+function retire(retired: string) {
+  const levels = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+  server.use(
+    http.get('*/masters/priorities', () =>
+      HttpResponse.json({
+        data: levels.map((level, index) => ({
+          id: index + 1,
+          level,
+          name: level[0] + level.slice(1).toLowerCase(),
+          seq: index + 1,
+          isActive: level !== retired,
+        })),
+      }),
+    ),
+  )
+}
+
 const openDialog = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(screen.getByRole('button', { name: /change the level/i }))
   return screen.findByRole('dialog')
@@ -118,6 +141,61 @@ describe('TicketLevelControl — §4B.1', () => {
     // The ticket's own level opens selected, so the dialog is a picker rather
     // than a blank form the user has to re-answer.
     expect(within(group).getByRole('radio', { name: 'MEDIUM' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  /**
+   * C-072 · a level S-12 has retired is not offered here either. The override
+   * is `GET /masters/priorities` once its active-only default widens to match
+   * `listTaskTypes` and `listModules` (`DEPENDENCIES.md` row 23) — until then
+   * the endpoint hides the row and this defect cannot be reached, which is
+   * exactly why it has to be tested against the widened shape.
+   */
+  it('does not offer a level the priority master has retired', async () => {
+    retire('CRITICAL')
+    const { user } = renderControl()
+
+    await openDialog(user)
+
+    const group = await screen.findByRole('radiogroup')
+    await waitFor(() =>
+      expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual([
+        'LOW',
+        'MEDIUM',
+        'HIGH',
+      ]),
+    )
+  })
+
+  /**
+   * The exception that makes `levelsIncludingCurrent` a separate function from
+   * `selectableLevels`.
+   *
+   * Retiring CRITICAL does not move the tickets already there. If the filter
+   * were applied flat, this dialog would open on a born-critical ticket with
+   * nothing checked — which reads as "this ticket has no level" — and the user
+   * could not close it back onto the level the ticket already holds without
+   * changing it to something else. The retired level is appended rather than
+   * inserted, because a retired row has no place in a sequence it has left.
+   */
+  it('still offers the level the ticket is at, even once it is retired', async () => {
+    retire('CRITICAL')
+    const { user } = renderControl({ ticket: ticket({ level: 'CRITICAL', originalLevel: 'CRITICAL' }) })
+
+    await openDialog(user)
+
+    const group = await screen.findByRole('radiogroup')
+    await waitFor(() =>
+      expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual([
+        'LOW',
+        'MEDIUM',
+        'HIGH',
+        'CRITICAL',
+      ]),
+    )
+    expect(within(group).getByRole('radio', { name: 'CRITICAL' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
   })
 
   /**

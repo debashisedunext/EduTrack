@@ -10,7 +10,6 @@ import { useListClients, useListClientContacts } from '@/api/generated/clients/c
 import { useListUsers } from '@/api/generated/users/users'
 import { useListTaskTypes, useListPriorities, useListModules } from '@/api/generated/masters/masters'
 import { newIdempotencyKey, ApiError } from '@/api/http'
-import type { Level } from '@/api/generated/model/level'
 import type { Project } from '@/api/generated/model/project'
 import type { Client } from '@/api/generated/model/client'
 import type { Contact } from '@/api/generated/model/contact'
@@ -48,6 +47,7 @@ import { SlaPreview } from '../sla/SlaPreview'
 import { usePlannedCloseDate } from '../sla/usePlannedCloseDate'
 import { FieldGroup, FormField, ReadOnlyField } from './FormField'
 import { LevelPicker } from './LevelPicker'
+import { selectableLevels } from '../levels'
 import { WatcherPicker } from './WatcherPicker'
 import { useCreateTicket } from './createTicketMutation'
 import {
@@ -94,10 +94,14 @@ export function CreateTicketPage() {
     () => (taskTypesData?.data ?? []).filter((t) => t.isActive !== false),
     [taskTypesData],
   )
-  const levels = React.useMemo(
-    () => (prioritiesData?.data ?? []).map((p) => p.level).filter((l): l is Level => l != null),
-    [prioritiesData],
-  )
+  /*
+    C-072 · retired levels dropped, exactly as `taskTypes` and `modules` above
+    drop theirs and for the same reason — this is the picker that decides what
+    a *new* ticket may be raised at, so offering a level S-12 has retired is
+    offering a choice the master has withdrawn. See `../levels.ts` for why the
+    filter lives there rather than in the query parameter.
+  */
+  const levels = React.useMemo(() => selectableLevels(prioritiesData?.data), [prioritiesData])
 
   const modules = React.useMemo(
     () => (modulesData?.data ?? []).filter((m) => m.isActive !== false),
@@ -401,8 +405,16 @@ export function CreateTicketPage() {
   React.useEffect(() => {
     if (levelTouched.current || taskTypeId == null) return
     const fallback = taskTypes.find((t) => t.id === taskTypeId)?.defaultLevel
-    if (fallback) setValue('level', fallback, { shouldValidate: false })
-  }, [taskTypeId, taskTypes, setValue])
+    // C-072 · only if the master still offers it. `TaskTypeService` refuses a
+    // retired level as a default, so the two masters should agree — but they
+    // arrive here as two independent queries that go stale independently, and
+    // a `defaultLevel` the picker below does not show is the worst kind of
+    // disagreement: the form renders with no chip selected, clicking the chip
+    // the user wanted is a no-op if it is the one already in state, and
+    // `taskTypeRules.levels` refuses the submit with a message about a level
+    // nobody chose. One `includes` avoids all of it.
+    if (fallback && levels.includes(fallback)) setValue('level', fallback, { shouldValidate: false })
+  }, [taskTypeId, taskTypes, levels, setValue])
 
   // A contact belongs to exactly one client, so it cannot survive the client changing.
   //

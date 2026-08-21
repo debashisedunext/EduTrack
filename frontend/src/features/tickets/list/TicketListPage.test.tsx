@@ -2,6 +2,7 @@ import { beforeAll, afterEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 import { TicketListPage } from './TicketListPage'
 
@@ -197,6 +198,40 @@ describe('S-17 Ticket List — C-014', () => {
         for (const row of rows) {
           expect(within(row).getByRole('link').textContent).toMatch(/^ARCH-/)
         }
+      },
+      { timeout: 4000 },
+    )
+  })
+
+  /**
+   * C-072 · `GET /masters/priorities` is active-only *by default*, which is the
+   * only thing keeping a retired level off this filter — and that default is
+   * due to widen to match `listTaskTypes` and `listModules`
+   * (`DEPENDENCIES.md` row 23). The override is that widened endpoint: it is
+   * what the page will actually be handed, not a hypothetical. Without the
+   * filter in `selectableLevels` the fifth option is back.
+   */
+  it('leaves a retired level out of the Level filter', async () => {
+    server.use(
+      http.get('*/masters/priorities', () =>
+        HttpResponse.json({
+          data: [
+            { id: 1, level: 'LOW', name: 'Low', seq: 1, isActive: true },
+            { id: 2, level: 'MEDIUM', name: 'Medium', seq: 2, isActive: true },
+            { id: 3, level: 'HIGH', name: 'High', seq: 3, isActive: true },
+            { id: 4, level: 'CRITICAL', name: 'Critical', seq: 4, isActive: false },
+          ],
+        }),
+      ),
+    )
+    renderPage()
+    await rowsReady()
+
+    await openFilter('Level')
+    await waitFor(
+      () => {
+        const options = screen.getAllByRole('option').map((o) => o.textContent)
+        expect(options).toEqual(['All level', 'Low', 'Medium', 'High'])
       },
       { timeout: 4000 },
     )
