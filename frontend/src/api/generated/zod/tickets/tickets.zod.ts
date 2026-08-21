@@ -814,7 +814,7 @@ export const getTicketDetailResponse = zod.object({
   "idleMins": zod.number().nullish().describe('`durationMins − effort`. High idle against low effort is a queue problem.'),
   "iterationNo": zod.number().optional(),
   "loopBackCount": zod.number().optional().describe('Drives the loop-back badge.'),
-  "skipReason": zod.string().nullish(),
+  "skipReason": zod.string().nullish().describe('Set only while `state` is `SKIPPED` — read off the transition by\nwhich the ticket \*left\* this stage, not the one it entered. Carries\nthe authoriser as a trailing `Skipped by: …` line, which is what\n§4A.3\'s hover asks for alongside the reason; render the whole string.\nCleared again if the ticket is later reworked back into the stage.\n'),
   "handoffNote": zod.string().nullish()
 })).optional()
 }).optional(),

@@ -47,4 +47,12 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * Set only while `state` is `SKIPPED` — read off the transition by
+which the ticket *left* this stage, not the one it entered. Carries
+the authoriser as a trailing `Skipped by: …` line, which is what
+§4A.3's hover asks for alongside the reason; render the whole string.
+Cleared again if the ticket is later reworked back into the stage.
+
+ */
 export type RibbonSegmentSkipReason = string | null;

@@ -366,9 +366,36 @@ export const useReworkTicket = <TError = ValidationFailedResponse | NotFoundResp
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * `reason` mandatory. The segment renders struck-through with the reason on
+ * **The stage being skipped is the one the ticket is standing in**, and
+`toStageCode` is where it lands — the same meaning that field carries on
+`handoff`, `rework` and `force-move`. One field, one meaning across all
+four ribbon routes; the alternative reading would need two transitions
+per skip and invent a zero-duration segment nobody worked.
+
+`reason` mandatory. The segment renders struck-through with the reason on
 hover, rather than disappearing — a stage that silently vanishes from the
-ribbon makes the history unreadable later.
+ribbon makes the history unreadable later. **Who authorised the skip is
+appended to the stored reason** (§4A.3 asks the hover for both):
+`ticket_stage_transitions` carries the outgoing and incoming stage
+owners and no actor at all, and adding a column to an append-only
+hash-chained table for one name is out of proportion — the same call
+`rework` makes for its defect list.
+
+**The stage must be marked `isOptional` on the ticket's workflow
+template** — blueprint §4A.6, "skipping an *optional* stage requires
+PM/Admin and a reason". A stage that is not is refused with **422, not
+400**: nothing the caller sent is malformed, and the identical request
+would succeed once the ticket reaches a stage the template marks
+optional. A ticket with no workflow template is not checked, on
+`rework`'s own precedent for `canReturnTo`.
+
+Gated on `ticket.skip_stage`, which Admin and PM hold and nobody else
+(§2's "Skip a stage (with reason)" row) — so a caller without it gets a
+**403 from the security chain**, never the 422 the mock answers. That
+difference is the mock's to fix.
+
+`status` is untouched, like `handoff` and `force-move` and unlike
+`rework`: a skip says where the ticket is, not something about the work.
 
  * @summary Skip an optional stage — PM and Admin only
  */
@@ -389,7 +416,7 @@ export const skipStage = (
   
 
 
-export const getSkipStageMutationOptions = <TError = NotFoundResponse | UnprocessableTransitionResponse,
+export const getSkipStageMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | UnprocessableTransitionResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skipStage>>, TError,{ticketId: string;data: SkipStageBody}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof skipStage>>, TError,{ticketId: string;data: SkipStageBody}, TContext> => {
 
@@ -416,12 +443,12 @@ const {mutation: mutationOptions} = options ?
 
     export type SkipStageMutationResult = NonNullable<Awaited<ReturnType<typeof skipStage>>>
     export type SkipStageMutationBody = SkipStageBody
-    export type SkipStageMutationError = NotFoundResponse | UnprocessableTransitionResponse
+    export type SkipStageMutationError = ValidationFailedResponse | NotFoundResponse | UnprocessableTransitionResponse
 
     /**
  * @summary Skip an optional stage — PM and Admin only
  */
-export const useSkipStage = <TError = NotFoundResponse | UnprocessableTransitionResponse,
+export const useSkipStage = <TError = ValidationFailedResponse | NotFoundResponse | UnprocessableTransitionResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skipStage>>, TError,{ticketId: string;data: SkipStageBody}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof skipStage>>,

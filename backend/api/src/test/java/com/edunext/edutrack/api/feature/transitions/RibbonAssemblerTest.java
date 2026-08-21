@@ -99,18 +99,43 @@ class RibbonAssemblerTest {
     }
 
     @Test
-    @DisplayName("a SKIP action renders SKIPPED with the reason, not the stage's history state")
-    void skippedCarriesReason() {
-        TicketStageTransition skip = hop("DEV", false, "SKIP");
-        skip.setReason("no dev work needed, straight to QA");
-        when(journal.hopsFor(TICKET, (short) 1)).thenReturn(List.of(skip));
+    @DisplayName("C-047 · a SKIP strikes through the stage it LEFT, with the reason — not the one it entered")
+    void skippedCarriesReasonOnTheStageLeft() {
+        TicketStageTransition intoDev = hop("TRIAGE", "DEV", 1, false, "FORWARD");
+        TicketStageTransition skip = hop("DEV", "QA", 2, true, "SKIP");
+        skip.setReason("no dev work needed, straight to QA\n\nSkipped by: Priya Nair");
+        when(journal.hopsFor(TICKET, (short) 1)).thenReturn(List.of(intoDev, skip));
         when(journal.effortFor(TICKET, (short) 1)).thenReturn(List.of());
 
         RibbonWire.Ribbon ribbon = assembler.assembleCurrentCycle(ticket, true);
 
         RibbonWire.RibbonSegment dev = segment(ribbon, "DEV");
         assertThat(dev.state()).isEqualTo(RibbonWire.SegmentState.SKIPPED);
-        assertThat(dev.skipReason()).isEqualTo("no dev work needed, straight to QA");
+        assertThat(dev.skipReason()).isEqualTo("no dev work needed, straight to QA\n\nSkipped by: Priya Nair");
+
+        // The destination is where the ticket actually is, and carries no
+        // strike-through — this is the half that was wrong before C-047.
+        RibbonWire.RibbonSegment qa = segment(ribbon, "QA");
+        assertThat(qa.state()).isEqualTo(RibbonWire.SegmentState.CURRENT);
+        assertThat(qa.skipReason()).isNull();
+    }
+
+    @Test
+    @DisplayName("C-047 · a stage skipped and later reworked back into is not struck through any more")
+    void skipIsClearedByALaterReturn() {
+        TicketStageTransition intoDev = hop("TRIAGE", "DEV", 1, false, "FORWARD");
+        TicketStageTransition skip = hop("DEV", "QA", 2, false, "SKIP");
+        skip.setReason("no dev work needed");
+        TicketStageTransition backToDev = hop("QA", "DEV", 3, true, "REWORK");
+        when(journal.hopsFor(TICKET, (short) 1)).thenReturn(List.of(intoDev, skip, backToDev));
+        when(journal.effortFor(TICKET, (short) 1)).thenReturn(List.of());
+
+        RibbonWire.Ribbon ribbon = assembler.assembleCurrentCycle(ticket, true);
+
+        RibbonWire.RibbonSegment dev = segment(ribbon, "DEV");
+        assertThat(dev.state()).isEqualTo(RibbonWire.SegmentState.CURRENT);
+        assertThat(dev.skipReason()).isNull();
+        assertThat(dev.loopBackCount()).isEqualTo(1);
     }
 
     @Test
@@ -169,10 +194,23 @@ class RibbonAssemblerTest {
     }
 
     private static TicketStageTransition hop(String toStage, boolean current, String actionCode) {
+        return hop(null, toStage, 0, current, actionCode);
+    }
+
+    /**
+     * C-047 · the fuller form. {@code fromStage} and {@code seqNo} only matter
+     * once a {@code SKIP} is in play — that is the hop the assembler reads the
+     * strike-through off, and {@code seqNo} is how it decides whether a later
+     * return has since undone it.
+     */
+    private static TicketStageTransition hop(String fromStage, String toStage, int seqNo,
+                                             boolean current, String actionCode) {
         TicketStageTransition h = new TicketStageTransition();
         h.setTicketId(TICKET);
         h.setCycleNo((short) 1);
         h.setIterationNo((short) 1);
+        h.setSeqNo(seqNo);
+        h.setFromStage(fromStage);
         h.setToStage(toStage);
         h.setToUserId(1L);
         h.setActionCode(actionCode);

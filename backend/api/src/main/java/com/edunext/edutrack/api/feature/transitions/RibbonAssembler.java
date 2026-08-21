@@ -39,6 +39,16 @@ import java.util.Map;
  * (predates B's designer, {@code TransitionService.resolveToStage}'s own note)
  * answers an empty segment list rather than guessing a template.
  *
+ * <h2>C-047 · a skipped segment is the stage the ticket left</h2>
+ *
+ * <p>A {@code SKIP} hop records that the ticket <em>left</em> {@code from_stage}
+ * by skipping it and landed on {@code to_stage}; the stage to strike through is
+ * therefore the departure's, not the arrival's. This class read the arriving
+ * hop's action code until C-047 and struck through the destination — see
+ * {@link #toSegment}. The skip only wins while it is the last thing that
+ * happened to that stage: a ticket skipped past and later reworked back into a
+ * stage is standing in it, not past it.
+ *
  * <h2>Effort per segment</h2>
  *
  * <p>Summed across the whole cycle for that stage — every iteration, not
@@ -52,6 +62,8 @@ import java.util.Map;
  */
 @Component
 class RibbonAssembler {
+
+    private static final String SKIP = "SKIP";
 
     private final TicketJournal journal;
     private final WorkflowStageRepository stages;
@@ -84,12 +96,23 @@ class RibbonAssembler {
             effortByStage.merge(entry.getStageCode(), entry.getHours(), BigDecimal::add);
         }
 
+        // C-047 · a SKIP hop is keyed on the stage it LEFT, not the one it
+        // entered — see skipDeparture below. Last one wins: a stage skipped,
+        // reworked back into and skipped again shows the most recent reason.
+        Map<String, TicketStageTransition> skipsByStageLeft = new HashMap<>();
+        for (TicketStageTransition hop : hops) {
+            if (SKIP.equals(hop.getActionCode()) && hop.getFromStage() != null) {
+                skipsByStageLeft.put(hop.getFromStage(), hop);
+            }
+        }
+
         Map<Long, RibbonWire.UserRef> owners = people.resolve(hops.stream()
                 .map(TicketStageTransition::getToUserId).toList());
 
         List<RibbonWire.RibbonSegment> segments = new ArrayList<>();
         for (WorkflowStage stage : template) {
             segments.add(toSegment(stage, hopsByStage.get(stage.getStageCode()),
+                    skipsByStageLeft.get(stage.getStageCode()),
                     effortByStage.getOrDefault(stage.getStageCode(), BigDecimal.ZERO), owners));
         }
 
@@ -102,9 +125,24 @@ class RibbonAssembler {
                 segments);
     }
 
+    /**
+     * @param skipDeparture C-047 · the hop by which the ticket <em>left</em>
+     *        this stage with action {@code SKIP}, if there is one. A skip is
+     *        recorded on the departing hop — {@code from_stage} is the stage
+     *        that was skipped and {@code to_stage} is where the ticket landed
+     *        — so keying the state on the arriving hop's action code, as this
+     *        method did until C-047, struck through the <em>destination</em>
+     *        segment instead. Nothing had exercised it: no route wrote a
+     *        {@code SKIP} row until {@code SkipService}.
+     */
     private RibbonWire.RibbonSegment toSegment(WorkflowStage stage, List<TicketStageTransition> hopsForStage,
+                                               TicketStageTransition skipDeparture,
                                                BigDecimal effortHrs, Map<Long, RibbonWire.UserRef> owners) {
         if (hopsForStage == null || hopsForStage.isEmpty()) {
+            // A stage the ticket never entered cannot have been departed
+            // either, so skipDeparture is unreachable here — and if a
+            // malformed ledger ever produced one, PENDING is the honest answer
+            // rather than a struck-through segment with no history behind it.
             return new RibbonWire.RibbonSegment(
                     stage.getStageCode(), stage.getDisplayName(), stage.getIcon(),
                     RibbonWire.SegmentState.PENDING, stage.getSeq(),
@@ -119,8 +157,15 @@ class RibbonAssembler {
                 ? Math.max(0, last.getDurationMins() - (int) Math.round(effort * 60))
                 : null;
 
+        // Only if the skip is the last thing that happened to this stage. A
+        // ticket skipped past QA and later reworked back into it is standing
+        // in QA now, and a struck-through label would be a lie about where the
+        // work is — seqNo is strictly increasing within a cycle, so comparing
+        // the two hops answers it without a second query.
+        boolean skipped = skipDeparture != null && skipDeparture.getSeqNo() > last.getSeqNo();
+
         RibbonWire.SegmentState state;
-        if ("SKIP".equals(last.getActionCode())) {
+        if (skipped) {
             state = RibbonWire.SegmentState.SKIPPED;
         } else if (last.isCurrent()) {
             state = RibbonWire.SegmentState.CURRENT;
@@ -136,7 +181,7 @@ class RibbonAssembler {
                 owners.get(last.getToUserId()), stage.getOwnerRole(),
                 last.getEnteredAt(), last.getExitedAt(), last.getDurationMins(),
                 effort, idleMins, last.getIterationNo(), loopBackCount,
-                state == RibbonWire.SegmentState.SKIPPED ? last.getReason() : null,
+                skipped ? skipDeparture.getReason() : null,
                 last.getHandoffNote());
     }
 

@@ -232,6 +232,16 @@ final class PermissionMatrix {
             {"toStageCode":"DEV","reason":"Matrix fixture rework — see PermissionMatrix's own header."}""";
 
     /**
+     * C-047 · {@code SkipDtos.SkipRequest}: {@code reason} is the only
+     * required field, and {@code toStageCode} is omitted on {@link #REWORK}'s
+     * own reasoning — the strongest fixture is the bare minimum the contract
+     * allows. Omitting it also exercises the route as the ribbon will call it:
+     * §4A.6's skip is "skip this stage", and the destination defaults.
+     */
+    private static final String SKIP_STAGE = """
+            {"reason":"Matrix fixture skip — see PermissionMatrix's own header."}""";
+
+    /**
      * C-049 · {@code AssignDtos.AssignRequest}: {@code assigneeId} is the only
      * {@code @NotNull} field. {@code note} is omitted deliberately, on
      * {@link #CHANGE_PRIORITY}'s own reasoning: the strongest fixture is the
@@ -976,6 +986,28 @@ final class PermissionMatrix {
             // before @PreAuthorize is consulted, on this file's own header's
             // warning.
             everyRole("POST", "/api/v1/tickets/{ticketId}/rework", REWORK),
+
+            // ── skip · C-047, §2's "Skip a stage (with reason)" row ───────────
+            //
+            // Admin and PM, exactly like force-move two rows up and for its
+            // reason rather than the handoff/rework row's: ticket.skip_stage
+            // (V20260806_0900) is granted to those two alone, so the
+            // capability itself is the whole authorisation question. §2's own
+            // row ticks the same two columns and no others, which is the
+            // blueprint stating this as a capability and not as a row rule.
+            //
+            // StageOwnership still runs underneath, inside advance — but
+            // defensively: both roles holding the capability already satisfy
+            // mayAdvance regardless of assignment, so it refuses nobody who
+            // gets this far. §4A.6's real second condition is the one this
+            // matrix cannot express either — the stage must be marked
+            // optional on the template — and that is SkipService's 422.
+            //
+            // Carries a fixture because the handler takes a required
+            // @RequestBody — without one, argument resolution answers 400
+            // before @PreAuthorize is consulted, on this file's own header's
+            // warning.
+            adminAndPm("POST", "/api/v1/tickets/{ticketId}/skip-stage", SKIP_STAGE),
 
             // ── reopen · C-038, and the one ticket route where three roles is
             //    the whole answer rather than half a rule ────────────────────
