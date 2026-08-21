@@ -13,7 +13,7 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 230 of 244 (94%) | 343.8 of 365.8 (94%) |
-| In flight | 1 | 3.0 |
+| In flight | 2 | 4.0 |
 | On the driving chain | 8 | 12.5 |
 | Zero float (no slack at all) | 9 | 15.0 |
 
@@ -333,7 +333,7 @@ gantt
 |  | `C-044` | Handoff dialog — next stage | 2.5 | `C-042` `C-035` | Wed 19 Aug | Wed 19 Aug | 7 | ✅ done |
 |  | `C-045` | On submit: seal the current row | 2 | `C-044` `D-014` | Wed 19 Aug | Wed 19 Aug | 8 | ✅ done |
 |  | `C-046` | Backward moves | 1.5 | `C-042` ᶦ | Thu 20 Aug | Thu 20 Aug | 10 | ✅ done |
-|  | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Fri 21 Aug | Fri 21 Aug | 9 | ▫️ to do |
+|  | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Fri 21 Aug | Sat 22 Aug | 9 | ▫️ to do |
 |  | `C-048` | Force-move (OVERRIDE) — PM/Admin, logged as an override | 1 | `C-042` ᶦ | Thu 20 Aug | Thu 20 Aug | 11 | ✅ done |
 |  | `C-049` | Reassignment within a stage does not create a new segment | 1.5 | `C-042` | Thu 20 Aug | Thu 20 Aug | 0 | ✅ done |
 |  | `C-050` | Unassigned receiving role → ticket falls to a project-level queue… | 1 | `C-044` ᶦ | Thu 20 Aug | Thu 20 Aug | 11 | ✅ done |
@@ -348,7 +348,7 @@ gantt
 |  | `C-064` | Ticket linking — blocks / is blocked by / duplicate of / relates to | 1.5 | `C-019` ᶦ | Wed 19 Aug | Wed 19 Aug | 12 | ✅ done |
 |  | `C-066` | Shared rich-text editor in components/ui/ + Storybook | 1.5 | `C-003` | Tue 11 Aug | Tue 11 Aug | 17 | ✅ done |
 | 🔴 | `C-071` | Per-project settings are configurable and ignored | 1 | — | Fri 21 Aug | Fri 21 Aug | 10 | ✅ done |
-|  | `C-072` | A deactivated priority can still be chosen | 1 | — | Sat 22 Aug | Sat 22 Aug | 9 | ▫️ to do |
+|  | `C-072` | A deactivated priority can still be chosen | 1 | — | Fri 21 Aug | Fri 21 Aug | 8 | 🟡 50% |
 
 </details>
 
