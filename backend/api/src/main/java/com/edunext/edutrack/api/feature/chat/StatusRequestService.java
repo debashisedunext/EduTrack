@@ -121,12 +121,20 @@ public class StatusRequestService {
      * @param note the manager's own wording, or null for {@link #DEFAULT_NOTE}
      */
     @Transactional
-    public Outcome ask(long ticketId, long requesterId, String note) {
-        Optional<StatusRequestRepository.TicketRow> found = requests.ticket(ticketId);
-        if (found.isEmpty() || !requests.mayAsk(requesterId, ticketId)) {
+    public Outcome ask(String ticketCode, long requesterId, String note) {
+        // The ticket CODE, per the contract's TicketId $ref. Resolved once here;
+        // everything below still works by row id, unchanged.
+        Optional<StatusRequestRepository.TicketRow> found = requests.ticket(ticketCode);
+        if (found.isEmpty()) {
             return new Outcome.NotFound();
         }
         StatusRequestRepository.TicketRow ticket = found.get();
+        long ticketId = ticket.id();
+        if (!requests.mayAsk(requesterId, ticketId)) {
+            // Same answer as a ticket that does not exist, deliberately — a
+            // distinguishable refusal would confirm the ticket is real.
+            return new Outcome.NotFound();
+        }
 
         if (ticket.assignedTo() == null) {
             // §11 addresses this notification to the Assignee, and there is not
@@ -215,7 +223,12 @@ public class StatusRequestService {
      * ticket to another.
      */
     @Transactional(readOnly = true)
-    public List<StatusRequestDtos.StatusRequest> openOnTicket(long ticketId, long viewerId) {
+    public List<StatusRequestDtos.StatusRequest> openOnTicket(String ticketCode, long viewerId) {
+        Optional<StatusRequestRepository.TicketRow> found = requests.ticket(ticketCode);
+        if (found.isEmpty()) {
+            return List.of();
+        }
+        long ticketId = found.get().id();
         if (!chat.participatesInTicketThread(viewerId, ticketId)) {
             return List.of();
         }
