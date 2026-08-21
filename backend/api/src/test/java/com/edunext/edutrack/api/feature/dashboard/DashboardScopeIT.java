@@ -422,13 +422,57 @@ class DashboardScopeIT {
             assertThat(valueOf(s, "open")).as("5 in my project, not 105").isEqualByComparingTo("5");
         }
 
+        /**
+         * A-077 · this test used to assert the figures came back as <b>zeroes</b>,
+         * and it was renamed rather than deleted because the property it was
+         * written to protect is still the important one and still holds.
+         *
+         * <p>What it proves is that the filter cannot <em>widen</em> scope: a PM
+         * naming somebody else's project does not receive that project's
+         * numbers. That was true before and is true now, and it is the security
+         * property.
+         *
+         * <p>What changed is how the absence is expressed. Zero is a
+         * measurement — "this project has no open tickets" — and it is false
+         * about a project holding a hundred of them. The old assertion was
+         * therefore pinning the defect A-077 exists to remove, which is why the
+         * change broke it: exactly the signal a pinned expectation is for.
+         *
+         * <p>Both halves are asserted below, because dropping either would lose
+         * something. Without the first, a refusal that leaked the real figures
+         * would pass; without the second, a silent return to zeroes would.
+         */
         @Test
-        @DisplayName("a PM asking for a project they do not hold gets zeroes, not that project")
+        @DisplayName("a PM asking for a project they do not hold is told why, and gets no figures")
         void filterCannotWidenScope() {
             DashboardDtos.Summary s = service.summary(
                     caller(me, "PM", List.of(mine)), theirs, D1, D3, null);
 
-            assertThat(valueOf(s, "open")).isEqualByComparingTo("0");
+            // The security property, unchanged: none of the other project's 100
+            // open tickets reaches this caller.
+            assertThat(s.cards()).isEmpty();
+
+            // The A-077 property: the absence is stated rather than drawn as a
+            // number somebody would read as a measurement.
+            assertThat(s.unavailableReason()).isEqualTo(WidgetService.NOT_YOUR_PROJECT);
+
+            // Nothing was read, so there is no recompute time to report — a
+            // timestamp beside a refusal would suggest figures were fetched and
+            // came back empty.
+            assertThat(s.asOf()).isNull();
+        }
+
+        @Test
+        @DisplayName("a PM asking for a project they DO hold still gets its figures")
+        void ownProjectFilterStillWorks() {
+            // The complement, and it is not redundant: a gate that refused every
+            // ?projectId= would pass the test above and break the screen this
+            // task exists to build.
+            DashboardDtos.Summary s = service.summary(
+                    caller(me, "PM", List.of(mine)), mine, D1, D3, null);
+
+            assertThat(s.unavailableReason()).isNull();
+            assertThat(valueOf(s, "open")).isEqualByComparingTo("5");
         }
 
         @Test

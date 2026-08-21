@@ -47,10 +47,19 @@ import java.util.List;
  * <h2>The caller's filters narrow; they never widen</h2>
  *
  * <p>{@code ?projectId=} is ANDed with the caller's scope rather than replacing
- * it, exactly as the ticket list does. A PM asking for a project they do not
- * hold gets zeroes, not that project. {@code ?assigneeId=} is accepted only
+ * it, exactly as the ticket list does. {@code ?assigneeId=} is accepted only
  * where it is meaningful and is otherwise the caller's own id — a Developer
  * cannot ask for somebody else's numbers by naming them.
+ *
+ * <p><b>A-077 · a PM asking for a project they do not hold is told so, and this
+ * paragraph used to say they "get zeroes".</b> They did, and the AND above is
+ * why that was never a leak — but zero is a measurement, and six cards reading
+ * 0 state that a project holding a hundred open tickets has none. The refusal
+ * is now explicit, in {@link WidgetService#NOT_YOUR_PROJECT}, matching the
+ * charts beneath the cards so the two cannot answer differently. The old
+ * wording is quoted rather than deleted because {@code DashboardScopeIT} pinned
+ * it as an expectation, and reading only the new sentence would leave whoever
+ * finds that test's history unsure which behaviour was intended.
  */
 @Service
 class DashboardService {
