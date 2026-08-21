@@ -47,4 +47,4 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type WorkflowTemplateWriteRequestProjectId = number | null;
+export type TemplateMappingProjectCode = string | null;

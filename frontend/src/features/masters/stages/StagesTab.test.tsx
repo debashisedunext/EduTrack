@@ -92,11 +92,28 @@ describe('the tab is reachable and scoped to a template', () => {
     expect(stages).not.toBeDisabled()
   })
 
-  it('tab 3 is still disabled and still names its task', async () => {
-    renderPage()
+  /**
+   * **Replaced rather than deleted — B-041.** This asserted "tab 3 is still
+   * disabled and still names its task", which was the absence B-040 shipped on
+   * purpose and which named the task that would end it. Deleting it would have
+   * left nothing recording that the two tabs are neighbours on one screen; what
+   * stands in its place is the fact that still matters, which is that leaving
+   * tab 2 does not lose the template you were editing on it.
+   *
+   * Tab 3's own behaviour is `TemplatesTab.test.tsx`.
+   */
+  it('tab 3 is enabled now, and tab 2 keeps its own selector state', async () => {
+    await openStagesTab()
 
     const templates = await screen.findByRole('tab', { name: 'Workflow templates' }, SLOW)
-    expect(templates).toBeDisabled()
+    expect(templates).not.toBeDisabled()
+
+    fireEvent.click(templates)
+    fireEvent.click(await screen.findByRole('tab', { name: 'Stages' }, SLOW))
+
+    // Standard Dev Flow's own stage, so this fails if the tab remounted onto
+    // whichever template happened to be first rather than the one selected.
+    expect(await screen.findByText('QA / Testing', undefined, SLOW)).toBeInTheDocument()
   })
 
   /**

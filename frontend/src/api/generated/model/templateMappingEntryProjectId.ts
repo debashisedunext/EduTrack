@@ -46,38 +46,5 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { WorkflowTemplateWriteRequestDescription } from './workflowTemplateWriteRequestDescription';
-import type { WorkflowTemplateWriteRequestIsDefault } from './workflowTemplateWriteRequestIsDefault';
-import type { WorkflowTemplateWriteRequestCopyStagesFromTemplateId } from './workflowTemplateWriteRequestCopyStagesFromTemplateId';
 
-/**
- * **Reshaped by B-041 when it was finally served.** `projectId` and
-`taskTypeId` are gone — a template maps to *many* pairs (§4A.9), so two
-scalars could never have held it, and the mapping is now
-`replaceTemplateMappings`. `stages` is gone because `createStage` already
-writes one and holds every rule about doing so.
-
-`maxLength` on `name` drops from 150 to 80: `workflow_templates.name` is
-`VARCHAR(80)`, and the declared 150 would have been accepted here and
-truncated by MySQL.
-
- */
-export interface WorkflowTemplateWriteRequest {
-  /**
-   * @minLength 1
-   * @maxLength 80
-   */
-  name: string;
-  /** @maxLength 255 */
-  description?: WorkflowTemplateWriteRequestDescription;
-  /** Honoured only if the new template ends up with a live stage —
-otherwise `409 empty-template`. Setting it clears the flag from
-whichever template held it, in the same transaction.
- */
-  isDefault?: WorkflowTemplateWriteRequestIsDefault;
-  /** Clone this template's ribbon into the new one. §7.4's "built by
-picking stages", and A-005's "versioned by copy, never edited in
-place". Omit for an empty template.
- */
-  copyStagesFromTemplateId?: WorkflowTemplateWriteRequestCopyStagesFromTemplateId;
-}
+export type TemplateMappingEntryProjectId = number | null;

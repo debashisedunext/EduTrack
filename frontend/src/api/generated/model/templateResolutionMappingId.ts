@@ -46,8 +46,10 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { WorkflowTemplate } from './workflowTemplate';
 
-export interface WorkflowTemplateResponse {
-  data: WorkflowTemplate;
-}
+/**
+ * The rule that answered, so the screen can highlight the row. Null on
+`DEFAULT` and `NONE`, where no rule was involved.
+
+ */
+export type TemplateResolutionMappingId = number | null;

@@ -484,6 +484,34 @@ final class PermissionMatrix {
             {"isDeprecated":true}""";
 
     /**
+     * B-041 · {@code WorkflowTemplateWriteRequest}. Name alone is required.
+     *
+     * <p><b>It reuses "Standard Dev Flow"</b>, which B-004 seeds, for
+     * {@code STAGE}'s reason one constant up: an allowed role is entitled to
+     * reach the handler and earn its 409 {@code duplicate}, a denied role never
+     * gets that far, and the 409 is the proof that authorisation passed rather
+     * than that the fixture was lucky. A unique name would create a real template
+     * on every run of this matrix.
+     */
+    private static final String WORKFLOW_TEMPLATE = """
+            {"name":"Standard Dev Flow"}""";
+
+    /**
+     * B-041 · {@code TemplateMappingReplaceRequest}. The list is all there is.
+     *
+     * <p>Deliberately <b>empty</b>, where {@code STAGE_ORDER} one constant up uses
+     * ids that cannot exist. Both land on the allowed side of the distinction this
+     * matrix measures, and the reason to differ is what an allowed role would do
+     * with them: unknown ids here would be a 400, which is fine, but an empty list
+     * is <em>valid</em> and would clear a seeded template's rules underneath the
+     * rest of the matrix. It never gets that far — every entry using this body is
+     * preconditioned on an {@code If-Match} the matrix does not send, so an allowed
+     * role earns a 428 and a denied one still earns its 403.
+     */
+    private static final String TEMPLATE_MAPPINGS = """
+            {"mappings":[]}""";
+
+    /**
      * {@code TaskTypeWrite}: code, name, colour and defaultLevel are all
      * required, and the colour must be a {@code #RRGGBB} token.
      */
@@ -1455,6 +1483,32 @@ final class PermissionMatrix {
             // **workflow**, holidays)".
             adminOnly("PUT", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}/deprecation", STAGE_DEPRECATION),
             adminOnly("DELETE", "/api/v1/masters/workflow-templates/{templateId}/stages/{stageId}"),
+
+            // -- workflow templates themselves - S-13 tab 3 (B-041) -----------
+            // The two reads join the three above on the identical argument: a
+            // ribbon renders on every ticket page for every role and names its
+            // template, so concealing the template list would blank a label rather
+            // than a secret. The resolution read is included in that rather than
+            // excepted - "which flow will my ticket follow?" is better read than
+            // discovered, and every input to the answer (the project, the task
+            // type, the template list) is already readable by the same caller.
+            everyRole("GET", "/api/v1/masters/workflow-templates/{templateId}"),
+            everyRole("GET", "/api/v1/masters/workflow-templates/{templateId}/mappings"),
+            everyRole("GET", "/api/v1/masters/workflow-templates/resolution"),
+            // The four writes are master.write on the same S2 row the stage writes
+            // cite - "Master data (task types, SLA, **workflow**, holidays)" - and
+            // S-13 is titled "Status, Stage & Workflow Template Master", so the
+            // word appears twice over.
+            //
+            // The mapping replace is worth one sentence of its own: it is the
+            // routing policy for the whole product, deciding which ribbon every
+            // future ticket on a project x task type gets. Admin-only is about
+            // authoring that policy rather than about hiding it, which is why the
+            // GET beside it is open to all six.
+            adminOnly("POST", "/api/v1/masters/workflow-templates", WORKFLOW_TEMPLATE),
+            adminOnly("PATCH", "/api/v1/masters/workflow-templates/{templateId}", EMPTY_PATCH),
+            adminOnly("DELETE", "/api/v1/masters/workflow-templates/{templateId}"),
+            adminOnly("PUT", "/api/v1/masters/workflow-templates/{templateId}/mappings", TEMPLATE_MAPPINGS),
 
             // ── task types · S-11 (B-020) ────────────────────────────────────
             // Both reads open to all six, and the argument is §2's rather than

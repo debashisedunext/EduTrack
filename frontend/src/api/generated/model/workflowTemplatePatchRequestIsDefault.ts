@@ -47,4 +47,10 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type WorkflowTemplateWriteRequestTaskTypeId = number | null;
+/**
+ * `true` moves the default here and clears it from wherever it was, in
+one transaction. `false` on the template that currently holds it is
+`409 last-default`: the flag is moved, never dropped.
+
+ */
+export type WorkflowTemplatePatchRequestIsDefault = boolean | null;

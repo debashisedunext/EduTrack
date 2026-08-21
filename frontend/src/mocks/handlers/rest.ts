@@ -4,7 +4,7 @@ import { getDb, nextId } from '../db';
 import type {
   Db, Holiday, Level, NotificationChannelCode, NotificationTemplateRow, Priority, ReportScheduleRow,
   ProjectRoleCode, Role, Status, StatusCategory, StatusCode, TaskType, TemplateStage, User,
-  WorkflowTransitionRow,
+  WorkflowTemplateRow, WorkflowTransitionRow,
 } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
 import { round, statusRequestDto } from './tickets';
@@ -404,6 +404,135 @@ const stageEtag = (stage: TemplateStage) => hash(JSON.stringify(stageDto(stage))
  */
 const ribbonEtag = (stages: TemplateStage[]) =>
   hash(stages.map((s) => JSON.stringify(stageDto(s))).join('#'));
+
+/**
+ * B-041 - one template's routing rules, most specific first.
+ *
+ * The two ends are joined in here rather than held on the fixture row, exactly
+ * as the server joins them, so a screen reading `projectName` off the response
+ * is exercising the shape it will get in production. **A project or task type
+ * that no longer exists still yields a row with nulls in the name fields** - the
+ * server's LEFT JOIN does the same, and the alternative is a rule that routes
+ * tickets and cannot say what it routes.
+ */
+function templateMappings(templateId: number) {
+  const db = getDb();
+  return db.templateMappings
+    .filter((m) => m.templateId === templateId)
+    .map((m) => {
+      const project = m.projectId === null
+        ? null : db.projects.find((p) => p.id === m.projectId) ?? null;
+      const taskType = m.taskTypeId === null
+        ? null : db.taskTypes.find((t) => t.id === m.taskTypeId) ?? null;
+      return {
+        id: m.id,
+        projectId: m.projectId,
+        projectCode: project?.projectCode ?? null,
+        projectName: project?.name ?? null,
+        taskTypeId: m.taskTypeId,
+        taskTypeCode: taskType?.code ?? null,
+        taskTypeName: taskType?.name ?? null,
+        specificity: (m.projectId !== null ? 1 : 0) + (m.taskTypeId !== null ? 1 : 0),
+      };
+    })
+    .sort((a, b) => b.specificity - a.specificity
+      || (a.projectCode ?? '').localeCompare(b.projectCode ?? '')
+      || (a.taskTypeCode ?? '').localeCompare(b.taskTypeCode ?? '')
+      || a.id - b.id);
+}
+
+/**
+ * B-041 - the default template refuses to be cleared, deactivated or deleted.
+ *
+ * One helper for three call sites because the sentence and the remedy are the
+ * same in all three: `is_default` is the last rung of the resolver's ladder, so
+ * dropping it leaves every unmapped project x task type routing nowhere - and
+ * the fix is always "make another template the default first".
+ */
+const lastDefault = (name: string) =>
+  problem(409, 'last-default', 'This is the default template', {
+    detail: `"${name}" is the default template. Make another template the default first - `
+      + 'every project and task type with no rule of its own routes through it.',
+  });
+
+const mappingsEtag = (rows: ReturnType<typeof templateMappings>) =>
+  hash(`${rows.length}|${rows.map((m) => `${m.id}:${m.projectId}:${m.taskTypeId}`).join('#')}`);
+
+/**
+ * B-041 - the detail shape of S-13 tab 3, counts and computed permissions
+ * included.
+ *
+ * `ticketCount` is read off the ticket fixture rather than stored, so a test that
+ * creates a ticket on a template sees the delete stop being offered - which is
+ * the behaviour the `ETag` exists to protect and would be untestable against a
+ * hard-coded zero.
+ */
+function templateDetail(t: WorkflowTemplateRow) {
+  const db = getDb();
+  const stageCount = db.templateStages.filter((st) => st.templateId === t.id).length;
+  const mappingCount = db.templateMappings.filter((m) => m.templateId === t.id).length;
+  const ticketCount = t.ticketCount;
+  return {
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    isDefault: t.isDefault,
+    isActive: t.isActive,
+    stageCount,
+    mappingCount,
+    ticketCount,
+    isDeletable: ticketCount === 0 && mappingCount === 0 && !t.isDefault,
+    isDeactivatable: t.isActive && mappingCount === 0 && !t.isDefault,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+const workflowTemplateEtag = (t: WorkflowTemplateRow) => {
+  const d = templateDetail(t);
+  return hash([d.id, d.name, d.description, d.isDefault, d.isActive,
+    d.stageCount, d.mappingCount, d.ticketCount].join('|'));
+};
+
+/**
+ * B-041 - 4A.9's ladder, and the mock runs the whole thing rather than
+ * short-circuiting to the default.
+ *
+ * A mock that returned `DEFAULT` for everything would let a screen ship that
+ * rendered `rung` wrongly on every other branch, and `rung` is the field the
+ * resolution route exists for.
+ */
+function resolveTemplate(projectId: number | null, taskTypeId: number | null) {
+  const db = getDb();
+  const candidates = db.templateMappings
+    .filter((m) => (m.projectId === null || m.projectId === projectId)
+      && (m.taskTypeId === null || m.taskTypeId === taskTypeId));
+
+  // Project beats task type on a tie. The server writes the same comparator and
+  // the same sentence: a project is the narrower population.
+  const rank = (m: { projectId: number | null; taskTypeId: number | null }) =>
+    m.projectId !== null && m.taskTypeId !== null ? 0
+      : m.projectId !== null ? 1
+        : m.taskTypeId !== null ? 2 : 3;
+  const winner = [...candidates].sort((a, b) => rank(a) - rank(b) || a.id - b.id)[0];
+
+  if (winner) {
+    const t = db.workflowTemplates.find((x) => x.id === winner.templateId) ?? null;
+    return {
+      templateId: winner.templateId,
+      templateName: t?.name ?? null,
+      rung: (['EXACT', 'PROJECT', 'TASK_TYPE', 'ANY'] as const)[rank(winner)],
+      mappingId: winner.id,
+    };
+  }
+
+  const fallback = db.workflowTemplates
+    .filter((t) => t.isDefault && t.isActive)
+    .sort((a, b) => a.id - b.id)[0];
+  return fallback
+    ? { templateId: fallback.id, templateName: fallback.name, rung: 'DEFAULT', mappingId: null }
+    : { templateId: null, templateName: null, rung: 'NONE', mappingId: null };
+}
 
 /**
  * The mock enforces `If-Match` too. A guard the real backend has and the mock
@@ -3931,19 +4060,266 @@ export const restHandlers = [
     })),
   ),
 
+  // -- S-13 tab 3 - workflow templates and their routing rules (B-041) -------
+
   /**
-   * B-041's, untouched by B-040 and left as the stub it has always been.
+   * The stub B-040 left here is gone, and this writes a real row.
    *
-   * Creating a template is the tab-3 operation — it needs the project x task-type
-   * mapping that has no table yet — so there is nothing here to make faithful.
-   * Kept rather than deleted because `mocks.test.ts` requires a handler for every
-   * declared operation, and the alternative is deleting a contract operation
-   * B-041 is going to implement.
+   * It had been a stub since D-001 for a reason that has stopped being true: the
+   * project x task-type mapping had no table, so there was nothing to make
+   * faithful. There is now.
    */
-  http.post(url('/masters/workflow-templates'), async ({ request }) =>
-    ok({ id: 4, isActive: true, isDefault: false, stageCount: 0, stages: [],
-         ...(await request.json() as object) },
-       undefined, { status: 201 }),
+  http.post(url('/masters/workflow-templates'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as {
+      name?: string; description?: string | null;
+      isDefault?: boolean | null; copyStagesFromTemplateId?: number | null;
+    };
+    const name = (body.name ?? '').trim();
+    if (db.workflowTemplates.some((t) => t.name === name)) {
+      const detail = `A workflow template named "${name}" already exists.`;
+      return problem(409, 'duplicate', 'Duplicate template name',
+        { detail, errors: { name: [detail] } });
+    }
+
+    const id = Math.max(0, ...db.workflowTemplates.map((t) => t.id)) + 1;
+    const created: WorkflowTemplateRow = {
+      id, name, description: body.description?.trim() || null,
+      isDefault: false, isActive: true, ticketCount: 0,
+    };
+    db.workflowTemplates.push(created);
+
+    // "Built by picking stages" done as a copy - A-005's own rule for how a
+    // template is versioned. Deprecated stages come too: the copy is a new
+    // ribbon whose shape is the old one, and dropping the retired segments would
+    // silently produce a template differing from its source.
+    if (body.copyStagesFromTemplateId != null) {
+      const source = db.templateStages
+        .filter((st) => st.templateId === body.copyStagesFromTemplateId);
+      let next = Math.max(0, ...db.templateStages.map((st) => st.id));
+      source.forEach((st) => {
+        next += 1;
+        db.templateStages.push({
+          ...st, id: next, templateId: id,
+          canReturnTo: [...st.canReturnTo],
+          // Not copied. Usage belongs to the stage that was used, and carrying
+          // it over would freeze the new template's codes against history that
+          // is not its own.
+          transitionCount: 0, openTicketCount: 0,
+        });
+      });
+    }
+
+    if (body.isDefault === true) {
+      const live = db.templateStages
+        .filter((st) => st.templateId === id && !st.isDeprecated).length;
+      if (live === 0) {
+        const detail = `"${name}" has no live stage, so it routes no ticket anywhere. `
+          + 'Add a stage before making it the default.';
+        return problem(409, 'empty-template', 'This template cannot be the default',
+          { detail, errors: { isDefault: [detail] } });
+      }
+      db.workflowTemplates.forEach((t) => { t.isDefault = t.id === id; });
+    }
+
+    return ok(templateDetail(created), undefined,
+      { status: 201, headers: { ETag: workflowTemplateEtag(created) } });
+  }),
+
+  /**
+   * The resolution read, and it is registered **before** `/:templateId` on
+   * purpose.
+   *
+   * MSW matches in registration order, unlike Spring's pattern comparator which
+   * prefers the literal segment regardless. Registering it second would make
+   * `/resolution` fall into the detail route as `templateId = NaN` and 404 -
+   * against a backend where the same request works.
+   */
+  http.get(url('/masters/workflow-templates/resolution'), ({ request }) => {
+    const q = new URL(request.url).searchParams;
+    const num = (k: string) => (q.get(k) === null || q.get(k) === '' ? null : Number(q.get(k)));
+    return ok(resolveTemplate(num('projectId'), num('taskTypeId')));
+  }),
+
+  http.get(url('/masters/workflow-templates/:templateId'), ({ params }) => {
+    const t = getDb().workflowTemplates.find((x) => x.id === Number(params.templateId));
+    if (!t) return notFound('Workflow template');
+    return ok(templateDetail(t), undefined, { headers: { ETag: workflowTemplateEtag(t) } });
+  }),
+
+  http.patch(url('/masters/workflow-templates/:templateId'), async ({ request, params }) => {
+    const db = getDb();
+    const t = db.workflowTemplates.find((x) => x.id === Number(params.templateId));
+    if (!t) return notFound('Workflow template');
+
+    const stale = stagePrecondition(request.headers.get('If-Match'), workflowTemplateEtag(t), 'template');
+    if (stale) return stale;
+
+    const body = (await request.json()) as Record<string, unknown>;
+
+    if (typeof body.name === 'string') {
+      const name = body.name.trim();
+      if (db.workflowTemplates.some((o) => o.id !== t.id && o.name === name)) {
+        const detail = `A workflow template named "${name}" already exists.`;
+        return problem(409, 'duplicate', 'Duplicate template name',
+          { detail, errors: { name: [detail] } });
+      }
+      t.name = name;
+    }
+    if (body.description !== undefined) {
+      t.description = typeof body.description === 'string'
+        ? body.description.trim() || null : null;
+    }
+
+    // isActive before isDefault, matching the server. A request switching a
+    // template off *and* handing the default away would otherwise walk through a
+    // rule neither field could break alone.
+    if (typeof body.isActive === 'boolean' && body.isActive !== t.isActive) {
+      if (!body.isActive) {
+        if (t.isDefault) return lastDefault(t.name);
+        const rules = db.templateMappings.filter((m) => m.templateId === t.id).length;
+        if (rules > 0) {
+          const tickets = t.ticketCount;
+          const detail = `"${t.name}" is in use - ${tickets} ticket(s) started on it and `
+            + `${rules} routing rule(s) point at it.`;
+          return problem(409, 'template-in-use', 'Template in use',
+            { detail, ticketCount: tickets, mappingCount: rules, canDeactivate: false });
+        }
+      }
+      t.isActive = body.isActive;
+    }
+
+    if (typeof body.isDefault === 'boolean') {
+      if (!body.isDefault && t.isDefault) return lastDefault(t.name);
+      if (body.isDefault && !t.isDefault) {
+        const live = db.templateStages
+          .filter((st) => st.templateId === t.id && !st.isDeprecated).length;
+        if (live === 0 || !t.isActive) {
+          const detail = live === 0
+            ? `"${t.name}" has no live stage, so it routes no ticket anywhere. `
+              + 'Add a stage before making it the default.'
+            : `"${t.name}" is inactive and cannot be made the default. Reactivate it first.`;
+          return problem(409, 'empty-template', 'This template cannot be the default',
+            { detail, errors: { isDefault: [detail] } });
+        }
+        db.workflowTemplates.forEach((o) => { o.isDefault = o.id === t.id; });
+      }
+    }
+
+    return ok(templateDetail(t), undefined, { headers: { ETag: workflowTemplateEtag(t) } });
+  }),
+
+  http.delete(url('/masters/workflow-templates/:templateId'), ({ request, params }) => {
+    const db = getDb();
+    const t = db.workflowTemplates.find((x) => x.id === Number(params.templateId));
+    if (!t) return notFound('Workflow template');
+
+    const stale = stagePrecondition(request.headers.get('If-Match'), workflowTemplateEtag(t), 'template');
+    if (stale) return stale;
+
+    const tickets = t.ticketCount;
+    const rules = db.templateMappings.filter((m) => m.templateId === t.id).length;
+    if (tickets > 0 || rules > 0) {
+      const detail = `"${t.name}" is in use - ${tickets} ticket(s) started on it and `
+        + `${rules} routing rule(s) point at it. Deleting it would cascade away the stages `
+        + 'every one of those ribbons resolves its names and owner roles through.';
+      return problem(409, 'template-in-use', 'Template in use', {
+        detail, ticketCount: tickets, mappingCount: rules,
+        canDeactivate: rules === 0 && tickets > 0,
+      });
+    }
+    if (t.isDefault) return lastDefault(t.name);
+
+    // Both cascades, because the schema has them: ON DELETE CASCADE on the
+    // stages and on the rules. A mock that left orphans behind would let a
+    // screen ship that read them.
+    db.templateStages = db.templateStages.filter((st) => st.templateId !== t.id);
+    db.templateMappings = db.templateMappings.filter((m) => m.templateId !== t.id);
+    db.workflowTemplates.splice(db.workflowTemplates.findIndex((x) => x.id === t.id), 1);
+    return noContent();
+  }),
+
+  http.get(url('/masters/workflow-templates/:templateId/mappings'), ({ params }) => {
+    const templateId = Number(params.templateId);
+    if (!getDb().workflowTemplates.some((t) => t.id === templateId)) {
+      return notFound('Workflow template');
+    }
+    const rows = templateMappings(templateId);
+    return ok(rows, undefined, { headers: { ETag: mappingsEtag(rows) } });
+  }),
+
+  http.put(url('/masters/workflow-templates/:templateId/mappings'),
+    async ({ request, params }) => {
+      const db = getDb();
+      const templateId = Number(params.templateId);
+      if (!db.workflowTemplates.some((t) => t.id === templateId)) {
+        return notFound('Workflow template');
+      }
+
+      const stale = stagePrecondition(request.headers.get('If-Match'),
+        mappingsEtag(templateMappings(templateId)), 'rules');
+      if (stale) return stale;
+
+      const body = (await request.json()) as {
+        mappings?: { projectId?: number | null; taskTypeId?: number | null }[];
+      };
+      const key = (p: number | null, tt: number | null) => `${p ?? '*'}:${tt ?? '*'}`;
+
+      // Last one wins on a repeated pair, matching the server. The screen cannot
+      // produce one - a pair is a row - so refusing it would defend against a
+      // client bug at the cost of a 500 from the unique key.
+      const wanted = new Map<string, { projectId: number | null; taskTypeId: number | null }>();
+      (body.mappings ?? []).forEach((e) => {
+        const entry = { projectId: e.projectId ?? null, taskTypeId: e.taskTypeId ?? null };
+        wanted.set(key(entry.projectId, entry.taskTypeId), entry);
+      });
+
+      for (const e of wanted.values()) {
+        if (e.projectId !== null && !db.projects.some((p) => p.id === e.projectId)) {
+          const detail = `No such projectId: ${e.projectId}.`;
+          return problem(400, 'validation', 'Unknown reference',
+            { detail, errors: { projectId: [detail] } });
+        }
+        if (e.taskTypeId !== null && !db.taskTypes.some((t) => t.id === e.taskTypeId)) {
+          const detail = `No such taskTypeId: ${e.taskTypeId}.`;
+          return problem(400, 'validation', 'Unknown reference',
+            { detail, errors: { taskTypeId: [detail] } });
+        }
+        const claimed = db.templateMappings.find((m) =>
+          m.templateId !== templateId && key(m.projectId, m.taskTypeId) === key(e.projectId, e.taskTypeId));
+        if (claimed) {
+          const other = db.workflowTemplates.find((t) => t.id === claimed.templateId);
+          const detail = `That project and task type already route to `
+            + `"${other?.name ?? 'another template'}". A pair resolves to one template.`;
+          return problem(409, 'mapping-claimed', 'That pair already routes somewhere', {
+            detail,
+            claimedByTemplateId: claimed.templateId,
+            claimedByTemplateName: other?.name ?? null,
+            projectId: e.projectId,
+            taskTypeId: e.taskTypeId,
+            errors: { mappings: [detail] },
+          });
+        }
+      }
+
+      // Matched on the pair rather than the id, so an unchanged rule keeps its
+      // row. That is why TemplateMappingEntry carries no id.
+      const kept = db.templateMappings.filter((m) => m.templateId === templateId
+        && wanted.has(key(m.projectId, m.taskTypeId)));
+      const keptKeys = new Set(kept.map((m) => key(m.projectId, m.taskTypeId)));
+      db.templateMappings = db.templateMappings
+        .filter((m) => m.templateId !== templateId || keptKeys.has(key(m.projectId, m.taskTypeId)));
+
+      let next = Math.max(0, ...db.templateMappings.map((m) => m.id));
+      wanted.forEach((e, k) => {
+        if (keptKeys.has(k)) return;
+        next += 1;
+        db.templateMappings.push({ id: next, templateId, ...e });
+      });
+
+      const rows = templateMappings(templateId);
+      return ok(rows, undefined, { headers: { ETag: mappingsEtag(rows) } });
+    },
   ),
 
   http.get(url('/masters/workflow-templates/:templateId/stages'), ({ params }) => {

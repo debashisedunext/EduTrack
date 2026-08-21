@@ -46,6 +46,7 @@ import {
   type StatusFormValues,
 } from './statusForm'
 import { StagesTab } from '../stages/StagesTab'
+import { TemplatesTab } from '../templates/TemplatesTab'
 import {
   useCreateStatus,
   useReplaceStatusTransitions,
@@ -59,8 +60,8 @@ import {
  * S-13 Status, Stage & Workflow Template Master. B-039 builds tab 1.
  *
  * §7.4 specifies three tabs — statuses, stages, workflow templates. B-040 filled
- * in tab 2; tab 3 is B-041, and it is rendered here as a disabled tab naming its
- * task rather than omitted. A screen that grows a tab later is a screen whose
+ * in tab 2 and B-041 tab 3, so all three are live. Each arrived as a disabled tab
+ * naming its task first. A screen that grows a tab later is a screen whose
  * shape nobody could see coming; one that shows them greyed out tells an Admin
  * what this master will hold and tells the next developer where their work goes.
  *
@@ -91,27 +92,29 @@ export function StatusMasterPage() {
           active={tab === 'statuses'}
           onSelect={() => setTab('statuses')}
         />
-        {/*
-          Disabled rather than absent. B-040 and B-041 own these, and naming the
-          task in the tooltip is how the next developer finds where their screen
-          goes without reading the backlog.
-        */}
         <TabButton
           id="stages"
           label="Stages"
           active={tab === 'stages'}
           onSelect={() => setTab('stages')}
         />
+        {/*
+          B-041. The last of §7.4's three tabs, and the `disabled` prop on
+          `TabButton` now has no caller — kept rather than removed, because it is
+          how this screen named the tasks that owed it two tabs, and S-13 is not
+          the only master that will grow one.
+        */}
         <TabButton
           id="templates"
           label="Workflow templates"
-          disabled
-          title="B-041 — templates mapped to project × task type"
+          active={tab === 'templates'}
+          onSelect={() => setTab('templates')}
         />
       </div>
 
       {tab === 'statuses' && <StatusesTab />}
       {tab === 'stages' && <StagesTab />}
+      {tab === 'templates' && <TemplatesTab />}
     </div>
   )
 }

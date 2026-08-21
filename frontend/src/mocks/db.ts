@@ -355,9 +355,40 @@ export interface Stage {
  * These rows follow the database, because tab 2 is the screen that edits the
  * database's rows.
  */
+/**
+ * B-041 · S-13 tab 3 - one routing rule of blueprint 4A.9.
+ *
+ * **A null id means "any", not "unknown".** That is the whole reason both
+ * columns are nullable in `workflow_template_mappings`, and it is what lets the
+ * resolver's four-rung ladder be expressed in rows instead of code.
+ *
+ * The mock holds only the two ids; `projectCode`, `projectName`, `taskTypeCode`
+ * and `taskTypeName` are joined in by the handler the way the server joins them,
+ * so a screen that read them off the fixture instead of off the response would
+ * still be exercising the shape it will get in production.
+ */
+export interface TemplateMappingRow {
+  id: number; templateId: number;
+  projectId: number | null; taskTypeId: number | null;
+}
 export interface WorkflowTemplateRow {
   id: number; name: string; description: string | null;
   isDefault: boolean; isActive: boolean;
+  /**
+   * B-041 - how many tickets ever started on this template. The delete's whole
+   * guard.
+   *
+   * **Held on the row rather than counted off `tickets`**, which is the same
+   * call `TemplateStage.transitionCount` makes one type down and for the same
+   * reason: the mock's `Ticket` has no `workflowTemplateId` at all, so a count
+   * over the fixture would be zero for every template and the in-use refusal
+   * would be unreachable from the screen. The server counts the column.
+   *
+   * Seeded above zero on Standard Dev Flow only - it is the one every other
+   * template is a reduction of, so it is where history would actually be. The
+   * other two are deletable, which is the ordinary case a create lands in.
+   */
+  ticketCount: number;
 }
 export interface TemplateStage {
   id: number; templateId: number; stageCode: string; displayName: string;
@@ -565,6 +596,8 @@ export interface Db {
   statuses: Status[]; workflowTransitions: WorkflowTransitionRow[];
   /** B-040 · S-13 tab 2 — the three templates of §4A.9 and their stages. */
   workflowTemplates: WorkflowTemplateRow[]; templateStages: TemplateStage[];
+  /** B-041 - S-13 tab 3. Which template a project x task type routes to. */
+  templateMappings: TemplateMappingRow[];
   /** B-015 · S-09. `roleGrants` is keyed by role id — the matrix, one row per role. */
   permissions: Permission[]; roles: Role[]; roleGrants: Record<number, string[]>;
   /** B-022 · S-15. One row per (event, channel) — the wording of everything sent. */
@@ -1440,11 +1473,11 @@ const STAGES: Stage[] = [
  * ordinary case and the one the create flow lands in.
  */
 const WORKFLOW_TEMPLATES: WorkflowTemplateRow[] = [
-  { id: 1, name: 'Standard Dev Flow', isDefault: true, isActive: true,
+  { id: 1, name: 'Standard Dev Flow', isDefault: true, isActive: true, ticketCount: 47,
     description: 'All 8 stages. Production Bug, Change Request, Future Release. Blueprint §4A.9.' },
-  { id: 2, name: 'Support Fast-Track', isDefault: false, isActive: true,
+  { id: 2, name: 'Support Fast-Track', isDefault: false, isActive: true, ticketCount: 0,
     description: 'Intake -> Triage -> Development -> Sign-off -> Closed. Blueprint §4A.9.' },
-  { id: 3, name: 'Infra Flow', isDefault: false, isActive: true,
+  { id: 3, name: 'Infra Flow', isDefault: false, isActive: true, ticketCount: 0,
     description: 'Intake -> Triage -> Deployment -> Verification -> Closed. Blueprint §4A.9.' },
 ]
 
@@ -1472,6 +1505,35 @@ const TEMPLATE_STAGES: TemplateStage[] = [
   { id: 18, templateId: 3, seq: 50, stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', slaHours: null, isOptional: false, canReturnTo: [], icon: 'circle-check-big', transitionCount: 0, openTicketCount: 0, isDeprecated: false, deprecatedAt: null },
 ]
 
+/**
+ * B-041 - 4A.9's own seven pairs, matching
+ * `V20260821_1015__workflow_template_mappings.sql` row for row.
+ *
+ * **All seven are (null, taskType), and that is the blueprint rather than a
+ * simplification.** 4A.9 names the task types each template covers in
+ * parentheses and says nothing about projects, so a project-scoped seed row
+ * would invent a policy for a project the fixture knows nothing about.
+ *
+ * It also leaves the ladder genuinely exercised on first open: a pair with an
+ * exact rule, a pair matching only on task type, and a pair matching nothing and
+ * falling through to Standard Dev Flow's `isDefault`. A fixture that mapped
+ * every pair explicitly would make `rung` constant, and a screen that rendered
+ * `DEFAULT` wrongly would pass every test.
+ *
+ * Task type ids are B-002's: 1 CHANGE_REQUEST, 2 PRODUCTION_BUG,
+ * 3 CLIENT_REQUEST, 4 FUTURE_RELEASE, 7 SERVER_ISSUE, 8 NETWORK_ISSUE,
+ * 9 BROWSER_ISSUE.
+ */
+const TEMPLATE_MAPPINGS: TemplateMappingRow[] = [
+  { id: 1, templateId: 1, projectId: null, taskTypeId: 2 },
+  { id: 2, templateId: 1, projectId: null, taskTypeId: 1 },
+  { id: 3, templateId: 1, projectId: null, taskTypeId: 4 },
+  { id: 4, templateId: 2, projectId: null, taskTypeId: 3 },
+  { id: 5, templateId: 2, projectId: null, taskTypeId: 9 },
+  { id: 6, templateId: 3, projectId: null, taskTypeId: 7 },
+  { id: 7, templateId: 3, projectId: null, taskTypeId: 8 },
+]
+
 export function createDb(): Db {
   // Before anything reads `pick` or `int` — see `rewindFixtureRandom`. Without
   // this, two calls to this function produce different fixtures.
@@ -1489,6 +1551,7 @@ export function createDb(): Db {
     workflowTransitions: structuredClone(WORKFLOW_TRANSITIONS),
     workflowTemplates: structuredClone(WORKFLOW_TEMPLATES),
     templateStages: structuredClone(TEMPLATE_STAGES),
+    templateMappings: structuredClone(TEMPLATE_MAPPINGS),
     permissions: structuredClone(PERMISSIONS),
     roles: structuredClone(ROLES),
     notificationTemplates: structuredClone(NOTIFICATION_TEMPLATES),
