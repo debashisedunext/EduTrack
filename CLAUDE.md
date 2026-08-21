@@ -100,6 +100,14 @@ Push and let CI do the rest. A red check on your PR is cheaper than an hour of y
 
 ### Integration happens in batches, across all four streams
 
+> **RULE — a batch is the only way into `develop`. Nobody merges their own PR, and nobody merges anybody else's outside a batch. Agreed 20 Aug 2026.**
+>
+> Not "prefer batches". Not "batch when the queue is long". **The only merge button anyone presses on this repository is the one on an integration PR**, and only Claude presses it. A PR marked ready is a request to be integrated, not a licence to merge it.
+>
+> This is a restatement, not a new rule — the line "Developers never merge" has been in this file since the start. It is being written again because **in the three days to 20 Aug, twenty merges reached `develop` directly and none went through an integration branch**, including three that landed while a batch was being built on top of them. The rule was not misunderstood; it was simply easier to press the button.
+>
+> **So it does not become enforceable until branch protection lands** (see the end of this section). Until then it holds by agreement, and the cost of breaking it is not abstract: a merge landing mid-batch voids the CI run underneath it, and the batch has to be rebuilt from the new `develop`. That happened three times on 12 Aug and three more times on 20 Aug.
+
 **A batch is every PR that is ready at that moment, whoever wrote it** — not one stream's, and not one PR at a time.
 
 That scope is the whole point. On 12 Aug three verification runs in a row were invalidated by *somebody else's* merge landing while they were in progress — A-076, then B-013, then A-031. Batching one stream's work fixes nothing, because the race is with the other three. One batch, one CI run on the combined result, one push, and the window in which `develop` can move underneath it is a single push wide instead of four.
@@ -118,6 +126,10 @@ Twice a working day, or whenever the queue is worth clearing — the point is to
 **Why the rule outlived its workaround.** Between 11 and 17 Aug 2026 the Actions allowance was exhausted and the repository was private, so nothing on the platform could refuse an unverified merge — and A-030 reached `develop` unverified during a two-day outage. `tools/integration-gate.sh` existed to close that window locally. It closed it badly: a run cost ~50 minutes on a machine that could do nothing else, so it was skipped, and on 16–17 Aug seven PRs reached `develop` with it never run. **A verification step nobody can afford is a verification step nobody performs.**
 
 Going public fixed the cause rather than the symptom. Enforce it where it cannot be skipped: **branch protection on `develop` with the CI checks required**. That is stronger than any convention in this file, because it does not depend on anyone remembering.
+
+**That protection is still not on, and it is the single thing standing between the rule above and a rule that holds.** It is blocked on one technical detail: the workflow's path filters make jobs report `skipping`, a skipped check never reports a conclusion, and a required check that never reports deadlocks every PR that did not touch its paths. The fix is an **aggregate job** — one `all-checks-passed` that depends on the rest and succeeds when they skip — which is then the only check the branch requires. Stream A owns it (issue #3).
+
+Until that job exists, this section is a promise between four people. After it exists, it is the platform's answer and nobody has to remember anything.
 
 **The rule itself never lapsed and does not now:** verified, then merged, always.
 
