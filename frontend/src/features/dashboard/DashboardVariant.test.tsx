@@ -24,15 +24,20 @@ import { DashboardWidgets } from './DashboardWidgets'
  */
 
 /**
- * Widgets 7–15 and 20 — every chart `DashboardWidgets` renders for a manager.
+ * Widgets 7–20 — every chart `DashboardWidgets` renders for a manager.
  *
- * Named rather than written as a literal because it has already moved once:
- * A-057 made it nine and A-059 made it ten, and a bare `9` in two assertions
- * says nothing about which widget was added or whether adding it was intended.
- * What these two tests are actually about is that a manager's list is *not*
- * the delivery role's short one.
+ * Named rather than written as a literal because it keeps moving: A-057 made it
+ * nine, A-059 ten, and A-058 fourteen by adding the four the Workflow Ribbon
+ * unlocks — the stage funnel, rework, time per stage and handoff latency. A
+ * bare `14` in two assertions says nothing about which widgets were added or
+ * whether adding them was intended.
+ *
+ * What these two tests are actually about is that a manager's list is *not* the
+ * delivery role's short one — and A-058 widens the gap rather than changing the
+ * rule, since all four of its widgets are keyed by project and refuse a
+ * delivery role in words.
  */
-const MANAGER_WIDGETS = 10
+const MANAGER_WIDGETS = 14
 
 const useGetDashboardWidget = vi.fn()
 const useGetDashboardWidgets = vi.fn()

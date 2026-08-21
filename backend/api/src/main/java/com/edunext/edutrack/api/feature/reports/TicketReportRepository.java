@@ -415,10 +415,12 @@ class TicketReportRepository {
      * stage, and where they stop".
      *
      * <p>Read from {@code tickets.current_stage} rather than from
-     * {@code daily_ticket_stats.wip_by_stage}. A-050 declared that column and
-     * left it NULL deliberately — "a point-in-time column cannot be backfilled"
-     * — and A-058, which fills it, has not landed. Every row of it is still NULL
-     * today, so a funnel reading it would draw an empty chart and call it data.
+     * {@code daily_ticket_stats.wip_by_stage}. That column is no longer NULL —
+     * A-058 fills it — and this query still does not read it, on purpose: a
+     * report is answered now and exported, so it takes the live count, while
+     * the dashboard takes the summary because CLAUDE.md forbids a live
+     * {@code COUNT(*)} behind a repainting screen. {@link StageFunnelRunner}
+     * carries the full reconciliation.
      *
      * <p>Two counts per stage, and the difference is the report. {@code sitting}
      * is how many open tickets are at that stage now; {@code passedThrough} is

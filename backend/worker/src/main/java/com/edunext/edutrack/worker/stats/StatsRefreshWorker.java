@@ -141,6 +141,17 @@ class StatsRefreshWorker {
             // would leave a window in which the project charts had advanced to
             // today and the client chart had not, on one dashboard.
             stats.refreshClientStats(day, clock.instant());
+            // A-058 · widgets 16–19. The first two are UPDATE passes over the
+            // rows refreshTicketStats has just written, so they must follow it;
+            // the third writes its own table and could sit anywhere.
+            //
+            // All three read ticket_stage_transitions, which is why the second
+            // pass and not the first: reading that table from inside the
+            // INSERT … SELECT above is the shape that deadlocked A-056 —
+            // CannotAcquireLock, on a suite that had passed the day before.
+            stats.refreshWipByStage(day, clock.instant());
+            stats.refreshReworkCounts(day, clock.instant());
+            stats.refreshStageStats(day, clock.instant());
             days++;
         }
         return days;

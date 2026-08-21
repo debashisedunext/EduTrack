@@ -27,17 +27,39 @@ import static com.edunext.edutrack.api.feature.reports.ReportDtos.ColumnType.STR
  * <p>The retained share makes it comparable between a stage that saw four
  * tickets and one that saw four hundred.
  *
- * <h2>Not from {@code wip_by_stage}</h2>
+ * <h2>Not from {@code wip_by_stage} — and A-058 has now landed, so here is the
+ * reconciliation this comment promised</h2>
  *
- * <p>A-050 declared that column and deliberately left it NULL — "a
- * point-in-time column cannot be backfilled" — and A-058, which fills it, has
- * not landed. Every row of it is NULL today, so a funnel reading it would draw
- * an empty chart and present it as data.
+ * <p>A-050 declared that column and left it NULL against A-058 by name. A-058
+ * fills it, so there are now two sources for "how many sit in each stage" and
+ * they are <b>deliberately different</b>:
  *
- * <p>So this reads {@code tickets.current_stage} for the standing count and
- * {@code ticket_stage_transitions} for the flow. When A-058 does land there
- * will be two sources for one figure, and this comment is where whoever
- * reconciles them should start.
+ * <ul>
+ *   <li><b>This report reads live</b>, from {@code tickets.current_stage}. A
+ *       report is a question asked once and answered now, and §7.8's readers
+ *       export it and act on it — a figure five minutes old inside a document
+ *       stamped with today's date is worse here than the query cost.</li>
+ *   <li><b>Widget 16 reads the summary</b>, because CLAUDE.md forbids a live
+ *       {@code COUNT(*)} behind a dashboard and a dashboard repaints on every
+ *       filter change.</li>
+ * </ul>
+ *
+ * <p>They can therefore disagree by up to one refresh interval, and the widget
+ * carries {@code asOf} so its staleness is visible. That is the intended
+ * outcome and not drift to be repaired by pointing both at one table: making
+ * this report read the summary would date it, and making the widget read
+ * {@code tickets} would put a live aggregate behind ten charts.
+ *
+ * <p>What they must <em>not</em> disagree about is the definition, and they do
+ * not: both count tickets not yet closed, and
+ * {@code DailyStatsRepository.refreshWipByStage} names this runner as the
+ * reason it excludes closed tickets from the funnel.
+ *
+ * <p>One difference in kind is worth knowing about. A-058 derives the summary
+ * from {@code ticket_stage_transitions} as at the end of each day, so
+ * <b>widget 16 can answer for a past day and this report cannot</b> —
+ * {@code current_stage} carries no history. A "where was work sitting last
+ * Tuesday" report would have to read the transitions the way the worker does.
  */
 @Component
 class StageFunnelRunner implements ReportRunner {
