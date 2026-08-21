@@ -47,7 +47,7 @@ import java.util.Set;
  * alone is never the test: a {@code .doc} is an OLE2 container, and so is a
  * 1998-era Excel macro workbook renamed by hand.
  */
-enum AttachmentType {
+public enum AttachmentType {
 
     /** {@code \x89PNG\r\n\x1a\n} — the signature that also detects a truncated transfer. */
     PNG("image/png", "png"),

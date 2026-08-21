@@ -46,55 +46,53 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ChatAttachmentScanStatus } from './chatAttachmentScanStatus';
+import type { ChatAttachmentDownloadUrl } from './chatAttachmentDownloadUrl';
 import type { UserRef } from './userRef';
-import type { ChatMessageKind } from './chatMessageKind';
-import type { ChatMessageEditableUntil } from './chatMessageEditableUntil';
-import type { ChatAttachment } from './chatAttachment';
-import type { TicketCard } from './ticketCard';
 
-export interface ChatMessage {
+/**
+ * D-053 · one file shared into a chat thread (§7.6).
+
+**The same safety pipeline as a ticket attachment**, and deliberately
+so: the bytes are sniffed and reconciled against the declared name,
+EXIF is stripped, and the file is virus-scanned before it becomes
+readable. Chat and tickets call the same beans, so there is one answer
+to "is this file safe" rather than two that can drift.
+
+What differs is everything a chat file does not have. There is no
+`isClientVisible` — §7.6's three surfaces are all internal and no
+client portal serves them, and a flag that is always false is one
+somebody eventually sets true. There is no `stageCode` or `cycleNo`; a
+thread has neither. And there is no 15-minute delete window of its own:
+D-057 already governs chat immutability, and an attachment follows the
+tombstone of the message that carries it rather than inventing a
+second, differently-sized window over the same evidence.
+
+ */
+export interface ChatAttachment {
   id?: number;
-  body?: string;
-  author?: UserRef;
-  kind?: ChatMessageKind;
-  isEdited?: boolean;
-  isDeleted?: boolean;
-  editableUntil?: ChatMessageEditableUntil;
-  /** D-053 · §7.6's file and image share. **Not `Attachment`**, which is
-the ticket shape: that carries `isClientVisible`, `stageCode` and
-`cycleNo`, none of which a chat file has, and advertising fields
-that are permanently null is how a client comes to branch on one.
-
-Always empty on a deleted message — §7.6 withholds a tombstoned
-message's content on read and a file list is content. The rows
-survive; they are simply not handed back with a message that has
-been retracted.
+  fileName?: string;
+  /** **Sniffed from the bytes, never taken from the upload's declared
+type.** `isImage` is derived from this and nothing else — a client
+that renders an `<img>` off a file extension will happily try it on
+a renamed executable.
  */
-  attachments?: ChatAttachment[];
-  readBy?: number[];
-  /** Resolved server-side from the body; the request never supplies it, or a caller could aim the notification fan-out at anybody. Only thread participants resolve — any other `@handle` stays plain text. Retained on a deleted message, whose body is withheld.
+  contentType?: string;
+  sizeBytes?: number;
+  /** Returned, never hidden. Hiding a pending row would make a scan
+delay indistinguishable from a failed upload and leave a user
+re-attaching the same file; the requirement is that the file not
+become **readable**, and the absent `downloadUrl` is what enforces
+that.
  */
-  mentions?: UserRef[];
-  /** D-054 · the `CRM-26-00347` mentions in the body, resolved into cards
-(§7.6). Parsed server-side from the body, like `mentions`.
-
-**Resolved per reader, on every read — never stored.** Two people
-reading the same message are entitled to different answers, and the
-card carries live state (level, status, stage, holder, lateness)
-rather than how the ticket looked when somebody typed its code.
-
-A code with no card here **renders as plain text**. That covers a
-ticket the reader may not see and one that does not exist, and the
-two are deliberately indistinguishable — otherwise pasting a range
-of codes would report back which are real.
-
-Always empty on a deleted message: the body is withheld, so nothing
-in it named anything.
-
-The blueprint writes this as `TKT-xxxx`; no ticket has ever looked
-like that. C-011 mints `{PROJECT}-{YY}-{NNNNN}`, and that is what is
-matched — see `TicketId`.
+  scanStatus?: ChatAttachmentScanStatus;
+  /** Whether the client should render it inline, decided from `contentType`. */
+  isImage?: boolean;
+  /** Short-lived signed URL, and present **only** for a `CLEAN` row that
+has not been tombstoned. Never a public bucket path. A URL that is
+never issued is stronger than a row that is merely hidden.
  */
-  ticketRefs?: TicketCard[];
+  downloadUrl?: ChatAttachmentDownloadUrl;
+  uploadedBy?: UserRef;
   createdAt?: string;
 }

@@ -256,6 +256,65 @@ describe('the screen, against the mock server', () => {
     // either side, and this proves the client does not add any.
     expect(await screen.findByText('deployed🚀 to prod')).toBeInTheDocument()
   })
+
+  it('attaches a file, sends it with the message, and renders it — D-053', async () => {
+    renderChat()
+    await screen.findByRole('navigation', { name: 'Conversations' })
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const png = new File([new Uint8Array([137, 80, 78, 71])], 'checkout-500.png', { type: 'image/png' })
+    await userEvent.upload(input, png)
+
+    // The upload is its own request: the chip appears before anything is sent,
+    // which is the whole point — a file that will be refused is refused before
+    // the author has written their message.
+    expect(await screen.findByText('checkout-500.png')).toBeInTheDocument()
+
+    const box = screen.getByLabelText('Message')
+    await userEvent.type(box, 'Screenshot of the failure')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(box).toHaveValue(''))
+    expect(await screen.findByText('Screenshot of the failure')).toBeInTheDocument()
+    // Rendered inline, and its alt text is the file name rather than "image" —
+    // the only description anybody ever supplies in a chat client.
+    // The *server's* name, not the browser's — the mock echoes a constant
+    // because no genuine multipart body reaches a handler under vitest (see
+    // the handler's own note). What this proves is the round trip: the id was
+    // carried on the send, bound to the message, and came back on the read.
+    expect(await screen.findByAltText('screenshot.png')).toBeInTheDocument()
+  })
+
+  it('sends a file with no words at all', async () => {
+    renderChat()
+    await screen.findByRole('navigation', { name: 'Conversations' })
+
+    // `body` is @minLength 1 on the contract, so Send is disabled on an empty
+    // box — until there is a file, which is a message on its own.
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, new File(['log'], 'server.log', { type: 'text/plain' }))
+    await screen.findByText('server.log')
+
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled()
+  })
+
+  it('lets an attached file be taken off again before sending', async () => {
+    renderChat()
+    await screen.findByRole('navigation', { name: 'Conversations' })
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, new File(['log'], 'wrong-file.log', { type: 'text/plain' }))
+    await screen.findByText('wrong-file.log')
+
+    // Named, not a bare ×: a row of identical "remove" buttons cannot be used
+    // by anybody navigating by label.
+    await userEvent.click(screen.getByRole('button', { name: 'Remove wrong-file.log' }))
+
+    await waitFor(() => expect(screen.queryByText('wrong-file.log')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+  })
 })
 
 describe('a message arriving while the screen is open', () => {

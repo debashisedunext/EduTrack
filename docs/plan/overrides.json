@@ -44,13 +44,9 @@
     "reason": "Shivendra, commit 0518564 — SchemaIntegrationIT covers update/delete rejection on ticket_history and ticket_effort_logs, delete and non-seal update rejection on ticket_stage_transitions, and seal-succeeds-exactly-once, on Testcontainers. Supersedes the earlier hand-verification; commit subject said 'A011' without the hyphen"
   },
   "D-053": {
-    "status": "blocked",
-    "pct": 70,
-    "reason": "Debashis — git reads this as done, and the backlog entry says otherwise in its own first line. **Corrected 20 Aug: search and emoji are shipped; file share is the one half left.** Emoji landed once D-065 built the chat composer, which is what it was actually waiting on — it needed no backend at all: chat_messages.body is utf8mb4 (checked against the live column), nothing sanitises the body, and the mention parser reads @handle rather than scanning code points. File/image share still has nowhere to put the row: ticket_attachments.ticket_id is NOT NULL, so an attachment on a DM or project channel is unrepresentable, and there is no chat_attachments table. PostMessage.attachmentIds is on the contract and on the DTO and is accepted and silently ignored. Two shapes are possible — a chat_message_attachments join, or ticket_attachments.ticket_id made nullable with a chat_message_id beside it — and both are Stream C's table and Stream C's upload pipeline (C-024/C-025 own MinIO keys, MIME sniffing and AV scan); a second pipeline here would put two answers next to each other for 'is this file safe'. Needs Divyansh's sign-off on the table shape.",
-    "_blocked_by": [
-      "C-024",
-      "C-025"
-    ]
+    "status": "in-progress",
+    "pct": 100,
+    "reason": "Debashis — git read this as done off a branch that carried only the search half. **All three halves are now built (20 Aug).** Search shipped first; emoji once D-065 built the chat composer, needing no backend at all (chat_messages.body is utf8mb4, checked against the live column); file share last. The file-share half was recorded for months as needing a table-shape decision from Stream C. The shape chosen is a new chat_attachments table rather than a nullable ticket_attachments.ticket_id: that NOT NULL is load-bearing for C-025's scope check, C-028's delete window, C-060's cycle/stage grouping and the AV worker's claim query, and a chat file has no cycle, no stage, no client-visibility flag and no fifteen-minute window. The 'two answers to is-this-file-safe' worry is answered rather than overruled: AttachmentTypePolicy, ImageMetadataStripper and AttachmentScanner were already separate injectable beans, so chat calls the same three; only the storage key was ticket-shaped, and a StorageKey interface now covers both namespaces. Stream C's attachments package is touched for visibility only. Left as in-progress rather than done until the PR merges; the override exists because the git evidence for this task has been wrong since the first commit and would otherwise stay wrong."
   },
   "D-037": {
     "status": "blocked",

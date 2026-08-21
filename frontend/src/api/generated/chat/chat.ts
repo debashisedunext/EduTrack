@@ -66,6 +66,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ChatAttachmentResponse,
   ChatMessageListResponse,
   ChatMessageResponse,
   ChatSearchResponse,
@@ -76,11 +77,14 @@ import type {
   ListChatThreadsParams,
   NotFoundResponse,
   PostChatMessageBody,
+  Problem,
   ResolveTicketCardsParams,
   SearchChatMessagesParams,
   StatusRequestListResponse,
   TicketCardListResponse,
-  UnauthorizedResponse
+  UnauthorizedResponse,
+  UploadChatAttachmentBody,
+  ValidationFailedResponse
 } from '.././model';
 
 import { http } from '../../http';
@@ -493,6 +497,92 @@ export function useSearchChatMessages<TData = Awaited<ReturnType<typeof searchCh
 
 
 /**
+ * Multipart, for `uploadAttachment`'s reason: a base64 JSON body inflates
+the payload by a third and buffers the whole file as a String before
+anything has decided whether it is acceptable.
+
+**Upload and send are separate requests on purpose.** The file is
+sniffed, EXIF-stripped, stored privately and queued for the AV scan
+while the author is still typing, so the send is instant and a file that
+is going to be refused is refused *before* they have written anything
+rather than after, with their message lost. Pass the returned `id` in
+`attachmentIds` when posting the message.
+
+Answers `201` with `scanStatus: PENDING` and **no** `downloadUrl` —
+the honest description of what has happened: the bytes are stored,
+nothing can read them, and a verdict is pending.
+
+Scope is thread participation, and a caller who is not in the thread
+gets **404** — the rule every other chat read follows, so a thread
+somebody is not in is indistinguishable from one that does not exist.
+
+ * @summary Share a file or image into a thread (§7.6)
+ */
+export const uploadChatAttachment = (
+    threadId: number,
+    uploadChatAttachmentBody: UploadChatAttachmentBody,
+ signal?: AbortSignal
+) => {
+      
+      const formData = new FormData();
+formData.append(`file`, uploadChatAttachmentBody.file)
+
+      return http<ChatAttachmentResponse>(
+      {url: `/chat/threads/${threadId}/attachments`, method: 'POST',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData, signal
+    },
+      );
+    }
+  
+
+
+export const getUploadChatAttachmentMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadChatAttachment>>, TError,{threadId: number;data: UploadChatAttachmentBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof uploadChatAttachment>>, TError,{threadId: number;data: UploadChatAttachmentBody}, TContext> => {
+
+const mutationKey = ['uploadChatAttachment'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadChatAttachment>>, {threadId: number;data: UploadChatAttachmentBody}> = (props) => {
+          const {threadId,data} = props ?? {};
+
+          return  uploadChatAttachment(threadId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadChatAttachmentMutationResult = NonNullable<Awaited<ReturnType<typeof uploadChatAttachment>>>
+    export type UploadChatAttachmentMutationBody = UploadChatAttachmentBody
+    export type UploadChatAttachmentMutationError = ValidationFailedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Share a file or image into a thread (§7.6)
+ */
+export const useUploadChatAttachment = <TError = ValidationFailedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadChatAttachment>>, TError,{threadId: number;data: UploadChatAttachmentBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof uploadChatAttachment>>,
+        TError,
+        {threadId: number;data: UploadChatAttachmentBody},
+        TContext
+      > => {
+
+      const mutationOptions = getUploadChatAttachmentMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * @summary Messages, newest first
  */
 export const listChatMessages = (

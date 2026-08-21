@@ -92,11 +92,31 @@ public final class ChatDtos {
              * and must not be made to.
              */
             List<TicketCard> ticketRefs,
+
+            /*
+             * D-053. §7.6's file and image share. Appended rather than slotted
+             * in beside body, on TicketWire.Ticket's own convention: a record's
+             * component order is its JSON order under springdoc, so inserting
+             * mid-record reorders every field after it and churns the generated
+             * client for nothing.
+             *
+             * Empty on a deleted message, exactly like ticketRefs and for the
+             * same reason: §7.6 withholds a tombstoned message's content on
+             * read, and a file list is content. The row survives — the
+             * attachment is still there, still scanned, still countable — it is
+             * simply not handed back with a message that has been retracted.
+             */
+            List<ChatAttachmentDtos.ChatAttachmentView> attachments,
             Instant createdAt) {
 
         ChatMessage withTicketRefs(List<TicketCard> cards) {
             return new ChatMessage(id, body, author, kind, isEdited, isDeleted,
-                    editableUntil, readBy, mentions, cards, createdAt);
+                    editableUntil, readBy, mentions, cards, attachments, createdAt);
+        }
+
+        ChatMessage withAttachments(List<ChatAttachmentDtos.ChatAttachmentView> files) {
+            return new ChatMessage(id, body, author, kind, isEdited, isDeleted,
+                    editableUntil, readBy, mentions, ticketRefs, files, createdAt);
         }
     }
 

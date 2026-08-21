@@ -56,7 +56,7 @@ import java.util.regex.Pattern;
  * larger, unreduced file, and neither key is an address on its own — the bucket is
  * private and a signature is still required.
  */
-record AttachmentStorageKey(long ticketId, UUID objectId, Variant variant) {
+record AttachmentStorageKey(long ticketId, UUID objectId, Variant variant) implements StorageKey {
 
     /**
      * Which of the two objects an attachment can have.
@@ -141,6 +141,11 @@ record AttachmentStorageKey(long ticketId, UUID objectId, Variant variant) {
         } catch (IllegalArgumentException notOurs) {
             return false;
         }
+    }
+
+    @Override
+    public String value() {
+        return toString();
     }
 
     @Override

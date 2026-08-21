@@ -65,11 +65,11 @@ class S3AttachmentStorage implements AttachmentStorage {
     }
 
     @Override
-    public void put(AttachmentStorageKey key, byte[] content, String contentType) {
+    public void put(StorageKey key, byte[] content, String contentType) {
         s3.putObject(
                 PutObjectRequest.builder()
                         .bucket(bucket)
-                        .key(key.toString())
+                        .key(key.value())
                         .contentType(contentType)
                         .contentLength((long) content.length)
                         .build(),
@@ -77,10 +77,10 @@ class S3AttachmentStorage implements AttachmentStorage {
     }
 
     @Override
-    public URI signedDownloadUrl(AttachmentStorageKey key, String fileName, String contentType, Duration ttl) {
+    public URI signedDownloadUrl(StorageKey key, String fileName, String contentType, Duration ttl) {
         GetObjectRequest get = GetObjectRequest.builder()
                 .bucket(bucket)
-                .key(key.toString())
+                .key(key.value())
                 .responseContentType(contentType)
                 .responseContentDisposition(contentDisposition(fileName))
                 .build();
@@ -98,19 +98,19 @@ class S3AttachmentStorage implements AttachmentStorage {
     }
 
     @Override
-    public void delete(AttachmentStorageKey key) {
+    public void delete(StorageKey key) {
         // S3 DELETE is idempotent and answers 204 for a key that was never
         // there, which is the behaviour both callers want: the AV path deletes
         // an object it may have failed to store, and C-028's delete window may
         // race a retry.
-        s3.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key.toString()).build());
+        s3.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key.value()).build());
     }
 
     @Override
-    public Optional<byte[]> read(AttachmentStorageKey key) {
+    public Optional<byte[]> read(StorageKey key) {
         try {
             ResponseBytes<GetObjectResponse> object = s3.getObjectAsBytes(
-                    GetObjectRequest.builder().bucket(bucket).key(key.toString()).build());
+                    GetObjectRequest.builder().bucket(bucket).key(key.value()).build());
             return Optional.of(object.asByteArray());
         } catch (NoSuchKeyException gone) {
             return Optional.empty();

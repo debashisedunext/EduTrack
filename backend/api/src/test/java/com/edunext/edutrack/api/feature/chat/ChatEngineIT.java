@@ -1104,7 +1104,10 @@ class ChatEngineIT {
             // deleted text.
             ChatDtos.ChatMessage undead = new ChatDtos.ChatMessage(
                     1L, "see ITC-26-00001", null, MessageKind.TEXT, false, true,
-                    null, List.of(), List.of(), List.of(), java.time.Instant.now());
+                    null, List.of(), List.of(), List.of(),
+                    // D-053 · attachments, which a deleted message never carries
+                    // — the same reason ticketRefs above is empty here.
+                    List.of(), java.time.Instant.now());
 
             assertThat(ticketCards.attach(auth(ravi), List.of(undead)).getFirst().ticketRefs())
                     .isEmpty();

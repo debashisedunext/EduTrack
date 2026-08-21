@@ -119,7 +119,7 @@ class ChatController {
     ResponseEntity<MessageResponse> post(Authentication authentication,
                                          @PathVariable long threadId,
                                          @Valid @RequestBody ChatDtos.PostMessage request) {
-        return chat.post(threadId, CurrentUser.idOf(authentication), request.body())
+        return chat.post(threadId, CurrentUser.idOf(authentication), request.body(), request.attachmentIds())
                 .map(message -> ResponseEntity.status(HttpStatus.CREATED)
                         .body(new MessageResponse(withCards(authentication, message))))
                 .orElseGet(() -> ResponseEntity.notFound().build());

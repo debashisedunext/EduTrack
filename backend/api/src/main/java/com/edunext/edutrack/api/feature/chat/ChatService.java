@@ -43,15 +43,49 @@ public class ChatService {
     private final RealtimePublisher realtime;
     private final MentionNotifier mentionNotifier;
     private final StatusRequestAnswerer statusRequests;
+    /** D-053 · §7.6's file share. Resolved a page at a time, never per row. */
+    private final ChatAttachmentService attachments;
 
     ChatService(ChatRepository repository,
                 RealtimePublisher realtime,
                 MentionNotifier mentionNotifier,
-                StatusRequestAnswerer statusRequests) {
+                StatusRequestAnswerer statusRequests,
+                ChatAttachmentService attachments) {
         this.repository = repository;
         this.realtime = realtime;
         this.mentionNotifier = mentionNotifier;
         this.statusRequests = statusRequests;
+        this.attachments = attachments;
+    }
+
+    /**
+     * D-053 · hang each message's shared files off it, one query for the page.
+     *
+     * <p>Applied at the list edge rather than inside {@code toMessage}, because
+     * a per-row resolve is a query per line on screen and a thread renders
+     * fifty at a time. Unlike {@code ticketRefs} this is <b>not</b> per-reader —
+     * everyone in a thread sees the same files — so it belongs here rather than
+     * in {@code TicketCardResolver}'s position at the controller.
+     *
+     * <p>A deleted message keeps its empty list: §7.6 withholds a tombstoned
+     * message's content on read, and a file list is content. The rows survive.
+     */
+    private List<ChatDtos.ChatMessage> withAttachments(List<ChatDtos.ChatMessage> messages) {
+        List<Long> ids = messages.stream()
+                .filter(message -> !message.isDeleted())
+                .map(ChatDtos.ChatMessage::id)
+                .toList();
+        Map<Long, List<ChatAttachmentDtos.ChatAttachmentView>> byMessage =
+                attachments.forMessages(ids, Map.of());
+        if (byMessage.isEmpty()) {
+            return messages;
+        }
+        return messages.stream()
+                .map(message -> {
+                    List<ChatAttachmentDtos.ChatAttachmentView> files = byMessage.get(message.id());
+                    return files == null || files.isEmpty() ? message : message.withAttachments(files);
+                })
+                .toList();
     }
 
     // --------------------------------------------------------------- threads
@@ -120,9 +154,9 @@ public class ChatService {
         // reflected rather than a snapshot that is already one request stale.
         List<ChatRepository.ReadCursor> cursors = repository.readCursors(threadId);
         Map<Long, List<ChatRepository.MentionedUser>> mentions = mentionsFor(rows);
-        return Optional.of(rows.stream()
+        return Optional.of(withAttachments(rows.stream()
                 .map(row -> toMessage(row, userId, cursors, mentions))
-                .toList());
+                .toList()));
     }
 
     /**
@@ -136,7 +170,21 @@ public class ChatService {
      */
     @Transactional
     public Optional<ChatDtos.ChatMessage> post(long threadId, long senderId, String body) {
-        return post(threadId, senderId, body, MessageKind.TEXT);
+        return post(threadId, senderId, body, List.of());
+    }
+
+    /**
+     * D-053 · post with files already uploaded to this thread.
+     *
+     * <p>{@code attachmentIds} has been on the contract and on {@code
+     * PostMessage} since D-001 and stored nothing until now — a field that
+     * looked wired from both sides, which is the failure this codebase keeps
+     * finding. It is bound here, inside the post's own transaction, so a
+     * message that rolls back does not leave files pointing at it.
+     */
+    public Optional<ChatDtos.ChatMessage> post(long threadId, long senderId, String body,
+                                               List<Long> attachmentIds) {
+        return post(threadId, senderId, body, MessageKind.TEXT, attachmentIds);
     }
 
     /**
@@ -151,6 +199,12 @@ public class ChatService {
      */
     @Transactional
     Optional<ChatDtos.ChatMessage> post(long threadId, long senderId, String body, MessageKind kind) {
+        return post(threadId, senderId, body, kind, List.of());
+    }
+
+    @Transactional
+    Optional<ChatDtos.ChatMessage> post(long threadId, long senderId, String body, MessageKind kind,
+                                        List<Long> attachmentIds) {
         Optional<ChatRepository.ThreadAnchor> anchor = repository.threadForParticipant(threadId, senderId);
         if (anchor.isEmpty()) {
             return Optional.empty();
@@ -168,6 +222,11 @@ public class ChatService {
         // the sender's own post counts as unread to them.
         repository.advanceReadCursor(threadId, senderId, messageId);
 
+        // D-053 · bind the files, inside this transaction. An id that is not
+        // this thread's, or is already carried by another message, is skipped
+        // rather than refused — ChatAttachmentService.attachTo says why.
+        attachments.attachTo(messageId, threadId, attachmentIds);
+
         List<ChatRepository.MessageRow> written = repository.messages(threadId, messageId + 1, 1);
         ChatDtos.ChatMessage message = written.isEmpty()
                 ? null
@@ -175,6 +234,8 @@ public class ChatService {
         if (message == null) {
             throw new IllegalStateException("chat: message " + messageId + " vanished immediately after insert");
         }
+
+        message = withAttachments(List.of(message)).getFirst();
 
         broadcast(anchor.get(), message, "chat.message");
         mentionNotifier.mentioned(anchor.get(), messageId, senderId,
@@ -495,6 +556,17 @@ public class ChatService {
                 // is what stops a card ever being computed for the wrong person
                 // — including on the broadcast path, which reaches a whole room
                 // through one frame and so must carry none at all.
+                List.of(),
+                // D-053. Empty here for the same structural reason ticketRefs
+                // above is, minus the per-reader argument: a file list is the
+                // same for everybody in the thread. It is filled in by
+                // `withAttachments` at the edge, in one query for the whole
+                // page — resolving it per row here would be a query per line on
+                // screen.
+                //
+                // A deleted message keeps an empty list rather than its files:
+                // §7.6 withholds a tombstoned message's content on read, and a
+                // file list is content. The rows survive.
                 List.of(),
                 createdAt);
     }

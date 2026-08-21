@@ -20,7 +20,7 @@ import java.util.Optional;
  * Testcontainers MinIO is needed to prove that an INFECTED file is never
  * presigned.
  */
-interface AttachmentStorage {
+public interface AttachmentStorage {
 
     /**
      * Store the cleaned bytes under {@code key}.
@@ -30,7 +30,7 @@ interface AttachmentStorage {
      * because a presigned GET serves it back, and serving back a caller-supplied
      * {@code text/html} is stored XSS against whoever opens the link.
      */
-    void put(AttachmentStorageKey key, byte[] content, String contentType);
+    void put(StorageKey key, byte[] content, String contentType);
 
     /**
      * A short-lived, signed GET URL — the <em>only</em> way an attachment is
@@ -43,7 +43,7 @@ interface AttachmentStorage {
      *                 ends up in a browser history, a chat paste and a proxy log,
      *                 and every one of those is a copy of a credential
      */
-    URI signedDownloadUrl(AttachmentStorageKey key, String fileName, String contentType, Duration ttl);
+    URI signedDownloadUrl(StorageKey key, String fileName, String contentType, Duration ttl);
 
     /**
      * Remove the object.
@@ -56,8 +56,8 @@ interface AttachmentStorage {
      * outcome both callers wanted, and reporting "there was nothing to delete"
      * would only invite a branch that treats it as a failure.
      */
-    void delete(AttachmentStorageKey key);
+    void delete(StorageKey key);
 
     /** The stored bytes, for the AV scanner. Empty when the object is gone. */
-    Optional<byte[]> read(AttachmentStorageKey key);
+    Optional<byte[]> read(StorageKey key);
 }

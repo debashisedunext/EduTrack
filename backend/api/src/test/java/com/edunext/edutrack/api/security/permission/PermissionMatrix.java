@@ -700,6 +700,20 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/chat/threads/{threadId}/messages", CHAT_MESSAGE),
             everyRole("PATCH", "/api/v1/chat/threads/{threadId}/messages/{messageId}", CHAT_MESSAGE),
             everyRole("DELETE", "/api/v1/chat/threads/{threadId}/messages/{messageId}"),
+
+            // D-053 · §7.6's file and image share. Every role, for the reason
+            // the block above gives: being in the thread is the whole
+            // authorisation question, and it is a row question the feature
+            // answers per thread — a non-participant gets 404, never 403.
+            //
+            // No fixture body, unlike the write rows above it. This handler
+            // takes a multipart `@RequestParam("file")` rather than a `@Valid
+            // @RequestBody`, and a missing request *param* is resolved after
+            // `@PreAuthorize` rather than before it — so authorisation is
+            // reached without one. That is the opposite of this file's header
+            // warning about JSON bodies, and it is worth stating rather than
+            // leaving the absent fixture to look like an oversight.
+            everyRole("POST", "/api/v1/chat/threads/{threadId}/attachments"),
             // D-054. Scoped per row inside the feature like the rest of chat, and
             // more strictly than it reads: the codes come from the caller, and
             // every one of them goes through A-034 — a ticket they may not see is
