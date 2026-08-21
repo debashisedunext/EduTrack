@@ -28,7 +28,7 @@ class StatusRequestRepository {
     private static final String TICKET = """
             SELECT t.id, t.ticket_code, t.title, t.project_id, t.assigned_to
               FROM tickets t
-             WHERE t.id = :ticketId
+             WHERE t.ticket_code = :ticketCode
             """;
 
     /**
@@ -232,8 +232,14 @@ class StatusRequestRepository {
         this.jdbc = jdbc;
     }
 
-    Optional<TicketRow> ticket(long ticketId) {
-        return jdbc.sql(TICKET).param("ticketId", ticketId).query(TicketRow.class).optional();
+    /**
+     * By ticket CODE, because that is what the contract's {@code TicketId} is
+     * and therefore what the route receives. The row carries {@code id}, so
+     * every query after this one still works by row id — the code is resolved
+     * exactly once, here.
+     */
+    Optional<TicketRow> ticket(String ticketCode) {
+        return jdbc.sql(TICKET).param("ticketCode", ticketCode).query(TicketRow.class).optional();
     }
 
     boolean mayAsk(long userId, long ticketId) {
