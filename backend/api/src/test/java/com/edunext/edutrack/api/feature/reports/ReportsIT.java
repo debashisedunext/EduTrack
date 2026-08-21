@@ -367,16 +367,30 @@ class ReportsIT {
         }
 
         @Test
-        @DisplayName("a declared but unbuilt report is also 404, not an empty 200")
-        void unbuiltKey() {
-            // The catalogue is where "exists, not built yet" is said in words a
-            // person reads. A runner has no columns to name and no rows to
-            // return, so a 200 would have to invent an empty report — which
-            // asserts the query ran and found nothing.
-            // resource-contribution, not resource-scorecard — A-066 built that
-            // one, and a test naming a report that keeps changing state is a
-            // test that fails on somebody else's task.
-            assertThat(service.run(admin(), "resource-contribution", D1, D3, null, null, ReportFilters.NONE)).isEmpty();
+        @DisplayName("every catalogued report has a runner, so none of them 404s")
+        void everyCatalogueKeyRuns() {
+            // A-068 · this was `unbuiltKey`, asserting that a declared-but-unbuilt
+            // report 404s rather than returning an empty 200. It named
+            // resource-contribution, and its own comment said the hazard out
+            // loud — "a test naming a report that keeps changing state is a test
+            // that fails on somebody else's task". A-068 is that task.
+            //
+            // With all nineteen built there is no unbuilt key to assert on, and
+            // inventing one here would test a fixture rather than the product.
+            // The useful assertion is the complement, and it is stronger: the
+            // catalogue promises a card for every key, so every key must run.
+            // A twentieth report declared without a runner turns this red, which
+            // is the same protection pointed the other way round.
+            //
+            // The unknown-key 404 above is untouched — that is the behaviour a
+            // made-up key still gets, and it is what an unbuilt one would get too.
+            ReportScope adminScope = new ReportScope(false, 1L, List.of());
+
+            for (ReportDtos.Descriptor d : ReportCatalogue.forScope(adminScope)) {
+                assertThat(service.run(admin(), d.key(), D1, D3, null, null, ReportFilters.NONE))
+                        .describedAs("%s is in the catalogue but no runner serves it", d.key())
+                        .isPresent();
+            }
         }
     }
 

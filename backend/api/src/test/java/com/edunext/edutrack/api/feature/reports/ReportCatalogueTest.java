@@ -106,8 +106,9 @@ class ReportCatalogueTest {
         // An exact set rather than a count, so both halves of the mistake are
         // caught: a card flipped on with no runner (a 500 in front of a user)
         // and a runner added without flipping the card (a report that exists
-        // and is unreachable). A-063 shipped one, A-066 six, A-067 five and
-        // B-060 the client report.
+        // and is unreachable). A-063 shipped one, A-066 six, A-067 five,
+        // B-060 the client report, B-061 the resource ones, and A-068 the last
+        // five — which completes §7.8's eighteen plus A-070's nineteenth.
         List<String> available = ReportCatalogue.declared().stream()
                 .filter(ReportDtos.Descriptor::available)
                 .map(ReportDtos.Descriptor::key)
@@ -129,7 +130,13 @@ class ReportCatalogueTest {
                 ClientReportRunner.KEY,
                 // A-070 · the nineteenth, and the first outside §7.8's eighteen —
                 // blueprint §6 asks for it by name.
-                CriticalOriginRunner.KEY);
+                CriticalOriginRunner.KEY,
+                // A-068 · the last five of §7.8's eighteen.
+                ReworkAnalysisRunner.KEY,
+                DeploymentReportRunner.KEY,
+                ResourceContributionRunner.KEY,
+                AuditComplianceRunner.KEY,
+                EmailDeliveryLogRunner.KEY);
     }
 
     /**
@@ -190,12 +197,39 @@ class ReportCatalogueTest {
         // "Not kept per person" says a report will never be theirs; "not built
         // yet" says it has not been written. Replacing the second with the first
         // would mislead a Developer about something they only have to wait for.
-        ReportScope ownWork = new ReportScope(true, 8L, List.of(1L));
+        //
+        // A-068 · this used to find a real unbuilt report and assert on it,
+        // which worked only while one existed. A-068 built the last five, so the
+        // descriptor is constructed here instead. That is the more honest test
+        // in any case: the rule is about the *precedence* of two reasons, and
+        // pointing it at whichever report is currently unfinished made it fail
+        // on the task that finished it — exactly what ReportsIT.unbuiltKey
+        // warned about in its own comment before it happened.
+        ReportDtos.Descriptor declaredButUnbuilt = new ReportDtos.Descriptor(
+                "not-yet-written", "Not Yet Written", "A report declared before it was built.",
+                ReportCategory.PEOPLE, "bar", List.of(ReportFilterKind.DATE_RANGE),
+                false, "This report is not built yet.");
 
-        ReportDtos.Descriptor scorecard = ReportCatalogue.find("resource-contribution", ownWork).orElseThrow();
+        ReportDtos.Descriptor afterWithholding = ReportCatalogue.withheld(declaredButUnbuilt);
 
-        assertThat(scorecard.available()).isFalse();
-        assertThat(scorecard.unavailableReason()).contains("not built yet");
+        assertThat(afterWithholding.available()).isFalse();
+        assertThat(afterWithholding.unavailableReason()).contains("not built yet");
+    }
+
+    @Test
+    @DisplayName("every report in the catalogue is built, and any new one must say why if not")
+    void everyReportIsBuilt() {
+        // A-068 closed the last five. This is not a permanent truth — a
+        // twentieth report will be declared before it is written — and the test
+        // is here to make that a deliberate act rather than a silent one: adding
+        // an unbuilt report turns this red, and the fix is to say so here and
+        // check that its card carries a reason a person can read.
+        ReportScope admin = new ReportScope(false, 1L, List.of());
+
+        assertThat(ReportCatalogue.forScope(admin))
+                .allSatisfy(d -> assertThat(d.available())
+                        .describedAs("%s is declared but not built — see ReportCatalogue.withheld", d.key())
+                        .isTrue());
     }
 
     @Test

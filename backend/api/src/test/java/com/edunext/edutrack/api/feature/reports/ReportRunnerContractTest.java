@@ -50,12 +50,17 @@ class ReportRunnerContractTest {
     }
 
     @Test
-    @DisplayName("fourteen reports run — A-063 one, A-066 six, A-067 five, B-060 one, A-070 one")
+    @DisplayName("nineteen reports run — §7.8's eighteen, plus A-070's")
     void totalAvailable() {
         // Pinned as a count so a report flipped on without a runner, or a runner
         // added without flipping the card, is caught here rather than by a 500.
+        //
+        // A-063 one, A-066 six, A-067 five, B-060 one, A-070 one, A-068 five.
+        // This is the number at which §7.8's list is complete: eighteen there,
+        // plus the nineteenth blueprint §6 asks for by name. A twentieth is a
+        // deliberate act and turns this red on purpose.
         assertThat(ReportCatalogue.declared().stream().filter(ReportDtos.Descriptor::available).count())
-                .isEqualTo(14);
+                .isEqualTo(19);
     }
 
     /**
@@ -358,7 +363,17 @@ class ReportRunnerContractTest {
                 // an escalation is often something that happened to a ticket
                 // while nobody was looking, so a default view with names
                 // against it would read as a blame list.
-                CriticalOriginRunner.KEY);
+                CriticalOriginRunner.KEY,
+                // A-068 · three more, and each reads the subject it is handed
+                // rather than re-deriving it — the defect this test exists for.
+                // The column each applies it to differs and is the interesting
+                // part: rework keys on who *sent work back* (from_user_id),
+                // contribution on who *logged the hours* (effort user_id), and
+                // audit on who *made the change* (actor_id). Three readings of
+                // "this resource", each the one its own report is about.
+                ReworkAnalysisRunner.KEY,
+                ResourceContributionRunner.KEY,
+                AuditComplianceRunner.KEY);
     }
 
     @Test

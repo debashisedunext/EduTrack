@@ -844,4 +844,332 @@ class TicketReportRepository {
                              long bornCritical, long becameCritical, long deEscalated,
                              long criticalNow, long escalatedBySla, long raisedByPerson) {
     }
+
+    // ── A-068 · reports 13, 14 and 15, from the transitions and effort logs ──
+
+    /**
+     * A-068 report 13 · Rework Analysis — §7.8's "rework rate by developer, QA
+     * rejection rate, first-time-right %".
+     *
+     * <h2>The unit is a backward move, not a reworked ticket</h2>
+     *
+     * <p>{@code reopenAnalysis} above makes the same distinction one report over
+     * and for the same reason: a ticket sent back four times is four failures,
+     * and counting {@code rework_count > 0} would put it in the same bucket as
+     * one sent back once — precisely the case this report exists to find. Both
+     * figures are returned and the runner shows both.
+     *
+     * <h2>Attributed to whoever sent it back, and to the pair of stages</h2>
+     *
+     * <p>{@code from_user_id} is the person who rejected the work and
+     * {@code from_stage} is where they were standing, so §7.8's "QA rejection
+     * rate" is this grouping read at QA rather than a second query. Grouping by
+     * the <em>pair</em> is what answers the catalogue's "how often the same pair
+     * repeats it", which a per-person count averages away: two developers each
+     * bounced once is a different problem from one pair bounced twice.
+     *
+     * <h2>The four backward action codes are listed, not derived</h2>
+     *
+     * <p>{@code TransitionService.BACKWARD_ACTIONS} holds the same four. They
+     * are repeated here because this is SQL and they reach the database as
+     * literals either way; {@code ReportRunnersIT} asserts the two sets agree,
+     * so the duplication is checked rather than trusted.
+     *
+     * <h2>What this returns today, stated rather than discovered later</h2>
+     *
+     * <p><b>{@code ticket_stage_transitions} has no rows in a running
+     * application.</b> Only {@code TransitionService.advance} writes to it, and
+     * it refuses to act without an already-open hop — which nothing opens.
+     * {@code NoOpenStageException}'s own javadoc names that state and leaves it
+     * to somebody else, {@code ReworkService} and {@code HandoffService} both
+     * inherit the refusal, and every test that needs a hop either inserts one by
+     * raw SQL or mocks {@code openHopFor}.
+     *
+     * <p>So this query is correct and returns nothing, and starts returning rows
+     * the day a first hop is written. That is not a placeholder — it is a true
+     * answer to a question nothing has yet produced data for. What must not
+     * happen is the emptiness being turned into a reassuring percentage, and
+     * {@code ReworkAnalysisRunner} is where that is prevented.
+     */
+    List<ReworkRow> reworkAnalysis(LocalDate from, LocalDate to, List<Long> projectIds,
+                                   boolean ownWork, long userId, Long resourceId) {
+        return jdbc.sql("""
+                        SELECT COALESCE(u.full_name, '(system)') AS full_name,
+                               p.name        AS project_name,
+                               tr.from_stage AS from_stage,
+                               tr.to_stage   AS to_stage,
+                               COUNT(*)                     AS bounces,
+                               COUNT(DISTINCT tr.ticket_id) AS tickets_affected
+                          FROM ticket_stage_transitions tr
+                          JOIN tickets t    ON t.id = tr.ticket_id
+                          JOIN projects p   ON p.id = t.project_id
+                          LEFT JOIN users u ON u.id = tr.from_user_id
+                         WHERE tr.action_code IN ('REWORK', 'VERIFY_FAILED',
+                                                  'DEPLOY_FAILED', 'SIGNOFF_REJECTED')
+                           AND tr.entered_at >= :fromTs
+                           AND tr.entered_at < :toExclusiveTs
+                           AND (:unscoped = 1 OR t.project_id IN (:projectIds))
+                           AND (:ownWork = 0 OR t.assigned_to = :userId)
+                           AND (:resourceId IS NULL OR tr.from_user_id = :resourceId)
+                      GROUP BY u.full_name, p.name, tr.from_stage, tr.to_stage
+                      ORDER BY bounces DESC, full_name
+                        """)
+                .param("fromTs", from.atStartOfDay())
+                .param("toExclusiveTs", to.plusDays(1).atStartOfDay())
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .param("ownWork", ownWork ? 1 : 0)
+                .param("userId", userId)
+                .param("resourceId", resourceId)
+                .query((rs, n) -> new ReworkRow(
+                        rs.getString("full_name"), rs.getString("project_name"),
+                        rs.getString("from_stage"), rs.getString("to_stage"),
+                        rs.getLong("bounces"), rs.getLong("tickets_affected")))
+                .list();
+    }
+
+    /**
+     * The first-time-right denominator, counted over tickets closed in the
+     * window.
+     *
+     * <h2>A second query rather than a join</h2>
+     *
+     * <p>The grouping above is per (person, project, stage pair) and this is per
+     * project. There is no grouping at which both are true: forcing one would
+     * either repeat the closed count on every stage-pair row, where a reader
+     * would sum it, or collapse the stage pairs, which are the report.
+     *
+     * <p>{@code current_iteration = 1} is first-time-right by §7.8's definition
+     * — closed without ever having been sent back. The counter only rises and is
+     * never reset ({@code TransitionService} increments it on a backward move,
+     * and {@code ReopenService} says the same of {@code rework_count} beside
+     * it), so its value at close is a faithful record of the whole cycle.
+     *
+     * <p><b>This one does return rows today</b>, because it reads
+     * {@code tickets} rather than the transitions — which is exactly why the
+     * runner may not divide one by the other without saying so.
+     */
+    List<FirstTimeRightRow> firstTimeRight(LocalDate from, LocalDate to, List<Long> projectIds,
+                                           boolean ownWork, long userId, Long resourceId) {
+        return jdbc.sql("""
+                        SELECT p.name AS project_name,
+                               COUNT(*) AS closed,
+                               SUM(CASE WHEN t.current_iteration = 1 THEN 1 ELSE 0 END) AS ftr
+                          FROM tickets t
+                          JOIN projects p ON p.id = t.project_id
+                         WHERE t.actual_close_date >= :fromTs
+                           AND t.actual_close_date < :toExclusiveTs
+                           AND (:unscoped = 1 OR t.project_id IN (:projectIds))
+                           AND (:ownWork = 0 OR t.assigned_to = :userId)
+                           AND (:resourceId IS NULL OR t.assigned_to = :resourceId)
+                      GROUP BY p.name
+                      ORDER BY p.name
+                        """)
+                .param("fromTs", from.atStartOfDay())
+                .param("toExclusiveTs", to.plusDays(1).atStartOfDay())
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .param("ownWork", ownWork ? 1 : 0)
+                .param("userId", userId)
+                .param("resourceId", resourceId)
+                .query((rs, n) -> new FirstTimeRightRow(
+                        rs.getString("project_name"), rs.getLong("closed"), rs.getLong("ftr")))
+                .list();
+    }
+
+    /**
+     * A-068 report 14 · Deployment Report — §7.8's "deployments per week,
+     * success vs rollback, avg deploy duration".
+     *
+     * <h2>A deployment is a visit to a Deployment-owned stage, not a table</h2>
+     *
+     * <p>There is no {@code deployments} table and this report does not add one.
+     * A deployment in this product is a ticket entering a stage whose owning
+     * role is {@code DEPLOYMENT} and leaving it again — which
+     * {@code ticket_stage_transitions} already records completely, with
+     * {@code duration_mins} in working minutes set on seal. A second table would
+     * be a second answer to "was this deployed", and the ribbon would remain the
+     * one people believe.
+     *
+     * <p><b>Keyed on {@code workflow_stages.owner_role}, never on the literal
+     * stage code {@code DEPLOY}</b> — {@code HandoffNotifier.leavesDeployment}
+     * decides the identical question the identical way, and its note gives the
+     * reason: a stage code is a template's own label and B-034 lets an Admin
+     * write another one, whereas the role that owns the stage is what §4A.1
+     * fixes. The three seeded templates prove the point — each spells its
+     * deployment stage {@code DEPLOY}, and nothing makes a fourth do so.
+     * {@code owner_role} carries no foreign key to {@code roles} (A-005 made it
+     * a plain {@code VARCHAR}), so this is a literal comparison and not a join.
+     *
+     * <h2>Success versus rollback is the action code on the way out</h2>
+     *
+     * <p>A visit that left by {@code FORWARD} shipped; one that left by
+     * {@code DEPLOY_FAILED} came back. That is the whole distinction and it is
+     * recorded on the <em>next</em> hop rather than on the visit itself, because
+     * a hop records how it was entered — so the outcome of visit <i>n</i> is
+     * read from the action code of visit <i>n+1</i>, joined on {@code seq_no}.
+     * Reading {@code action_code} off the visit row itself would report how the
+     * deployment was <em>reached</em>, which is a different and plausible-looking
+     * number.
+     *
+     * <h2>Unsealed visits are excluded</h2>
+     *
+     * <p>{@code exited_at IS NULL} is a deployment still in progress. It has no
+     * outcome and no duration, and averaging a partial stay drags every figure
+     * down worst for the deployments taking longest right now — {@code A-067}'s
+     * stage-cycle-time made the same call for the same reason.
+     *
+     * <p>Weekly, because §7.8 asks for "deployments per week". The week is
+     * keyed by its Monday so the label sorts and groups identically.
+     *
+     * <p>Reads the transitions, so see {@code reworkAnalysis} above for what
+     * that means today.
+     */
+    List<DeploymentRow> deploymentReport(LocalDate from, LocalDate to, List<Long> projectIds,
+                                         boolean ownWork, long userId) {
+        return jdbc.sql("""
+                        SELECT DATE(DATE_SUB(dep.entered_at,
+                                             INTERVAL WEEKDAY(dep.entered_at) DAY)) AS week_start,
+                               p.name AS project_name,
+                               COUNT(*) AS deployments,
+                               SUM(CASE WHEN nxt.action_code = 'DEPLOY_FAILED' THEN 1 ELSE 0 END)
+                                   AS rolled_back,
+                               SUM(CASE WHEN nxt.action_code IS NULL
+                                          OR nxt.action_code <> 'DEPLOY_FAILED' THEN 1 ELSE 0 END)
+                                   AS succeeded,
+                               COALESCE(AVG(dep.duration_mins), 0) AS avg_minutes
+                          FROM ticket_stage_transitions dep
+                          JOIN tickets t   ON t.id = dep.ticket_id
+                          JOIN projects p  ON p.id = t.project_id
+                          JOIN workflow_stages ws
+                                 ON ws.template_id = t.workflow_template_id
+                                AND ws.stage_code  = dep.to_stage
+                          LEFT JOIN ticket_stage_transitions nxt
+                                 ON nxt.ticket_id = dep.ticket_id
+                                AND nxt.cycle_no  = dep.cycle_no
+                                AND nxt.seq_no    = dep.seq_no + 1
+                         WHERE ws.owner_role = 'DEPLOYMENT'
+                           AND dep.exited_at IS NOT NULL
+                           AND dep.entered_at >= :fromTs
+                           AND dep.entered_at < :toExclusiveTs
+                           AND (:unscoped = 1 OR t.project_id IN (:projectIds))
+                           AND (:ownWork = 0 OR t.assigned_to = :userId)
+                      GROUP BY week_start, p.name
+                      ORDER BY week_start, p.name
+                        """)
+                .param("fromTs", from.atStartOfDay())
+                .param("toExclusiveTs", to.plusDays(1).atStartOfDay())
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .param("ownWork", ownWork ? 1 : 0)
+                .param("userId", userId)
+                .query((rs, n) -> new DeploymentRow(
+                        // A-067's defect: rs.getDate(..).toLocalDate() converts
+                        // through the JVM default zone, so a stored date read on
+                        // an IST machine against a UTC database came back a day
+                        // early. getObject(.., LocalDate.class) does not.
+                        rs.getObject("week_start", LocalDate.class),
+                        rs.getString("project_name"),
+                        rs.getLong("deployments"), rs.getLong("succeeded"),
+                        rs.getLong("rolled_back"), rs.getBigDecimal("avg_minutes")))
+                .list();
+    }
+
+    /**
+     * A-068 report 15 · Resource Contribution — §7.8's "the §4A.4 per-resource-
+     * per-stage roll-up across any ticket set".
+     *
+     * <h2>Read from the effort logs alone, and that is what makes it work</h2>
+     *
+     * <p>{@code JourneyRepository.perResource} — C-058's roll-up, the one §4A.4
+     * describes — groups by {@code ticket_effort_logs.user_id} and nothing else.
+     * Its own sibling {@code hops} joins the transitions, but the per-resource
+     * half does not need to, and {@code AssignService}'s javadoc explains why in
+     * as many words: {@code ticket_effort_logs.user_id} is stamped from
+     * <em>whoever logged the hours</em>, never from {@code tickets.assigned_to},
+     * so the roll-up is already correct across reassignment without consulting a
+     * hop at all.
+     *
+     * <p>The effort log carries {@code stage_code}, {@code iteration_no} and
+     * {@code cycle_no} itself. So the per-resource-per-stage roll-up is
+     * answerable from one append-only table that <b>real production code
+     * writes</b> — {@code EffortLogService.append} and
+     * {@code QuickUpdateService.appendEffort} — which is what separates this
+     * report from its two neighbours above.
+     *
+     * <h2>Corrections are summed, not filtered out</h2>
+     *
+     * <p>{@code is_correction} rows may carry negative hours by design
+     * ({@code ck_effort_hours} relaxes the positive check for exactly them), and
+     * a correction is an accounting reversal. Summing everything is what applies
+     * it; excluding corrections would report the hours somebody already withdrew
+     * and would disagree with the ticket's own roll-up on the detail page.
+     *
+     * <p>Tickets are counted {@code DISTINCT}, because a person logging six
+     * entries against one ticket has contributed to one ticket.
+     */
+    List<ContributionRow> resourceContribution(LocalDate from, LocalDate to, List<Long> projectIds,
+                                               boolean ownWork, long userId, Long resourceId) {
+        return jdbc.sql("""
+                        SELECT u.full_name AS full_name,
+                               p.name      AS project_name,
+                               COALESCE(e.stage_code, '(no stage)') AS stage_code,
+                               SUM(e.hours)                   AS hours,
+                               COUNT(DISTINCT e.ticket_id)    AS tickets,
+                               COUNT(*)                       AS entries
+                          FROM ticket_effort_logs e
+                          JOIN users u    ON u.id = e.user_id
+                          JOIN tickets t  ON t.id = e.ticket_id
+                          JOIN projects p ON p.id = t.project_id
+                         WHERE e.work_date >= :from
+                           AND e.work_date <= :to
+                           AND (:unscoped = 1 OR t.project_id IN (:projectIds))
+                           AND (:ownWork = 0 OR e.user_id = :userId)
+                           AND (:resourceId IS NULL OR e.user_id = :resourceId)
+                      GROUP BY u.full_name, p.name, e.stage_code
+                      ORDER BY hours DESC, u.full_name
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", projectIds.isEmpty() ? List.of(-1L) : projectIds)
+                .param("ownWork", ownWork ? 1 : 0)
+                .param("userId", userId)
+                .param("resourceId", resourceId)
+                .query((rs, n) -> new ContributionRow(
+                        rs.getString("full_name"), rs.getString("project_name"),
+                        rs.getString("stage_code"), rs.getBigDecimal("hours"),
+                        rs.getLong("tickets"), rs.getLong("entries")))
+                .list();
+    }
+
+    /**
+     * @param fromStage where the work stood when it was sent back. Nullable
+     *                  because the column is — only a first hop has no
+     *                  {@code from_stage}, and a first hop cannot be a backward
+     *                  move, so in practice it is always present.
+     */
+    record ReworkRow(String fullName, String projectName, String fromStage, String toStage,
+                     long bounces, long ticketsAffected) {
+    }
+
+    record FirstTimeRightRow(String projectName, long closed, long firstTimeRight) {
+    }
+
+    /**
+     * @param succeeded  left the deployment stage by anything other than
+     *                   {@code DEPLOY_FAILED}, including a visit whose next hop
+     *                   has not been written — a sealed visit with no successor
+     *                   is a ticket that left and closed, which shipped.
+     * @param avgMinutes working minutes, from {@code duration_mins}. Zero rather
+     *                   than null when nothing qualified, since the row only
+     *                   exists when at least one deployment did.
+     */
+    record DeploymentRow(LocalDate weekStart, String projectName, long deployments,
+                         long succeeded, long rolledBack, java.math.BigDecimal avgMinutes) {
+    }
+
+    record ContributionRow(String fullName, String projectName, String stageCode,
+                           java.math.BigDecimal hours, long tickets, long entries) {
+    }
 }
