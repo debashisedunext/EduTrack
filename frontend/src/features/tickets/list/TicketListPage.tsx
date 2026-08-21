@@ -14,7 +14,6 @@ import {
   useListWorkflowTemplates,
 } from '@/api/generated/masters/masters'
 import { useGetMe } from '@/api/generated/auth/auth'
-import type { Level } from '@/api/generated/model/level'
 import type { StatusCode } from '@/api/generated/model/statusCode'
 import type { BulkResultResponseData } from '@/api/generated/model/bulkResultResponseData'
 import { ApiError, newIdempotencyKey } from '@/api/http'
@@ -42,6 +41,7 @@ import { SavedViewsMenu } from './SavedViewsMenu'
 import { useTicketListFilters, type TicketListFilters } from './useTicketListFilters'
 import { useListPreferences } from './useListPreferences'
 import { COLUMNS, STATUS_LABEL, levelLabel, rowCueClassName, type ColumnRenderContext } from './columns'
+import { selectableLevels } from '../levels'
 import {
   TicketBulkActionBar,
   BulkReassignDialog,
@@ -201,13 +201,25 @@ export function TicketListPage() {
 
   const renderContext: ColumnRenderContext = { taskTypeNames, moduleNames }
 
+  /*
+    C-072 · **retired levels dropped, in both the filter and the bulk dialog** —
+    the opposite call to the module block above, and the difference is what the
+    list does with each.
+
+    `levelOptions` feeds two things. One is the bulk *Change level* dialog,
+    which is a picker in the plainest sense and must not offer a level S-12 has
+    withdrawn. The other is the level filter — and unlike a module, a level
+    filter loses nothing by hiding a retired row, because the master is
+    active-only by default today, so this is the set the filter has always
+    shown. `listStatuses` states the same reasoning for the status filter
+    beside it. If "every ticket still sitting at a retired CRITICAL" turns out
+    to be a question somebody asks, it wants `includeInactive` on the query and
+    a split between the two uses, not an unfiltered list feeding the dialog.
+  */
   const { data: prioritiesData } = useListPriorities()
   const levelOptions = React.useMemo(
     () =>
-      (prioritiesData?.data ?? [])
-        .map((p) => p.level)
-        .filter((l): l is Level => l != null)
-        .map((value) => ({ value, label: levelLabel(value) })),
+      selectableLevels(prioritiesData?.data).map((value) => ({ value, label: levelLabel(value) })),
     [prioritiesData],
   )
 

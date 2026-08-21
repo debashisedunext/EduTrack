@@ -56,6 +56,17 @@ function renderPage() {
   )
 }
 
+/**
+ * `GET /masters/priorities` as it will answer once its active-only default
+ * widens — every level returned, the retired one carrying `isActive: false`.
+ * Built from the fixture rather than a literal so it keeps the master's own
+ * order and stays four levels long if S-12 ever grows a fifth.
+ */
+function retirePriority(level: string) {
+  const rows = getDb().priorities.map((p) => ({ ...p, isActive: p.level !== level }))
+  server.use(http.get('*/masters/priorities', () => HttpResponse.json({ data: rows })))
+}
+
 /** The form skeletons until the project and task-type masters land. */
 const formReady = () => screen.findByRole('button', { name: 'Save & Assign' })
 
@@ -261,6 +272,74 @@ describe('S-19 Create Ticket', () => {
     // Changing the task type again must not overwrite a level the user chose.
     await pickFromDropdown('taskTypeId', /^Change Request$/)
     expect(within(levels).getByRole('radio', { name: 'CRITICAL' })).toBeChecked()
+  })
+
+  /**
+   * C-072 · the retired level, and the task-type default that points at it.
+   *
+   * The override is `GET /masters/priorities` once its default widens to match
+   * `listTaskTypes` and `listModules` (`DEPENDENCIES.md` row 23) — the reason
+   * this defect is latent rather than live, and the reason a test against the
+   * current fixture would prove nothing.
+   *
+   * Both halves matter and pull opposite ways. CRITICAL must be **gone** from
+   * the picker, and Production Bug's `defaultLevel` of HIGH must still land —
+   * a guard that dropped the pre-fill along with the retired chip would leave
+   * every new ticket starting at no level at all.
+   */
+  it('leaves a retired level out of the picker', async () => {
+    retirePriority('CRITICAL')
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('taskTypeId', /^Production Bug$/)
+
+    const levels = screen.getByRole('radiogroup', { name: /Level/ })
+    await waitFor(() => expect(within(levels).getByRole('radio', { name: 'HIGH' })).toBeChecked())
+    expect(within(levels).queryByRole('radio', { name: 'CRITICAL' })).not.toBeInTheDocument()
+    expect(within(levels).getAllByRole('radio').map((r) => r.textContent)).toEqual([
+      'LOW',
+      'MEDIUM',
+      'HIGH',
+    ])
+  })
+
+  /**
+   * The pre-fill's other side. `TaskTypeService` refuses a retired level as a
+   * default, so the two masters should never disagree — but they reach this
+   * form as two independent queries that go stale independently, and a
+   * `defaultLevel` the picker does not offer would render the form with no
+   * chip selected and then refuse the submit for a level nobody chose. The
+   * form must simply stay unfilled and wait for a choice.
+   */
+  it('does not pre-fill a task-type default the master has retired', async () => {
+    retirePriority('HIGH')
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('taskTypeId', /^Production Bug$/)
+
+    const levels = screen.getByRole('radiogroup', { name: /Level/ })
+    await waitFor(() =>
+      expect(within(levels).getAllByRole('radio').map((r) => r.textContent)).toEqual([
+        'LOW',
+        'MEDIUM',
+        'CRITICAL',
+      ]),
+    )
+
+    // Asserted through the *submit*, not the radios. A level held in form state
+    // but absent from the master renders as no chip selected — which is what an
+    // unfilled form looks like too — so the radios alone cannot tell the guard
+    // working from the guard missing. The two messages can: an unfilled level
+    // is asked for, a stale one is rejected by `rules.levels` with a complaint
+    // about a choice the user was never offered.
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+    expect(await screen.findByText('Select a priority level')).toBeInTheDocument()
+    expect(
+      screen.queryByText('That priority level no longer exists — pick one of the ones offered'),
+    ).not.toBeInTheDocument()
+    expect(creates).toHaveLength(0)
   })
 
   it('demands a client for a client-facing task type', async () => {

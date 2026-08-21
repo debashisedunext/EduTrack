@@ -4,6 +4,7 @@ import { Pencil } from 'lucide-react'
 import { useChangeTicketPriority } from '@/api/generated/tickets/tickets'
 import { useListPriorities } from '@/api/generated/masters/masters'
 import type { Level } from '@/api/generated/model/level'
+import { levelsIncludingCurrent } from '../levels'
 import type { Ticket } from '@/api/generated/model/ticket'
 import { ApiError } from '@/api/http'
 
@@ -98,13 +99,18 @@ export function TicketLevelControl({ ticket, clockStart, canEdit, onChanged }: T
    * copy of the master that silently disagrees with it the day a fifth level is
    * added, and offering only the current level while the master is loading is
    * honest about knowing nothing yet.
+   *
+   * C-072 · retired levels are dropped, **except the one this ticket is at**.
+   * That exception is the whole reason this call site does not use
+   * `selectableLevels` directly: retiring CRITICAL must not leave a
+   * born-critical ticket's dialog with no radio checked, and must not turn
+   * opening the dialog into a forced level change. `../levels.ts` carries the
+   * argument.
    */
-  const levels = React.useMemo<Level[]>(() => {
-    const fromMaster = (prioritiesData?.data ?? [])
-      .map((p) => p.level)
-      .filter((l): l is Level => l != null)
-    return fromMaster.length > 0 ? fromMaster : [ticket.level]
-  }, [prioritiesData, ticket.level])
+  const levels = React.useMemo<Level[]>(
+    () => levelsIncludingCurrent(prioritiesData?.data, ticket.level),
+    [prioritiesData, ticket.level],
+  )
 
   const reasonRequired = isLevelReasonRequired(ticket)
   const changed = level !== ticket.level
