@@ -50,6 +50,10 @@ import static org.mockito.Mockito.when;
 class AttachmentServiceTest {
 
     private static final long TICKET = 347L;
+    /** The service is addressed by CODE now; TICKET stays for the row id it resolves to. */
+    private static final String TICKET_CODE = "CRM-26-00347";
+    /** A code that resolves to nothing — the old {@code 999L} in its new shape. */
+    private static final String MISSING_CODE = "ZZ-26-00999";
 
     private final ScopedTickets tickets = mock(ScopedTickets.class);
     private final TicketAttachmentRepository attachments = mock(TicketAttachmentRepository.class);
@@ -105,7 +109,7 @@ class AttachmentServiceTest {
 
         Ticket ticket = new Ticket();
         ticket.setId(TICKET);
-        when(tickets.require(any(), eq(TICKET))).thenReturn(ticket);
+        when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
         // C-028 · both finders are driven from `existing`, and the difference
         // between them is reproduced rather than ignored: the upload path's finder
         // filters deleted rows the way its query does, and the listing's returns
@@ -170,9 +174,9 @@ class AttachmentServiceTest {
 
         @Test
         void anOutOfScopeTicketIs404AndNothingIsStored() {
-            when(tickets.require(any(), eq(999L))).thenThrow(new TicketNotFoundException());
+            when(tickets.requireByCode(any(), eq(MISSING_CODE))).thenThrow(new TicketNotFoundException());
 
-            assertThatThrownBy(() -> service.upload(caller, 999L, upload("a.png", AttachmentFixtures.pngWithExif())))
+            assertThatThrownBy(() -> service.upload(caller, MISSING_CODE, upload("a.png", AttachmentFixtures.pngWithExif())))
                     .isInstanceOf(TicketNotFoundException.class);
 
             // A-035: absence, not refusal — and no side effect at all, so a
@@ -189,7 +193,7 @@ class AttachmentServiceTest {
 
         @Test
         void aDisguisedExecutableIsRefusedAndNoObjectIsWritten() {
-            assertThatThrownBy(() -> service.upload(caller, TICKET,
+            assertThatThrownBy(() -> service.upload(caller, TICKET_CODE,
                     upload("payroll.pdf", AttachmentFixtures.windowsExecutable())))
                     .isInstanceOf(UnsupportedAttachmentTypeException.class);
 
@@ -202,7 +206,7 @@ class AttachmentServiceTest {
             byte[] huge = new byte[11 * 1024 * 1024];
             System.arraycopy(AttachmentFixtures.pngSignature(), 0, huge, 0, 8);
 
-            assertThatThrownBy(() -> service.upload(caller, TICKET, upload("big.png", huge)))
+            assertThatThrownBy(() -> service.upload(caller, TICKET_CODE, upload("big.png", huge)))
                     .isInstanceOf(AttachmentLimitExceededException.class)
                     .hasMessageContaining("10 MB");
 
@@ -219,7 +223,7 @@ class AttachmentServiceTest {
             for (int i = 0; i < 20; i++) {
                 existing.add(stored(1024, "CLEAN"));
             }
-            assertThatThrownBy(() -> service.upload(caller, TICKET, upload("a.png", AttachmentFixtures.pngWithExif())))
+            assertThatThrownBy(() -> service.upload(caller, TICKET_CODE, upload("a.png", AttachmentFixtures.pngWithExif())))
                     .isInstanceOf(AttachmentLimitExceededException.class)
                     .hasMessageContaining("20 attachments");
         }
@@ -231,7 +235,7 @@ class AttachmentServiceTest {
             byte[] twoMegabytes = new byte[2 * 1024 * 1024];
             System.arraycopy(AttachmentFixtures.pdf(), 0, twoMegabytes, 0, AttachmentFixtures.pdf().length);
 
-            assertThatThrownBy(() -> service.upload(caller, TICKET, upload("report.pdf", twoMegabytes)))
+            assertThatThrownBy(() -> service.upload(caller, TICKET_CODE, upload("report.pdf", twoMegabytes)))
                     .isInstanceOf(AttachmentLimitExceededException.class)
                     .hasMessageContaining("50 MB");
         }
@@ -244,7 +248,7 @@ class AttachmentServiceTest {
             byte[] twoMegabytes = new byte[2 * 1024 * 1024];
             System.arraycopy(AttachmentFixtures.pdf(), 0, twoMegabytes, 0, AttachmentFixtures.pdf().length);
 
-            assertThatThrownBy(() -> service.upload(caller, TICKET, upload("report.pdf", twoMegabytes)))
+            assertThatThrownBy(() -> service.upload(caller, TICKET_CODE, upload("report.pdf", twoMegabytes)))
                     .isInstanceOf(AttachmentLimitExceededException.class);
         }
 
@@ -260,13 +264,13 @@ class AttachmentServiceTest {
          */
         @Test
         void theCapsAreReadOnEveryUploadSoAChangeAppliesToTheNextOne() {
-            service.upload(caller, TICKET, upload("first.png", AttachmentFixtures.pngWithExif()));
+            service.upload(caller, TICKET_CODE, upload("first.png", AttachmentFixtures.pngWithExif()));
 
             // An administrator drops the ticket cap below what is already stored.
             existing.add(stored(1024, "CLEAN"));
             when(limits.effective()).thenReturn(AttachmentLimits.of(512, 512, 20));
 
-            assertThatThrownBy(() -> service.upload(caller, TICKET, upload("second.png", AttachmentFixtures.pngWithExif())))
+            assertThatThrownBy(() -> service.upload(caller, TICKET_CODE, upload("second.png", AttachmentFixtures.pngWithExif())))
                     .isInstanceOf(AttachmentLimitExceededException.class);
             verify(limits, times(2)).effective();
         }
@@ -278,7 +282,7 @@ class AttachmentServiceTest {
 
         @Test
         void theStrippedBytesAreStoredAndNotTheOriginals() {
-            service.upload(caller, TICKET, upload("screenshot.png", AttachmentFixtures.pngWithExif()));
+            service.upload(caller, TICKET_CODE, upload("screenshot.png", AttachmentFixtures.pngWithExif()));
 
             var content = org.mockito.ArgumentCaptor.forClass(byte[].class);
             verify(storage).put(any(), content.capture(), eq("image/png"));
@@ -292,7 +296,7 @@ class AttachmentServiceTest {
             // The Upload record carries no client content type at all, which is
             // the strongest form of "it is never consulted": there is nothing to
             // consult. This asserts what does get used.
-            service.upload(caller, TICKET, upload("export.csv", AttachmentFixtures.text("id,name\n1,Priya\n")));
+            service.upload(caller, TICKET_CODE, upload("export.csv", AttachmentFixtures.text("id,name\n1,Priya\n")));
             verify(storage).put(any(), any(), eq("text/csv"));
         }
 
@@ -301,7 +305,7 @@ class AttachmentServiceTest {
             // A row pointing at an object that failed to write is a broken
             // attachment the user can see; an object with no row is invisible
             // litter the PENDING sweeper collects.
-            service.upload(caller, TICKET, upload("signoff.pdf", AttachmentFixtures.pdf()));
+            service.upload(caller, TICKET_CODE, upload("signoff.pdf", AttachmentFixtures.pdf()));
 
             InOrder order = inOrder(storage, attachments, scans);
             order.verify(storage).put(any(), any(), anyString());
@@ -312,7 +316,7 @@ class AttachmentServiceTest {
         @Test
         void theRowIsInsertedPendingWithAWellFormedKey() {
             var saved = org.mockito.ArgumentCaptor.forClass(TicketAttachment.class);
-            service.upload(caller, TICKET, upload("signoff.pdf", AttachmentFixtures.pdf()));
+            service.upload(caller, TICKET_CODE, upload("signoff.pdf", AttachmentFixtures.pdf()));
             verify(attachments).saveAndFlush(saved.capture());
 
             TicketAttachment row = saved.getValue();
@@ -330,7 +334,7 @@ class AttachmentServiceTest {
             byte[] original = AttachmentFixtures.pngWithExif();
             var saved = org.mockito.ArgumentCaptor.forClass(TicketAttachment.class);
 
-            service.upload(caller, TICKET, upload("screenshot.png", original));
+            service.upload(caller, TICKET_CODE, upload("screenshot.png", original));
             verify(attachments).saveAndFlush(saved.capture());
 
             assertThat(saved.getValue().getSizeBytes()).isLessThan(original.length);
@@ -338,7 +342,7 @@ class AttachmentServiceTest {
 
         @Test
         void theScanIsQueuedForTheRowThatWasJustInserted() {
-            service.upload(caller, TICKET, upload("signoff.pdf", AttachmentFixtures.pdf()));
+            service.upload(caller, TICKET_CODE, upload("signoff.pdf", AttachmentFixtures.pdf()));
             verify(scans).submit(9001L);
         }
     }
@@ -400,13 +404,13 @@ class AttachmentServiceTest {
             existing.add(stored(1024, "PENDING"));
             existing.add(stored(2048, "INFECTED"));
 
-            assertThat(service.list(caller, TICKET, null, null)).hasSize(2);
+            assertThat(service.list(caller, TICKET_CODE, null, null)).hasSize(2);
         }
 
         @Test
         void anOutOfScopeTicketIs404OnTheReadPathToo() {
-            when(tickets.require(any(), eq(999L))).thenThrow(new TicketNotFoundException());
-            assertThatThrownBy(() -> service.list(caller, 999L, null, null))
+            when(tickets.requireByCode(any(), eq(MISSING_CODE))).thenThrow(new TicketNotFoundException());
+            assertThatThrownBy(() -> service.list(caller, MISSING_CODE, null, null))
                     .isInstanceOf(TicketNotFoundException.class);
         }
 
@@ -418,7 +422,7 @@ class AttachmentServiceTest {
             existing.add(internal);
             existing.add(shared);
 
-            assertThat(service.list(caller, TICKET, null, true))
+            assertThat(service.list(caller, TICKET_CODE, null, true))
                     .containsExactly(shared);
         }
 
@@ -431,8 +435,8 @@ class AttachmentServiceTest {
             existing.add(first);
             existing.add(second);
 
-            assertThat(service.list(caller, TICKET, 1, null)).containsExactly(first);
-            assertThat(service.list(caller, TICKET, 2, null)).containsExactly(second);
+            assertThat(service.list(caller, TICKET_CODE, 1, null)).containsExactly(first);
+            assertThat(service.list(caller, TICKET_CODE, 2, null)).containsExactly(second);
         }
     }
 
@@ -446,10 +450,10 @@ class AttachmentServiceTest {
             ticket.setId(TICKET);
             ticket.setCurrentCycleNo((short) 2);
             ticket.setCurrentStage("QA");
-            when(tickets.require(any(), eq(TICKET))).thenReturn(ticket);
+            when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
 
             var saved = org.mockito.ArgumentCaptor.forClass(TicketAttachment.class);
-            service.upload(caller, TICKET, upload("signoff.pdf", AttachmentFixtures.pdf()));
+            service.upload(caller, TICKET_CODE, upload("signoff.pdf", AttachmentFixtures.pdf()));
             verify(attachments).saveAndFlush(saved.capture());
 
             assertThat(saved.getValue().getCycleNo()).isEqualTo((short) 2);
@@ -653,7 +657,7 @@ class AttachmentServiceTest {
         void theUploaderMayRemoveTheirOwnFile() {
             TicketAttachment row = uploaded(Duration.ofMinutes(3));
 
-            service.delete(user(RAVI, "DEVELOPER"), TICKET, row.getId());
+            service.delete(user(RAVI, "DEVELOPER"), TICKET_CODE, row.getId());
 
             assertThat(row.isDeleted()).isTrue();
             assertThat(row.getDeletedBy()).isEqualTo(RAVI);
@@ -664,7 +668,7 @@ class AttachmentServiceTest {
         void aColleagueMayNot() {
             TicketAttachment row = uploaded(Duration.ofMinutes(3));
 
-            assertThatThrownBy(() -> service.delete(user(ANIL, "DEVELOPER"), TICKET, row.getId()))
+            assertThatThrownBy(() -> service.delete(user(ANIL, "DEVELOPER"), TICKET_CODE, row.getId()))
                     .isInstanceOf(AttachmentDeletionNotPermittedException.class)
                     // The wording is asserted, not just the type. Both refusals
                     // are the same exception and the same 403, and the only thing
@@ -688,7 +692,7 @@ class AttachmentServiceTest {
             // where "wait and you may be able to" would be false.
             TicketAttachment row = uploaded(Duration.ofDays(1));
 
-            assertThatThrownBy(() -> service.delete(user(ANIL, "DEVELOPER"), TICKET, row.getId()))
+            assertThatThrownBy(() -> service.delete(user(ANIL, "DEVELOPER"), TICKET_CODE, row.getId()))
                     .isInstanceOf(AttachmentDeletionNotPermittedException.class)
                     .hasMessageContaining("window for removing this file has passed");
 
@@ -703,7 +707,7 @@ class AttachmentServiceTest {
             // timer to expire or for its uploader to come back from leave.
             TicketAttachment row = uploaded(Duration.ofMinutes(3));
 
-            service.delete(user(ANIL, "PM"), TICKET, row.getId());
+            service.delete(user(ANIL, "PM"), TICKET_CODE, row.getId());
 
             assertThat(row.isDeleted()).isTrue();
             assertThat(row.getDeletedBy()).isEqualTo(ANIL);
@@ -713,7 +717,7 @@ class AttachmentServiceTest {
         void soMayAnAdmin() {
             TicketAttachment row = uploaded(Duration.ofHours(30));
 
-            service.delete(user(ANIL, "ADMIN"), TICKET, row.getId());
+            service.delete(user(ANIL, "ADMIN"), TICKET_CODE, row.getId());
 
             assertThat(row.isDeleted()).isTrue();
         }
@@ -726,7 +730,7 @@ class AttachmentServiceTest {
             // attached a file the only one who could not take it off.
             TicketAttachment row = uploaded(Duration.ofDays(2));
 
-            service.delete(user(RAVI, "DEVELOPER"), TICKET, row.getId());
+            service.delete(user(RAVI, "DEVELOPER"), TICKET_CODE, row.getId());
 
             assertThat(row.isDeleted()).isTrue();
         }
@@ -740,7 +744,7 @@ class AttachmentServiceTest {
             TicketAttachment row = uploaded(Duration.ofMinutes(1));
             AttachmentStorageKey key = AttachmentStorageKey.parse(row.getStorageKey());
 
-            service.delete(user(RAVI, "DEVELOPER"), TICKET, row.getId());
+            service.delete(user(RAVI, "DEVELOPER"), TICKET_CODE, row.getId());
 
             verify(storage).delete(key);
             verify(storage).delete(key.thumbnail());
@@ -755,10 +759,10 @@ class AttachmentServiceTest {
             // response is ordinary. Refusing would also distinguish "already
             // removed" from "never existed" for anyone allowed to ask.
             TicketAttachment row = uploaded(Duration.ofMinutes(1));
-            service.delete(user(RAVI, "DEVELOPER"), TICKET, row.getId());
+            service.delete(user(RAVI, "DEVELOPER"), TICKET_CODE, row.getId());
             Instant firstRemoval = row.getDeletedAt();
 
-            service.delete(user(ANIL, "DEVELOPER"), TICKET, row.getId());
+            service.delete(user(ANIL, "DEVELOPER"), TICKET_CODE, row.getId());
 
             // Not merely "did not throw" — the original tombstone is intact. A
             // second delete that re-stamped it would rewrite who removed the file.
@@ -780,15 +784,15 @@ class AttachmentServiceTest {
             elsewhere.setTicketId(999L);
             when(attachments.findById(elsewhere.getId())).thenReturn(Optional.of(elsewhere));
 
-            assertThatThrownBy(() -> service.delete(user(RAVI, "ADMIN"), TICKET, elsewhere.getId()))
+            assertThatThrownBy(() -> service.delete(user(RAVI, "ADMIN"), TICKET_CODE, elsewhere.getId()))
                     .isInstanceOf(AttachmentNotFoundException.class);
         }
 
         @Test
         void anOutOfScopeTicketIs404BeforeTheAttachmentIsEvenLookedUp() {
-            when(tickets.require(any(), eq(999L))).thenThrow(new TicketNotFoundException());
+            when(tickets.requireByCode(any(), eq(MISSING_CODE))).thenThrow(new TicketNotFoundException());
 
-            assertThatThrownBy(() -> service.delete(user(RAVI, "ADMIN"), 999L, 1L))
+            assertThatThrownBy(() -> service.delete(user(RAVI, "ADMIN"), MISSING_CODE, 1L))
                     .isInstanceOf(TicketNotFoundException.class);
 
             // Row scope is asked first, so an out-of-scope caller cannot even
@@ -805,12 +809,12 @@ class AttachmentServiceTest {
             for (int i = 0; i < 20; i++) {
                 existing.add(stored(1024, "CLEAN"));
             }
-            assertThatThrownBy(() -> service.upload(caller, TICKET, upload("a.png", AttachmentFixtures.pngWithExif())))
+            assertThatThrownBy(() -> service.upload(caller, TICKET_CODE, upload("a.png", AttachmentFixtures.pngWithExif())))
                     .isInstanceOf(AttachmentLimitExceededException.class);
 
             existing.getFirst().setDeleted(true);
 
-            assertThatCode(() -> service.upload(caller, TICKET, upload("a.png", AttachmentFixtures.pngWithExif())))
+            assertThatCode(() -> service.upload(caller, TICKET_CODE, upload("a.png", AttachmentFixtures.pngWithExif())))
                     .doesNotThrowAnyException();
         }
     }
@@ -845,14 +849,14 @@ class AttachmentServiceTest {
             // matters.
             removed(RAVI, RAVI, Duration.ofMinutes(3));
 
-            assertThat(service.list(caller, TICKET, null, null)).isEmpty();
+            assertThat(service.list(caller, TICKET_CODE, null, null)).isEmpty();
         }
 
         @Test
         void theUploaderRemovingItAfterTheWindowLeavesATombstone() {
             TicketAttachment row = removed(RAVI, RAVI, Duration.ofMinutes(16));
 
-            assertThat(service.list(caller, TICKET, null, null)).containsExactly(row);
+            assertThat(service.list(caller, TICKET_CODE, null, null)).containsExactly(row);
         }
 
         @Test
@@ -862,7 +866,7 @@ class AttachmentServiceTest {
             // precisely the deletion the ticket most needs to record.
             TicketAttachment row = removed(RAVI, ANIL, Duration.ofMinutes(3));
 
-            assertThat(service.list(caller, TICKET, null, null)).containsExactly(row);
+            assertThat(service.list(caller, TICKET_CODE, null, null)).containsExactly(row);
         }
 
         @Test
@@ -882,7 +886,7 @@ class AttachmentServiceTest {
             // removed" names the internal file as surely as serving it would.
             removed(RAVI, ANIL, Duration.ofMinutes(3));
 
-            assertThat(service.list(caller, TICKET, null, true)).isEmpty();
+            assertThat(service.list(caller, TICKET_CODE, null, true)).isEmpty();
         }
 
         @Test
@@ -895,7 +899,7 @@ class AttachmentServiceTest {
             TicketAttachment row = removed(RAVI, RAVI, Duration.ZERO);
             row.setDeletedAt(null);
 
-            assertThat(service.list(caller, TICKET, null, null)).containsExactly(row);
+            assertThat(service.list(caller, TICKET_CODE, null, null)).containsExactly(row);
         }
     }
 }

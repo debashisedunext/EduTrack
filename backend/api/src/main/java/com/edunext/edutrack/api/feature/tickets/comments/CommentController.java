@@ -48,7 +48,7 @@ class CommentController {
     @Operation(operationId = "listComments", summary = "List comments")
     CommentDtos.CommentListResponse list(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @RequestParam(required = false) Integer cycle,
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) Integer limit) {
@@ -96,7 +96,7 @@ class CommentController {
                     rather than ignored.""")
     CommentDtos.CommentResponse create(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @Valid @RequestBody CommentDtos.CommentWriteRequest request) {
 
         return new CommentDtos.CommentResponse(service.create(caller, ticketId, request));
@@ -137,7 +137,7 @@ class CommentController {
                     somebody the previous wording did not already name is notified.""")
     CommentDtos.CommentResponse edit(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @PathVariable long commentId,
             @Valid @RequestBody CommentDtos.EditCommentRequest request) {
 
@@ -169,7 +169,7 @@ class CommentController {
                     Idempotent — deleting a tombstone answers 204.""")
     void delete(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @PathVariable long commentId) {
 
         service.delete(caller, ticketId, commentId);

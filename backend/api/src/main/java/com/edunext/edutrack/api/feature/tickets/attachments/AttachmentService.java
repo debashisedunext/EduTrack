@@ -119,8 +119,11 @@ class AttachmentService {
      *         describes
      */
     @Transactional
-    TicketAttachment upload(Authentication caller, long ticketId, Upload upload) {
-        Ticket ticket = tickets.require(caller, ticketId);
+    TicketAttachment upload(Authentication caller, String ticketCode, Upload upload) {
+        // The ticket CODE, per the contract's TicketId $ref. These three took a
+        // long until 21 Aug and 400'd every real caller — see TicketDetailController.
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
 
         byte[] content = upload.content();
         enforceLimits(ticketId, content.length);
@@ -174,8 +177,8 @@ class AttachmentService {
      * still a statement about that file.
      */
     @Transactional(readOnly = true)
-    List<TicketAttachment> list(Authentication caller, long ticketId, Integer cycle, Boolean clientVisibleOnly) {
-        tickets.require(caller, ticketId);
+    List<TicketAttachment> list(Authentication caller, String ticketCode, Integer cycle, Boolean clientVisibleOnly) {
+        long ticketId = tickets.requireByCode(caller, ticketCode).getId();
 
         return rows.findByTicketIdOrderByCreatedAtAsc(ticketId).stream()
                 .filter(row -> !row.isDeleted() || isVisibleTombstone(row))
@@ -277,8 +280,8 @@ class AttachmentService {
      * removed" from "never existed" for anyone allowed to ask.
      */
     @Transactional
-    void delete(Authentication caller, long ticketId, long attachmentId) {
-        tickets.require(caller, ticketId);
+    void delete(Authentication caller, String ticketCode, long attachmentId) {
+        long ticketId = tickets.requireByCode(caller, ticketCode).getId();
 
         // Loaded by id and then checked against the path's ticket rather than
         // queried by both. The check has to exist either way, and doing it here

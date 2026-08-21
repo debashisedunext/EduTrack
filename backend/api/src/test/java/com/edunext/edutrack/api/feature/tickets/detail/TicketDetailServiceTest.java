@@ -35,6 +35,8 @@ import static org.mockito.Mockito.when;
 class TicketDetailServiceTest {
 
     private static final long TICKET_ID = 347L;
+    /** The route is addressed by code, not by row id — see TicketDetailIT.Binding. */
+    private static final String TICKET_CODE = "CRM-26-00347";
     private static final long PROJECT = 8L;
     private static final long CURRENT_ASSIGNEE = 55L;
 
@@ -55,14 +57,14 @@ class TicketDetailServiceTest {
     void setUp() {
         ticket = new Ticket();
         ticket.setId(TICKET_ID);
-        ticket.setTicketCode("CRM-26-00347");
+        ticket.setTicketCode(TICKET_CODE);
         ticket.setProjectId(PROJECT);
         ticket.setStatus("IN_PROGRESS");
         ticket.setCurrentStage("DEV");
         ticket.setCurrentCycleNo((short) 1);
         ticket.setAssignedTo(CURRENT_ASSIGNEE);
 
-        when(tickets.require(any(), eq(TICKET_ID))).thenReturn(ticket);
+        when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
     }
 
     @Nested
@@ -116,13 +118,13 @@ class TicketDetailServiceTest {
         void unidentifiableCallerSeesNothing() {
             Authentication anonymous = new TestingAuthenticationToken(null, null);
 
-            List<String> actions = service.detail(anonymous, TICKET_ID, null).availableActions();
+            List<String> actions = service.detail(anonymous, TICKET_CODE, null).availableActions();
 
             assertThat(actions).isEmpty();
         }
 
         private TicketDetailDtos.Detail detailFor(Authentication caller) {
-            return service.detail(caller, TICKET_ID, null);
+            return service.detail(caller, TICKET_CODE, null);
         }
 
         private Authentication caller(long userId, String role) {
