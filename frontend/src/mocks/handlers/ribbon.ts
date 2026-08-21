@@ -6,6 +6,9 @@ import {
   ticketDto, unprocessable, url, userRef, validationFailed, workingMinutes,
 } from './util';
 
+/** C-046 · §4A.1's four backward action codes, mirroring `ReworkService.BACKWARD_ACTIONS`. */
+const BACKWARD_ACTIONS = ['REWORK', 'DEPLOY_FAILED', 'VERIFY_FAILED', 'SIGNOFF_REJECTED'];
+
 /**
  * The Workflow Ribbon — the transitions that make it move, and the roll-up.
  *
@@ -115,6 +118,11 @@ export const ribbonHandlers = [
   }),
 
   // ── rework ────────────────────────────────────────────────────────────────
+  //
+  // C-046 · §4A.1's four backward action codes. Mirrored from
+  // `ReworkService.BACKWARD_ACTIONS`; the server refuses anything else with a
+  // 400 that names which route the caller wanted instead.
+
   http.post(url('/tickets/:ticketId/rework'), async ({ params, request }) => {
     const db = getDb();
     const t = findTicket(String(params.ticketId), db);
@@ -123,9 +131,20 @@ export const ribbonHandlers = [
       return unprocessable('Only the current stage owner may move this ticket');
     }
     const body = (await request.json()) as {
-      toStageCode: string; reason: string; action?: string; toUserId?: number; effortHours?: number;
+      toStageCode: string; reason: string; action?: string; defects?: string[];
+      toUserId?: number; effortHours?: number;
     };
     if (!body.reason?.trim()) return validationFailed({ reason: ['is mandatory on a backward move'] });
+
+    // C-046 · the four backward codes, and nothing else. The server refuses
+    // FORWARD here with a 400 naming `/handoff`, because the transition engine
+    // would otherwise write a forward move into an append-only ledger as a
+    // rework. A mock that accepted it would let a client be built against a
+    // request the server rejects.
+    const action = (body.action ?? 'REWORK').trim().toUpperCase();
+    if (!BACKWARD_ACTIONS.includes(action)) {
+      return validationFailed({ action: [`is not a backward move — ${BACKWARD_ACTIONS.join(', ')}`] });
+    }
 
     const from = db.stages.find((s) => s.stageCode === t.currentStageCode);
     const target = db.stages.find((s) => s.stageCode === body.toStageCode);
@@ -136,9 +155,19 @@ export const ribbonHandlers = [
       );
     }
 
+    // C-046 · the defect list is appended to the stored reason. There is no
+    // third text column on a transition, and adding one is a migration against
+    // an append-only hash-chained table — so the server folds them in, and the
+    // mock has to fold them in identically or the History tab looks different
+    // against the two.
+    const defects = (body.defects ?? []).map((d) => d?.trim()).filter((d): d is string => Boolean(d));
+    const reason = defects.length === 0
+      ? body.reason.trim()
+      : `${body.reason.trim()}\n\nDefects:\n${defects.map((d) => `• ${d}`).join('\n')}`;
+
     const now = new Date().toISOString();
     const leaving = sealCurrent(t.ticketId, t.cycleNo, now);
-    if (leaving) leaving.action = body.action ?? 'REWORK';
+    if (leaving) leaving.action = action;
     if (body.effortHours) {
       db.effortLogs.push({
         id: nextId(db, 'effort'), ticketId: t.ticketId, userId: db.currentUserId,
@@ -166,13 +195,13 @@ export const ribbonHandlers = [
       cycleNo: t.cycleNo, iterationNo: t.iterationNo,
       stageCode: target.stageCode, ownerId: t.assigneeId, ownerRole: target.ownerRole,
       enteredAt: now, exitedAt: null, durationMins: null,
-      action: body.action ?? 'REWORK', note: body.reason, skipReason: null,
+      action, note: reason, skipReason: null,
     });
     db.history.push({
       id: nextId(db, 'history'), ticketId: t.ticketId, action: 'REWORK',
       actorId: db.currentUserId, actorType: 'USER',
       fieldName: 'iterationNo', oldValue: String(t.iterationNo - 1), newValue: String(t.iterationNo),
-      note: body.reason, stageCode: target.stageCode,
+      note: reason, stageCode: target.stageCode,
       cycleNo: t.cycleNo, iterationNo: t.iterationNo,
       isCorrection: false, correctsEntryId: null,
       entryHash: `sha256:${nextId(db, 'hash').toString(16)}`, createdAt: now,

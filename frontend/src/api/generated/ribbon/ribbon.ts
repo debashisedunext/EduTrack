@@ -275,6 +275,32 @@ counts at `iterationNo >= 3`. It does **not** touch `cycleNo`, and by
 default it does not move the planned close date (decision G-2): the
 original commitment stands, and rework is what `iterationNo` measures.
 
+`status` moves to `REWORK`. A backward move is the one transition that
+says something about the *work* rather than only about where it is —
+which is why `handoff`, `skip-stage` and `force-move` all leave the
+status alone and this does not.
+
+**`toStageCode` must be one of the current stage's `can_return_to`
+targets**, and a stage that exists but is not a return target is
+refused with **422, not 400** — nothing the caller sent is malformed,
+and the identical request would be valid from a different stage. A
+stage that is not on the template at all is a 400, because that cannot
+be right from any state. `force-move` deliberately applies neither rule.
+
+**`action` must be one of the four backward codes** — `REWORK`,
+`DEPLOY_FAILED`, `VERIFY_FAILED`, `SIGNOFF_REJECTED` — and defaults to
+`REWORK`. `FORWARD` is refused with a 400 naming `/handoff`: the
+transition engine would otherwise record a forward move as a rework,
+with `iterationNo` left alone, in a ledger that is append-only and
+hash-chained and so could never be corrected.
+
+**`defects` are appended to the stored `reason`** as a bulleted tail.
+`ticket_stage_transitions` has no third text column, and adding one is
+a migration against an append-only hash-chained table — a great deal of
+ceremony for a list a developer reads off the ribbon segment. Accepting
+the field and dropping it was the alternative, and that is the failure
+this codebase keeps finding elsewhere.
+
  * @summary Send the ticket backwards
  */
 export const reworkTicket = (
@@ -294,7 +320,7 @@ export const reworkTicket = (
   
 
 
-export const getReworkTicketMutationOptions = <TError = NotFoundResponse | UnprocessableTransitionResponse,
+export const getReworkTicketMutationOptions = <TError = ValidationFailedResponse | NotFoundResponse | UnprocessableTransitionResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reworkTicket>>, TError,{ticketId: string;data: ReworkRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof reworkTicket>>, TError,{ticketId: string;data: ReworkRequest}, TContext> => {
 
@@ -321,12 +347,12 @@ const {mutation: mutationOptions} = options ?
 
     export type ReworkTicketMutationResult = NonNullable<Awaited<ReturnType<typeof reworkTicket>>>
     export type ReworkTicketMutationBody = ReworkRequest
-    export type ReworkTicketMutationError = NotFoundResponse | UnprocessableTransitionResponse
+    export type ReworkTicketMutationError = ValidationFailedResponse | NotFoundResponse | UnprocessableTransitionResponse
 
     /**
  * @summary Send the ticket backwards
  */
-export const useReworkTicket = <TError = NotFoundResponse | UnprocessableTransitionResponse,
+export const useReworkTicket = <TError = ValidationFailedResponse | NotFoundResponse | UnprocessableTransitionResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reworkTicket>>, TError,{ticketId: string;data: ReworkRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof reworkTicket>>,

@@ -20,13 +20,14 @@ import java.util.Optional;
 /**
  * D-037 · the shared producer for §4B.6's ticket events.
  *
- * <p>Six of the fifteen rows are wired here — created-and-assigned, comment
- * added, closed, reopened, reassigned-within-a-stage and deployment-done. They
- * are the ones whose trigger exists: {@code TicketWriteService.create}
+ * <p>Seven of the fifteen rows are wired here — created-and-assigned, comment
+ * added, closed, reopened, reassigned-within-a-stage, deployment-done and sent
+ * back for rework. Their triggers are {@code TicketWriteService.create}
  * (C-067), {@code CommentService.post} (C-029), {@code CloseService} (C-040),
- * {@code ReopenService} (C-038), {@code AssignService.assign} (C-049) and
- * C-045's forward hop out of Deployment. The other nine are accounted for at
- * the bottom of this comment.
+ * {@code ReopenService} (C-038), {@code AssignService.assign} (C-049),
+ * C-045's forward hop out of Deployment and {@code ReworkService} (C-046).
+ * <b>With the last of those, all fifteen rows have a producer.</b> The other
+ * eight are accounted for at the bottom of this comment.
  *
  * <h2>One producer, not one per feature package</h2>
  *
@@ -78,18 +79,14 @@ import java.util.Optional;
  *   <li><b>Live already, elsewhere (continued):</b> handoff —
  *       {@code HandoffNotifier}, written by C-045 rather than by this task and
  *       deliberately left where it is.</li>
- *   <li><b>Still without a trigger — one row, and it is not waiting on this
- *       class:</b> <b>sent back for rework</b>. {@code TransitionService}
- *       understands {@code REWORK}, {@code VERIFY_FAILED},
- *       {@code DEPLOY_FAILED} and {@code SIGNOFF_REJECTED}, and
- *       {@code POST /tickets/{ticketId}/rework} is in the contract and in the
- *       mock — but <b>no controller serves it</b>. The only two callers of
- *       {@code advance} in this codebase are {@code HandoffService}, which
- *       hard-codes {@code FORWARD}, and {@code ForceMoveService}, which uses
- *       {@code OVERRIDE}. So nothing in the running application has ever moved
- *       a ticket backwards, and the mail has nowhere to fire from. The route is
- *       Stream C's; when it lands, this is one call at the end of it, and the
- *       recipient list §4B.6 gives is "Developer, cc PM".</li>
+ *   <li><b>Nothing is left without a trigger.</b> Sent-back-for-rework was the
+ *       last, and what was missing was never this class: {@code
+ *       TransitionService} had understood the four backward action codes since
+ *       C-042, and {@code POST /tickets/}{@code {ticketId}}{@code /rework} had
+ *       been in the contract and the mock since D-001/D-004 — but no controller
+ *       served it, and the only two callers of {@code advance} hard-coded
+ *       {@code FORWARD} and {@code OVERRIDE}. Nothing in the running
+ *       application had ever moved a ticket backwards. C-046 is that route.</li>
  *   <li><b>Not this task:</b> the daily digest and the weekly manager summary
  *       are D-038, and they are done.</li>
  * </ul>
@@ -308,6 +305,57 @@ public class TicketEventNotifier {
 
         fanOut(ticket, actorId, NotificationEvent.DEPLOYMENT_DONE_VERIFY, people,
                 "Deployed to production — please verify",
+                ticket.getTicketCode() + " · " + ticket.getTitle(),
+                link(ticket, null) + "?tab=ribbon");
+    }
+
+    /**
+     * §4B.6 row 4 — "Sent back for rework → Developer, cc PM", never optional,
+     * subject "QA failed — 3 defects returned".
+     *
+     * <p><b>The fifteenth and last row of §4B.6 to get a producer.</b> It had
+     * none for a reason that took a while to state precisely:
+     * {@code TransitionService} has understood {@code REWORK},
+     * {@code VERIFY_FAILED}, {@code DEPLOY_FAILED} and {@code SIGNOFF_REJECTED}
+     * since C-042, and {@code POST /tickets/&#123;ticketId&#125;/rework} has been in the
+     * contract and the mock since D-001/D-004 — but no controller served it,
+     * and the only two callers of {@code advance} hard-coded {@code FORWARD}
+     * and {@code OVERRIDE}. Nothing in the running application had ever moved
+     * a ticket backwards. C-046 is the route; this is the mail.
+     *
+     * <h2>"Developer" is the receiving owner, resolved after the move</h2>
+     *
+     * <p>Not the ticket's assignee before the rework — that is the person
+     * <em>sending</em> it back, usually the QA engineer. {@code advance} has
+     * already run by the time this is called and has set the ticket's assignee
+     * to whoever now owns the destination stage (or to nobody, when C-050's
+     * receiving role has no member on the project, in which case there is
+     * nobody to tell and the PM's copy carries the news alone).
+     *
+     * <h2>The subject counts the defects, and says nothing when there are none</h2>
+     *
+     * <p>§4B.6's example is literally "QA failed — 3 defects returned", and the
+     * count is the part that makes it worth opening. A rework with no defect
+     * list is not "0 defects returned" — the same judgement D-038 made about
+     * the digest, where a zero is left out rather than printed, because the
+     * absence is not the news.
+     *
+     * @param defectCount how many defects the route was given, after blanks
+     *                    were dropped — zero is normal, not an error
+     */
+    public void sentBackForRework(Ticket ticket, long actorId, Long developerId, int defectCount) {
+        List<Recipient> people = new ArrayList<>();
+        if (developerId != null) {
+            recipients.user(developerId).ifPresent(people::add);
+        }
+        people.addAll(recipients.projectManagers(ticket.getId()));
+
+        String title = defectCount > 0
+                ? "Sent back for rework — " + defectCount + (defectCount == 1 ? " defect" : " defects") + " returned"
+                : "Sent back for rework";
+
+        fanOut(ticket, actorId, NotificationEvent.QA_FAILED_REWORK, people,
+                title,
                 ticket.getTicketCode() + " · " + ticket.getTitle(),
                 link(ticket, null) + "?tab=ribbon");
     }
