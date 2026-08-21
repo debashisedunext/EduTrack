@@ -1,15 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { createTicketBody } from '@/api/generated/zod/tickets/tickets.zod'
+import type { ProjectSettings } from '@/api/generated/model/projectSettings'
+import type { TicketFieldCode } from '@/api/generated/model/ticketFieldCode'
 import {
+  allowedTaskTypes,
   BUG_TASK_TYPE_CODES,
   bugTaskTypeIds,
   CLIENT_REQUIRING_TASK_TYPES,
   clientRequiringTaskTypeIds,
   emptyTicketForm,
+  projectRulesFrom,
   retainedForNextTicket,
   ticketFormSchema,
   toCreateRequest,
+  type ProjectRules,
   type TicketFormValues,
+  type TicketSaveAction,
 } from './ticketForm'
 
 const TASK_TYPES = [
@@ -351,5 +357,157 @@ describe('retainedForNextTicket', () => {
     const next = retainedForNextTicket(submitted)
     expect(next.watcherIds).not.toBe(submitted.watcherIds)
     expect(next.watcherIds).toEqual(submitted.watcherIds)
+  })
+})
+
+/* ── C-071 — the project's own settings ────────────────────────────────── */
+
+const settings = (over: Partial<ProjectSettings> = {}): ProjectSettings => ({
+  projectId: 1,
+  autoAssignRule: 'MANUAL',
+  mandatoryFields: [],
+  restrictsTaskTypes: false,
+  taskTypes: TASK_TYPES.map((t) => ({
+    taskTypeId: t.id,
+    code: t.code,
+    name: t.name,
+    isAllowed: true,
+    isActive: t.isActive,
+  })),
+  ...over,
+})
+
+describe('projectRulesFrom', () => {
+  it('reads an unrestricted project as null, not as an empty set', () => {
+    // The decision B-019 turns on. An empty *set* would mean "no task type may
+    // be raised", which is the state that does not exist — a project allowing
+    // none could raise no ticket, and every project is unconfigured until
+    // somebody configures one.
+    expect(projectRulesFrom(settings()).allowedTaskTypeIds).toBeNull()
+  })
+
+  it('reads the allow-list off isAllowed when the project restricts', () => {
+    const rules = projectRulesFrom(
+      settings({
+        restrictsTaskTypes: true,
+        taskTypes: settings().taskTypes.map((t) => ({ ...t, isAllowed: t.taskTypeId === 2 })),
+      }),
+    )
+    expect(rules.allowedTaskTypeIds).toEqual(new Set([2]))
+  })
+
+  it('falls back to no rules at all while the settings are in flight', () => {
+    // Not "everything is forbidden". A form that has not been told the rules yet
+    // must behave exactly as it did before this feature existed.
+    const rules = projectRulesFrom(undefined)
+    expect(rules.allowedTaskTypeIds).toBeNull()
+    expect(rules.mandatoryFields.size).toBe(0)
+  })
+})
+
+describe('allowedTaskTypes', () => {
+  it('offers everything on an unrestricted project', () => {
+    expect(allowedTaskTypes(TASK_TYPES, projectRulesFrom(settings()))).toHaveLength(TASK_TYPES.length)
+  })
+
+  it('offers only the allow-list on a restricted one', () => {
+    const rules = projectRulesFrom(
+      settings({
+        restrictsTaskTypes: true,
+        taskTypes: settings().taskTypes.map((t) => ({ ...t, isAllowed: t.taskTypeId !== 1 })),
+      }),
+    )
+    expect(allowedTaskTypes(TASK_TYPES, rules).map((t) => t.id)).not.toContain(1)
+  })
+})
+
+describe('ticketFormSchema — the project rules (C-071)', () => {
+  const requiring = (...fields: TicketFieldCode[]) =>
+    projectRulesFrom(settings({ mandatoryFields: fields }))
+
+  const parseWith = (values: TicketFormValues, project: ProjectRules, action: TicketSaveAction = 'assign') => {
+    const result = ticketFormSchema(rules, action, project).safeParse(values)
+    if (result.success) return {}
+    return Object.fromEntries(result.error.issues.map((i) => [i.path.join('.'), i.message]))
+  }
+
+  it('leaves a form alone when the project requires nothing', () => {
+    expect(parseWith(valid, projectRulesFrom(settings()))).toEqual({})
+  })
+
+  it('refuses a field the project requires', () => {
+    expect(parseWith(valid, requiring('SCREEN_NAME'))).toEqual({
+      screenName: 'This project requires a screen name on every ticket',
+    })
+  })
+
+  it('accepts it once answered', () => {
+    expect(parseWith({ ...valid, screenName: 'Fee Receipt Print' }, requiring('SCREEN_NAME'))).toEqual({})
+  })
+
+  it('does not accept an editor that was focused and left as an answer', () => {
+    // `<p><br></p>` is what a contentEditable holds after a click and a click
+    // away — thirteen characters that `.min(1)` would call present.
+    // `ProjectTicketRules.hasRichText` is the same rule on the server.
+    expect(parseWith({ ...valid, stepsToGenerate: '<p><br></p>' }, requiring('STEPS_TO_GENERATE'))).toEqual(
+      { stepsToGenerate: 'This project requires steps to generate on every ticket' },
+    )
+  })
+
+  it('counts a pasted screenshot as an answer', () => {
+    expect(
+      parseWith(
+        { ...valid, stepsToGenerate: '<p><img src="https://edutrack.test/shot.png" alt=""></p>' },
+        requiring('STEPS_TO_GENERATE'),
+      ),
+    ).toEqual({})
+  })
+
+  it('does not measure a plain field through the sanitiser', () => {
+    // `isRichTextEmpty` strips markup before it looks, so a screen name typed as
+    // `<3` would come back empty and be refused — a rule rejecting a value the
+    // server stores happily. Only the two rich-text fields are measured that way.
+    expect(parseWith({ ...valid, screenName: '<3' }, requiring('SCREEN_NAME'))).toEqual({})
+  })
+
+  it('holds a draft to the project’s fields, where §7.5’s own are waived', () => {
+    // The draft still waives the description and the estimate — C-013's rule,
+    // untouched. It does not waive the project's: `saveAsDraft` is accepted by
+    // the server and acted on nowhere, so a draft that waived them would be a
+    // one-click opt-out of a project's configuration producing a ticket
+    // indistinguishable from any other.
+    const errors = parseWith(draftable, requiring('SCREEN_NAME'), 'draft')
+    expect(errors).toEqual({ screenName: 'This project requires a screen name on every ticket' })
+  })
+
+  it('refuses a task type the project does not accept', () => {
+    const project = projectRulesFrom(
+      settings({
+        restrictsTaskTypes: true,
+        taskTypes: settings().taskTypes.map((t) => ({ ...t, isAllowed: t.taskTypeId === 1 })),
+      }),
+    )
+    // `valid` is task type 5. The picker no longer offers it, so this covers the
+    // path a filtered list cannot: one carried across projects by Save & Create
+    // Another, whose `retainedForNextTicket` keeps the task type on purpose.
+    expect(parseWith(valid, project)).toEqual({
+      taskTypeId: 'This project does not accept that task type — pick one from the list',
+    })
+  })
+
+  it('reports every missing field at once', () => {
+    expect(Object.keys(parseWith(valid, requiring('SCREEN_NAME', 'FEATURE', 'ASSIGNEE')))).toEqual([
+      'screenName',
+      'feature',
+      'assigneeId',
+    ])
+  })
+
+  it('never requires a planned close date on the form', () => {
+    // Blank there does not mean absent: it means "compute it from the SLA
+    // policy", and the server does. The control is read-only for four of the six
+    // roles, so a rule here would refuse a form those roles cannot fix — the
+    // server measures that code against the resolved date instead.
+    expect(parseWith(valid, requiring('PLANNED_CLOSE_DATE'))).toEqual({})
   })
 })

@@ -21,6 +21,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 /**
  * C-067 · the create and patch paths, against real MySQL.
@@ -178,6 +179,108 @@ class TicketWriteIT {
         } finally {
             jdbc.update("UPDATE product_modules SET is_active = 1 WHERE id = ?", library);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // C-071 · B-019's project settings, obeyed
+    // ------------------------------------------------------------------
+
+    /**
+     * The other tests in this class are the other half of this one: {@code ITW}
+     * has no {@code project_task_types} rows and every one of them raises a
+     * ticket successfully. An empty allow-list allowing nothing is the failure
+     * that would take out ticket creation on every project at once, so it is
+     * asserted by the whole file rather than by one case.
+     */
+    @Test
+    @DisplayName("a project that restricts its task types refuses one outside the list")
+    void allowListIsEnforced() {
+        Integer allowed = jdbc.queryForObject("SELECT id FROM task_types ORDER BY id LIMIT 1", Integer.class);
+        Integer refused = jdbc.queryForObject(
+                "SELECT id FROM task_types WHERE id <> ? ORDER BY id LIMIT 1", Integer.class, allowed);
+        long before = ticketSeq();
+
+        jdbc.update("INSERT INTO project_task_types (project_id, task_type_id) VALUES (?, ?)",
+                projectId, allowed);
+        try {
+            assertThatThrownBy(() -> service.create(null, request(refused)))
+                    .isInstanceOf(TaskTypeNotAllowedException.class);
+
+            // Refused before the sequence moved. A number burnt on a rejected
+            // request is a permanent gap in that project's ticket codes.
+            assertThat(ticketSeq()).isEqualTo(before);
+
+            // And the allowed one still goes through, so this is a restriction
+            // rather than a project nobody can raise a ticket on.
+            assertThat(service.create(null, request(allowed)).ticketCode()).startsWith("ITW-");
+        } finally {
+            jdbc.update("DELETE FROM project_task_types WHERE project_id = ?", projectId);
+        }
+    }
+
+    @Test
+    @DisplayName("every mandatory field the ticket leaves empty is reported, in one refusal")
+    void mandatoryFieldsAreEnforced() {
+        long before = ticketSeq();
+        jdbc.update("UPDATE projects SET mandatory_fields = ? WHERE id = ?",
+                "[\"MODULE\", \"ESTIMATED_HRS\"]", projectId);
+        try {
+            MandatoryFieldsMissingException refusal = catchThrowableOfType(
+                    MandatoryFieldsMissingException.class, () -> service.create(null, request(null, null)));
+
+            // Both, in one refusal. One per round trip on a form with ten
+            // optional fields is a conversation rather than an error message.
+            assertThat(refusal.missing()).containsOnlyKeys("moduleId", "estimatedHrs");
+            assertThat(ticketSeq()).isEqualTo(before);
+        } finally {
+            jdbc.update("UPDATE projects SET mandatory_fields = NULL WHERE id = ?", projectId);
+        }
+    }
+
+    /**
+     * The two things a settings read has to collapse to the same answer: a
+     * project that predates B-019 holds {@code NULL}, and one whose last box was
+     * unticked holds {@code NULL} too. Neither may require anything.
+     */
+    @Test
+    @DisplayName("an unconfigured project requires nothing beyond what every ticket requires")
+    void noMandatoryFieldsMeansNoExtraRules() {
+        assertThat(jdbc.queryForObject("SELECT mandatory_fields FROM projects WHERE id = ?",
+                String.class, projectId)).isNull();
+
+        assertThat(service.create(null, request(null, null)).ticketCode()).startsWith("ITW-");
+    }
+
+    /**
+     * PLANNED_CLOSE_DATE is measured against the date the ticket would carry, not
+     * against what the caller sent — {@code ProjectTicketRules} carries the
+     * argument. This is the half that can be asserted without an SLA policy to
+     * arrange: an explicit override satisfies it.
+     */
+    @Test
+    @DisplayName("a required planned close date is satisfied by the date the ticket ends up with")
+    void plannedCloseDateIsJudgedOnTheResolvedValue() {
+        jdbc.update("UPDATE projects SET mandatory_fields = ? WHERE id = ?",
+                "[\"PLANNED_CLOSE_DATE\"]", projectId);
+        try {
+            var created = service.create(null, new TicketCreateDtos.CreateRequest(
+                    projectId, "Has a target date", null, 1, null, null, null, null, "MEDIUM",
+                    null, null, null, null, List.of(), null,
+                    java.time.Instant.parse("2026-09-30T09:00:00Z"), false));
+
+            assertThat(created.ticketCode()).startsWith("ITW-");
+        } finally {
+            jdbc.update("UPDATE projects SET mandatory_fields = NULL WHERE id = ?", projectId);
+        }
+    }
+
+    private TicketCreateDtos.CreateRequest request(Integer taskTypeId) {
+        return new TicketCreateDtos.CreateRequest(projectId, "A ticket worth raising", null, taskTypeId,
+                null, null, null, null, "MEDIUM", null, null, null, null, List.of(), null, null, false);
+    }
+
+    private long ticketSeq() {
+        return jdbc.queryForObject("SELECT ticket_seq FROM projects WHERE id = ?", Long.class, projectId);
     }
 
     @Test

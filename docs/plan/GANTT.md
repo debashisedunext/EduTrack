@@ -347,7 +347,7 @@ gantt
 |  | `C-063` | Bulk reassignment wizard | 2 | `C-017` `B-014` | Tue 18 Aug | Wed 19 Aug | 16 | ✅ done |
 |  | `C-064` | Ticket linking — blocks / is blocked by / duplicate of / relates to | 1.5 | `C-019` ᶦ | Wed 19 Aug | Wed 19 Aug | 16 | ✅ done |
 |  | `C-066` | Shared rich-text editor in components/ui/ + Storybook | 1.5 | `C-003` | Tue 11 Aug | Tue 11 Aug | 21 | ✅ done |
-| 🔴 | `C-071` | Per-project settings are configurable and ignored | 1 | — | Fri 21 Aug | Fri 21 Aug | 12 | 🟡 50% |
+| 🔴 | `C-071` | Per-project settings are configurable and ignored | 1 | — | Fri 21 Aug | Fri 21 Aug | 12 | 🔵 in review |
 |  | `C-072` | A deactivated priority can still be chosen | 1 | — | Sat 22 Aug | Tue 25 Aug | 12 | ▫️ to do |
 
 </details>

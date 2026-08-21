@@ -238,6 +238,32 @@ legitimately visible to the caller; what is refused is the combination,
 and a caller who cannot tell "does not exist" from "not yet usable"
 cannot act on either.
 
+**C-071 — the project's own settings are enforced here, and only here.**
+`getProjectSettings` says which task types a project accepts and which
+otherwise-optional fields it requires; both are refused on this operation
+with a `400` carrying the `errors` map, keyed on the request property so
+a form can mark the control rather than raise a banner:
+
+- a `taskTypeId` outside a restricted project's allow-list —
+  `errors.taskTypeId`. **An empty allow-list is unrestricted**, so a
+  project nobody has configured refuses nothing;
+- every field in `mandatoryFields` the request left empty, all of them in
+  one response rather than one per attempt.
+
+Two readings that are deliberately not taken. `saveAsDraft` does **not**
+waive them: the flag is accepted and acted on nowhere, so a draft is
+stored as an ordinary ticket, and waiving on it would be a one-field
+opt-out of a project's configuration. And `PLANNED_CLOSE_DATE` is
+measured against the date the ticket ends up with — supplied or computed
+from the SLA ladder — not against what the caller sent; requiring the
+caller to send one would make it the single setting the four roles who
+may not override the date could never satisfy.
+
+`updateTicket` does not apply any of it. A newly-ticked mandatory field
+would otherwise make every existing ticket on the project un-editable,
+including ones closed years ago. The setting governs what may be raised,
+not what was.
+
  * @summary Create a ticket
  */
 export const createTicket = (

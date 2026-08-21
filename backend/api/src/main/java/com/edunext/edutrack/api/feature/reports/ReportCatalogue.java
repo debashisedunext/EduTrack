@@ -91,8 +91,17 @@ public final class ReportCatalogue {
             built("effort-summary", "Effort Summary",
                     "Hours logged by resource, project and task type, and how many tickets they covered.",
                     PEOPLE, "stacked-bar", List.of(DATE_RANGE, PROJECT, RESOURCE, TASK_TYPE)),
-            unbuilt("resource-contribution", "Resource Contribution",
-                    "Who moved each ticket, rolled up across the stages they owned.",
+            // A-068 · the description changed with the implementation, because
+            // the original one described a report this is not. "Who moved each
+            // ticket" is the transitions; the §4A.4 roll-up this actually is
+            // reads the effort logs, and says who *did the work* at each stage —
+            // which is a different claim and the one the numbers support. See
+            // ResourceContributionRunner for why that distinction is what makes
+            // this report answerable at all.
+            built("resource-contribution", "Resource Contribution",
+                    "Hours logged per person per stage, the §4A.4 roll-up widened from one "
+                            + "ticket to a whole date range. Effort logged against no stage is "
+                            + "kept and grouped, not dropped.",
                     PEOPLE, "stacked-bar", List.of(DATE_RANGE, PROJECT, RESOURCE)),
 
             // ── DELIVERY ────────────────────────────────────────────────────
@@ -132,8 +141,17 @@ public final class ReportCatalogue {
             built("reopen-analysis", "Reopen Analysis",
                     "Where reopens cluster, by resource, project and task type together.",
                     QUALITY, "bar", List.of(DATE_RANGE, PROJECT, RESOURCE)),
-            unbuilt("rework-analysis", "Rework Analysis",
-                    "Where tickets bounce backwards, and how often the same pair repeats it.",
+            // A-068 · the description names the dependency, because this report
+            // is correct and empty until a ticket's first stage hop is written
+            // by something other than a fixture. A card promising "where tickets
+            // bounce backwards" that opens to nothing would read as a defect;
+            // the honest version says which record it is waiting on. Same
+            // reasoning as client-report naming the figure it does not have.
+            built("rework-analysis", "Rework Analysis",
+                    "Where tickets bounce backwards, how often the same stage pair repeats it, "
+                            + "and first-time-right per project. Counted from recorded stage "
+                            + "moves, so it stays empty until tickets are moved through the "
+                            + "ribbon.",
                     QUALITY, "bar", List.of(DATE_RANGE, PROJECT, RESOURCE)),
             built("task-type-analysis", "Task Type Analysis",
                     "Volume raised against average resolution time per type — what is eating the team.",
@@ -170,8 +188,18 @@ public final class ReportCatalogue {
             built("stage-cycle-time", "Stage Cycle Time",
                     "Average time per stage, split into hours worked and hours waiting.",
                     WORKFLOW, "stacked-bar", List.of(DATE_RANGE, PROJECT)),
-            unbuilt("deployment-report", "Deployment Report",
-                    "What was deployed, when, by whom, and what came back.",
+            // A-068 · "by whom" is gone from the description deliberately. A
+            // deployment here is a visit to a Deployment-owned stage, and the
+            // person who ran it is the stage's assignee at the time — which the
+            // sealed hop does record, but which this report does not group by,
+            // because §7.8 asks for cadence and outcome rather than for a league
+            // table of deployers. Promising a column the report does not have is
+            // the defect ReportFilterKind's javadoc describes for filters.
+            built("deployment-report", "Deployment Report",
+                    "Deployments per week, how many shipped against how many were rolled back, "
+                            + "and average working time in the deployment stage. Counted from "
+                            + "recorded stage moves, so it stays empty until tickets are moved "
+                            + "through the ribbon.",
                     WORKFLOW, "bar", List.of(DATE_RANGE, PROJECT)),
 
             // ── OPERATIONS ──────────────────────────────────────────────────
@@ -186,11 +214,25 @@ public final class ReportCatalogue {
                             + "resolution time. Satisfaction is not included — no rating is "
                             + "captured on closure yet.",
                     OPERATIONS, "bar", List.of(DATE_RANGE, CLIENT)),
-            unbuilt("audit-compliance", "Audit & Compliance",
-                    "Who changed what, with the hash chain's own verdict on each entry.",
+            // A-068 · the description states the limit of the verdict, which is
+            // the whole reason this report is not S-16 with a nicer export. Each
+            // entry is checked; the trail's *completeness* is not, and cannot be
+            // from a date-ranged slice — A-042 handed that to chain_anchors and
+            // the worker. A compliance card that let a reader infer otherwise
+            // would be the most consequential overstatement in the product.
+            built("audit-compliance", "Audit & Compliance",
+                    "Every recorded change to a ticket, with each entry's own hash recomputed "
+                            + "and compared. Proves entries have not been altered; completeness "
+                            + "of the trail is checked separately by the nightly chain verifier.",
                     OPERATIONS, null, List.of(DATE_RANGE, PROJECT, RESOURCE)),
-            unbuilt("email-delivery-log", "Email Delivery Log",
-                    "Every notification mail, its state and why it failed if it did.",
+            // A-068 · says "ticket mail" rather than "every notification mail",
+            // because email_log.ticket_id is nullable and §2's row rule is
+            // expressed through the ticket's project — so mail with no ticket
+            // cannot be scoped and is out. See EmailDeliveryLogRunner.
+            built("email-delivery-log", "Email Delivery Log",
+                    "Every alert mail raised against a ticket, its state and why it failed if it "
+                            + "did. Mail with no ticket — password resets, digests — has no "
+                            + "project to scope by and is not included.",
                     OPERATIONS, null, List.of(DATE_RANGE)));
 
     /**
@@ -220,7 +262,23 @@ public final class ReportCatalogue {
      */
     private static final java.util.Set<String> NOT_KEPT_PER_PERSON =
             java.util.Set.of("project-health", "aging",
-                    "deployment-report", "client-report", "email-delivery-log");
+                    "deployment-report", "client-report", "email-delivery-log",
+                    // A-068 · rework-analysis, and the reason is a shape the
+                    // other five do not have: its subject is the person who
+                    // *sent work back*, while §2 scopes a delivery role to the
+                    // tickets assigned to *them*. Both narrowings then apply and
+                    // they name two different people — a Developer would be
+                    // served "bounces I caused on tickets I am holding", which
+                    // is nearly always empty and is a question nobody asks. Not
+                    // a permission problem and not a missing column, so it is
+                    // said in the same words A-056 chose: the data does not
+                    // record an answer to this for one person.
+                    //
+                    // resource-contribution is deliberately NOT here. Its
+                    // subject is whoever logged the hours, and both narrowings
+                    // land on ticket_effort_logs.user_id — the same column, the
+                    // same person — exactly as effort-summary already does.
+                    "rework-analysis");
 
     /**
      * Reports that answer a delivery role from {@code resource_daily_stats}
@@ -309,8 +367,24 @@ public final class ReportCatalogue {
      * per person" — the first is what a Developer can do something about by
      * waiting, and replacing it would tell them a report will never be theirs
      * when in fact it has not been written.
+     *
+     * <p><b>Package-private deliberately, as of A-068.</b> This precedence rule
+     * was tested through the real catalogue, by finding a report that happened
+     * to be unbuilt and asserting it kept its own reason. A-068 built the last
+     * five, so there is no longer an unbuilt report to point at — and
+     * {@code ReportsIT.unbuiltKey} had already recorded the hazard in its own
+     * comment: <i>"a test naming a report that keeps changing state is a test
+     * that fails on somebody else's task"</i>. It fell to this task, as
+     * predicted.
+     *
+     * <p>The rule outlives the reports it was written for: a twentieth report
+     * will be declared before it is built, and the day it is, this is what stops
+     * a Developer being told it will never be theirs. So it is kept and tested
+     * against a descriptor the test constructs, rather than deleted because
+     * nothing currently exercises it or left tied to whichever report happens to
+     * be unfinished.
      */
-    private static ReportDtos.Descriptor withheld(ReportDtos.Descriptor d) {
+    static ReportDtos.Descriptor withheld(ReportDtos.Descriptor d) {
         if (!d.available()) {
             return d;
         }

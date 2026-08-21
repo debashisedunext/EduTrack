@@ -394,3 +394,73 @@ The empty state says so in the field's hint rather than opening onto nothing.
 that would let a network failure silently disable a validation rule, and every
 bug raised during the outage would carry no module, which is §7.5's data
 poisoning with the added property of being invisible. Two tests pin both halves.
+
+## C-071 — the project's own settings
+
+B-019's Settings tab had shipped and **nothing obeyed it**: a PM could restrict
+a project to two task types, watch the screen confirm the save, and watch
+tickets be raised outside them. That is worse than not offering the setting,
+because the screen says it took effect. `GET /projects/{projectId}/settings` is
+readable by every role — the contract says so in as many words, precisely so
+this form can read it.
+
+Two rules arrive from it, and `projectRulesFrom` turns the response into both:
+
+- **`restrictsTaskTypes` + `taskTypes[].isAllowed`** filter the task-type
+  picker. `ProjectRules.allowedTaskTypeIds` is `null` for an unrestricted
+  project rather than an empty set, and the distinction is the whole of B-019's
+  design decision expressed as a type: every project has no `project_task_types`
+  rows until somebody configures one, so reading that absence as "none allowed"
+  would empty the picker on every project in the organisation at once.
+- **`mandatoryFields`** marks the named controls required and refuses a save
+  without them, worded as the project's rule — "This project requires a screen
+  name on every ticket" — because that is why the asterisk is there and it is
+  not something §7.5 would lead anyone to expect.
+
+**Filtered out, not shown and refused** — the opposite of what the Client
+control does two fields up, and right for the opposite reason. A client blocked
+by B-028 is an obstacle the person raising the ticket can usually go and fix; a
+project's allow-list is a deliberate configuration only a PM or Admin can
+change, on a screen most of the six roles cannot open. Offering it would be
+offering a refusal. The hint says the list is restricted, because a picker that
+is simply shorter than it was on the last project reads as a list that has lost
+its data.
+
+**A task type the newly-picked project does not accept is cleared.** It has to
+be, and there is no third option: the picker no longer lists it, so the trigger
+falls back to its placeholder and the form *looks* empty while still holding the
+old id. That is also why the task-type `Select` is `''`-controlled rather than
+`undefined`-controlled — Radix reads `undefined` as *uncontrolled* and goes on
+drawing the old label.
+
+**A draft does not waive these**, where it waives the description, the estimate
+and §4B.2's client rule. Those three are the blueprint's rules about what a
+ticket ought to *say*, and a draft exists to hold one that cannot say them yet.
+These are a project's rules, and `saveAsDraft` is accepted by the server and
+acted on nowhere — a draft is stored as an ordinary ticket today, so waiving on
+the flag would be a one-click opt-out of a project's configuration producing a
+ticket indistinguishable from any other. `ProjectSettingsGate` refuses a draft
+the same way, so the two halves agree.
+
+**`PLANNED_CLOSE_DATE` is not a rule on this form.** Blank there does not mean
+absent: it means "compute it from the SLA policy", and the server does.
+Overriding the date is PM and Admin only, so the control is read-only for four
+of the six roles and a rule here would refuse a form those roles cannot fix. The
+server measures that code against the *resolved* date and fails only when no
+rung of the ladder answered either, which is a project misconfiguration rather
+than something the reporter left out.
+
+### The window before the settings arrive
+
+`GET /projects/{id}/settings` is a round trip that starts when the project is
+picked, and **the form cannot enforce a rule it has not been told about yet.** A
+save fired inside that window validates against no project rules and goes
+through; the server refuses it and the 400's `errors` map lands on the same
+controls with the same messages. Unreachable by a person, who has a title and a
+description still to type; trivially reachable by `fireEvent`, which is why the
+C-071 tests wait on the asterisk before saving.
+
+Left as it is deliberately. The alternative — disabling the save buttons while
+the settings are in flight — trades a real guarantee nobody was missing for a
+disabled control on every project change, and this codebase's position
+throughout is that the form is advice and the write path is the guarantee.
