@@ -40,12 +40,24 @@ import { useWidget } from './widgetBatchContext'
  */
 
 /**
- * The keys the server actually serves — A-056's six and A-057's three.
+ * The keys the server actually serves.
  *
- * Narrower than the contract's enum on purpose. That enum also lists
- * `stage-funnel`, `rework`, `stage-duration` and `handoff-latency`, which
- * answer 404 until A-058 lands; naming one here would compile and then render
- * an error card, where this way it does not compile at all.
+ * It was narrower than the contract's enum on purpose from A-056 to A-059:
+ * naming a key the server answered 404 for would have compiled and then
+ * rendered an error card, and this way it did not compile at all.
+ *
+ * **A-058 closes that gap** — the four stage-flow keys are served, and this
+ * type is now the contract's enum exactly. The guard has not stopped being
+ * worth keeping: it is what a twenty-first widget declared in the contract
+ * before it is built will run into.
+ *
+ * The server side of the same agreement is pinned by
+ * `DashboardWidgetIT.everyContractKeyIsServed`, which reads the enum out of
+ * `contracts/openapi.yaml` and fails if anything declared has no branch. This
+ * union is narrowed by hand rather than generated, so widening it is the
+ * deliberate step that says "the server answers this now" — and `FULL_KEYS` in
+ * `DashboardWidgets` is checked against it with `satisfies`, so a key rendered
+ * without being declared here does not compile.
  */
 export type WidgetKey =
   | 'type-donut'
@@ -58,6 +70,11 @@ export type WidgetKey =
   | 'sla-gauge'
   | 'project-treemap'
   | 'client-volume'
+  // A-058 · §S-05 widgets 16–19, the four the Workflow Ribbon unlocks.
+  | 'stage-funnel'
+  | 'rework'
+  | 'stage-duration'
+  | 'handoff-latency'
 
 export interface WidgetPoint {
   x: string

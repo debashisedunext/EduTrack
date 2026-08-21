@@ -65,6 +65,58 @@ export const LOAD_COLOURS: Record<string, string> = {
   Delayed: 'var(--warning)',
 }
 
+/**
+ * A-058 · widgets 16–19 borrow the **ribbon's** tokens, not the generic palette.
+ *
+ * These four widgets are the ribbon seen from above, and a reworked stage is
+ * already amber on the ticket detail page. Reaching for `chart-4` here would
+ * give one fact two colours on two screens — the reader who has learnt that
+ * amber means "sent back" would have to learn it again, and the colour would
+ * drift the first time either palette moved.
+ *
+ * `styles/tokens.css` is Stream C's file and nothing here edits it; these are
+ * references to tokens the ribbon already declares.
+ */
+export const REWORK_COLOURS: Record<string, string> = {
+  'Reworked (2 or more passes)': 'var(--ribbon-reworked)',
+  // §4A.7 escalates at three passes, and the ribbon paints a breached segment
+  // in this token. Ping-pong is a quality breach in the same sense.
+  'Ping-pong (3 or more passes)': 'var(--ribbon-breached)',
+  'First pass': 'var(--ribbon-done-fg)',
+}
+
+/**
+ * Widget 18's two halves. Work is the success token and waiting is the warning
+ * one — the same pairing `FLOW_COLOURS` uses for closed and reopened, so amber
+ * means "attention" on every chart on the screen rather than on some of them.
+ *
+ * Deliberately not danger/red: idle time is where the waste is, but a stage
+ * with idle time is normal and a dashboard that paints the normal case red
+ * teaches people to ignore red.
+ */
+export const STAGE_TIME_COLOURS: Record<string, string> = {
+  Active: 'var(--success)',
+  Idle: 'var(--warning)',
+}
+
+/**
+ * Widget 16's funnel draws every band in **one** token.
+ *
+ * A funnel's content is length and order, both of which the bars and the axis
+ * already carry. Eight hues down a funnel would invite the reader to take hue
+ * as meaning — severity, most obviously, since that is what colour means
+ * everywhere else on this dashboard — and there is no severity here. The
+ * heatmap made the same call for the same reason.
+ */
+export const FUNNEL_COLOUR = 'var(--chart-1)'
+
+/**
+ * Widget 19's trend. Handoff latency is time nobody is working, so it is drawn
+ * in the warning token like widget 18's idle band — the two charts measure the
+ * same kind of waste in different places and should look related.
+ */
+export const HANDOFF_COLOUR = 'var(--warning)'
+
 /** Axis, grid and tick styling, so six charts do not each invent their own. */
 export const AXIS = {
   stroke: 'var(--border)',

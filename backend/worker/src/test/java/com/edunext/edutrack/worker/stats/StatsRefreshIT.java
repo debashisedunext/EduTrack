@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -117,6 +118,7 @@ class StatsRefreshIT {
         jdbc.update("DELETE FROM daily_ticket_stats");
         jdbc.update("DELETE FROM resource_daily_stats");
         jdbc.update("DELETE FROM client_daily_stats");
+        jdbc.update("DELETE FROM stage_daily_stats");
 
         // ticket_effort_logs is append-only and hash-chained: A-008's trigger
         // refuses DELETE outright, so a fixture cannot truncate it and must not
@@ -133,7 +135,22 @@ class StatsRefreshIT {
         // worker's scanners fire once at context startup, so it can hold a row
         // pinning a ticket alive. Cleared first rather than worked around.
         jdbc.update("DELETE FROM email_log");
-        jdbc.update("DELETE FROM tickets WHERE id NOT IN (SELECT ticket_id FROM ticket_effort_logs)");
+        // A-058 · ticket_stage_transitions joins the same exclusion, and for
+        // the identical reason rather than a similar one: A-008 puts a
+        // BEFORE DELETE trigger on it too — "the ribbon can never be
+        // rewritten" — so a ticket with hops is as undeletable as one with
+        // effort, and its FK would fail this statement rather than the
+        // trigger firing.
+        //
+        // Nothing rests on removing them. Every test seeds its own project and
+        // every assertion is scoped to it, so a surviving ticket is invisible
+        // here; and the handoff walk is per ticket, so an old ticket's hops
+        // cannot join into this one's sequence.
+        jdbc.update("""
+                DELETE FROM tickets
+                 WHERE id NOT IN (SELECT ticket_id FROM ticket_effort_logs)
+                   AND id NOT IN (SELECT ticket_id FROM ticket_stage_transitions)
+                """);
 
         userId = user();
 
@@ -735,5 +752,303 @@ class StatsRefreshIT {
                 "SELECT COUNT(*) FROM client_daily_stats "
                         + "WHERE stat_date = ? AND project_id = ? AND client_id = ?",
                 Integer.class, day, projectId, clientId);
+    }
+
+    // ── A-058 · widgets 16–19, the four derived from the ribbon ──────────────
+
+    /**
+     * 🔴 The decision this task turns on, and the obvious implementation fails
+     * it.
+     *
+     * <p>{@code tickets.current_stage} is current state with no history. A pass
+     * reading it would write <em>today's</em> distribution into every day it
+     * recomputes — and because each pass recomputes a trailing week, last
+     * Tuesday's funnel would silently become a copy of this morning's, five
+     * minutes at a time.
+     *
+     * <p>The ticket below is in QA now and was in DEV on the 10th. A funnel for
+     * the 10th must say DEV.
+     */
+    @Test
+    @DisplayName("wip_by_stage is where the ticket WAS that day, not where it is now")
+    void wipByStageIsHistorical() {
+        long id = ticket("2026-08-10 08:00:00", null, "MEDIUM");
+        jdbc.update("UPDATE tickets SET current_stage = 'QA' WHERE id = ?", id);
+        // Left DEV on the 11th, in QA since — and unsealed, so it is there now.
+        transition(id, 1, 1, "DEV", "2026-08-10 09:00:00", "2026-08-11 09:00:00", 480);
+        transition(id, 1, 2, "QA", "2026-08-11 09:00:00", null, null);
+
+        worker.refreshOnce();
+
+        assertThat(wip(LocalDate.of(2026, 8, 10)))
+                .as("reading tickets.current_stage would answer QA for a day it was in DEV")
+                .isEqualTo("{\"DEV\": 1}");
+        assertThat(wip(LocalDate.of(2026, 8, 11))).isEqualTo("{\"QA\": 1}");
+    }
+
+    @Test
+    @DisplayName("a ticket closed by end of day sits in no stage")
+    void closedTicketsLeaveTheFunnel() {
+        long id = ticket("2026-08-10 08:00:00", "2026-08-11 10:00:00", "MEDIUM");
+        transition(id, 1, 1, "QA", "2026-08-10 09:00:00", null, null);
+
+        worker.refreshOnce();
+
+        assertThat(wip(LocalDate.of(2026, 8, 10))).isEqualTo("{\"QA\": 1}");
+        assertThat(wip(LocalDate.of(2026, 8, 11)))
+                .as("closed work is not queued anywhere; NULL says the question does not arise")
+                .isNull();
+    }
+
+    /**
+     * The staleness {@code refreshTypeCounts} still carries and this must not
+     * copy: an inner join leaves yesterday's document in place for a project
+     * that no longer matches. A funnel is read as "where the work is now", so a
+     * stale one points at a bottleneck that has already cleared.
+     */
+    @Test
+    @DisplayName("a project that has emptied is reset to NULL, not left holding yesterday's funnel")
+    void wipByStageIsResetRatherThanLeftStale() {
+        jdbc.update("""
+                INSERT INTO daily_ticket_stats (stat_date, project_id, wip_by_stage, computed_at)
+                VALUES (?, ?, '{"DEV": 99}', ?)
+                """, TODAY, projectId, java.sql.Timestamp.from(NOW));
+
+        worker.refreshOnce();
+
+        assertThat(wip(TODAY)).isNull();
+    }
+
+    /**
+     * The two counters are independent and the migration calls confusing them
+     * "the single most misread concept in the spec". A reopen starts a fresh
+     * journey with iteration back at 1, so a bounce in cycle 1 must not follow
+     * a ticket into cycle 2.
+     */
+    @Test
+    @DisplayName("rework counts the iteration inside the LATEST cycle, so a reopen clears it")
+    void reworkIsScopedToTheCurrentCycle() {
+        long bouncing = ticket("2026-08-09 08:00:00", null, "MEDIUM");
+        transition(bouncing, 1, 1, "DEV", "2026-08-09 09:00:00", "2026-08-09 12:00:00", 180);
+        reworkTransition(bouncing, 1, 2, 3, "DEV", "2026-08-09 12:00:00", null);
+
+        long reopened = ticket("2026-08-09 08:00:00", null, "MEDIUM");
+        // Bounced twice in cycle 1, then reopened into a clean cycle 2.
+        reworkTransition(reopened, 1, 1, 3, "DEV", "2026-08-09 09:00:00", "2026-08-09 18:00:00");
+        transition(reopened, 2, 1, "DEV", "2026-08-10 09:00:00", null, null);
+
+        worker.refreshOnce();
+
+        assertThat(stat(TODAY, "rework_open"))
+                .as("only the still-bouncing ticket; the reopened one is on a clean cycle 2")
+                .isEqualTo(1);
+        assertThat(stat(TODAY, "pingpong_open"))
+                .as("iteration 3 in the current cycle is ping-pong; a cycle-1 bounce is not")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("rework is stock, so a ticket bouncing for three days counts once per day")
+    void reworkIsStockNotFlow() {
+        long id = ticket("2026-08-09 08:00:00", null, "MEDIUM");
+        reworkTransition(id, 1, 1, 2, "DEV", "2026-08-09 09:00:00", null);
+
+        worker.refreshOnce();
+
+        for (LocalDate day : List.of(LocalDate.of(2026, 8, 10), LocalDate.of(2026, 8, 11), TODAY)) {
+            assertThat(stat(day, "rework_open")).as("%s", day).isEqualTo(1);
+        }
+        assertThat(stat(TODAY, "pingpong_open"))
+                .as("two passes is rework and not yet ping-pong — §4A.7 escalates at three")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("a project whose tickets stop bouncing goes back to zero")
+    void reworkIsClearedRatherThanLeftStanding() {
+        jdbc.update("""
+                INSERT INTO daily_ticket_stats (stat_date, project_id, rework_open, pingpong_open, computed_at)
+                VALUES (?, ?, 7, 4, ?)
+                """, TODAY, projectId, java.sql.Timestamp.from(NOW));
+
+        worker.refreshOnce();
+
+        assertThat(stat(TODAY, "rework_open"))
+                .as("a quality warning that can be earned and never cleared is worse than none")
+                .isZero();
+        assertThat(stat(TODAY, "pingpong_open")).isZero();
+    }
+
+    @Test
+    @DisplayName("stage rows count entries on the day they began and exits on the day they ended")
+    void stageFlowSplitsEntriesFromExits() {
+        long id = ticket("2026-08-09 08:00:00", null, "MEDIUM");
+        // Entered Monday, left Tuesday — one entry and one exit, two days apart.
+        transition(id, 1, 1, "DEV", "2026-08-10 09:00:00", "2026-08-11 09:00:00", 480);
+
+        worker.refreshOnce();
+
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "DEV", "entered")).isEqualTo(1);
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "DEV", "exited")).isZero();
+        assertThat(stageStat(LocalDate.of(2026, 8, 11), "DEV", "exited")).isEqualTo(1);
+        assertThat(stageStat(LocalDate.of(2026, 8, 11), "DEV", "elapsed_mins"))
+                .as("working minutes from the transition, attributed to the day it sealed")
+                .isEqualTo(480);
+    }
+
+    @Test
+    @DisplayName("an unsealed visit contributes no elapsed minutes")
+    void openVisitsAreNotAveraged() {
+        long id = ticket("2026-08-09 08:00:00", null, "MEDIUM");
+        transition(id, 1, 1, "QA", "2026-08-10 09:00:00", null, null);
+
+        worker.refreshOnce();
+
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "QA", "entered")).isEqualTo(1);
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "QA", "exited"))
+                .as("a ticket still in a stage has no duration yet; counting a partial "
+                        + "stay drags the average down worst where work is piling up")
+                .isZero();
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "QA", "elapsed_mins")).isZero();
+    }
+
+    /**
+     * 🔴 CLAUDE.md: "All SLA and duration maths use the working calendar."
+     *
+     * <p>{@code TIMESTAMPDIFF} would report this handoff as 2,880 minutes of
+     * queue waste. Widget 19 exists to point at queue waste, so that is the one
+     * wrong answer it must not give — a chart spiking every Monday teaches the
+     * reader to ignore the only signal it carries.
+     */
+    @Test
+    @DisplayName("handoff latency is working minutes, so a weekend is not two days of queue waste")
+    void handoffLatencySkipsTheWeekend() {
+        long id = ticket("2026-08-06 08:00:00", null, "MEDIUM");
+        // Friday 7 Aug 2026 17:00 → Monday 10 Aug 09:00. Wall clock: 3,840
+        // minutes. Working time: the calendar's Friday remainder plus Monday's
+        // morning, and nothing for Saturday or Sunday.
+        transition(id, 1, 1, "DEV", "2026-08-06 09:00:00", "2026-08-07 17:00:00", 480);
+        transition(id, 1, 2, "QA", "2026-08-10 09:00:00", null, null);
+
+        worker.refreshOnce();
+
+        Integer minutes = stageStat(LocalDate.of(2026, 8, 10), "QA", "handoff_mins");
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "QA", "handoff_count")).isEqualTo(1);
+        assertThat(minutes)
+                .as("wall-clock would be 3840; anything near it means the calendar was skipped")
+                .isNotNull()
+                .isLessThan(1440);
+    }
+
+    @Test
+    @DisplayName("the handoff is charged to the receiving stage, not to the one that finished")
+    void handoffIsChargedToTheQueueItWaitedIn() {
+        long id = ticket("2026-08-09 08:00:00", null, "MEDIUM");
+        transition(id, 1, 1, "DEV", "2026-08-10 09:00:00", "2026-08-10 10:00:00", 60);
+        transition(id, 1, 2, "QA", "2026-08-10 12:00:00", null, null);
+
+        worker.refreshOnce();
+
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "QA", "handoff_count"))
+                .as("QA is the queue the ticket sat in")
+                .isEqualTo(1);
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "DEV", "handoff_count"))
+                .as("charging the sender blames the team that did its job")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("a first hop has no handoff, since nothing preceded it")
+    void theFirstHopIsNotAHandoff() {
+        long id = ticket("2026-08-09 08:00:00", null, "MEDIUM");
+        transition(id, 1, 1, "INTAKE", "2026-08-10 09:00:00", null, null);
+
+        worker.refreshOnce();
+
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "INTAKE", "handoff_count")).isZero();
+    }
+
+    @Test
+    @DisplayName("effort lands on its work_date and against its own stage")
+    void activeMinutesFollowTheWorkDate() {
+        long id = ticket("2026-08-09 08:00:00", null, "MEDIUM");
+        transition(id, 1, 1, "DEV", "2026-08-10 09:00:00", "2026-08-11 09:00:00", 480);
+        effort(id, "DEV", LocalDate.of(2026, 8, 10), "2.50");
+
+        worker.refreshOnce();
+
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "DEV", "active_mins"))
+                .as("2.5 hours attributed to the day the work happened, per §4A.4")
+                .isEqualTo(150);
+    }
+
+    @Test
+    @DisplayName("recomputing a day twice does not double the stage rows")
+    void stageStatsAreRecomputedNotAccumulated() {
+        long id = ticket("2026-08-09 08:00:00", null, "MEDIUM");
+        transition(id, 1, 1, "DEV", "2026-08-10 09:00:00", "2026-08-10 17:00:00", 480);
+
+        worker.refreshOnce();
+        worker.refreshOnce();
+
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "DEV", "exited")).isEqualTo(1);
+        assertThat(stageStat(LocalDate.of(2026, 8, 10), "DEV", "elapsed_mins")).isEqualTo(480);
+    }
+
+    // ── A-058 fixtures ───────────────────────────────────────────────────────
+
+    /** One sealed or open visit. {@code exitedAt} null means the ticket is still there. */
+    private void transition(long ticketId, int cycleNo, int seqNo, String toStage,
+                            String enteredAt, String exitedAt, Integer durationMins) {
+        jdbc.update("""
+                INSERT INTO ticket_stage_transitions
+                       (ticket_id, cycle_no, iteration_no, seq_no, to_stage, action_code,
+                        entered_at, exited_at, duration_mins, is_current)
+                VALUES (?, ?, 1, ?, ?, 'FORWARD', ?, ?, ?, ?)
+                """, ticketId, cycleNo, seqNo, toStage, enteredAt, exitedAt, durationMins,
+                exitedAt == null ? 1 : 0);
+    }
+
+    /**
+     * A backward move, which is what {@code iteration_no} counts. Separate from
+     * {@link #transition} so a test cannot raise the iteration by accident —
+     * the whole of widget 17 rests on that column meaning "sent back".
+     */
+    private void reworkTransition(long ticketId, int cycleNo, int seqNo, int iterationNo,
+                                  String toStage, String enteredAt, String exitedAt) {
+        jdbc.update("""
+                INSERT INTO ticket_stage_transitions
+                       (ticket_id, cycle_no, iteration_no, seq_no, to_stage, action_code,
+                        reason, entered_at, exited_at, is_current)
+                VALUES (?, ?, ?, ?, ?, 'REWORK', 'stats probe', ?, ?, ?)
+                """, ticketId, cycleNo, iterationNo, seqNo, toStage, enteredAt, exitedAt,
+                exitedAt == null ? 1 : 0);
+    }
+
+    private void effort(long ticketId, String stageCode, LocalDate workDate, String hours) {
+        jdbc.update("""
+                INSERT INTO ticket_effort_logs
+                       (ticket_id, user_id, cycle_no, stage_code, iteration_no, work_date, hours)
+                VALUES (?, ?, 1, ?, 1, ?, ?)
+                """, ticketId, userId, stageCode, workDate, new java.math.BigDecimal(hours));
+    }
+
+    private String wip(LocalDate day) {
+        return jdbc.queryForObject(
+                "SELECT wip_by_stage FROM daily_ticket_stats WHERE stat_date = ? AND project_id = ?",
+                String.class, day, projectId);
+    }
+
+    /**
+     * A stage with no row that day answers {@code 0} rather than throwing.
+     * "Nothing was recorded" is what most of these assertions are checking, and
+     * an {@code EmptyResultDataAccessException} would report it as an error
+     * rather than as the zero it is.
+     */
+    private Integer stageStat(LocalDate day, String stageCode, String column) {
+        return jdbc.queryForObject(
+                "SELECT COALESCE((SELECT " + column + " FROM stage_daily_stats "
+                        + "WHERE stat_date = ? AND project_id = ? AND stage_code = ?), 0)",
+                Integer.class, day, projectId, stageCode);
     }
 }

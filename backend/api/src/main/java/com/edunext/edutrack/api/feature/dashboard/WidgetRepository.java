@@ -560,6 +560,303 @@ class WidgetRepository {
                 .list();
     }
 
+    // ── A-058 · widgets 16–19, the four the ribbon unlocks ───────────────────
+
+    /**
+     * A-058 · has the ribbon recorded anything at all for the projects this
+     * caller can see?
+     *
+     * <h2>Why four widgets ask this before drawing</h2>
+     *
+     * <p>Widgets 16–19 all derive from {@code ticket_stage_transitions}. On a
+     * database where the ribbon is not yet in use, every one of them computes
+     * cleanly to nothing — an empty funnel, zero tickets in rework, no stage
+     * durations, no handoffs — and every one of those renders as a <em>claim</em>:
+     * that no work is queued anywhere, and in widget 17's case that no ticket has
+     * ever been sent back. "Nothing was measured" and "the measurement is zero"
+     * are the same picture and opposite facts.
+     *
+     * <p>A-068 was caught by exactly this and its answer is the precedent
+     * followed here: first-time-right showed 100% beside an empty bounce table,
+     * computed from a counter nothing had ever incremented, and it is now
+     * withheld unless a backward move was observed. <b>Nothing measured renders
+     * as a sentence, never as a zero.</b> A-057's SLA gauge says the same.
+     *
+     * <p>Asked of {@code stage_daily_stats} rather than of the transitions
+     * themselves, so the rule against reading that table from a dashboard holds
+     * here too. A row exists there for every (project, stage) with any ribbon
+     * activity on any day, so its absence across a caller's whole scope is
+     * exactly the statement being tested.
+     *
+     * <p><b>Deliberately unbounded by the date window.</b> A quiet fortnight is
+     * not an unpopulated ribbon, and gating on the window would withhold widget
+     * 17 from a team whose tickets are bouncing today because none of them
+     * happened to move during it. {@code LIMIT 1} on
+     * {@code ix_stage_stats_project} makes the breadth free.
+     */
+    boolean ribbonHasData(List<Long> projectIds, Long projectFilter) {
+        return jdbc.sql("""
+                        SELECT 1
+                          FROM stage_daily_stats
+                         WHERE (:unscoped = 1 OR project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR project_id = :projectFilter)
+                         LIMIT 1
+                        """)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .param("projectFilter", projectFilter)
+                .query(Integer.class)
+                .optional()
+                .isPresent();
+    }
+
+    /**
+     * A-058 · widget 16 — open tickets per stage, from
+     * {@code daily_ticket_stats.wip_by_stage}.
+     *
+     * <p>The column A-050 declared and left NULL against this task by name, now
+     * filled by {@code DailyStatsRepository.refreshWipByStage} from the
+     * transitions rather than from {@code tickets.current_stage} — see that
+     * method for why the obvious source would have rewritten history.
+     *
+     * <p><b>The latest day in the window, never the sum of it.</b> WIP is stock:
+     * "how many tickets sit in each stage" is true at an instant, and a
+     * fortnight of it summed is a funnel fourteen times too tall whose
+     * <em>proportions</em> are right — which is exactly what makes it survive
+     * review. {@code openByTaskType} above reads the same way for the same
+     * reason and this is the third widget to state it.
+     *
+     * <p>Merged in Java rather than with {@code JSON_MERGE_PATCH}, which
+     * replaces a duplicate key rather than adding it: two projects each with 4
+     * tickets in QA would merge to 4.
+     *
+     * @return stage code to open count, empty when the day has no rows or every
+     *         row's {@code wip_by_stage} is still NULL
+     */
+    Map<String, Long> openByStage(LocalDate from, LocalDate to, List<Long> projectIds, Long projectFilter) {
+        List<String> documents = jdbc.sql("""
+                        SELECT wip_by_stage
+                          FROM daily_ticket_stats
+                         WHERE stat_date = (
+                                   SELECT MAX(stat_date) FROM daily_ticket_stats
+                                    WHERE stat_date BETWEEN :from AND :to
+                                      AND (:unscoped = 1 OR project_id IN (:projectIds))
+                                      AND (:projectFilter IS NULL OR project_id = :projectFilter))
+                           AND (:unscoped = 1 OR project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR project_id = :projectFilter)
+                           AND wip_by_stage IS NOT NULL
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .param("projectFilter", projectFilter)
+                .query(String.class)
+                .list();
+
+        Map<String, Long> merged = new LinkedHashMap<>();
+        for (String document : documents) {
+            parseStageCounts(document).forEach((stage, count) ->
+                    merged.merge(stage, count.longValue(), Long::sum));
+        }
+        return merged;
+    }
+
+    private Map<String, Integer> parseStageCounts(String document) {
+        try {
+            return json.readValue(document, new com.fasterxml.jackson.core.type.TypeReference<>() {
+            });
+        } catch (com.fasterxml.jackson.core.JsonProcessingException malformed) {
+            // Written by JSON_OBJECTAGG into a JSON column, so MySQL has already
+            // validated it. Unreadable here means something else wrote the
+            // column, which is a defect to surface rather than a funnel to draw
+            // one band short.
+            throw new IllegalStateException(
+                    "daily_ticket_stats.wip_by_stage holds a value that is not a JSON object: " + document,
+                    malformed);
+        }
+    }
+
+    /**
+     * A-058 · the ribbon's stage vocabulary — code to display name, in ribbon
+     * order.
+     *
+     * <p>Distinct on the code, because {@code workflow_stages} is keyed
+     * {@code (template_id, stage_code)} and every template declares its own row
+     * for {@code QA}. The dashboard aggregates across projects and therefore
+     * across templates, so it needs one label per code; {@code MIN(seq)} orders
+     * them by the earliest position any template gives them, which is the only
+     * ordering that exists once templates disagree.
+     *
+     * <p>A code with no surviving definition is simply absent here, and the
+     * widgets fall back to the code itself. That is deliberate:
+     * {@code V20260818_2140} deprecates stage codes, and a bar vanishing from a
+     * funnel because its master row was retired would silently understate the
+     * work in front of it.
+     */
+    Map<String, String> stageNames() {
+        Map<String, String> names = new LinkedHashMap<>();
+        jdbc.sql("""
+                        SELECT stage_code, MIN(display_name) AS display_name
+                          FROM workflow_stages
+                      GROUP BY stage_code
+                      ORDER BY MIN(seq), stage_code
+                        """)
+                .query((rs, n) -> Map.entry(rs.getString("stage_code"), rs.getString("display_name")))
+                .list()
+                .forEach(entry -> names.put(entry.getKey(), entry.getValue()));
+        return names;
+    }
+
+    /**
+     * A-058 · widget 17 — open tickets in rework, and the ping-pong subset.
+     *
+     * <p><b>Stock, so the latest day and not the sum.</b> A ticket stuck at
+     * iteration 4 for a fortnight would otherwise count fourteen times, and the
+     * resulting card would read as a crisis that is really one ticket.
+     *
+     * <p>Summed <em>across projects</em> on that day, which is sound for the
+     * reason {@code client_daily_stats}' header gives: a ticket belongs to
+     * exactly one project, so space adds and time does not.
+     */
+    Optional<ReworkCounts> reworkCounts(LocalDate from, LocalDate to,
+                                        List<Long> projectIds, Long projectFilter) {
+        return jdbc.sql("""
+                        SELECT COALESCE(SUM(rework_open), 0)   AS rework,
+                               COALESCE(SUM(pingpong_open), 0) AS pingpong,
+                               COALESCE(SUM(open_total), 0)    AS open_total
+                          FROM daily_ticket_stats
+                         WHERE stat_date = (
+                                   SELECT MAX(stat_date) FROM daily_ticket_stats
+                                    WHERE stat_date BETWEEN :from AND :to
+                                      AND (:unscoped = 1 OR project_id IN (:projectIds))
+                                      AND (:projectFilter IS NULL OR project_id = :projectFilter))
+                           AND (:unscoped = 1 OR project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR project_id = :projectFilter)
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .param("projectFilter", projectFilter)
+                .query((rs, n) -> new ReworkCounts(
+                        rs.getLong("rework"), rs.getLong("pingpong"), rs.getLong("open_total")))
+                .optional()
+                // A window with no summarised day at all aggregates to one row
+                // of zeroes rather than to none, and that row is indistinguishable
+                // from a genuinely quiet organisation. Filtered to empty so the
+                // service can say "not summarised yet" instead of "nothing is in
+                // rework" — the distinction this whole widget family turns on.
+                .filter(counts -> counts.openTotal() > 0 || counts.rework() > 0);
+    }
+
+    /**
+     * @param openTotal the same day's open count, carried so the widget can say
+     *                  "12 of 80" rather than "12". A rework figure with no
+     *                  denominator is unreadable — twelve is a disaster in a
+     *                  team of twenty tickets and a rounding error in two
+     *                  thousand — and taking it from this row rather than from a
+     *                  second query guarantees both halves describe one day.
+     */
+    record ReworkCounts(long rework, long pingpong, long openTotal) {
+    }
+
+    /**
+     * A-058 · widget 18 — elapsed and active minutes per stage across the whole
+     * window.
+     *
+     * <p><b>Flow, so summed</b>, and the sums are what make the average right.
+     * Averaging the daily averages would weight a day with one sealed visit
+     * equally with a day with fifty; summing the minutes and the visits
+     * separately and dividing once at the end does not. That is the reason
+     * {@code stage_daily_stats} stores totals and no average.
+     *
+     * <p>{@code visits} counts <em>exits</em>, not entries. A stage entered on
+     * Monday and left on Thursday contributes its duration to Thursday, and
+     * dividing by arrivals would divide one day's durations by a different
+     * day's tickets.
+     *
+     * <p>Stages whose visits all remain unsealed are absent rather than zero:
+     * the worker writes no elapsed minutes for a visit still in progress, so a
+     * stage that only ever receives and never releases has nothing to average —
+     * which widget 16's funnel is the place to see, and drawing it here as a
+     * zero-height bar would say the opposite.
+     */
+    List<StageDuration> stageDurations(LocalDate from, LocalDate to,
+                                       List<Long> projectIds, Long projectFilter) {
+        return jdbc.sql("""
+                        SELECT stage_code,
+                               SUM(exited)       AS visits,
+                               SUM(elapsed_mins) AS elapsed_mins,
+                               SUM(active_mins)  AS active_mins
+                          FROM stage_daily_stats
+                         WHERE stat_date BETWEEN :from AND :to
+                           AND (:unscoped = 1 OR project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR project_id = :projectFilter)
+                      GROUP BY stage_code
+                        HAVING visits > 0
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .param("projectFilter", projectFilter)
+                .query((rs, n) -> new StageDuration(
+                        rs.getString("stage_code"), rs.getLong("visits"),
+                        rs.getLong("elapsed_mins"), rs.getLong("active_mins")))
+                .list();
+    }
+
+    record StageDuration(String stageCode, long visits, long elapsedMins, long activeMins) {
+    }
+
+    /**
+     * A-058 · widget 19 — handoff latency per day, for the trend line.
+     *
+     * <p>Grouped by day rather than by stage because §7.9 draws this one as a
+     * trend: the question is whether queue waste is growing, which a bar per
+     * stage cannot answer and a line over dates can. The per-stage cut of the
+     * same figures is A-067's stage-cycle-time report, one screen over.
+     *
+     * <p>Minutes and count both summed, divided once by the caller. A day where
+     * nothing was handed over is absent rather than zero — a zero on this line
+     * reads as "handoffs were instant that day", which is a claim about a day on
+     * which nothing happened.
+     */
+    List<HandoffDay> handoffLatency(LocalDate from, LocalDate to,
+                                    List<Long> projectIds, Long projectFilter) {
+        return jdbc.sql("""
+                        SELECT stat_date,
+                               SUM(handoff_count) AS handoffs,
+                               SUM(handoff_mins)  AS minutes
+                          FROM stage_daily_stats
+                         WHERE stat_date BETWEEN :from AND :to
+                           AND (:unscoped = 1 OR project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR project_id = :projectFilter)
+                      GROUP BY stat_date
+                        HAVING handoffs > 0
+                      ORDER BY stat_date
+                        """)
+                .param("from", from)
+                .param("to", to)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .param("projectFilter", projectFilter)
+                .query((rs, n) -> new HandoffDay(
+                        // getObject rather than getDate().toLocalDate(): A-067
+                        // found that conversion going through the JVM default
+                        // zone in four places, so a date stored in UTC and read
+                        // on an IST machine came back a day early. Every existing
+                        // test asserted counts and never dates, so it was
+                        // invisible until a report printed one.
+                        rs.getObject("stat_date", LocalDate.class),
+                        rs.getLong("handoffs"), rs.getLong("minutes")))
+                .list();
+    }
+
+    record HandoffDay(LocalDate day, long handoffs, long minutes) {
+    }
+
     /**
      * An empty {@code IN ()} list is a MySQL syntax error, and the guard against
      * reaching it is the {@code :unscoped} flag beside every use. The sentinel

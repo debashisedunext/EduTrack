@@ -8,10 +8,14 @@ import { AgingBuckets } from './charts/AgingBuckets'
 import { CalendarHeatmap } from './charts/CalendarHeatmap'
 import { ClientVolumeBar } from './charts/ClientVolumeBar'
 import { DailyStackedArea } from './charts/DailyStackedArea'
+import { HandoffLatencyLine } from './charts/HandoffLatencyLine'
 import { PriorityBar } from './charts/PriorityBar'
 import { ProjectTreemap } from './charts/ProjectTreemap'
 import { ResourceLoadBar } from './charts/ResourceLoadBar'
+import { ReworkPanel } from './charts/ReworkPanel'
 import { SlaGauge } from './charts/SlaGauge'
+import { StageDurationBar } from './charts/StageDurationBar'
+import { StageFunnel } from './charts/StageFunnel'
 import { TypeDonut } from './charts/TypeDonut'
 import { VelocityLines } from './charts/VelocityLines'
 
@@ -76,6 +80,13 @@ const FULL_KEYS = [
   'sla-gauge',
   'project-treemap',
   'client-volume',
+  // A-058 · widgets 16–19. Appended for A-057's reason and with the same
+  // result: nothing above moves, and the two-column grid takes them as it was
+  // shaped to.
+  'stage-funnel',
+  'rework',
+  'stage-duration',
+  'handoff-latency',
 ] as const satisfies readonly WidgetKey[]
 
 export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams }) {
@@ -209,6 +220,61 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
         params={params}
       >
         {(series) => <ClientVolumeBar series={series} />}
+      </WidgetFrame>
+
+      {/* A-058 · widgets 16–19, the four the Workflow Ribbon unlocks. Appended
+          like A-057's and A-059's, with nothing above rearranged.
+
+          Kept together and last, because they are the only block on this screen
+          that can all be unavailable at once: on an organisation not yet using
+          the ribbon every one of them answers with the same sentence, and four
+          adjacent notices read as one honest gap rather than as four failures
+          scattered through a working dashboard. */}
+      <WidgetFrame
+        widgetKey="stage-funnel"
+        title="Stage funnel (where work is sitting)"
+        categoryLabel="Stage"
+        params={params}
+      >
+        {(series) => <StageFunnel series={series} />}
+      </WidgetFrame>
+
+      <WidgetFrame
+        widgetKey="rework"
+        // "Rework" rather than §7.9's "Rework / ping-pong tickets": the panel
+        // states the ping-pong figure in its own words, and a title naming both
+        // invites the two numbers to be read as a pair that adds up. They do
+        // not — the second is inside the first.
+        title="Rework"
+        categoryLabel="Rework state"
+        params={params}
+      >
+        {(series) => <ReworkPanel series={series} />}
+      </WidgetFrame>
+
+      <WidgetFrame
+        widgetKey="stage-duration"
+        // "per visit" and not "per ticket": a ticket reworked twice visits DEV
+        // twice and contributes two stays to this average. The distinction is
+        // the whole reason widget 17 sits beside it.
+        title="Average hours per stage visit"
+        categoryLabel="Stage"
+        params={params}
+      >
+        {(series) => <StageDurationBar series={series} />}
+      </WidgetFrame>
+
+      <WidgetFrame
+        widgetKey="handoff-latency"
+        // "waiting" rather than "latency": §7.6's term is precise and means
+        // nothing to a PM reading a dashboard, and what the line measures is
+        // a ticket sitting between two teams with nobody working on it.
+        title="Time waiting between stages"
+        categoryLabel="Date"
+        params={params}
+        wide
+      >
+        {(series) => <HandoffLatencyLine series={series} />}
       </WidgetFrame>
     </div>
     </DashboardWidgetBatch>

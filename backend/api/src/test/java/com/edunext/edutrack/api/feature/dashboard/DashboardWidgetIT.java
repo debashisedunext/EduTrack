@@ -109,6 +109,16 @@ class DashboardWidgetIT {
         jdbc.update("DELETE FROM daily_ticket_stats");
         jdbc.update("DELETE FROM resource_daily_stats");
         jdbc.update("DELETE FROM client_daily_stats");
+        // A-058 · load-bearing rather than tidiness. Each test seeds fresh
+        // projects, so rows left by the previous one are orphans no *scoped*
+        // caller can reach — but an Admin reads unrestricted, and a leftover
+        // stage row would arrive in their funnel as another project's work.
+        // The stage masters are cleared for the same reason: `stageNames`
+        // groups across templates, so a code seeded by an earlier test would
+        // add a band to every later funnel.
+        jdbc.update("DELETE FROM stage_daily_stats");
+        jdbc.update("DELETE FROM workflow_stages");
+        jdbc.update("DELETE FROM workflow_templates");
         jdbc.update("DELETE FROM project_members");
 
         mine = project("WDGA");
@@ -581,6 +591,251 @@ class DashboardWidgetIT {
 
     // ── the contract's other promises ────────────────────────────────────────
 
+    // ── A-058 · widgets 16–19, the four the ribbon unlocks ───────────────────
+
+    @Nested
+    @DisplayName("widgets 16–19 · the stage-flow four")
+    class StageFlowWidgets {
+
+        /**
+         * Every test here needs the ribbon to look used, because all four
+         * widgets refuse to draw otherwise — which is itself the subject of
+         * {@link #anUnusedRibbonSaysSoRatherThanDrawingZeroes}.
+         */
+        @BeforeEach
+        void ribbonInUse() {
+            seedStages();
+            for (LocalDate d : List.of(D1, D2, D3)) {
+                // Stock, repeated identically. Anything summing the window
+                // reads three times these figures.
+                wipStat(d, mine, "{\"TRIAGE\": 2, \"QA\": 5}");
+                wipStat(d, theirs, "{\"DEV\": 60}");
+                reworkStat(d, mine, 3, 1);
+                reworkStat(d, theirs, 40, 12);
+
+                // Flow, so these DO sum across the three days.
+                stageStat(d, mine, "DEV", 4, 2, 600, 120, 2, 90);
+                stageStat(d, theirs, "DEV", 50, 30, 9000, 3000, 30, 3000);
+            }
+        }
+
+        @Test
+        @DisplayName("widget 16 · the funnel is the latest day's stock, never the window summed")
+        void funnelReadsStock() {
+            WidgetDtos.Widget w = render("stage-funnel", caller(me, "PM", List.of(mine)));
+
+            // 5, not 15. Three identical days of "how many sit in QA" is one
+            // day's answer — and a summed funnel keeps its proportions exactly,
+            // which is what makes this the mistake worth pinning.
+            assertThat(pointNamed(w, "QA")).as("one day's stock, not three")
+                    .isEqualByComparingTo("5");
+            assertThat(pointNamed(w, "Triage")).isEqualByComparingTo("2");
+        }
+
+        @Test
+        @DisplayName("widget 16 · stages keep ribbon order, and an empty one still draws")
+        void funnelKeepsRibbonOrder() {
+            WidgetDtos.Widget w = render("stage-funnel", caller(me, "PM", List.of(mine)));
+
+            // Triage(2), Development(0), QA(5). Sorted by value this would be
+            // QA, Triage, Development — the same numbers arranged so that a
+            // bulge at a known point in the sequence cannot be seen.
+            assertThat(w.series().getFirst().points().stream().map(WidgetDtos.Point::x))
+                    .containsExactly("Triage", "Development", "QA");
+
+            assertThat(pointNamed(w, "Development"))
+                    .as("a stage nothing sits in is a gap in the funnel, which is information")
+                    .isEqualByComparingTo("0");
+        }
+
+        @Test
+        @DisplayName("widget 16 · a PM's funnel counts their project, not the organisation's")
+        void funnelIsScoped() {
+            WidgetDtos.Widget w = render("stage-funnel", caller(me, "PM", List.of(mine)));
+
+            // The other project has 60 in DEV. A funnel that read them would
+            // still look entirely plausible.
+            assertThat(pointNamed(w, "Development")).isEqualByComparingTo("0");
+            assertThat(render("stage-funnel", caller(me, "ADMIN", List.of())))
+                    .extracting(widget -> pointNamed(widget, "Development"))
+                    .as("Admin is unrestricted, so both projects' DEV counts land")
+                    .isEqualTo(new java.math.BigDecimal("60"));
+        }
+
+        @Test
+        @DisplayName("widget 16 · every band deep-links to the tickets standing in that stage")
+        void funnelDrillsDown() {
+            WidgetDtos.Widget w = render("stage-funnel", caller(me, "PM", List.of(mine)));
+
+            assertThat(w.series().getFirst().points())
+                    .filteredOn(point -> point.x().equals("QA"))
+                    .singleElement()
+                    .extracting(WidgetDtos.Point::drillDown)
+                    // The stage CODE, not the display name: `stage=` filters on
+                    // tickets.current_stage, which holds the code.
+                    .isEqualTo("/tickets?stage=QA&excludeClosed=true");
+        }
+
+        @Test
+        @DisplayName("widget 17 · rework and ping-pong are stock, and ping-pong is inside rework")
+        void reworkIsStockAndNested() {
+            WidgetDtos.Widget w = render("rework", caller(me, "PM", List.of(mine)));
+
+            assertThat(pointNamed(w, "Reworked (2 or more passes)")).isEqualByComparingTo("3");
+            assertThat(pointNamed(w, "Ping-pong (3 or more passes)")).isEqualByComparingTo("1");
+
+            // open_total for `mine` is 10 on every day, so first-pass is 10-3.
+            // The three points do NOT sum to the backlog — first pass plus
+            // reworked does, and ping-pong is counted again inside reworked.
+            assertThat(pointNamed(w, "First pass")).isEqualByComparingTo("7");
+        }
+
+        @Test
+        @DisplayName("widget 17 · no segment deep-links, because no filter expresses an iteration")
+        void reworkHasNoDrillDown() {
+            WidgetDtos.Widget w = render("rework", caller(me, "PM", List.of(mine)));
+
+            // `reopenedOnly` is cycle_no and would be a plausible, wrong link —
+            // the baseline migration calls confusing the two counters "the
+            // single most misread concept in the spec".
+            assertThat(w.series().getFirst().points())
+                    .allSatisfy(point -> assertThat(point.drillDown())
+                            .as("no iteration filter exists; a reopened-ticket link would "
+                                    + "be the misreading shipped as a feature")
+                            .isNull());
+        }
+
+        @Test
+        @DisplayName("widget 18 · hours are total minutes over total exits, not an average of averages")
+        void stageDurationDividesOnce() {
+            WidgetDtos.Widget w = render("stage-duration", caller(me, "PM", List.of(mine)));
+
+            // Three days of 600 elapsed minutes over 2 exits: 1800 / 6 = 300
+            // minutes = 5 hours, of which 360/6 = 60 minutes = 1 hour active.
+            assertThat(pointNamed(seriesNamed(w, "Active"), "Development"))
+                    .isEqualByComparingTo("1.00");
+            assertThat(pointNamed(seriesNamed(w, "Idle"), "Development"))
+                    .as("elapsed minus active, so the two bands sum to the stay")
+                    .isEqualByComparingTo("4.00");
+        }
+
+        @Test
+        @DisplayName("widget 18 · idle never goes negative when effort exceeds the sealed elapsed time")
+        void idleIsFloored() {
+            // Effort attaches to a stage code rather than to a visit, so a stage
+            // entered twice on a rework loop can have more logged hours than the
+            // visit that sealed in the window took. A negative idle band would
+            // draw below the axis for what is really an attribution limit.
+            jdbc.update("DELETE FROM stage_daily_stats");
+            stageStat(D2, mine, "QA", 1, 1, 60, 600, 0, 0);
+
+            WidgetDtos.Widget w = render("stage-duration", caller(me, "PM", List.of(mine)));
+
+            assertThat(pointNamed(seriesNamed(w, "Idle"), "QA")).isEqualByComparingTo("0.00");
+            assertThat(pointNamed(seriesNamed(w, "Active"), "QA"))
+                    .as("active is capped at elapsed, so the bar is never longer than the stay")
+                    .isEqualByComparingTo("1.00");
+        }
+
+        @Test
+        @DisplayName("widget 19 · one point per day with a handoff, absent where there were none")
+        void handoffTrendSkipsQuietDays() {
+            jdbc.update("DELETE FROM stage_daily_stats");
+            stageStat(D1, mine, "QA", 1, 1, 60, 30, 4, 480);   // 480/4 = 120 min = 2h
+            stageStat(D3, mine, "QA", 1, 1, 60, 30, 1, 30);    // 30/1  =  30 min = 0.5h
+
+            WidgetDtos.Widget w = render("handoff-latency", caller(me, "PM", List.of(mine)));
+
+            assertThat(w.series().getFirst().points().stream().map(WidgetDtos.Point::x))
+                    .as("D2 had no handoff; a zero there would claim handoffs were instant")
+                    .containsExactly(D1.toString(), D3.toString());
+            assertThat(pointNamed(w, D1.toString())).isEqualByComparingTo("2.00");
+            assertThat(pointNamed(w, D3.toString())).isEqualByComparingTo("0.50");
+        }
+
+        @Test
+        @DisplayName("widget 19 · the daily average weights by handoffs, not by day")
+        void handoffAverageIsWeighted() {
+            jdbc.update("DELETE FROM stage_daily_stats");
+            // Two stages on one day: 10 handoffs totalling 100 minutes, and one
+            // handoff of 600. Weighted, that is 700/11 = 63.64 minutes = 1.06h.
+            // An average of the two stages' averages would be (10 + 600)/2 =
+            // 305 minutes = 5.08h — eightfold, and entirely plausible.
+            stageStat(D2, mine, "DEV", 1, 1, 60, 0, 10, 100);
+            stageStat(D2, mine, "QA", 1, 1, 60, 0, 1, 600);
+
+            WidgetDtos.Widget w = render("handoff-latency", caller(me, "PM", List.of(mine)));
+
+            assertThat(pointNamed(w, D2.toString())).isEqualByComparingTo("1.06");
+        }
+
+        @Test
+        @DisplayName("all four refuse a delivery role, in words rather than as an empty chart")
+        void deliveryRolesAreToldWhy() {
+            for (String key : List.of("stage-funnel", "rework", "stage-duration", "handoff-latency")) {
+                WidgetDtos.Widget w = render(key, caller(me, "DEVELOPER", List.of(mine)));
+
+                assertThat(w.unavailableReason())
+                        .as("%s must say why rather than draw nothing", key)
+                        .isNotNull()
+                        .contains("per project rather than per person");
+                assertThat(w.series()).as("%s", key).isEmpty();
+            }
+        }
+
+        /**
+         * 🔴 The defect this whole family is shaped around.
+         *
+         * <p>On a database where the ribbon is not in use every one of these
+         * computes cleanly to nothing, and every one of those renders as a
+         * claim: no work queued anywhere, and — widget 17 — no ticket ever sent
+         * back. A-068's first-time-right showed 100% for exactly this reason,
+         * from a counter nothing had incremented.
+         */
+        @Test
+        @DisplayName("an unused ribbon says so rather than drawing zeroes that read as good news")
+        void anUnusedRibbonSaysSoRatherThanDrawingZeroes() {
+            jdbc.update("DELETE FROM stage_daily_stats");
+            jdbc.update("UPDATE daily_ticket_stats SET wip_by_stage = NULL, "
+                    + "rework_open = 0, pingpong_open = 0");
+
+            for (String key : List.of("stage-funnel", "rework", "stage-duration", "handoff-latency")) {
+                WidgetDtos.Widget w = render(key, caller(me, "PM", List.of(mine)));
+
+                assertThat(w.unavailableReason())
+                        .as("%s drew a zero where nothing was measured", key)
+                        .isNotNull()
+                        .contains("has not recorded any stage movement");
+            }
+        }
+
+        /**
+         * The complement, and it is not redundant: a gate that refused whenever
+         * the window was quiet would pass the test above and withhold widget 17
+         * from a team whose tickets are bouncing today.
+         */
+        @Test
+        @DisplayName("a quiet window is not an unused ribbon")
+        void aQuietWindowStillAnswers() {
+            // Ribbon activity exists, but none of it inside the window asked for.
+            jdbc.update("DELETE FROM stage_daily_stats");
+            stageStat(D8, mine, "DEV", 1, 1, 60, 30, 1, 30);
+
+            WidgetDtos.Widget w = render("rework", caller(me, "PM", List.of(mine)));
+
+            assertThat(w.unavailableReason())
+                    .as("three tickets are in rework right now; a refusal would hide them")
+                    .isNull();
+            assertThat(pointNamed(w, "Reworked (2 or more passes)")).isEqualByComparingTo("3");
+        }
+
+        private WidgetDtos.Widget render(String key, CallerIdentity caller) {
+            return service.widget(caller, key, null, D1, D3)
+                    .orElseThrow(() -> new AssertionError(key + " answered 404"))
+                    .widget();
+        }
+    }
+
     @Nested
     @DisplayName("the endpoint's own contract")
     class Contract {
@@ -588,16 +843,53 @@ class DashboardWidgetIT {
         @Test
         @DisplayName("a key the contract declares but nothing implements is absent, not unavailable")
         void unimplementedKeysAre404() {
-            // Was `sla-gauge` until A-057 implemented it, and this test failing
-            // is how that landed — which is the useful behaviour: a key moving
-            // from 404 to served should not pass silently. `stage-funnel` is
-            // A-058's and needs Stream C's transitions, so it will outlive this.
+            // Was `sla-gauge` until A-057 implemented it and `stage-funnel`
+            // until A-058 did — and this test failing is how each of those
+            // landed, which is the useful behaviour: a key moving from 404 to
+            // served must not pass silently.
+            //
+            // A-058 serves every key the contract declares, so there is no
+            // longer a declared-but-unbuilt key to point at, and a third
+            // re-pointing would be inventing a fixture for a state that no
+            // longer exists. What the route must still do is refuse a key that
+            // is not in the contract at all — the case a typo in a client
+            // produces — and that behaviour is permanent.
+            //
+            // The complement, that nothing declared is unbuilt, is
+            // `everyContractKeyIsServed` below. Between them they say what the
+            // old single test said, and neither expires.
             Optional<WidgetService.Rendered> rendered = service.widget(
-                    caller(me, "ADMIN", List.of()), "stage-funnel", null, D1, D3);
+                    caller(me, "ADMIN", List.of()), "not-a-widget", null, D1, D3);
 
             assertThat(rendered)
-                    .as("A-058's; a role message would send somebody after a permission that would not help")
+                    .as("empty means 404; a role message would send somebody after a "
+                            + "permission that would not help")
                     .isEmpty();
+        }
+
+        /**
+         * A-058 · the direction the old test could not check.
+         *
+         * <p>{@code unimplementedKeysAre404} proved a key nothing implements is
+         * refused. Nothing proved the reverse — that every key the contract
+         * <em>declares</em> is served — and that is the failure a client meets:
+         * a widget in the enum, rendered by the SPA, answering 404 as an error
+         * card. Widgets 16–19 sat in that state from D-001 until this task.
+         *
+         * <p>The enum is read from the contract rather than restated here, so
+         * the twenty-first widget is caught by this test on the day it is
+         * declared rather than on the day somebody notices the card.
+         */
+        @Test
+        @DisplayName("every widget key the contract declares is served by something")
+        void everyContractKeyIsServed() throws Exception {
+            for (String key : contractWidgetKeys()) {
+                assertThat(WidgetService.isImplemented(key))
+                        .as("'%s' is in the contract's widgetKey enum but WidgetService has no "
+                                + "branch for it — the SPA will render an error card for a widget "
+                                + "the contract promises", key)
+                        .isTrue();
+            }
         }
 
         /**
@@ -1039,9 +1331,14 @@ class DashboardWidgetIT {
         @Test
         @DisplayName("drops a key nothing implements rather than failing the set")
         void unimplementedKeysAreDroppedNotFatal() {
+            // Was `stage-funnel` until A-058 served it. There is no longer a
+            // key the contract declares and nothing implements, so the stand-in
+            // is a key that is not in the contract at all — which is the case
+            // that stays reachable: a typo in a client, or a key removed from
+            // the enum while an old bundle is still cached.
             WidgetService.RenderedBatch batch = service.widgets(
                     caller(me, "ADMIN", List.of()),
-                    List.of("type-donut", "stage-funnel", "velocity"), null, D1, D3);
+                    List.of("type-donut", "not-a-widget", "velocity"), null, D1, D3);
 
             assertThat(batch.widgets()).extracting(WidgetDtos.Widget::key)
                     .containsExactly("type-donut", "velocity");
@@ -1091,10 +1388,13 @@ class DashboardWidgetIT {
             String one = service.widgets(admin, List.of("type-donut"), null, D1, D3).etag();
             String two = service.widgets(admin, List.of("type-donut", "velocity"), null, D1, D3).etag();
             String alsoOne = service.widgets(admin,
-                    List.of("type-donut", "stage-funnel"), null, D1, D3).etag();
+                    List.of("type-donut", "not-a-widget"), null, D1, D3).etag();
 
             assertThat(one).isNotNull().isNotEqualTo(two);
-            // stage-funnel is dropped, so this served exactly what the first did.
+            // The unknown key is dropped, so this served exactly what the first
+            // did. `stage-funnel` stood here until A-058 served it — and using
+            // an implemented key now would prove nothing, since it would be
+            // rendered rather than dropped.
             assertThat(alsoOne).isEqualTo(one);
         }
 
@@ -1283,5 +1583,97 @@ class DashboardWidgetIT {
                                                 created, closed, open_total, computed_at)
                 VALUES (?, ?, ?, ?, ?, ?, '2026-08-12 06:00:00')
                 """, day, projectId, clientId, created, closed, openTotal);
+    }
+
+    // ── A-058 · widgets 16–19 ────────────────────────────────────────────────
+
+    /**
+     * The ribbon's stage vocabulary. Two templates declaring the same codes on
+     * purpose: {@code workflow_stages} is keyed {@code (template_id,
+     * stage_code)}, so the dashboard's {@code GROUP BY stage_code} is the thing
+     * under test — an implementation that forgot it would return DEV twice and
+     * draw the funnel with duplicate bands.
+     */
+    private void seedStages() {
+        for (String template : List.of("Default", "Support")) {
+            jdbc.update("INSERT INTO workflow_templates (name, is_active) VALUES (?, 1)",
+                    "Widget IT " + template + SEQ.incrementAndGet());
+            Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+            int seq = 0;
+            for (String stage : List.of("TRIAGE", "DEV", "QA")) {
+                seq++;
+                jdbc.update("""
+                        INSERT INTO workflow_stages (template_id, seq, stage_code, display_name, owner_role)
+                        VALUES (?, ?, ?, ?, 'DEVELOPER')
+                        """, id, seq, stage, switch (stage) {
+                    case "TRIAGE" -> "Triage";
+                    case "DEV" -> "Development";
+                    default -> "QA";
+                });
+            }
+        }
+    }
+
+    /** Widget 16's JSON column, set separately for the reason {@link #slaStat} gives. */
+    private void wipStat(LocalDate day, long projectId, String wipByStage) {
+        jdbc.update("UPDATE daily_ticket_stats SET wip_by_stage = ? WHERE stat_date = ? AND project_id = ?",
+                wipByStage, day, projectId);
+    }
+
+    /** Widget 17's two columns. Stock, so the fixture repeats them across days. */
+    private void reworkStat(LocalDate day, long projectId, int reworkOpen, int pingPongOpen) {
+        jdbc.update("""
+                UPDATE daily_ticket_stats SET rework_open = ?, pingpong_open = ?
+                 WHERE stat_date = ? AND project_id = ?
+                """, reworkOpen, pingPongOpen, day, projectId);
+    }
+
+    /**
+     * One day of one stage's flow on one project — widgets 18 and 19.
+     *
+     * <p>{@code entered} and {@code exited} are given independently, because
+     * widget 18 divides by exits and a fixture that made them equal would let
+     * an implementation dividing by arrivals pass.
+     */
+    private void stageStat(LocalDate day, long projectId, String stageCode,
+                           int entered, int exited, long elapsedMins, long activeMins,
+                           int handoffCount, long handoffMins) {
+        jdbc.update("""
+                INSERT INTO stage_daily_stats (stat_date, project_id, stage_code,
+                                               entered, exited, elapsed_mins, active_mins,
+                                               handoff_count, handoff_mins, computed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-08-12 06:00:00')
+                """, day, projectId, stageCode, entered, exited, elapsedMins, activeMins,
+                handoffCount, handoffMins);
+    }
+
+    /**
+     * The {@code widgetKey} enum, read from the contract rather than restated.
+     *
+     * <p>Restating it here would be a third copy of the same vocabulary — the
+     * contract, {@code WidgetService.IMPLEMENTED}, and this — and the first to
+     * drift would be this one, which is the copy whose drift makes the test
+     * stop testing anything.
+     */
+    private static List<String> contractWidgetKeys() throws java.io.IOException {
+        java.io.File dir = new java.io.File("").getAbsoluteFile();
+        for (int i = 0; i < 6 && dir != null; i++, dir = dir.getParentFile()) {
+            java.io.File candidate = new java.io.File(dir, "contracts/openapi.yaml");
+            if (candidate.isFile()) {
+                com.fasterxml.jackson.databind.JsonNode enumNode =
+                        new com.fasterxml.jackson.databind.ObjectMapper(
+                                new com.fasterxml.jackson.dataformat.yaml.YAMLFactory())
+                                .readTree(candidate)
+                                .path("paths").path("/dashboard/widget/{widgetKey}")
+                                .path("parameters").path(0).path("schema").path("enum");
+
+                List<String> keys = new java.util.ArrayList<>();
+                enumNode.forEach(node -> keys.add(node.asText()));
+                assertThat(keys).as("the contract's widgetKey enum was not found").isNotEmpty();
+                return keys;
+            }
+        }
+        throw new IllegalStateException(
+                "contracts/openapi.yaml not found above " + new java.io.File("").getAbsolutePath());
     }
 }

@@ -5,11 +5,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -94,13 +97,24 @@ class WidgetService {
     }
 
     /**
-     * A-056's six, A-057's three and A-059's one. The contract's remaining four
-     * — {@code stage-funnel}, {@code rework}, {@code stage-duration} and
-     * {@code handoff-latency} — are A-058's and wait on Stream C's transitions.
+     * A-056's six, A-057's three, A-059's one and A-058's four — <b>every key in
+     * the contract's enum</b>, as of A-058.
+     *
+     * <p>That completeness is worth stating because this list has been the
+     * shorter half of a pair since A-056, and {@code widget()} returning 404 for
+     * a key in the enum was the whole reason it exists. There is no longer a
+     * declared-but-unserved key, so a 404 from this route now means a key that
+     * is not in the contract at all.
+     *
+     * <p>{@code DashboardWidgetIT.unimplementedKeysAre404} has had to be
+     * re-pointed twice as this list grew — A-057 moved it off {@code sla-gauge}
+     * and onto {@code stage-funnel}, which is A-058's. There is nothing left to
+     * point it at, and that test has done its job; see its replacement.
      */
     private static final List<String> IMPLEMENTED = List.of(
             "type-donut", "daily-stacked", "velocity", "resource-load", "priority-bar", "aging-buckets",
-            "calendar-heatmap", "sla-gauge", "project-treemap", "client-volume");
+            "calendar-heatmap", "sla-gauge", "project-treemap", "client-volume",
+            "stage-funnel", "rework", "stage-duration", "handoff-latency");
 
     static boolean isImplemented(String widgetKey) {
         return IMPLEMENTED.contains(widgetKey);
@@ -274,6 +288,13 @@ class WidgetService {
             case "sla-gauge" -> slaGauge(scope, projectId, start, end, asOf);
             case "project-treemap" -> projectTreemap(scope, projectId, start, end, asOf);
             case "client-volume" -> clientVolume(scope, projectId, start, end, asOf);
+            // A-058 · the four the ribbon unlocks. All read stage_daily_stats or
+            // wip_by_stage, both filled by the worker from
+            // ticket_stage_transitions — never from that table directly.
+            case "stage-funnel" -> stageFunnel(scope, projectId, start, end, asOf);
+            case "rework" -> rework(scope, projectId, start, end, asOf);
+            case "stage-duration" -> stageDuration(scope, projectId, start, end, asOf);
+            case "handoff-latency" -> handoffLatency(scope, projectId, start, end, asOf);
             default -> throw new IllegalStateException("implemented key with no branch: " + widgetKey);
         };
     }
@@ -840,6 +861,332 @@ class WidgetService {
 
     private static final WidgetRepository.StockBreakdown EMPTY_BREAKDOWN =
             new WidgetRepository.StockBreakdown(0, 0, 0, 0, 0, 0, 0, 0);
+
+    // ── A-058 · widgets 16–19, the four the ribbon unlocks ───────────────────
+
+    /**
+     * The sentence all four of A-058's widgets show when the ribbon has recorded
+     * nothing in the caller's scope.
+     *
+     * <p>Not an empty chart and not a zero. On these four the two are the same
+     * picture and opposite facts: an empty funnel says no work is queued, and a
+     * rework card reading 0 says no ticket has ever been sent back. Both are
+     * claims about how a team works, made from a table nobody has written to.
+     *
+     * <p>A-068's first-time-right showed 100% for precisely this reason and is
+     * now withheld the same way; A-057's SLA gauge established the form —
+     * <b>nothing measured renders as a sentence, never as a needle at zero</b>.
+     *
+     * <p>Worded as what has not been recorded rather than as a permission or a
+     * missing feature, because that is what a reader can act on: the ribbon is
+     * a thing their team either uses or does not, and the message points at
+     * that rather than at an administrator or at this backlog.
+     */
+    static final String RIBBON_NOT_IN_USE =
+            "The Workflow Ribbon has not recorded any stage movement for the projects you can see, "
+                    + "so there is nothing to measure yet. Stage figures appear once tickets start "
+                    + "moving between stages.";
+
+    /**
+     * The sentence a delivery role sees in place of these four.
+     *
+     * <p>Distinct from {@link #NO_RESOURCE_EQUIVALENT}, which says a breakdown
+     * is not kept per resource. Here the figures exist per resource in
+     * principle — a Developer's own tickets do move between stages — and what
+     * is missing is that {@code stage_daily_stats} and {@code wip_by_stage} are
+     * both keyed by project, exactly as §S-05 intends: it names widgets 1–6, 9
+     * and 12 as the Developer's dashboard and these four are a manager's view of
+     * where a team's work piles up.
+     */
+    private static final String STAGE_VIEW_IS_A_MANAGER_VIEW =
+            "Stage flow is measured per project rather than per person. Your dashboard reads the "
+                    + "figures for tickets assigned to you, and where work queues across a team is "
+                    + "not a question those figures can answer.";
+
+    /**
+     * A-058 · §S-05 widget 16 — how many tickets sit in each ribbon stage.
+     *
+     * <h2>Stock, so the latest summarised day and never the window summed</h2>
+     *
+     * <p>The trap is that summing looks right: a funnel drawn from a fortnight
+     * of daily snapshots has the correct <em>proportions</em> and fourteen times
+     * the height, and proportions are what a funnel is read for. Widget 7's
+     * donut carries the same argument and widget 20's bar deliberately does the
+     * opposite, which is why all three say so.
+     *
+     * <h2>Ordered by ribbon position, not by size</h2>
+     *
+     * <p>Unlike the donut and the client bars. A funnel <em>is</em> the
+     * sequence — §4A.8 describes it as "spot the bottleneck instantly", and a
+     * bottleneck is only visible as a bulge at a known point in a known order.
+     * Sorting by count would produce the same numbers arranged so that the one
+     * thing the chart exists to show cannot be seen.
+     *
+     * <p>A stage with nothing in it is still drawn, and that is the difference
+     * from the donut: an empty band in the middle of a funnel is information —
+     * work is arriving after it and not sitting there — whereas an empty slice
+     * of a donut is a legend entry against no colour. A stage the master no
+     * longer defines still appears, under its own code, so retiring a stage
+     * cannot hide the tickets standing in it.
+     */
+    private WidgetDtos.Widget stageFunnel(DashboardScope scope, Long projectId,
+                                          LocalDate from, LocalDate to, Instant asOf) {
+        if (scope.ownWorkOnly()) {
+            return WidgetDtos.Widget.unavailable("stage-funnel", STAGE_VIEW_IS_A_MANAGER_VIEW);
+        }
+        if (!widgets.ribbonHasData(scope.projectIds(), projectId)) {
+            return WidgetDtos.Widget.unavailable("stage-funnel", RIBBON_NOT_IN_USE);
+        }
+
+        Map<String, Long> wip = widgets.openByStage(from, to, scope.projectIds(), projectId);
+        Map<String, String> names = widgets.stageNames();
+
+        // The master's order first, then any code the master no longer knows —
+        // appended rather than dropped, because a retired stage still holding
+        // tickets is the case somebody most needs to see.
+        List<String> ordered = new ArrayList<>(names.keySet());
+        wip.keySet().stream().filter(stage -> !names.containsKey(stage)).forEach(ordered::add);
+
+        List<WidgetDtos.Point> points = ordered.stream()
+                .map(stage -> WidgetDtos.Point.of(
+                        names.getOrDefault(stage, stage),
+                        wip.getOrDefault(stage, 0L),
+                        // The one drill-down of the four that names exactly the
+                        // population it counted: `stage=` filters on
+                        // tickets.current_stage and the bar counts tickets
+                        // currently at that stage. excludeClosed matches the
+                        // worker's own predicate, so the list and the band agree.
+                        "/tickets?stage=" + stage + "&excludeClosed=true" + projectParam(projectId)))
+                .toList();
+
+        return WidgetDtos.Widget.of("stage-funnel", asOf,
+                List.of(new WidgetDtos.Series("Tickets in stage", points)));
+    }
+
+    /**
+     * A-058 · §S-05 widget 17 — open tickets being reworked, and the ping-pong
+     * subset.
+     *
+     * <h2>Two counts and a denominator, because one number is unreadable</h2>
+     *
+     * <p>Twelve tickets in rework is a crisis in a team holding twenty and a
+     * rounding error in two thousand. The open total travels with the counts
+     * from the same summarised row, so the widget cannot show a numerator from
+     * one day beside a denominator from another.
+     *
+     * <p>§7.9 puts this widget at {@code iteration_no >= 2} and §4A.7 raises the
+     * ping-pong alert at {@code >= 3}. Both are drawn: a team with ten one-off
+     * corrections and a team with ten tickets in a loop produce the same single
+     * figure and want different conversations.
+     *
+     * <h2>⚠️ No drill-down, and this is a real gap rather than a decision</h2>
+     *
+     * <p>{@code GET /tickets} has no iteration filter — the closest is
+     * {@code reopenedOnly}, which is {@code cycle_no} and <b>not</b>
+     * {@code iteration_no}. The baseline migration calls those two "the single
+     * most misread concept in the spec", and linking a rework card to a reopened
+     * list would be that exact misreading shipped as a feature: a ticket
+     * reopened three times and resolved cleanly each time is not being reworked.
+     *
+     * <p>So the segments carry no target, following A-056's aging buckets and
+     * A-059's pooled bar — a segment with no honest filter does nothing on click
+     * rather than opening a list that contradicts what was clicked. <b>The
+     * missing parameter is Stream C's</b>: {@code GET /tickets} wants a
+     * {@code minIteration=} to express it, and A-060 is the precedent for how
+     * that lands — the drill-downs existed for three tasks before the list grew
+     * the parameter that made them true.
+     */
+    private WidgetDtos.Widget rework(DashboardScope scope, Long projectId,
+                                     LocalDate from, LocalDate to, Instant asOf) {
+        if (scope.ownWorkOnly()) {
+            return WidgetDtos.Widget.unavailable("rework", STAGE_VIEW_IS_A_MANAGER_VIEW);
+        }
+        if (!widgets.ribbonHasData(scope.projectIds(), projectId)) {
+            return WidgetDtos.Widget.unavailable("rework", RIBBON_NOT_IN_USE);
+        }
+
+        Optional<WidgetRepository.ReworkCounts> counts =
+                widgets.reworkCounts(from, to, scope.projectIds(), projectId);
+        if (counts.isEmpty()) {
+            // No summarised day in the window. Distinct from "nothing is in
+            // rework", which is what a row of zeroes would have said.
+            return WidgetDtos.Widget.unavailable("rework", RIBBON_NOT_IN_USE);
+        }
+
+        WidgetRepository.ReworkCounts row = counts.get();
+        List<WidgetDtos.Point> points = List.of(
+                WidgetDtos.Point.of("Reworked (2 or more passes)", row.rework(), null),
+                WidgetDtos.Point.of("Ping-pong (3 or more passes)", row.pingpong(), null),
+                // The remainder rather than the total, so "First pass" and
+                // "Reworked" partition the open backlog and the client can draw
+                // a share without subtracting.
+                //
+                // 🔴 Ping-pong is NOT a third part of that partition — it is a
+                // subset of Reworked, counted again at a higher threshold.
+                // Stacking all three would count every ping-pong ticket twice
+                // and produce a bar longer than the backlog it describes. The
+                // client draws two segments and nests the third; this comment
+                // is here because the three points arriving in one series is
+                // exactly what invites stacking them.
+                //
+                // Floored at zero: rework is counted over the same open
+                // population as open_total, so the subtraction cannot go
+                // negative unless the two columns were computed from different
+                // days — which the single-row read prevents, and which this
+                // guards against rather than renders as a negative bar.
+                WidgetDtos.Point.of("First pass", Math.max(0, row.openTotal() - row.rework()), null));
+
+        return WidgetDtos.Widget.of("rework", asOf,
+                List.of(new WidgetDtos.Series("Open tickets by rework", points)));
+    }
+
+    /**
+     * A-058 · §S-05 widget 18 — average time per stage, split into work and
+     * waiting.
+     *
+     * <h2>The split is the widget</h2>
+     *
+     * <p>§4A.8 asks "where the calendar time actually goes, split into active vs
+     * idle". A stage averaging four days of which three hours were worked is not
+     * slow because the work is hard, and the total on its own cannot tell those
+     * apart. Idle is the remainder — elapsed minus what somebody logged — and it
+     * is computed here rather than stored, so the two halves cannot drift.
+     *
+     * <p><b>Idle is floored at zero and that hides nothing.</b> Effort attaches
+     * to a stage code rather than to a visit, so a stage entered twice on a
+     * rework loop has both visits' hours counted against whichever of them
+     * sealed in the window — active can exceed elapsed for that stage, and a
+     * negative idle band would draw a bar below the axis for what is really an
+     * attribution limit. The active share is therefore an upper bound and idle a
+     * lower one, which is the safe direction for a chart whose purpose is
+     * finding queue waste: it under-claims waste rather than inventing it. The
+     * migration and A-067's report both state the same limit.
+     *
+     * <h2>Hours, divided once, at the end</h2>
+     *
+     * <p>The table stores minutes and this divides by 60 after summing. Dividing
+     * per day and averaging the results would weight a day with one sealed visit
+     * equally with a day with fifty.
+     */
+    private WidgetDtos.Widget stageDuration(DashboardScope scope, Long projectId,
+                                            LocalDate from, LocalDate to, Instant asOf) {
+        if (scope.ownWorkOnly()) {
+            return WidgetDtos.Widget.unavailable("stage-duration", STAGE_VIEW_IS_A_MANAGER_VIEW);
+        }
+        if (!widgets.ribbonHasData(scope.projectIds(), projectId)) {
+            return WidgetDtos.Widget.unavailable("stage-duration", RIBBON_NOT_IN_USE);
+        }
+
+        List<WidgetRepository.StageDuration> stages =
+                widgets.stageDurations(from, to, scope.projectIds(), projectId);
+        Map<String, String> names = widgets.stageNames();
+
+        // Ribbon order, like the funnel and unlike the donut: reading "QA is
+        // where it sits" off a bar chart depends on knowing where QA comes.
+        List<String> order = new ArrayList<>(names.keySet());
+        List<WidgetRepository.StageDuration> ordered = stages.stream()
+                .sorted(Comparator.comparingInt(stage -> {
+                    int at = order.indexOf(stage.stageCode());
+                    return at < 0 ? Integer.MAX_VALUE : at;
+                }))
+                .toList();
+
+        List<WidgetDtos.Point> active = new ArrayList<>(ordered.size());
+        List<WidgetDtos.Point> idle = new ArrayList<>(ordered.size());
+
+        for (WidgetRepository.StageDuration stage : ordered) {
+            String label = names.getOrDefault(stage.stageCode(), stage.stageCode());
+            // The bar is a DURATION, so a list opening on a different population
+            // cannot contradict it — there is no count on screen to disagree
+            // with. That is what separates this from widget 17, where the
+            // number on the card is a ticket count and a mismatched list would
+            // be read as the card being wrong. The list opens on tickets
+            // standing in the stage now; the bar measures visits that ended in
+            // the window.
+            String drillDown = "/tickets?stage=" + stage.stageCode() + "&excludeClosed=true"
+                    + projectParam(projectId);
+
+            long activeMins = Math.min(stage.activeMins(), stage.elapsedMins());
+            long idleMins = stage.elapsedMins() - activeMins;
+
+            active.add(new WidgetDtos.Point(label, averageHours(activeMins, stage.visits()), drillDown));
+            idle.add(new WidgetDtos.Point(label, averageHours(idleMins, stage.visits()), drillDown));
+        }
+
+        return WidgetDtos.Widget.of("stage-duration", asOf, List.of(
+                new WidgetDtos.Series("Active", active),
+                new WidgetDtos.Series("Idle", idle)));
+    }
+
+    /**
+     * A-058 · §S-05 widget 19 — handoff latency, as a trend.
+     *
+     * <h2>Pure queue waste, and the only figure here nobody owns</h2>
+     *
+     * <p>§7.6 defines it as the gap between one stage being left and the next
+     * being entered. It belongs to neither stage's duration and appears in no
+     * other figure on this dashboard — a team can look fully efficient on widget
+     * 18 while tickets spend days between them.
+     *
+     * <p>Drawn as a trend rather than per stage because §7.9 asks for one and
+     * because the useful question is whether it is growing. The per-stage cut is
+     * A-067's stage-cycle-time report.
+     *
+     * <p><b>Calendar minutes, from the worker.</b> A Friday-evening handoff
+     * picked up at nine on Monday is a few minutes of queue waste, not two days
+     * of it, and this is the one duration in the schema nothing had already
+     * corrected — see {@code DailyStatsRepository.applyHandoffLatency}.
+     *
+     * <h2>⚠️ No drill-down, because a handoff is not a ticket</h2>
+     *
+     * <p>§7.9 gives this widget's drill-down as "slowest handoffs", which is a
+     * list of <em>hops</em>. {@code GET /tickets} lists tickets and has no
+     * parameter for "had a handoff on this date"; the nearest,
+     * {@code reportedFrom}/{@code reportedTo}, filters on when a ticket was
+     * raised, which is a different set that would look plausible and be wrong.
+     * A-060's defect was exactly a link whose filter did not mean what the
+     * segment meant, so this emits nothing rather than something close.
+     */
+    private WidgetDtos.Widget handoffLatency(DashboardScope scope, Long projectId,
+                                             LocalDate from, LocalDate to, Instant asOf) {
+        if (scope.ownWorkOnly()) {
+            return WidgetDtos.Widget.unavailable("handoff-latency", STAGE_VIEW_IS_A_MANAGER_VIEW);
+        }
+        if (!widgets.ribbonHasData(scope.projectIds(), projectId)) {
+            return WidgetDtos.Widget.unavailable("handoff-latency", RIBBON_NOT_IN_USE);
+        }
+
+        List<WidgetDtos.Point> points = widgets
+                .handoffLatency(from, to, scope.projectIds(), projectId).stream()
+                .map(day -> new WidgetDtos.Point(
+                        day.day().toString(), averageHours(day.minutes(), day.handoffs()), null))
+                .toList();
+
+        return WidgetDtos.Widget.of("handoff-latency", asOf,
+                List.of(new WidgetDtos.Series("Average handoff wait (hours)", points)));
+    }
+
+    /**
+     * Minutes to average hours, two decimals.
+     *
+     * <p>{@code HALF_UP} and two places to match
+     * {@code WorkingHoursService.workingHoursBetween}, which is where the
+     * handoff half of these minutes came from — rounding the same quantity two
+     * different ways at two ends of the same pipeline is how a total stops
+     * matching its parts.
+     *
+     * <p>A zero denominator answers zero rather than throwing. The queries
+     * already exclude those rows with {@code HAVING}, so this is a backstop and
+     * not a live path; it returns a number because the alternative is a widget
+     * that 500s on a division nobody would ever see in the response.
+     */
+    private static BigDecimal averageHours(long minutes, long denominator) {
+        if (denominator <= 0) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        return BigDecimal.valueOf(minutes)
+                .divide(BigDecimal.valueOf(60L * denominator), 2, RoundingMode.HALF_UP);
+    }
 
     private static String projectParam(Long projectId) {
         return projectId == null ? "" : "&projectId=" + projectId;
