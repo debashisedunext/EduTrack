@@ -53,6 +53,13 @@ export type SkipStageBody = {
    * @maxLength 500
    */
   reason: string;
-  /** Defaults to the next stage in the template. */
+  /**
+   * Where the ticket lands, not which stage is skipped. Defaults
+to the next stage in the template after the one being
+skipped; required when there is none (the ticket is in the
+template's last stage, or carries no template).
+
+   * @maxLength 20
+   */
   toStageCode?: string;
 };

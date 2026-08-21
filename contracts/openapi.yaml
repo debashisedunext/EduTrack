@@ -2178,9 +2178,36 @@ paths:
       operationId: skipStage
       summary: Skip an optional stage — PM and Admin only
       description: |
+        **The stage being skipped is the one the ticket is standing in**, and
+        `toStageCode` is where it lands — the same meaning that field carries on
+        `handoff`, `rework` and `force-move`. One field, one meaning across all
+        four ribbon routes; the alternative reading would need two transitions
+        per skip and invent a zero-duration segment nobody worked.
+
         `reason` mandatory. The segment renders struck-through with the reason on
         hover, rather than disappearing — a stage that silently vanishes from the
-        ribbon makes the history unreadable later.
+        ribbon makes the history unreadable later. **Who authorised the skip is
+        appended to the stored reason** (§4A.3 asks the hover for both):
+        `ticket_stage_transitions` carries the outgoing and incoming stage
+        owners and no actor at all, and adding a column to an append-only
+        hash-chained table for one name is out of proportion — the same call
+        `rework` makes for its defect list.
+
+        **The stage must be marked `isOptional` on the ticket's workflow
+        template** — blueprint §4A.6, "skipping an *optional* stage requires
+        PM/Admin and a reason". A stage that is not is refused with **422, not
+        400**: nothing the caller sent is malformed, and the identical request
+        would succeed once the ticket reaches a stage the template marks
+        optional. A ticket with no workflow template is not checked, on
+        `rework`'s own precedent for `canReturnTo`.
+
+        Gated on `ticket.skip_stage`, which Admin and PM hold and nobody else
+        (§2's "Skip a stage (with reason)" row) — so a caller without it gets a
+        **403 from the security chain**, never the 422 the mock answers. That
+        difference is the mock's to fix.
+
+        `status` is untouched, like `handoff` and `force-move` and unlike
+        `rework`: a skip says where the ticket is, not something about the work.
       requestBody:
         required: true
         content:
@@ -2190,13 +2217,21 @@ paths:
               required: [reason]
               properties:
                 reason: { type: string, minLength: 3, maxLength: 500 }
-                toStageCode: { type: string, description: Defaults to the next stage in the template. }
+                toStageCode:
+                  type: string
+                  maxLength: 20
+                  description: |
+                    Where the ticket lands, not which stage is skipped. Defaults
+                    to the next stage in the template after the one being
+                    skipped; required when there is none (the ticket is in the
+                    template's last stage, or carries no template).
       responses:
         '200':
           description: Skipped.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RibbonResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/UnprocessableTransition' }
 
@@ -8395,7 +8430,14 @@ components:
           description: '`durationMins − effort`. High idle against low effort is a queue problem.'
         iterationNo: { type: integer }
         loopBackCount: { type: integer, description: Drives the loop-back badge. }
-        skipReason: { type: [string, 'null'] }
+        skipReason:
+          type: [string, 'null']
+          description: |
+            Set only while `state` is `SKIPPED` — read off the transition by
+            which the ticket *left* this stage, not the one it entered. Carries
+            the authoriser as a trailing `Skipped by: …` line, which is what
+            §4A.3's hover asks for alongside the reason; render the whole string.
+            Cleared again if the ticket is later reworked back into the stage.
         handoffNote: { type: [string, 'null'] }
     Ribbon:
       type: object

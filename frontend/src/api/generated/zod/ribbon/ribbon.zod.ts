@@ -96,7 +96,7 @@ export const getRibbonResponse = zod.object({
   "idleMins": zod.number().nullish().describe('`durationMins − effort`. High idle against low effort is a queue problem.'),
   "iterationNo": zod.number().optional(),
   "loopBackCount": zod.number().optional().describe('Drives the loop-back badge.'),
-  "skipReason": zod.string().nullish(),
+  "skipReason": zod.string().nullish().describe('Set only while `state` is `SKIPPED` — read off the transition by\nwhich the ticket \*left\* this stage, not the one it entered. Carries\nthe authoriser as a trailing `Skipped by: …` line, which is what\n§4A.3\'s hover asks for alongside the reason; render the whole string.\nCleared again if the ticket is later reworked back into the stage.\n'),
   "handoffNote": zod.string().nullish()
 })).optional()
 })
@@ -172,7 +172,7 @@ export const handoffTicketResponse = zod.object({
   "idleMins": zod.number().nullish().describe('`durationMins − effort`. High idle against low effort is a queue problem.'),
   "iterationNo": zod.number().optional(),
   "loopBackCount": zod.number().optional().describe('Drives the loop-back badge.'),
-  "skipReason": zod.string().nullish(),
+  "skipReason": zod.string().nullish().describe('Set only while `state` is `SKIPPED` — read off the transition by\nwhich the ticket \*left\* this stage, not the one it entered. Carries\nthe authoriser as a trailing `Skipped by: …` line, which is what\n§4A.3\'s hover asks for alongside the reason; render the whole string.\nCleared again if the ticket is later reworked back into the stage.\n'),
   "handoffNote": zod.string().nullish()
 })).optional()
 })
@@ -264,16 +264,43 @@ export const reworkTicketResponse = zod.object({
   "idleMins": zod.number().nullish().describe('`durationMins − effort`. High idle against low effort is a queue problem.'),
   "iterationNo": zod.number().optional(),
   "loopBackCount": zod.number().optional().describe('Drives the loop-back badge.'),
-  "skipReason": zod.string().nullish(),
+  "skipReason": zod.string().nullish().describe('Set only while `state` is `SKIPPED` — read off the transition by\nwhich the ticket \*left\* this stage, not the one it entered. Carries\nthe authoriser as a trailing `Skipped by: …` line, which is what\n§4A.3\'s hover asks for alongside the reason; render the whole string.\nCleared again if the ticket is later reworked back into the stage.\n'),
   "handoffNote": zod.string().nullish()
 })).optional()
 })
 })
 
 /**
- * `reason` mandatory. The segment renders struck-through with the reason on
+ * **The stage being skipped is the one the ticket is standing in**, and
+`toStageCode` is where it lands — the same meaning that field carries on
+`handoff`, `rework` and `force-move`. One field, one meaning across all
+four ribbon routes; the alternative reading would need two transitions
+per skip and invent a zero-duration segment nobody worked.
+
+`reason` mandatory. The segment renders struck-through with the reason on
 hover, rather than disappearing — a stage that silently vanishes from the
-ribbon makes the history unreadable later.
+ribbon makes the history unreadable later. **Who authorised the skip is
+appended to the stored reason** (§4A.3 asks the hover for both):
+`ticket_stage_transitions` carries the outgoing and incoming stage
+owners and no actor at all, and adding a column to an append-only
+hash-chained table for one name is out of proportion — the same call
+`rework` makes for its defect list.
+
+**The stage must be marked `isOptional` on the ticket's workflow
+template** — blueprint §4A.6, "skipping an *optional* stage requires
+PM/Admin and a reason". A stage that is not is refused with **422, not
+400**: nothing the caller sent is malformed, and the identical request
+would succeed once the ticket reaches a stage the template marks
+optional. A ticket with no workflow template is not checked, on
+`rework`'s own precedent for `canReturnTo`.
+
+Gated on `ticket.skip_stage`, which Admin and PM hold and nobody else
+(§2's "Skip a stage (with reason)" row) — so a caller without it gets a
+**403 from the security chain**, never the 422 the mock answers. That
+difference is the mock's to fix.
+
+`status` is untouched, like `handoff` and `force-move` and unlike
+`rework`: a skip says where the ticket is, not something about the work.
 
  * @summary Skip an optional stage — PM and Admin only
  */
@@ -287,11 +314,13 @@ export const skipStageParams = zod.object({
 export const skipStageBodyReasonMin = 3;
 export const skipStageBodyReasonMax = 500;
 
+export const skipStageBodyToStageCodeMax = 20;
+
 
 
 export const skipStageBody = zod.object({
   "reason": zod.string().min(skipStageBodyReasonMin).max(skipStageBodyReasonMax),
-  "toStageCode": zod.string().optional().describe('Defaults to the next stage in the template.')
+  "toStageCode": zod.string().max(skipStageBodyToStageCodeMax).optional().describe('Where the ticket lands, not which stage is skipped. Defaults\nto the next stage in the template after the one being\nskipped; required when there is none (the ticket is in the\ntemplate\'s last stage, or carries no template).\n')
 })
 
 export const skipStageResponse = zod.object({
@@ -322,7 +351,7 @@ export const skipStageResponse = zod.object({
   "idleMins": zod.number().nullish().describe('`durationMins − effort`. High idle against low effort is a queue problem.'),
   "iterationNo": zod.number().optional(),
   "loopBackCount": zod.number().optional().describe('Drives the loop-back badge.'),
-  "skipReason": zod.string().nullish(),
+  "skipReason": zod.string().nullish().describe('Set only while `state` is `SKIPPED` — read off the transition by\nwhich the ticket \*left\* this stage, not the one it entered. Carries\nthe authoriser as a trailing `Skipped by: …` line, which is what\n§4A.3\'s hover asks for alongside the reason; render the whole string.\nCleared again if the ticket is later reworked back into the stage.\n'),
   "handoffNote": zod.string().nullish()
 })).optional()
 })
@@ -388,7 +417,7 @@ export const forceMoveTicketResponse = zod.object({
   "idleMins": zod.number().nullish().describe('`durationMins − effort`. High idle against low effort is a queue problem.'),
   "iterationNo": zod.number().optional(),
   "loopBackCount": zod.number().optional().describe('Drives the loop-back badge.'),
-  "skipReason": zod.string().nullish(),
+  "skipReason": zod.string().nullish().describe('Set only while `state` is `SKIPPED` — read off the transition by\nwhich the ticket \*left\* this stage, not the one it entered. Carries\nthe authoriser as a trailing `Skipped by: …` line, which is what\n§4A.3\'s hover asks for alongside the reason; render the whole string.\nCleared again if the ticket is later reworked back into the stage.\n'),
   "handoffNote": zod.string().nullish()
 })).optional()
 })

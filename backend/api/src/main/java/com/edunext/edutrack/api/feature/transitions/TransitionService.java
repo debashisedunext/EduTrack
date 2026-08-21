@@ -346,8 +346,19 @@ class TransitionService {
         return null;
     }
 
-    /** The template's stage immediately after {@code fromStage}, left to right. */
-    private String nextStageAfter(Ticket ticket, String fromStage) {
+    /**
+     * The template's stage immediately after {@code fromStage}, left to right.
+     *
+     * <p>Package-private rather than private since C-047, which needs the
+     * identical answer for a different reason: {@code skip-stage} defaults its
+     * destination to the template's next stage, but {@link #resolveToStage}
+     * deliberately reserves that fallback for {@code FORWARD} — widening it
+     * would hand the same guess to {@code CLARIFICATION} and {@code OVERRIDE},
+     * which is what {@link ToStageRequiredException} exists to prevent. Shared
+     * rather than copied so "the template's next stage" cannot come to mean two
+     * things.
+     */
+    String nextStageAfter(Ticket ticket, String fromStage) {
         Long templateId = ticket.getWorkflowTemplateId();
         if (templateId == null) {
             throw new NoNextStageException(ticket.getId(), fromStage);

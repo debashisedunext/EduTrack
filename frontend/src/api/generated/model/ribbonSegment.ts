@@ -75,6 +75,12 @@ export interface RibbonSegment {
   iterationNo?: number;
   /** Drives the loop-back badge. */
   loopBackCount?: number;
+  /** Set only while `state` is `SKIPPED` — read off the transition by
+which the ticket *left* this stage, not the one it entered. Carries
+the authoriser as a trailing `Skipped by: …` line, which is what
+§4A.3's hover asks for alongside the reason; render the whole string.
+Cleared again if the ticket is later reworked back into the stage.
+ */
   skipReason?: RibbonSegmentSkipReason;
   handoffNote?: RibbonSegmentHandoffNote;
 }
