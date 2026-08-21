@@ -1165,6 +1165,11 @@ paths:
         Every role may read it. All six can raise a ticket, and the create form
         cannot mark a field mandatory or filter its task-type picker without
         this.
+
+        **C-071 enforces it**: `createTicket` refuses a task type outside the
+        allow-list and any `mandatoryFields` the request left empty, and
+        `CreateTicketPage` filters its picker and marks its controls from this
+        response.
       responses:
         '200':
           description: OK.
@@ -1203,11 +1208,13 @@ paths:
         through `PATCH /projects/{projectId}`, so narrowing this to Admin would
         take away a capability PMs hold today.
 
-        **Nothing enforces these settings yet.** Ticket creation is Stream C's
-        (`api/feature/tickets`, `CreateTicketPage`); B-019 stores and serves the
-        configuration and C consumes it. Said here rather than left to be
-        discovered, because a settings screen whose settings do nothing is a
-        screen that looks finished.
+        **These settings are enforced as of C-071**, in `createTicket` and in
+        `CreateTicketPage` — B-019 stores and serves the configuration, and
+        Stream C consumes it. Between the two tasks they did nothing at all,
+        which is worse than not offering them: the screen said they had taken
+        effect. Recorded here rather than left to be discovered, because a
+        settings screen whose settings do nothing is a screen that looks
+        finished.
       parameters:
         - { $ref: '#/components/parameters/IfMatch' }
       requestBody:
@@ -1303,6 +1310,32 @@ paths:
         legitimately visible to the caller; what is refused is the combination,
         and a caller who cannot tell "does not exist" from "not yet usable"
         cannot act on either.
+
+        **C-071 — the project's own settings are enforced here, and only here.**
+        `getProjectSettings` says which task types a project accepts and which
+        otherwise-optional fields it requires; both are refused on this operation
+        with a `400` carrying the `errors` map, keyed on the request property so
+        a form can mark the control rather than raise a banner:
+
+        - a `taskTypeId` outside a restricted project's allow-list —
+          `errors.taskTypeId`. **An empty allow-list is unrestricted**, so a
+          project nobody has configured refuses nothing;
+        - every field in `mandatoryFields` the request left empty, all of them in
+          one response rather than one per attempt.
+
+        Two readings that are deliberately not taken. `saveAsDraft` does **not**
+        waive them: the flag is accepted and acted on nowhere, so a draft is
+        stored as an ordinary ticket, and waiving on it would be a one-field
+        opt-out of a project's configuration. And `PLANNED_CLOSE_DATE` is
+        measured against the date the ticket ends up with — supplied or computed
+        from the SLA ladder — not against what the caller sent; requiring the
+        caller to send one would make it the single setting the four roles who
+        may not override the date could never satisfy.
+
+        `updateTicket` does not apply any of it. A newly-ticked mandatory field
+        would otherwise make every existing ticket on the project un-editable,
+        including ones closed years ago. The setting governs what may be raised,
+        not what was.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true

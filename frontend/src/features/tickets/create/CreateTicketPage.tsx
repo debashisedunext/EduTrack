@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
 
 import { useGetMe } from '@/api/generated/auth/auth'
-import { useListProjects } from '@/api/generated/projects/projects'
+import { useGetProjectSettings, useListProjects } from '@/api/generated/projects/projects'
 import { useListClients, useListClientContacts } from '@/api/generated/clients/clients'
 import { useListUsers } from '@/api/generated/users/users'
 import { useListTaskTypes, useListPriorities, useListModules } from '@/api/generated/masters/masters'
@@ -15,6 +15,7 @@ import type { Project } from '@/api/generated/model/project'
 import type { Client } from '@/api/generated/model/client'
 import type { Contact } from '@/api/generated/model/contact'
 import type { User } from '@/api/generated/model/user'
+import type { TicketFieldCode } from '@/api/generated/model/ticketFieldCode'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -50,9 +51,11 @@ import { LevelPicker } from './LevelPicker'
 import { WatcherPicker } from './WatcherPicker'
 import { useCreateTicket } from './createTicketMutation'
 import {
+  allowedTaskTypes,
   bugTaskTypeIds,
   clientRequiringTaskTypeIds,
   emptyTicketForm,
+  projectRulesFrom,
   retainedForNextTicket,
   ticketFormSchema,
   toCreateRequest,
@@ -111,6 +114,14 @@ export function CreateTicketPage() {
     () => ({ clientRequired: clientRequiredIds, bugTypes: bugTypeIds, levels: levelCodes }),
     [clientRequiredIds, bugTypeIds, levelCodes],
   )
+  /*
+    C-071 · the selected project's settings, read at validation time rather than
+    closed over — the same arrangement `submitAction` uses two blocks down and
+    for the same reason. The resolver is built before a project has been picked
+    and long before its settings come back, so one that captured the rules would
+    validate against `noProjectRules` for the life of the form.
+  */
+  const projectRulesRef = React.useRef(projectRulesFrom(undefined))
 
   /**
    * Which button is being validated for. Held in a ref because the resolver has
@@ -125,7 +136,11 @@ export function CreateTicketPage() {
   const submitAction = React.useRef<TicketSaveAction>('assign')
   const resolver = React.useMemo<Resolver<TicketFormValues>>(
     () => (values, context, options) =>
-      zodResolver(ticketFormSchema(taskTypeRules, submitAction.current))(values, context, options),
+      zodResolver(ticketFormSchema(taskTypeRules, submitAction.current, projectRulesRef.current))(
+        values,
+        context,
+        options,
+      ),
     [taskTypeRules],
   )
 
@@ -161,6 +176,59 @@ export function CreateTicketPage() {
   */
   const moduleRequired = taskTypeId != null && bugTypeIds.has(taskTypeId)
   const modulesEmpty = modulesFailed || (modulesData != null && modules.length === 0)
+
+  /*
+    C-071 · B-019's Settings tab, obeyed. Every role may read it — the contract
+    says so in as many words, because "all six can raise a ticket, and the create
+    form cannot mark a field mandatory or filter its task-type picker without
+    this".
+
+    `projectId ?? 0` rather than a `query.enabled` of our own: the generated hook
+    already carries `enabled: !!(projectId)`, so a falsy id is a query that never
+    runs. Its 404 is left to fall through to the empty rules below — a project
+    the caller cannot see is one they cannot raise a ticket on either, and the
+    create call is where they find that out.
+  */
+  const { data: settingsData } = useGetProjectSettings(projectId ?? 0)
+  const projectRules = React.useMemo(() => projectRulesFrom(settingsData?.data), [settingsData])
+  projectRulesRef.current = projectRules
+
+  const mandates = React.useCallback(
+    (field: TicketFieldCode) => projectRules.mandatoryFields.has(field),
+    [projectRules],
+  )
+
+  /*
+    What the task-type picker offers, as against what the rules above are
+    computed from. `clientRequiredIds` and `bugTypeIds` stay derived from the
+    whole active master: they answer "does *this* task type need a client", which
+    does not change because a project stopped accepting the type.
+  */
+  const offeredTaskTypes = React.useMemo(
+    () => allowedTaskTypes(taskTypes, projectRules),
+    [taskTypes, projectRules],
+  )
+  const taskTypesRestricted = projectRules.allowedTaskTypeIds != null
+
+  /*
+    A task type the newly-selected project does not accept is cleared rather than
+    left standing. It has to be one or the other and there is no third option:
+    the picker no longer lists it, so `SelectValue` renders its placeholder and
+    the form *looks* empty while still holding the old id — which is the state
+    that submits a value the user cannot see and gets a 400 for it.
+
+    Deliberately keyed on the settings arriving rather than done in the project
+    picker's `onChange`, which is a tick too early: the allow-list is still in
+    flight there, so nothing yet knows whether the type survives the move. Most
+    moves keep it, which is why it is not simply cleared alongside the client and
+    the assignee.
+  */
+  React.useEffect(() => {
+    const allowed = projectRules.allowedTaskTypeIds
+    if (taskTypeId != null && allowed != null && !allowed.has(taskTypeId)) {
+      setValue('taskTypeId', null)
+    }
+  }, [projectRules, taskTypeId, setValue])
 
   /**
    * C-012 · recomputed server-side on every change to the four inputs that move
@@ -591,7 +659,19 @@ export function CreateTicketPage() {
             label="Task type"
             required
             error={errors.taskTypeId?.message}
-            hint="Sets the default priority and the SLA the close date is computed from."
+            hint={
+              /*
+                C-071 · a restricted project says so. A picker that is simply
+                shorter than it was on the last project reads as a list that has
+                lost its data, and the person raising the ticket cannot change
+                the setting — only a PM or Admin can, on a screen most of the six
+                roles cannot open. Naming it is what turns "where did it go" into
+                "ask the PM".
+              */
+              taskTypesRestricted
+                ? 'This project accepts only these task types. Sets the default priority and the SLA the close date is computed from.'
+                : 'Sets the default priority and the SLA the close date is computed from.'
+            }
           >
             {(aria) => (
               <Controller
@@ -599,14 +679,24 @@ export function CreateTicketPage() {
                 name="taskTypeId"
                 render={({ field }) => (
                   <Select
-                    value={field.value != null ? String(field.value) : undefined}
+                    /*
+                      C-071 · `''` and not `undefined` for "nothing chosen".
+                      Radix reads an `undefined` value as *uncontrolled* and goes
+                      on displaying whatever it last had, so clearing a task type
+                      the new project does not accept would leave the old label
+                      drawn under a picker that no longer offers it — the exact
+                      invisible-stale-value this clearing exists to prevent. It
+                      also silences the "changing from uncontrolled to
+                      controlled" warning the first selection used to emit.
+                    */
+                    value={field.value != null ? String(field.value) : ''}
                     onValueChange={(value) => field.onChange(Number(value))}
                   >
                     <SelectTrigger {...aria}>
                       <SelectValue placeholder="Select a task type" />
                     </SelectTrigger>
                     <SelectContent>
-                      {taskTypes.map((type) => (
+                      {offeredTaskTypes.map((type) => (
                         <SelectItem key={type.id} value={String(type.id)}>
                           {type.name}
                         </SelectItem>
@@ -621,14 +711,17 @@ export function CreateTicketPage() {
           <FormField
             id="clientId"
             label="Client"
+            required={mandates('CLIENT')}
             error={errors.clientId?.message}
             hint={
               <>
-                {taskTypeId != null && clientRequiredIds.has(taskTypeId)
-                  ? 'Required for this task type.'
-                  : showAllClients
-                    ? 'Every active client, not only this project’s.'
-                    : 'Clients mapped to the selected project.'}
+                {mandates('CLIENT')
+                  ? 'Required on every ticket in this project.'
+                  : taskTypeId != null && clientRequiredIds.has(taskTypeId)
+                    ? 'Required for this task type.'
+                    : showAllClients
+                      ? 'Every active client, not only this project’s.'
+                      : 'Clients mapped to the selected project.'}
                 {canViewAllClients && (
                   <label className="ml-1 inline-flex items-center gap-1.5">
                     <input
@@ -689,6 +782,7 @@ export function CreateTicketPage() {
           <FormField
             id="clientContactId"
             label="Client contact"
+            required={mandates('CLIENT_CONTACT')}
             error={errors.clientContactId?.message}
             hint={
               canAddContact
@@ -842,7 +936,7 @@ export function CreateTicketPage() {
           <FormField
             id="moduleId"
             label="Module"
-            required={moduleRequired}
+            required={moduleRequired || mandates('MODULE')}
             error={errors.moduleId?.message}
             hint={
               /*
@@ -862,9 +956,18 @@ export function CreateTicketPage() {
               */
               modulesEmpty
                 ? 'The module list could not be loaded, so there is nothing to choose from yet.'
-                : moduleRequired
-                  ? 'Required for bug-type tickets — it is what routes this to the right team.'
-                  : 'Optional for change requests and internal work. Leave it blank rather than guessing.'
+                : /*
+                     C-071 · the project's rule is named ahead of §7.5's, because
+                     it is the one that surprises: a change request needing a
+                     module is not something §7.5 would lead anyone to expect,
+                     and "required for bug-type tickets" shown on a change
+                     request reads as a bug in the form.
+                  */
+                  mandates('MODULE')
+                  ? 'Required on every ticket in this project — it is what routes this to the right team.'
+                  : moduleRequired
+                    ? 'Required for bug-type tickets — it is what routes this to the right team.'
+                    : 'Optional for change requests and internal work. Leave it blank rather than guessing.'
             }
           >
             {(aria) => (
@@ -895,6 +998,7 @@ export function CreateTicketPage() {
           <FormField
             id="screenName"
             label="Screen name"
+            required={mandates('SCREEN_NAME')}
             error={errors.screenName?.message}
             hint="The screen it happened on."
           >
@@ -904,6 +1008,7 @@ export function CreateTicketPage() {
           <FormField
             id="feature"
             label="Feature"
+            required={mandates('FEATURE')}
             error={errors.feature?.message}
             hint="The feature within that screen."
             className="sm:col-span-2"
@@ -916,6 +1021,7 @@ export function CreateTicketPage() {
           <FormField
             id="stepsToGenerate"
             label="Steps to generate"
+            required={mandates('STEPS_TO_GENERATE')}
             error={errors.stepsToGenerate?.message}
             hint="Numbered steps and screenshots — what a developer needs in order to reproduce it without coming back to ask."
             className="sm:col-span-2"
@@ -963,6 +1069,7 @@ export function CreateTicketPage() {
           <FormField
             id="assigneeId"
             label="Assigned to"
+            required={mandates('ASSIGNEE')}
             error={errors.assigneeId?.message}
             hint="Open-ticket load shown per person, so you can see who is free."
           >

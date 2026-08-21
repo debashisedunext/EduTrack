@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 import { getDb } from '@/mocks/db'
+import type { TicketFieldCode } from '@/api/generated/model/ticketFieldCode'
 import { useCurrentProjectStore } from '@/app/currentProjectStore'
 import { CreateTicketPage } from './CreateTicketPage'
 
@@ -139,6 +140,20 @@ beforeEach(() => {
   // The mock session is Ravi Kumar, a Developer, and the project switcher has
   // no selection until the user makes one.
   useCurrentProjectStore.setState({ project: null })
+  /*
+    C-071 · the CRM fixture requires MODULE and ESTIMATED_HRS on every ticket,
+    and almost every test in this file raises its ticket on CRM. Left in place,
+    that project rule would sit on top of whichever rule each test is actually
+    measuring — §7.5's bug-type module, §4B.2's client, C-013's draft — and an
+    assertion would pass or fail for a reason that has nothing to do with its
+    own subject. Cleared here so each rule is measured alone; `C-071 — the
+    project's own settings` puts it back, explicitly, for the tests that are
+    about it.
+
+    `resetDb()` in `src/test/setup.ts` restores the fixture after every test, so
+    this is scoped to the test that runs next and nothing else.
+  */
+  getDb().projects.find((project) => project.id === 1)!.mandatoryFields = []
 })
 
 afterEach(() => {
@@ -984,5 +999,156 @@ describe('CreateTicketPage — pasting a screenshot', () => {
     })
 
     expect(screen.queryByRole('list', { name: 'Attached files' })).toBeNull()
+  })
+})
+
+/* ── C-071 — the project's own settings ────────────────────────────────── */
+
+/**
+ * B-019's Settings tab had shipped and nothing obeyed it: a PM could restrict a
+ * project's task types, watch the screen confirm the save, and watch tickets be
+ * raised outside them. These are the four things that had to become true.
+ *
+ * The fixture is the arrangement: `PAY` allows exactly two task types and `CRM`
+ * allows none explicitly, which is the pair the whole feature turns on — an
+ * empty allow-list means *unrestricted*, and reading it the other way would
+ * empty the picker on every project in the organisation.
+ */
+describe("C-071 — the project's own settings", () => {
+  const requireOnCrm = (...fields: TicketFieldCode[]) => {
+    getDb().projects.find((project) => project.id === 1)!.mandatoryFields = fields
+  }
+
+  /**
+   * Wait until the settings have actually reached the form.
+   *
+   * **The form cannot enforce a rule it has not been told about yet**, and
+   * `GET /projects/{id}/settings` is a round trip that starts when the project
+   * is picked. A save fired inside that window validates against
+   * `noProjectRules` and goes through — the server refuses it and
+   * `CreateTicketPage` maps the 400 back onto the fields, which is the
+   * arrangement this codebase draws everywhere ("a form is advice; the write
+   * path is the guarantee"). Unreachable by a person, who has a title and a
+   * description to type first; trivially reachable by `fireEvent`.
+   *
+   * The asterisk is the honest signal that the rules have landed, and it is what
+   * the user would be looking at too.
+   */
+  const settingsApplied = (label: string) =>
+    waitFor(() => expect(screen.getByText(label).textContent).toMatch(/\(required\)/))
+
+  it('offers only the task types a restricted project accepts', async () => {
+    renderPage()
+    await formReady()
+    await pickFromDropdown('projectId', /PAY — Payments Gateway/)
+
+    await waitFor(async () => {
+      const options = await readDropdownOptions('taskTypeId')
+      // The two `project_task_types` rows, and nothing else. Filtered out rather
+      // than shown greyed: unlike a client with no primary contact, this is not
+      // an obstacle the person raising the ticket can go and fix.
+      expect(options).toEqual(['Production Bug', 'Internal Bug'])
+    })
+  })
+
+  it('offers every active task type on a project that restricts none', async () => {
+    renderPage()
+    await formReady()
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+
+    const options = await readDropdownOptions('taskTypeId')
+    // An empty allow-list is unrestricted, not forbidden — the decision B-019
+    // turns on, and the one whose reversal would stop ticket creation
+    // everywhere at once. `Fax Request` is absent because it is deactivated,
+    // which is a different rule and still applies.
+    expect(options).toContain('Change Request')
+    expect(options.length).toBeGreaterThan(2)
+    expect(options).not.toContain('Fax Request')
+  })
+
+  it('clears a task type the newly selected project does not accept', async () => {
+    renderPage()
+    await formReady()
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Change Request$/)
+    expect(screen.getByLabelText(/Task type/)).toHaveTextContent('Change Request')
+
+    await pickFromDropdown('projectId', /PAY — Payments Gateway/)
+
+    // Left standing it would be invisible and still submitted: the picker no
+    // longer lists it, so the trigger falls back to its placeholder and the form
+    // looks empty while holding the old id.
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Task type/)).toHaveTextContent('Select a task type'),
+    )
+  })
+
+  it('marks a field the project requires and refuses the save without it', async () => {
+    requireOnCrm('SCREEN_NAME')
+
+    renderPage()
+    await formReady()
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Change Request$/)
+    fillTicketBody('Add a duplicate watermark toggle')
+
+    // The asterisk is `aria-hidden` and paired with an `sr-only` "(required)",
+    // so this reads what a screen reader reads rather than what is drawn.
+    await waitFor(() => expect(screen.getByText('Screen name').textContent).toMatch(/\(required\)/))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+    expect(
+      await screen.findByText('This project requires a screen name on every ticket'),
+    ).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+
+    fireEvent.change(screen.getByLabelText(/Screen name/), { target: { value: 'Fee Receipt Print' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+    await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
+  })
+
+  it('does not waive the project’s fields for a draft, where §7.5’s own rules are waived', async () => {
+    requireOnCrm('SCREEN_NAME')
+
+    renderPage()
+    await formReady()
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Change Request$/)
+    fireEvent.change(screen.getByLabelText(/Title \/ summary/), { target: { value: 'Half a thought' } })
+    await settingsApplied('Screen name')
+
+    // A draft waives the description and the estimate — C-013's rule, unchanged,
+    // and this save would succeed today. It does not waive the project's own
+    // fields: `saveAsDraft` is accepted by the server and acted on nowhere, so a
+    // draft that waived them would be a one-click opt-out producing a ticket
+    // indistinguishable from any other. `ProjectSettingsGate` refuses it too.
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }))
+    expect(
+      await screen.findByText('This project requires a screen name on every ticket'),
+    ).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+  })
+
+  it('reports every field the project requires, not one per attempt', async () => {
+    requireOnCrm('SCREEN_NAME', 'FEATURE')
+
+    renderPage()
+    await formReady()
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Change Request$/)
+    fillTicketBody('Add a duplicate watermark toggle')
+    await settingsApplied('Screen name')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+
+    // Both at once. One per round trip on a form with ten optional fields is a
+    // conversation rather than an error message.
+    expect(
+      await screen.findByText('This project requires a screen name on every ticket'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('This project requires a feature on every ticket'),
+    ).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
   })
 })
