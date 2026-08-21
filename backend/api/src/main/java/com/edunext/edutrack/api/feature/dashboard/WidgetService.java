@@ -252,6 +252,15 @@ class WidgetService {
      */
     private WidgetDtos.Widget render(String widgetKey, DashboardScope scope, Long projectId,
                                      Window window, Instant asOf) {
+        // A-077 · before any branch, because every one of them would otherwise
+        // answer with an empty series that reads as "this project has no
+        // tickets". Placed here rather than in each widget for the reason the
+        // switch exists at all: ten branches each remembering to check is ten
+        // chances for the eleventh to forget, and the failure is silent.
+        if (!scope.coversProject(projectId)) {
+            return WidgetDtos.Widget.unavailable(widgetKey, NOT_YOUR_PROJECT);
+        }
+
         LocalDate start = window.start();
         LocalDate end = window.end();
         return switch (widgetKey) {
@@ -282,6 +291,23 @@ class WidgetService {
             "This breakdown is not kept per resource. Your dashboard reads the figures for "
                     + "tickets assigned to you, and those are recorded per person and per day "
                     + "without this split.";
+
+    /**
+     * A-077 · the sentence for a project whose figures are not this caller's.
+     *
+     * <p>Distinct wording from {@link #NO_RESOURCE_EQUIVALENT} because it is a
+     * different fact, and the difference is what the reader should do next. That
+     * one says the data does not exist in this shape for anybody; this one says
+     * the data exists and is somebody else's. One is a message for this backlog,
+     * the other for whoever administers project membership.
+     *
+     * <p>Named for what it is rather than phrased as a denial, and it deliberately
+     * does not say whether the project has many tickets or none — that is the
+     * fact being withheld, and hinting at it in the refusal would give it away.
+     */
+    static final String NOT_YOUR_PROJECT =
+            "These figures cover the projects you are a member of. This project is not one of "
+                    + "them, so its numbers are not shown here.";
 
     // ── widget 7 · task type donut ───────────────────────────────────────────
 

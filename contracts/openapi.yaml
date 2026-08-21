@@ -10827,6 +10827,30 @@ components:
           type: object
           properties:
             asOf: { type: string, format: date-time, description: Summary tables refresh every five minutes. }
+            # A-077 · additive and optional. Non-null when `?projectId=` names a
+            # project the caller is not a member of, with `cards` empty.
+            #
+            # Not a 404 and not six cards reading 0. The queries behind this
+            # route already AND the caller's scope with the requested project,
+            # so an out-of-scope project matches no rows — but "no rows" renders
+            # as a KPI row of zeroes, which is a measurement rather than an
+            # absence, and states that a project with five hundred tickets has
+            # none. A 404 was the other option and contradicts `/projects/{id}`,
+            # which is deliberately not row-scoped so that a project's name
+            # stays readable by anybody who can see a ticket naming it.
+            #
+            # Mirrors `Widget.unavailableReason` in shape and in wording, so the
+            # KPI row and the charts beneath it cannot answer differently about
+            # the same project. Decided server-side rather than by the SPA from
+            # `GET /me`'s projectIds: CLAUDE.md scopes server-side, never by a
+            # frontend filter.
+            unavailableReason:
+              type: [string, 'null']
+              description: |
+                Why these figures are withheld, in words a person reads, or null
+                when they are served. Set when the requested project is outside
+                the caller's scope; `cards` is empty and `asOf` is null.
+              examples: ['These figures cover the projects you are a member of.']
             cards:
               type: array
               items:

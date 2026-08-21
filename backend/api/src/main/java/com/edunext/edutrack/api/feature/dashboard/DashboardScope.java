@@ -69,4 +69,54 @@ record DashboardScope(boolean ownWorkOnly, long userId, List<Long> projectIds) {
         }
         return requestedAssigneeId;
     }
+
+    /**
+     * A-077 · whether this caller's figures for {@code requestedProjectId} would
+     * be the project's real ones.
+     *
+     * <h2>Why this is needed when the queries were already safe</h2>
+     *
+     * <p>Nothing leaks today. Every widget query ANDs two independent
+     * predicates — the caller's scope and the requested project — so a project
+     * outside the scope matches no rows. That is correct, and it is why this is
+     * <b>not</b> a security fix.
+     *
+     * <p>It is a truthfulness fix. Zero rows render as an empty chart, and an
+     * empty chart states that this project has no tickets, which is false about
+     * a project with five hundred of them. A-056 settled the same question for a
+     * role that has no table to answer it: <i>"an empty series renders as 'no
+     * tickets matched', which is a factual claim about the data and is false"</i>
+     * — and the answer was to say so in words rather than draw nothing.
+     *
+     * <p>A-077's project dashboard is where it stops being theoretical, because
+     * that screen is reached by clicking a project name on any ticket, and the
+     * project master is deliberately <em>not</em> row-scoped — see
+     * {@code ProjectController}, which explains that a PM who could not see a
+     * project's name could not read the tickets they do own. So a caller can and
+     * routinely will arrive at a project whose figures are not theirs.
+     *
+     * <h2>Why the server decides it and not the client</h2>
+     *
+     * <p>{@code GET /me} carries {@code projectIds}, so the SPA could work this
+     * out for itself — and must not. CLAUDE.md's rule is that scope is resolved
+     * server-side and never by a frontend filter, and {@link DashboardScope}'s
+     * own reason for existing is that a rule stated twice is a rule that drifts.
+     * A-056 made the identical call for {@code unavailableReason}: saying it
+     * explicitly <i>"stops the frontend re-deriving the role rule for itself"</i>.
+     *
+     * <p><b>Not a 404.</b> The project's existence and name are already public
+     * to every authenticated caller by Stream B's deliberate decision, so
+     * refusing the whole page would contradict the screen that linked here and
+     * would hide nothing that is not already visible in four pickers.
+     *
+     * @param requestedProjectId the {@code ?projectId=} filter, or null for the
+     *                           caller's whole scope — which is always
+     *                           answerable, since it is by definition what they
+     *                           can see.
+     */
+    boolean coversProject(Long requestedProjectId) {
+        return requestedProjectId == null
+                || projectIds.isEmpty()          // Admin — unrestricted, ScopeResolver's convention
+                || projectIds.contains(requestedProjectId);
+    }
 }

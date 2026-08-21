@@ -92,6 +92,20 @@ class DashboardService {
         // is a Developer seeing their own cards above a chart of everybody's.
         DashboardScope scope = DashboardScope.of(caller);
 
+        // A-077 · a project the caller is not a member of. The queries below are
+        // safe without this — they AND the scope with the requested project and
+        // match nothing — but "nothing" becomes six cards reading 0, and a KPI
+        // row of zeroes is a measurement, not an absence. Refused in the same
+        // words WidgetService uses so the cards and the charts beneath them give
+        // one answer rather than two.
+        //
+        // Ahead of the resource branch deliberately: ?assigneeId= with an
+        // out-of-scope ?projectId= must not slip past on the resource table,
+        // which is keyed by person and carries no project column to bound it.
+        if (!scope.coversProject(projectId)) {
+            return new DashboardDtos.Summary(null, List.of(), WidgetService.NOT_YOUR_PROJECT);
+        }
+
         // A-062 · the one place "whose rows, if anybody's" is decided, and it is
         // DashboardScope's own method rather than a third statement of the rule.
         // Non-null means resource_daily_stats answers this request:
@@ -151,10 +165,10 @@ class DashboardService {
         // the branch above.
         if (subject != null) {
             return new DashboardDtos.Summary(asOf,
-                    resourceCards(flow, stock, priorFlow, priorStock, series, subject, start, end));
+                    resourceCards(flow, stock, priorFlow, priorStock, series, subject, start, end), null);
         }
         return new DashboardDtos.Summary(asOf,
-                cards(flow, stock, priorFlow, priorStock, series, projectId, start, end));
+                cards(flow, stock, priorFlow, priorStock, series, projectId, start, end), null);
     }
 
     /**

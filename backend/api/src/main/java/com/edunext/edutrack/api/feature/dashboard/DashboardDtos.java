@@ -22,9 +22,23 @@ final class DashboardDtos {
      *             {@code computed_at}. Surfaced because these rows are up to
      *             five minutes old by design (A-051) and a dashboard that hides
      *             its own staleness invites somebody to trust a number that
-     *             moved four minutes ago. The contract requires it.
+     *             moved four minutes ago. The contract requires it. <b>Null when
+     *             {@code unavailableReason} is set</b> — nothing was read, so
+     *             there is no recompute time to report, and a timestamp beside a
+     *             refusal would suggest figures were fetched and came back
+     *             empty.
+     * @param unavailableReason A-077 · non-null when the caller asked for a
+     *             project outside their scope, with the reason in plain words
+     *             and {@code cards} empty. <b>Not an empty card set on its own</b>,
+     *             and not a 404: six cards reading 0 is a measurement rather
+     *             than an absence, and 404 would contradict the project master,
+     *             which is deliberately not row-scoped so that a project's name
+     *             is readable by anybody who can see a ticket naming it.
+     *             <p>Mirrors {@code WidgetDtos.Widget.unavailableReason} in both
+     *             shape and wording, so the KPI row and the charts under it
+     *             cannot give two different answers about the same project.
      */
-    record Summary(Instant asOf, List<Card> cards) {
+    record Summary(Instant asOf, List<Card> cards, String unavailableReason) {
     }
 
     /**
