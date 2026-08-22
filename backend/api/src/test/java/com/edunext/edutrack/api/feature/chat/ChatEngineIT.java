@@ -97,6 +97,14 @@ class ChatEngineIT {
     private long outsider;
     private long projectId;
     private long ticketId;
+    /**
+     * StatusRequestService takes the ticket CODE — the contract's TicketId is a
+     * code and that is what the route receives. The fixtures still build by row
+     * id, so both are held.
+     */
+    private static final String TICKET_CODE = "ITC-26-00001";
+    /** A code that resolves to nothing — the old {@code 9_999_999L} in its new shape. */
+    private static final String MISSING_TICKET_CODE = "ZZZ-26-99999";
     private long ticketThread;
     private long directThread;
     private long projectThread;
@@ -1277,7 +1285,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("the manager asks, and the card lands in the ticket's own thread")
         void theCardLandsInTheThread() {
-            StatusRequestService.Outcome outcome = statusRequests.ask(ticketId, meera, null);
+            StatusRequestService.Outcome outcome = statusRequests.ask(TICKET_CODE, meera, null);
 
             assertThat(outcome).isInstanceOf(StatusRequestService.Outcome.Asked.class);
             ChatDtos.ChatMessage card = latestMessageOn(ticketThread);
@@ -1289,7 +1297,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("the manager's own wording is what gets posted")
         void theManagersWording() {
-            statusRequests.ask(ticketId, meera, "  Client call at four — where are we?  ");
+            statusRequests.ask(TICKET_CODE, meera, "  Client call at four — where are we?  ");
 
             assertThat(latestMessageOn(ticketThread).body())
                     .isEqualTo("Client call at four — where are we?");
@@ -1300,7 +1308,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("D-037: asking queues the mail §4B.6 marks never-optional")
         void theAskIsMailed() {
-            statusRequests.ask(ticketId, meera, "any update?");
+            statusRequests.ask(TICKET_CODE, meera, "any update?");
 
             List<Map<String, Object>> queued = jdbc.queryForList(
                     "SELECT * FROM email_log WHERE ticket_id = ?", ticketId);
@@ -1317,7 +1325,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("D-037: the subject leads with the ticket code — D-031")
         void theSubjectCarriesTheCode() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
 
             String subject = jdbc.queryForObject(
                     "SELECT subject FROM email_log WHERE ticket_id = ?", String.class, ticketId);
@@ -1330,7 +1338,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("D-037: the manager's words stay in the thread, not in the subject")
         void theQuestionIsNotPutInTheSubject() {
-            statusRequests.ask(ticketId, meera, "Client call at four — where are we?");
+            statusRequests.ask(TICKET_CODE, meera, "Client call at four — where are we?");
 
             String subject = jdbc.queryForObject(
                     "SELECT subject FROM email_log WHERE ticket_id = ?", String.class, ticketId);
@@ -1350,7 +1358,7 @@ class ChatEngineIT {
                     VALUES (?, 'STATUS_REQUESTED', 'EMAIL', 0)
                     """, ravi);
 
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
 
             assertThat(jdbc.queryForObject(
                     "SELECT COUNT(*) FROM email_log WHERE ticket_id = ?", Integer.class, ticketId))
@@ -1360,7 +1368,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("D-037: the answer sends no mail — §11 gives that row a dash")
         void theAnswerIsNotMailed() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             jdbc.update("DELETE FROM email_log");
 
             chat.post(statusRequestRepository.ensureTicketThread(ticketId, meera), ravi,
@@ -1375,7 +1383,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("the card broadcasts to the ticket's room like any other message")
         void theCardIsBroadcast() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
 
             assertThat(published()).contains("/topic/ticket." + ticketId);
         }
@@ -1383,8 +1391,8 @@ class ChatEngineIT {
         @Test
         @DisplayName("clicking twice asks once")
         void repeatClicksAreIdempotent() {
-            StatusRequestService.Outcome first = statusRequests.ask(ticketId, meera, "any update?");
-            StatusRequestService.Outcome second = statusRequests.ask(ticketId, meera, "any update?");
+            StatusRequestService.Outcome first = statusRequests.ask(TICKET_CODE, meera, "any update?");
+            StatusRequestService.Outcome second = statusRequests.ask(TICKET_CODE, meera, "any update?");
 
             assertThat(asked(first).request().id()).isEqualTo(asked(second).request().id());
             assertThat(asked(first).alreadyOpen()).isFalse();
@@ -1406,8 +1414,8 @@ class ChatEngineIT {
             // twice.
             makePm(anil);
 
-            statusRequests.ask(ticketId, meera, "status?");
-            statusRequests.ask(ticketId, anil, "status?");
+            statusRequests.ask(TICKET_CODE, meera, "status?");
+            statusRequests.ask(TICKET_CODE, anil, "status?");
 
             assertThat(openRequestCount()).isEqualTo(2);
         }
@@ -1417,7 +1425,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("somebody in the thread who is neither the manager nor a PM cannot ask")
         void aColleagueInTheThreadCannotAsk() {
-            assertThat(statusRequests.ask(ticketId, anil, null))
+            assertThat(statusRequests.ask(TICKET_CODE, anil, null))
                     .isInstanceOf(StatusRequestService.Outcome.NotFound.class);
             assertThat(openRequestCount()).isZero();
             assertThat(cardCount()).isZero();
@@ -1428,7 +1436,7 @@ class ChatEngineIT {
         void aProjectPmMayAsk() {
             makePm(anil);
 
-            assertThat(statusRequests.ask(ticketId, anil, null))
+            assertThat(statusRequests.ask(TICKET_CODE, anil, null))
                     .isInstanceOf(StatusRequestService.Outcome.Asked.class);
         }
 
@@ -1438,7 +1446,7 @@ class ChatEngineIT {
             jdbc.update("UPDATE users SET role_id = (SELECT id FROM roles WHERE code = 'ADMIN') "
                     + "WHERE id = ?", anil);
 
-            assertThat(statusRequests.ask(ticketId, anil, null))
+            assertThat(statusRequests.ask(TICKET_CODE, anil, null))
                     .isInstanceOf(StatusRequestService.Outcome.Asked.class);
         }
 
@@ -1452,7 +1460,7 @@ class ChatEngineIT {
                     VALUES (?, ?, 'PM', 1)
                     """, otherProject, anil);
 
-            assertThat(statusRequests.ask(ticketId, anil, null))
+            assertThat(statusRequests.ask(TICKET_CODE, anil, null))
                     .isInstanceOf(StatusRequestService.Outcome.NotFound.class);
         }
 
@@ -1464,7 +1472,7 @@ class ChatEngineIT {
                     VALUES (?, ?, 'PM', 0)
                     """, projectId, anil);
 
-            assertThat(statusRequests.ask(ticketId, anil, null))
+            assertThat(statusRequests.ask(TICKET_CODE, anil, null))
                     .isInstanceOf(StatusRequestService.Outcome.NotFound.class);
         }
 
@@ -1475,8 +1483,8 @@ class ChatEngineIT {
             // a row. Whether Anil is Ravi's manager depends entirely on the
             // row, so a 403 here would confirm the ticket exists to anyone
             // willing to try ids.
-            assertThat(statusRequests.ask(ticketId, anil, null))
-                    .isEqualTo(statusRequests.ask(9_999_999L, anil, null));
+            assertThat(statusRequests.ask(TICKET_CODE, anil, null))
+                    .isEqualTo(statusRequests.ask(MISSING_TICKET_CODE, anil, null));
         }
 
         @Test
@@ -1485,7 +1493,7 @@ class ChatEngineIT {
             makePm(anil);
             jdbc.update("UPDATE tickets SET assigned_to = NULL WHERE id = ?", ticketId);
 
-            assertThat(statusRequests.ask(ticketId, anil, null))
+            assertThat(statusRequests.ask(TICKET_CODE, anil, null))
                     .isInstanceOf(StatusRequestService.Outcome.Rejected.class);
             assertThat(cardCount())
                     .as("a question in the thread with nobody's name against it, and a clock "
@@ -1504,7 +1512,7 @@ class ChatEngineIT {
             // is ever reached — 404, not 422. Pinned because it is the kind of
             // ordering that looks like a bug the first time somebody hits it:
             // a PM or Admin on the same ticket gets the 422 above.
-            assertThat(statusRequests.ask(ticketId, meera, null))
+            assertThat(statusRequests.ask(TICKET_CODE, meera, null))
                     .isInstanceOf(StatusRequestService.Outcome.NotFound.class);
         }
 
@@ -1514,7 +1522,7 @@ class ChatEngineIT {
             makePm(anil);
             jdbc.update("UPDATE tickets SET assigned_to = ? WHERE id = ?", anil, ticketId);
 
-            assertThat(statusRequests.ask(ticketId, anil, null))
+            assertThat(statusRequests.ask(TICKET_CODE, anil, null))
                     .isInstanceOf(StatusRequestService.Outcome.Rejected.class);
         }
 
@@ -1527,7 +1535,7 @@ class ChatEngineIT {
             jdbc.update("DELETE FROM chat_participants WHERE thread_id = ?", ticketThread);
             jdbc.update("DELETE FROM chat_threads WHERE id = ?", ticketThread);
 
-            StatusRequestService.Outcome outcome = statusRequests.ask(ticketId, meera, null);
+            StatusRequestService.Outcome outcome = statusRequests.ask(TICKET_CODE, meera, null);
 
             // Nothing else in the system creates a ticket thread. Refusing here
             // would mean "you may not ask for a status because nobody has
@@ -1543,7 +1551,7 @@ class ChatEngineIT {
             jdbc.update("DELETE FROM chat_participants WHERE thread_id = ? AND user_id = ?",
                     ticketThread, ravi);
 
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
 
             // A notification that deep-links somebody to a 404 is worse than
             // none: membership is what makes the thread readable at all.
@@ -1553,7 +1561,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("the assignee gets a bell entry in the Status requests tab")
         void theAssigneeIsNotified() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
 
             assertThat(notificationsFor(ravi, "STATUS_REQUESTED")).isEqualTo(1);
             assertThat(notificationsFor(meera, "STATUS_REQUESTED"))
@@ -1566,7 +1574,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("the assignee's reply closes it and the wait is recorded")
         void theReplyClosesIt() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             chat.post(ticketThread, ravi, "Fix is in review, closing today.");
 
             StatusRequestDtos.StatusRequest answered = onlyRequest();
@@ -1579,7 +1587,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("the manager chasing their own question does not answer it")
         void theManagersFollowUpDoesNotClose() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             chat.post(ticketThread, meera, "any update on this?");
 
             // Without this the metric would record a flattering response time
@@ -1590,7 +1598,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("a manager who ends up holding the ticket still cannot answer their own question")
         void theManagerCannotAnswerEvenWhenTheTicketBecomesTheirs() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             // S-24 reassigns the ticket to Meera herself — she asked Ravi, and
             // now she owns the work.
             jdbc.update("UPDATE tickets SET assigned_to = ? WHERE id = ?", meera, ticketId);
@@ -1611,7 +1619,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("two replies racing the same request close it once")
         void theClaimIsSafeWithoutTheCandidateQuery() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             long id = onlyRequest().id();
             long messageId = idOfLatest();
 
@@ -1633,7 +1641,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("a bystander talking in the thread does not answer it")
         void aBystanderDoesNotClose() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             chat.post(ticketThread, anil, "I saw something similar last week");
 
             assertThat(onlyRequest().isAnswered()).isFalse();
@@ -1643,8 +1651,8 @@ class ChatEngineIT {
         @DisplayName("one reply answers every manager who was waiting")
         void oneReplyClosesThemAll() {
             makePm(anil);
-            statusRequests.ask(ticketId, meera, "status?");
-            statusRequests.ask(ticketId, anil, "status?");
+            statusRequests.ask(TICKET_CODE, meera, "status?");
+            statusRequests.ask(TICKET_CODE, anil, "status?");
 
             chat.post(ticketThread, ravi, "Deployed to staging, verifying now.");
 
@@ -1656,7 +1664,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("after a reassignment the new owner can close what the old one was asked")
         void theNewOwnerCanAnswer() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             // The ticket moves to Anil. Ravi has no reason to answer any more,
             // and without this clause nobody can clear the row — the manager's
             // list would fill with questions that cannot be closed.
@@ -1673,7 +1681,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("after a reassignment the person who was asked can still answer")
         void theOriginalOwnerCanStillAnswer() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             jdbc.update("UPDATE tickets SET assigned_to = ? WHERE id = ?", anil, ticketId);
 
             // The mirror of theNewOwnerCanAnswer, and the reason the clause is
@@ -1688,7 +1696,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("a second reply neither reopens it nor rings the manager again")
         void aSecondReplyChangesNothing() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             chat.post(ticketThread, ravi, "Fix is in review.");
             java.time.Instant firstAnswer = onlyRequest().answeredAt();
 
@@ -1701,7 +1709,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("the manager is told their question was answered")
         void theManagerIsNotified() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
             chat.post(ticketThread, ravi, "Fix is in review.");
 
             assertThat(notificationsFor(meera, "STATUS_REQUEST_ANSWERED")).isEqualTo(1);
@@ -1715,7 +1723,7 @@ class ChatEngineIT {
         @Test
         @DisplayName("the wait is working minutes, so a weekend is not held against anybody")
         void theWaitIsMeasuredAgainstTheWorkingCalendar() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
 
             // Asked at 18:00 IST on a Friday — half an hour before the 18:30
             // close on the seeded calendar — and answered below at wall-clock
@@ -1762,11 +1770,11 @@ class ChatEngineIT {
         @DisplayName("the awaiting list is longest wait first, and only your own")
         void theAwaitingList() {
             makePm(anil);
-            statusRequests.ask(ticketId, meera, "older");
+            statusRequests.ask(TICKET_CODE, meera, "older");
             long older = onlyRequest().id();
             jdbc.update("UPDATE ticket_status_requests SET requested_at = ? WHERE id = ?",
                     java.sql.Timestamp.from(java.time.Instant.parse("2026-08-01T09:00:00Z")), older);
-            statusRequests.ask(ticketId, anil, "newer");
+            statusRequests.ask(TICKET_CODE, anil, "newer");
 
             assertThat(statusRequests.awaiting(meera))
                     .extracting(StatusRequestDtos.StatusRequest::id)
@@ -1781,27 +1789,27 @@ class ChatEngineIT {
         @DisplayName("the badge shows what is outstanding on the ticket, whoever asked")
         void theBadge() {
             makePm(anil);
-            statusRequests.ask(ticketId, meera, "one");
-            statusRequests.ask(ticketId, anil, "two");
+            statusRequests.ask(TICKET_CODE, meera, "one");
+            statusRequests.ask(TICKET_CODE, anil, "two");
 
-            assertThat(statusRequests.openOnTicket(ticketId, ravi)).hasSize(2);
+            assertThat(statusRequests.openOnTicket(TICKET_CODE, ravi)).hasSize(2);
 
             chat.post(ticketThread, ravi, "both answered at once");
-            assertThat(statusRequests.openOnTicket(ticketId, ravi)).isEmpty();
+            assertThat(statusRequests.openOnTicket(TICKET_CODE, ravi)).isEmpty();
         }
 
         @Test
         @DisplayName("somebody who cannot see the conversation sees no badge")
         void theBadgeIsScopedByMembership() {
-            statusRequests.ask(ticketId, meera, null);
+            statusRequests.ask(TICKET_CODE, meera, null);
 
-            assertThat(statusRequests.openOnTicket(ticketId, outsider)).isEmpty();
+            assertThat(statusRequests.openOnTicket(TICKET_CODE, outsider)).isEmpty();
         }
 
         @Test
         @DisplayName("deleting the question withholds it here too")
         void theTombstoneReachesTheNote() {
-            statusRequests.ask(ticketId, meera, "Where are we on this?");
+            statusRequests.ask(TICKET_CODE, meera, "Where are we on this?");
             long messageId = onlyRequest().requestMessageId();
             assertThat(onlyRequest().note()).isEqualTo("Where are we on this?");
 

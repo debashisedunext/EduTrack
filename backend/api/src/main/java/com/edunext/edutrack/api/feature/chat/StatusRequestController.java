@@ -67,7 +67,7 @@ class StatusRequestController {
     @Operation(operationId = "askTicketStatus",
             summary = "Request a status update from the assignee (S-25)")
     ResponseEntity<?> ask(Authentication authentication,
-                          @PathVariable long ticketId,
+                          @PathVariable String ticketId,
                           @Valid @RequestBody(required = false) StatusRequestDtos.AskStatus request) {
         StatusRequestService.Outcome outcome = statusRequests.ask(
                 ticketId,
@@ -99,7 +99,7 @@ class StatusRequestController {
     @GetMapping(path = "/tickets/{ticketId}/status-requests", produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(operationId = "listTicketStatusRequests",
             summary = "Open status requests on this ticket (S-25)")
-    StatusRequestListResponse onTicket(Authentication authentication, @PathVariable long ticketId) {
+    StatusRequestListResponse onTicket(Authentication authentication, @PathVariable String ticketId) {
         return new StatusRequestListResponse(
                 statusRequests.openOnTicket(ticketId, CurrentUser.idOf(authentication)));
     }

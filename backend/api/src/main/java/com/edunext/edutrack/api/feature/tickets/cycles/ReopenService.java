@@ -239,13 +239,16 @@ class ReopenService {
      */
     @Transactional
     TicketWire.Ticket reopen(Authentication caller,
-                             long ticketId,
+                             String ticketCode,
                              ReopenDtos.ReopenRequest request) {
 
         // Scope first, and only once. Everything below works by ticket id, so a
         // caller who got past this line would reopen another project's ticket and
         // no later write would notice.
-        Ticket ticket = tickets.require(caller, ticketId);
+        // The ticket CODE, per the contract's TicketId $ref — CloseController's
+        // sibling route has taken one since 20 Aug and this one 400'd until now.
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
 
         if (!CLOSED.equals(ticket.getStatus())) {
             throw new TicketNotClosedException(ticket.getStatus());

@@ -95,7 +95,7 @@ class ReopenController {
                     resting in — belong to C-042's transition service.""")
     ReopenDtos.TicketResponse reopen(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             /*
              * Accepted per CONVENTIONS.md §4 and NOT yet honoured: the 24-hour
              * replay store does not exist. Until it does, a retried reopen is
