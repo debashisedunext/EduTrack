@@ -100,7 +100,25 @@ function EntityLink({ to, children }: { to: string; children: ReactNode }) {
 }
 
 function PersonCell({ person }: { person: UserRef | null | undefined }) {
-  if (!person) return <Dash />
+  /*
+   * ⚠ Guarded on the field this actually reads, not merely on the object being
+   * present — and the difference is a white screen.
+   *
+   * The contract declares `Ticket.assignee` and `Ticket.reportedBy` as
+   * `UserRef`, so the generated type says `person.displayName` is there. Eight
+   * routes answer with a bare numeric id instead (`TicketWire` carries
+   * `Long reportedBy` / `Long assignedTo`; its own class note records the
+   * divergence). **A number is truthy**, so `!person` waved `17` through, and
+   * the avatar below then read `displayName` off it as `undefined` and threw
+   * inside `initials()` — taking the entire route down, because this app has no
+   * error boundary anywhere.
+   *
+   * Rendering a dash is the honest answer while the payload says nothing about
+   * who this is. The real repair is the backend sending the shape the contract
+   * promises; this stops one absent name from costing the whole page in the
+   * meantime, and would still be correct after that lands.
+   */
+  if (!person || typeof person !== 'object' || person.displayName == null) return <Dash />
   return (
     <span className="flex min-w-0 items-center gap-2">
       {/*

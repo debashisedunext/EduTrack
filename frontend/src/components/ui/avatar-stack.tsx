@@ -15,8 +15,24 @@ export interface AvatarStackProps {
   className?: string
 }
 
-function initials(name: string) {
-  return name
+/**
+ * ⚠ Tolerates a missing name, and that is not defensive clutter.
+ *
+ * `AvatarStackPerson.name` is typed `string`, so this read looks safe — but the
+ * type is only a promise about the *caller's* data, and a caller filling it
+ * from an API response inherits whatever that response actually contained. A
+ * ticket whose `assignee` arrived as a bare numeric id rather than the
+ * contract's `UserRef` reached here as `{name: undefined}`, `.split()` threw,
+ * and because nothing in this app is wrapped in an error boundary the whole
+ * page unmounted to a white screen — a blank browser window as the symptom of
+ * one absent field.
+ *
+ * A shared primitive that every stream renders should degrade to an empty
+ * badge rather than take the route down with it. The caller is still wrong and
+ * still gets fixed; this decides how loudly that wrongness fails.
+ */
+function initials(name: string | null | undefined) {
+  return (name ?? '')
     .split(' ')
     .filter(Boolean)
     .slice(0, 2)
