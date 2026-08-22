@@ -47,6 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+export * from './approveTimesheetParams';
 export * from './askTicketStatusBody';
 export * from './assignTicketBody';
 export * from './attachment';
@@ -707,6 +708,12 @@ export * from './ticketSummaryEstimatedHrs';
 export * from './ticketSummaryModuleId';
 export * from './ticketSummaryPlannedCloseDate';
 export * from './timesheet';
+export * from './timesheetApproval';
+export * from './timesheetApprovalNote';
+export * from './timesheetApprovalProperty';
+export * from './timesheetApprovalRequest';
+export * from './timesheetApprovalRequestNote';
+export * from './timesheetApprovalResponse';
 export * from './timesheetDay';
 export * from './timesheetResponse';
 export * from './timesheetRow';

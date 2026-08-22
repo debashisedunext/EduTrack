@@ -67,16 +67,14 @@ import java.util.TreeMap;
  * Org-wide plus their own leave is the honest answer at this grain; a
  * per-project timesheet, if it is ever wanted, can pass one.
  *
- * <h2>Deliberately absent: the approval step</h2>
+ * <h2>The approval step, since B-065</h2>
  *
- * <p>§21 also asks for "an approval step for the manager" and it is not here.
- * {@code ticket_effort_logs} is append-only and hash-chained, so an approval
- * flag on it is not a thing that can exist, and a separate approvals table is a
- * migration, Stream A's review, and a policy nobody has decided: the backdating
- * window and who signs off are still an open governance question, which
- * {@code feature/tickets/effort/README.md} already records as raised rather
- * than made. Building the flow here would settle it by accident. Raised again,
- * as its own task.
+ * <p>§21's "an approval step for the manager" is {@link TimesheetApprovalService},
+ * a separate write path over its own table ({@code timesheet_approvals},
+ * V20260822_1200) — {@code ticket_effort_logs} is append-only and hash-chained,
+ * so an approval flag could never have lived on it. This class only reads the
+ * answer: {@link #week} looks the current week up in {@link TimesheetApprovalRepository}
+ * and carries it as {@code approval}, null until somebody reviews it.
  */
 @Service
 class TimesheetService {
@@ -85,13 +83,16 @@ class TimesheetService {
     private final Profile360Repository people;
     private final WorkingHoursService workingHours;
     private final WorkingCalendarRepository calendars;
+    private final TimesheetApprovalRepository approvals;
 
     TimesheetService(TimesheetRepository repository, Profile360Repository people,
-                     WorkingHoursService workingHours, WorkingCalendarRepository calendars) {
+                     WorkingHoursService workingHours, WorkingCalendarRepository calendars,
+                     TimesheetApprovalRepository approvals) {
         this.repository = repository;
         this.people = people;
         this.workingHours = workingHours;
         this.calendars = calendars;
+        this.approvals = approvals;
     }
 
     /**
@@ -132,6 +133,11 @@ class TimesheetService {
 
         Profile360Repository.Subject s = subject.get();
 
+        TimesheetDtos.TimesheetApproval approval = approvals.find(userId, weekStart)
+                .map(a -> new TimesheetDtos.TimesheetApproval(
+                        a.weekStart().toString(), a.approvedBy(), a.approvedAt(), a.note()))
+                .orElse(null);
+
         return Optional.of(new TimesheetDtos.Timesheet(
                 new TimesheetDtos.UserRef(s.id(), s.fullName(), s.roleCode(), s.username()),
                 weekStart.toString(),
@@ -140,7 +146,8 @@ class TimesheetService {
                 rows,
                 scaled(logged),
                 scaled(capacity),
-                utilisation(logged, capacity)));
+                utilisation(logged, capacity),
+                approval));
     }
 
     /**
@@ -150,8 +157,15 @@ class TimesheetService {
      * "the week containing this" and never compute a boundary itself. A client
      * that had to would eventually compute a different one from the server, and
      * the screen would page through weeks that did not line up with its totals.
+     *
+     * <p>Package-private rather than {@code private}: {@link TimesheetApprovalService}
+     * (B-065) resolves {@code weekOf} to the identical Monday before looking up
+     * or writing an approval, and a second implementation of this one-line rule
+     * is exactly the drift CLAUDE.md's "never write your own date maths" warns
+     * about — small enough to look harmless, and the first place the two would
+     * disagree is a week boundary nobody would think to test.
      */
-    private static LocalDate mondayOf(LocalDate date) {
+    static LocalDate mondayOf(LocalDate date) {
         return date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
     }
 

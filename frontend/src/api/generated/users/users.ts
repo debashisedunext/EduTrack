@@ -66,10 +66,12 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ApproveTimesheetParams,
   BulkUserStatusRequest,
   BulkUserStatusResponse,
   ConflictResponse,
   ExportUsersParams,
+  ForbiddenResponse,
   GetUserProfile360Params,
   GetUserTimesheetParams,
   ListReporteesParams,
@@ -80,6 +82,8 @@ import type {
   Problem,
   Profile360Response,
   SetUserStatusBody,
+  TimesheetApprovalRequest,
+  TimesheetApprovalResponse,
   TimesheetResponse,
   UnauthorizedResponse,
   UserCreatedResponse,
@@ -886,10 +890,10 @@ themselves. A caller who may not see the subject gets the same `404` as
 one asking for a user who does not exist — distinguishing them would let
 anyone enumerate the staff list by id.
 
-**No approval step.** §21 also asks for one, and it is not here: an
-approval cannot be a flag on an append-only, hash-chained table, and the
-policy it would enforce — the backdating window and who signs off — is
-still an open governance question. Raised rather than invented.
+**The approval step, since B-065.** §21 also asks for one, and it now
+exists at `POST .../timesheet/approval` — a new row rather than a flag
+on the append-only effort log. `approval` here is null until an Admin
+or the resource's own direct manager reviews the week.
 
  * @summary A resource's week, stage by stage (B-063)
  */
@@ -991,6 +995,96 @@ export function useGetUserTimesheet<TData = Awaited<ReturnType<typeof getUserTim
 
 
 /**
+ * §21's "an approval step for the manager", built as its own row rather
+than a flag on `ticket_effort_logs` — that table is append-only and
+hash-chained, so nothing on it can be mutated to mean "reviewed".
+
+**Who may approve is a row question, decided the same way the GET
+above decides who may look**: Admin, or the resource's own direct
+reporting manager — `users.reporting_manager_id`, the same direct-only
+reading `GET .../timesheet` already uses, not a transitive walk up the
+chain. A caller who is neither gets the same `404` as a user id that
+does not exist, so an id cannot be walked to learn who reports to whom.
+The three delivery roles and Support never reach that check at all:
+`hasAnyRole('ADMIN','PM')` refuses them first, and that refusal does
+not depend on which resource is named, so it is the one `403` this
+route can answer.
+
+**One review per resource per week.** A week already reviewed answers
+`409`, naming who reviewed it and when — never a second, silent row —
+which is also why a retried `Idempotency-Key` is accepted but not yet
+honoured: `uq_timesheet_approvals_week` already catches a genuine
+double-submit as a 409 rather than a second row, on
+`EffortLogController`'s own precedent for a create the 24-hour replay
+store (A-035) does not exist for yet.
+
+ * @summary A manager marks a resource's week reviewed (B-065)
+ */
+export const approveTimesheet = (
+    userId: number,
+    timesheetApprovalRequest: TimesheetApprovalRequest,
+    params?: ApproveTimesheetParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<TimesheetApprovalResponse>(
+      {url: `/users/${userId}/timesheet/approval`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: timesheetApprovalRequest,
+        params, signal
+    },
+      );
+    }
+  
+
+
+export const getApproveTimesheetMutationOptions = <TError = ForbiddenResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveTimesheet>>, TError,{userId: number;data: TimesheetApprovalRequest;params?: ApproveTimesheetParams}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof approveTimesheet>>, TError,{userId: number;data: TimesheetApprovalRequest;params?: ApproveTimesheetParams}, TContext> => {
+
+const mutationKey = ['approveTimesheet'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveTimesheet>>, {userId: number;data: TimesheetApprovalRequest;params?: ApproveTimesheetParams}> = (props) => {
+          const {userId,data,params} = props ?? {};
+
+          return  approveTimesheet(userId,data,params,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveTimesheetMutationResult = NonNullable<Awaited<ReturnType<typeof approveTimesheet>>>
+    export type ApproveTimesheetMutationBody = TimesheetApprovalRequest
+    export type ApproveTimesheetMutationError = ForbiddenResponse | NotFoundResponse | ConflictResponse
+
+    /**
+ * @summary A manager marks a resource's week reviewed (B-065)
+ */
+export const useApproveTimesheet = <TError = ForbiddenResponse | NotFoundResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveTimesheet>>, TError,{userId: number;data: TimesheetApprovalRequest;params?: ApproveTimesheetParams}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof approveTimesheet>>,
+        TError,
+        {userId: number;data: TimesheetApprovalRequest;params?: ApproveTimesheetParams},
+        TContext
+      > => {
+
+      const mutationOptions = getApproveTimesheetMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * @summary Direct and indirect reportees
  */
 export const listReportees = (
