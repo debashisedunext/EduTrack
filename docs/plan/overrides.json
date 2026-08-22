@@ -56,5 +56,10 @@
   "A-030": {
     "status": "done",
     "reason": "Shivendra, PR #87 merged 2026-08-11 — features/auth/ with LoginPage, ForgotPassword, ResetPassword, ChangePassword, authStore, RequireAuth and the strength meter, verified against the real stack (MySQL, Redis, packaged jar, Vite proxy with VITE_USE_MOCKS=false), and checked off in STREAM-A-PLATFORM.md. Commit subject carried no task ID and the merge subject only had the lowercase branch slug 'a-030', which the [A-D]-\\d{3} pattern does not match"
+  },
+  "A-059": {
+    "status": "done",
+    "pct": 100,
+    "reason": "Shivendra, commit d1f78b95 in PR #220 merged 2026-08-19 — V20260819_0443__client_daily_stats.sql, worker/stats/{DailyStatsRepository.refreshClientStats,StatsRefreshWorker}, the client-volume branch in WidgetService/WidgetRepository, and features/dashboard/charts/ClientVolumeBar with its tests; DashboardWidgetIT carries 11 references and the generated client already declares the key. The commit subject does say 'A-059', but the branch was called feat/platform/client-volume-widget, so the merge subject that reached develop's first-parent history carried no task ID and the refresh could not attribute it — the same failure as A-030 and A-010. Backlog line 371 has been checked off since the day it merged."
   }
 }
