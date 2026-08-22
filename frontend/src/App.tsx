@@ -1,4 +1,4 @@
-import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './app/AppShell'
 import { ChatPage } from './features/chat/ChatPage'
 import { ScreenPlaceholder } from './app/ScreenPlaceholder'
@@ -19,6 +19,7 @@ import { ClientListPage } from './features/clients/ClientListPage'
 import { ClientFormPage } from './features/clients/ClientFormPage'
 import { ClientImportPage } from './features/imports/ClientImportPage'
 import { ResourceImportPage } from './features/imports/ResourceImportPage'
+import { MastersIndexPage } from './features/masters/MastersIndexPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
 import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
 import { ProjectListPage } from './features/masters/projects/ProjectListPage'
@@ -47,7 +48,6 @@ import { ReportsHubPage } from './features/reports/ReportsHubPage'
 import { ReportViewerPage } from './features/reports/ReportViewerPage'
 import { ScheduledReportsPage } from './features/reports/ScheduledReportsPage'
 import { ResourceProfilePage } from './features/resources/ResourceProfilePage'
-import { Button } from './components/ui/button'
 
 export default function App() {
   return (
@@ -157,47 +157,12 @@ export default function App() {
             */}
             <Route path="/timesheet" element={<TimesheetPage />} />
             <Route path="/timesheet/:userId" element={<TimesheetPage />} />
-            <Route
-              path="/masters"
-              element={
-                <ScreenPlaceholder
-                  title="Masters"
-                  action={
-                    <div className="flex flex-wrap items-center justify-center gap-2">
-                      {/* The masters index arrives with the rest of M3; until
-                          then the screens that exist are reachable from here. */}
-                      <Button asChild>
-                        <Link to="/masters/resources">Resources</Link>
-                      </Button>
-                      <Button asChild variant="secondary">
-                        <Link to="/masters/roles">Roles &amp; permissions</Link>
-                      </Button>
-                      <Button asChild variant="secondary">
-                        <Link to="/masters/projects">Projects</Link>
-                      </Button>
-                      <Button asChild variant="secondary">
-                        <Link to="/masters/priorities">Priority levels</Link>
-                      </Button>
-                      <Button asChild variant="secondary">
-                        <Link to="/masters/task-types">Task types</Link>
-                      </Button>
-                      <Button asChild variant="secondary">
-                        <Link to="/masters/statuses">Statuses &amp; workflow</Link>
-                      </Button>
-                      <Button asChild variant="secondary">
-                        <Link to="/masters/calendar">Working calendar</Link>
-                      </Button>
-                      <Button asChild variant="secondary">
-                        <Link to="/masters/notification-templates">Notification templates</Link>
-                      </Button>
-                      <Button asChild variant="secondary">
-                        <Link to="/masters/clients">Clients</Link>
-                      </Button>
-                    </div>
-                  }
-                />
-              }
-            />
+            {/* B-067 · the index the sidebar's Masters entry has led to since
+                A-030 and never actually reached until now. Permission-filtered
+                per-card rather than gated as a whole page — `MastersIndexPage`'s
+                own note has the per-master @PreAuthorize audit that decided
+                which one (notification templates) needed it. */}
+            <Route path="/masters" element={<MastersIndexPage />} />
             <Route path="/masters/resources" element={<ResourceListPage />} />
             {/* `/new` before `/:userId/edit` so the literal wins — otherwise
                 "new" is matched as a userId and the form loads resource NaN.
