@@ -267,7 +267,21 @@ export default function App() {
                 the path is unchanged. */}
             <Route path="/masters/clients/import" element={<ClientImportPage />} />
             <Route path="/masters/clients/:clientId/edit" element={<ClientFormPage />} />
-            <Route path="/settings" element={<ScreenPlaceholder title="Settings" />} />
+            {/* B-068 · DEPENDENCIES.md row 24, decided rather than built. C-027
+                shipped `GET/PUT /attachments/limits` — the only org-wide
+                setting the product currently has — as an API and stopped
+                there, because no S-number specifies this screen. The sidebar
+                entry stays; the placeholder now says why there is no page
+                behind it instead of promising one a later task would build. */}
+            <Route
+              path="/settings"
+              element={
+                <ScreenPlaceholder
+                  title="Settings"
+                  description="There is no settings screen. Attachment limits — the only org-wide setting today — are configured through the API (PUT /attachments/limits) by an administrator."
+                />
+              }
+            />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />
           </Route>
         </Route>
