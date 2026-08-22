@@ -1,5 +1,8 @@
 package com.edunext.edutrack.api.feature.tickets.detail;
 
+import com.edunext.edutrack.api.feature.tickets.TicketRefResolver;
+import com.edunext.edutrack.api.feature.transitions.RibbonAssembler;
+import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.feature.tickets.links.TicketLinkService;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
@@ -35,6 +38,8 @@ import static org.mockito.Mockito.when;
 class TicketDetailServiceTest {
 
     private static final long TICKET_ID = 347L;
+    /** The contract's `TicketId` is the code, and the service resolves by it. */
+    private static final String TICKET_CODE = "CRM-26-00347";
     private static final long PROJECT = 8L;
     private static final long CURRENT_ASSIGNEE = 55L;
 
@@ -45,9 +50,19 @@ class TicketDetailServiceTest {
     private final TicketAttachmentRepository attachments = mock(TicketAttachmentRepository.class);
     private final TicketWatcherRepository watchers = mock(TicketWatcherRepository.class);
     private final TicketLinkService links = mock(TicketLinkService.class);
+    /**
+     * Returns Mockito's default {@code null} for {@code resolve}, which
+     * {@code TicketWire.of} would then dereference — so it is stubbed to
+     * {@link TicketWire.Refs#NONE} in {@link #setUp()}. This class pins
+     * {@code availableActions} and says nothing about reference resolution;
+     * {@code TicketDetailIT} covers that against real rows.
+     */
+    private final TicketRefResolver refs = mock(TicketRefResolver.class);
+    /** Mockito's default null is fine — this class asserts availableActions, not the strip. */
+    private final RibbonAssembler ribbon = mock(RibbonAssembler.class);
 
-    private final TicketDetailService service =
-            new TicketDetailService(tickets, cycles, journal, comments, attachments, watchers, links);
+    private final TicketDetailService service = new TicketDetailService(
+            tickets, cycles, journal, comments, attachments, watchers, links, refs, ribbon);
 
     private Ticket ticket;
 
@@ -62,7 +77,10 @@ class TicketDetailServiceTest {
         ticket.setCurrentCycleNo((short) 1);
         ticket.setAssignedTo(CURRENT_ASSIGNEE);
 
-        when(tickets.require(any(), eq(TICKET_ID))).thenReturn(ticket);
+        when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
+        // Not null: TicketWire.of dereferences this, and Mockito's default would
+        // NPE every case here for a reason none of them is about.
+        when(refs.resolve(any())).thenReturn(TicketWire.Refs.NONE);
     }
 
     @Nested
@@ -116,13 +134,13 @@ class TicketDetailServiceTest {
         void unidentifiableCallerSeesNothing() {
             Authentication anonymous = new TestingAuthenticationToken(null, null);
 
-            List<String> actions = service.detail(anonymous, TICKET_ID, null).availableActions();
+            List<String> actions = service.detail(anonymous, TICKET_CODE, null).availableActions();
 
             assertThat(actions).isEmpty();
         }
 
         private TicketDetailDtos.Detail detailFor(Authentication caller) {
-            return service.detail(caller, TICKET_ID, null);
+            return service.detail(caller, TICKET_CODE, null);
         }
 
         private Authentication caller(long userId, String role) {

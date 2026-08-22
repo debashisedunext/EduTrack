@@ -17,22 +17,22 @@ import java.time.Instant;
  * shape both routes will share. {@link RibbonAssembler} only ever assembles
  * the ticket's <em>current</em> cycle, which is all a handoff response needs.
  */
-final class RibbonWire {
+public final class RibbonWire {
 
     private RibbonWire() {
     }
 
     /** {@code UserRef} — a feature-local copy, on {@code EffortLogDtos.UserRef}'s own precedent. */
-    record UserRef(long id, String displayName) {
+    public record UserRef(long id, String displayName) {
     }
 
     /** {@code SegmentState} — the six states blueprint §4A.3/C-051 name. */
-    enum SegmentState {
+    public enum SegmentState {
         COMPLETED, CURRENT, PENDING, REWORKED, SKIPPED, BLOCKED
     }
 
     /** One segment of the ribbon — one row per workflow-template stage. */
-    record RibbonSegment(
+    public record RibbonSegment(
             String stageCode,
             String displayName,
             String icon,
@@ -52,7 +52,7 @@ final class RibbonWire {
     }
 
     /** {@code Ribbon} — one cycle's journey. */
-    record Ribbon(
+    public record Ribbon(
             int cycleNo,
             int iterationNo,
             boolean isSealed,

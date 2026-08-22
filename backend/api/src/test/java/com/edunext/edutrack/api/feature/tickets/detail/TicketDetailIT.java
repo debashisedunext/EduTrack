@@ -107,6 +107,16 @@ class TicketDetailIT {
         insertCycle(ticketId, (short) 2, false);
     }
 
+    /**
+     * The service resolves by ticket CODE, not by id — the contract's
+     * {@code TicketId} is the code, so that is what every real caller sends.
+     * These fixtures are created by id, so this reads back the code the
+     * insert generated rather than restating its format in a second place.
+     */
+    private String codeOf(long id) {
+        return jdbc.queryForObject("SELECT ticket_code FROM tickets WHERE id = ?", String.class, id);
+    }
+
     private long insertTicket(long project, short currentCycle) {
         jdbc.update("""
                 INSERT INTO tickets (ticket_code, project_id, title, level, original_level,
@@ -195,7 +205,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("returns every section the detail page needs")
         void returnsEverySection() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), codeOf(ticketId), null);
 
             assertThat(d.ticket().id()).isEqualTo(ticketId);
             assertThat(d.ticket().ticketCode()).isNotBlank();
@@ -215,7 +225,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("ribbon is null until C-051's stage sequence exists")
         void ribbonIsNullNotInvented() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), codeOf(ticketId), null);
 
             assertThat(d.ribbon())
                     .as("a ribbon needs C-042's transitions and B's workflow stages; the second half is still missing")
@@ -231,7 +241,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("availableActions offers handoff/rework to the current owner")
         void availableActionsOffersAdvanceToTheOwner() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), codeOf(ticketId), null);
 
             assertThat(d.availableActions()).containsExactlyInAnyOrder("handoff", "rework");
         }
@@ -253,7 +263,7 @@ class TicketDetailIT {
         void outOfScopeIsNotFound() {
             long theirs = insertTicket(otherProjectId, (short) 1);
 
-            assertThatThrownBy(() -> service.detail(caller("PM", List.of(projectId)), theirs, null))
+            assertThatThrownBy(() -> service.detail(caller("PM", List.of(projectId)), codeOf(theirs), null))
                     .as("A-035: indistinguishable from a ticket that never existed")
                     .isInstanceOf(TicketNotFoundException.class);
         }
@@ -261,7 +271,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("a ticket that never existed fails identically")
         void missingTicketFailsTheSameWay() {
-            assertThatThrownBy(() -> service.detail(admin(), 999_999_999L, null))
+            assertThatThrownBy(() -> service.detail(admin(), "ZZ-26-99999", null))
                     .isInstanceOf(TicketNotFoundException.class);
         }
 
@@ -282,7 +292,7 @@ class TicketDetailIT {
                             "SUPPORT", List.of(projectId), List.of()),
                     null, List.of());
 
-            TicketDetailDtos.Detail d = service.detail(otherSupport, ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(otherSupport, codeOf(ticketId), null);
 
             assertThat(d.ticket().id()).isEqualTo(ticketId);
             assertThat(d.availableActions()).isEmpty();
@@ -298,7 +308,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("defaults to the ticket's current cycle")
         void defaultsToCurrentCycle() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), codeOf(ticketId), null);
 
             assertThat(d.history()).allSatisfy(h ->
                     assertThat(h.cycleNo()).as("current cycle is 2").isEqualTo((short) 2));
@@ -309,7 +319,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("an earlier cycle returns that cycle's journals")
         void earlierCycleIsReadable() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, 1);
+            TicketDetailDtos.Detail d = service.detail(admin(), codeOf(ticketId), 1);
 
             assertThat(d.history()).isNotEmpty().allSatisfy(h ->
                     assertThat(h.cycleNo()).isEqualTo((short) 1));
@@ -325,8 +335,8 @@ class TicketDetailIT {
         @Test
         @DisplayName("cycles list and comments are not filtered by the selected cycle")
         void ticketScopedSectionsAreNotFiltered() {
-            TicketDetailDtos.Detail current = service.detail(admin(), ticketId, null);
-            TicketDetailDtos.Detail earlier = service.detail(admin(), ticketId, 1);
+            TicketDetailDtos.Detail current = service.detail(admin(), codeOf(ticketId), null);
+            TicketDetailDtos.Detail earlier = service.detail(admin(), codeOf(ticketId), 1);
 
             assertThat(earlier.cycles()).as("the selector needs every cycle to offer")
                     .hasSameSizeAs(current.cycles());

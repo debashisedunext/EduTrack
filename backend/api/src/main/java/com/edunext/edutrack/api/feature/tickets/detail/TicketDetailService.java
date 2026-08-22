@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.tickets.detail;
 
+import com.edunext.edutrack.api.feature.tickets.TicketRefResolver;
+import com.edunext.edutrack.api.feature.transitions.RibbonAssembler;
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.feature.tickets.links.TicketLinkService;
 import com.edunext.edutrack.api.feature.transitions.StageOwnership;
@@ -40,17 +42,28 @@ import java.util.List;
  * ever becomes the bottleneck the answer is to widen the fetch, not to hand the
  * waterfall back to the client.
  *
- * <h2>🔴 {@code ribbon} the contract declares and this does not return</h2>
+ * <h2>{@code ribbon} — filled in, and why it was empty for so long</h2>
  *
- * <p>{@code ribbon} is <b>deliberately null</b>: it needs stage segments from
- * {@code ticket_stage_transitions} (C-042, built) laid against a workflow
- * template's stage sequence (Stream B's {@code api/feature/workflow/}, which
- * still holds only a README). The second half does not exist, so any ribbon
- * assembled here would be invented. It is optional in
- * {@code TicketDetailResponse} — only {@code ticket} is required — so
- * omitting it is a contract-valid answer, and a client sees it absent and
- * renders no ribbon, the truthful rendering of a system that cannot yet lay
- * one out. <b>C-051 fills it in once the stage-sequence half exists.</b>
+ * <p>This section used to say the ribbon was <b>deliberately null</b> because
+ * the stage-sequence half lived in a Stream B package "which still holds only a
+ * README". That stopped being true without this note being revisited:
+ * {@code WorkflowStageRepository} exists, every one of the 50,000 seeded tickets
+ * carries a {@code workflow_template_id}, and {@code RibbonAssembler} had been
+ * assembling this exact shape for {@code HandoffService} and
+ * {@code ForceMoveService} for days. The literal {@code null} outlived its own
+ * justification, and the screen rendered it as <i>"this ticket has no workflow
+ * template, so there is no stage journey to show"</i> — a confident sentence
+ * that was false of every ticket in the database.
+ *
+ * <p>Now assembled by {@link RibbonAssembler}, the same component the two write
+ * paths use, so the strip a reader sees and the strip a handoff returns cannot
+ * disagree. {@code canAdvance} comes from {@link #canAdvance}, which is also
+ * what {@link #availableActions} answers from — one predicate, so the ribbon
+ * cannot offer a hop the actions list refuses.
+ *
+ * <p>⚠ <b>Current cycle only.</b> See the field's own note: {@code ?cycle=}
+ * still selects an earlier cycle's history and effort while the ribbon shows
+ * the live one. Closing that is C-042's remaining half.
  *
  * <h2>{@code availableActions} — C-043, the golden rule</h2>
  *
@@ -98,13 +111,35 @@ class TicketDetailService {
     private final TicketWatcherRepository watchers;
     private final TicketLinkService links;
 
+    /**
+     * A-052 · resolves the four reference objects the contract's
+     * {@code Ticket} declares. This screen is the one that reads all four,
+     * so it is the first route moved off {@code TicketWire.Refs.NONE}.
+     */
+    private final TicketRefResolver refs;
+    /**
+     * C-051's strip, which this endpoint declared and never filled — the
+     * field sat at a literal {@code null} while {@code HandoffService} and
+     * {@code ForceMoveService} had been assembling the same shape for days.
+     * The screen read that null as "this ticket has no workflow template",
+     * which was false of all 50,000 of them.
+     *
+     * <p>⚠ <b>Current cycle only.</b> {@code assembleCurrentCycle} is what
+     * its name says, so {@code ?cycle=} still selects the history, effort and
+     * comments of an earlier cycle while the ribbon keeps showing the live
+     * one. That is C-042's remaining half and is not invented here.
+     */
+    private final RibbonAssembler ribbon;
+
     TicketDetailService(ScopedTickets tickets,
                         TicketCycleRepository cycles,
                         TicketJournal journal,
                         TicketCommentRepository comments,
                         TicketAttachmentRepository attachments,
                         TicketWatcherRepository watchers,
-                        TicketLinkService links) {
+                        TicketLinkService links,
+                        TicketRefResolver refs,
+                        RibbonAssembler ribbon) {
         this.tickets = tickets;
         this.cycles = cycles;
         this.journal = journal;
@@ -112,6 +147,8 @@ class TicketDetailService {
         this.attachments = attachments;
         this.watchers = watchers;
         this.links = links;
+        this.refs = refs;
+        this.ribbon = ribbon;
     }
 
     /**
@@ -121,20 +158,30 @@ class TicketDetailService {
      *         may not see — A-035, indistinguishable on purpose
      */
     @Transactional(readOnly = true)
-    TicketDetailDtos.Detail detail(Authentication caller, long ticketId, Integer requestedCycle) {
+    TicketDetailDtos.Detail detail(Authentication caller, String ticketCode, Integer requestedCycle) {
         // Scope first, and only once. Everything below reads by ticket id, so a
         // caller who got past this line would see another project's history and
         // no later query would notice.
-        Ticket ticket = tickets.require(caller, ticketId);
+        //
+        // ⚠ Resolved by CODE, not by id. The contract's `TicketId` is the
+        // ticket code (`^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$`, e.g.
+        // `CRM-26-00347`), so every generated client puts a code in this path
+        // segment and a `long` path variable 400s before this method is ever
+        // reached. CloseController raised exactly this against `full` and left
+        // it for A-052's own task rather than fixing another task's surface;
+        // this is that task. Only the boundary changes — everything below
+        // still reads by the numeric id, which is what the tables are keyed on.
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
 
         short cycle = requestedCycle == null
                 ? ticket.getCurrentCycleNo()
                 : (short) requestedCycle.intValue();
 
         return new TicketDetailDtos.Detail(
-                TicketWire.of(ticket),
+                TicketWire.of(ticket, refs.resolve(ticket)),
                 cycles.findByTicketIdOrderByCycleNoAsc(ticketId).stream().map(this::toCycle).toList(),
-                null,   // ribbon — C-042/C-051, see the class note
+                ribbon.assembleCurrentCycle(ticket, canAdvance(caller, ticket)),
                 journal.historyFor(ticketId, cycle).stream().map(this::toHistory).toList(),
                 journal.effortFor(ticketId, cycle).stream().map(this::toEffort).toList(),
                 comments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(ticketId).stream()
@@ -158,12 +205,19 @@ class TicketDetailService {
      * class's own doc requires.
      */
     private List<String> availableActions(Authentication caller, Ticket ticket) {
+        return canAdvance(caller, ticket) ? List.of("handoff", "rework") : List.of();
+    }
+
+    /**
+     * The golden rule and a live stage to advance from — extracted because the
+     * ribbon needs the same answer {@link #availableActions} does, and two
+     * copies of it would be two chances for the strip to offer a hop the
+     * actions list refuses.
+     */
+    private boolean canAdvance(Authentication caller, Ticket ticket) {
         CallerIdentity identity = CallerIdentity.of(caller).orElse(null);
         boolean hasLiveStage = ticket.getCurrentStage() != null && !"CLOSED".equals(ticket.getStatus());
-        if (identity != null && hasLiveStage && StageOwnership.mayAdvance(identity, ticket)) {
-            return List.of("handoff", "rework");
-        }
-        return List.of();
+        return identity != null && hasLiveStage && StageOwnership.mayAdvance(identity, ticket);
     }
 
     // ── mapping ──────────────────────────────────────────────────────────────
