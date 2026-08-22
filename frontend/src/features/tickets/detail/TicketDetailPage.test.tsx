@@ -399,10 +399,18 @@ describe('S-20 Ticket detail shell — C-019', () => {
 
     const list = within(ribbon).getByRole('list', { name: 'Workflow stages' })
     const items = within(list).getAllByRole('listitem')
-    // Blueprint §4A.1's eight stages, minus CLOSED — the mock's `buildRibbon`
-    // never draws a ninth tile for the terminal state.
-    expect(items).toHaveLength(7)
+    // Blueprint §4A.1's eight stages, minus CLOSED (the mock's `buildRibbon`
+    // never draws a ninth tile for the terminal state) and minus Intake,
+    // Triage and Development, which this sealed cycle 2 never re-visited on
+    // reopen and so never got a hop — B-053's own count is Intake (PENDING),
+    // Triage, Development and QA as their own tiles, plus one collapsed group
+    // for Deployment/Verification/Sign-off, the run past the third completed
+    // stage.
+    expect(items).toHaveLength(5)
     expect(within(ribbon).getByText('Intake')).toBeInTheDocument()
+    expect(within(ribbon).queryByText('Sign-off')).not.toBeInTheDocument()
+
+    await userEvent.setup().click(within(ribbon).getByRole('button', { name: /completed stages collapsed/ }))
     expect(within(ribbon).getByText('Sign-off')).toBeInTheDocument()
   })
 
