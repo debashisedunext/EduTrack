@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.tickets.assign;
 
+import com.edunext.edutrack.api.feature.tickets.TicketRefResolver;
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
@@ -54,7 +55,16 @@ class AssignServiceTest {
     private final com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier notifier =
             mock(com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier.class);
 
-    private final AssignService service = new AssignService(tickets, users, journal, notifier);
+    /**
+     * Answers the refs the real resolver would. Stubbed rather than left to
+     * Mockito's null because {@code TicketWire.of} dereferences it, and because
+     * the two assertions below are precisely about the assignee reaching the
+     * response — a mock returning nothing would make them pass against a
+     * service that had stopped reporting it.
+     */
+    private final TicketRefResolver refs = mock(TicketRefResolver.class);
+
+    private final AssignService service = new AssignService(tickets, users, journal, notifier, refs);
 
     /**
      * The three-argument constructor is load-bearing — {@code PriorityChangeServiceTest}'s
@@ -72,6 +82,19 @@ class AssignServiceTest {
         ticket = assignedTicket();
         when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
         when(users.existsById(NEW_ASSIGNEE)).thenReturn(true);
+        // Reads the ticket as the real resolver does, rather than answering a
+        // fixed value: the two response assertions are about the assignee
+        // actually reaching the wire, and a constant here would hold them up
+        // even if the service stopped setting it.
+        when(refs.resolve(any())).thenAnswer(call -> {
+            com.edunext.edutrack.domain.tickets.Ticket t = call.getArgument(0);
+            return new TicketWire.Refs(
+                    userRef(t.getReportedBy()), userRef(t.getAssignedTo()), null, null);
+        });
+    }
+
+    private static TicketWire.UserRef userRef(Long id) {
+        return id == null ? null : new TicketWire.UserRef(id, "Fixture " + id, null);
     }
 
     // ── the STAGE_REASSIGNED row ──────────────────────────────────────────────
@@ -158,7 +181,7 @@ class AssignServiceTest {
         void isAnsweredWithTheNewAssignee() {
             TicketWire.Ticket answered = service.assign(caller, TICKET_CODE, request(NEW_ASSIGNEE, null));
 
-            assertThat(answered.assignedTo()).isEqualTo(NEW_ASSIGNEE);
+            assertThat(answered.assignedTo().id()).isEqualTo(NEW_ASSIGNEE);
             assertThat(answered.currentStage()).isEqualTo("DEVELOPMENT");
         }
     }
@@ -174,7 +197,7 @@ class AssignServiceTest {
         void sameAssigneeIsANoOp() {
             TicketWire.Ticket answered = service.assign(caller, TICKET_CODE, request(PREVIOUS_ASSIGNEE, null));
 
-            assertThat(answered.assignedTo()).isEqualTo(PREVIOUS_ASSIGNEE);
+            assertThat(answered.assignedTo().id()).isEqualTo(PREVIOUS_ASSIGNEE);
             assertThat(ticket.getAssignedBy()).isNull();
             verifyNoInteractions(journal);
         }
