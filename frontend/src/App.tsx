@@ -17,6 +17,7 @@ import { StageQueuePage } from './features/tickets/stage-queue/StageQueuePage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ClientListPage } from './features/clients/ClientListPage'
 import { ClientFormPage } from './features/clients/ClientFormPage'
+import { ClientProfilePage } from './features/clients/ClientProfilePage'
 import { ClientImportPage } from './features/imports/ClientImportPage'
 import { ResourceImportPage } from './features/imports/ResourceImportPage'
 import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
@@ -114,7 +115,9 @@ export default function App() {
                 registered this pattern the same way it registered the resource
                 one, so every project name on every ticket already linked here. */}
             <Route path={PROJECT_ROUTE} element={<ProjectDashboardPage />} />
-            <Route path={CLIENT_ROUTE} element={<ScreenPlaceholder title="Client 360" />} />
+            {/* B-066 · the third and last of the three placeholders replaced.
+                Every client name on every ticket already linked here. */}
+            <Route path={CLIENT_ROUTE} element={<ClientProfilePage />} />
             {/* A-069 · S-28. C-019 registered this pattern against a placeholder
                 so every assignee name in the product already linked here. */}
             <Route path={RESOURCE_ROUTE} element={<ResourceProfilePage />} />

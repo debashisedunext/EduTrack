@@ -1722,6 +1722,13 @@ final class PermissionMatrix {
             // could not render a header for a PM looking at their own project's
             // client.
             everyRole("GET", "/api/v1/clients/{clientId}"),
+            // B-066 · S-32's Client 360 view carries exactly the argument above:
+            // a client is not row-scoped and every role already reads every
+            // client through the ticket-form dropdown. The *tickets* inside the
+            // response stay scoped by ScopedTickets — a row question this file
+            // does not ask, the same split RouteAuthorizationTest already draws
+            // between "may this role reach the route" and "which rows come back".
+            everyRole("GET", "/api/v1/clients/{clientId}/tickets"),
             // The writes are master.write — Admin alone. §2 row 51 reads "Master
             // data (task types, SLA, workflow, holidays)" ✅ Admin / ❌ the other
             // five, and §7.4 heads the module "Master data module (Admin only)"
