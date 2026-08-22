@@ -113,6 +113,34 @@ class Profile360Repository {
     }
 
     /**
+     * B-065 · is {@code managerId} the direct {@code reporting_manager_id} of
+     * {@code subjectId}?
+     *
+     * <p>Deliberately narrower than {@link #isVisibleTo} — that method also
+     * admits a PM sharing a project with the subject, which is right for
+     * "may this PM open the profile" and wrong for "may this PM approve the
+     * week": approving is a manager's act, not a colleague's, and widening it
+     * to project co-membership would let any PM on a shared project sign off
+     * a week for someone they do not manage. Direct only, on
+     * {@link #isVisibleTo}'s own reasoning: a transitive walk up the chain is
+     * a policy nobody has decided to allow.
+     */
+    boolean isDirectManagerOf(long subjectId, long managerId) {
+        Boolean isManager = jdbc.sql("""
+                        SELECT EXISTS (
+                                   SELECT 1 FROM users u
+                                    WHERE u.id = :subjectId
+                                      AND u.reporting_manager_id = :managerId) AS is_manager
+                        """)
+                .param("subjectId", subjectId)
+                .param("managerId", managerId)
+                .query(Boolean.class)
+                .single();
+
+        return Boolean.TRUE.equals(isManager);
+    }
+
+    /**
      * The headline figures, over the window the screen asks for.
      *
      * <p>Closed, effort and the two rates all come from {@code tickets} and the

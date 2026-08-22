@@ -46,38 +46,12 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { UserRef } from './userRef';
-import type { TimesheetDay } from './timesheetDay';
-import type { TimesheetRow } from './timesheetRow';
-import type { TimesheetUtilisationPct } from './timesheetUtilisationPct';
-import type { TimesheetApprovalProperty } from './timesheetApprovalProperty';
+import type { TimesheetApprovalRequestNote } from './timesheetApprovalRequestNote';
 
-/**
- * One resource's week. `days` is always seven entries, Monday first, even
-where nothing was logged and nothing was available — a week that dropped
-its empty days would render as a grid whose columns move, and a Tuesday
-holiday is exactly the day a reader is looking for when the totals look
-thin.
-
- */
-export interface Timesheet {
-  person: UserRef;
-  /** The Monday of the ISO week the server resolved from `weekOf`. */
-  weekStart: string;
-  weekEnd: string;
-  days: TimesheetDay[];
-  /** One row per ticket × stage × iteration the person logged against this week, busiest first. Stage and iteration are part of the key, not decoration: a second pass through QA is a different row from the first, which is the whole of what "stage-aware" means here.
- */
-  rows: TimesheetRow[];
-  /** Σ of every entry in the week, corrections included and signed. */
-  totalHours: number;
-  /** Σ of the seven days' `capacityHours`, from the working calendar.
- */
-  capacityHours: number;
-  /** `totalHours / capacityHours × 100`. Null rather than 0 when the week offered no working hours at all — a person on leave all week has no utilisation, and reporting 0% would read as having done nothing with a week they were never expected to work.
- */
-  utilisationPct?: TimesheetUtilisationPct;
-  /** B-065 · null until an Admin or this resource's own direct manager reviews the week via `POST .../timesheet/approval`.
- */
-  approval?: TimesheetApprovalProperty;
+export interface TimesheetApprovalRequest {
+  /**
+   * Optional, for a manager who wants to record why — or that anything did.
+   * @maxLength 500
+   */
+  note?: TimesheetApprovalRequestNote;
 }

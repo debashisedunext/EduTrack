@@ -717,10 +717,10 @@ paths:
         one asking for a user who does not exist — distinguishing them would let
         anyone enumerate the staff list by id.
 
-        **No approval step.** §21 also asks for one, and it is not here: an
-        approval cannot be a flag on an append-only, hash-chained table, and the
-        policy it would enforce — the backdating window and who signs off — is
-        still an open governance question. Raised rather than invented.
+        **The approval step, since B-065.** §21 also asks for one, and it now
+        exists at `POST .../timesheet/approval` — a new row rather than a flag
+        on the append-only effort log. `approval` here is null until an Admin
+        or the resource's own direct manager reviews the week.
       parameters:
         - name: weekOf
           in: query
@@ -739,6 +739,57 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TimesheetResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{userId}/timesheet/approval:
+    parameters: [{ $ref: '#/components/parameters/UserId' }]
+    post:
+      tags: [users]
+      operationId: approveTimesheet
+      summary: A manager marks a resource's week reviewed (B-065)
+      description: |
+        §21's "an approval step for the manager", built as its own row rather
+        than a flag on `ticket_effort_logs` — that table is append-only and
+        hash-chained, so nothing on it can be mutated to mean "reviewed".
+
+        **Who may approve is a row question, decided the same way the GET
+        above decides who may look**: Admin, or the resource's own direct
+        reporting manager — `users.reporting_manager_id`, the same direct-only
+        reading `GET .../timesheet` already uses, not a transitive walk up the
+        chain. A caller who is neither gets the same `404` as a user id that
+        does not exist, so an id cannot be walked to learn who reports to whom.
+        The three delivery roles and Support never reach that check at all:
+        `hasAnyRole('ADMIN','PM')` refuses them first, and that refusal does
+        not depend on which resource is named, so it is the one `403` this
+        route can answer.
+
+        **One review per resource per week.** A week already reviewed answers
+        `409`, naming who reviewed it and when — never a second, silent row —
+        which is also why a retried `Idempotency-Key` is accepted but not yet
+        honoured: `uq_timesheet_approvals_week` already catches a genuine
+        double-submit as a 409 rather than a second row, on
+        `EffortLogController`'s own precedent for a create the 24-hour replay
+        store (A-035) does not exist for yet.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - name: weekOf
+          in: query
+          schema: { type: string, format: date }
+          description: >
+            Resolved to its Monday exactly as the GET resolves it. Omitted
+            means the week containing today.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TimesheetApprovalRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimesheetApprovalResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /users/{userId}/reportees:
     parameters: [{ $ref: '#/components/parameters/UserId' }]
@@ -7796,6 +7847,11 @@ components:
             offered no working hours at all — a person on leave all week has no
             utilisation, and reporting 0% would read as having done nothing with
             a week they were never expected to work.
+        approval:
+          oneOf: [{ $ref: '#/components/schemas/TimesheetApproval' }, { type: 'null' }]
+          description: >
+            B-065 · null until an Admin or this resource's own direct manager
+            reviews the week via `POST .../timesheet/approval`.
 
     TimesheetDay:
       type: object
@@ -7857,6 +7913,37 @@ components:
             Marked rather than hidden: `ticket_effort_logs` is append-only, so a
             fixed mistake is a compensating row, and a timesheet that dropped
             them would not add up to the ticket's own effort tab.
+
+    # ── timesheet approval · B-065 ───────────────────────────────────────────
+    TimesheetApprovalRequest:
+      type: object
+      properties:
+        note:
+          type: [string, 'null']
+          maxLength: 500
+          description: Optional, for a manager who wants to record why — or that anything did.
+
+    TimesheetApprovalResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/TimesheetApproval' }
+
+    TimesheetApproval:
+      type: object
+      required: [weekStart, approvedBy, approvedAt]
+      description: >
+        One resource's week, reviewed once. There is no PATCH or DELETE for
+        this resource and none is planned — a week is approved once, and
+        un-approving one is a policy nobody has asked for.
+      properties:
+        weekStart:
+          type: string
+          format: date
+          description: The same Monday `GET .../timesheet` resolved `weekOf` to.
+        approvedBy: { $ref: '#/components/schemas/UserRef' }
+        approvedAt: { type: string, format: date-time }
+        note: { type: [string, 'null'] }
 
     # ── projects ──────────────────────────────────────────────────────────
     ProjectRef:

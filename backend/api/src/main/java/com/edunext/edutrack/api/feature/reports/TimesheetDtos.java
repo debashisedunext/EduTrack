@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.reports;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -32,7 +33,17 @@ final class TimesheetDtos {
     record Timesheet(UserRef person, String weekStart, String weekEnd,
                      List<Day> days, List<Row> rows,
                      BigDecimal totalHours, BigDecimal capacityHours,
-                     BigDecimal utilisationPct) {
+                     BigDecimal utilisationPct, TimesheetApproval approval) {
+    }
+
+    /** B-065 · null until an Admin or this resource's own direct manager reviews the week. */
+    record TimesheetApprovalRequest(String note) {
+    }
+
+    record TimesheetApprovalResponse(TimesheetApproval data) {
+    }
+
+    record TimesheetApproval(String weekStart, UserRef approvedBy, Instant approvedAt, String note) {
     }
 
     /** The contract's {@code UserRef}, local to this feature as every other one is. */
