@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.tickets;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 
@@ -47,7 +49,23 @@ public final class TicketWire {
      */
     public record Ticket(
             long id,
-            String ticketCode,
+            // B-066 · the contract's field is `ticketId` (blueprint's human-
+            // readable code, TicketId-shaped) — this component kept the Java
+            // name the entity accessor uses, and nothing was annotated, so
+            // every one of the eight routes below has been serving this as
+            // `ticketCode` in the actual JSON. No test caught it: every test
+            // on this record calls the accessor directly or reads it from a
+            // Java object before serialization, and ContractConformanceTest's
+            // GET-body check only compares one level of nesting, where this
+            // field sits two deep (`data.ticket.ticketId` on the detail read,
+            // `data.tickets[].ticketId` on B-066's own Client 360). Caught
+            // here because B-066 is the first caller to actually render the
+            // nested field in a browser. Flagged for Stream C's sign-off
+            // (Divyansh) rather than fixed quietly — it touches all eight
+            // lifecycle routes' wire shape, even though the Java accessor
+            // name (`ticketCode()`) is unchanged and every call site compiles
+            // as-is.
+            @JsonProperty("ticketId") String ticketCode,
             long projectId,
             String title,
             String description,
