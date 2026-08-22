@@ -1,6 +1,8 @@
 package com.edunext.edutrack.api.feature.tickets.assign;
 
 import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
+import com.edunext.edutrack.api.feature.tickets.TicketRefResolver;
+import com.edunext.edutrack.api.feature.tickets.TicketRefResolver;
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
@@ -60,13 +62,22 @@ class AssignService {
     private final UserRepository users;
     private final TicketJournal journal;
     private final TicketEventNotifier notifier;
+    /**
+     * Resolves the four reference objects the contract's {@code Ticket}
+     * declares. Without it this route answered {@code assignee: null} — and
+     * an assign response whose entire subject is <em>who now holds this</em>
+     * must not be the one response that cannot say.
+     */
+    private final TicketRefResolver refs;
 
     AssignService(ScopedTickets tickets, UserRepository users, TicketJournal journal,
-                  TicketEventNotifier notifier) {
+                  TicketEventNotifier notifier,
+                  TicketRefResolver refs) {
         this.tickets = tickets;
         this.users = users;
         this.journal = journal;
         this.notifier = notifier;
+        this.refs = refs;
     }
 
     /**
@@ -87,7 +98,7 @@ class AssignService {
             // before the assignee lookup below for the same reason that rule
             // is: a row reading "Priya -> Priya" cannot be deleted once
             // written, and the History tab is the one place noise is expensive.
-            return TicketWire.of(ticket);
+            return TicketWire.of(ticket, refs.resolve(ticket));
         }
 
         if (!users.existsById(assigneeId)) {
@@ -112,7 +123,7 @@ class AssignService {
         // does not have to revisit this line.
         notifier.reassignedWithinStage(ticket, actor == null ? 0L : actor, previous, assigneeId);
 
-        return TicketWire.of(ticket);
+        return TicketWire.of(ticket, refs.resolve(ticket));
     }
 
     private static TicketHistory reassignedEntry(Ticket ticket, Long previous, Long assigneeId,
