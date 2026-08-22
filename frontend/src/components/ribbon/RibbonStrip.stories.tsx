@@ -256,6 +256,62 @@ export const KeyboardNavigation: Story = {
 }
 
 /**
+ * B-053 · §17's mitigation for "ribbon becomes unreadable at 8 stages on a
+ * laptop" — five completed stages before the current one, so only the first
+ * three (`Intake`, `Triage`, `Design`) render individually and `Build` /
+ * `Spec Review` fold into one "…" tile. Click it (or focus it with the
+ * keyboard and press Enter/Space) to unfold the two it is standing in for;
+ * click the same tile again to fold them back. The strip also scrolls itself
+ * so **Deployment** — the current stage — opens centred rather than at
+ * whichever edge eight tiles happen to leave it.
+ */
+export const EightStagesWithACollapsedGroup: Story = {
+  args: {
+    ribbon: {
+      cycleNo: 1,
+      iterationNo: 1,
+      isSealed: false,
+      currentStageCode: 'DEPLOY',
+      canAdvance: false,
+      segments: [
+        seg({ stageCode: 'INTAKE', displayName: 'Intake', sequence: 1 }),
+        seg({
+          stageCode: 'TRIAGE', displayName: 'Triage', sequence: 2,
+          owner: { id: 2, displayName: 'Meera Prasad' }, ownerRole: 'PM',
+        }),
+        seg({
+          stageCode: 'DESIGN', displayName: 'Design', sequence: 3,
+          owner: { id: 3, displayName: 'Priya Nair' }, ownerRole: 'SUPPORT',
+        }),
+        seg({
+          stageCode: 'BUILD', displayName: 'Build', sequence: 4,
+          owner: { id: 7, displayName: 'Ravi Kumar' }, ownerRole: 'DEVELOPER',
+        }),
+        seg({
+          stageCode: 'SPEC_REVIEW', displayName: 'Spec Review', sequence: 5,
+          owner: { id: 9, displayName: 'Anil Sharma' }, ownerRole: 'QA',
+        }),
+        seg({
+          stageCode: 'DEPLOY', displayName: 'Deployment', sequence: 6, state: SegmentState.CURRENT,
+          owner: { id: 11, displayName: 'Karan Desai' }, ownerRole: 'DEPLOYMENT',
+          durationMins: null, exitedAt: null, effortHrs: 1.5,
+        }),
+        seg({
+          stageCode: 'VERIFY', displayName: 'Verification', sequence: 7, state: SegmentState.PENDING,
+          owner: undefined, ownerRole: 'DEVELOPER',
+          enteredAt: null, exitedAt: null, durationMins: null, effortHrs: undefined,
+        }),
+        seg({
+          stageCode: 'SIGNOFF', displayName: 'Sign-off', sequence: 8, state: SegmentState.PENDING,
+          owner: undefined, ownerRole: 'PM',
+          enteredAt: null, exitedAt: null, durationMins: null, effortHrs: undefined,
+        }),
+      ],
+    },
+  },
+}
+
+/**
  * B-052 · the same keyboard, on a ribbon with nothing to activate.
  *
  * S-13 tab 3's live preview, S-30's designer preview and a sealed past cycle

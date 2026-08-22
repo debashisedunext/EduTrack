@@ -18,6 +18,8 @@ task IDs still needs the ordinary sign-off.
 | `RibbonDots.tsx` | B-051 | The compact variant. One row of S-17's grid, as dots. |
 | `compactDots.ts` | B-051 | Template stages + one ticket row → dots; the cell's accessible name and each dot's hover. Pure. |
 | `rovingFocus.ts` | B-052 | The strip's single tab stop and the arrow keys that move inside it. `nextFocusIndex` is pure. |
+| `collapsedGroup.ts` | B-053 | Segments + which groups are expanded → the strip's row list. `buildRibbonRows` is pure. |
+| `CollapsedGroupTile.tsx` | B-053 | The "…" tile — a run of completed stages folded into one control, or unfolded back into them. |
 
 ## What C-052 built, and what still sits above this directory
 
@@ -42,11 +44,10 @@ entered, exited, owner, note, effort, and the idle-vs-active split, reachable
 by keyboard focus as well as pointer hover, which the native `title` it
 replaces never was.
 
-Still above this directory: `C-053`'s cycle selector, `C-054`'s
-`Cycle 2 · Iteration 3` chips, and `B-053`'s auto-centred scroll and collapsed
-`…` group at eight stages — `RibbonStrip` still only goes as far as
-`overflow-x-auto`, the floor a strip needs not to visibly break before that
-lands. `B-052`'s roving keyboard navigation has landed; see below.
+Still above this directory: `C-053`'s cycle selector and `C-054`'s
+`Cycle 2 · Iteration 3` chips. `B-052`'s roving keyboard navigation and
+`B-053`'s auto-centred scroll and collapsed `…` group have both landed; see
+below.
 
 The props `RibbonSegment` accepts are the contract between B-050/C-052 and
 C-051: `segment`, `isLast`, `onSelect`, `isSelected`, `actionSlot`, `className`,
@@ -207,7 +208,63 @@ re-renders on selection, on focus and on every realtime frame. Stable identities
 fixed it. If a future change makes those closures depend on anything but the
 index, that regression comes straight back.
 
-**What is still not here:** `B-053`'s auto-centred horizontal scroll and the
-collapsed `…` group past eight stages. Arrowing to an off-screen segment scrolls
-it into view because `.focus()` does that natively, which is the floor rather
-than the enhancement.
+**What is still not here:** `C-053`'s cycle selector and `C-054`'s
+`Cycle 2 · Iteration 3` chips, both of which render above this strip rather
+than inside it.
+
+## B-053 — the collapsed group and the auto-centred scroll
+
+§17's own mitigation for "ribbon becomes unreadable at 8 stages on a laptop"
+names two behaviours, and both are here rather than in `RibbonSegment` —
+a tile does not know how many siblings it has, or where the strip has
+scrolled to.
+
+**Only `COMPLETED` collapses, and only beyond the third one.** `collapsedGroup.ts`'s
+`buildRibbonRows` walks the segment list once: the first three completed
+stages stay individual tiles, and a run of completed stages after that folds
+into one `CollapsedGroupTile`. `REWORKED`, `SKIPPED` and `BLOCKED` never join
+a run — each carries something a completed tile does not (a loop badge, a
+reason, a hold), and `segmentState.ts`'s own header asks this feature to share
+that vocabulary rather than invent a private one, so folding them into "…"
+would be the summary hiding the one thing worth reading. A skipped or blocked
+stage in the middle of an otherwise-collapsible run splits it into two groups
+rather than pretending the run is still contiguous.
+
+**Collapsing hides a tile, never a segment.** B-052 made every stage reachable,
+including the read-only ones, and a group that silently dropped a stage from
+the DOM would undo that for whichever one a reader most wants to click to
+filter History and Effort. So a collapsed run's segments are still in
+`ribbon.segments` — `expandedGroups` (a `Set<string>` of run keys, kept in
+`RibbonStrip`, not in the pure builder) is the only thing deciding whether they
+render as one tile or as themselves. The group's own tile stays on screen
+either way: collapsed, it reads "N completed stages collapsed" with `+N`;
+activated once (click, Enter or Space), it renders the real segments right
+after itself and relabels to "Collapse N completed stages"; activated again,
+they fold back. One control rather than a pair to keep in sync.
+
+**The group is always a button, unlike a segment tile.** `RibbonSegment`
+renders a `<div role="group">` when the caller passes no `onSelect` — a sealed
+past cycle's ribbon is read-only for advancing it. Folding and unfolding a
+group is a display decision, not a selection, so `CollapsedGroupTile` takes no
+`onSelect` at all and is a real button on every ribbon, including a sealed one.
+Clicking it never calls `onSelectSegment` — `RibbonStrip.test.tsx` pins that
+distinction directly.
+
+**The group joins the roving same as any tile, and does not disturb it.**
+`useRovingFocus` counts `rows.length`, not `segments.length` — expanding a
+group changes how many rows there are, exactly the way a live `stage.changed`
+frame changing `segments.length` already could, and the hook's own tolerance
+for an index outliving its list (`rovingFocus.ts`'s own note on `current`
+outside `[0, count)`) is what keeps that safe.
+
+**Auto-centring keys on the current *stage*, not on the roving tab stop or on
+which groups are expanded.** The two are independent axes: arrowing across the
+strip to read it, or expanding a group to look inside it, must not drag the
+scroll position along, the same reason B-052's own tab stop does not chase a
+live `stage.changed` frame once a reader has moved it. So `RibbonStrip` keeps
+one `React.useEffect` keyed only on the current segment's own stage code and
+iteration, and calls `scrollIntoView({ inline: 'center', block: 'nearest' })`
+on it — the same optional-chained `scrollIntoView` `HandoffDialog.tsx` already
+uses for its own auto-scroll, not a new pattern. `prefers-reduced-motion`
+decides `smooth` versus `auto`, checked the same way `useCountUp.ts` already
+does; the scroll still happens either way, it simply has no motion.

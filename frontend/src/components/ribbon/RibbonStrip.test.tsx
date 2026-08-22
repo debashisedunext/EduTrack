@@ -1,11 +1,30 @@
-import { describe, expect, it, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import type { Ribbon } from '@/api/generated/model/ribbon'
 import type { RibbonSegment as RibbonSegmentData } from '@/api/generated/model/ribbonSegment'
 import { SegmentState } from '@/api/generated/model/segmentState'
 import { RibbonStrip } from './RibbonStrip'
+
+beforeAll(() => {
+  // jsdom has neither — B-053's auto-centre calls `scrollIntoView`, and
+  // `prefersReducedMotion` asks `matchMedia`. `DashboardPage.test.tsx`'s
+  // `useCountUp` polyfill and `HandoffDialog.test.tsx`'s own `scrollIntoView`
+  // stub use the identical shapes.
+  Element.prototype.scrollIntoView ??= vi.fn()
+  window.matchMedia ??= ((query: string) =>
+    ({
+      matches: false,
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    }) as unknown as MediaQueryList) as typeof window.matchMedia
+})
+
+beforeEach(() => {
+  ;(Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear?.()
+})
 
 function seg(over: Partial<RibbonSegmentData> = {}): RibbonSegmentData {
   return {
@@ -412,5 +431,203 @@ describe('RibbonStrip · B-052 keyboard navigation', () => {
     expect(trigger).not.toContainElement(action)
     // The same card all the same — §4A.3 wants it on the current segment.
     expect(trigger.parentElement).toContainElement(action)
+  })
+})
+
+/**
+ * B-053 · §17's mitigation for "ribbon becomes unreadable at 8 stages on a
+ * laptop" — the collapsed `…` group. `collapsedGroup.test.ts` pins which
+ * stages collapse; this is the strip wiring it into the roving strip and
+ * keeping every stage reachable once collapsed.
+ */
+describe('RibbonStrip · B-053 collapsed group', () => {
+  function completedRun(count: number, offset = 0): RibbonSegmentData[] {
+    return Array.from({ length: count }, (_, i) =>
+      seg({
+        stageCode: `STAGE${offset + i}`,
+        displayName: `Stage ${offset + i}`,
+        sequence: offset + i,
+        state: SegmentState.COMPLETED,
+      }),
+    )
+  }
+
+  function fiveCompletedThenCurrent(): RibbonSegmentData[] {
+    return [
+      ...completedRun(5),
+      seg({ stageCode: 'VERIFY', displayName: 'Verify', sequence: 6, state: SegmentState.CURRENT }),
+      seg({ stageCode: 'SIGNOFF', displayName: 'Sign-off', sequence: 7, state: SegmentState.PENDING }),
+      seg({ stageCode: 'CLOSED', displayName: 'Closed', sequence: 8, state: SegmentState.PENDING }),
+    ]
+  }
+
+  it('collapses completed stages beyond the first three into one group tile', () => {
+    render(<RibbonStrip ribbon={ribbon(fiveCompletedThenCurrent())} onSelectSegment={vi.fn()} />)
+
+    // 3 completed + current + 2 pending — the other 2 completed are folded.
+    expect(screen.getAllByTestId('ribbon-segment')).toHaveLength(6)
+    expect(screen.getByTestId('ribbon-collapsed-group')).toBeInTheDocument()
+
+    const group = screen.getByRole('button', { name: /^2 completed stages collapsed:/ })
+    expect(group).toHaveAttribute('aria-expanded', 'false')
+    expect(group).toHaveAccessibleName('2 completed stages collapsed: Stage 3, Stage 4')
+  })
+
+  it('does not collapse a run of three or fewer completed stages', () => {
+    render(
+      <RibbonStrip
+        ribbon={ribbon([...completedRun(3), seg({ stageCode: 'QA', state: SegmentState.CURRENT })])}
+      />,
+    )
+
+    expect(screen.queryByTestId('ribbon-collapsed-group')).not.toBeInTheDocument()
+    expect(screen.getAllByTestId('ribbon-segment')).toHaveLength(4)
+  })
+
+  it('expands the group into its own segments on click, and folds them back on a second click', async () => {
+    const user = userEvent.setup()
+    render(<RibbonStrip ribbon={ribbon(fiveCompletedThenCurrent())} onSelectSegment={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /^2 completed stages collapsed:/ }))
+
+    // The toggle itself stays on screen — it is now the "Collapse" control —
+    // and the two segments it was hiding join it as ordinary tiles.
+    const toggle = screen.getByRole('button', { name: /^Collapse 2 completed stages:/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('Stage 3')).toBeInTheDocument()
+    expect(screen.getByText('Stage 4')).toBeInTheDocument()
+    // 5 completed + current + 2 pending, all individual once expanded.
+    expect(screen.getAllByTestId('ribbon-segment')).toHaveLength(8)
+
+    await user.click(toggle)
+
+    expect(screen.getByRole('button', { name: /^2 completed stages collapsed:/ })).toBeInTheDocument()
+    expect(screen.queryByText('Stage 3')).not.toBeInTheDocument()
+  })
+
+  it('activates the group with Enter, same as any other tile', async () => {
+    const user = userEvent.setup()
+    render(<RibbonStrip ribbon={ribbon(fiveCompletedThenCurrent())} onSelectSegment={vi.fn()} />)
+
+    act(() => {
+      screen.getByRole('button', { name: /^2 completed stages collapsed:/ }).focus()
+    })
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByRole('button', { name: /^Collapse 2 completed stages:/ })).toBeInTheDocument()
+  })
+
+  it('counts the group as one roving stop, reachable by arrow keys like any segment', async () => {
+    const user = userEvent.setup()
+    render(<RibbonStrip ribbon={ribbon(fiveCompletedThenCurrent())} onSelectSegment={vi.fn()} />)
+
+    // 3 individual completed + 1 group + current + 2 pending = 7 stops.
+    const stops = document.querySelectorAll('[data-testid="ribbon-segment"] [tabindex], [data-testid="ribbon-collapsed-group"] [tabindex]')
+    expect(stops).toHaveLength(7)
+
+    await user.tab()
+    expect(document.activeElement).toHaveAccessibleName(/^Verify,/)
+
+    await user.keyboard('{ArrowLeft}')
+    expect(document.activeElement).toHaveAccessibleName(/^2 completed stages collapsed:/)
+
+    await user.keyboard('{ArrowLeft}')
+    expect(document.activeElement).toHaveAccessibleName(/^Stage 2,/)
+  })
+
+  it('never selects a group tile — it is a display toggle, not a filter', async () => {
+    const user = userEvent.setup()
+    const onSelectSegment = vi.fn()
+    render(<RibbonStrip ribbon={ribbon(fiveCompletedThenCurrent())} onSelectSegment={onSelectSegment} />)
+
+    await user.click(screen.getByRole('button', { name: /^2 completed stages collapsed:/ }))
+    expect(onSelectSegment).not.toHaveBeenCalled()
+  })
+
+  // A read-only ribbon still folds and unfolds its own completed run — the
+  // toggle is a display decision, not a selection, so it does not depend on
+  // `onSelectSegment` the way `RibbonSegment`'s own control-ness does.
+  it('keeps the group expandable even on a read-only ribbon', async () => {
+    const user = userEvent.setup()
+    render(<RibbonStrip ribbon={ribbon(fiveCompletedThenCurrent())} />)
+
+    await user.click(screen.getByRole('button', { name: /^2 completed stages collapsed:/ }))
+    expect(screen.getByText('Stage 3')).toBeInTheDocument()
+  })
+})
+
+/**
+ * B-053 · the strip scrolls itself so the current segment is centred —
+ * blueprint §17's other half of the same mitigation.
+ */
+describe('RibbonStrip · B-053 auto-centred scroll', () => {
+  function scrollSpy() {
+    return Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>
+  }
+
+  it('centres the current segment on mount', () => {
+    render(
+      <RibbonStrip
+        ribbon={ribbon([
+          seg({ stageCode: 'INTAKE', displayName: 'Intake', state: SegmentState.COMPLETED }),
+          seg({ stageCode: 'DEV', displayName: 'Development', state: SegmentState.CURRENT }),
+        ])}
+      />,
+    )
+
+    expect(scrollSpy()).toHaveBeenCalledWith(
+      expect.objectContaining({ inline: 'center', block: 'nearest', behavior: 'smooth' }),
+    )
+  })
+
+  it('scrolls instantly rather than smoothly when the reader prefers reduced motion', () => {
+    const original = window.matchMedia
+    window.matchMedia = ((query: string) =>
+      ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList) as typeof window.matchMedia
+
+    try {
+      render(
+        <RibbonStrip
+          ribbon={ribbon([seg({ stageCode: 'DEV', displayName: 'Development', state: SegmentState.CURRENT })])}
+        />,
+      )
+      expect(scrollSpy()).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'auto' }))
+    } finally {
+      window.matchMedia = original
+    }
+  })
+
+  it('does not re-centre on a re-render that leaves the current stage unchanged', () => {
+    const segments = [
+      seg({ stageCode: 'INTAKE', displayName: 'Intake', state: SegmentState.COMPLETED }),
+      seg({ stageCode: 'DEV', displayName: 'Development', state: SegmentState.CURRENT }),
+    ]
+    const { rerender } = render(<RibbonStrip ribbon={ribbon(segments)} selectedSegment={undefined} />)
+    scrollSpy().mockClear()
+
+    // Same current stage, different prop — selecting a tile must not re-fire
+    // the centring effect, or arrowing around the strip would fight it.
+    rerender(<RibbonStrip ribbon={ribbon(segments)} selectedSegment={{ stageCode: 'INTAKE' }} />)
+
+    expect(scrollSpy()).not.toHaveBeenCalled()
+  })
+
+  it('re-centres when the current stage actually moves', () => {
+    const before = [
+      seg({ stageCode: 'INTAKE', displayName: 'Intake', state: SegmentState.COMPLETED }),
+      seg({ stageCode: 'DEV', displayName: 'Development', state: SegmentState.CURRENT }),
+      seg({ stageCode: 'QA', displayName: 'QA', state: SegmentState.PENDING }),
+    ]
+    const { rerender } = render(<RibbonStrip ribbon={ribbon(before)} />)
+    scrollSpy().mockClear()
+
+    const after = [
+      seg({ stageCode: 'INTAKE', displayName: 'Intake', state: SegmentState.COMPLETED }),
+      seg({ stageCode: 'DEV', displayName: 'Development', state: SegmentState.COMPLETED }),
+      seg({ stageCode: 'QA', displayName: 'QA', state: SegmentState.CURRENT }),
+    ]
+    rerender(<RibbonStrip ribbon={ribbon(after)} />)
+
+    expect(scrollSpy()).toHaveBeenCalledWith(expect.objectContaining({ inline: 'center' }))
   })
 })
