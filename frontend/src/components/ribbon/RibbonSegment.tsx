@@ -36,9 +36,14 @@ import { useElapsedMins } from './useElapsedMins'
  *   does* — filtering History and Effort below to this stage and iteration —
  *   is `RibbonStrip`'s and `TicketDetailPage`'s, which own the selection
  *   state this tile only reports through `onSelect`/`isSelected`.
- * - **`B-052`'s keyboard navigation.** A segment given `onSelect` is a real
- *   `<button>`, so it is focusable and Enter/Space work today. Arrow-key
- *   roving across the strip belongs to the strip.
+ * - **`B-052`'s roving keyboard navigation across the strip** is
+ *   `RibbonStrip`'s — this tile only accepts the `tabIndex` and `onFocus`
+ *   that `useRovingFocus` hands it, and forwards a ref to whichever element
+ *   is its focusable one. What B-052 changed *here* is that the contextual
+ *   action left the tile's own `<button>`: `actionSlot` used to render inside
+ *   it, which is a button nested inside a button — invalid HTML, and a *Hand
+ *   off to QA →* no keyboard could reach. It is now a sibling within the
+ *   card, so the card holds two controls rather than one inside the other.
  * - **`B-051`'s compact dot** and **`B-053`'s horizontal scroll and collapsed
  *   grouping**. This tile is fixed-width and content-sized; who scrolls it is
  *   the strip's problem.
@@ -75,8 +80,23 @@ export interface RibbonSegmentProps {
   onSelect?: (segment: RibbonSegmentData) => void
   /** Marks this tile as the selected filter — `C-052` drives it. */
   isSelected?: boolean
-  /** §4A.3's inline contextual action on the current segment — `C-044`. */
+  /**
+   * §4A.3's inline contextual action on the current segment — `C-044`.
+   * Rendered *beside* the tile's trigger inside the card, never inside it.
+   */
   actionSlot?: React.ReactNode
+  /**
+   * `B-052`'s roving tab stop, from `useRovingFocus`. `0` on the one segment
+   * that holds the strip's place in the tab order, `-1` on the rest.
+   *
+   * Supplying it is also what makes a **read-only** tile focusable at all: a
+   * ribbon with no `onSelect` — a sealed cycle, S-13 tab 3's preview, S-30's
+   * designer — is a `<div role="group">`, and without a tabindex neither the
+   * segment nor the rich tooltip hanging off it has any keyboard route.
+   */
+  tabIndex?: number
+  /** Moves the strip's tab stop here when this tile is focused by any means. */
+  onFocus?: () => void
   className?: string
 }
 
@@ -89,14 +109,10 @@ function initials(name: string): string {
     .join('')
 }
 
-export function RibbonSegment({
-  segment,
-  isLast = false,
-  onSelect,
-  isSelected = false,
-  actionSlot,
-  className,
-}: RibbonSegmentProps) {
+export const RibbonSegment = React.forwardRef<HTMLElement, RibbonSegmentProps>(function RibbonSegment(
+  { segment, isLast = false, onSelect, isSelected = false, actionSlot, tabIndex, onFocus, className },
+  ref,
+) {
   const treatment = treatmentFor(segment.state)
   const isCurrent = segment.state === SegmentState.CURRENT
 
@@ -174,24 +190,44 @@ export function RibbonSegment({
           <RotateCcw className="h-3 w-3" aria-hidden="true" />×{loops}
         </span>
       )}
-
-      {actionSlot && <div className="pt-0.5">{actionSlot}</div>}
     </>
   )
 
+  /*
+   * B-052 · the card is the container and the trigger is inside it, which is
+   * the inverse of how B-050 built this.
+   *
+   * The tile used to *be* the `<button>`, and `actionSlot` rendered within its
+   * children — so §4A.3's *Hand off to QA →* was a `<button>` inside a
+   * `<button>`. The HTML spec forbids it, browsers recover from it differently,
+   * and a keyboard user could not reach the inner control at all: the outer
+   * button swallows Enter and Space. Splitting them makes the card a plain
+   * `<div>` holding two siblings, the five data points and the action.
+   *
+   * The focus ring moves to the card with `has-[:focus-visible]` — the exact
+   * pattern `CommentBox` uses for the same reason — so a ring still outlines
+   * the whole tile rather than an inset rectangle, and it draws for the action
+   * button too, which is honest: the reader is in this segment either way.
+   */
   const card = cn(
     'flex w-40 shrink-0 flex-col gap-1 rounded-card border p-2.5 text-left shadow-rest transition',
     treatment.card,
-    onSelect && 'cursor-pointer hover:shadow-modal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
+    onSelect && 'hover:shadow-modal',
+    'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary has-[:focus-visible]:ring-offset-1',
     isSelected && 'ring-2 ring-primary',
     className,
   )
 
+  const triggerClass = cn('flex min-w-0 flex-col gap-1 text-left outline-none', onSelect && 'cursor-pointer')
+
   const trigger = onSelect ? (
     <button
+      ref={ref as React.Ref<HTMLButtonElement>}
       type="button"
-      className={card}
+      className={triggerClass}
       onClick={() => onSelect(segment)}
+      onFocus={onFocus}
+      tabIndex={tabIndex}
       aria-label={segmentAriaLabel(segment, elapsedMins)}
       aria-current={isCurrent ? 'step' : undefined}
       aria-pressed={isSelected}
@@ -201,10 +237,15 @@ export function RibbonSegment({
     </button>
   ) : (
     <div
-      className={card}
-      // Still announced as one thing with one name. A sealed cycle's ribbon
-      // is read-only, not invisible.
+      ref={ref as React.Ref<HTMLDivElement>}
+      className={triggerClass}
+      // Still announced as one thing with one name, and — once the strip hands
+      // it a `tabIndex` — still reachable. A sealed cycle's ribbon is read-only,
+      // not invisible, and the tooltip below is the only place its entered,
+      // exited, note and idle-vs-active figures are written down.
       role="group"
+      onFocus={onFocus}
+      tabIndex={tabIndex}
       aria-label={segmentAriaLabel(segment, elapsedMins)}
       aria-current={isCurrent ? 'step' : undefined}
       data-state={segment.state}
@@ -215,41 +256,47 @@ export function RibbonSegment({
 
   return (
     <div className="flex min-w-0 items-center" data-testid="ribbon-segment">
-      {/* Its own provider rather than one shared from `App.tsx` — keeps this
-          tile self-contained for Storybook and any future standalone use,
-          `components/ui/tooltip.tsx`'s own note on why. */}
-      <TooltipProvider delayDuration={300}>
-        <Tooltip>
-          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-          <TooltipContent>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
-              <dt className="text-content-muted">Entered</dt>
-              <dd>{tooltip.entered}</dd>
-              <dt className="text-content-muted">Exited</dt>
-              <dd>{tooltip.exited}</dd>
-              <dt className="text-content-muted">Owner</dt>
-              <dd>{tooltip.owner}</dd>
-              <dt className="text-content-muted">Note</dt>
-              <dd>{tooltip.note}</dd>
-              <dt className="text-content-muted">Effort</dt>
-              <dd>{tooltip.effort}</dd>
-              <dt className="text-content-muted">Active</dt>
-              <dd>{tooltip.active}</dd>
-              <dt className={cn('text-content-muted', tooltip.isIdleDominated && 'font-medium text-warning-text')}>
-                Idle
-              </dt>
-              <dd className={cn(tooltip.isIdleDominated && 'font-medium text-warning-text')}>
-                {tooltip.idle}
-                {/* Colour is never the only signal — the same rule the Journey
-                    grid's own idle column follows for the identical reading. */}
-                {tooltip.isIdleDominated && (
-                  <span className="sr-only"> — most of this stage was spent waiting, not working</span>
-                )}
-              </dd>
-            </dl>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <div className={card}>
+        {/* Its own provider rather than one shared from `App.tsx` — keeps this
+            tile self-contained for Storybook and any future standalone use,
+            `components/ui/tooltip.tsx`'s own note on why. */}
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+            <TooltipContent>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+                <dt className="text-content-muted">Entered</dt>
+                <dd>{tooltip.entered}</dd>
+                <dt className="text-content-muted">Exited</dt>
+                <dd>{tooltip.exited}</dd>
+                <dt className="text-content-muted">Owner</dt>
+                <dd>{tooltip.owner}</dd>
+                <dt className="text-content-muted">Note</dt>
+                <dd>{tooltip.note}</dd>
+                <dt className="text-content-muted">Effort</dt>
+                <dd>{tooltip.effort}</dd>
+                <dt className="text-content-muted">Active</dt>
+                <dd>{tooltip.active}</dd>
+                <dt className={cn('text-content-muted', tooltip.isIdleDominated && 'font-medium text-warning-text')}>
+                  Idle
+                </dt>
+                <dd className={cn(tooltip.isIdleDominated && 'font-medium text-warning-text')}>
+                  {tooltip.idle}
+                  {/* Colour is never the only signal — the same rule the Journey
+                      grid's own idle column follows for the identical reading. */}
+                  {tooltip.isIdleDominated && (
+                    <span className="sr-only"> — most of this stage was spent waiting, not working</span>
+                  )}
+                </dd>
+              </dl>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        {/* §4A.3's contextual action, a sibling of the trigger and not a child
+            of it. `RibbonStrip` decides whether there is one at all. */}
+        {actionSlot && <div className="pt-0.5">{actionSlot}</div>}
+      </div>
 
       {/* The connector belongs to the segment on its left — §4A.3 describes it
           as part of that state's treatment ("filled connector to the right",
@@ -264,4 +311,4 @@ export function RibbonSegment({
       )}
     </div>
   )
-}
+})
