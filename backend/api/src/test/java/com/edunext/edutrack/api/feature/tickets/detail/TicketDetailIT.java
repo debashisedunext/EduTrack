@@ -229,11 +229,13 @@ class TicketDetailIT {
          * assignee, so either half of the golden rule alone would pass this.
          */
         @Test
-        @DisplayName("availableActions offers handoff/rework to the current owner")
+        @DisplayName("availableActions offers handoff/rework to the current owner, plus skip-stage for this "
+                + "Admin caller — the fixture ticket carries no workflow template, so C-047's own "
+                + "unchecked-precedent applies")
         void availableActionsOffersAdvanceToTheOwner() {
             TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
 
-            assertThat(d.availableActions()).containsExactlyInAnyOrder("handoff", "rework");
+            assertThat(d.availableActions()).containsExactlyInAnyOrder("handoff", "rework", "skip-stage");
         }
     }
 

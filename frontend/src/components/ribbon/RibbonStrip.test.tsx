@@ -225,6 +225,60 @@ describe('RibbonStrip · C-052 the contextual action', () => {
   })
 })
 
+describe('RibbonStrip · C-047 currentStageAction', () => {
+  it('renders the caller-supplied action on the current segment, alongside the handoff placeholder', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: false,
+          canAdvance: true,
+          segments: [seg({ stageCode: 'DEVELOPMENT', state: SegmentState.CURRENT })],
+        }}
+        currentStageAction={<button type="button">Skip stage</button>}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Skip stage' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Hand off/ })).toBeInTheDocument()
+  })
+
+  it('renders the caller-supplied action even when the caller may not otherwise advance', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: false,
+          canAdvance: false,
+          segments: [seg({ stageCode: 'DEVELOPMENT', state: SegmentState.CURRENT })],
+        }}
+        currentStageAction={<button type="button">Skip stage</button>}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Skip stage' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Hand off/ })).not.toBeInTheDocument()
+  })
+
+  it('renders nothing extra when the caller passes no action, same as before', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: false,
+          canAdvance: false,
+          segments: [seg({ stageCode: 'DEVELOPMENT', state: SegmentState.CURRENT })],
+        }}
+      />,
+    )
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+})
+
 /**
  * B-052 · blueprint §4A.3's closing bullet — "fully keyboard-navigable".
  *

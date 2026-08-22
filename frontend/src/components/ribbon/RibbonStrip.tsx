@@ -1,4 +1,5 @@
 import * as React from 'react'
+import type { ReactNode } from 'react'
 
 import type { Ribbon } from '@/api/generated/model/ribbon'
 import type { RibbonSegment as RibbonSegmentData } from '@/api/generated/model/ribbonSegment'
@@ -55,6 +56,22 @@ function isSameSegment(selected: SelectedSegment | undefined, segment: RibbonSeg
  * invents a second one. The label itself reads the *next* segment's name off
  * the sibling list `RibbonSegment` does not have, on the same "Hand off to QA →"
  * wording the blueprint's own diagram uses.
+ *
+ * ## `currentStageAction` — C-047's skip trigger, and why it is a prop rather
+ * ## than a second placeholder built in here
+ *
+ * `components/ribbon/` is the shared component library every stream consumes
+ * — `segmentState.ts`'s own note declines the opposite import direction for
+ * exactly this reason — so a real, working `SkipStageDialog` (which needs
+ * `useSkipStageMutation`, toasts and a ticket) belongs in
+ * `features/tickets/detail/`, not here. `TicketDetailPage` decides *whether*
+ * to render one (`detail.availableActions.includes('skip-stage')`, C-047's
+ * own addition to `TicketDetailService.availableActions`) and hands the
+ * finished node down, the same "the caller decides, the ribbon reports"
+ * split `onSelectSegment` already drew above. Rendered only on the current
+ * segment, alongside the honest handoff placeholder rather than replacing
+ * it — a skip and a handoff are both things the current owner might do next,
+ * not alternatives to choose between at this layer.
  *
  * ## What this task is not
  *
@@ -130,12 +147,21 @@ export function RibbonStrip({
   ribbon,
   selectedSegment,
   onSelectSegment,
+  currentStageAction,
 }: {
   ribbon?: Ribbon
   /** The stage+iteration currently filtering History/Effort below, or `undefined` for none. */
   selectedSegment?: SelectedSegment
   /** Fired on every segment click, current cycle or sealed. */
   onSelectSegment?: (segment: RibbonSegmentData) => void
+  /**
+   * C-047 · a finished trigger (today, `SkipStageDialog`) for the current
+   * segment, supplied by the caller — see the class javadoc's own section on
+   * why this is a prop rather than a second placeholder built in here.
+   * Rendered only alongside the current segment, and only when the caller
+   * passes something; `undefined` renders nothing extra, same as today.
+   */
+  currentStageAction?: ReactNode
 }) {
   const segments = React.useMemo(() => ribbon?.segments ?? [], [ribbon?.segments])
   const currentIndex = segments.findIndex((segment) => segment.state === SegmentState.CURRENT)
@@ -236,8 +262,11 @@ export function RibbonStrip({
               onSelect={onSelectSegment}
               isSelected={isSameSegment(selectedSegment, segment)}
               actionSlot={
-                isCurrent && ribbon?.canAdvance ? (
-                  <HandoffPlaceholder label={nextStageLabel(segments, currentIndex)} />
+                isCurrent && (ribbon?.canAdvance || currentStageAction) ? (
+                  <>
+                    {ribbon?.canAdvance && <HandoffPlaceholder label={nextStageLabel(segments, currentIndex)} />}
+                    {currentStageAction}
+                  </>
                 ) : undefined
               }
             />

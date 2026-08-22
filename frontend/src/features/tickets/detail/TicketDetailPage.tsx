@@ -16,6 +16,7 @@ import { ensureRichText } from '@/components/ui/rich-text'
 
 import { RibbonStrip } from '@/components/ribbon/RibbonStrip'
 
+import { SkipStageDialog } from './SkipStageDialog'
 import { AttachmentsTab } from '../attachments/AttachmentsTab'
 import { useAttachmentsTab } from '../attachments/useAttachmentsTab'
 import { CommentBox } from '../comments/CommentBox'
@@ -475,7 +476,16 @@ export function TicketDetailPage() {
             aria-label="Workflow ribbon"
             className="rounded-card border border-border bg-surface p-2 shadow-rest"
           >
-            <RibbonStrip ribbon={detail?.ribbon} selectedSegment={selectedSegment} onSelectSegment={selectSegment} />
+            <RibbonStrip
+              ribbon={detail?.ribbon}
+              selectedSegment={selectedSegment}
+              onSelectSegment={selectSegment}
+              currentStageAction={
+                detail?.availableActions?.includes('skip-stage') ? (
+                  <SkipStageDialog ticket={ticket} onSkipped={() => void refetch()} />
+                ) : undefined
+              }
+            />
           </section>
 
           <section

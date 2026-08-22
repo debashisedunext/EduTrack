@@ -4,6 +4,7 @@ import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.feature.tickets.links.TicketLinkService;
 import com.edunext.edutrack.api.feature.transitions.StageOwnership;
 import com.edunext.edutrack.api.security.CallerIdentity;
+import com.edunext.edutrack.api.security.permission.RolePermissions;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketAttachment;
@@ -16,10 +17,12 @@ import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.TicketEffortLog;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
 import com.edunext.edutrack.domain.tickets.TicketWatcherRepository;
+import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -98,13 +101,23 @@ class TicketDetailService {
     private final TicketWatcherRepository watchers;
     private final TicketLinkService links;
 
+    /**
+     * C-047 · read-only, exactly like {@link #cycles}/{@link #comments} above
+     * — this class already only ever reads the stage-sequence side of the
+     * ribbon (never journals a transition itself), so a plain repository
+     * dependency is consistent with what is already here rather than a new
+     * exception to it.
+     */
+    private final WorkflowStageRepository stages;
+
     TicketDetailService(ScopedTickets tickets,
                         TicketCycleRepository cycles,
                         TicketJournal journal,
                         TicketCommentRepository comments,
                         TicketAttachmentRepository attachments,
                         TicketWatcherRepository watchers,
-                        TicketLinkService links) {
+                        TicketLinkService links,
+                        WorkflowStageRepository stages) {
         this.tickets = tickets;
         this.cycles = cycles;
         this.journal = journal;
@@ -112,6 +125,7 @@ class TicketDetailService {
         this.attachments = attachments;
         this.watchers = watchers;
         this.links = links;
+        this.stages = stages;
     }
 
     /**
@@ -156,14 +170,58 @@ class TicketDetailService {
      * even to its own owner. An unidentifiable caller (empty
      * {@link CallerIdentity#of}) gets none, the same deny-by-default that
      * class's own doc requires.
+     *
+     * <p>{@code skip-stage} — C-047 · added on top of the pair above rather
+     * than folded into the same {@code mayAdvance} branch, because it is a
+     * genuine capability (§2's "Skip a stage" row ticks Admin and PM alone,
+     * {@code V20260806_0900}) and not a row rule {@code mayAdvance} narrows —
+     * {@code SkipController}'s own javadoc makes the identical point about why
+     * its golden-rule check is defensive rather than load-bearing. Checked by
+     * role code rather than by re-deriving {@code ticket.skip_stage} from
+     * {@code RolePermissions} here, on {@code StageOwnership}'s own reasoning
+     * for staying a plain predicate: the two roles that hold the capability
+     * are exactly the two the golden rule always admits regardless of
+     * assignment, so this is one fact stated once, not a second copy of the
+     * permission catalogue. Offered only when the current stage is actually
+     * skippable — {@code workflow_stages.is_optional} — so the client never
+     * renders a button {@code POST /skip-stage} would 422. A ticket with no
+     * template, or standing in a stage not on its own template, is treated as
+     * skippable-unchecked exactly as {@code SkipService.requireSkippable}
+     * itself does, for the identical reason: there is nothing to validate
+     * against, and inventing a refusal here would just hide whichever real
+     * problem produced it.
      */
     private List<String> availableActions(Authentication caller, Ticket ticket) {
         CallerIdentity identity = CallerIdentity.of(caller).orElse(null);
         boolean hasLiveStage = ticket.getCurrentStage() != null && !"CLOSED".equals(ticket.getStatus());
-        if (identity != null && hasLiveStage && StageOwnership.mayAdvance(identity, ticket)) {
-            return List.of("handoff", "rework");
+        if (identity == null || !hasLiveStage) {
+            return List.of();
         }
-        return List.of();
+
+        List<String> actions = new ArrayList<>();
+        if (StageOwnership.mayAdvance(identity, ticket)) {
+            actions.add("handoff");
+            actions.add("rework");
+        }
+        if (isSkipCapable(identity) && isCurrentStageSkippable(ticket)) {
+            actions.add("skip-stage");
+        }
+        return List.copyOf(actions);
+    }
+
+    private static boolean isSkipCapable(CallerIdentity identity) {
+        return RolePermissions.ADMIN.equals(identity.roleCode()) || RolePermissions.PM.equals(identity.roleCode());
+    }
+
+    private boolean isCurrentStageSkippable(Ticket ticket) {
+        Long templateId = ticket.getWorkflowTemplateId();
+        String stageCode = ticket.getCurrentStage();
+        if (templateId == null || stageCode == null) {
+            return true;
+        }
+        return stages.findByTemplateIdAndStageCode(templateId, stageCode)
+                .map(stage -> stage.isOptional())
+                .orElse(true);
     }
 
     // ── mapping ──────────────────────────────────────────────────────────────
