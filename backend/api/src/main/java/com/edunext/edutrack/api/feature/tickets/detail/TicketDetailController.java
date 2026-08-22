@@ -63,7 +63,7 @@ class TicketDetailController {
     @Operation(operationId = "getTicketDetail", summary = "Ticket detail in one call")
     ResponseEntity<TicketDetailDtos.DetailResponse> full(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @RequestParam(required = false) Integer cycle,
             @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
 
