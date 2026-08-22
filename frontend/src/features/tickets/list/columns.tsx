@@ -8,10 +8,13 @@ import type { Level } from '@/api/generated/model/level'
 import type { StatusCode } from '@/api/generated/model/statusCode'
 import { Chip, type ChipProps } from '@/components/ui/chip'
 import { AvatarStack } from '@/components/ui/avatar-stack'
+import { RibbonDots } from '@/components/ribbon/RibbonDots'
+import type { CompactDot } from '@/components/ribbon/compactDots'
 
 export type ColumnKey =
   | 'ticketId'
   | 'title'
+  | 'journey'
   | 'taskType'
   | 'module'
   | 'level'
@@ -37,6 +40,17 @@ export interface ColumnRenderContext {
    * than as a retirement.
    */
   moduleNames: Map<number, string>
+  /**
+   * B-051 · `ticketId` → the compact ribbon for that row, or `null` where the
+   * row cannot be placed on one. Resolved once per distinct project × task
+   * type pair by `useTicketStageDots`, not per row — see that hook's header
+   * for why this arrives pre-built rather than being fetched in the cell.
+   *
+   * An absent key is a page still loading its templates, which renders the
+   * same placeholder as `null`: a grid that reflowed as eight dots appeared
+   * per row would be worse than one that fills a fixed-width cell late.
+   */
+  stageDots: Map<string, CompactDot[] | null>
 }
 
 export interface ColumnDef {
@@ -143,6 +157,32 @@ export const COLUMNS: ColumnDef[] = [
         {t.title}
       </span>
     ),
+  },
+  {
+    // B-051 · the compact ribbon. "Journey" is the prototype's own header for
+    // this column, and the word C's roll-up grid already uses for the same
+    // idea at ticket scale.
+    //
+    // **Not `alwaysVisible`**, and on by default. The two anchors are ID and
+    // Description — the columns a row cannot be identified without — and this
+    // is not one of them. It is in the default set because blueprint line 984
+    // describes it as the thing the grid is scanned *for*, and a column nobody
+    // can find is not a column that was added (D-063's own reasoning for the
+    // date columns). It costs about 80px, which is why the chooser can switch
+    // it off for a reader who would rather spend that width on Module.
+    key: 'journey',
+    header: 'Journey',
+    widthClassName: 'w-[7.5rem]',
+    render: (t, ctx) => {
+      const dots = t.ticketId ? ctx.stageDots.get(t.ticketId) : undefined
+      // Absent (still resolving) and `null` (resolved, unplaceable) render the
+      // same em dash. Both mean "this grid cannot say", and inventing a
+      // distinction between them would put a spinner in twenty-five cells.
+      if (!dots || dots.length === 0) {
+        return <span className="text-content-muted">—</span>
+      }
+      return <RibbonDots dots={dots} />
+    },
   },
   {
     key: 'taskType',
@@ -280,6 +320,11 @@ export function rowCueClassName(ticket: Ticket): string | undefined {
 export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = [
   'ticketId',
   'title',
+  // B-051 · the compact ribbon, on for a new reader. `useListPreferences`
+  // persists a saved selection, so anyone who has already opened the list
+  // keeps their layout and finds this in the chooser — the same way D-063's
+  // two date columns arrived.
+  'journey',
   'taskType',
   'level',
   'assignee',

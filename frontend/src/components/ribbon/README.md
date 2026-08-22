@@ -15,6 +15,8 @@ task IDs still needs the ordinary sign-off.
 | `segmentState.ts` | B-050, C-052 | State → words, icon and treatment; the ARIA label; the tooltip's six fields. Pure. |
 | `useElapsedMins.ts` | B-050 | The current segment's running timer. |
 | `RibbonStrip.tsx` | C-051, C-052 | Lays the segments out in order; wires selection and the current segment's contextual action. |
+| `RibbonDots.tsx` | B-051 | The compact variant. One row of S-17's grid, as dots. |
+| `compactDots.ts` | B-051 | Template stages + one ticket row → dots; the cell's accessible name and each dot's hover. Pure. |
 
 ## What C-052 built, and what still sits above this directory
 
@@ -40,11 +42,10 @@ by keyboard focus as well as pointer hover, which the native `title` it
 replaces never was.
 
 Still above this directory: `C-053`'s cycle selector, `C-054`'s
-`Cycle 2 · Iteration 3` chips, `B-051`'s compact dot for the ticket list,
-`B-052`'s roving keyboard navigation across the whole strip, and `B-053`'s
-auto-centred scroll and collapsed `…` group at eight stages — `RibbonStrip`
-still only goes as far as `overflow-x-auto`, the floor a strip needs not to
-visibly break before that lands.
+`Cycle 2 · Iteration 3` chips, `B-052`'s roving keyboard navigation across the
+whole strip, and `B-053`'s auto-centred scroll and collapsed `…` group at eight
+stages — `RibbonStrip` still only goes as far as `overflow-x-auto`, the floor a
+strip needs not to visibly break before that lands.
 
 The props `RibbonSegment` accepts are the contract between B-050/C-052 and
 C-051: `segment`, `isLast`, `onSelect`, `isSelected`, `actionSlot`,
@@ -100,3 +101,38 @@ is where the blueprint put it. **No token was requested and none is pending.**
 clock, is not in `SegmentState`, and has no field on `RibbonSegment` to render
 from; when D's stage-SLA scanner surfaces one it is an overlay on a state, not a
 seventh state.
+
+## B-051 — the compact variant, and what it shares with the tile
+
+`RibbonDots` is the same ribbon at grid scale: blueprint line 984's "eight
+small dots per row (filled = done, ringed = current, hollow = pending, amber =
+reworked) so a manager can scan a whole grid and see exactly where every ticket
+sits without opening any of them."
+
+**It shares `SegmentState` and nothing else.** `segmentState.ts`'s own header
+asked for that — "B-051's compact dot and B-053's collapsed group read the same
+vocabulary instead of inventing a second one three weeks from now" — so a dot's
+state is the wire enum, not a private four-value union. What it does *not*
+share is the source: a tile is drawn from a server-built `Ribbon`, and a dot is
+derived from the row's workflow template plus its `currentStageCode`, because
+`GET /tickets` returns `TicketSummary` and no transitions. Four of the six
+states are producible from that; `SKIPPED` and `BLOCKED` are facts in
+`ticket_stage_transitions` and are absent rather than approximated.
+`features/tickets/list/README.md` carries how a row finds its template.
+
+**Shape carries the state and colour repeats it**, because at 7px there is no
+room for an icon or a word and `tokens.css` requires a second channel: filled
+circle, larger circle inside a ring, hollow outline, and a **diamond** for sent
+back — four marks that stay apart in greyscale. `RibbonDots.test.tsx` pins that
+as a behaviour, so a future tidy-up that collapses them to four colours fails.
+No new token was needed or requested.
+
+**One `role="img"` per cell, not eight focusable marks.** Eight per row across
+25 rows is 200 stops between a keyboard reader and the bottom of the page, in a
+cell with nothing to activate — so the strip carries one sentence naming where
+the ticket is, how far along and whether it has been sent back, and the per-dot
+naming §S-17 asks of a hover is a native `title`. That is deliberately *not*
+the Radix tooltip `RibbonSegment` uses: right for one ribbon of eight tiles on
+a detail page, a different question with a different answer for 200 in a grid.
+`B-052` owns keyboard navigation across the detail strip, where every segment
+is a control.
