@@ -15,6 +15,9 @@ task IDs still needs the ordinary sign-off.
 | `segmentState.ts` | B-050, C-052 | State → words, icon and treatment; the ARIA label; the tooltip's six fields. Pure. |
 | `useElapsedMins.ts` | B-050 | The current segment's running timer. |
 | `RibbonStrip.tsx` | C-051, C-052 | Lays the segments out in order; wires selection and the current segment's contextual action. |
+| `RibbonDots.tsx` | B-051 | The compact variant. One row of S-17's grid, as dots. |
+| `compactDots.ts` | B-051 | Template stages + one ticket row → dots; the cell's accessible name and each dot's hover. Pure. |
+| `rovingFocus.ts` | B-052 | The strip's single tab stop and the arrow keys that move inside it. `nextFocusIndex` is pure. |
 
 ## What C-052 built, and what still sits above this directory
 
@@ -40,16 +43,17 @@ by keyboard focus as well as pointer hover, which the native `title` it
 replaces never was.
 
 Still above this directory: `C-053`'s cycle selector, `C-054`'s
-`Cycle 2 · Iteration 3` chips, `B-051`'s compact dot for the ticket list,
-`B-052`'s roving keyboard navigation across the whole strip, and `B-053`'s
-auto-centred scroll and collapsed `…` group at eight stages — `RibbonStrip`
-still only goes as far as `overflow-x-auto`, the floor a strip needs not to
-visibly break before that lands.
+`Cycle 2 · Iteration 3` chips, and `B-053`'s auto-centred scroll and collapsed
+`…` group at eight stages — `RibbonStrip` still only goes as far as
+`overflow-x-auto`, the floor a strip needs not to visibly break before that
+lands. `B-052`'s roving keyboard navigation has landed; see below.
 
 The props `RibbonSegment` accepts are the contract between B-050/C-052 and
-C-051: `segment`, `isLast`, `onSelect`, `isSelected`, `actionSlot`,
-`className`. A segment with no `onSelect` renders as a labelled `<div>`, not a
-dead button — that is what a caller that has not wired selection gets.
+C-051: `segment`, `isLast`, `onSelect`, `isSelected`, `actionSlot`, `className`,
+and — since `B-052` — `tabIndex` and `onFocus`, plus a forwarded `ref` that
+lands on whichever element is the tile's focusable one. A segment with no
+`onSelect` renders as a labelled `<div>`, not a dead button — that is what a
+caller that has not wired selection gets.
 
 ## Three things the contract cannot express yet
 
@@ -100,3 +104,110 @@ is where the blueprint put it. **No token was requested and none is pending.**
 clock, is not in `SegmentState`, and has no field on `RibbonSegment` to render
 from; when D's stage-SLA scanner surfaces one it is an overlay on a state, not a
 seventh state.
+
+## B-051 — the compact variant, and what it shares with the tile
+
+`RibbonDots` is the same ribbon at grid scale: blueprint line 984's "eight
+small dots per row (filled = done, ringed = current, hollow = pending, amber =
+reworked) so a manager can scan a whole grid and see exactly where every ticket
+sits without opening any of them."
+
+**It shares `SegmentState` and nothing else.** `segmentState.ts`'s own header
+asked for that — "B-051's compact dot and B-053's collapsed group read the same
+vocabulary instead of inventing a second one three weeks from now" — so a dot's
+state is the wire enum, not a private four-value union. What it does *not*
+share is the source: a tile is drawn from a server-built `Ribbon`, and a dot is
+derived from the row's workflow template plus its `currentStageCode`, because
+`GET /tickets` returns `TicketSummary` and no transitions. Four of the six
+states are producible from that; `SKIPPED` and `BLOCKED` are facts in
+`ticket_stage_transitions` and are absent rather than approximated.
+`features/tickets/list/README.md` carries how a row finds its template.
+
+**Shape carries the state and colour repeats it**, because at 7px there is no
+room for an icon or a word and `tokens.css` requires a second channel: filled
+circle, larger circle inside a ring, hollow outline, and a **diamond** for sent
+back — four marks that stay apart in greyscale. `RibbonDots.test.tsx` pins that
+as a behaviour, so a future tidy-up that collapses them to four colours fails.
+No new token was needed or requested.
+
+**One `role="img"` per cell, not eight focusable marks.** Eight per row across
+25 rows is 200 stops between a keyboard reader and the bottom of the page, in a
+cell with nothing to activate — so the strip carries one sentence naming where
+the ticket is, how far along and whether it has been sent back, and the per-dot
+naming §S-17 asks of a hover is a native `title`. That is deliberately *not*
+the Radix tooltip `RibbonSegment` uses: right for one ribbon of eight tiles on
+a detail page, a different question with a different answer for 200 in a grid.
+`B-052` owns keyboard navigation across the detail strip, where every segment
+is a control.
+
+## B-052 — the keyboard, and the button that was inside a button
+
+§4A.3's closing bullet asks for two things: *"Fully keyboard-navigable; each
+segment has an ARIA label reading the stage, owner, state and effort."* The
+second was B-050's and shipped with it — `segmentAriaLabel` emits stage, owner,
+state, **duration** and effort, plus the loop count and the skip reason, and
+`segmentState.test.ts` pins all seven. This task is the first half.
+
+**Eight segments are one tab stop.** `useRovingFocus` in `rovingFocus.ts` makes
+the strip a composite widget in the APG sense: one element in the tab order,
+`←`/`→` between segments, `Home`/`End` to the ends, both wrapping. The keys are
+`TicketDetailTabs`' and the rich-text toolbar's on purpose — a third set of
+arrow-key semantics on the same screen would *be* the accessibility problem. The
+alternative is not "slightly more presses": S-20 stacks History, Effort, Chat and
+the roll-up grid **below** the ribbon, so eight tab stops is eight presses
+between a keyboard reader and everything they came for, and sixteen on a ticket
+that has looped.
+
+**The tab stop starts on the current segment.** Landing a reader on an Intake
+finished four days ago and making them arrow forward to discover where the
+ticket actually is would be a working keyboard interface answering the wrong
+question. It is a *preference*, not a controlled value: once the reader moves
+it, it stays moved, because the strip re-renders on every `stage.changed` frame
+D-058 pushes and a live handoff must not yank the tab stop out from under
+someone reading with it.
+
+**Focus does not select, and this is the one place the ribbon differs from the
+tabs.** `TicketDetailTabs` selects on focus and says why — every panel is
+already loaded from the one `/full` call, so moving costs nothing. Selecting
+here is not free: C-052 filters History, Effort and (once `D-047` lands) Chat
+down to one stage and iteration, so arrowing across eight stages to *read* the
+ribbon would refilter three panels eight times, and a keyboard user could not
+inspect the journey without changing what sits under it. Activation is explicit
+— `Enter` or `Space`.
+
+**Every tile joins the roving, including the read-only ones.** A strip rendered
+without `onSelectSegment` draws `<div role="group">` tiles, and *nothing could
+focus them* before this task — so C-052's tooltip, the only place a segment's
+entered, exited, note and idle-vs-active figures are written down, was
+pointer-only on all three callers that render one: a sealed past cycle, S-13
+tab 3's live preview and S-30's designer preview. They take a `tabIndex` now.
+They are still not buttons, because there is still nothing to activate.
+
+**The defect this found: `actionSlot` rendered inside the tile's own
+`<button>`.** §4A.3 puts *Hand off to QA →* on the current segment and B-050
+read that literally enough to render it among the tile's children — a `<button>`
+inside a `<button>`, which the HTML spec forbids, which every browser recovers
+from differently, and which **no keyboard can reach**, because the outer control
+consumes Enter and Space before the inner one sees them. The card is now a
+`<div>` holding two siblings: the trigger with the five data points, and the
+action. The focus ring moved to the card with `has-[:focus-visible]` — the
+pattern `CommentBox` already uses — so it still outlines the whole tile rather
+than an inset rectangle, and it draws for the action button too, which is
+honest.
+
+**`itemProps` caches its two callbacks per index, and that is not a
+micro-optimisation.** A fresh `ref` closure on every render makes React detach and
+reattach the node — `ref(null)` then `ref(node)` — on all eight tiles, and each
+tile's ref is composed by Radix's `Slot` with `TooltipTrigger`'s own, which is
+the Popper **anchor**. The first cut of this hook did exactly that, and
+`TicketDetailPage.test.tsx` started timing out under parallel load in a
+different test each run while its single-file time was unchanged — eight
+tooltips being torn down and re-anchored on every render of a strip that
+re-renders on selection, on focus and on every realtime frame. Stable identities
+fixed it. If a future change makes those closures depend on anything but the
+index, that regression comes straight back.
+
+**What is still not here:** `B-053`'s auto-centred horizontal scroll and the
+collapsed `…` group past eight stages. Arrowing to an off-screen segment scrolls
+it into view because `.focus()` does that natively, which is the floor rather
+than the enhancement.

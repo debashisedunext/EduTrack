@@ -73,18 +73,32 @@ export function useTemplate(templateId: number | null) {
  * it would be refused for an edit that has nothing to do with routing.
  */
 export function useTemplateMappings(templateId: number | null) {
-  return useQuery<MappingsWithEtag, ApiError>({
+  return useQuery<MappingsWithEtag, ApiError>(mappingsQueryOptions(templateId))
+}
+
+/**
+ * The same query as an options object, so a caller that needs several
+ * templates' rules at once can hand them all to `useQueries` — B-051's Journey
+ * column on S-17 does, because a grid mixing projects needs the whole routing
+ * table rather than one template's slice of it.
+ *
+ * Split out rather than copied: the tab and the grid must read the same cache
+ * entry, or an Admin who edits a rule on S-13 would see the ticket list keep
+ * the old routing until a reload. `invalidate` below already clears this key.
+ */
+export function mappingsQueryOptions(templateId: number | null) {
+  return {
     queryKey: MAPPINGS_KEY(templateId ?? -1),
     enabled: templateId != null,
-    queryFn: async ({ signal }) => {
+    queryFn: async ({ signal }: { signal?: AbortSignal }) => {
       const response = await authedFetch(
         `/masters/workflow-templates/${templateId}/mappings`,
         signal,
       )
       const body = (await response.json()) as { data: TemplateMapping[] }
-      return { mappings: body.data, etag: response.headers.get('ETag') }
+      return { mappings: body.data, etag: response.headers.get('ETag') } satisfies MappingsWithEtag
     },
-  })
+  }
 }
 
 /**

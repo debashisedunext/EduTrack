@@ -4,6 +4,7 @@ import { SegmentState } from '@/api/generated/model/segmentState'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { RibbonSegment } from './RibbonSegment'
+import { useRovingFocus } from './rovingFocus'
 import { nextStageLabel } from './segmentState'
 
 /** Identifies one segment for the selection C-052 drives — a stage code alone
@@ -70,6 +71,34 @@ function isSameSegment(selected: SelectedSegment | undefined, segment: RibbonSeg
  * `<ol>` and the tab strip's `tablist`, and a screen reader announcing "list,
  * 8 items" here is the ribbon's shape, the same way the roll-up grid's rows
  * are a table.
+ *
+ * ## B-052 · one tab stop, arrows inside it
+ *
+ * §4A.3's closing bullet asks for a ribbon that is *fully keyboard-navigable*,
+ * and eight tab stops is the way to fail that while appearing to satisfy it: a
+ * ticket detail page puts History, Effort, Chat and the roll-up grid **below**
+ * the ribbon, so eight segments is eight presses of Tab standing between a
+ * keyboard reader and everything they came for — and sixteen on a ticket that
+ * has looped. So the strip is a composite widget: one element in the tab order,
+ * `←`/`→` between segments, `Home`/`End` to the ends, all of it in
+ * `useRovingFocus` beside this file.
+ *
+ * The tab stop **starts on the current segment**, which is the one thing the
+ * ribbon exists to say. Landing a reader on Intake — finished four days ago —
+ * and making them arrow forward to find out where the ticket actually is would
+ * be a working keyboard interface answering the wrong question.
+ *
+ * **Every tile joins the roving, including the read-only ones.** A strip
+ * rendered without `onSelectSegment` — a sealed cycle, S-13 tab 3's live
+ * preview, S-30's designer preview — draws `<div role="group">` tiles that
+ * nothing could focus before this task, so C-052's rich tooltip (entered,
+ * exited, owner, note, effort, idle-vs-active) was pointer-only on all three.
+ * Passing `tabIndex` is what makes them reachable; there is still nothing to
+ * activate, which is correct and is why they are not buttons.
+ *
+ * **Focus does not select** — `useRovingFocus`'s own header argues it against
+ * `TicketDetailTabs`, which does the opposite for a good reason that does not
+ * hold here.
  */
 export function RibbonStrip({
   ribbon,
@@ -83,6 +112,11 @@ export function RibbonStrip({
   onSelectSegment?: (segment: RibbonSegmentData) => void
 }) {
   const segments = ribbon?.segments ?? []
+  const currentIndex = segments.findIndex((segment) => segment.state === SegmentState.CURRENT)
+
+  // Above the empty-state return, because hooks are. A ribbon with no segments
+  // rovers over nothing, which `useRovingFocus` handles rather than divides by.
+  const roving = useRovingFocus(segments.length, Math.max(currentIndex, 0))
 
   if (segments.length === 0) {
     return (
@@ -93,25 +127,37 @@ export function RibbonStrip({
     )
   }
 
-  const currentIndex = segments.findIndex((segment) => segment.state === SegmentState.CURRENT)
-
   return (
-    <div role="list" aria-label="Workflow stages" className="flex items-start overflow-x-auto pb-1">
-      {segments.map((segment, index) => (
-        <div role="listitem" key={segment.stageCode ?? index}>
-          <RibbonSegment
-            segment={segment}
-            isLast={index === segments.length - 1}
-            onSelect={onSelectSegment}
-            isSelected={isSameSegment(selectedSegment, segment)}
-            actionSlot={
-              index === currentIndex && ribbon?.canAdvance ? (
-                <HandoffPlaceholder label={nextStageLabel(segments, currentIndex)} />
-              ) : undefined
-            }
-          />
-        </div>
-      ))}
+    <div
+      role="list"
+      aria-label="Workflow stages"
+      // One listener on the container rather than eight on the tiles, and the
+      // one place a key that is not ours is left alone — `nextFocusIndex`
+      // returns null and nothing is prevented, so Tab still leaves the strip.
+      onKeyDown={roving.onKeyDown}
+      className="flex items-start overflow-x-auto pb-1"
+    >
+      {segments.map((segment, index) => {
+        const { ref, tabIndex, onFocus } = roving.itemProps(index)
+        return (
+          <div role="listitem" key={segment.stageCode ?? index}>
+            <RibbonSegment
+              ref={ref}
+              tabIndex={tabIndex}
+              onFocus={onFocus}
+              segment={segment}
+              isLast={index === segments.length - 1}
+              onSelect={onSelectSegment}
+              isSelected={isSameSegment(selectedSegment, segment)}
+              actionSlot={
+                index === currentIndex && ribbon?.canAdvance ? (
+                  <HandoffPlaceholder label={nextStageLabel(segments, currentIndex)} />
+                ) : undefined
+              }
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }

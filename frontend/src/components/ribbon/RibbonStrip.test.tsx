@@ -205,3 +205,212 @@ describe('RibbonStrip · C-052 the contextual action', () => {
     expect(screen.queryByRole('button', { name: /Hand off/ })).not.toBeInTheDocument()
   })
 })
+
+/**
+ * B-052 · blueprint §4A.3's closing bullet — "fully keyboard-navigable".
+ *
+ * The per-segment ARIA label the same bullet asks for was B-050's and is
+ * pinned in `segmentState.test.ts`; what is new here is that eight segments
+ * are **one** stop on the way down the page, and that everything below the
+ * ribbon is eight presses of Tab closer than it was.
+ */
+describe('RibbonStrip · B-052 keyboard navigation', () => {
+  /** The strip's tab stops, in DOM order — the trigger of each tile. */
+  function stops(): HTMLElement[] {
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-testid="ribbon-segment"] [tabindex]'))
+  }
+
+  function tabStops(): HTMLElement[] {
+    return stops().filter((node) => node.getAttribute('tabindex') === '0')
+  }
+
+  function eightStages(currentAt = 3): RibbonSegmentData[] {
+    const names = ['Intake', 'Triage', 'Development', 'QA', 'Deployment', 'Verification', 'Sign-off', 'Closed']
+    return names.map((displayName, index) =>
+      seg({
+        stageCode: displayName.toUpperCase(),
+        displayName,
+        sequence: index + 1,
+        state: index === currentAt ? SegmentState.CURRENT : SegmentState.COMPLETED,
+      }),
+    )
+  }
+
+  it('is one tab stop for the whole strip, not one per segment', () => {
+    render(<RibbonStrip ribbon={ribbon(eightStages())} onSelectSegment={vi.fn()} />)
+
+    expect(stops()).toHaveLength(8)
+    expect(tabStops()).toHaveLength(1)
+  })
+
+  it('puts that tab stop on the current segment, not on the first', () => {
+    render(<RibbonStrip ribbon={ribbon(eightStages(3))} onSelectSegment={vi.fn()} />)
+
+    expect(tabStops()[0]).toHaveAccessibleName(/^QA,/)
+  })
+
+  it('falls back to the first segment when nothing is current — a sealed cycle', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: true,
+          canAdvance: false,
+          segments: eightStages(-1),
+        }}
+        onSelectSegment={vi.fn()}
+      />,
+    )
+
+    expect(tabStops()[0]).toHaveAccessibleName(/^Intake,/)
+  })
+
+  it('tabs into the strip once and lands on the current stage', async () => {
+    const user = userEvent.setup()
+    render(<RibbonStrip ribbon={ribbon(eightStages(3))} onSelectSegment={vi.fn()} />)
+
+    await user.tab()
+
+    expect(document.activeElement).toHaveAccessibleName(/^QA,/)
+  })
+
+  it('moves right and left with the arrow keys', async () => {
+    const user = userEvent.setup()
+    render(<RibbonStrip ribbon={ribbon(eightStages(3))} onSelectSegment={vi.fn()} />)
+
+    await user.tab()
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toHaveAccessibleName(/^Deployment,/)
+
+    await user.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect(document.activeElement).toHaveAccessibleName(/^Development,/)
+  })
+
+  it('jumps to the ends with Home and End, and wraps past them', async () => {
+    const user = userEvent.setup()
+    render(<RibbonStrip ribbon={ribbon(eightStages(3))} onSelectSegment={vi.fn()} />)
+
+    await user.tab()
+    await user.keyboard('{Home}')
+    expect(document.activeElement).toHaveAccessibleName(/^Intake,/)
+
+    await user.keyboard('{ArrowLeft}')
+    expect(document.activeElement).toHaveAccessibleName(/^Closed,/)
+
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toHaveAccessibleName(/^Intake,/)
+
+    await user.keyboard('{End}')
+    expect(document.activeElement).toHaveAccessibleName(/^Closed,/)
+  })
+
+  it('moves the tab stop with the focus, so Tab re-enters where the reader left', async () => {
+    const user = userEvent.setup()
+    render(<RibbonStrip ribbon={ribbon(eightStages(3))} onSelectSegment={vi.fn()} />)
+
+    await user.tab()
+    await user.keyboard('{ArrowRight}{ArrowRight}')
+
+    expect(tabStops()).toHaveLength(1)
+    expect(tabStops()[0]).toHaveAccessibleName(/^Verification,/)
+  })
+
+  /*
+   * The one place this strip deliberately differs from `TicketDetailTabs`,
+   * which selects on focus. Selecting here filters History, Effort and (once
+   * `D-047` lands) Chat below — arrowing across eight stages to *read* the
+   * ribbon would refilter three panels eight times.
+   */
+  it('does not select while the reader is only moving focus', async () => {
+    const user = userEvent.setup()
+    const onSelectSegment = vi.fn()
+    render(<RibbonStrip ribbon={ribbon(eightStages(3))} onSelectSegment={onSelectSegment} />)
+
+    await user.tab()
+    await user.keyboard('{ArrowRight}{ArrowRight}{Home}{End}')
+
+    expect(onSelectSegment).not.toHaveBeenCalled()
+  })
+
+  it('selects on Enter and on Space, which is what activation means here', async () => {
+    const user = userEvent.setup()
+    const onSelectSegment = vi.fn()
+    render(<RibbonStrip ribbon={ribbon(eightStages(3))} onSelectSegment={onSelectSegment} />)
+
+    await user.tab()
+    await user.keyboard('{ArrowRight}')
+
+    await user.keyboard('{Enter}')
+    expect(onSelectSegment).toHaveBeenCalledWith(expect.objectContaining({ stageCode: 'DEPLOYMENT' }))
+
+    onSelectSegment.mockClear()
+    await user.keyboard('[Space]')
+    expect(onSelectSegment).toHaveBeenCalledWith(expect.objectContaining({ stageCode: 'DEPLOYMENT' }))
+  })
+
+  it('leaves keys it does not own alone, so Tab still escapes the strip', async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <RibbonStrip ribbon={ribbon(eightStages(3))} onSelectSegment={vi.fn()} />
+        <button type="button">After the ribbon</button>
+      </>,
+    )
+
+    await user.tab()
+    expect(document.activeElement).toHaveAccessibleName(/^QA,/)
+
+    await user.tab()
+    expect(document.activeElement).toHaveAccessibleName('After the ribbon')
+  })
+
+  /*
+   * S-13 tab 3's preview, S-30's designer preview and a sealed cycle all render
+   * without `onSelectSegment`, so their tiles are `<div role="group">` —
+   * unfocusable before this task, which made C-052's tooltip pointer-only on
+   * all three. There is still nothing to activate, which is why they are not
+   * buttons.
+   */
+  it('keeps a read-only ribbon navigable, with nothing to activate', async () => {
+    const user = userEvent.setup()
+    render(<RibbonStrip ribbon={ribbon(eightStages(3))} />)
+
+    expect(screen.queryAllByRole('button')).toHaveLength(0)
+    expect(stops()).toHaveLength(8)
+
+    await user.tab()
+    expect(document.activeElement).toHaveAccessibleName(/^QA,/)
+
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toHaveAccessibleName(/^Deployment,/)
+  })
+
+  /*
+   * §4A.3 puts the contextual action *on* the current segment, and B-050 read
+   * that literally enough to render it inside the tile's own `<button>` — a
+   * button nested in a button, which the HTML spec forbids and which no
+   * keyboard can reach, because the outer control consumes Enter and Space.
+   */
+  it('renders the contextual action beside the segment trigger, never inside it', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: false,
+          canAdvance: true,
+          segments: eightStages(3),
+        }}
+        onSelectSegment={vi.fn()}
+      />,
+    )
+
+    const action = screen.getByRole('button', { name: /Hand off to Deployment/ })
+    const trigger = screen.getByRole('button', { name: /^QA,/ })
+
+    expect(trigger).not.toContainElement(action)
+    // The same card all the same — §4A.3 wants it on the current segment.
+    expect(trigger.parentElement).toContainElement(action)
+  })
+})

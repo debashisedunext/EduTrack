@@ -57,6 +57,7 @@ import {
   selectionAfter,
 } from './bulk/bulkActions'
 import { useBulkChangeLevel, useBulkClose, useBulkReassign } from './bulk/useBulkTicketActions'
+import { useTicketStageDots } from './useTicketStageDots'
 
 const PAGE_SIZE = 25
 const SEARCH_DEBOUNCE_MS = 300
@@ -199,8 +200,6 @@ export function TicketListPage() {
   const modules = React.useMemo(() => modulesData?.data ?? [], [modulesData])
   const moduleNames = React.useMemo(() => new Map(modules.map((m) => [m.id, m.name])), [modules])
 
-  const renderContext: ColumnRenderContext = { taskTypeNames, moduleNames }
-
   /*
     C-072 · **retired levels dropped, in both the filter and the bulk dialog** —
     the opposite call to the module block above, and the difference is what the
@@ -280,6 +279,14 @@ export function TicketListPage() {
 
   const tickets = data?.data ?? []
   const meta = data?.meta
+
+  // B-051 · the Journey column's dots. Keyed off the rows, so it sits below
+  // the list query rather than beside the filter masters above — one
+  // resolution per distinct project × task type pair on the page, not one per
+  // row. `useTicketStageDots` carries why that is the shape.
+  const stageDots = useTicketStageDots(tickets)
+  const renderContext: ColumnRenderContext = { taskTypeNames, moduleNames, stageDots }
+
   const orderedVisibleColumns = COLUMNS.filter((c) => c.alwaysVisible || visibleColumns.includes(c.key))
   const rowPadding = DENSITY_ROW_CLASS[density]
 

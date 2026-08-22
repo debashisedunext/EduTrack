@@ -1,3 +1,4 @@
+import { createRef } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -324,5 +325,107 @@ describe('RibbonSegment · the connector', () => {
   it('draws none on the last segment', () => {
     render(<RibbonSegment segment={seg()} isLast />)
     expect(screen.queryByTestId('ribbon-connector')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * B-052 · what the tile owes the strip's roving tab stop, and the nested
+ * control it stopped rendering to make room for it.
+ *
+ * The arrow keys themselves are `RibbonStrip`'s and are tested there. These
+ * are the three things the tile has to get right for that to work at all: it
+ * takes a `tabIndex`, it forwards a ref to whichever element that lands on,
+ * and it no longer puts a `<button>` inside a `<button>`.
+ */
+describe('RibbonSegment · B-052 accessibility', () => {
+  it('takes the strip tab stop on its button', () => {
+    render(<RibbonSegment segment={seg()} onSelect={vi.fn()} tabIndex={0} />)
+    expect(screen.getByRole('button')).toHaveAttribute('tabindex', '0')
+  })
+
+  it('takes -1 when another segment holds the strip tab stop', () => {
+    render(<RibbonSegment segment={seg()} onSelect={vi.fn()} tabIndex={-1} />)
+    expect(screen.getByRole('button')).toHaveAttribute('tabindex', '-1')
+  })
+
+  /*
+   * A read-only tile is a `<div role="group">` and was unfocusable before this
+   * task, which left C-052's tooltip — entered, exited, owner, note, effort,
+   * idle-vs-active — with no keyboard route on a sealed cycle, on S-13 tab 3's
+   * preview or in S-30's designer. It is still not a button, because there is
+   * still nothing to activate.
+   */
+  it('makes a read-only tile focusable when the strip hands it a tab stop', () => {
+    render(<RibbonSegment segment={seg()} tabIndex={0} />)
+    expect(screen.getByRole('group')).toHaveAttribute('tabindex', '0')
+  })
+
+  it('leaves a tile with no tab stop out of the tab order entirely', () => {
+    render(<RibbonSegment segment={seg()} />)
+    expect(screen.getByRole('group')).not.toHaveAttribute('tabindex')
+  })
+
+  it('reports focus so the strip can move its tab stop to a clicked tile', async () => {
+    const onFocus = vi.fn()
+    render(<RibbonSegment segment={seg()} onSelect={vi.fn()} tabIndex={0} onFocus={onFocus} />)
+
+    await userEvent.tab()
+
+    expect(document.activeElement).toBe(screen.getByRole('button'))
+    expect(onFocus).toHaveBeenCalled()
+  })
+
+  it('forwards a ref to the focusable element, which is what the strip focuses', () => {
+    const ref = createRef<HTMLElement>()
+    render(<RibbonSegment segment={seg()} onSelect={vi.fn()} ref={ref} />)
+
+    expect(ref.current).toBe(screen.getByRole('button'))
+  })
+
+  it('forwards that ref to the read-only tile too', () => {
+    const ref = createRef<HTMLElement>()
+    render(<RibbonSegment segment={seg()} ref={ref} />)
+
+    expect(ref.current).toBe(screen.getByRole('group'))
+  })
+
+  /*
+   * The defect B-050 shipped and this task fixes. `actionSlot` rendered inside
+   * the tile's own `<button>`, so §4A.3's *Hand off to QA →* was a button
+   * nested in a button: invalid HTML, recovered from differently by every
+   * browser, and unreachable by keyboard because the outer control consumes
+   * Enter and Space. It is now a sibling within the card.
+   */
+  it('renders the contextual action outside the tile button, not inside it', () => {
+    render(
+      <RibbonSegment
+        segment={seg({ state: SegmentState.CURRENT })}
+        onSelect={vi.fn()}
+        actionSlot={<button type="button">Hand off to QA</button>}
+      />,
+    )
+
+    const action = screen.getByRole('button', { name: 'Hand off to QA' })
+    const trigger = screen.getByRole('button', { name: /^Development,/ })
+
+    expect(trigger).not.toContainElement(action)
+    expect(trigger.parentElement).toContainElement(action)
+  })
+
+  it('leaves the action reachable by Tab after the segment itself', async () => {
+    render(
+      <RibbonSegment
+        segment={seg({ state: SegmentState.CURRENT })}
+        onSelect={vi.fn()}
+        tabIndex={0}
+        actionSlot={<button type="button">Hand off to QA</button>}
+      />,
+    )
+
+    await userEvent.tab()
+    expect(document.activeElement).toHaveAccessibleName(/^Development,/)
+
+    await userEvent.tab()
+    expect(document.activeElement).toHaveAccessibleName('Hand off to QA')
   })
 })

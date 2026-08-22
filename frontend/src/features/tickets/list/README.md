@@ -13,6 +13,7 @@ on top of what the API already narrowed.
 | `DateRangeFilter.tsx` | The "Dates▾" filter — `dueFrom`/`dueTo` against the planned close date. |
 | `SavedViewsMenu.tsx` | C-015 — the six fixed S-17 saved views, replacing the old disabled stub. |
 | `columns.tsx` | Column definitions, cell renderers, the level/status chip variant maps. |
+| `useTicketStageDots.ts` | B-051 — resolves each row's workflow template and builds its compact ribbon, in requests bounded by the master rather than by the page. |
 | `useListPreferences.ts` | Density and column visibility, persisted to `localStorage`. |
 | `ColumnChooserMenu.tsx` · `DensityToggle.tsx` | The "⚙ Columns" popover and the comfortable/compact toggle. |
 | `bulk/bulkActions.ts` | C-017 — who may act, and which of a selection each action can reach. Pure functions, no React. |
@@ -73,34 +74,111 @@ manager can paste into chat and get back exactly what they were looking at.
 filter params plus `q`; `Reset` clears the filter row but leaves `q` alone; it
 is a header control the wireframe draws separately from the filter row.
 
-## The compact ribbon column is deliberately not here
+## B-051 — the compact ribbon column, and what unblocked it
 
-S-17's wireframe draws eight small dots per row — the ticket's stage
-progress at a glance — but it is not named in C-014's own backlog line
-("filters, sticky header, density toggle, column chooser"), and building it
-turned out to need more than this screen already fetches.
+S-17's wireframe draws eight small dots per row — the ticket's stage progress
+at a glance. C-014 shipped without it, and the reason recorded here was that a
+grid mixing projects "cannot resolve one row's dot count without resolving that
+row's own template, and doing that per row is the per-ticket-detail waterfall
+S-20 deliberately collapsed into one aggregated call". Two exits were named:
+a ribbon summary folded into `TicketListResponse`, or **"a stage-order lookup
+keyed by project and task type that does not require fetching every
+template"**.
 
-The prototype's own version (`docs/prototype/index.html`) computes it from
-three plain numbers per row — stages completed, current stage index, whether
-any stage was reworked — which look derivable from `Ticket.currentStageCode`
-and a stage's position in sequence. The complication is that the sequence
-itself is not one fixed list: `GET /masters/workflow-templates` accepts
-`projectId` *and* `taskTypeId`, and a template's own `POST` doc says stages
-in use are "deprecated, never deleted" specifically because live tickets keep
-the template version they started on. A grid mixing tickets from several
-projects — which is exactly what Admin and PM see — cannot resolve one row's
-dot count without resolving that row's own template, and doing that per row
-is the per-ticket-detail waterfall S-20 deliberately collapsed into one
-aggregated call. Today's mock only ever seeds one template, so the gap does
-not show yet; it would the day a second one exists.
+B-041 shipped the routing table that makes the second one answerable, and the
+column is now `journey` in `columns.tsx`, drawn by
+`components/ribbon/RibbonDots.tsx` from data assembled by
+`useTicketStageDots.ts`. **No contract change, no route, no migration and no
+`PermissionMatrix` row** — `GET /masters/workflow-templates` and
+`GET /masters/workflow-templates/{id}/mappings` are both `everyRole` already.
 
-Decided with the developer rather than worked around silently: ship the grid
-without it and pick this back up once there is a cheap way to answer "what
-stage sequence does this row's ticket belong to" — either a per-ticket ribbon
-summary folded into `TicketListResponse` the way S-20 folds ribbon into
-`TicketDetailResponse`, or a stage-order lookup keyed by project and task
-type that does not require fetching every template. Worth raising with
-Stream D when C-015 or C-016 next touch this contract.
+### The clause that mattered was "does not require fetching every template"
+
+Meaning: not one request per row. `GET /masters/workflow-templates/resolution`
+answers one project × task type pair, which is exactly right for S-13 tab 3,
+where a person picks one. It was built here first and **measured worse**: the
+fixture's generator draws `taskTypeId` from `int(1, 11)` across three projects,
+so a page of 25 rows is up to 25 distinct pairs and 25 requests. One MSW round
+trip costs something like half a second in the test rig, and the effect was
+visible — running this directory's seven suites together went from one flaky
+failure to six, all of them the documented Radix-popover timing flake tipping
+over under the extra load.
+
+What ships instead is bounded by the **workflow master** rather than by the
+page: `listWorkflowTemplates` (already fetched here for the stage filter, so it
+costs a cache read) plus one `mappings` call per template — three in the
+fixture, and a number an Admin curates by hand thereafter. It does not grow
+with rows, with paging, or with how many projects a reader can see.
+
+The cost is `features/masters/templates/routeToTemplate.ts`, a **second
+implementation of §4A.9's ladder** beside `TemplateResolver.java` and the
+mock's `resolveTemplate`. Two things make that affordable: the server ships its
+own ranking key (`TemplateMapping.specificity` is documented as "what the
+resolver breaks ties on"), and `routeToTemplate.test.ts` asserts the client
+agrees with `GET .../resolution` pair for pair against the fixture — so a drift
+is a failing test rather than the wrong ribbon on the wrong ticket. If a
+resolution endpoint that takes many pairs at once ever lands, that file goes
+and this hook calls it.
+
+### The column holds until the whole routing table has arrived
+
+A correctness guard, not a loading nicety, and the one defect the integration
+test caught. `routeToTemplate` falls through to the default template when no
+rule matches — right, and what the server does. But *"no rule matched"* and
+*"the rules have not arrived yet"* look identical from a half-loaded table, so
+drawing dots early put **every** row on Standard Dev Flow's eight stages for a
+frame: a wrong ribbon on most of them. `useTicketStageDots` returns nothing
+until every `mappings` read has succeeded — and `isSuccess` rather than
+`!isPending`, so a failed read holds the column too instead of quietly falling
+back to the default. Either way the cell is an em dash.
+
+### Three things the row payload cannot say, and none is guessed
+
+- **Which earlier stage bounced.** `docs/prototype/index.html` paints a
+  *completed* dot amber and hardcodes its index at 2. `TicketSummary` carries
+  `iterationNo` and no transitions, so the amber mark here is the stage the
+  ticket is in **now** — the prototype's own sentence for the colour is "amber
+  means it has been sent back", which is a claim about the ticket.
+- **Skipped and blocked stages.** Both are facts in `ticket_stage_transitions`.
+  `buildCompactDots` produces four of `SegmentState`'s six values and no
+  private union — `segmentState.ts` asked for exactly that.
+- **A ticket whose stage code is not in its resolved template.** Almost always
+  a template re-cut since the ticket started, and nothing versions a template
+  yet (B-042). The cell renders an em dash. Eight hollow dots would claim the
+  ticket has not started; an index would claim where it is.
+
+### ⚠ The mock speaks two stage vocabularies, so most rows read an em dash there
+
+Not a defect in this column, and worth knowing before anyone "fixes" it.
+`db.stages` — Stream C's flat ribbon fixture, which the mock's filler ticket
+generator draws `currentStageCode` from — says `DEVELOPMENT`, `DEPLOYMENT` and
+`VERIFICATION`. The workflow template master says `DEV`, `DEPLOY` and `VERIFY`,
+**following the database**, which seeds those in `V20260807_1700`. B-040 found
+this and recorded it at the top of `mocks/db.ts`; reconciling it means renaming
+codes that Stream C's reopen fixture and `ReopenDialog.test.tsx` assert on, so
+it was left as a note rather than done across a stream boundary.
+
+Against the real backend both halves say `DEV` and the question never arises.
+Against the mock, a ticket sitting in `DEVELOPMENT` finds no such stage in its
+template, and `buildCompactDots` correctly declines to place it. So
+`TicketJourneyColumn.test.tsx` writes the template vocabulary onto the rows it
+is about rather than pinning the divergence, which would pin a bug.
+
+**It is not only this column.** The Stage filter a few sections down builds its
+options from the same template stages, so filtering the mock to "Development"
+already matches no row and has since C-013. **For Stream C:** one rename in
+`db.ts`'s `STAGES` and `OPEN_STAGES` closes both, along with the fixtures that
+assert on the old codes.
+
+### Ownership
+
+`columns.tsx` and `TicketListPage.tsx` are **Stream C's**, and this is Stream
+B's edit in them — the arrangement TEAM-PLAN.md §6 sets out for weeks 10–11
+("**joins C** — ribbon UI, segment states, compact variant"), the same one
+B-050 records for `components/ribbon/`. The edits are one column definition,
+one field on `ColumnRenderContext`, one hook call, and moving `renderContext`
+below the list query so it can see the rows. **Flagged, not done quietly** —
+the precedent B-027 through B-029 set in this same file.
 
 ## `meta.totalCount` is optional, and the pager treats it that way
 
@@ -161,7 +239,6 @@ screen's behaviour.
 
 | Not built | Owner |
 |---|---|
-| Compact ribbon column | See above — no owner yet, needs a contract answer first |
 | Bulk select → reassign / change level / close | C-017 |
 | Export CSV / PDF | A-064 (Stream A's export engine) — not S-17's job at all, confirmed against the backlog before assuming it belonged here |
 
