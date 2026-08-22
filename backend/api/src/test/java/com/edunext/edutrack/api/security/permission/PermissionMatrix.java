@@ -719,6 +719,10 @@ final class PermissionMatrix {
             // ── me · every operation is about the caller's own account ───────
             // §2 grants no capability for these and must not: gating a password
             // change on a permission would lock a role out of its own security.
+            // A-020 · reading your own identity is not a capability either. A
+            // role that could not ask who it is could not render a single
+            // authenticated screen, since the SPA calls this on all of them.
+            everyRole("GET", "/api/v1/me"),
             everyRole("PATCH", "/api/v1/me/password", CHANGE_PASSWORD),
             everyRole("POST", "/api/v1/me/2fa/setup"),
             everyRole("POST", "/api/v1/me/2fa/confirm", TOTP_CODE),

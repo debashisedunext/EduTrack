@@ -10,6 +10,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * A-020 · credential verification. Blueprint §10.1.
@@ -216,6 +217,29 @@ class AuthenticationService {
         }
 
         return resolveScope(user);
+    }
+
+    /**
+     * A-020 · the caller's own identity for {@code GET /me}, re-read rather
+     * than reconstructed from the token.
+     *
+     * <p><b>Re-read on purpose.</b> The access token carries role, permissions
+     * and projects, and answering from those claims would be one fewer query —
+     * but a token lives fifteen minutes, so a caller moved off a project, or
+     * demoted, would keep seeing the old scope described back to them for the
+     * rest of that window. The screen this feeds decides which actions to
+     * offer; describing a scope the server would refuse is the one thing it
+     * must not do. {@code ScheduledReportRunner.callerFor} makes the same
+     * argument for the same reason.
+     *
+     * <p>Empty when the id resolves to nobody or to a deactivated account —
+     * the caller holds a still-valid token for an account that has since been
+     * switched off, and the route answers 401 rather than describing them.
+     */
+    Optional<AuthenticatedUser> describe(long userId) {
+        return users.findById(userId)
+                .filter(AuthUserRow::active)
+                .map(this::resolveScope);
     }
 
     /**

@@ -58,6 +58,13 @@ class MeControllerTest {
     @MockitoBean
     TwoFactorEnrolmentService twoFactorEnrolment;
 
+    // A-020 · and again for GET /me, which the controller had never served.
+    // Same reason as the line above: a @WebMvcTest instantiates the whole
+    // controller, so every constructor dependency must exist even for the
+    // tests that never touch it.
+    @MockitoBean
+    AuthenticationService authentication;
+
     // ── the happy path ──────────────────────────────────────────────────────
 
     @Test

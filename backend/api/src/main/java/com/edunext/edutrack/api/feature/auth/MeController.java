@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.auth;
 
+import com.edunext.edutrack.api.security.CallerIdentity;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.headers.Header;
@@ -14,7 +15,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -63,11 +66,46 @@ class MeController {
 
     private final PasswordChangeService passwordChange;
     private final TwoFactorEnrolmentService twoFactorEnrolment;
+    private final AuthenticationService authentication;
 
     MeController(PasswordChangeService passwordChange,
-                 TwoFactorEnrolmentService twoFactorEnrolment) {
+                 TwoFactorEnrolmentService twoFactorEnrolment,
+                 AuthenticationService authentication) {
         this.passwordChange = passwordChange;
         this.twoFactorEnrolment = twoFactorEnrolment;
+        this.authentication = authentication;
+    }
+
+    /**
+     * A-020 · {@code GET /me} — the caller, with the scope their role grants.
+     *
+     * <p>Declared in the contract since D-001 and, until now, <b>served by
+     * nothing</b>: the SPA calls it on every authenticated screen, so a 404
+     * here is not one missing field but a failed request on every page. The
+     * same shape of gap A-053 found on {@code GET /tickets} and A-056 on the
+     * widget route — declared, generated into the client, never implemented.
+     *
+     * <p>Answers the identical {@link Me} the login response embeds, built by
+     * {@code Me.from} rather than assembled a second time here — two builders
+     * for one schema is how the two drift.
+     *
+     * <p>401 rather than 404 when the account no longer resolves: the token is
+     * well-formed but names nobody this server will act for, which is a
+     * statement about the credential and not about a missing resource.
+     */
+    @GetMapping
+    @Operation(
+            operationId = "getMe",
+            summary = "The authenticated user, with resolved permissions and scope")
+    MeResponse me(Authentication caller) {
+        long userId = CallerIdentity.of(caller)
+                .map(CallerIdentity::userId)
+                .orElseThrow(InvalidAccessTokenException::new);
+
+        return authentication.describe(userId)
+                .map(Me::from)
+                .map(MeResponse::new)
+                .orElseThrow(InvalidAccessTokenException::new);
     }
 
     @PatchMapping(path = "/password", consumes = MediaType.APPLICATION_JSON_VALUE)
