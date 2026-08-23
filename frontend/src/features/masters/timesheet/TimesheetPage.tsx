@@ -1,10 +1,19 @@
+import * as React from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { addDays, format, parseISO } from 'date-fns'
-import { ChevronLeft, ChevronRight, Info } from 'lucide-react'
+import { CheckCircle2, ChevronLeft, ChevronRight, Info } from 'lucide-react'
 
-import { useGetUserTimesheet, useListUsers } from '@/api/generated/users/users'
+import { ApiError } from '@/api/http'
+import {
+  getGetUserTimesheetQueryKey,
+  useApproveTimesheet,
+  useGetUserTimesheet,
+  useListUsers,
+} from '@/api/generated/users/users'
 import type { Timesheet, TimesheetDay, TimesheetRow } from '@/api/generated/model'
+import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/modal'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -16,9 +25,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/features/auth/authStore'
 import { ticketPath } from '@/features/tickets/detail/entityLinks'
+import { canApproveTimesheet } from './timesheetApprovalPermissions'
+import { useQueryClient } from '@tanstack/react-query'
 
 /**
  * B-063 · blueprint §21's timesheet — one resource's week across all tickets,
@@ -95,8 +107,22 @@ export function TimesheetPage() {
         <div className="flex items-end gap-3">
           <WhoPicker subjectId={subjectId} weekOf={weekOf} />
           {sheet && <WeekNav weekStart={sheet.weekStart} onPick={goToWeek} />}
+          {sheet && canApproveTimesheet({ role: me?.role }) && (
+            <ApprovalControl subjectId={subjectId} sheet={sheet} />
+          )}
         </div>
       </header>
+
+      {sheet?.approval && (
+        <p className="flex items-start gap-2 rounded-card border border-border bg-subtle px-3 py-2 text-caption text-content-muted">
+          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success-text" aria-hidden />
+          <span>
+            Reviewed by {sheet.approval.approvedBy.displayName} on{' '}
+            {format(parseISO(sheet.approval.approvedAt), 'd MMM yyyy')}
+            {sheet.approval.note ? ` — “${sheet.approval.note}”` : ''}
+          </span>
+        </p>
+      )}
 
       {query.isLoading && <Skeleton className="h-72 w-full" />}
 
@@ -198,6 +224,126 @@ function WeekNav({ weekStart, onPick }: { weekStart: string; onPick: (date: stri
         <ChevronRight className="h-4 w-4" aria-hidden />
       </button>
     </div>
+  )
+}
+
+/**
+ * B-065 · "Mark reviewed", and the dialog behind it.
+ *
+ * <p>Shown to any Admin or PM — `canApproveTimesheet`'s own header explains
+ * why the button cannot know in advance whether *this* PM is *this*
+ * resource's manager, and lets the server's 404 answer that instead.
+ * Nothing renders once {@link Timesheet.approval} is set: there is no
+ * un-approve, on the same reasoning the contract's `TimesheetApproval`
+ * schema gives for shipping no `PATCH` or `DELETE`.
+ */
+function ApprovalControl({ subjectId, sheet }: { subjectId: number; sheet: Timesheet }) {
+  const [open, setOpen] = React.useState(false)
+
+  if (sheet.approval) return null
+
+  return (
+    <>
+      <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)}>
+        <CheckCircle2 className="h-4 w-4" aria-hidden />
+        Mark reviewed
+      </Button>
+      <Modal open={open} onOpenChange={setOpen}>
+        <ModalContent aria-describedby={undefined}>
+          {open && (
+            <ApprovalForm
+              subjectId={subjectId}
+              weekStart={sheet.weekStart}
+              personName={sheet.person.displayName}
+              onDone={() => setOpen(false)}
+            />
+          )}
+        </ModalContent>
+      </Modal>
+    </>
+  )
+}
+
+function ApprovalForm({
+  subjectId,
+  weekStart,
+  personName,
+  onDone,
+}: {
+  subjectId: number
+  weekStart: string
+  personName: string
+  onDone: () => void
+}) {
+  const [note, setNote] = React.useState('')
+  const queryClient = useQueryClient()
+
+  // No hand-written Idempotency-Key wrapper here, unlike `useHandoffMutation` —
+  // the header is accepted server-side but not yet honoured either way
+  // (EffortLogController's precedent), and unlike a handoff a retried approve
+  // is already caught by `uq_timesheet_approvals_week` as a 409 rather than a
+  // silent second row, so there is nothing for a replay key to protect yet.
+  const approve = useApproveTimesheet()
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    approve.mutate(
+      { userId: subjectId, data: { note: note.trim() || null }, params: { weekOf: weekStart } },
+      {
+        onSuccess: () => {
+          toast({ title: 'Week marked reviewed', description: `${personName}’s week of ${weekStart}.` })
+          void queryClient.invalidateQueries({
+            queryKey: getGetUserTimesheetQueryKey(subjectId, { weekOf: weekStart }),
+          })
+          onDone()
+        },
+      },
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <ModalHeader>
+        <ModalTitle>Mark {personName}’s week reviewed</ModalTitle>
+      </ModalHeader>
+
+      <label className="flex flex-col gap-1">
+        <span className="text-caption text-content-muted">Note (optional)</span>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={3}
+          maxLength={500}
+          disabled={approve.isPending}
+          placeholder="Anything worth recording about this review…"
+          className="w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-content placeholder:text-content-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        />
+      </label>
+
+      {/*
+        A 404 here means this caller turned out not to be this resource's
+        direct manager — the row question `canApproveTimesheet` could not
+        check up front — and a 409 means somebody else reviewed this week
+        first. Shown as the server phrased it, on `HandoffDialog`'s own
+        precedent for a refusal the caller can act on.
+      */}
+      {approve.isError && (
+        <p role="alert" className="text-caption text-danger-text">
+          {approve.error instanceof ApiError
+            ? (approve.error.problem.detail ?? approve.error.message)
+            : 'This week could not be marked reviewed. Please try again.'}
+        </p>
+      )}
+
+      <ModalFooter>
+        <Button type="button" variant="secondary" size="sm" onClick={onDone} disabled={approve.isPending}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={approve.isPending}>
+          {approve.isPending ? 'Marking reviewed…' : 'Mark reviewed'}
+        </Button>
+      </ModalFooter>
+    </form>
   )
 }
 

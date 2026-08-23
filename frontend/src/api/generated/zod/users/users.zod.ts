@@ -622,10 +622,10 @@ themselves. A caller who may not see the subject gets the same `404` as
 one asking for a user who does not exist — distinguishing them would let
 anyone enumerate the staff list by id.
 
-**No approval step.** §21 also asks for one, and it is not here: an
-approval cannot be a flag on an append-only, hash-chained table, and the
-policy it would enforce — the backdating window and who signs off — is
-still an open governance question. Raised rather than invented.
+**The approval step, since B-065.** §21 also asks for one, and it now
+exists at `POST .../timesheet/approval` — a new row rather than a flag
+on the append-only effort log. `approval` here is null until an Admin
+or the resource's own direct manager reviews the week.
 
  * @summary A resource's week, stage by stage (B-063)
  */
@@ -677,8 +677,66 @@ export const getUserTimesheetResponse = zod.object({
 })).describe('One row per ticket × stage × iteration the person logged against this week, busiest first. Stage and iteration are part of the key, not decoration: a second pass through QA is a different row from the first, which is the whole of what \"stage-aware\" means here.\n'),
   "totalHours": zod.number().describe('Σ of every entry in the week, corrections included and signed.'),
   "capacityHours": zod.number().describe('Σ of the seven days\' `capacityHours`, from the working calendar.\n'),
-  "utilisationPct": zod.number().nullish().describe('`totalHours \/ capacityHours × 100`. Null rather than 0 when the week offered no working hours at all — a person on leave all week has no utilisation, and reporting 0% would read as having done nothing with a week they were never expected to work.\n')
+  "utilisationPct": zod.number().nullish().describe('`totalHours \/ capacityHours × 100`. Null rather than 0 when the week offered no working hours at all — a person on leave all week has no utilisation, and reporting 0% would read as having done nothing with a week they were never expected to work.\n'),
+  "approval": zod.union([zod.object({
+  "weekStart": zod.string().date().describe('The same Monday `GET ...\/timesheet` resolved `weekOf` to.'),
+  "approvedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),
+  "approvedAt": zod.string().datetime({}),
+  "note": zod.string().nullish()
+}).describe('One resource\'s week, reviewed once. There is no PATCH or DELETE for this resource and none is planned — a week is approved once, and un-approving one is a policy nobody has asked for.\n'),zod.null()]).optional().describe('B-065 · null until an Admin or this resource\'s own direct manager reviews the week via `POST ...\/timesheet\/approval`.\n')
 }).describe('One resource\'s week. `days` is always seven entries, Monday first, even\nwhere nothing was logged and nothing was available — a week that dropped\nits empty days would render as a grid whose columns move, and a Tuesday\nholiday is exactly the day a reader is looking for when the totals look\nthin.\n')
+})
+
+/**
+ * §21's "an approval step for the manager", built as its own row rather
+than a flag on `ticket_effort_logs` — that table is append-only and
+hash-chained, so nothing on it can be mutated to mean "reviewed".
+
+**Who may approve is a row question, decided the same way the GET
+above decides who may look**: Admin, or the resource's own direct
+reporting manager — `users.reporting_manager_id`, the same direct-only
+reading `GET .../timesheet` already uses, not a transitive walk up the
+chain. A caller who is neither gets the same `404` as a user id that
+does not exist, so an id cannot be walked to learn who reports to whom.
+The three delivery roles and Support never reach that check at all:
+`hasAnyRole('ADMIN','PM')` refuses them first, and that refusal does
+not depend on which resource is named, so it is the one `403` this
+route can answer.
+
+**One review per resource per week.** A week already reviewed answers
+`409`, naming who reviewed it and when — never a second, silent row —
+which is also why a retried `Idempotency-Key` is accepted but not yet
+honoured: `uq_timesheet_approvals_week` already catches a genuine
+double-submit as a 409 rather than a second row, on
+`EffortLogController`'s own precedent for a create the 24-hour replay
+store (A-035) does not exist for yet.
+
+ * @summary A manager marks a resource's week reviewed (B-065)
+ */
+export const approveTimesheetParams = zod.object({
+  "userId": zod.number()
+})
+
+export const approveTimesheetQueryParams = zod.object({
+  "weekOf": zod.string().date().optional().describe('Resolved to its Monday exactly as the GET resolves it. Omitted means the week containing today.\n')
+})
+
+export const approveTimesheetHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const approveTimesheetBodyNoteMax = 500;
+
+
+
+export const approveTimesheetBody = zod.object({
+  "note": zod.string().max(approveTimesheetBodyNoteMax).nullish().describe('Optional, for a manager who wants to record why — or that anything did.')
 })
 
 /**

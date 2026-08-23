@@ -587,6 +587,12 @@ export interface StatusRequest {
   responseWorkingMinutes: number | null;
 }
 
+/** B-065 · one row per (userId, weekStartDate) — uq_timesheet_approvals_week's shape. */
+export interface TimesheetApproval {
+  id: number; userId: number; weekStartDate: string;
+  approvedById: number; approvedAt: string; note: string | null;
+}
+
 // ── the store ───────────────────────────────────────────────────────────────
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
@@ -612,6 +618,7 @@ export interface Db {
   emailLog: EmailLogEntry[]; chatThreads: ChatThread[]; chatMessages: ChatMessage[];
   chatAttachments: ChatAttachment[];
   statusRequests: StatusRequest[];
+  timesheetApprovals: TimesheetApproval[];
   currentUserId: number;
   seq: Record<string, number>;
   /**
@@ -1565,6 +1572,7 @@ export function createDb(): Db {
     tickets: [], cycles: [], transitions: [], effortLogs: [], history: [],
     comments: [], attachments: [], ticketLinks: [], notifications: [], notificationPreferences: [], emailLog: [],
     chatThreads: [], chatMessages: [], chatAttachments: [], statusRequests: [],
+    timesheetApprovals: [],
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
     seq: {},
     twoFactor: {}, // opt-in, so nobody starts enrolled

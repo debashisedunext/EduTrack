@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -6,6 +6,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 
+import type { Me } from '@/api/generated/model/me'
+import type { RoleCode } from '@/api/generated/model/roleCode'
+import { initialAuthState, useAuthStore } from '@/features/auth/authStore'
 import { TimesheetPage } from './TimesheetPage'
 
 /**
@@ -82,6 +85,15 @@ function stub(payload: unknown, status = 200) {
   )
 }
 
+/** B-065 · signs the viewer in as `role`, undoing itself after each test. */
+function signedInAs(role: RoleCode) {
+  useAuthStore.setState({
+    ...initialAuthState,
+    status: 'authenticated',
+    user: { id: 2, displayName: 'Meera Nair', role } as Me,
+  })
+}
+
 function renderPage(entry = `/timesheet/7?weekOf=${MONDAY}`) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -122,6 +134,10 @@ const totalCell = (row: HTMLElement) => cells(row)[cells(row).length - 1]
  * ends in two non-working days that look alike, would still pass.
  */
 const footerDayCell = (row: HTMLElement, index: number) => cells(row)[1 + index]
+
+afterEach(() => {
+  useAuthStore.setState(initialAuthState)
+})
 
 describe('the timesheet grid', () => {
   it('splits one ticket into a row per stage and pass', async () => {
@@ -250,5 +266,132 @@ describe('the timesheet grid', () => {
 
     expect(seen[0]).toBe(MONDAY)
     expect(seen).toContain('2026-08-03')
+  })
+})
+
+/**
+ * B-065 · "Mark reviewed" and the badge behind it.
+ *
+ * The row question — Admin, or this resource's own direct manager, nobody
+ * else — lives server-side and is exactly what a 404 on submit exercises
+ * below; the button's own visibility is the coarser, rowless half:
+ * `canApproveTimesheet` cannot know in advance whether this particular PM
+ * manages this particular resource, so it draws for any PM or Admin and lets
+ * the server refuse a submission that turns out not to be theirs to make.
+ */
+describe('B-065 · marking a week reviewed', () => {
+  function stubApproval(
+    response: { weekStart: string; approvedBy: unknown; approvedAt: string; note: string | null } | null,
+    status = 201,
+  ) {
+    server.use(
+      http.post('/api/v1/users/:userId/timesheet/approval', () =>
+        status === 201
+          ? HttpResponse.json({ data: response }, { status: 201 })
+          : HttpResponse.json(
+              { type: 'https://edutrack/errors/already-approved', title: 'Already reviewed', status },
+              { status, headers: { 'Content-Type': 'application/problem+json' } },
+            ),
+      ),
+    )
+  }
+
+  it('offers the control to a PM, and not to a Developer', async () => {
+    signedInAs('PM')
+    stub(week())
+    renderPage()
+
+    expect(await screen.findByRole('button', { name: /Mark reviewed/ })).toBeInTheDocument()
+
+    signedInAs('DEVELOPER')
+    stub(week())
+    renderPage()
+
+    await screen.findByText(/Ravi Kumar/)
+    expect(screen.queryByRole('button', { name: /Mark reviewed/ })).not.toBeInTheDocument()
+  })
+
+  it('shows who reviewed it, and offers no control once a week is already reviewed', async () => {
+    signedInAs('ADMIN')
+    stub(
+      week({
+        approval: {
+          weekStart: MONDAY,
+          approvedBy: { id: 2, displayName: 'Meera Nair', role: 'PM' },
+          approvedAt: '2026-08-17T10:15:00Z',
+          note: 'Looks right',
+        },
+      }),
+    )
+    renderPage()
+
+    expect(await screen.findByText(/Reviewed by Meera Nair on 17 Aug 2026/)).toBeInTheDocument()
+    expect(screen.getByText(/Looks right/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Mark reviewed/ })).not.toBeInTheDocument()
+  })
+
+  it('marks the week reviewed and shows the reviewer once the request succeeds', async () => {
+    signedInAs('PM')
+    stub(week())
+    stubApproval({
+      weekStart: MONDAY,
+      approvedBy: { id: 2, displayName: 'Meera Nair', role: 'PM' },
+      approvedAt: '2026-08-17T10:15:00Z',
+      note: 'All good',
+    })
+    renderPage()
+
+    await userEvent.click(await screen.findByRole('button', { name: /Mark reviewed/ }))
+    await userEvent.type(screen.getByLabelText(/Note/), 'All good')
+
+    // The GET is re-stubbed to answer with the approval now attached, mirroring
+    // what the real server would return on the refetch this submission triggers.
+    stub(
+      week({
+        approval: {
+          weekStart: MONDAY,
+          approvedBy: { id: 2, displayName: 'Meera Nair', role: 'PM' },
+          approvedAt: '2026-08-17T10:15:00Z',
+          note: 'All good',
+        },
+      }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }))
+
+    expect(await screen.findByText(/Reviewed by Meera Nair on 17 Aug 2026/)).toBeInTheDocument()
+  })
+
+  it('shows the server refusal when this caller turns out not to be the manager', async () => {
+    // canApproveTimesheet cannot see the reporting line from here — the button
+    // shows for any PM, and a 404 is exactly what a PM who is not this
+    // resource's own direct manager gets back.
+    signedInAs('PM')
+    stub(week())
+    server.use(
+      http.post('/api/v1/users/:userId/timesheet/approval', () =>
+        HttpResponse.json(
+          { type: 'https://edutrack/errors/not-found', title: 'Not found', status: 404 },
+          { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+    renderPage()
+
+    await userEvent.click(await screen.findByRole('button', { name: /Mark reviewed/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }))
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+  })
+
+  it('names the first reviewer when the week was already reviewed underneath this request', async () => {
+    signedInAs('ADMIN')
+    stub(week())
+    stubApproval(null, 409)
+    renderPage()
+
+    await userEvent.click(await screen.findByRole('button', { name: /Mark reviewed/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }))
+
+    expect(await screen.findByText('Already reviewed')).toBeInTheDocument()
   })
 })

@@ -3,7 +3,7 @@ import { isWellFormedEmail } from '@/lib/email';
 import { getDb, nextId } from '../db';
 import type {
   Db, Holiday, Level, NotificationChannelCode, NotificationTemplateRow, Priority, ReportScheduleRow,
-  ProjectRoleCode, Role, Status, StatusCategory, StatusCode, TaskType, TemplateStage, User,
+  ProjectRoleCode, Role, Status, StatusCategory, StatusCode, TaskType, TemplateStage, TimesheetApproval, User,
   WorkflowTemplateRow, WorkflowTransitionRow,
 } from '../db';
 import { resolveSla, workingMinutesBetween } from './sla';
@@ -1863,6 +1863,13 @@ export const restHandlers = [
     const totalHours = round2(days.reduce((s, d) => s + d.loggedHours, 0));
     const capacityHours = round2(days.reduce((s, d) => s + d.capacityHours, 0));
 
+    // B-065 · null until an Admin or this resource's own direct manager has
+    // reviewed the week — reused rather than recomputed, on the same "one
+    // rule, not two" argument the server-side handler carries.
+    const approvalRow = db.timesheetApprovals.find(
+      (a) => a.userId === u.id && a.weekStartDate === weekStart,
+    );
+
     return ok({
       person: userRef(u.id, db),
       weekStart,
@@ -1879,7 +1886,73 @@ export const restHandlers = [
       // expected to work makes no claim about how it was spent.
       utilisationPct:
         capacityHours > 0 ? Math.round((totalHours / capacityHours) * 1000) / 10 : null,
+      approval: approvalRow
+        ? {
+            weekStart: approvalRow.weekStartDate,
+            approvedBy: userRef(approvalRow.approvedById, db),
+            approvedAt: approvalRow.approvedAt,
+            note: approvalRow.note,
+          }
+        : null,
     });
+  }),
+  /*
+    B-065 · "a manager marks a resource's week reviewed" — §21's second half.
+
+    Unlike the GET above, the role gate IS enforced here: hasAnyRole('ADMIN',
+    'PM') is rowless on the server (whether a Developer may ever approve ANY
+    week does not depend on which one is named), so it is the one place this
+    mock draws a line the profile-360/timesheet handlers above deliberately
+    do not. The row question underneath it — Admin, or this resource's own
+    *direct* reporting manager — is NOT enforced, on this file's own
+    precedent for row scoping: the mock has never modelled it, and a screen
+    built against a mock that got it right by accident would be built
+    against a rule the mock cannot get right in general.
+  */
+  http.post(url('/users/:userId/timesheet/approval'), async ({ params, request }) => {
+    const db = getDb();
+    const caller = currentUser(db);
+    if (!['ADMIN', 'PM'].includes(caller.role)) {
+      return problem(403, 'forbidden', 'Only an Admin or a PM may review a timesheet');
+    }
+
+    const u = db.users.find((x) => x.id === Number(params.userId));
+    if (!u) return notFound('User');
+
+    const weekOf = new URL(request.url).searchParams.get('weekOf') ?? isoToday();
+    const weekStart = mondayOf(weekOf);
+
+    const existing = db.timesheetApprovals.find(
+      (a) => a.userId === u.id && a.weekStartDate === weekStart,
+    );
+    if (existing) {
+      return problem(409, 'already-approved', 'This week has already been reviewed', {
+        approvedBy: userRef(existing.approvedById, db),
+        approvedAt: existing.approvedAt,
+      });
+    }
+
+    const body = (await request.json().catch(() => ({}))) as { note?: string | null };
+    const row: TimesheetApproval = {
+      id: nextId(db, 'timesheetApprovals'),
+      userId: u.id,
+      weekStartDate: weekStart,
+      approvedById: caller.id,
+      approvedAt: new Date().toISOString(),
+      note: body?.note ?? null,
+    };
+    db.timesheetApprovals.push(row);
+
+    return ok(
+      {
+        weekStart: row.weekStartDate,
+        approvedBy: userRef(row.approvedById, db),
+        approvedAt: row.approvedAt,
+        note: row.note,
+      },
+      undefined,
+      { status: 201 },
+    );
   }),
   http.get(url('/users/:userId/reportees'), ({ params, request }) => {
     const db = getDb();

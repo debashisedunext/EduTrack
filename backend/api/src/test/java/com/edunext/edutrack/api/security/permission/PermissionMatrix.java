@@ -1254,6 +1254,29 @@ final class PermissionMatrix {
             // 404 rather than a 403, for the reason above.
             everyRole("GET", "/api/v1/users/{userId}/timesheet"),
 
+            // B-065 · the approval, and the one place this feature answers a
+            // genuine 403 rather than the row-scoped 404 every other route in
+            // it uses. hasAnyRole('ADMIN','PM') on TimesheetController.approve
+            // refuses Support and the three delivery roles before any row is
+            // read — BulkReassignController's identical annotation, for the
+            // identical reason: whether a Developer may ever approve ANY
+            // week does not depend on which one is named, so this refusal is
+            // rowless and belongs here rather than in a service.
+            //
+            // What this row does NOT assert: whether a GIVEN PM may approve
+            // a GIVEN resource's week — Admin, or that resource's own direct
+            // reporting manager, nobody else — because that answer depends
+            // on the row and CONVENTIONS.md §7 is explicit that a row-scoped
+            // refusal is a 404, never a 403. TimesheetApprovalServiceTest and
+            // TimesheetApprovalIT are where that is proved.
+            //
+            // Carries EMPTY_PATCH because TimesheetApprovalRequest's one
+            // field is optional — the same fixture PATCH_TICKET uses one
+            // block up, and for the same reason: an empty object is already
+            // valid, so the row is not passing because some field happened
+            // to satisfy a validator.
+            adminAndPm("POST", "/api/v1/users/{userId}/timesheet/approval", EMPTY_PATCH),
+
             // The runner. Same reasoning, plus the one thing that is genuinely
             // withheld: ?resourceId= is ignored for the three delivery roles
             // rather than honoured, so "Own perf." cannot be widened into a

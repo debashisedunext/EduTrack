@@ -42,9 +42,10 @@ class TimesheetServiceTest {
     private final Profile360Repository people = mock(Profile360Repository.class);
     private final WorkingHoursService workingHours = mock(WorkingHoursService.class);
     private final WorkingCalendarRepository calendars = mock(WorkingCalendarRepository.class);
+    private final TimesheetApprovalRepository approvals = mock(TimesheetApprovalRepository.class);
 
     private final TimesheetService service =
-            new TimesheetService(repository, people, workingHours, calendars);
+            new TimesheetService(repository, people, workingHours, calendars, approvals);
 
     private static final CallerIdentity ADMIN = new CallerIdentity(1L, "ADMIN", List.of());
 
@@ -281,6 +282,38 @@ class TimesheetServiceTest {
             // Somebody on leave all week. 0% is a claim about how they spent it;
             // null says the question has no answer.
             assertThat(week(MONDAY).utilisationPct()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("B-065 · the approval, read alongside the week")
+    class Approval {
+
+        @Test
+        @DisplayName("null until somebody has reviewed the week")
+        void nullUntilReviewed() {
+            when(repository.entries(anyLong(), any(), any())).thenReturn(List.of());
+            when(approvals.find(anyLong(), any())).thenReturn(Optional.empty());
+
+            assertThat(week(MONDAY).approval()).isNull();
+        }
+
+        @Test
+        @DisplayName("carried through once a manager has reviewed it")
+        void carriedThroughOnceReviewed() {
+            when(repository.entries(anyLong(), any(), any())).thenReturn(List.of());
+            TimesheetDtos.UserRef manager = new TimesheetDtos.UserRef(2L, "Meera Nair", "PM", "meera.nair");
+            Instant approvedAt = Instant.parse("2026-08-17T10:15:00Z");
+            when(approvals.find(7L, MONDAY)).thenReturn(Optional.of(
+                    new TimesheetApprovalRepository.Approval(1L, 7L, MONDAY, manager, approvedAt, "Looks right")));
+
+            TimesheetDtos.TimesheetApproval approval = week(MONDAY).approval();
+
+            assertThat(approval).isNotNull();
+            assertThat(approval.weekStart()).isEqualTo("2026-08-10");
+            assertThat(approval.approvedBy()).isEqualTo(manager);
+            assertThat(approval.approvedAt()).isEqualTo(approvedAt);
+            assertThat(approval.note()).isEqualTo("Looks right");
         }
     }
 
