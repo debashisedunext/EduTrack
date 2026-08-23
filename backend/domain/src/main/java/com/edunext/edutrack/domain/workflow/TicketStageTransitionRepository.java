@@ -1,8 +1,6 @@
 package com.edunext.edutrack.domain.workflow;
 
 import com.edunext.edutrack.domain.appendonly.AppendOnly;
-import jakarta.persistence.LockModeType;
-import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
@@ -60,9 +58,26 @@ public interface TicketStageTransitionRepository
      * next append. PLAN.md §3.7: the chain is <b>per-ticket</b>, and the caller
      * must already hold {@code SELECT … FOR UPDATE} on the parent ticket row,
      * or two concurrent appends read the same tail and fork the chain.
+     *
+     * <p><b>{@code FOR UPDATE} is baked into the SQL, not requested through
+     * {@code @Lock}.</b> {@code TicketStageTransition} is {@link
+     * org.hibernate.annotations.Immutable @Immutable}, and a JPA-level lock
+     * request makes Hibernate try to upgrade the loaded entity's lock mode
+     * during result initialisation — which {@code ImmutableEntityEntry}
+     * refuses outright ({@code UnsupportedLockAttemptException: Lock mode not
+     * supported}), for every ticket past its very first hop (the first append
+     * has no prior row to lock, so the query returns empty and the entity path
+     * is never exercised — which is why this went unnoticed until a second
+     * transition was appended). A native query's {@code FOR UPDATE} clause is
+     * executed by MySQL directly and needs no cooperation from Hibernate's
+     * entity-locking bookkeeping, so the row lock — still required, per
+     * {@link TicketHistoryRepository#findFirstByTicketIdOrderByIdDesc}'s own
+     * note on why a plain {@code SELECT} is not enough under REPEATABLE READ —
+     * survives without touching the immutable entity's lock mode at all.
      */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    Optional<TicketStageTransition> findFirstByTicketIdOrderByIdDesc(Long ticketId);
+    @Query(value = "select * from ticket_stage_transitions where ticket_id = :ticketId "
+            + "order by id desc limit 1 for update", nativeQuery = true)
+    Optional<TicketStageTransition> findFirstByTicketIdOrderByIdDesc(@Param("ticketId") Long ticketId);
 
     /**
      * Seal an open stage — <b>the only mutation this table permits</b>.
