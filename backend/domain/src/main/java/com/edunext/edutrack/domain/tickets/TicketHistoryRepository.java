@@ -1,9 +1,9 @@
 package com.edunext.edutrack.domain.tickets;
 
 import com.edunext.edutrack.domain.appendonly.AppendOnly;
-import jakarta.persistence.LockModeType;
-import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -48,9 +48,23 @@ public interface TicketHistoryRepository
      * sees what the writer ahead of it just committed. This is what makes the
      * lock mean anything across transactions; without it the lock serialises
      * writes correctly and each one is still blind.
+     *
+     * <p><b>{@code FOR UPDATE} is baked into the SQL, not requested through
+     * {@code @Lock}.</b> {@code TicketHistory} is {@link
+     * org.hibernate.annotations.Immutable @Immutable}, and a JPA-level lock
+     * request makes Hibernate try to upgrade the loaded entity's lock mode
+     * during result initialisation, which {@code ImmutableEntityEntry} refuses
+     * outright ({@code UnsupportedLockAttemptException: Lock mode not
+     * supported}) for every ticket past its first history row — the first
+     * append has nothing to lock, so the defect was invisible until a second
+     * row existed. A native query's {@code FOR UPDATE} clause is executed by
+     * MySQL directly and needs no cooperation from Hibernate's entity-locking
+     * bookkeeping, so the row lock this method's own reasoning above requires
+     * still happens, without touching the immutable entity's lock mode.
      */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    Optional<TicketHistory> findFirstByTicketIdOrderByIdDesc(Long ticketId);
+    @Query(value = "select * from ticket_history where ticket_id = :ticketId "
+            + "order by id desc limit 1 for update", nativeQuery = true)
+    Optional<TicketHistory> findFirstByTicketIdOrderByIdDesc(@Param("ticketId") Long ticketId);
 
     /** Every correction pointing at one entry — the reversal trail for A-043. */
     List<TicketHistory> findByCorrectsEntryId(Long correctsEntryId);

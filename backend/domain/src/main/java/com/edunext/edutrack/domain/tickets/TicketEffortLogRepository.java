@@ -1,9 +1,9 @@
 package com.edunext.edutrack.domain.tickets;
 
 import com.edunext.edutrack.domain.appendonly.AppendOnly;
-import jakarta.persistence.LockModeType;
-import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -41,9 +41,19 @@ public interface TicketEffortLogRepository
     /**
      * The tail of this ticket's chain. The caller must already hold
      * {@link TicketRepository#findByIdForUpdate} (PLAN.md §3.7).
+     *
+     * <p><b>{@code FOR UPDATE} is baked into the SQL, not requested through
+     * {@code @Lock}</b> — {@code TicketEffortLog} is {@link
+     * org.hibernate.annotations.Immutable @Immutable}, and {@link
+     * TicketHistoryRepository#findFirstByTicketIdOrderByIdDesc}'s own note
+     * explains both why a locking read is required under REPEATABLE READ and
+     * why a JPA-level {@code @Lock} is the wrong way to ask for one against an
+     * immutable entity ({@code UnsupportedLockAttemptException}, for every
+     * ticket past its first effort row).
      */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    Optional<TicketEffortLog> findFirstByTicketIdOrderByIdDesc(Long ticketId);
+    @Query(value = "select * from ticket_effort_logs where ticket_id = :ticketId "
+            + "order by id desc limit 1 for update", nativeQuery = true)
+    Optional<TicketEffortLog> findFirstByTicketIdOrderByIdDesc(@Param("ticketId") Long ticketId);
 
     List<TicketEffortLog> findByCorrectsEntryId(Long correctsEntryId);
 }
