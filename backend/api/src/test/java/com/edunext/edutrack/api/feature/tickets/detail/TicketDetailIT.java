@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.tickets.detail;
 
+import com.edunext.edutrack.api.feature.transitions.RibbonWire;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
@@ -218,18 +219,38 @@ class TicketDetailIT {
         }
 
         /**
-         * {@code ribbon}'s rule is still unbuilt. Asserted explicitly so that
-         * filling it in is a deliberate act that breaks a test, rather than
-         * something that quietly starts returning invented data.
+         * This assertion used to read {@code isNull()}, guarding a deliberately
+         * unbuilt field so that <i>"filling it in is a deliberate act that
+         * breaks a test, rather than something that quietly starts returning
+         * invented data"</i>. Filling it in was deliberate, and this is that
+         * break — so the guard is <b>replaced rather than deleted</b>, which
+         * is the whole reason it was written that way.
+         *
+         * <p>What it pins now is the same property from the other side: the
+         * ribbon is <em>assembled</em>, never invented. This fixture's ticket
+         * carries no {@code workflow_template_id}, so the honest answer is a
+         * ribbon describing the ticket's own cycle with <b>no segments</b> —
+         * there is no stage sequence to lay one against. Segments appearing
+         * here for a template-less ticket is exactly what the original
+         * assertion existed to catch, and asserting emptiness keeps catching
+         * it.
          */
         @Test
-        @DisplayName("ribbon is null until C-051's stage sequence exists")
-        void ribbonIsNullNotInvented() {
+        @DisplayName("ribbon is assembled from the ticket's own template, never invented")
+        void ribbonIsAssembledNotInvented() {
             TicketDetailDtos.Detail d = service.detail(admin(), codeOf(ticketId), null);
 
             assertThat(d.ribbon())
-                    .as("a ribbon needs C-042's transitions and B's workflow stages; the second half is still missing")
-                    .isNull();
+                    .as("C-051's assembler is wired in; this is no longer a placeholder null")
+                    .isNotNull();
+
+            RibbonWire.Ribbon ribbon = (RibbonWire.Ribbon) d.ribbon();
+            assertThat(ribbon.segments())
+                    .as("no workflow template on this fixture, so there is no sequence to lay out")
+                    .isEmpty();
+            assertThat(ribbon.cycleNo())
+                    .as("and it describes this ticket's own cycle rather than a default")
+                    .isEqualTo((short) 2);
         }
 
         /**
