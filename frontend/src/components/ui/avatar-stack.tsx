@@ -15,7 +15,8 @@ export interface AvatarStackProps {
   className?: string
 }
 
-function initials(name: string) {
+function initials(name: string | undefined | null) {
+  if (!name) return '?'
   return name
     .split(' ')
     .filter(Boolean)

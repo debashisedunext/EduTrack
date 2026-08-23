@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.tickets;
 
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketCycle;
@@ -119,6 +120,7 @@ class PriorityChangeService {
     private final TicketCycleRepository cycles;
     private final TicketJournal journal;
     private final PlannedCloseDateService slaLadder;
+    private final UserRepository users;
 
     /*
      * One constructor, and so no @Autowired — unlike ReopenService, CommentService
@@ -135,11 +137,13 @@ class PriorityChangeService {
     PriorityChangeService(ScopedTickets tickets,
                           TicketCycleRepository cycles,
                           TicketJournal journal,
-                          PlannedCloseDateService slaLadder) {
+                          PlannedCloseDateService slaLadder,
+                          UserRepository users) {
         this.tickets = tickets;
         this.cycles = cycles;
         this.journal = journal;
         this.slaLadder = slaLadder;
+        this.users = users;
     }
 
     /**
@@ -185,7 +189,7 @@ class PriorityChangeService {
 
         String previous = ticket.getLevel();
         if (level.equals(previous)) {
-            return TicketWire.of(ticket);
+            return TicketWire.of(ticket, users);
         }
 
         // §4B.1: mandatory once assigned, optional while the ticket is still
@@ -230,7 +234,7 @@ class PriorityChangeService {
         // shows the changes made during cycle 2.
         journal.append(levelChangedEntry(ticket, previous, level, caller, request.reason()));
 
-        return TicketWire.of(ticket);
+        return TicketWire.of(ticket, users);
     }
 
     /**

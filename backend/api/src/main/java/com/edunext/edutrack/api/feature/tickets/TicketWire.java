@@ -1,9 +1,15 @@
 package com.edunext.edutrack.api.feature.tickets;
 
+import com.edunext.edutrack.domain.clients.ClientRepository;
+import com.edunext.edutrack.domain.identity.ProjectRepository;
+import com.edunext.edutrack.domain.identity.User;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Objects;
 
 /**
  * The contract's {@code Ticket} schema, and the one mapping from the entity onto
@@ -66,7 +72,6 @@ public final class TicketWire {
             // name (`ticketCode()`) is unchanged and every call site compiles
             // as-is.
             @JsonProperty("ticketId") String ticketCode,
-            long projectId,
             String title,
             String description,
             Integer taskTypeId,
@@ -75,8 +80,20 @@ public final class TicketWire {
             String status,
             String environment,
             Instant dateReported,
-            Long reportedBy,
-            Long assignedTo,
+            // C-0xx · the contract's `Ticket.reportedBy`/`Ticket.assignee` are both
+            // `UserRef` — `{id, displayName}`, `displayName` required — not the bare
+            // FK this record carried until now. Every one of this record's eight
+            // callers was serving `reportedBy`/`assignedTo` as a number under the
+            // wrong field name for `assignee` besides, which the frontend's
+            // generated `Ticket` type reads as a `UserRef` and calls `.displayName`
+            // straight off — `PersonCell`/`AvatarStack`'s `initials()` crashes the
+            // whole app on the resulting `undefined.split(...)`, uncaught, for
+            // every ticket that has a reporter. Found via `S-20` blank-screening
+            // for every role on every ticket; `of` below now resolves both through
+            // `UserRepository` the same way `TicketListRefs`/`CommentUserRefs`
+            // already do for their own screens.
+            UserRef reportedBy,
+            @JsonProperty("assignee") UserRef assignee,
             BigDecimal estimatedEffortHrs,
             BigDecimal totalEffortHrs,
             Instant plannedCloseDate,
@@ -105,19 +122,151 @@ public final class TicketWire {
             Integer moduleId,
             String screenName,
             String feature,
-            String stepsToGenerate) {
+            String stepsToGenerate,
+
+            // C-0xx · the contract's `Ticket.project`/`Ticket.client` are the
+            // `Project`/`ClientRef` objects, not the bare `project_id` this
+            // record carried until now (and no client field at all) — so every
+            // one of this record's eight callers has served both as absent
+            // JSON, which is why the detail page's Summary panel has rendered
+            // "—" for Project and Client since A-052 first wrote this record.
+            // Appended rather than inserted where the contract places them, on
+            // the same precedent `pctComplete` above states. `TicketListRefs`
+            // already solved this exact shape for the list screen; `of` below
+            // resolves both the same way, at the "two lookups per ticket" cost
+            // the reportedBy/assignee fix already accepts for this method.
+            // `client` is null for a client-less ticket (Internal Bug does not
+            // require one, §4B.2) — the contract marks it optional for exactly
+            // that reason.
+            Project project,
+            ClientRef client) {
     }
 
-    /** The entity as the contract's {@code Ticket}. */
-    public static Ticket of(com.edunext.edutrack.domain.tickets.Ticket t) {
+    /** The contract's {@code UserRef}, at the two properties it requires. */
+    public record UserRef(long id, String displayName) {
+    }
+
+    /**
+     * The contract's {@code Project}, at the three properties {@code Ticket} embeds.
+     *
+     * <h2>Why the explicit schema name</h2>
+     *
+     * <p>springdoc keys {@code components.schemas} by <b>simple class name</b>, so
+     * a record called {@code Project} here silently overwrites Stream B's
+     * {@code ProjectDtos.Project} in the served document — {@code
+     * TicketListDtos.Project}'s own javadoc names this exact failure, caught by
+     * {@code ContractConformanceTest} the moment that record was added, reporting
+     * eight properties "declared but not served" on {@code GET /projects}, an
+     * endpoint that change never touched. Same remedy here, on the same
+     * precedent: named for this feature's view of a project, not renamed away
+     * from a collision.
+     */
+    @Schema(name = "TicketProjectRef")
+    public record Project(long id, String projectCode, String name) {
+    }
+
+    /** The contract's {@code ClientRef}, at the three properties {@code Ticket}
+     * embeds. Named explicitly for the reason above. */
+    @Schema(name = "TicketClientRef")
+    public record ClientRef(long id, String clientCode, String name) {
+    }
+
+    /**
+     * The entity as the contract's {@code Ticket}, with {@code project}/
+     * {@code client} left {@code null}.
+     *
+     * <p>{@code users} resolves {@code reportedBy}/{@code assignedTo} into the
+     * {@code UserRef} the contract declares — see the record's own note on why a
+     * bare id was wrong for every one of this method's eight callers. Two lookups
+     * at most, which is the right cost here and would not be at
+     * {@code TicketListRefs}' scale: this method answers for one ticket, not a
+     * page of fifty, so there is nothing to batch.
+     *
+     * <p>Delegates to the four-argument overload below rather than duplicating
+     * the field list a third time. Every existing caller reaches this one —
+     * they answer from a lifecycle mutation the frontend re-fetches the detail
+     * page after anyway — and {@code TicketDetailService} is the only one that
+     * needs {@code project}/{@code client} populated, so it alone calls the
+     * four-argument form. Widening every caller to carry two more repositories
+     * for a field none of them render was a bigger change than this bug fix
+     * should make; {@code Client360Service}'s own note above states the
+     * identical restraint for the same reason.
+     */
+    public static Ticket of(com.edunext.edutrack.domain.tickets.Ticket t, UserRepository users) {
+        return of(t, users, null, null);
+    }
+
+    /**
+     * The entity as the contract's {@code Ticket}, {@code project}/{@code client}
+     * included — see the two-argument overload's note on why only
+     * {@code TicketDetailService} calls this one today.
+     */
+    public static Ticket of(com.edunext.edutrack.domain.tickets.Ticket t, UserRepository users,
+                             ProjectRepository projects, ClientRepository clients) {
         return new Ticket(
-                t.getId(), t.getTicketCode(), t.getProjectId(), t.getTitle(), t.getDescription(),
+                t.getId(), t.getTicketCode(), t.getTitle(), t.getDescription(),
                 t.getTaskTypeId(), t.getLevel(), t.getOriginalLevel(), t.getStatus(),
-                t.getEnvironment(), t.getDateReported(), t.getReportedBy(), t.getAssignedTo(),
+                t.getEnvironment(), t.getDateReported(), userRef(t.getReportedBy(), users),
+                userRef(t.getAssignedTo(), users),
                 t.getEstimatedEffortHrs(), t.getTotalEffortHrs(), t.getPlannedCloseDate(),
                 t.getActualCloseDate(), t.isReopened(), t.getReopenCount(), t.getCurrentCycleNo(),
                 t.isDelayed(), t.getCurrentStage(), t.getCurrentIteration(), t.getReworkCount(),
                 t.getPctComplete(),
-                t.getModuleId(), t.getScreenName(), t.getFeature(), t.getStepsToGenerate());
+                t.getModuleId(), t.getScreenName(), t.getFeature(), t.getStepsToGenerate(),
+                projectRef(t.getProjectId(), projects), clientRef(t.getClientId(), clients));
+    }
+
+    /**
+     * An id with no matching row resolves to {@code null} rather than a
+     * placeholder — {@code TicketListRefs}' own reasoning: a deleted account
+     * should render the ticket without a reporter rather than inventing "Unknown
+     * user".
+     */
+    private static UserRef userRef(Long userId, UserRepository users) {
+        if (userId == null) {
+            return null;
+        }
+        return users.findById(userId).map(u -> new UserRef(u.getId(), displayNameOf(u))).orElse(null);
+    }
+
+    /** {@code project_id} is {@code NOT NULL} on {@code tickets}, but a row with no
+     * matching project still resolves to {@code null} rather than throwing — the
+     * same restraint {@link #userRef} applies, and a wire method is the wrong
+     * place to enforce a foreign key the database already enforces. */
+    private static Project projectRef(Long projectId, ProjectRepository projects) {
+        if (projectId == null || projects == null) {
+            return null;
+        }
+        return projects.findById(projectId)
+                .map(p -> new Project(p.getId(), p.getProjectCode(), p.getName()))
+                .orElse(null);
+    }
+
+    /** {@code client_id} is nullable — an Internal Bug ticket genuinely has none
+     * (§4B.2) — so {@code null} here is the ordinary case, not a lookup miss. */
+    private static ClientRef clientRef(Long clientId, ClientRepository clients) {
+        if (clientId == null || clients == null) {
+            return null;
+        }
+        return clients.findById(clientId)
+                .map(c -> new ClientRef(c.getId(), c.getClientCode(), c.getName()))
+                .orElse(null);
+    }
+
+    /**
+     * {@code full_name}, falling back to the username — {@code TicketListRefs}'
+     * own fallback, for the same reason: {@code full_name} is nullable and an
+     * SSO-provisioned account can arrive without one.
+     */
+    private static String displayNameOf(User user) {
+        String fullName = blankToNull(user.getFullName());
+        if (fullName != null) {
+            return fullName;
+        }
+        return Objects.requireNonNullElse(blankToNull(user.getUsername()), "Unknown");
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 }

@@ -28,6 +28,19 @@ import org.springframework.web.bind.annotation.RestController;
  * requests Divyansh's review automatically, which is the mechanism that makes
  * this visible rather than quiet; <b>it needs his sign-off before merge.</b>
  *
+ * <h2>{@code String}, not {@code long} — the bug PriorityChangeController and
+ * CloseController's own javadocs named and left to this file</h2>
+ *
+ * <p>The contract's {@code TicketId} is a ticket <em>code</em>
+ * ({@code ^[A-Z][A-Z0-9]{1,9}-\d{2}-\d{5,}$}, e.g. {@code CRM-26-00347}), so
+ * every real client — including the generated one every screen already
+ * uses — puts a code in this path segment. Declaring it {@code long} 400'd
+ * against the real backend for every request the frontend actually sent; it
+ * never bit because this route had only ever been exercised against D-004's
+ * mock, which routes on the string. Fixed the same way {@code CloseController}
+ * and {@code PriorityChangeController} already were, via
+ * {@code ScopedTickets.requireByCode} (A-035).
+ *
  * <h2>ETag, and why it is the response's own hash</h2>
  *
  * <p>The tag is computed from the assembled answer rather than from
@@ -63,7 +76,7 @@ class TicketDetailController {
     @Operation(operationId = "getTicketDetail", summary = "Ticket detail in one call")
     ResponseEntity<TicketDetailDtos.DetailResponse> full(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @RequestParam(required = false) Integer cycle,
             @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
 

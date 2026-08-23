@@ -2,8 +2,10 @@ package com.edunext.edutrack.api.feature.tickets.detail;
 
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.feature.tickets.links.TicketLinkService;
+import com.edunext.edutrack.api.feature.transitions.RibbonAssembler;
 import com.edunext.edutrack.api.feature.transitions.StageOwnership;
 import com.edunext.edutrack.api.security.CallerIdentity;
+import com.edunext.edutrack.api.security.permission.RolePermissions;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketAttachment;
@@ -16,10 +18,16 @@ import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.TicketEffortLog;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
 import com.edunext.edutrack.domain.tickets.TicketWatcherRepository;
+import com.edunext.edutrack.domain.clients.ClientRepository;
+import com.edunext.edutrack.domain.identity.ProjectRepository;
+import com.edunext.edutrack.domain.identity.User;
+import com.edunext.edutrack.domain.identity.UserRepository;
+import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -40,17 +48,18 @@ import java.util.List;
  * ever becomes the bottleneck the answer is to widen the fetch, not to hand the
  * waterfall back to the client.
  *
- * <h2>🔴 {@code ribbon} the contract declares and this does not return</h2>
+ * <h2>{@code ribbon} — assembled via {@link RibbonAssembler}</h2>
  *
- * <p>{@code ribbon} is <b>deliberately null</b>: it needs stage segments from
- * {@code ticket_stage_transitions} (C-042, built) laid against a workflow
- * template's stage sequence (Stream B's {@code api/feature/workflow/}, which
- * still holds only a README). The second half does not exist, so any ribbon
- * assembled here would be invented. It is optional in
- * {@code TicketDetailResponse} — only {@code ticket} is required — so
- * omitting it is a contract-valid answer, and a client sees it absent and
- * renders no ribbon, the truthful rendering of a system that cannot yet lay
- * one out. <b>C-051 fills it in once the stage-sequence half exists.</b>
+ * <p>The current cycle only, on the same reasoning {@link RibbonAssembler}'s
+ * own javadoc gives — the caller here already knows which ticket it asked
+ * for, and the cycle-selector-aware read is {@code GET
+ * /tickets/{ticketId}/ribbon}'s job, not this route's. A ticket with no
+ * {@code workflow_template_id} — one that predates the workflow designer, or
+ * was created before ticket creation resolved a template — gets a
+ * {@code Ribbon} with an empty segment list rather than {@code null}, exactly
+ * as {@link RibbonAssembler} already answers every lifecycle route; the
+ * frontend's empty state ("no workflow ribbon") renders off that emptiness,
+ * not off the field's absence.
  *
  * <h2>{@code availableActions} — C-043, the golden rule</h2>
  *
@@ -98,13 +107,40 @@ class TicketDetailService {
     private final TicketWatcherRepository watchers;
     private final TicketLinkService links;
 
+    /**
+     * C-047 · read-only, exactly like {@link #cycles}/{@link #comments} above
+     * — this class already only ever reads the stage-sequence side of the
+     * ribbon (never journals a transition itself), so a plain repository
+     * dependency is consistent with what is already here rather than a new
+     * exception to it.
+     */
+    private final WorkflowStageRepository stages;
+
+    /** Resolves {@code reportedBy}/{@code assignedTo} and watcher ids into the
+     * contract's {@code UserRef} — {@code TicketWire}'s own note on why a bare
+     * id was wrong here for every one of its eight callers. */
+    private final UserRepository users;
+
+    /** Resolves {@code ticket.project}/{@code ticket.client} — {@code TicketWire}'s
+     * own note on why this route alone calls its four-argument {@code of}. */
+    private final ProjectRepository projects;
+    private final ClientRepository clients;
+
+    /** Assembles {@code ribbon} — see the class note above. */
+    private final RibbonAssembler ribbon;
+
     TicketDetailService(ScopedTickets tickets,
                         TicketCycleRepository cycles,
                         TicketJournal journal,
                         TicketCommentRepository comments,
                         TicketAttachmentRepository attachments,
                         TicketWatcherRepository watchers,
-                        TicketLinkService links) {
+                        TicketLinkService links,
+                        WorkflowStageRepository stages,
+                        UserRepository users,
+                        ProjectRepository projects,
+                        ClientRepository clients,
+                        RibbonAssembler ribbon) {
         this.tickets = tickets;
         this.cycles = cycles;
         this.journal = journal;
@@ -112,6 +148,11 @@ class TicketDetailService {
         this.attachments = attachments;
         this.watchers = watchers;
         this.links = links;
+        this.stages = stages;
+        this.users = users;
+        this.projects = projects;
+        this.clients = clients;
+        this.ribbon = ribbon;
     }
 
     /**
@@ -121,20 +162,25 @@ class TicketDetailService {
      *         may not see — A-035, indistinguishable on purpose
      */
     @Transactional(readOnly = true)
-    TicketDetailDtos.Detail detail(Authentication caller, long ticketId, Integer requestedCycle) {
+    TicketDetailDtos.Detail detail(Authentication caller, String ticketCode, Integer requestedCycle) {
         // Scope first, and only once. Everything below reads by ticket id, so a
         // caller who got past this line would see another project's history and
         // no later query would notice.
-        Ticket ticket = tickets.require(caller, ticketId);
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
 
         short cycle = requestedCycle == null
                 ? ticket.getCurrentCycleNo()
                 : (short) requestedCycle.intValue();
 
+        boolean canAdvance = CallerIdentity.of(caller)
+                .map(identity -> StageOwnership.mayAdvance(identity, ticket))
+                .orElse(false);
+
         return new TicketDetailDtos.Detail(
-                TicketWire.of(ticket),
+                TicketWire.of(ticket, users, projects, clients),
                 cycles.findByTicketIdOrderByCycleNoAsc(ticketId).stream().map(this::toCycle).toList(),
-                null,   // ribbon — C-042/C-051, see the class note
+                ribbon.assembleCurrentCycle(ticket, canAdvance),
                 journal.historyFor(ticketId, cycle).stream().map(this::toHistory).toList(),
                 journal.effortFor(ticketId, cycle).stream().map(this::toEffort).toList(),
                 comments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(ticketId).stream()
@@ -142,7 +188,7 @@ class TicketDetailService {
                 attachments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(ticketId).stream()
                         .map(this::toAttachment).toList(),
                 watchers.findByIdTicketId(ticketId).stream()
-                        .map(w -> new TicketDetailDtos.UserRef(w.getId().getUserId())).toList(),
+                        .map(w -> toUserRef(w.getId().getUserId())).filter(java.util.Objects::nonNull).toList(),
                 links.viewsFor(caller, ticket),
                 availableActions(caller, ticket));
     }
@@ -156,17 +202,81 @@ class TicketDetailService {
      * even to its own owner. An unidentifiable caller (empty
      * {@link CallerIdentity#of}) gets none, the same deny-by-default that
      * class's own doc requires.
+     *
+     * <p>{@code skip-stage} — C-047 · added on top of the pair above rather
+     * than folded into the same {@code mayAdvance} branch, because it is a
+     * genuine capability (§2's "Skip a stage" row ticks Admin and PM alone,
+     * {@code V20260806_0900}) and not a row rule {@code mayAdvance} narrows —
+     * {@code SkipController}'s own javadoc makes the identical point about why
+     * its golden-rule check is defensive rather than load-bearing. Checked by
+     * role code rather than by re-deriving {@code ticket.skip_stage} from
+     * {@code RolePermissions} here, on {@code StageOwnership}'s own reasoning
+     * for staying a plain predicate: the two roles that hold the capability
+     * are exactly the two the golden rule always admits regardless of
+     * assignment, so this is one fact stated once, not a second copy of the
+     * permission catalogue. Offered only when the current stage is actually
+     * skippable — {@code workflow_stages.is_optional} — so the client never
+     * renders a button {@code POST /skip-stage} would 422. A ticket with no
+     * template, or standing in a stage not on its own template, is treated as
+     * skippable-unchecked exactly as {@code SkipService.requireSkippable}
+     * itself does, for the identical reason: there is nothing to validate
+     * against, and inventing a refusal here would just hide whichever real
+     * problem produced it.
      */
     private List<String> availableActions(Authentication caller, Ticket ticket) {
         CallerIdentity identity = CallerIdentity.of(caller).orElse(null);
         boolean hasLiveStage = ticket.getCurrentStage() != null && !"CLOSED".equals(ticket.getStatus());
-        if (identity != null && hasLiveStage && StageOwnership.mayAdvance(identity, ticket)) {
-            return List.of("handoff", "rework");
+        if (identity == null || !hasLiveStage) {
+            return List.of();
         }
-        return List.of();
+
+        List<String> actions = new ArrayList<>();
+        if (StageOwnership.mayAdvance(identity, ticket)) {
+            actions.add("handoff");
+            actions.add("rework");
+        }
+        if (isSkipCapable(identity) && isCurrentStageSkippable(ticket)) {
+            actions.add("skip-stage");
+        }
+        return List.copyOf(actions);
+    }
+
+    private static boolean isSkipCapable(CallerIdentity identity) {
+        return RolePermissions.ADMIN.equals(identity.roleCode()) || RolePermissions.PM.equals(identity.roleCode());
+    }
+
+    private boolean isCurrentStageSkippable(Ticket ticket) {
+        Long templateId = ticket.getWorkflowTemplateId();
+        String stageCode = ticket.getCurrentStage();
+        if (templateId == null || stageCode == null) {
+            return true;
+        }
+        return stages.findByTemplateIdAndStageCode(templateId, stageCode)
+                .map(stage -> stage.isOptional())
+                .orElse(true);
     }
 
     // ── mapping ──────────────────────────────────────────────────────────────
+
+    /** An id with no matching row resolves to {@code null}, {@code TicketWire}'s
+     * own reasoning — a deleted watcher should drop off the list rather than
+     * render as a placeholder. */
+    private TicketDetailDtos.UserRef toUserRef(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        return users.findById(userId)
+                .map(u -> new TicketDetailDtos.UserRef(u.getId(), displayNameOf(u)))
+                .orElse(null);
+    }
+
+    private static String displayNameOf(User user) {
+        String fullName = user.getFullName();
+        if (fullName != null && !fullName.isBlank()) {
+            return fullName;
+        }
+        return user.getUsername() != null && !user.getUsername().isBlank() ? user.getUsername() : "Unknown";
+    }
 
     private TicketDetailDtos.Cycle toCycle(TicketCycle c) {
         return new TicketDetailDtos.Cycle(

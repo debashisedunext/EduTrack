@@ -29,10 +29,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * things that are easy to get wrong and silent when wrong: that the scope
  * guard is applied <em>before</em> anything is read by ticket id, that
  * {@code ?cycle=} filters the journals and nothing else, that {@code ribbon}
- * stays null rather than quietly invented (still blocked on Stream B's
- * workflow-stage sequence — C-051), and that {@code availableActions}
- * reflects C-043's golden rule against a real {@code Ticket} entity, not
- * just the mocked one {@code TicketDetailServiceTest} exercises.
+ * is a real {@link com.edunext.edutrack.api.feature.transitions.RibbonWire.Ribbon}
+ * rather than invented data even for this fixture's template-less ticket
+ * (empty segments, not null — {@code RibbonAssembler} answers every ticket the
+ * same way), and that {@code availableActions} reflects C-043's golden rule
+ * against a real {@code Ticket} entity, not just the mocked one
+ * {@code TicketDetailServiceTest} exercises.
  */
 @SpringBootTest
 @Testcontainers
@@ -72,6 +74,7 @@ class TicketDetailIT {
     private long otherProjectId;
     private long userId;
     private long ticketId;
+    private String ticketCode;
 
     @BeforeEach
     void seed() {
@@ -95,7 +98,9 @@ class TicketDetailIT {
                 "dtl" + suffix() + "@example.test", roleId);
         userId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
 
-        ticketId = insertTicket(projectId, (short) 2);
+        Seeded seededTicket = insertTicket(projectId, (short) 2);
+        ticketId = seededTicket.id();
+        ticketCode = seededTicket.code();
 
         // Two cycles' worth of journal, so the cycle filter has something to cut.
         insertHistory(ticketId, (short) 1, "CREATED");
@@ -107,13 +112,19 @@ class TicketDetailIT {
         insertCycle(ticketId, (short) 2, false);
     }
 
-    private long insertTicket(long project, short currentCycle) {
+    /** A ticket's numeric id, for the journal helpers below, and its code — the path segment {@link
+     * TicketDetailService#detail} now takes since the {@code long}-vs-code fix. */
+    private record Seeded(long id, String code) {}
+
+    private Seeded insertTicket(long project, short currentCycle) {
+        String code = "DT-26-" + suffix();
         jdbc.update("""
                 INSERT INTO tickets (ticket_code, project_id, title, level, original_level,
                                      status, assigned_to, current_cycle_no)
                 VALUES (?, ?, 'detail probe', 'HIGH', 'HIGH', 'IN_PROGRESS', ?, ?)
-                """, "DT-26-" + suffix(), project, userId, currentCycle);
-        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+                """, code, project, userId, currentCycle);
+        long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        return new Seeded(id, code);
     }
 
     /**
@@ -195,7 +206,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("returns every section the detail page needs")
         void returnsEverySection() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, null);
 
             assertThat(d.ticket().id()).isEqualTo(ticketId);
             assertThat(d.ticket().ticketCode()).isNotBlank();
@@ -208,18 +219,24 @@ class TicketDetailIT {
         }
 
         /**
-         * {@code ribbon}'s rule is still unbuilt. Asserted explicitly so that
-         * filling it in is a deliberate act that breaks a test, rather than
-         * something that quietly starts returning invented data.
+         * This fixture ticket carries no {@code workflow_template_id} — {@code
+         * insertTicket} never sets one — the same legacy/no-template state a
+         * ticket created before ticket creation resolved a template would be
+         * in. {@code RibbonAssembler} answers a real {@code Ribbon} regardless,
+         * with an empty segment list rather than {@code null}: asserted
+         * explicitly so a future change that makes this ticket's ribbon
+         * {@code null} again — reintroducing the C-051 gap — breaks a test
+         * instead of passing silently.
          */
         @Test
-        @DisplayName("ribbon is null until C-051's stage sequence exists")
-        void ribbonIsNullNotInvented() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+        @DisplayName("ribbon is assembled with empty segments for a ticket with no workflow template")
+        void ribbonHasEmptySegmentsNotNull() {
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, null);
 
-            assertThat(d.ribbon())
-                    .as("a ribbon needs C-042's transitions and B's workflow stages; the second half is still missing")
-                    .isNull();
+            assertThat(d.ribbon()).as("RibbonAssembler always answers a Ribbon, never null").isNotNull();
+            assertThat(d.ribbon().segments())
+                    .as("no workflow_template_id on this fixture ticket — nothing to lay a segment list against")
+                    .isEmpty();
         }
 
         /**
@@ -229,11 +246,13 @@ class TicketDetailIT {
          * assignee, so either half of the golden rule alone would pass this.
          */
         @Test
-        @DisplayName("availableActions offers handoff/rework to the current owner")
+        @DisplayName("availableActions offers handoff/rework to the current owner, plus skip-stage for this "
+                + "Admin caller — the fixture ticket carries no workflow template, so C-047's own "
+                + "unchecked-precedent applies")
         void availableActionsOffersAdvanceToTheOwner() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, null);
 
-            assertThat(d.availableActions()).containsExactlyInAnyOrder("handoff", "rework");
+            assertThat(d.availableActions()).containsExactlyInAnyOrder("handoff", "rework", "skip-stage");
         }
     }
 
@@ -251,9 +270,9 @@ class TicketDetailIT {
         @Test
         @DisplayName("an out-of-scope ticket is not found, not forbidden")
         void outOfScopeIsNotFound() {
-            long theirs = insertTicket(otherProjectId, (short) 1);
+            Seeded theirs = insertTicket(otherProjectId, (short) 1);
 
-            assertThatThrownBy(() -> service.detail(caller("PM", List.of(projectId)), theirs, null))
+            assertThatThrownBy(() -> service.detail(caller("PM", List.of(projectId)), theirs.code(), null))
                     .as("A-035: indistinguishable from a ticket that never existed")
                     .isInstanceOf(TicketNotFoundException.class);
         }
@@ -261,7 +280,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("a ticket that never existed fails identically")
         void missingTicketFailsTheSameWay() {
-            assertThatThrownBy(() -> service.detail(admin(), 999_999_999L, null))
+            assertThatThrownBy(() -> service.detail(admin(), "ZZZ-26-99999", null))
                     .isInstanceOf(TicketNotFoundException.class);
         }
 
@@ -282,7 +301,7 @@ class TicketDetailIT {
                             "SUPPORT", List.of(projectId), List.of()),
                     null, List.of());
 
-            TicketDetailDtos.Detail d = service.detail(otherSupport, ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(otherSupport, ticketCode, null);
 
             assertThat(d.ticket().id()).isEqualTo(ticketId);
             assertThat(d.availableActions()).isEmpty();
@@ -298,7 +317,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("defaults to the ticket's current cycle")
         void defaultsToCurrentCycle() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, null);
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, null);
 
             assertThat(d.history()).allSatisfy(h ->
                     assertThat(h.cycleNo()).as("current cycle is 2").isEqualTo((short) 2));
@@ -309,7 +328,7 @@ class TicketDetailIT {
         @Test
         @DisplayName("an earlier cycle returns that cycle's journals")
         void earlierCycleIsReadable() {
-            TicketDetailDtos.Detail d = service.detail(admin(), ticketId, 1);
+            TicketDetailDtos.Detail d = service.detail(admin(), ticketCode, 1);
 
             assertThat(d.history()).isNotEmpty().allSatisfy(h ->
                     assertThat(h.cycleNo()).isEqualTo((short) 1));
@@ -325,8 +344,8 @@ class TicketDetailIT {
         @Test
         @DisplayName("cycles list and comments are not filtered by the selected cycle")
         void ticketScopedSectionsAreNotFiltered() {
-            TicketDetailDtos.Detail current = service.detail(admin(), ticketId, null);
-            TicketDetailDtos.Detail earlier = service.detail(admin(), ticketId, 1);
+            TicketDetailDtos.Detail current = service.detail(admin(), ticketCode, null);
+            TicketDetailDtos.Detail earlier = service.detail(admin(), ticketCode, 1);
 
             assertThat(earlier.cycles()).as("the selector needs every cycle to offer")
                     .hasSameSizeAs(current.cycles());

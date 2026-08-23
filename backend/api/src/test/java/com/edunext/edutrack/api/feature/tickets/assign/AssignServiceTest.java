@@ -4,6 +4,7 @@ import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
+import com.edunext.edutrack.domain.identity.User;
 import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
@@ -18,12 +19,14 @@ import org.springframework.security.core.Authentication;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -72,6 +75,19 @@ class AssignServiceTest {
         ticket = assignedTicket();
         when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
         when(users.existsById(NEW_ASSIGNEE)).thenReturn(true);
+        // TicketWire.of(ticket, users) now resolves assignedTo through the
+        // repo on every non-exceptional return, C-0xx's UserRef fix — stubbed
+        // here for both ids so every test that reaches a return gets a real
+        // UserRef rather than null.
+        when(users.findById(NEW_ASSIGNEE)).thenReturn(Optional.of(userNamed(NEW_ASSIGNEE, "New Assignee")));
+        when(users.findById(PREVIOUS_ASSIGNEE)).thenReturn(Optional.of(userNamed(PREVIOUS_ASSIGNEE, "Previous Assignee")));
+    }
+
+    private static User userNamed(long id, String fullName) {
+        User user = new User();
+        user.setId(id);
+        user.setFullName(fullName);
+        return user;
     }
 
     // ── the STAGE_REASSIGNED row ──────────────────────────────────────────────
@@ -158,7 +174,7 @@ class AssignServiceTest {
         void isAnsweredWithTheNewAssignee() {
             TicketWire.Ticket answered = service.assign(caller, TICKET_CODE, request(NEW_ASSIGNEE, null));
 
-            assertThat(answered.assignedTo()).isEqualTo(NEW_ASSIGNEE);
+            assertThat(answered.assignee().id()).isEqualTo(NEW_ASSIGNEE);
             assertThat(answered.currentStage()).isEqualTo("DEVELOPMENT");
         }
     }
@@ -174,7 +190,7 @@ class AssignServiceTest {
         void sameAssigneeIsANoOp() {
             TicketWire.Ticket answered = service.assign(caller, TICKET_CODE, request(PREVIOUS_ASSIGNEE, null));
 
-            assertThat(answered.assignedTo()).isEqualTo(PREVIOUS_ASSIGNEE);
+            assertThat(answered.assignee().id()).isEqualTo(PREVIOUS_ASSIGNEE);
             assertThat(ticket.getAssignedBy()).isNull();
             verifyNoInteractions(journal);
         }
@@ -189,7 +205,12 @@ class AssignServiceTest {
         void noOpSkipsTheAssigneeLookup() {
             service.assign(caller, TICKET_CODE, request(PREVIOUS_ASSIGNEE, null));
 
-            verifyNoInteractions(users);
+            // TicketWire.of(ticket, users) still resolves the wire's assignee
+            // through users.findById on the way out — that's the response
+            // shape, not the validation this test is about. What must not
+            // happen is the existsById check the assignee-lookup guard below
+            // performs on a genuine reassignment.
+            verify(users, never()).existsById(any());
         }
 
         @Test

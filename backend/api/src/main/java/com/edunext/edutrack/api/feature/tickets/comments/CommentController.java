@@ -31,6 +31,13 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>The {@code /api/v1} prefix is spelled out because nothing declares it
  * globally; see {@code PlannedCloseDateController}'s note and the 404s that cost.
+ *
+ * <p><b>{@code String}, not {@code long}</b> — the same {@code TicketDetailController}/
+ * {@code ReopenController} bug: the contract's {@code TicketId} is a code like
+ * {@code CRM-26-00347}, not a numeric id, so declaring it {@code long} 400s
+ * against the real backend for every request a real caller sends. Fixed via
+ * {@code ScopedTickets.requireByCode} (A-035), the same as every other route in
+ * this feature already resolves it.
  */
 @RestController
 @RequestMapping("/api/v1/tickets/{ticketId}/comments")
@@ -48,7 +55,7 @@ class CommentController {
     @Operation(operationId = "listComments", summary = "List comments")
     CommentDtos.CommentListResponse list(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @RequestParam(required = false) Integer cycle,
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) Integer limit) {
@@ -96,7 +103,7 @@ class CommentController {
                     rather than ignored.""")
     CommentDtos.CommentResponse create(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @Valid @RequestBody CommentDtos.CommentWriteRequest request) {
 
         return new CommentDtos.CommentResponse(service.create(caller, ticketId, request));
@@ -137,7 +144,7 @@ class CommentController {
                     somebody the previous wording did not already name is notified.""")
     CommentDtos.CommentResponse edit(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @PathVariable long commentId,
             @Valid @RequestBody CommentDtos.EditCommentRequest request) {
 
@@ -169,7 +176,7 @@ class CommentController {
                     Idempotent — deleting a tombstone answers 204.""")
     void delete(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @PathVariable long commentId) {
 
         service.delete(caller, ticketId, commentId);

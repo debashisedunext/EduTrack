@@ -7,6 +7,7 @@ import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
 import com.edunext.edutrack.domain.tickets.Ticket;
@@ -67,6 +68,7 @@ import static org.mockito.Mockito.when;
 class ReopenServiceTest {
 
     private static final long TICKET = 347L;
+    private static final String TICKET_CODE = "CRM-26-00347";
     private static final long PROJECT = 8L;
     private static final long TEMPLATE = 3L;
     private static final long ACTOR = 12L;
@@ -92,8 +94,17 @@ class ReopenServiceTest {
      */
     private final TicketEventNotifier eventNotifier = mock(TicketEventNotifier.class);
 
+    /**
+     * The `TicketWire.of` resolver, mocked and unstubbed: every `Optional<User>`
+     * lookup answers empty, and no assertion in this file reads
+     * `.assignee()`/`.reportedBy()` off the returned {@code TicketWire.Ticket} —
+     * those display-name shapes are `TicketWireTest`'s subject, not this
+     * transaction's.
+     */
+    private final UserRepository users = mock(UserRepository.class);
+
     private final ReopenService service = new ReopenService(
-            tickets, cycles, journal, stages, slaLadder, workingHours, eventNotifier,
+            tickets, cycles, journal, stages, slaLadder, workingHours, eventNotifier, users,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
     /**
@@ -117,7 +128,7 @@ class ReopenServiceTest {
         ticket = closedTicket();
         cycle1 = cycle(1, CYCLE_1_ASSIGNEE);
 
-        when(tickets.require(any(), eq(TICKET))).thenReturn(ticket);
+        when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
         when(cycles.findByTicketIdAndCycleNo(TICKET, (short) 1)).thenReturn(Optional.of(cycle1));
         when(cycles.save(any())).thenAnswer(call -> call.getArgument(0));
         when(stages.findByTemplateIdAndStageCode(TEMPLATE, "TRIAGE"))
@@ -147,7 +158,7 @@ class ReopenServiceTest {
             when(cycles.findByTicketIdAndCycleNo(TICKET, (short) 2))
                     .thenReturn(Optional.of(cycle(2, CYCLE_1_ASSIGNEE)));
 
-            TicketWire.Ticket answered = service.reopen(caller, TICKET, request());
+            TicketWire.Ticket answered = service.reopen(caller, TICKET_CODE, request());
 
             assertThat(ticket.getStatus()).isEqualTo("REOPENED");
             assertThat(ticket.getCurrentCycleNo()).isEqualTo((short) 3);
@@ -170,7 +181,7 @@ class ReopenServiceTest {
         void clearsTheCloseDate() {
             assertThat(ticket.getActualCloseDate()).isNotNull();
 
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(ticket.getActualCloseDate()).isNull();
         }
@@ -186,7 +197,7 @@ class ReopenServiceTest {
             ticket.setCurrentIteration((short) 4);
             ticket.setReworkCount((short) 6);
 
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(ticket.getCurrentIteration()).isEqualTo((short) 1);
             assertThat(ticket.getReworkCount())
@@ -200,7 +211,7 @@ class ReopenServiceTest {
             when(stages.findByTemplateIdAndStageCode(TEMPLATE, "DEV"))
                     .thenReturn(Optional.of(stage("DEV")));
 
-            service.reopen(caller, TICKET, new ReopenDtos.ReopenRequest(
+            service.reopen(caller, TICKET_CODE, new ReopenDtos.ReopenRequest(
                     REASON, "DEV", null, null, null));
 
             assertThat(ticket.getCurrentStage()).isEqualTo("DEV");
@@ -210,7 +221,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("keeps level and original_level — G-4 says a close does not revert them")
         void keepsBothLevels() {
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(ticket.getLevel()).isEqualTo("HIGH");
             assertThat(ticket.getOriginalLevel()).isEqualTo("MEDIUM");
@@ -235,7 +246,7 @@ class ReopenServiceTest {
             ticket.setTotalEffortHrs(new BigDecimal("38.00"));
             cycle1.setEffortHrs(new BigDecimal("24.50"));
 
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(ticket.getTotalEffortHrs())
                     .as("Σ across all cycles already includes cycle 1")
@@ -253,7 +264,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("is not appended to, corrected, or even read through the journal")
         void theJournalSeesOnlyTheHistoryAppend() {
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             verify(journal).append(any(TicketHistory.class));
             verify(journal, never()).effortFor(anyLong(), any());
@@ -265,7 +276,7 @@ class ReopenServiceTest {
         void theNewCycleStartsAtZero() {
             cycle1.setEffortHrs(new BigDecimal("24.50"));
 
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(savedCycle().getEffortHrs()).isEqualByComparingTo("0.00");
         }
@@ -280,7 +291,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("is inserted at N+1 with the reason, the actor and a fresh start date")
         void isInsertedWithItsOwnFacts() {
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             TicketCycle saved = savedCycle();
             assertThat(saved.getTicketId()).isEqualTo(TICKET);
@@ -298,7 +309,7 @@ class ReopenServiceTest {
         void sealsTheClosingCycle() {
             assertThat(cycle1.isSealed()).isFalse();
 
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(cycle1.isSealed()).isTrue();
         }
@@ -312,7 +323,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("defaults the assignee to the closing cycle's, not the ticket's")
         void defaultsTheAssigneeToTheClosingCycles() {
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(savedCycle().getAssignedTo()).isEqualTo(CYCLE_1_ASSIGNEE);
             assertThat(ticket.getAssignedTo()).isEqualTo(CYCLE_1_ASSIGNEE);
@@ -323,7 +334,7 @@ class ReopenServiceTest {
         void fallsBackToTheTicketsAssignee() {
             cycle1.setAssignedTo(null);
 
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(savedCycle().getAssignedTo()).isEqualTo(TICKET_ASSIGNEE);
         }
@@ -331,7 +342,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("takes the requested assignee when one is given")
         void takesTheRequestedAssignee() {
-            service.reopen(caller, TICKET, new ReopenDtos.ReopenRequest(
+            service.reopen(caller, TICKET_CODE, new ReopenDtos.ReopenRequest(
                     REASON, null, 99L, null, null));
 
             assertThat(savedCycle().getAssignedTo()).isEqualTo(99L);
@@ -355,7 +366,7 @@ class ReopenServiceTest {
             Instant recomputed = Instant.parse("2026-08-19T13:30:00Z");
             assertThat(cycle1.getPlannedCloseDate()).isBefore(NOW);
 
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(savedCycle().getPlannedCloseDate()).isEqualTo(recomputed);
             assertThat(ticket.getPlannedCloseDate()).isEqualTo(recomputed);
@@ -370,7 +381,7 @@ class ReopenServiceTest {
         void prefersTheCallersDate() {
             Instant chosen = Instant.parse("2026-08-25T12:00:00Z");
 
-            service.reopen(caller, TICKET, new ReopenDtos.ReopenRequest(
+            service.reopen(caller, TICKET_CODE, new ReopenDtos.ReopenRequest(
                     REASON, null, null, chosen, null));
 
             assertThat(ticket.getPlannedCloseDate()).isEqualTo(chosen);
@@ -388,7 +399,7 @@ class ReopenServiceTest {
             when(slaLadder.resolve(PROJECT, 4, "HIGH")).thenReturn(
                     new SlaResolution(SlaResolution.Source.NONE, null, null, null));
 
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(ticket.getStatus()).isEqualTo("REOPENED");
             assertThat(ticket.getPlannedCloseDate()).isNull();
@@ -411,7 +422,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("is a CLOSED → REOPENED status change stamped with the new cycle")
         void isAStatusChangeOnTheNewCycle() {
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             TicketHistory entry = appendedHistory();
             assertThat(entry.getTicketId()).isEqualTo(TICKET);
@@ -431,7 +442,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("names the actor, with actor_type agreeing")
         void namesTheActor() {
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             TicketHistory entry = appendedHistory();
             assertThat(entry.getActorId()).isEqualTo(ACTOR);
@@ -446,7 +457,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("carries no hash of its own — the journal computes the chain")
         void carriesNoHash() {
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             TicketHistory entry = appendedHistory();
             assertThat(entry.getPrevHash()).isNull();
@@ -469,9 +480,9 @@ class ReopenServiceTest {
         @Test
         @DisplayName("an out-of-scope or absent ticket is 404, and nothing is written")
         void outOfScopeIs404() {
-            when(tickets.require(any(), eq(TICKET))).thenThrow(new TicketNotFoundException());
+            when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenThrow(new TicketNotFoundException());
 
-            assertThatThrownBy(() -> service.reopen(caller, TICKET, request()))
+            assertThatThrownBy(() -> service.reopen(caller, TICKET_CODE, request()))
                     .isInstanceOf(TicketNotFoundException.class);
 
             verifyNoInteractions(cycles, journal);
@@ -482,7 +493,7 @@ class ReopenServiceTest {
         void resolvedIs422() {
             ticket.setStatus("RESOLVED");
 
-            assertThatThrownBy(() -> service.reopen(caller, TICKET, request()))
+            assertThatThrownBy(() -> service.reopen(caller, TICKET_CODE, request()))
                     .isInstanceOf(TicketNotClosedException.class)
                     .hasMessageContaining("RESOLVED rather than CLOSED");
 
@@ -494,7 +505,7 @@ class ReopenServiceTest {
         void alreadyReopenedIs422() {
             ticket.setStatus("REOPENED");
 
-            assertThatThrownBy(() -> service.reopen(caller, TICKET, request()))
+            assertThatThrownBy(() -> service.reopen(caller, TICKET_CODE, request()))
                     .isInstanceOf(TicketNotClosedException.class);
 
             assertThat(ticket.getCurrentCycleNo()).isEqualTo((short) 1);
@@ -513,7 +524,7 @@ class ReopenServiceTest {
             when(stages.findByTemplateIdAndStageCode(TEMPLATE, "SIGNOFF"))
                     .thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service.reopen(caller, TICKET, new ReopenDtos.ReopenRequest(
+            assertThatThrownBy(() -> service.reopen(caller, TICKET_CODE, new ReopenDtos.ReopenRequest(
                     REASON, "SIGNOFF", null, null, null)))
                     .isInstanceOf(UnknownRestartStageException.class)
                     .hasMessageContaining("SIGNOFF");
@@ -531,7 +542,7 @@ class ReopenServiceTest {
         void noTemplateIsNotRefused() {
             ReflectionTestUtils.setField(ticket, "workflowTemplateId", null);
 
-            service.reopen(caller, TICKET, new ReopenDtos.ReopenRequest(
+            service.reopen(caller, TICKET_CODE, new ReopenDtos.ReopenRequest(
                     REASON, "ANYTHING", null, null, null));
 
             assertThat(ticket.getCurrentStage()).isEqualTo("ANYTHING");
@@ -548,7 +559,7 @@ class ReopenServiceTest {
         void missingCycleRowFailsLoudly() {
             when(cycles.findByTicketIdAndCycleNo(TICKET, (short) 1)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service.reopen(caller, TICKET, request()))
+            assertThatThrownBy(() -> service.reopen(caller, TICKET_CODE, request()))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("nothing to seal");
 
@@ -566,7 +577,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("replaces the ticket's estimate when supplied")
         void replacesTheEstimate() {
-            service.reopen(caller, TICKET, new ReopenDtos.ReopenRequest(
+            service.reopen(caller, TICKET_CODE, new ReopenDtos.ReopenRequest(
                     REASON, null, null, null, new BigDecimal("6.50")));
 
             assertThat(ticket.getEstimatedEffortHrs()).isEqualByComparingTo("6.50");
@@ -580,7 +591,7 @@ class ReopenServiceTest {
         @Test
         @DisplayName("leaves a good estimate alone when omitted")
         void leavesTheEstimateAloneWhenOmitted() {
-            service.reopen(caller, TICKET, request());
+            service.reopen(caller, TICKET_CODE, request());
 
             assertThat(ticket.getEstimatedEffortHrs()).isEqualByComparingTo("12.00");
         }

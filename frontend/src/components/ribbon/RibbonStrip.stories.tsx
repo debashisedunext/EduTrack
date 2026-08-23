@@ -161,9 +161,10 @@ export const Interactive: Story = {
   },
 }
 
-/** `ribbon.canAdvance` — the golden rule, resolved server-side — puts C-052's
- * honestly-disabled handoff placeholder on the current segment. `C-044`'s
- * dialog replaces it; until then it names the task that will. */
+/** `currentStageAction` — the real trigger `TicketDetailPage` composes
+ * (`HandoffDialog`, `SkipStageDialog`), rendered on the current segment. This
+ * story stands in with a plain button since the real dialogs need a live
+ * ticket and mutation hooks the strip itself never depends on. */
 export const WithHandoffAction: Story = {
   args: {
     ribbon: {
@@ -186,6 +187,7 @@ export const WithHandoffAction: Story = {
         }),
       ],
     },
+    currentStageAction: <button type="button">Hand off to QA →</button>,
   },
 }
 

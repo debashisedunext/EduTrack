@@ -50,6 +50,12 @@ import java.util.Map;
  *
  * <p>The {@code /api/v1} prefix is spelled out because nothing declares it
  * globally; see {@code PlannedCloseDateController}'s note and the 404s that cost.
+ *
+ * <p><b>{@code String}, not {@code long}</b> — the same {@code TicketDetailController}/
+ * {@code ReopenController} bug: the contract's {@code TicketId} is a code like
+ * {@code CRM-26-00347}, not a numeric id, so declaring it {@code long} 400s
+ * against the real backend for every request a real caller sends. Fixed via
+ * {@code ScopedTickets.requireByCode} (A-035).
  */
 @RestController
 @RequestMapping("/api/v1/tickets/{ticketId}/attachments")
@@ -87,7 +93,7 @@ class AttachmentController {
                     `scanStatus` is `PENDING` and `downloadUrl` is null until the scan passes.""")
     AttachmentDtos.AttachmentResponse upload(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @RequestParam("file") MultipartFile file,
             @RequestParam(name = "isClientVisible", defaultValue = "false") boolean isClientVisible,
             @RequestParam(name = "commentId", required = false) Long commentId) {
@@ -113,7 +119,7 @@ class AttachmentController {
     @Operation(operationId = "listAttachments", summary = "List attachments")
     AttachmentDtos.AttachmentListResponse list(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             @RequestParam(required = false) Integer cycle,
             @RequestParam(required = false) Boolean clientVisibleOnly) {
 
@@ -168,7 +174,7 @@ class AttachmentController {
                     After that — or when a PM or an administrator removes it — the row survives \
                     as a tombstone naming who removed it and when, so the ticket still records \
                     that the file was there. The stored object and its thumbnail go in every case.""")
-    void delete(Authentication caller, @PathVariable long ticketId, @PathVariable long attachmentId) {
+    void delete(Authentication caller, @PathVariable String ticketId, @PathVariable long attachmentId) {
         service.delete(caller, ticketId, attachmentId);
     }
 

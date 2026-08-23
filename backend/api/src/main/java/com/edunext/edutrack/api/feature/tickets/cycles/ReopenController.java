@@ -32,6 +32,13 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>The {@code /api/v1} prefix is spelled out because nothing declares it
  * globally; see {@code PlannedCloseDateController}'s note and the 404s that cost.
+ *
+ * <p><b>{@code String}, not {@code long}</b> — {@code PriorityChangeController}'s
+ * own javadoc named this route (alongside {@code TicketDetailController.full})
+ * as declaring {@code @PathVariable long ticketId}, which 400s against the real
+ * backend for every request a real caller sends, since the contract's
+ * {@code TicketId} is a code like {@code CRM-26-00347}. Fixed the same way, via
+ * {@code ScopedTickets.requireByCode} (A-035).
  */
 @RestController
 @RequestMapping("/api/v1/tickets/{ticketId}/reopen")
@@ -95,7 +102,7 @@ class ReopenController {
                     resting in — belong to C-042's transition service.""")
     ReopenDtos.TicketResponse reopen(
             Authentication caller,
-            @PathVariable long ticketId,
+            @PathVariable String ticketId,
             /*
              * Accepted per CONVENTIONS.md §4 and NOT yet honoured: the 24-hour
              * replay store does not exist. Until it does, a retried reopen is
