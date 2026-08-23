@@ -5,6 +5,7 @@ import com.edunext.edutrack.domain.identity.ProjectRepository;
 import com.edunext.edutrack.domain.identity.User;
 import com.edunext.edutrack.domain.identity.UserRepository;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -145,11 +146,28 @@ public final class TicketWire {
     public record UserRef(long id, String displayName) {
     }
 
-    /** The contract's {@code Project}, at the three properties {@code Ticket} embeds. */
+    /**
+     * The contract's {@code Project}, at the three properties {@code Ticket} embeds.
+     *
+     * <h2>Why the explicit schema name</h2>
+     *
+     * <p>springdoc keys {@code components.schemas} by <b>simple class name</b>, so
+     * a record called {@code Project} here silently overwrites Stream B's
+     * {@code ProjectDtos.Project} in the served document — {@code
+     * TicketListDtos.Project}'s own javadoc names this exact failure, caught by
+     * {@code ContractConformanceTest} the moment that record was added, reporting
+     * eight properties "declared but not served" on {@code GET /projects}, an
+     * endpoint that change never touched. Same remedy here, on the same
+     * precedent: named for this feature's view of a project, not renamed away
+     * from a collision.
+     */
+    @Schema(name = "TicketProjectRef")
     public record Project(long id, String projectCode, String name) {
     }
 
-    /** The contract's {@code ClientRef}, at the three properties {@code Ticket} embeds. */
+    /** The contract's {@code ClientRef}, at the three properties {@code Ticket}
+     * embeds. Named explicitly for the reason above. */
+    @Schema(name = "TicketClientRef")
     public record ClientRef(long id, String clientCode, String name) {
     }
 
