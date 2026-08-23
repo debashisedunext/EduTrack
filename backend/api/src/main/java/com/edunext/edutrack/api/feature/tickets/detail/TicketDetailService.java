@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.tickets.detail;
 
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.feature.tickets.links.TicketLinkService;
+import com.edunext.edutrack.api.feature.transitions.RibbonAssembler;
 import com.edunext.edutrack.api.feature.transitions.StageOwnership;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.permission.RolePermissions;
@@ -17,6 +18,10 @@ import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.TicketEffortLog;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
 import com.edunext.edutrack.domain.tickets.TicketWatcherRepository;
+import com.edunext.edutrack.domain.clients.ClientRepository;
+import com.edunext.edutrack.domain.identity.ProjectRepository;
+import com.edunext.edutrack.domain.identity.User;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -43,17 +48,18 @@ import java.util.List;
  * ever becomes the bottleneck the answer is to widen the fetch, not to hand the
  * waterfall back to the client.
  *
- * <h2>🔴 {@code ribbon} the contract declares and this does not return</h2>
+ * <h2>{@code ribbon} — assembled via {@link RibbonAssembler}</h2>
  *
- * <p>{@code ribbon} is <b>deliberately null</b>: it needs stage segments from
- * {@code ticket_stage_transitions} (C-042, built) laid against a workflow
- * template's stage sequence (Stream B's {@code api/feature/workflow/}, which
- * still holds only a README). The second half does not exist, so any ribbon
- * assembled here would be invented. It is optional in
- * {@code TicketDetailResponse} — only {@code ticket} is required — so
- * omitting it is a contract-valid answer, and a client sees it absent and
- * renders no ribbon, the truthful rendering of a system that cannot yet lay
- * one out. <b>C-051 fills it in once the stage-sequence half exists.</b>
+ * <p>The current cycle only, on the same reasoning {@link RibbonAssembler}'s
+ * own javadoc gives — the caller here already knows which ticket it asked
+ * for, and the cycle-selector-aware read is {@code GET
+ * /tickets/{ticketId}/ribbon}'s job, not this route's. A ticket with no
+ * {@code workflow_template_id} — one that predates the workflow designer, or
+ * was created before ticket creation resolved a template — gets a
+ * {@code Ribbon} with an empty segment list rather than {@code null}, exactly
+ * as {@link RibbonAssembler} already answers every lifecycle route; the
+ * frontend's empty state ("no workflow ribbon") renders off that emptiness,
+ * not off the field's absence.
  *
  * <h2>{@code availableActions} — C-043, the golden rule</h2>
  *
@@ -110,6 +116,19 @@ class TicketDetailService {
      */
     private final WorkflowStageRepository stages;
 
+    /** Resolves {@code reportedBy}/{@code assignedTo} and watcher ids into the
+     * contract's {@code UserRef} — {@code TicketWire}'s own note on why a bare
+     * id was wrong here for every one of its eight callers. */
+    private final UserRepository users;
+
+    /** Resolves {@code ticket.project}/{@code ticket.client} — {@code TicketWire}'s
+     * own note on why this route alone calls its four-argument {@code of}. */
+    private final ProjectRepository projects;
+    private final ClientRepository clients;
+
+    /** Assembles {@code ribbon} — see the class note above. */
+    private final RibbonAssembler ribbon;
+
     TicketDetailService(ScopedTickets tickets,
                         TicketCycleRepository cycles,
                         TicketJournal journal,
@@ -117,7 +136,11 @@ class TicketDetailService {
                         TicketAttachmentRepository attachments,
                         TicketWatcherRepository watchers,
                         TicketLinkService links,
-                        WorkflowStageRepository stages) {
+                        WorkflowStageRepository stages,
+                        UserRepository users,
+                        ProjectRepository projects,
+                        ClientRepository clients,
+                        RibbonAssembler ribbon) {
         this.tickets = tickets;
         this.cycles = cycles;
         this.journal = journal;
@@ -126,6 +149,10 @@ class TicketDetailService {
         this.watchers = watchers;
         this.links = links;
         this.stages = stages;
+        this.users = users;
+        this.projects = projects;
+        this.clients = clients;
+        this.ribbon = ribbon;
     }
 
     /**
@@ -135,20 +162,25 @@ class TicketDetailService {
      *         may not see — A-035, indistinguishable on purpose
      */
     @Transactional(readOnly = true)
-    TicketDetailDtos.Detail detail(Authentication caller, long ticketId, Integer requestedCycle) {
+    TicketDetailDtos.Detail detail(Authentication caller, String ticketCode, Integer requestedCycle) {
         // Scope first, and only once. Everything below reads by ticket id, so a
         // caller who got past this line would see another project's history and
         // no later query would notice.
-        Ticket ticket = tickets.require(caller, ticketId);
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
 
         short cycle = requestedCycle == null
                 ? ticket.getCurrentCycleNo()
                 : (short) requestedCycle.intValue();
 
+        boolean canAdvance = CallerIdentity.of(caller)
+                .map(identity -> StageOwnership.mayAdvance(identity, ticket))
+                .orElse(false);
+
         return new TicketDetailDtos.Detail(
-                TicketWire.of(ticket),
+                TicketWire.of(ticket, users, projects, clients),
                 cycles.findByTicketIdOrderByCycleNoAsc(ticketId).stream().map(this::toCycle).toList(),
-                null,   // ribbon — C-042/C-051, see the class note
+                ribbon.assembleCurrentCycle(ticket, canAdvance),
                 journal.historyFor(ticketId, cycle).stream().map(this::toHistory).toList(),
                 journal.effortFor(ticketId, cycle).stream().map(this::toEffort).toList(),
                 comments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(ticketId).stream()
@@ -156,7 +188,7 @@ class TicketDetailService {
                 attachments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(ticketId).stream()
                         .map(this::toAttachment).toList(),
                 watchers.findByIdTicketId(ticketId).stream()
-                        .map(w -> new TicketDetailDtos.UserRef(w.getId().getUserId())).toList(),
+                        .map(w -> toUserRef(w.getId().getUserId())).filter(java.util.Objects::nonNull).toList(),
                 links.viewsFor(caller, ticket),
                 availableActions(caller, ticket));
     }
@@ -225,6 +257,26 @@ class TicketDetailService {
     }
 
     // ── mapping ──────────────────────────────────────────────────────────────
+
+    /** An id with no matching row resolves to {@code null}, {@code TicketWire}'s
+     * own reasoning — a deleted watcher should drop off the list rather than
+     * render as a placeholder. */
+    private TicketDetailDtos.UserRef toUserRef(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        return users.findById(userId)
+                .map(u -> new TicketDetailDtos.UserRef(u.getId(), displayNameOf(u)))
+                .orElse(null);
+    }
+
+    private static String displayNameOf(User user) {
+        String fullName = user.getFullName();
+        if (fullName != null && !fullName.isBlank()) {
+            return fullName;
+        }
+        return user.getUsername() != null && !user.getUsername().isBlank() ? user.getUsername() : "Unknown";
+    }
 
     private TicketDetailDtos.Cycle toCycle(TicketCycle c) {
         return new TicketDetailDtos.Cycle(

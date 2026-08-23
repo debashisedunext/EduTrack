@@ -4,6 +4,7 @@ import com.edunext.edutrack.api.feature.tickets.StatusCode;
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketAttachment;
@@ -84,11 +85,14 @@ class QuickUpdateService {
     private final ScopedTickets tickets;
     private final TicketJournal journal;
     private final TicketAttachmentRepository attachments;
+    private final UserRepository users;
 
-    QuickUpdateService(ScopedTickets tickets, TicketJournal journal, TicketAttachmentRepository attachments) {
+    QuickUpdateService(ScopedTickets tickets, TicketJournal journal, TicketAttachmentRepository attachments,
+                        UserRepository users) {
         this.tickets = tickets;
         this.journal = journal;
         this.attachments = attachments;
+        this.users = users;
     }
 
     /**
@@ -126,7 +130,7 @@ class QuickUpdateService {
             reviseEta(ticket, request.revisedEta(), request.revisedEtaReason(), actor);
         }
 
-        return TicketWire.of(ticket);
+        return TicketWire.of(ticket, users);
     }
 
     /** {@code STATUS_CHANGED}, following {@code PriorityChangeService}'s no-op-on-repeat rule. */

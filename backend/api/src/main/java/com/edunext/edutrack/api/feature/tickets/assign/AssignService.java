@@ -87,7 +87,7 @@ class AssignService {
             // before the assignee lookup below for the same reason that rule
             // is: a row reading "Priya -> Priya" cannot be deleted once
             // written, and the History tab is the one place noise is expensive.
-            return TicketWire.of(ticket);
+            return TicketWire.of(ticket, users);
         }
 
         if (!users.existsById(assigneeId)) {
@@ -112,7 +112,7 @@ class AssignService {
         // does not have to revisit this line.
         notifier.reassignedWithinStage(ticket, actor == null ? 0L : actor, previous, assigneeId);
 
-        return TicketWire.of(ticket);
+        return TicketWire.of(ticket, users);
     }
 
     private static TicketHistory reassignedEntry(Ticket ticket, Long previous, Long assigneeId,

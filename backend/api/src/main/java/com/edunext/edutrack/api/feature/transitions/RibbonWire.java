@@ -17,7 +17,7 @@ import java.time.Instant;
  * shape both routes will share. {@link RibbonAssembler} only ever assembles
  * the ticket's <em>current</em> cycle, which is all a handoff response needs.
  */
-final class RibbonWire {
+public final class RibbonWire {
 
     private RibbonWire() {
     }
@@ -52,7 +52,7 @@ final class RibbonWire {
     }
 
     /** {@code Ribbon} — one cycle's journey. */
-    record Ribbon(
+    public record Ribbon(
             int cycleNo,
             int iterationNo,
             boolean isSealed,

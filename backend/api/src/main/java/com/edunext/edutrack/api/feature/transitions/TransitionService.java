@@ -10,6 +10,7 @@ import com.edunext.edutrack.domain.tickets.TicketHistory;
 import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import com.edunext.edutrack.domain.workflow.WorkflowStage;
 import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
@@ -134,6 +135,7 @@ class TransitionService {
     private final ReceivingRoleRepository receivingRoles;
     private final ApplicationEventPublisher events;
     private final Clock clock;
+    private final UserRepository users;
 
     /*
      * @Autowired is required rather than decoration — see ReopenService's
@@ -145,8 +147,9 @@ class TransitionService {
                       WorkflowStageRepository stages,
                       WorkingHoursService workingHours,
                       ReceivingRoleRepository receivingRoles,
-                      ApplicationEventPublisher events) {
-        this(tickets, journal, stages, workingHours, receivingRoles, events, Clock.systemUTC());
+                      ApplicationEventPublisher events,
+                      UserRepository users) {
+        this(tickets, journal, stages, workingHours, receivingRoles, events, Clock.systemUTC(), users);
     }
 
     TransitionService(ScopedTickets tickets,
@@ -155,7 +158,8 @@ class TransitionService {
                       WorkingHoursService workingHours,
                       ReceivingRoleRepository receivingRoles,
                       ApplicationEventPublisher events,
-                      Clock clock) {
+                      Clock clock,
+                      UserRepository users) {
         this.tickets = tickets;
         this.journal = journal;
         this.stages = stages;
@@ -163,6 +167,7 @@ class TransitionService {
         this.receivingRoles = receivingRoles;
         this.events = events;
         this.clock = clock;
+        this.users = users;
     }
 
     /**
@@ -283,7 +288,7 @@ class TransitionService {
         // called advance. RibbonLiveBroadcaster delivers both after commit.
         events.publishEvent(new TicketStageAdvanced(ticketId, ticket.getProjectId(), open.getToStage(), toStage));
 
-        return TicketWire.of(ticket);
+        return TicketWire.of(ticket, users);
     }
 
     /**

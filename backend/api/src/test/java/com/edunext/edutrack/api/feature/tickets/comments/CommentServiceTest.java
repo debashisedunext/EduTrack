@@ -30,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -47,6 +48,7 @@ import static org.mockito.Mockito.when;
 class CommentServiceTest {
 
     private static final long TICKET = 347L;
+    private static final String TICKET_CODE = "CRM-26-00347";
     private static final long PROJECT = 8L;
     private static final long AUTHOR = 12L;
     private static final Instant POSTED_AT = Instant.parse("2026-08-16T10:15:30Z");
@@ -139,7 +141,7 @@ class CommentServiceTest {
         ticket.setCurrentStage("DEVELOPMENT");
         ticket.setCommentCount(7);
 
-        when(tickets.require(any(), anyLong())).thenReturn(ticket);
+        when(tickets.requireByCode(any(), anyString())).thenReturn(ticket);
         // Nobody resolves unless a test says so. The default matters: it is what
         // makes every pre-existing assertion here run through C-030's new write
         // path without a mention in sight, which is the common case.
@@ -185,9 +187,9 @@ class CommentServiceTest {
          */
         @Test
         void anOutOfScopeTicketIs404AndNothingIsWritten() {
-            when(tickets.require(any(), anyLong())).thenThrow(new TicketNotFoundException());
+            when(tickets.requireByCode(any(), anyString())).thenThrow(new TicketNotFoundException());
 
-            assertThatThrownBy(() -> service.create(caller, TICKET, body("<p>hello</p>")))
+            assertThatThrownBy(() -> service.create(caller, TICKET_CODE, body("<p>hello</p>")))
                     .isInstanceOf(TicketNotFoundException.class);
 
             verifyNoInteractions(comments);
@@ -195,9 +197,9 @@ class CommentServiceTest {
 
         @Test
         void theSameIsTrueOfTheThreadRead() {
-            when(tickets.require(any(), anyLong())).thenThrow(new TicketNotFoundException());
+            when(tickets.requireByCode(any(), anyString())).thenThrow(new TicketNotFoundException());
 
-            assertThatThrownBy(() -> service.list(caller, TICKET, null, null, null))
+            assertThatThrownBy(() -> service.list(caller, TICKET_CODE, null, null, null))
                     .isInstanceOf(TicketNotFoundException.class);
 
             verifyNoInteractions(rows);
@@ -214,13 +216,13 @@ class CommentServiceTest {
          */
         @Test
         void anOmittedFlagMeansInternal() {
-            service.create(caller, TICKET, body("<p>hello</p>"));
+            service.create(caller, TICKET_CODE, body("<p>hello</p>"));
             assertThat(saved().isInternal()).isTrue();
         }
 
         @Test
         void anExplicitFalseMeansInternal() {
-            service.create(caller, TICKET,
+            service.create(caller, TICKET_CODE,
                     new CommentDtos.CommentWriteRequest("<p>hello</p>", false, null, null));
             assertThat(saved().isInternal()).isTrue();
         }
@@ -228,7 +230,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("only an explicit true is client-visible")
         void anExplicitTrueIsClientVisible() {
-            service.create(caller, TICKET,
+            service.create(caller, TICKET_CODE,
                     new CommentDtos.CommentWriteRequest("<p>hello</p>", true, null, null));
             assertThat(saved().isInternal()).isFalse();
         }
@@ -236,7 +238,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("and the response says so in the contract's positive form")
         void theResponseInvertsTheColumn() {
-            CommentDtos.CommentDto posted = service.create(caller, TICKET, body("<p>hello</p>"));
+            CommentDtos.CommentDto posted = service.create(caller, TICKET_CODE, body("<p>hello</p>"));
             assertThat(posted.isClientVisible()).isFalse();
         }
     }
@@ -251,7 +253,7 @@ class CommentServiceTest {
          */
         @Test
         void copiesCycleAndStageFromTheTicketAtTimeOfWriting() {
-            service.create(caller, TICKET, body("<p>hello</p>"));
+            service.create(caller, TICKET_CODE, body("<p>hello</p>"));
 
             assertThat(saved().getCycleNo()).isEqualTo((short) 2);
             assertThat(saved().getStageCode()).isEqualTo("DEVELOPMENT");
@@ -260,7 +262,7 @@ class CommentServiceTest {
         /** C-032 · the fourth stamped field, read off the caller's identity. */
         @Test
         void stampsTheCallersRoleAtTimeOfWriting() {
-            service.create(caller, TICKET, body("<p>hello</p>"));
+            service.create(caller, TICKET_CODE, body("<p>hello</p>"));
             assertThat(saved().getAuthorRole()).isEqualTo("DEVELOPER");
         }
 
@@ -274,7 +276,7 @@ class CommentServiceTest {
         void stampsIterationFromTheOpenHop() {
             when(journal.openHopFor(TICKET)).thenReturn(Optional.of(openHop((short) 2, (short) 3)));
 
-            service.create(caller, TICKET, body("<p>hello</p>"));
+            service.create(caller, TICKET_CODE, body("<p>hello</p>"));
 
             assertThat(saved().getIterationNo()).isEqualTo((short) 3);
         }
@@ -288,7 +290,7 @@ class CommentServiceTest {
         void leavesIterationNullWithNoOpenHop() {
             when(journal.openHopFor(TICKET)).thenReturn(Optional.empty());
 
-            service.create(caller, TICKET, body("<p>hello</p>"));
+            service.create(caller, TICKET_CODE, body("<p>hello</p>"));
 
             assertThat(saved().getIterationNo()).isNull();
         }
@@ -307,7 +309,7 @@ class CommentServiceTest {
         void ignoresAStaleOpenHopFromAnEarlierCycle() {
             when(journal.openHopFor(TICKET)).thenReturn(Optional.of(openHop((short) 1, (short) 4)));
 
-            service.create(caller, TICKET, body("<p>hello</p>"));
+            service.create(caller, TICKET_CODE, body("<p>hello</p>"));
 
             assertThat(saved().getIterationNo()).isNull();
         }
@@ -315,7 +317,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("the stamp does not follow the ticket afterwards — it is a copy")
         void isACopyRatherThanAJoin() {
-            service.create(caller, TICKET, body("<p>hello</p>"));
+            service.create(caller, TICKET_CODE, body("<p>hello</p>"));
             TicketComment row = saved();
 
             ticket.setCurrentStage("QA");
@@ -342,14 +344,14 @@ class CommentServiceTest {
         @Test
         @DisplayName("what is stored is the sanitised body, not what was sent")
         void storesTheSanitisedBody() {
-            service.create(caller, TICKET, body("<p>ok</p><script>alert(1)</script>"));
+            service.create(caller, TICKET_CODE, body("<p>ok</p><script>alert(1)</script>"));
 
             assertThat(saved().getBodyHtml()).isEqualTo("<p>ok</p>").doesNotContain("script");
         }
 
         @Test
         void writesThePlainTextProjectionAlongside() {
-            service.create(caller, TICKET, body("<ul><li>one</li><li>two</li></ul>"));
+            service.create(caller, TICKET_CODE, body("<ul><li>one</li><li>two</li></ul>"));
 
             assertThat(saved().getBodyText()).isEqualTo("one\ntwo");
         }
@@ -360,7 +362,7 @@ class CommentServiceTest {
          */
         @Test
         void aBodyThatReducesToNothingIsRefused() {
-            assertThatThrownBy(() -> service.create(caller, TICKET, body("<script>alert(1)</script>")))
+            assertThatThrownBy(() -> service.create(caller, TICKET_CODE, body("<script>alert(1)</script>")))
                     .isInstanceOf(InvalidCommentException.class)
                     .satisfies(e -> assertThat(((InvalidCommentException) e).field()).isEqualTo("body"));
 
@@ -375,7 +377,7 @@ class CommentServiceTest {
         void aBodyThatGrowsPastTheBoundWhenEscapedIsRefused() {
             String submitted = "&".repeat(20_000);
 
-            assertThatThrownBy(() -> service.create(caller, TICKET, body(submitted)))
+            assertThatThrownBy(() -> service.create(caller, TICKET_CODE, body(submitted)))
                     .isInstanceOf(InvalidCommentException.class)
                     .hasMessageContaining("100,000");
 
@@ -393,7 +395,7 @@ class CommentServiceTest {
          */
         @Test
         void attachmentIdsAreRefusedRatherThanDropped() {
-            assertThatThrownBy(() -> service.create(caller, TICKET,
+            assertThatThrownBy(() -> service.create(caller, TICKET_CODE,
                     new CommentDtos.CommentWriteRequest("<p>hi</p>", null, null, List.of(4L))))
                     .isInstanceOf(InvalidCommentException.class)
                     .satisfies(e -> assertThat(((InvalidCommentException) e).field())
@@ -404,7 +406,7 @@ class CommentServiceTest {
 
         @Test
         void anEmptyAttachmentListIsNotARefusal() {
-            service.create(caller, TICKET,
+            service.create(caller, TICKET_CODE,
                     new CommentDtos.CommentWriteRequest("<p>hi</p>", null, null, List.of()));
 
             assertThat(saved().getBodyHtml()).isEqualTo("<p>hi</p>");
@@ -416,7 +418,7 @@ class CommentServiceTest {
          */
         @Test
         void noMentionsMeansANullColumnRatherThanAnEmptyArray() {
-            service.create(caller, TICKET,
+            service.create(caller, TICKET_CODE,
                     new CommentDtos.CommentWriteRequest("<p>hi</p>", null, List.of(), null));
 
             assertThat(saved().getMentionedUserIds()).isNull();
@@ -442,7 +444,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("the body is what is parsed — the request's own list is not consulted")
         void theRequestsListIsIgnored() {
-            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+            service.create(caller, TICKET_CODE, new CommentDtos.CommentWriteRequest(
                     "<p>no handles here</p>", null, List.of(999L), null));
 
             // 999 was asked for and is not stored. Anything else would let a
@@ -456,7 +458,7 @@ class CommentServiceTest {
             when(mentions.resolveProjectMembers(eq(PROJECT), eq(List.of("meera.s"))))
                     .thenReturn(List.of(meera));
 
-            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+            service.create(caller, TICKET_CODE, new CommentDtos.CommentWriteRequest(
                     "<p>Can you look at this @meera.s ?</p>", null, null, null));
 
             assertThat(saved().getMentionedUserIds()).containsExactly(31L);
@@ -468,7 +470,7 @@ class CommentServiceTest {
             // The resolver's default answer is "nobody", which is what an
             // outsider, a leaver and a typo all look like — deliberately
             // indistinguishable, for the reason A-035 returns 404 not 403.
-            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+            service.create(caller, TICKET_CODE, new CommentDtos.CommentWriteRequest(
                     "<p>ask @someone.else</p>", null, null, null));
 
             assertThat(saved().getMentionedUserIds()).isNull();
@@ -483,7 +485,7 @@ class CommentServiceTest {
          */
         @Test
         void anEmailAddressInTheBodyIsNotAMention() {
-            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+            service.create(caller, TICKET_CODE, new CommentDtos.CommentWriteRequest(
                     "<p>chase this with ops@edunext.com</p>", null, null, null));
 
             // Never even asked: no candidate survived the parser.
@@ -496,7 +498,7 @@ class CommentServiceTest {
         void notifiesAfterTheRowExists() {
             when(mentions.resolveProjectMembers(anyLong(), any())).thenReturn(List.of(meera));
 
-            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+            service.create(caller, TICKET_CODE, new CommentDtos.CommentWriteRequest(
                     "<p>@meera.s</p>", null, null, null));
 
             // 99 is what save() stamps. A notification deep-linking to a comment
@@ -511,7 +513,7 @@ class CommentServiceTest {
          */
         @Test
         void theParserSeesThePlainTextProjectionRatherThanTheMarkup() {
-            service.create(caller, TICKET, new CommentDtos.CommentWriteRequest(
+            service.create(caller, TICKET_CODE, new CommentDtos.CommentWriteRequest(
                     "<p><a href=\"https://edunext.test/s?q=@ravi\">search</a></p>", null, null, null));
 
             verify(mentions).resolveProjectMembers(PROJECT, List.of());
@@ -524,7 +526,7 @@ class CommentServiceTest {
 
         @Test
         void isAttributedToTheCaller() {
-            service.create(caller, TICKET, body("<p>hi</p>"));
+            service.create(caller, TICKET_CODE, body("<p>hi</p>"));
 
             assertThat(saved().getAuthorId()).isEqualTo(AUTHOR);
             assertThat(saved().getTicketId()).isEqualTo(TICKET);
@@ -539,7 +541,7 @@ class CommentServiceTest {
          */
         @Test
         void movesTheMaterialisedCounterOnTheTicket() {
-            service.create(caller, TICKET, body("<p>hi</p>"));
+            service.create(caller, TICKET_CODE, body("<p>hi</p>"));
 
             assertThat(ticket.getCommentCount()).isEqualTo(8);
         }
@@ -547,7 +549,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("a refused comment does not move the counter")
         void doesNotMoveTheCounterOnARefusal() {
-            assertThatThrownBy(() -> service.create(caller, TICKET, body("<script>x</script>")))
+            assertThatThrownBy(() -> service.create(caller, TICKET_CODE, body("<script>x</script>")))
                     .isInstanceOf(InvalidCommentException.class);
 
             assertThat(ticket.getCommentCount()).isEqualTo(7);
@@ -556,7 +558,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("posts as not-edited, not-deleted, and with no edit deadline")
         void carriesSection4B5sEditWindow() {
-            CommentDtos.CommentDto posted = service.create(caller, TICKET, body("<p>hi</p>"));
+            CommentDtos.CommentDto posted = service.create(caller, TICKET_CODE, body("<p>hi</p>"));
 
             assertThat(posted.isEdited()).isFalse();
             assertThat(posted.isDeleted()).isFalse();
@@ -610,7 +612,7 @@ class CommentServiceTest {
         @DisplayName("the author may rewrite inside the window")
         void theAuthorMayRewriteInsideTheWindow() {
             CommentDtos.CommentDto result = service()
-                    .edit(caller, TICKET, 99L, edit("<p>Root cause is the connection pool.</p>"));
+                    .edit(caller, TICKET_CODE, 99L, edit("<p>Root cause is the connection pool.</p>"));
 
             assertThat(result.body()).isEqualTo("<p>Root cause is the connection pool.</p>");
             assertThat(result.isEdited()).isTrue();
@@ -620,7 +622,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("the original is preserved on the first edit")
         void preservesTheOriginal() {
-            service().edit(caller, TICKET, 99L, edit("<p>second</p>"));
+            service().edit(caller, TICKET_CODE, 99L, edit("<p>second</p>"));
 
             assertThat(existing.getOriginalBody())
                     .isEqualTo("<p>Root cause is the retry timeout.</p>");
@@ -637,8 +639,8 @@ class CommentServiceTest {
         @Test
         @DisplayName("a second edit does not overwrite the original")
         void preservesTheFirstOriginalNotTheLast() {
-            service().edit(caller, TICKET, 99L, edit("<p>second</p>"));
-            service().edit(caller, TICKET, 99L, edit("<p>third</p>"));
+            service().edit(caller, TICKET_CODE, 99L, edit("<p>second</p>"));
+            service().edit(caller, TICKET_CODE, 99L, edit("<p>third</p>"));
 
             assertThat(existing.getBodyHtml()).isEqualTo("<p>third</p>");
             assertThat(existing.getOriginalBody())
@@ -657,7 +659,7 @@ class CommentServiceTest {
         void hasNoTimeLimitByDefault() {
             clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(30)), ZoneOffset.UTC);
 
-            assertThat(service().edit(caller, TICKET, 99L, edit("<p>and the retry count was 3</p>")).body())
+            assertThat(service().edit(caller, TICKET_CODE, 99L, edit("<p>and the retry count was 3</p>")).body())
                     .isEqualTo("<p>and the retry count was 3</p>");
         }
 
@@ -672,7 +674,7 @@ class CommentServiceTest {
         void reallyHasNoTimeLimit() {
             clock = Clock.fixed(POSTED_AT.plus(Duration.ofDays(365)), ZoneOffset.UTC);
 
-            assertThat(service().edit(caller, TICKET, 99L, edit("<p>a year on</p>")).body())
+            assertThat(service().edit(caller, TICKET_CODE, 99L, edit("<p>a year on</p>")).body())
                     .isEqualTo("<p>a year on</p>");
         }
 
@@ -680,7 +682,7 @@ class CommentServiceTest {
         @DisplayName("D-14 · no deadline goes on the wire, and that does not mean locked")
         void sendsNoDeadline() {
             CommentDtos.CommentDto edited =
-                    service().edit(caller, TICKET, 99L, edit("<p>rewritten</p>"));
+                    service().edit(caller, TICKET_CODE, 99L, edit("<p>rewritten</p>"));
 
             assertThat(edited.editableUntil()).isNull();
             assertThat(edited.isEdited()).isTrue();
@@ -709,7 +711,7 @@ class CommentServiceTest {
             void insideTheWindow() {
                 clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(4)), ZoneOffset.UTC);
 
-                assertThat(service().edit(caller, TICKET, 99L, edit("<p>in time</p>")).body())
+                assertThat(service().edit(caller, TICKET_CODE, 99L, edit("<p>in time</p>")).body())
                         .isEqualTo("<p>in time</p>");
             }
 
@@ -718,7 +720,7 @@ class CommentServiceTest {
             void locksAfterTheWindow() {
                 clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(5).plusSeconds(1)), ZoneOffset.UTC);
 
-                assertThatThrownBy(() -> service().edit(caller, TICKET, 99L, edit("<p>late</p>")))
+                assertThatThrownBy(() -> service().edit(caller, TICKET_CODE, 99L, edit("<p>late</p>")))
                         .isInstanceOf(CommentNotEditableException.class)
                         .hasMessageContaining("locked");
                 assertThat(existing.getBodyHtml()).isEqualTo("<p>Root cause is the retry timeout.</p>");
@@ -729,7 +731,7 @@ class CommentServiceTest {
             void theBoundaryIsInclusive() {
                 clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(5)), ZoneOffset.UTC);
 
-                assertThat(service().edit(caller, TICKET, 99L, edit("<p>just in time</p>")).body())
+                assertThat(service().edit(caller, TICKET_CODE, 99L, edit("<p>just in time</p>")).body())
                         .isEqualTo("<p>just in time</p>");
             }
 
@@ -738,7 +740,7 @@ class CommentServiceTest {
             void sendsTheDeadline() {
                 clock = Clock.fixed(POSTED_AT.plus(Duration.ofMinutes(1)), ZoneOffset.UTC);
 
-                assertThat(service().edit(caller, TICKET, 99L, edit("<p>x</p>")).editableUntil())
+                assertThat(service().edit(caller, TICKET_CODE, 99L, edit("<p>x</p>")).editableUntil())
                         .isEqualTo(POSTED_AT.plus(Duration.ofMinutes(5)));
             }
         }
@@ -758,7 +760,7 @@ class CommentServiceTest {
                         new DevPrincipal(999L, "priya", "Priya Nair", role, List.of(), List.of()),
                         "n/a", "ticket.update_progress");
 
-                assertThatThrownBy(() -> service().edit(other, TICKET, 99L, edit("<p>mine now</p>")))
+                assertThatThrownBy(() -> service().edit(other, TICKET_CODE, 99L, edit("<p>mine now</p>")))
                         .as("%s must not be able to rewrite another user's comment", role)
                         .isInstanceOf(CommentNotEditableException.class);
             }
@@ -768,7 +770,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("§3.9 runs on the edit, not only on the post")
         void sanitisesTheEditedBody() {
-            service().edit(caller, TICKET, 99L, edit("<p>ok</p><script>alert(1)</script>"));
+            service().edit(caller, TICKET_CODE, 99L, edit("<p>ok</p><script>alert(1)</script>"));
 
             assertThat(existing.getBodyHtml()).doesNotContain("script");
         }
@@ -781,7 +783,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("an edit that reduces to nothing is refused")
         void refusesAnEditThatSanitisesAway() {
-            assertThatThrownBy(() -> service().edit(caller, TICKET, 99L, edit("<script>x</script>")))
+            assertThatThrownBy(() -> service().edit(caller, TICKET_CODE, 99L, edit("<script>x</script>")))
                     .isInstanceOf(InvalidCommentException.class);
 
             assertThat(existing.getBodyHtml()).isEqualTo("<p>Root cause is the retry timeout.</p>");
@@ -804,7 +806,7 @@ class CommentServiceTest {
                     new CommentMentions.MentionedUser(42L, "anil", "Anil Sharma", "anil@x.com"),
                     new CommentMentions.MentionedUser(77L, "meera", "Meera Rao", "meera@x.com")));
 
-            service().edit(caller, TICKET, 99L, edit("<p>@anil @meera please look</p>"));
+            service().edit(caller, TICKET_CODE, 99L, edit("<p>@anil @meera please look</p>"));
 
             ArgumentCaptor<List<CommentMentions.MentionedUser>> told =
                     ArgumentCaptor.forClass(List.class);
@@ -820,7 +822,7 @@ class CommentServiceTest {
             when(mentions.resolveProjectMembers(eq(PROJECT), any())).thenReturn(List.of(
                     new CommentMentions.MentionedUser(42L, "anil", "Anil Sharma", "anil@x.com")));
 
-            service().edit(caller, TICKET, 99L, edit("<p>@anil please look again</p>"));
+            service().edit(caller, TICKET_CODE, 99L, edit("<p>@anil please look again</p>"));
 
             verifyNoInteractions(mentionNotifier);
         }
@@ -830,16 +832,16 @@ class CommentServiceTest {
         void anotherTicketsCommentIs404() {
             when(rows.find(TICKET, 500L)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service().edit(caller, TICKET, 500L, edit("<p>x</p>")))
+            assertThatThrownBy(() -> service().edit(caller, TICKET_CODE, 500L, edit("<p>x</p>")))
                     .isInstanceOf(CommentNotFoundException.class);
         }
 
         @Test
         @DisplayName("an out-of-scope ticket is 404 before the comment is even looked up")
         void outOfScopeIs404First() {
-            when(tickets.require(any(), anyLong())).thenThrow(new TicketNotFoundException());
+            when(tickets.requireByCode(any(), anyString())).thenThrow(new TicketNotFoundException());
 
-            assertThatThrownBy(() -> service().edit(caller, TICKET, 99L, edit("<p>x</p>")))
+            assertThatThrownBy(() -> service().edit(caller, TICKET_CODE, 99L, edit("<p>x</p>")))
                     .isInstanceOf(TicketNotFoundException.class);
             verifyNoInteractions(rows);
         }
@@ -881,7 +883,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("the row survives, stamped with who and when")
         void tombstonesRatherThanDeletes() {
-            service().delete(caller, TICKET, 99L);
+            service().delete(caller, TICKET_CODE, 99L);
 
             assertThat(existing.isDeleted()).isTrue();
             assertThat(existing.getDeletedBy()).isEqualTo(AUTHOR);
@@ -900,7 +902,7 @@ class CommentServiceTest {
         void clearsTheOriginalAsWellAsTheBody() {
             existing.setOriginalBody("<p>Acme are refusing to pay, escalate to legal.</p>");
 
-            service().delete(caller, TICKET, 99L);
+            service().delete(caller, TICKET_CODE, 99L);
 
             assertThat(existing.getBodyHtml()).isEmpty();
             assertThat(existing.getBodyText()).isEmpty();
@@ -912,7 +914,7 @@ class CommentServiceTest {
         void supervisoryRemovalIsAllowed() {
             for (String role : List.of("PM", "ADMIN")) {
                 existing.setDeleted(false);
-                service().delete(as(500L, role), TICKET, 99L);
+                service().delete(as(500L, role), TICKET_CODE, 99L);
                 assertThat(existing.isDeleted()).as("%s may remove a comment", role).isTrue();
             }
         }
@@ -920,7 +922,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("a Developer may not remove a colleague's, and gets 403 rather than 404")
         void othersAreRefused() {
-            assertThatThrownBy(() -> service().delete(as(500L, "DEVELOPER"), TICKET, 99L))
+            assertThatThrownBy(() -> service().delete(as(500L, "DEVELOPER"), TICKET_CODE, 99L))
                     .isInstanceOf(CommentDeletionNotPermittedException.class);
 
             assertThat(existing.isDeleted()).isFalse();
@@ -936,7 +938,7 @@ class CommentServiceTest {
         void everyRemovalIsRecorded() {
             clock = Clock.fixed(POSTED_AT.plusSeconds(10), ZoneOffset.UTC);
 
-            service().delete(caller, TICKET, 99L);
+            service().delete(caller, TICKET_CODE, 99L);
 
             assertThat(existing.isDeleted()).isTrue();
             assertThat(existing.getDeletedBy()).isEqualTo(AUTHOR);
@@ -945,7 +947,7 @@ class CommentServiceTest {
         @Test
         @DisplayName("decrements the materialised counter")
         void movesTheCounter() {
-            service().delete(caller, TICKET, 99L);
+            service().delete(caller, TICKET_CODE, 99L);
 
             assertThat(ticket.getCommentCount()).isEqualTo(6);
         }
@@ -960,7 +962,7 @@ class CommentServiceTest {
         void neverGoesNegative() {
             ticket.setCommentCount(0);
 
-            service().delete(caller, TICKET, 99L);
+            service().delete(caller, TICKET_CODE, 99L);
 
             assertThat(ticket.getCommentCount()).isZero();
         }
@@ -971,7 +973,7 @@ class CommentServiceTest {
             existing.setDeleted(true);
             existing.setDeletedBy(500L);
 
-            service().delete(as(500L, "DEVELOPER"), TICKET, 99L);
+            service().delete(as(500L, "DEVELOPER"), TICKET_CODE, 99L);
 
             // Not re-stamped: a second caller must not be able to take the first
             // one's name off the record.
@@ -982,9 +984,9 @@ class CommentServiceTest {
         @Test
         @DisplayName("an out-of-scope ticket is 404 before the comment is even looked up")
         void outOfScopeIs404First() {
-            when(tickets.require(any(), anyLong())).thenThrow(new TicketNotFoundException());
+            when(tickets.requireByCode(any(), anyString())).thenThrow(new TicketNotFoundException());
 
-            assertThatThrownBy(() -> service().delete(caller, TICKET, 99L))
+            assertThatThrownBy(() -> service().delete(caller, TICKET_CODE, 99L))
                     .isInstanceOf(TicketNotFoundException.class);
             verifyNoInteractions(rows);
         }
@@ -993,7 +995,7 @@ class CommentServiceTest {
         @DisplayName("a tombstone serves no text and no edit deadline")
         void theDtoHidesEverything() {
             existing.setOriginalBody("<p>secret</p>");
-            service().delete(caller, TICKET, 99L);
+            service().delete(caller, TICKET_CODE, 99L);
 
             // A window is passed DELIBERATELY, though D-14 ships without one:
             // it is the only configuration in which `editableUntil` could be

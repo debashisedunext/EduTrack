@@ -4,13 +4,11 @@ import type { ReactNode } from 'react'
 import type { Ribbon } from '@/api/generated/model/ribbon'
 import type { RibbonSegment as RibbonSegmentData } from '@/api/generated/model/ribbonSegment'
 import { SegmentState } from '@/api/generated/model/segmentState'
-import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { CollapsedGroupTile } from './CollapsedGroupTile'
 import { buildRibbonRows } from './collapsedGroup'
 import { RibbonSegment } from './RibbonSegment'
 import { useRovingFocus } from './rovingFocus'
-import { nextStageLabel } from './segmentState'
 
 /** Identifies one segment for the selection C-052 drives — a stage code alone
  * is not unique once a ticket has looped, so the iteration travels with it. */
@@ -44,34 +42,21 @@ function isSameSegment(selected: SelectedSegment | undefined, segment: RibbonSeg
  * History and Effort to one of its stages is exactly as useful as it is on the
  * live cycle, so selection is never gated on `isSealed`.
  *
- * ## The contextual action button is an honest placeholder
- *
- * §4A.3 puts *Hand off to QA →* on the current segment, gated on
- * `Ribbon.canAdvance` — "whether **this caller** may advance the ticket …
- * hidden for everyone else" is the contract's own words for this task's
- * "hidden for everyone else" line. The dialog behind it is `C-044`, which has
- * not landed, so until then the button renders disabled and names the task
- * that finishes it — `TicketDetailHeader`'s `HEADER_ACTIONS` used the identical
- * pattern for Close and Reopen before C-039/C-040 wired them, and nothing here
- * invents a second one. The label itself reads the *next* segment's name off
- * the sibling list `RibbonSegment` does not have, on the same "Hand off to QA →"
- * wording the blueprint's own diagram uses.
- *
- * ## `currentStageAction` — C-047's skip trigger, and why it is a prop rather
- * ## than a second placeholder built in here
+ * ## `currentStageAction` — the current segment's real triggers, composed by the caller
  *
  * `components/ribbon/` is the shared component library every stream consumes
  * — `segmentState.ts`'s own note declines the opposite import direction for
- * exactly this reason — so a real, working `SkipStageDialog` (which needs
- * `useSkipStageMutation`, toasts and a ticket) belongs in
- * `features/tickets/detail/`, not here. `TicketDetailPage` decides *whether*
- * to render one (`detail.availableActions.includes('skip-stage')`, C-047's
- * own addition to `TicketDetailService.availableActions`) and hands the
- * finished node down, the same "the caller decides, the ribbon reports"
- * split `onSelectSegment` already drew above. Rendered only on the current
- * segment, alongside the honest handoff placeholder rather than replacing
- * it — a skip and a handoff are both things the current owner might do next,
- * not alternatives to choose between at this layer.
+ * exactly this reason — so real, working triggers (`HandoffDialog`,
+ * `SkipStageDialog` — each needs its own mutation hook, toasts and a ticket)
+ * belong in `features/tickets/detail/`, not here. `TicketDetailPage` decides
+ * *which* to render (`detail.availableActions` naming `handoff`/`skip-stage`,
+ * `TicketDetailService.availableActions`'s own vocabulary) and hands the
+ * finished node down, the same "the caller decides, the ribbon reports" split
+ * `onSelectSegment` already drew above. This strip used to fill the slot
+ * itself with a disabled placeholder gated on `ribbon.canAdvance` — replaced
+ * outright once `HandoffDialog` had a real trigger site, not layered under it,
+ * since a caller with nothing to hand `currentStageAction` now has nothing to
+ * show rather than a button naming a task that already shipped.
  *
  * ## What this task is not
  *
@@ -155,11 +140,11 @@ export function RibbonStrip({
   /** Fired on every segment click, current cycle or sealed. */
   onSelectSegment?: (segment: RibbonSegmentData) => void
   /**
-   * C-047 · a finished trigger (today, `SkipStageDialog`) for the current
-   * segment, supplied by the caller — see the class javadoc's own section on
-   * why this is a prop rather than a second placeholder built in here.
-   * Rendered only alongside the current segment, and only when the caller
-   * passes something; `undefined` renders nothing extra, same as today.
+   * Finished triggers for the current segment (`HandoffDialog`,
+   * `SkipStageDialog`, composed together by the caller when both apply) — see
+   * the class javadoc's own section on why this is a prop rather than
+   * anything built in here. Rendered only alongside the current segment, and
+   * only when the caller passes something; `undefined` renders nothing.
    */
   currentStageAction?: ReactNode
 }) {
@@ -261,14 +246,7 @@ export function RibbonStrip({
               isLast={isLastRow}
               onSelect={onSelectSegment}
               isSelected={isSameSegment(selectedSegment, segment)}
-              actionSlot={
-                isCurrent && (ribbon?.canAdvance || currentStageAction) ? (
-                  <>
-                    {ribbon?.canAdvance && <HandoffPlaceholder label={nextStageLabel(segments, currentIndex)} />}
-                    {currentStageAction}
-                  </>
-                ) : undefined
-              }
+              actionSlot={isCurrent && currentStageAction ? currentStageAction : undefined}
             />
           </div>
         )
@@ -289,25 +267,5 @@ function prefersReducedMotion(): boolean {
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
-}
-
-/**
- * Rendered, disabled, and honest about why — `ribbon.canAdvance` already means
- * the server checked the golden rule and said this caller may act, so hiding
- * the button would misreport that, and enabling it would submit nothing.
- * `C-044`'s handoff dialog replaces this with a working trigger.
- */
-function HandoffPlaceholder({ label }: { label: string }) {
-  return (
-    <Button
-      type="button"
-      size="sm"
-      disabled
-      className="w-full justify-center truncate px-2 text-caption"
-      title={`${label} arrives with C-044`}
-    >
-      {label}
-    </Button>
   )
 }

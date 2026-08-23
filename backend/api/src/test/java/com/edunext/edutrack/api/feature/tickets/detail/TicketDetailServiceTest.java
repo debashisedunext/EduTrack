@@ -1,14 +1,18 @@
 package com.edunext.edutrack.api.feature.tickets.detail;
 
 import com.edunext.edutrack.api.feature.tickets.links.TicketLinkService;
+import com.edunext.edutrack.api.feature.transitions.RibbonAssembler;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
+import com.edunext.edutrack.domain.clients.ClientRepository;
+import com.edunext.edutrack.domain.identity.ProjectRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketAttachmentRepository;
 import com.edunext.edutrack.domain.tickets.TicketCommentRepository;
 import com.edunext.edutrack.domain.tickets.TicketCycleRepository;
 import com.edunext.edutrack.domain.tickets.TicketWatcherRepository;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.workflow.WorkflowStage;
 import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +42,7 @@ import static org.mockito.Mockito.when;
 class TicketDetailServiceTest {
 
     private static final long TICKET_ID = 347L;
+    private static final String TICKET_CODE = "CRM-26-00347";
     private static final long PROJECT = 8L;
     private static final long CURRENT_ASSIGNEE = 55L;
 
@@ -49,9 +54,14 @@ class TicketDetailServiceTest {
     private final TicketWatcherRepository watchers = mock(TicketWatcherRepository.class);
     private final TicketLinkService links = mock(TicketLinkService.class);
     private final WorkflowStageRepository stages = mock(WorkflowStageRepository.class);
+    private final UserRepository users = mock(UserRepository.class);
+    private final ProjectRepository projects = mock(ProjectRepository.class);
+    private final ClientRepository clients = mock(ClientRepository.class);
+    private final RibbonAssembler ribbon = mock(RibbonAssembler.class);
 
     private final TicketDetailService service =
-            new TicketDetailService(tickets, cycles, journal, comments, attachments, watchers, links, stages);
+            new TicketDetailService(tickets, cycles, journal, comments, attachments, watchers, links, stages, users,
+                    projects, clients, ribbon);
 
     private Ticket ticket;
 
@@ -66,7 +76,7 @@ class TicketDetailServiceTest {
         ticket.setCurrentCycleNo((short) 1);
         ticket.setAssignedTo(CURRENT_ASSIGNEE);
 
-        when(tickets.require(any(), eq(TICKET_ID))).thenReturn(ticket);
+        when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
     }
 
     @Nested
@@ -121,13 +131,13 @@ class TicketDetailServiceTest {
         void unidentifiableCallerSeesNothing() {
             Authentication anonymous = new TestingAuthenticationToken(null, null);
 
-            List<String> actions = service.detail(anonymous, TICKET_ID, null).availableActions();
+            List<String> actions = service.detail(anonymous, TICKET_CODE, null).availableActions();
 
             assertThat(actions).isEmpty();
         }
 
         private TicketDetailDtos.Detail detailFor(Authentication caller) {
-            return service.detail(caller, TICKET_ID, null);
+            return service.detail(caller, TICKET_CODE, null);
         }
 
         private Authentication caller(long userId, String role) {
@@ -216,7 +226,7 @@ class TicketDetailServiceTest {
         }
 
         private TicketDetailDtos.Detail detailFor(Authentication caller) {
-            return service.detail(caller, TICKET_ID, null);
+            return service.detail(caller, TICKET_CODE, null);
         }
 
         private Authentication caller(long userId, String role) {

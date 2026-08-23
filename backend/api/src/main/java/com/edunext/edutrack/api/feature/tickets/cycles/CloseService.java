@@ -9,6 +9,7 @@ import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketCycle;
 import com.edunext.edutrack.domain.tickets.TicketCycleRepository;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -106,11 +107,12 @@ class CloseService {
      */
     private final TicketEventNotifier notifier;
     private final Clock clock;
+    private final UserRepository users;
 
     @Autowired
     CloseService(ScopedTickets tickets, TicketCycleRepository cycles, TicketJournal journal,
-                 TicketEventNotifier notifier) {
-        this(tickets, cycles, journal, notifier, Clock.systemUTC());
+                 TicketEventNotifier notifier, UserRepository users) {
+        this(tickets, cycles, journal, notifier, Clock.systemUTC(), users);
     }
 
     /**
@@ -121,12 +123,13 @@ class CloseService {
      * the method took to run.
      */
     CloseService(ScopedTickets tickets, TicketCycleRepository cycles, TicketJournal journal,
-                 TicketEventNotifier notifier, Clock clock) {
+                 TicketEventNotifier notifier, Clock clock, UserRepository users) {
         this.tickets = tickets;
         this.cycles = cycles;
         this.journal = journal;
         this.notifier = notifier;
         this.clock = clock;
+        this.users = users;
     }
 
     /**
@@ -219,7 +222,7 @@ class CloseService {
         // failures for that reason.
         notifier.closed(ticket, actorIdOrZero(caller));
 
-        return TicketWire.of(ticket);
+        return TicketWire.of(ticket, users);
     }
 
     private static TicketHistory closedEntry(long ticketId, short cycleNo,

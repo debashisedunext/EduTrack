@@ -9,6 +9,7 @@ import com.edunext.edutrack.domain.tickets.TicketHistory;
 import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import com.edunext.edutrack.domain.workflow.WorkflowStage;
 import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -59,10 +60,11 @@ class TransitionServiceTest {
     private final WorkingHoursService workingHours = mock(WorkingHoursService.class);
     private final ReceivingRoleRepository receivingRoles = mock(ReceivingRoleRepository.class);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    private final UserRepository users = mock(UserRepository.class);
 
     private final TransitionService service = new TransitionService(
             tickets, journal, stages, workingHours, receivingRoles, events,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC), users);
 
     private final Authentication caller = new TestingAuthenticationToken(
             new DevPrincipal(ACTOR, "priya", "Priya Nair", "PM", List.of(PROJECT), List.of()),

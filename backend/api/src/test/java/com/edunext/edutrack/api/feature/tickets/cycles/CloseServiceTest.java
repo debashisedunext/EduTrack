@@ -5,6 +5,7 @@ import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketCycle;
@@ -66,8 +67,16 @@ class CloseServiceTest {
      */
     private final TicketEventNotifier eventNotifier = mock(TicketEventNotifier.class);
 
+    /**
+     * Resolved via {@code TicketWire.of} when the closed ticket is turned into
+     * its response shape. Left unstubbed — {@code Optional.empty()} is
+     * Mockito's default for a method returning {@code Optional<User>}, and no
+     * test here asserts a resolved {@code displayName} off the response.
+     */
+    private final UserRepository users = mock(UserRepository.class);
+
     private final CloseService service = new CloseService(
-            tickets, cycles, journal, eventNotifier, Clock.fixed(NOW, ZoneOffset.UTC));
+            tickets, cycles, journal, eventNotifier, Clock.fixed(NOW, ZoneOffset.UTC), users);
 
     /**
      * The three-argument constructor is load-bearing — {@code ReopenServiceTest}'s

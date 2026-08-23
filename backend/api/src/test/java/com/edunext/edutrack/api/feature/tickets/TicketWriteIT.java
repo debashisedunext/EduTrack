@@ -283,6 +283,35 @@ class TicketWriteIT {
         return jdbc.queryForObject("SELECT ticket_seq FROM projects WHERE id = ?", Long.class, projectId);
     }
 
+    // ------------------------------------------------------------------
+    // workflow_template_id — resolved on create, wired into ticket creation
+    // ------------------------------------------------------------------
+
+    /**
+     * The bug this closes: {@code create()} never called {@code TemplateResolver}
+     * — {@code TemplateResolver}'s own javadoc says as much — so every ticket was
+     * born with {@code workflow_template_id = NULL} and the ribbon
+     * {@code RibbonAssembler} now assembles on the detail page had nothing to
+     * show. {@code ITW} has no project-specific mapping, so this resolves
+     * through rung 5 to B-004's seeded org default, "Standard Dev Flow", whose
+     * first stage by {@code seq} is {@code INTAKE} (V20260807_1700).
+     */
+    @Test
+    @DisplayName("create resolves and stores a workflow template, and starts the ticket on its first stage")
+    void createResolvesWorkflowTemplate() {
+        var created = service.create(null, request(null, null));
+
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT workflow_template_id, current_stage FROM tickets WHERE ticket_code = ?",
+                created.ticketCode());
+
+        Long templateId = jdbc.queryForObject(
+                "SELECT id FROM workflow_templates WHERE name = 'Standard Dev Flow'", Long.class);
+
+        assertThat(row.get("workflow_template_id")).isEqualTo(templateId);
+        assertThat(row.get("current_stage")).isEqualTo("INTAKE");
+    }
+
     @Test
     @DisplayName("isClientRaised is derived from the pair, never taken from the caller")
     void clientRaisedIsDerived() {

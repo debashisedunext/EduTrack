@@ -16,6 +16,7 @@ import { ensureRichText } from '@/components/ui/rich-text'
 
 import { RibbonStrip } from '@/components/ribbon/RibbonStrip'
 
+import { HandoffDialog } from './HandoffDialog'
 import { SkipStageDialog } from './SkipStageDialog'
 import { AttachmentsTab } from '../attachments/AttachmentsTab'
 import { useAttachmentsTab } from '../attachments/useAttachmentsTab'
@@ -445,6 +446,24 @@ export function TicketDetailPage() {
   const selectedCycleNo = cycle ?? ticket.cycleNo ?? 1
   const isEarlierCycle = selectedCycleNo < (ticket.cycleNo ?? 1)
 
+  // Composed here rather than left as a JSX fragment inline: `RibbonStrip`
+  // treats any non-`undefined` `currentStageAction` as "the caller has
+  // something to show" and reserves the action slot for it, so an always-
+  // truthy empty fragment would draw an empty slot on a ticket where neither
+  // action applies. `undefined` when nothing does, matching what the prop
+  // meant before either dialog existed.
+  const currentStageAction =
+    detail?.availableActions?.includes('handoff') || detail?.availableActions?.includes('skip-stage') ? (
+      <>
+        {detail?.availableActions?.includes('handoff') && (
+          <HandoffDialog ticket={ticket} ribbon={detail?.ribbon} onHandedOff={() => void refetch()} />
+        )}
+        {detail?.availableActions?.includes('skip-stage') && (
+          <SkipStageDialog ticket={ticket} onSkipped={() => void refetch()} />
+        )}
+      </>
+    ) : undefined
+
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <TicketDetailHeader
@@ -480,11 +499,7 @@ export function TicketDetailPage() {
               ribbon={detail?.ribbon}
               selectedSegment={selectedSegment}
               onSelectSegment={selectSegment}
-              currentStageAction={
-                detail?.availableActions?.includes('skip-stage') ? (
-                  <SkipStageDialog ticket={ticket} onSkipped={() => void refetch()} />
-                ) : undefined
-              }
+              currentStageAction={currentStageAction}
             />
           </section>
 

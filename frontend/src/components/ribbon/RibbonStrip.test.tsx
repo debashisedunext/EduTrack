@@ -155,78 +155,8 @@ describe('RibbonStrip · C-052 selection', () => {
   })
 })
 
-describe('RibbonStrip · C-052 the contextual action', () => {
-  it('renders an honest, disabled handoff placeholder on the current segment when the caller can advance', () => {
-    render(
-      <RibbonStrip
-        ribbon={{
-          cycleNo: 1,
-          iterationNo: 1,
-          isSealed: false,
-          canAdvance: true,
-          segments: [
-            seg({ stageCode: 'DEVELOPMENT', displayName: 'Development', state: SegmentState.CURRENT }),
-            seg({ stageCode: 'QA', displayName: 'QA', state: SegmentState.PENDING }),
-          ],
-        }}
-      />,
-    )
-
-    const action = screen.getByRole('button', { name: 'Hand off to QA →' })
-    expect(action).toBeDisabled()
-  })
-
-  it('names the plain verb when the current segment is the last one', () => {
-    render(
-      <RibbonStrip
-        ribbon={{
-          cycleNo: 1,
-          iterationNo: 1,
-          isSealed: false,
-          canAdvance: true,
-          segments: [seg({ stageCode: 'SIGNOFF', displayName: 'Sign-off', state: SegmentState.CURRENT })],
-        }}
-      />,
-    )
-
-    expect(screen.getByRole('button', { name: 'Hand off →' })).toBeInTheDocument()
-  })
-
-  it('renders no action when the caller may not advance — hidden for everyone else', () => {
-    render(
-      <RibbonStrip
-        ribbon={{
-          cycleNo: 1,
-          iterationNo: 1,
-          isSealed: false,
-          canAdvance: false,
-          segments: [seg({ state: SegmentState.CURRENT })],
-        }}
-      />,
-    )
-
-    expect(screen.queryByRole('button', { name: /Hand off/ })).not.toBeInTheDocument()
-  })
-
-  it('renders no action when nothing is current, even if canAdvance is true', () => {
-    render(
-      <RibbonStrip
-        ribbon={{
-          cycleNo: 1,
-          iterationNo: 1,
-          isSealed: true,
-          canAdvance: true,
-          segments: [seg({ state: SegmentState.COMPLETED })],
-        }}
-      />,
-    )
-
-    expect(screen.queryByRole('button', { name: /Hand off/ })).not.toBeInTheDocument()
-  })
-})
-
-describe('RibbonStrip · C-047 currentStageAction', () => {
-  it('renders the caller-supplied action on the current segment, alongside the handoff placeholder', () => {
+describe('RibbonStrip · currentStageAction', () => {
+  it('renders the caller-supplied action on the current segment', () => {
     render(
       <RibbonStrip
         ribbon={{
@@ -236,12 +166,27 @@ describe('RibbonStrip · C-047 currentStageAction', () => {
           canAdvance: true,
           segments: [seg({ stageCode: 'DEVELOPMENT', state: SegmentState.CURRENT })],
         }}
-        currentStageAction={<button type="button">Skip stage</button>}
+        currentStageAction={<button type="button">Hand off</button>}
       />,
     )
 
-    expect(screen.getByRole('button', { name: 'Skip stage' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Hand off/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hand off' })).toBeInTheDocument()
+  })
+
+  it('renders nothing on the current segment when the caller passes no action, even if canAdvance is true', () => {
+    render(
+      <RibbonStrip
+        ribbon={{
+          cycleNo: 1,
+          iterationNo: 1,
+          isSealed: false,
+          canAdvance: true,
+          segments: [seg({ state: SegmentState.CURRENT })],
+        }}
+      />,
+    )
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
   it('renders the caller-supplied action even when the caller may not otherwise advance', () => {
@@ -476,10 +421,11 @@ describe('RibbonStrip · B-052 keyboard navigation', () => {
           segments: eightStages(3),
         }}
         onSelectSegment={vi.fn()}
+        currentStageAction={<button type="button">Hand off</button>}
       />,
     )
 
-    const action = screen.getByRole('button', { name: /Hand off to Deployment/ })
+    const action = screen.getByRole('button', { name: 'Hand off' })
     const trigger = screen.getByRole('button', { name: /^QA,/ })
 
     expect(trigger).not.toContainElement(action)

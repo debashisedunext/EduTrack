@@ -4,16 +4,21 @@ import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.UnscopedAccess;
 import com.edunext.edutrack.api.text.RichTextSanitizer;
+import com.edunext.edutrack.api.feature.masters.templates.TemplateResolver;
 import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
 import com.edunext.edutrack.domain.tickets.TicketRepository;
+import com.edunext.edutrack.domain.workflow.WorkflowStage;
+import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -95,11 +100,28 @@ public class TicketWriteService {
      * for Divyansh in the pull request rather than added quietly.
      */
     private final TicketEventNotifier notifier;
+    private final UserRepository users;
+
+    /**
+     * Resolves {@code workflow_template_id} for a new ticket from its project ×
+     * task type. Built and tested (masters/templates), but never called from
+     * here until now — its own javadoc says so explicitly: "wiring this into
+     * ticket creation is Stream C's, not this task's." Without it every ticket
+     * is created with {@code workflow_template_id = NULL}, so the ribbon
+     * {@code RibbonAssembler} now assembles on the detail page has nothing to
+     * show and Handoff/Skip never see a live stage to act on.
+     */
+    private final TemplateResolver templates;
+
+    /** The resolved template's first stage, by {@code seq} — where a ticket
+     * starts its journey once it has a template at all. */
+    private final WorkflowStageRepository stages;
 
     TicketWriteService(ScopedTickets tickets, TicketRepository repository, TicketCodeGenerator codes,
                        PlannedCloseDateService plannedCloseDates, ClientGate clients, ModuleGuard modules,
                        ProjectSettingsGate projectSettings, RichTextSanitizer sanitizer, TicketJournal journal,
-                       TicketEventNotifier notifier) {
+                       TicketEventNotifier notifier, UserRepository users, TemplateResolver templates,
+                       WorkflowStageRepository stages) {
         this.tickets = tickets;
         this.repository = repository;
         this.codes = codes;
@@ -110,6 +132,9 @@ public class TicketWriteService {
         this.sanitizer = sanitizer;
         this.journal = journal;
         this.notifier = notifier;
+        this.users = users;
+        this.templates = templates;
+        this.stages = stages;
     }
 
     @Transactional
@@ -160,6 +185,20 @@ public class TicketWriteService {
 
         ticket.setPlannedCloseDate(plannedCloseDate);
 
+        // A project × task type with no rule and no default (TemplateResolver's
+        // own §7.4 ladder) leaves the ticket with no template — the same
+        // legacy/no-template state RibbonAssembler and SkipService.requireSkippable
+        // already handle for a ticket that predates the workflow designer. Not a
+        // rejection: a ticket must exist to be assigned a template in the first
+        // place, per the masters/templates package's own ordering.
+        templates.resolve(request.projectId(), request.taskTypeId()).ifPresent(templateId -> {
+            ticket.setWorkflowTemplateId(templateId);
+            List<WorkflowStage> stageSequence = stages.findByTemplateIdOrderBySeqAsc(templateId);
+            if (!stageSequence.isEmpty()) {
+                ticket.setCurrentStage(stageSequence.get(0).getStageCode());
+            }
+        });
+
         Ticket saved = repository.save(ticket);
         journal.append(created(saved, caller));
         // D-037 · after the history row, because the history is the record and
@@ -168,7 +207,7 @@ public class TicketWriteService {
         // nothing when the ticket was saved unassigned: §4B.6's row is
         // "created *and assigned*".
         notifier.createdAndAssigned(saved, actorIdOrZero(caller), request.assigneeId());
-        return TicketWire.of(saved);
+        return TicketWire.of(saved, users);
     }
 
     @Transactional
@@ -195,7 +234,7 @@ public class TicketWriteService {
         changed(str(ticket.getEstimatedEffortHrs()), str(request.estimatedHrs()), "estimatedHrs", ticket, caller,
                 v -> ticket.setEstimatedEffortHrs(request.estimatedHrs()));
 
-        return TicketWire.of(ticket);
+        return TicketWire.of(ticket, users);
     }
 
     /** A rich-text field: sanitise first, then compare — so a no-op edit of markup writes nothing. */

@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.tickets.detail;
 
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.feature.tickets.links.TicketLinkDtos;
+import com.edunext.edutrack.api.feature.transitions.RibbonWire;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -27,7 +28,10 @@ final class TicketDetailDtos {
      *                        reused rather than duplicated — see that class's
      *                        javadoc on why the source/target label derivation
      *                        must have one implementation, not two
-     * @param ribbon          always null for now — see {@link TicketDetailService}
+     * @param ribbon          the current cycle's journey, from
+     *                        {@code RibbonAssembler} — null only for a ticket
+     *                        with no {@code workflow_template_id} (predates the
+     *                        workflow designer), see {@link TicketDetailService}
      * @param availableActions C-043 · {@code handoff}/{@code rework} when the
      *                        golden rule allows it, empty otherwise — see
      *                        {@link TicketDetailService}
@@ -35,7 +39,7 @@ final class TicketDetailDtos {
     record Detail(
             TicketWire.Ticket ticket,
             List<Cycle> cycles,
-            Object ribbon,
+            RibbonWire.Ribbon ribbon,
             List<HistoryEntry> history,
             List<EffortLog> effortLogs,
             List<Comment> comments,
@@ -122,6 +126,6 @@ final class TicketDetailDtos {
             Instant createdAt) {
     }
 
-    record UserRef(long id) {
+    record UserRef(long id, String displayName) {
     }
 }

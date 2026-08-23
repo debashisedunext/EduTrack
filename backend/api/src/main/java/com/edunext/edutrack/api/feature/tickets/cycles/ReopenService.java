@@ -6,6 +6,7 @@ import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
 import com.edunext.edutrack.domain.tickets.Ticket;
@@ -149,6 +150,7 @@ class ReopenService {
      * rather than added quietly.
      */
     private final TicketEventNotifier notifier;
+    private final UserRepository users;
     private final Clock clock;
 
     /*
@@ -165,8 +167,9 @@ class ReopenService {
                   WorkflowStageRepository stages,
                   PlannedCloseDateService slaLadder,
                   WorkingHoursService workingHours,
-                  TicketEventNotifier notifier) {
-        this(tickets, cycles, journal, stages, slaLadder, workingHours, notifier, Clock.systemUTC());
+                  TicketEventNotifier notifier,
+                  UserRepository users) {
+        this(tickets, cycles, journal, stages, slaLadder, workingHours, notifier, users, Clock.systemUTC());
     }
 
     /**
@@ -183,6 +186,7 @@ class ReopenService {
                  PlannedCloseDateService slaLadder,
                  WorkingHoursService workingHours,
                  TicketEventNotifier notifier,
+                 UserRepository users,
                  Clock clock) {
         this.tickets = tickets;
         this.cycles = cycles;
@@ -191,6 +195,7 @@ class ReopenService {
         this.slaLadder = slaLadder;
         this.workingHours = workingHours;
         this.notifier = notifier;
+        this.users = users;
         this.clock = clock;
     }
 
@@ -239,13 +244,14 @@ class ReopenService {
      */
     @Transactional
     TicketWire.Ticket reopen(Authentication caller,
-                             long ticketId,
+                             String ticketCode,
                              ReopenDtos.ReopenRequest request) {
 
         // Scope first, and only once. Everything below works by ticket id, so a
         // caller who got past this line would reopen another project's ticket and
         // no later write would notice.
-        Ticket ticket = tickets.require(caller, ticketId);
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
 
         if (!CLOSED.equals(ticket.getStatus())) {
             throw new TicketNotClosedException(ticket.getStatus());
@@ -340,7 +346,7 @@ class ReopenService {
         // has just set.
         notifier.reopened(ticket, actorIdOrZero(caller), assignee, newCycleNo);
 
-        return TicketWire.of(ticket);
+        return TicketWire.of(ticket, users);
     }
 
     /**

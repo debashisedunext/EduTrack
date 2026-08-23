@@ -5,6 +5,7 @@ import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.common.pagination.Cursor;
 import com.edunext.edutrack.common.pagination.CursorPage;
 import com.edunext.edutrack.common.pagination.PageLimit;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -71,9 +72,21 @@ class Client360Service {
     private final ClientService clients;
     private final ScopedTickets tickets;
 
-    Client360Service(ClientService clients, ScopedTickets tickets) {
+    /**
+     * B-0xx · flagged for Divyansh's sign-off rather than fixed quietly.
+     * {@code TicketWire.of} started requiring this to resolve {@code reportedBy}
+     * /{@code assignee} into the contract's {@code UserRef} — see that class's
+     * own note on the S-20 blank-screen bug this closes. One lookup per row
+     * here rather than {@code TicketListRefs}' batched {@code IN} query: this
+     * page's own ticket list already pages at {@link PageLimit}, and batching
+     * it is a fair follow-up but a bigger one than a compile fix should carry.
+     */
+    private final UserRepository users;
+
+    Client360Service(ClientService clients, ScopedTickets tickets, UserRepository users) {
         this.clients = clients;
         this.tickets = tickets;
+        this.users = users;
     }
 
     @Transactional(readOnly = true)
@@ -100,7 +113,7 @@ class Client360Service {
         CursorPage<Ticket> page = CursorPage.of(fetched, limit,
                 t -> new Cursor(String.valueOf(t.getCreatedAt()), t.getId()));
 
-        List<TicketWire.Ticket> wire = page.data().stream().map(TicketWire::of).toList();
+        List<TicketWire.Ticket> wire = page.data().stream().map(t -> TicketWire.of(t, users)).toList();
 
         Client360Dtos.Client360Data data = new Client360Dtos.Client360Data(
                 client.get(), wire, figures.open(), figures.closed(),

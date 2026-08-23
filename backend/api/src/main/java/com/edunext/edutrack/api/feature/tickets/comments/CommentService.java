@@ -159,12 +159,12 @@ class CommentService {
      */
     @Transactional(readOnly = true)
     CursorPage<CommentDtos.CommentDto> list(Authentication caller,
-                                            long ticketId,
+                                            String ticketCode,
                                             Integer cycle,
                                             String rawCursor,
                                             Integer rawLimit) {
 
-        tickets.require(caller, ticketId);
+        long ticketId = tickets.requireByCode(caller, ticketCode).getId();
 
         int limit = PageLimit.clamp(rawLimit);
         Cursor cursor = Cursor.decode(rawCursor);
@@ -223,10 +223,11 @@ class CommentService {
      */
     @Transactional
     CommentDtos.CommentDto create(Authentication caller,
-                                  long ticketId,
+                                  String ticketCode,
                                   CommentDtos.CommentWriteRequest request) {
 
-        Ticket ticket = tickets.require(caller, ticketId);
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
 
         if (request.attachmentIds() != null && !request.attachmentIds().isEmpty()) {
             throw InvalidCommentException.attachmentsNotSupported();
@@ -338,11 +339,12 @@ class CommentService {
      */
     @Transactional
     CommentDtos.CommentDto edit(Authentication caller,
-                                long ticketId,
+                                String ticketCode,
                                 long commentId,
                                 CommentDtos.EditCommentRequest request) {
 
-        Ticket ticket = tickets.require(caller, ticketId);
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
         TicketComment row = rows.find(ticketId, commentId).orElseThrow(CommentNotFoundException::new);
 
         long editor = authorId(caller);
@@ -456,9 +458,10 @@ class CommentService {
      * the first one's name off the record.
      */
     @Transactional
-    void delete(Authentication caller, long ticketId, long commentId) {
+    void delete(Authentication caller, String ticketCode, long commentId) {
 
-        Ticket ticket = tickets.require(caller, ticketId);
+        Ticket ticket = tickets.requireByCode(caller, ticketCode);
+        long ticketId = ticket.getId();
         TicketComment row = rows.find(ticketId, commentId).orElseThrow(CommentNotFoundException::new);
 
         if (row.isDeleted()) {

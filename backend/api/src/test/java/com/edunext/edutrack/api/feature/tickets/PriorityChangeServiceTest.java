@@ -3,6 +3,7 @@ package com.edunext.edutrack.api.feature.tickets;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketCycle;
@@ -82,9 +83,10 @@ class PriorityChangeServiceTest {
     private final TicketCycleRepository cycles = mock(TicketCycleRepository.class);
     private final TicketJournal journal = mock(TicketJournal.class);
     private final PlannedCloseDateService slaLadder = mock(PlannedCloseDateService.class);
+    private final UserRepository users = mock(UserRepository.class);
 
     private final PriorityChangeService service =
-            new PriorityChangeService(tickets, cycles, journal, slaLadder);
+            new PriorityChangeService(tickets, cycles, journal, slaLadder, users);
 
     /**
      * The third argument is load-bearing, and {@code ReopenServiceTest}'s note on

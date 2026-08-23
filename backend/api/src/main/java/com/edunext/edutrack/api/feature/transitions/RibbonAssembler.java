@@ -61,7 +61,7 @@ import java.util.Map;
  * disagree with what a resource actually logged.
  */
 @Component
-class RibbonAssembler {
+public class RibbonAssembler {
 
     private static final String SKIP = "SKIP";
 
@@ -76,7 +76,7 @@ class RibbonAssembler {
     }
 
     /** @param canAdvance already resolved by the caller — {@link StageOwnership#mayAdvance} */
-    RibbonWire.Ribbon assembleCurrentCycle(Ticket ticket, boolean canAdvance) {
+    public RibbonWire.Ribbon assembleCurrentCycle(Ticket ticket, boolean canAdvance) {
         short cycleNo = ticket.getCurrentCycleNo();
         boolean isSealed = "CLOSED".equals(ticket.getStatus());
 

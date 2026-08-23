@@ -98,6 +98,7 @@ class ReopenIT {
     private long userId;
     private long templateId;
     private long ticketId;
+    private String ticketCode;
 
     @BeforeEach
     void seed() {
@@ -118,7 +119,9 @@ class ReopenIT {
         templateId = jdbc.queryForObject(
                 "SELECT template_id FROM workflow_stages WHERE stage_code = 'TRIAGE' LIMIT 1", Long.class);
 
-        ticketId = insertClosedTicket((short) 1);
+        Seeded seededTicket = insertClosedTicket((short) 1);
+        ticketId = seededTicket.id();
+        ticketCode = seededTicket.code();
         insertCycle(ticketId, (short) 1, new BigDecimal("24.50"));
         // Cycle 1's 24.50 hours as real effort logs — the rows the headline
         // guarantee is about.
@@ -144,7 +147,7 @@ class ReopenIT {
         @Test
         @DisplayName("seals cycle N, opens N+1 and moves the ticket, all committed together")
         void allSixWritesLand() {
-            TicketWire.Ticket answered = service.reopen(pm(), ticketId, request());
+            TicketWire.Ticket answered = service.reopen(pm(), ticketCode, request());
 
             assertThat(answered.status()).isEqualTo("REOPENED");
             assertThat(answered.currentCycleNo()).isEqualTo(2);
@@ -184,7 +187,7 @@ class ReopenIT {
                     .as("a closed ticket is out of the open-PCD index")
                     .isNull();
 
-            service.reopen(pm(), ticketId, new ReopenDtos.ReopenRequest(
+            service.reopen(pm(), ticketCode, new ReopenDtos.ReopenRequest(
                     REASON, null, null, Instant.parse("2026-09-30T12:00:00Z"), null));
 
             assertThat(ticketRow().get("pcd_open"))
@@ -201,7 +204,7 @@ class ReopenIT {
         @Test
         @DisplayName("the REOPENED entry is really hash-chained")
         void historyIsChained() {
-            service.reopen(pm(), ticketId, request());
+            service.reopen(pm(), ticketCode, request());
 
             Map<String, Object> entry = jdbc.queryForMap("""
                     SELECT event_type, field_name, old_value, new_value, cycle_no, remarks,
@@ -236,9 +239,9 @@ class ReopenIT {
         @Test
         @DisplayName("a second reopen chains onto the first rather than forking")
         void chainStaysLinear() {
-            service.reopen(pm(), ticketId, request());
+            service.reopen(pm(), ticketCode, request());
             reclose();
-            service.reopen(pm(), ticketId, request());
+            service.reopen(pm(), ticketCode, request());
 
             List<Map<String, Object>> chain = jdbc.queryForList("""
                     SELECT prev_hash, row_hash FROM ticket_history
@@ -265,7 +268,7 @@ class ReopenIT {
         @Test
         @DisplayName("the log, the cycle figure and the grand total all survive unchanged")
         void nothingAboutEffortMoves() {
-            service.reopen(pm(), ticketId, request());
+            service.reopen(pm(), ticketCode, request());
 
             assertThat(effortLogCount((short) 1))
                     .as("cycle 1's effort logs are still there, uncorrected")
@@ -294,7 +297,7 @@ class ReopenIT {
         @Test
         @DisplayName("no correction row is written against cycle 1's effort")
         void noCompensatingRow() {
-            service.reopen(pm(), ticketId, request());
+            service.reopen(pm(), ticketCode, request());
 
             Integer corrections = jdbc.queryForObject(
                     "SELECT COUNT(*) FROM ticket_effort_logs WHERE ticket_id = ? AND is_correction = 1",
@@ -310,7 +313,7 @@ class ReopenIT {
         @Test
         @DisplayName("the history entry cannot be updated afterwards, by anyone")
         void theTriggerHoldsTheFloor() {
-            service.reopen(pm(), ticketId, request());
+            service.reopen(pm(), ticketCode, request());
             Long entryId = jdbc.queryForObject(
                     "SELECT id FROM ticket_history WHERE ticket_id = ? ORDER BY id DESC LIMIT 1",
                     Long.class, ticketId);
@@ -342,7 +345,7 @@ class ReopenIT {
                     (rs, n) -> rs.getTimestamp(1).toInstant(), ticketId);
             Instant before = Instant.now();
 
-            service.reopen(pm(), ticketId, request());
+            service.reopen(pm(), ticketCode, request());
 
             Instant reopened = (Instant) jdbc.queryForObject(
                     "SELECT planned_close_date FROM ticket_cycles WHERE ticket_id = ? AND cycle_no = 2",
@@ -361,7 +364,7 @@ class ReopenIT {
         void takesTheCallersDate() {
             Instant chosen = Instant.parse("2026-09-15T12:00:00Z");
 
-            service.reopen(pm(), ticketId, new ReopenDtos.ReopenRequest(
+            service.reopen(pm(), ticketCode, new ReopenDtos.ReopenRequest(
                     REASON, null, null, chosen, new BigDecimal("6.50")));
 
             assertThat((Instant) jdbc.queryForObject(
@@ -388,7 +391,7 @@ class ReopenIT {
         void resolvedRollsBackWhole() {
             jdbc.update("UPDATE tickets SET status = 'RESOLVED' WHERE id = ?", ticketId);
 
-            assertThatThrownBy(() -> service.reopen(pm(), ticketId, request()))
+            assertThatThrownBy(() -> service.reopen(pm(), ticketCode, request()))
                     .isInstanceOf(TicketNotClosedException.class);
 
             assertThat(cycleCount()).isEqualTo(1);
@@ -400,9 +403,9 @@ class ReopenIT {
         @Test
         @DisplayName("reopening twice without reclosing is 422 the second time")
         void doubleReopenIsRefused() {
-            service.reopen(pm(), ticketId, request());
+            service.reopen(pm(), ticketCode, request());
 
-            assertThatThrownBy(() -> service.reopen(pm(), ticketId, request()))
+            assertThatThrownBy(() -> service.reopen(pm(), ticketCode, request()))
                     .isInstanceOf(TicketNotClosedException.class);
 
             assertThat(cycleCount()).as("no third cycle").isEqualTo(2);
@@ -413,7 +416,7 @@ class ReopenIT {
         @Test
         @DisplayName("a stage outside the ticket's template is refused before anything is written")
         void unknownStageRollsBack() {
-            assertThatThrownBy(() -> service.reopen(pm(), ticketId, new ReopenDtos.ReopenRequest(
+            assertThatThrownBy(() -> service.reopen(pm(), ticketCode, new ReopenDtos.ReopenRequest(
                     REASON, "NOT_A_STAGE", null, null, null)))
                     .isInstanceOf(UnknownRestartStageException.class);
 
@@ -430,7 +433,7 @@ class ReopenIT {
         @DisplayName("a ticket outside the caller's scope is 404, not 403")
         void outOfScopeIs404() {
             assertThatThrownBy(() -> service.reopen(
-                    caller("DEVELOPER", List.of()), ticketId, request()))
+                    caller("DEVELOPER", List.of()), ticketCode, request()))
                     .isInstanceOf(TicketNotFoundException.class);
 
             assertThat(cycleCount()).isEqualTo(1);
@@ -444,8 +447,13 @@ class ReopenIT {
         return new ReopenDtos.ReopenRequest(REASON, null, null, null, null);
     }
 
+    /** A ticket's numeric id, for the fixture helpers below, and its code — the path segment {@link
+     * ReopenService#reopen} now takes since the {@code long}-vs-code fix. */
+    private record Seeded(long id, String code) {}
+
     /** Assigned to nobody, so the DEVELOPER scope test has a ticket to miss. */
-    private long insertClosedTicket(short currentCycle) {
+    private Seeded insertClosedTicket(short currentCycle) {
+        String code = "RP-26-" + suffix();
         jdbc.update("""
                 INSERT INTO tickets (ticket_code, project_id, title, level, original_level, status,
                                      workflow_template_id, current_cycle_no, current_iteration,
@@ -453,8 +461,9 @@ class ReopenIT {
                                      total_effort_hrs, planned_close_date, actual_close_date)
                 VALUES (?, ?, 'reopen probe', 'HIGH', 'MEDIUM', 'CLOSED', ?, ?, 3, 2, 'CLOSED',
                         12.00, 24.50, '2026-08-10 12:00:00', '2026-08-11 16:20:00')
-                """, "RP-26-" + suffix(), projectId, templateId, currentCycle);
-        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+                """, code, projectId, templateId, currentCycle);
+        long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        return new Seeded(id, code);
     }
 
     private void insertCycle(long ticket, short cycle, BigDecimal effort) {

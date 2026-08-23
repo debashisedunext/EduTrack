@@ -5,6 +5,7 @@ import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.dev.DevPrincipal;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
+import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketAttachment;
@@ -67,8 +68,9 @@ class QuickUpdateServiceTest {
     private final ScopedTickets tickets = mock(ScopedTickets.class);
     private final TicketJournal journal = mock(TicketJournal.class);
     private final TicketAttachmentRepository attachments = mock(TicketAttachmentRepository.class);
+    private final UserRepository users = mock(UserRepository.class);
 
-    private final QuickUpdateService service = new QuickUpdateService(tickets, journal, attachments);
+    private final QuickUpdateService service = new QuickUpdateService(tickets, journal, attachments, users);
 
     /**
      * The third argument is load-bearing — {@code EffortLogServiceTest}'s note
