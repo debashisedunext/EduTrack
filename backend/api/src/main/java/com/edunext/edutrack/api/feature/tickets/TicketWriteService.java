@@ -9,8 +9,11 @@ import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier
 import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
 import com.edunext.edutrack.domain.tickets.Ticket;
+import com.edunext.edutrack.domain.tickets.TicketCycle;
+import com.edunext.edutrack.domain.tickets.TicketCycleRepository;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
 import com.edunext.edutrack.domain.tickets.TicketRepository;
+import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import com.edunext.edutrack.domain.workflow.WorkflowStage;
 import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
 import org.springframework.security.core.Authentication;
@@ -18,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -117,11 +121,18 @@ public class TicketWriteService {
      * starts its journey once it has a template at all. */
     private final WorkflowStageRepository stages;
 
+    /**
+     * Cycle 1's row — {@link #openFirstCycleAndHop} writes it alongside the
+     * genesis hop, the same pairing {@code SingleTicketFixture} and {@code
+     * ReopenService} each make for a cycle they open.
+     */
+    private final TicketCycleRepository cycles;
+
     TicketWriteService(ScopedTickets tickets, TicketRepository repository, TicketCodeGenerator codes,
                        PlannedCloseDateService plannedCloseDates, ClientGate clients, ModuleGuard modules,
                        ProjectSettingsGate projectSettings, RichTextSanitizer sanitizer, TicketJournal journal,
                        TicketEventNotifier notifier, UserRepository users, TemplateResolver templates,
-                       WorkflowStageRepository stages) {
+                       WorkflowStageRepository stages, TicketCycleRepository cycles) {
         this.tickets = tickets;
         this.repository = repository;
         this.codes = codes;
@@ -135,6 +146,7 @@ public class TicketWriteService {
         this.users = users;
         this.templates = templates;
         this.stages = stages;
+        this.cycles = cycles;
     }
 
     @Transactional
@@ -160,6 +172,13 @@ public class TicketWriteService {
                 : computedPlannedCloseDate(request);
         projectSettings.requireMandatoryFields(request.projectId(), request, plannedCloseDate);
 
+        // Truncated to microseconds and reused for dateReported, the cycle's
+        // startDate and the genesis hop's enteredAt below — TicketJournal's own
+        // note on ChainDigest names the failure a raw Instant.now() risks: a
+        // row hashed over sub-microsecond precision fails verification for
+        // ever, because DATETIME(6) rounds rather than truncates it back out.
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+
         Ticket ticket = new Ticket();
         ticket.setTicketCode(codes.nextTicketCode(request.projectId()));
         ticket.setProjectId(request.projectId());
@@ -174,7 +193,7 @@ public class TicketWriteService {
         ticket.setClientRaised(request.clientId() != null && request.clientContactId() != null);
         ticket.setAssignedTo(request.assigneeId());
         ticket.setEstimatedEffortHrs(request.estimatedHrs());
-        ticket.setDateReported(Instant.now());
+        ticket.setDateReported(now);
         ticket.setReportedBy(actorId(caller));
 
         // §7.5's four.
@@ -201,6 +220,12 @@ public class TicketWriteService {
 
         Ticket saved = repository.save(ticket);
         journal.append(created(saved, caller));
+        // Only when a template resolved — see openFirstCycleAndHop's own
+        // javadoc for why a template-less ticket stays exactly as it has
+        // always been rather than opening a hop with no stage to validate.
+        if (saved.getWorkflowTemplateId() != null) {
+            openFirstCycleAndHop(saved, now);
+        }
         // D-037 · after the history row, because the history is the record and
         // a mail is a courtesy — if the enqueue throws, the notifier swallows
         // it rather than costing somebody the ticket they just raised. Sends
@@ -250,6 +275,60 @@ public class TicketWriteService {
         }
         apply.accept(submitted);
         journal.append(fieldChanged(ticket, field, current, submitted, caller));
+    }
+
+    /**
+     * The gap {@code TransitionService}'s own javadoc names and
+     * {@code STREAM-A-PLATFORM.md} raised by name: {@code
+     * TicketWriteService.create} set {@code tickets.current_stage} but never
+     * wrote the {@code ticket_cycles} row or the genesis {@code
+     * ticket_stage_transitions} hop that goes with it, so every ticket
+     * created through the real form — as opposed to {@code
+     * SingleTicketFixture}, which opens both for its own seed tickets — had a
+     * ribbon with no {@code CURRENT} segment and nothing for Handoff/Skip to
+     * act on. {@code TransitionService.advance} refuses to open one itself
+     * ({@code NoOpenStageException}); this is the second operation its
+     * javadoc says the pair belongs to, closed here rather than deferred a
+     * second time.
+     *
+     * <p>Only called when a template resolved — {@code stageSequence} was
+     * non-empty and {@code currentStage} is therefore set. A template-less
+     * ticket has no stage to open a hop into and stays in the same
+     * ribbon-less state {@link com.edunext.edutrack.api.feature.transitions
+     * transitions}' own {@code RibbonAssembler} already documents for it —
+     * that is unrelated to this gap and not this method's to fix.
+     *
+     * <p>{@code cycleNo}/{@code iterationNo}/{@code seqNo} are 1 — the same
+     * genesis numbering {@code TransitionService}'s own javadoc describes —
+     * {@code fromStage} and {@code fromUserId} are {@code null} — the ticket
+     * came from nowhere, {@link TicketStageTransition}'s own field doc — and
+     * {@code actionCode} is {@code FORWARD}, {@code SingleTicketFixture}'s
+     * identical choice for a ticket's first hop. {@code toUserId} is the
+     * ticket's assignee, null included: an unassigned ticket's first hop
+     * falls to the project queue exactly as {@code
+     * TransitionService.resolveAssignee} already leaves a later one when the
+     * receiving role has nobody active.
+     */
+    private void openFirstCycleAndHop(Ticket ticket, Instant now) {
+        TicketCycle cycle = new TicketCycle();
+        cycle.setTicketId(ticket.getId());
+        cycle.setCycleNo((short) 1);
+        cycle.setStartDate(now);
+        cycle.setAssignedTo(ticket.getAssignedTo());
+        cycle.setLevel(ticket.getLevel());
+        cycle.setPlannedCloseDate(ticket.getPlannedCloseDate());
+        cycles.save(cycle);
+
+        TicketStageTransition hop = new TicketStageTransition();
+        hop.setTicketId(ticket.getId());
+        hop.setCycleNo((short) 1);
+        hop.setIterationNo((short) 1);
+        hop.setSeqNo(1);
+        hop.setToStage(ticket.getCurrentStage());
+        hop.setToUserId(ticket.getAssignedTo());
+        hop.setActionCode("FORWARD");
+        hop.setEnteredAt(now);
+        journal.append(hop);
     }
 
     private Instant computedPlannedCloseDate(TicketCreateDtos.CreateRequest request) {
