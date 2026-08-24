@@ -312,6 +312,58 @@ class TicketWriteIT {
         assertThat(row.get("current_stage")).isEqualTo("INTAKE");
     }
 
+    /**
+     * The other half of {@link #createResolvesWorkflowTemplate}: setting
+     * {@code current_stage} is not enough on its own for the ribbon or
+     * Handoff to have anything to act on — {@code TransitionService.advance}
+     * refuses without an open {@code ticket_stage_transitions} row
+     * ({@code NoOpenStageException}), and {@code RibbonAssembler} renders
+     * every segment {@code PENDING} without one, exactly what a ticket
+     * created before this fix looked like. Asserted against the stored rows
+     * rather than the response, on {@link #richTextIsSanitisedOnWrite}'s own
+     * reasoning for the same choice.
+     */
+    @Test
+    @DisplayName("create opens cycle 1 and the genesis hop, so the ribbon has a CURRENT segment from the start")
+    void createOpensTheFirstCycleAndHop() {
+        var created = service.create(null, request(null, null));
+        long ticketId = jdbc.queryForObject(
+                "SELECT id FROM tickets WHERE ticket_code = ?", Long.class, created.ticketCode());
+
+        Map<String, Object> cycle = jdbc.queryForMap(
+                "SELECT cycle_no, is_sealed FROM ticket_cycles WHERE ticket_id = ?", ticketId);
+        assertThat(cycle.get("cycle_no")).isEqualTo(1);
+        assertThat(cycle.get("is_sealed")).isEqualTo(false);
+
+        Map<String, Object> hop = jdbc.queryForMap(
+                "SELECT cycle_no, iteration_no, seq_no, from_stage, to_stage, action_code, "
+                        + "exited_at, is_current, row_hash FROM ticket_stage_transitions WHERE ticket_id = ?",
+                ticketId);
+        assertThat(hop.get("cycle_no")).isEqualTo(1);
+        assertThat(hop.get("iteration_no")).isEqualTo(1);
+        assertThat(hop.get("seq_no")).isEqualTo(1);
+        assertThat(hop.get("from_stage")).isNull();
+        assertThat(hop.get("to_stage")).isEqualTo("INTAKE");
+        assertThat(hop.get("action_code")).isEqualTo("FORWARD");
+        assertThat(hop.get("exited_at")).isNull();
+        assertThat(hop.get("is_current")).isEqualTo(true);
+        assertThat(hop.get("row_hash")).isNotNull();
+    }
+
+    /** An unassigned ticket still gets a genesis hop — {@code to_user_id} null,
+     * on {@code TransitionService.resolveAssignee}'s identical precedent for a
+     * later hop whose receiving role has nobody active. */
+    @Test
+    @DisplayName("create opens the genesis hop for an unassigned ticket too")
+    void createOpensTheFirstHopEvenUnassigned() {
+        var created = service.create(null, request(null, null));
+
+        Long toUserId = jdbc.queryForObject(
+                "SELECT t.to_user_id FROM ticket_stage_transitions t JOIN tickets k ON k.id = t.ticket_id "
+                        + "WHERE k.ticket_code = ?", Long.class, created.ticketCode());
+        assertThat(toUserId).isNull();
+    }
+
     @Test
     @DisplayName("isClientRaised is derived from the pair, never taken from the caller")
     void clientRaisedIsDerived() {
