@@ -43,6 +43,10 @@ const valid: TicketFormValues = {
   // `valid` has to carry one or every assertion below would be measuring the
   // module rule instead of the field it names.
   moduleId: 3,
+  // Same reasoning as the module directly above: the assignee is mandatory on
+  // the three live save actions, so a `valid` without one would make every
+  // assertion in this file measure the assignee rule as well as its own.
+  assigneeId: 9,
   estimatedHrs: '4.5',
 }
 
@@ -70,7 +74,7 @@ describe('ticketFormSchema', () => {
   it('names every empty required field at once rather than one at a time', () => {
     const errors = errorsByField(emptyTicketForm)
     expect(Object.keys(errors).sort()).toEqual(
-      ['description', 'estimatedHrs', 'level', 'projectId', 'taskTypeId', 'title'].sort(),
+      ['assigneeId', 'description', 'estimatedHrs', 'level', 'projectId', 'taskTypeId', 'title'].sort(),
     )
   })
 
@@ -83,6 +87,20 @@ describe('ticketFormSchema', () => {
     // on behaviour. This is the test that keeps the two from being reconciled
     // the wrong way round.
     expect(errorsByField({ ...valid, description: '   ' })).toHaveProperty('description')
+  })
+
+  it('requires an assignee, which the contract and §7.5 both leave optional', () => {
+    // A recorded deviation, not a blueprint rule — §7.5 puts no asterisk on
+    // Assigned To. It is the *screen's* rule: unassigned tickets still exist
+    // and still have to, because D-036's email-to-ticket and B-053's import
+    // raise them with nobody standing in front of a form. This test is what
+    // keeps the deviation from being reconciled the wrong way round, the same
+    // job the description test above it does.
+    expect(errorsByField({ ...valid, assigneeId: null })).toHaveProperty(
+      'assigneeId',
+      'Pick who this ticket is assigned to',
+    )
+    expect(errorsByField({ ...valid, assigneeId: 9 })).not.toHaveProperty('assigneeId')
   })
 
   it('rejects effort that is not a plain decimal number of hours', () => {
@@ -306,6 +324,13 @@ describe('ticketFormSchema — the draft action (C-013)', () => {
     )
   })
 
+  it('waives the assignee, which is this screen’s rule and not the contract’s', () => {
+    // Deciding who picks a half-written ticket up is a common reason to park it
+    // as a draft — the same argument the client rule directly above makes.
+    expect(draftSchema.safeParse({ ...draftable, assigneeId: null }).success).toBe(true)
+    expect(schema.safeParse({ ...valid, assigneeId: null }).success).toBe(false)
+  })
+
   it('still rejects effort the user actually typed but typed wrongly', () => {
     // A draft is permission to leave a field empty, not permission to store
     // "4h" and discover it when the ticket is finished.
@@ -496,11 +521,25 @@ describe('ticketFormSchema — the project rules (C-071)', () => {
   })
 
   it('reports every missing field at once', () => {
-    expect(Object.keys(parseWith(valid, requiring('SCREEN_NAME', 'FEATURE', 'ASSIGNEE')))).toEqual([
+    // CLIENT rather than ASSIGNEE, which this used to name: the assignee is
+    // mandatory on the form now, so `valid` carries one and the project's copy
+    // of the rule has nothing left to catch on this path. `valid` is task type
+    // 5, Internal Bug, so §4B.2 does not require a client of its own here and
+    // the only issue on `clientId` is the project's.
+    expect(Object.keys(parseWith(valid, requiring('SCREEN_NAME', 'FEATURE', 'CLIENT')))).toEqual([
       'screenName',
       'feature',
-      'assigneeId',
+      'clientId',
     ])
+  })
+
+  it('still refuses an unassigned draft when the project requires an assignee', () => {
+    // The one path the form's own rule leaves open, and the reason the ASSIGNEE
+    // row stays in `MANDATORY_FIELD_PATHS` now that Save & Assign covers the
+    // other three actions. A project's rules are never waived by `saveAsDraft`.
+    expect(parseWith(draftable, requiring('ASSIGNEE'), 'draft')).toEqual({
+      assigneeId: 'This project requires an assignee on every ticket',
+    })
   })
 
   it('never requires a planned close date on the form', () => {

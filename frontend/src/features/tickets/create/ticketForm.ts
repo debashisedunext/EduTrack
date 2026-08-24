@@ -265,8 +265,8 @@ const HOURS = /^\d+(\.\d{1,2})?$/
  * runtime. Cheap — it is four `z.*` calls, not a network round trip.
  *
  * `action` decides how much the form insists on. A draft is only worth having
- * if it accepts work in progress, so it relaxes the three rules that are the
- * blueprint's rather than the contract's:
+ * if it accepts work in progress, so it relaxes the four rules that are this
+ * screen's rather than the contract's:
  *
  * - **Description** — §7.5 marks it mandatory; `TicketCreateRequest` has it
  *   optional. The strict path keeps the blueprint's rule.
@@ -274,6 +274,9 @@ const HOURS = /^\d+(\.\d{1,2})?$/
  * - **The client rule for client-facing task types** — §4B.2's, not the
  *   contract's. You often save a draft precisely because you are still chasing
  *   which client it belongs to.
+ * - **Assignee** — a recorded deviation rather than a blueprint rule; see the
+ *   field. A draft is often parked precisely because who picks it up is the
+ *   part not yet decided.
  *
  * It relaxes *nothing else*, and that is a contract fact rather than a choice:
  * `TicketCreateRequest.required` is `[projectId, title, taskTypeId, level]`, so
@@ -360,7 +363,33 @@ export function ticketFormSchema(
         ),
       clientId: optionalId,
       clientContactId: optionalId,
-      assigneeId: optionalId,
+      // Mandatory on this form, and a **recorded deviation** — §7.5 does not
+      // put an asterisk on Assigned To, so the README says so in as many words
+      // rather than letting it look like the blueprint asked for it.
+      //
+      // The argument for it is the one §7.5 makes about Module: a ticket
+      // nobody owns is a ticket nobody routes. The argument against was that
+      // §14's "Unassigned > 2h" escalation and C-015's Unassigned saved view
+      // both presuppose unassigned tickets exist — and they still do. They are
+      // raised by the paths a person is not standing in front of: D-036's
+      // email-to-ticket, B-053's Excel import, and anything the API creates
+      // directly. **This rule is the create *screen*'s, not the wire's**, which
+      // is why nothing in `toCreateRequest` or the contract changes and why the
+      // Unassigned view still has a job.
+      //
+      // Waived by Save as Draft, the same shape as the description and the
+      // estimate above it: a blueprint-level rule about what a finished ticket
+      // ought to say, and a draft exists to hold one that cannot say it yet.
+      // Deciding who picks a half-written ticket up is a common reason to park
+      // it in the first place.
+      assigneeId: z
+        .number()
+        .int()
+        .positive()
+        .nullable()
+        .refine((v) => isDraft || v !== null, {
+          message: 'Pick who this ticket is assigned to',
+        }),
       watcherIds: z.array(z.number().int().positive()),
       // Blank is reachable only on the draft path, where it means "not
       // estimated yet" and the mapper omits the field. Anything the user
@@ -482,6 +511,11 @@ const MANDATORY_FIELD_PATHS: ReadonlyArray<
   ['STEPS_TO_GENERATE', 'stepsToGenerate', true],
   ['CLIENT', 'clientId', false],
   ['CLIENT_CONTACT', 'clientContactId', false],
+  // Redundant on the three live save actions since the assignee became
+  // mandatory on this form, and kept anyway: the draft path waives the form's
+  // rule and does not waive a project's, so a project that ticks ASSIGNEE is
+  // the one way to refuse an unassigned *draft* too. It is also the code the
+  // server measures, and a row missing here would make the two disagree.
   ['ASSIGNEE', 'assigneeId', false],
   ['ESTIMATED_HRS', 'estimatedHrs', false],
 ]

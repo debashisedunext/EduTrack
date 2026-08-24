@@ -15,15 +15,16 @@ Extra** — and its four actions.
 **Cancel · Save as Draft · Save & Create Another · Save & Assign**, in that
 order, with Save & Assign as the primary and as what Enter does.
 
-**A draft relaxes exactly three rules, and which three is a contract fact
-rather than a preference.** `TicketCreateRequest.required` is
+**A draft relaxes exactly four rules, and where the line falls is a contract
+fact rather than a preference.** `TicketCreateRequest.required` is
 `[projectId, title, taskTypeId, level]`, so a draft missing any of those earns a
-400 whatever the form allows. What it *can* waive is the three rules that are
-the blueprint's rather than the contract's: the mandatory **description**
-(§7.5), the mandatory **estimated effort** (§7.5), and **§4B.2's client rule for
-client-facing task types** — you often park a ticket precisely because you are
-still chasing which client it belongs to. Level pre-fills from the task type, so
-a draft costs project + task type + title.
+400 whatever the form allows. What it *can* waive is the rules that are this
+screen's rather than the contract's: the mandatory **description** (§7.5), the
+mandatory **estimated effort** (§7.5), **§4B.2's client rule for client-facing
+task types** — you often park a ticket precisely because you are still chasing
+which client it belongs to — and the mandatory **assignee** (D-16, below), for
+the same reason. Level pre-fills from the task type, so a draft costs project +
+task type + title.
 
 A draft still rejects a *malformed* entry: `4h` in the effort field fails on
 every path. A draft is permission to leave a field empty, not permission to
@@ -83,12 +84,31 @@ holds its full width and pushes the primary action onto a second row, off the
 bar entirely — also caught only in a real browser. The hint is what wraps when
 the bar runs out of room; the button group is `shrink-0` and never does.
 
-**Save & Assign does not require an assignee.** §7.5 does not mark Assigned To
-with an asterisk and C-015 ships an *Unassigned* saved view, so an unassigned
-ticket is a supported outcome, not an oversight — making it mandatory here would
-contradict a screen we are about to build. The label still implies otherwise, so
-the action bar states which way it will go: the assignee's name, or that it
-saves unassigned and shows in the Unassigned view.
+**Save & Assign requires an assignee — a recorded deviation, PLAN.md D-16.**
+§7.5 does not mark Assigned To with an asterisk, so this is not the blueprint's
+rule and is not written down as though it were. It was asked for on 24 Aug 2026,
+and the argument is §7.5's own argument for Module on bug types: a ticket nobody
+owns is a ticket nobody routes. §14's *Unassigned > 2 h* escalation is the
+system paying for that omission two hours after the one moment somebody knew the
+answer and was looking at the field.
+
+**Unassigned tickets still exist, and the rule is worded to keep it that way.**
+It is the *screen's* rule, not the wire's: `TicketCreateRequest.assigneeId` is
+untouched, `toCreateRequest` still sends `null`, and D-036's email-to-ticket,
+B-053's Excel import and any direct API call go on creating unassigned tickets —
+nobody is standing in front of a form on those paths. C-015's Unassigned view,
+§14's escalation and §15's notification all keep their jobs.
+
+**Save as Draft waives it**, the fourth rule to join the description, the
+estimate and §4B.2's client rule — who picks a half-written ticket up is a
+common reason to park it. A project that wants the rule to hold on the draft
+path too, and to hold server-side, ticks **ASSIGNEE** in B-019's Settings tab;
+`ProjectSettingsGate` enforces that code on every path and does not waive it for
+a draft. That is also why `ASSIGNEE` stays in `MANDATORY_FIELD_PATHS` even
+though the form now covers the three live actions itself.
+
+The action bar states which way the save will go: the assignee's name, or that
+only Save as Draft will take the ticket without one.
 
 ## Decisions worth knowing about
 
