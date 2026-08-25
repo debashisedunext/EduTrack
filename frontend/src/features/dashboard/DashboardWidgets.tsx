@@ -1,6 +1,7 @@
 import type { GetDashboardWidgetParams } from '@/api/generated/model'
 
 import { DashboardWidgetBatch } from './DashboardWidgetBatch'
+import { useDashboardWidgetPreferencesStore } from './dashboardWidgetPreferencesStore'
 import type { WidgetKey } from './WidgetFrame'
 import { WidgetFrame } from './WidgetFrame'
 import { useDashboardVariant } from './useDashboardVariant'
@@ -67,9 +68,15 @@ import { VelocityLines } from './charts/VelocityLines'
  * not rendered costs a query for a chart nobody sees. `DashboardWidgetsBatchTest`
  * pins both directions so the drift is a failing test rather than a slow page.
  */
-const OWN_WORK_KEYS = ['velocity', 'aging-buckets'] as const satisfies readonly WidgetKey[]
+// Exported rather than kept module-private: `DashboardWidgetChooserMenu` reads
+// both to decide which of the fourteen catalogue entries are worth offering a
+// checkbox for. A Developer's dashboard only ever renders the two keys in
+// `OWN_WORK_KEYS` — a settings menu listing all fourteen regardless would let
+// somebody toggle twelve checkboxes that do nothing, on the one screen where
+// visibly doing nothing reads as broken rather than as "not for you".
+export const OWN_WORK_KEYS = ['velocity', 'aging-buckets'] as const satisfies readonly WidgetKey[]
 
-const FULL_KEYS = [
+export const FULL_KEYS = [
   'type-donut',
   'daily-stacked',
   'velocity',
@@ -91,39 +98,56 @@ const FULL_KEYS = [
 
 export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams }) {
   const variant = useDashboardVariant()
+  // The settings menu's other half. `DashboardWidgetChooserMenu`
+  // writes this store; reading it here rather than through a prop keeps
+  // `DashboardWidgets`'s own signature — and every existing caller and test —
+  // untouched, since the default (nothing hidden) reproduces today's grid
+  // exactly.
+  const hiddenWidgets = useDashboardWidgetPreferencesStore((s) => s.hiddenWidgets)
+  const isHidden = (key: WidgetKey) => hiddenWidgets.includes(key)
 
   if (variant === 'own-work') {
+    const ownWorkKeys = OWN_WORK_KEYS.filter((key) => !isHidden(key))
     return (
-      <DashboardWidgetBatch keys={OWN_WORK_KEYS} params={params}>
+      <DashboardWidgetBatch keys={ownWorkKeys} params={params}>
         <div className="grid gap-3 xl:grid-cols-2">
-          <WidgetFrame
-            widgetKey="velocity"
-            title="My velocity (tickets closed per week)"
-            categoryLabel="Week beginning"
-            params={params}
-          >
-            {(series) => <VelocityLines series={series} />}
-          </WidgetFrame>
+          {!isHidden('velocity') && (
+            <WidgetFrame
+              widgetKey="velocity"
+              title="My velocity (tickets closed per week)"
+              categoryLabel="Week beginning"
+              params={params}
+            >
+              {(series) => <VelocityLines series={series} />}
+            </WidgetFrame>
+          )}
 
-          <WidgetFrame
-            widgetKey="aging-buckets"
-            // Titled as theirs. The server scopes it to them either way, and a
-            // bar chart headed "Ticket aging" beside five figures that are all
-            // "mine" invites being read as the organisation's.
-            title="My ticket aging"
-            categoryLabel="Age range"
-            params={params}
-          >
-            {(series) => <AgingBuckets series={series} />}
-          </WidgetFrame>
+          {!isHidden('aging-buckets') && (
+            <WidgetFrame
+              widgetKey="aging-buckets"
+              // Titled as theirs. The server scopes it to them either way, and a
+              // bar chart headed "Ticket aging" beside five figures that are all
+              // "mine" invites being read as the organisation's.
+              title="My ticket aging"
+              categoryLabel="Age range"
+              params={params}
+            >
+              {(series) => <AgingBuckets series={series} />}
+            </WidgetFrame>
+          )}
+
+          {ownWorkKeys.length === 0 && <NoWidgetsSelectedNotice />}
         </div>
       </DashboardWidgetBatch>
     )
   }
 
+  const fullKeys = FULL_KEYS.filter((key) => !isHidden(key))
+
   return (
-    <DashboardWidgetBatch keys={FULL_KEYS} params={params}>
+    <DashboardWidgetBatch keys={fullKeys} params={params}>
     <div className="grid gap-3 xl:grid-cols-2">
+      {!isHidden('type-donut') && (
       <WidgetFrame
         widgetKey="type-donut"
         title="Task type distribution"
@@ -132,7 +156,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <TypeDonut series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('daily-stacked') && (
       <WidgetFrame
         widgetKey="daily-stacked"
         title="Daily task status"
@@ -141,7 +167,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <DailyStackedArea series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('velocity') && (
       <WidgetFrame
         widgetKey="velocity"
         title="Resource velocity (tickets closed per week)"
@@ -150,7 +178,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <VelocityLines series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('resource-load') && (
       <WidgetFrame
         widgetKey="resource-load"
         title="Resource-wise load"
@@ -159,7 +189,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <ResourceLoadBar series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('priority-bar') && (
       <WidgetFrame
         widgetKey="priority-bar"
         title="Priority split"
@@ -168,7 +200,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <PriorityBar series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('aging-buckets') && (
       <WidgetFrame
         widgetKey="aging-buckets"
         title="Ticket aging"
@@ -177,9 +211,11 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <AgingBuckets series={series} />}
       </WidgetFrame>
+      )}
 
       {/* A-057 · widgets 13–15. Appended, with nothing above rearranged —
           which is what A-054's grid and A-056's frame were shaped for. */}
+      {!isHidden('calendar-heatmap') && (
       <WidgetFrame
         widgetKey="calendar-heatmap"
         title="Date-wise activity"
@@ -189,7 +225,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <CalendarHeatmap series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('sla-gauge') && (
       <WidgetFrame
         widgetKey="sla-gauge"
         title="SLA compliance"
@@ -198,7 +236,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <SlaGauge series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('project-treemap') && (
       <WidgetFrame
         widgetKey="project-treemap"
         title="Project-wise distribution"
@@ -207,12 +247,14 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <ProjectTreemap series={series} />}
       </WidgetFrame>
+      )}
 
       {/* A-059 · widget 20. Titled "raised" rather than "volume": the bars
           count tickets the client submitted in the window, and a panel headed
           "Client-wise volume" beside the treemap's open-ticket tiles invites
           being read as the same measure. The one word is the difference
           between intake and backlog. */}
+      {!isHidden('client-volume') && (
       <WidgetFrame
         widgetKey="client-volume"
         title="Client-wise tickets raised"
@@ -221,6 +263,7 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <ClientVolumeBar series={series} />}
       </WidgetFrame>
+      )}
 
       {/* A-058 · widgets 16–19, the four the Workflow Ribbon unlocks. Appended
           like A-057's and A-059's, with nothing above rearranged.
@@ -230,6 +273,7 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
           the ribbon every one of them answers with the same sentence, and four
           adjacent notices read as one honest gap rather than as four failures
           scattered through a working dashboard. */}
+      {!isHidden('stage-funnel') && (
       <WidgetFrame
         widgetKey="stage-funnel"
         title="Stage funnel (where work is sitting)"
@@ -238,7 +282,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <StageFunnel series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('rework') && (
       <WidgetFrame
         widgetKey="rework"
         // "Rework" rather than §7.9's "Rework / ping-pong tickets": the panel
@@ -251,7 +297,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <ReworkPanel series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('stage-duration') && (
       <WidgetFrame
         widgetKey="stage-duration"
         // "per visit" and not "per ticket": a ticket reworked twice visits DEV
@@ -263,7 +311,9 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <StageDurationBar series={series} />}
       </WidgetFrame>
+      )}
 
+      {!isHidden('handoff-latency') && (
       <WidgetFrame
         widgetKey="handoff-latency"
         // "waiting" rather than "latency": §7.6's term is precise and means
@@ -276,7 +326,19 @@ export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams 
       >
         {(series) => <HandoffLatencyLine series={series} />}
       </WidgetFrame>
+      )}
+
+      {fullKeys.length === 0 && <NoWidgetsSelectedNotice />}
     </div>
     </DashboardWidgetBatch>
+  )
+}
+
+/** Every widget hidden via the settings menu — told plainly rather than left as a blank grid. */
+function NoWidgetsSelectedNotice() {
+  return (
+    <p className="text-sm text-[color:var(--text-secondary)] xl:col-span-2">
+      No dashboard components are selected. Use the Widgets button above to choose which to show.
+    </p>
   )
 }
