@@ -14,17 +14,7 @@ import { NotificationStream } from '@/features/notifications/NotificationStream'
 export function AppShell() {
   const location = useLocation()
   return (
-    /*
-      BUG-001 · `fixed inset-0`, not `h-screen`. `h-screen` is 100vh of a
-      document that anything at body level can make taller — and when that
-      happened the shell rendered as a 100vh band at the top of a taller page,
-      with a second, document-level scrollbar beside `<main>`'s and dead
-      background below it. Fixed to the viewport the shell always fills the
-      window exactly and adds no height to the document, so `<main>` is the
-      only place the app scrolls. Auth screens render outside the shell and
-      still scroll the document normally.
-    */
-    <div className="fixed inset-0 flex overflow-hidden bg-app">
+    <div className="flex h-screen overflow-hidden bg-app">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
