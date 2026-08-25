@@ -829,3 +829,60 @@ Answer during M3 (PLAN.md §5, blueprint §16):
 - Does the client Excel import update existing records or only insert? *(Recommended: upsert on client code, with the dry run showing exactly what changes.)*
 - Who may edit Planned Close Date after assignment? *(Recommended: PM/Admin only, reason mandatory, logged.)*
 - Effort backdating window? *(Recommended: 7 days, then manager approval.)*
+
+---
+
+# Phase 2 — Client Onboarding
+
+*Added 25 Aug 2026. Authority: [`docs/PHASE-2-BUILD-PLAN.md`](../PHASE-2-BUILD-PLAN.md) for implementation, [`docs/Onboarding-Module-Plan.md`](../Onboarding-Module-Plan.md) for behaviour. Task IDs use the 100-block so phase 1 and phase 2 never collide.*
+
+**Stream D is not staffed in phase 2.** Notification delivery and the two admin screens come here; the TAT engine goes to C and the contract to A.
+
+## OB1 — Client capture
+
+Everything a client arrives with, before the journey starts moving.
+
+### The client record
+
+- [ ] **B-101** **Fixture corpus** — the prototype's eight-step "Standard SaaS Onboarding" template and six demo clients, seeded verbatim. It is already a realistic journey; building a second one by hand would be worse and slower.
+- [ ] **B-102** 🔴 **Client CRUD and the duplicate guard** — PAN unique and checked on create, plus a warning on a near-duplicate name. Two half-onboarded copies of one client is a mess no report survives.
+- [ ] **B-103** **SPOC contacts** — multiple per client, one primary. **Capture `whatsapp_opt_in` with its timestamp and source now**, even though nothing sends WhatsApp this phase: consent cannot be backfilled, and every SPOC boarded without it must be re-approached before a single message can go out.
+- [ ] **B-104** **Applications purchased** — with license start and end dates. That pair is the renewal anchor; capturing it now costs nothing and is the whole data set a renewals module would need.
+- [ ] **B-105** **Payment schedule** — advance, balance and other as rows with due date, received date, mode, reference, invoice number and GST fields, plus an outstanding roll-up. Finance asks for this in week one.
+- [ ] **B-106** **Requirements** — structured rows plus rich text through `api/text/`'s allow-list. That class is shared and needs C's and D's sign-off if it changes; it should not need to.
+- [ ] **B-107** **Client attachments** — the existing upload pipeline, unchanged: allow-list, MIME sniff, AV scan, signed URLs.
+
+### The screens
+
+- [ ] **B-108** **OB-03 — client list** — filter by status, RAG, owner and sales person.
+- [ ] **B-109** **OB-04 — new client wizard** — four steps, template selection, duplicate-PAN guard inline rather than on submit.
+
+## OB3 — Notifications
+
+Stream D's in phase 1. Email only this phase — WhatsApp is out of scope, recorded in the build plan §6.1.
+
+- [ ] **B-110** 🔴 **Outbox dispatcher with retry** — behind a **channel-agnostic adapter interface**. That interface is what keeps the WhatsApp deferral from being a one-way door: adding the channel later becomes one implementation class rather than a redesign.
+- [ ] **B-111** **Email templates through the existing mail engine** — no new transport.
+- [ ] **B-112** **OB-13 — notification centre** — the bell popover for the daily surface and a full page for history, because the digest links need somewhere to land.
+- [ ] **B-113** **OB-11 and OB-12 — TAT settings and email templates** — amber threshold, scanner cadence, the escalation matrix as configuration rather than constants.
+- [ ] **B-114** **Daily digest to managers** — journeys stuck beyond a threshold, one mail a day.
+
+## OB4 — Sign-off, dashboard, reports
+
+### Sign-off
+
+- [ ] **B-115** **OB-09 — public sign-off page** — shell-less, no navigation, nothing that hints at the rest of the application.
+- [ ] **B-116** **Acceptance PDF** — name, timestamp, IP, user agent and OTP channel, archived as an attachment.
+- [ ] **B-117** 🔴 **The objection path** — step returns to `IN_PROGRESS`, objection logged, owner notified, our clock resumes.
+- [ ] **B-118** **Go-live flip** — final sign-off accepted **and** every mandatory step complete → LIVE, Green, `live_at` stamped, support handover note generated.
+- [ ] **B-119** **CSAT** — a public one-question page, storage, and a summary. The design fires a toast saying the survey was sent and there is nothing behind it; this is that nothing.
+
+### Dashboard and reports
+
+- [ ] **B-120** **`ob_dashboard_summary` refresh job** — lives in `worker/onboarding/stats/` and is **yours**, named in CODEOWNERS from day one. Phase 1 hit this exact shape with `worker/stats/` and it cost three unannounced edits to another stream's directory before anyone wrote it down.
+- [ ] **B-121** **OB-02 — onboarding dashboard** — RAG board, funnel, stuck list, breach list, TAT tiles. Reads the summary table, never a live count.
+- [ ] **B-122** **OB-10 — reports hub** — the seven the design draws, with XLSX and CSV export through the existing infrastructure.
+
+## OB5 — Hardening
+
+- [ ] **B-123** **Export redaction** — PAN and payment amounts stripped for every role that cannot see them on screen. An export that ignores the masking rule is the masking rule not existing.

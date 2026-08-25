@@ -535,3 +535,60 @@
 Answer before M2 (PLAN.md §5): **G-4** — does an auto-escalated level revert after closure? *(Recommended: no; keep `original_level` and report both.)*
 
 Answer before M1: **is there an existing employee directory or SSO** that the Resource Master should sync from? If yes, `users` needs an external ID now, not later.
+
+---
+
+# Phase 2 — Client Onboarding
+
+*Added 25 Aug 2026. Authority: [`docs/PHASE-2-BUILD-PLAN.md`](../PHASE-2-BUILD-PLAN.md) for implementation, [`docs/Onboarding-Module-Plan.md`](../Onboarding-Module-Plan.md) for behaviour. Task IDs use the 100-block so phase 1 and phase 2 never collide.*
+
+**Stream D is not staffed in phase 2.** Its OpenAPI contract work comes here; the TAT engine goes to C and notification delivery to B.
+
+## OB0 — Gate & schema
+
+Nothing else in phase 2 starts until the gate and the schema exist. This milestone is almost entirely yours, and it is the tightest fortnight in the phase.
+
+### The `ob_*` schema
+
+- [ ] **A-101** **Client capture tables** — `ob_clients`, `ob_client_contacts`, `ob_client_applications`, `ob_client_requirements`. PAN column sized for the encrypted form, not the plaintext.
+- [ ] **A-102** **`ob_payments` and `ob_attachments`** — payments is a schedule of rows, not two columns; attachments is polymorphic within the module only.
+- [ ] **A-103** **Journey template tables** — `ob_journey_templates`, `ob_journey_template_steps`, `ob_journey_template_step_items`. Versioned; an edit publishes a new version rather than mutating.
+- [ ] **A-104** **Journey instance tables** — `ob_journeys` pinned to `template_id + version`, `ob_journey_steps`, `ob_journey_step_items`.
+- [ ] **A-105** **`ob_step_clock_events`** — pause/resume rows for the waiting-on-client clock. The one permitted mutation in the module is sealing a row (`resumed_at` NULL → timestamp); a trigger rejects the rest.
+- [ ] **A-106** 🔴 **Append-only pair, hash-chained** — `ob_step_history` and `ob_step_communications`, own chain, PLAN.md §3.5–3.7 trigger pattern. No `update()`, no `delete()`, no `PUT`/`PATCH`/`DELETE` route. Corrections are compensating rows.
+- [ ] **A-107** **Sign-off, outbox and escalation tables** — `ob_signoffs`, `ob_notification_outbox`, `ob_escalations`. `ob_signoffs` has the shape that triggers MySQL error 3823; probe it against the container before committing.
+- [ ] **A-108** **`ob_dashboard_summary`** — pre-aggregated. Dashboards never run a live `COUNT(*)`.
+- [ ] **A-109** 🔴 **`user_module_access` and the grants** — `edutrack_app` holds per-table grants and eighteen tables arrive at once. Run `make grants` inside this task, not after it: the failure is `Schema-validation: missing table [x]` at startup, which names a table that plainly exists and cost two debugging sessions in phase 1.
+
+### The module gate
+
+- [ ] **A-110** 🔴 **`modules` JWT claim** — extend `CallerIdentity` rather than adding a second principal shape. Both chains, real and `dev-noauth`.
+- [ ] **A-111** 🔴 **ModuleGuard** — runs before RolesGuard on every `/api/v1/onboarding/**` route. No entitlement → **404**, same no-existence-leak rule as ticket scoping.
+- [ ] **A-112** 🔴 **`OnboardingScopeResolver` and `ScopedJourneys`** — Step Owner sees journeys containing their steps, Sales sees `created_by = me`, Manager/Admin/Viewer see all. Out-of-scope IDs answer 404. **Until this lands nobody writes their own filtering** — `dev-noauth` exists so they do not have to.
+- [ ] **A-113** **PAN encryption and the reveal audit** — AES-GCM, key from the vault A-075 stood up. Mask to the **last four only**, and make revealing an explicit action rather than a role-based default, so §11's audit rule has a discrete event to log.
+- [ ] **A-114** **Permission-matrix entries** — all six onboarding roles against every route as it lands.
+- [ ] **A-115** **ArchUnit: the two modules stay separable** — no import from `feature/tickets`, `feature/transitions` or `components/ribbon`; append-only enforcement on the two new chained tables.
+
+### The contract
+
+Stream D owned this in phase 1 and is not staffed now. It sits here because the contract is written before the schema is finished, and you are in the schema first.
+
+- [ ] **A-118** 🔴 **OpenAPI contract for the whole module** — every onboarding route and DTO, plus the MSW mock. Written ahead of the screens, not after them.
+- [ ] **A-119** 🔴 **Wire-conformance ratchet for onboarding DTOs** — every field the contract declares as an object must serialise as one. `TicketWireConformanceTest` is the template. **Lands in week 2, before a screen exists** — phase 1 added this after the fact and paid for it with three shipped bugs and a blank detail page.
+
+### The shell
+
+- [ ] **A-116** **Module launcher and switcher** — two cards, live counts, top-bar switcher for dual-access users. Single-module users skip it entirely.
+- [ ] **A-117** **OB-08 — roles and module access admin** — grant and revoke, fully audited.
+
+## OB4 — Sign-off, dashboard, reports
+
+Your part is the public surface. It is the module's only unauthenticated route and the only one an attacker can reach without an account.
+
+- [ ] **A-120** **Public sign-off surface** — hashed single-use token, short TTL, aggressive rate limits, generic errors, no enumeration.
+- [ ] **A-121** **OTP issue and verify** — against the SPOC's registered email or phone, rate-limited per token and per contact.
+
+## OB5 — Hardening
+
+- [ ] **A-122** **Permission-matrix completeness** — six onboarding roles × every route, taken from the module plan §3 rather than from whatever satisfies the test.
+- [ ] **A-123** **Mutation tests on the append-only pair** — prove `update` and `delete` are rejected at the database, not merely absent from the service.

@@ -22,9 +22,11 @@ import { FormField } from '../create/FormField'
 import {
   emptyHandoffForm,
   handoffSchema,
+  handoffStageOptions,
   stageOwnerRole,
   toHandoffRequest,
   type HandoffFormValues,
+  type HandoffStageOption,
 } from './handoffForm'
 import { useHandoffMutation } from './useHandoffMutation'
 
@@ -49,23 +51,19 @@ export interface HandoffDialogProps {
 /**
  * S-29 Handoff Dialog — C-044, blueprint §4A.
  *
- * A **standalone, importable component with no trigger site of its own
- * yet.** `TicketDetailHeader`'s own comment is explicit that `handoff` is a
- * *stage* action that belongs on the ribbon's current segment (§4A, C-052),
- * not in the header — and C-051 (the ribbon component) and C-052 (the
- * segment's contextual action button) are both still unbuilt. So this is
- * built and fully tested in isolation, ready for C-052 to import and render
- * a trigger for once the ribbon segment exists, on `TicketLinksControl`'s own
- * precedent for a detail-page control that predates the section that will
- * host it.
+ * **Live, and reached from the ribbon's current segment.** This comment used
+ * to say the component was standalone with "no trigger site of its own yet",
+ * pending C-051/C-052; that stopped being true once `TicketDetailPage`
+ * started rendering it beside the ribbon, and BUG-003 — a real defect found
+ * by a user opening this dialog from that segment — is what caught the
+ * comment still claiming otherwise.
  *
  * Composed the same way as `ReopenDialog`/`CloseDialog`: the exported
- * component owns its own trigger button and open state, so a future caller
- * needs only to render `<HandoffDialog .../>` and nothing about the modal's
- * lifecycle. C-052 will most likely swap this default trigger for its own
- * (a segment click, not a labelled button) — the form below is exported
- * separately from nothing more than `open`/`onOpenChange`, so replacing the
- * trigger does not mean rebuilding the dialog.
+ * component owns its own trigger button and open state, so the caller renders
+ * `<HandoffDialog .../>` and nothing about the modal's lifecycle. Should the
+ * labelled button later give way to a segment click, the form below depends
+ * on nothing more than `open`/`onOpenChange`, so replacing the trigger does
+ * not mean rebuilding the dialog.
  */
 export function HandoffDialog({ ticket, ribbon, onHandedOff }: HandoffDialogProps) {
   const [open, setOpen] = React.useState(false)
@@ -125,6 +123,23 @@ function HandoffForm({
     [toStageCode, ribbon, templatesData],
   )
 
+  // BUG-003 · the same two sources `stageOwnerRole` reads, asked the other
+  // question: not "who owns this stage" but "which stages are there to pick".
+  const stageOptions = React.useMemo(
+    () => handoffStageOptions(ribbon, templatesData?.data),
+    [ribbon, templatesData],
+  )
+
+  // A ticket cannot be handed to the stage it is already standing in. Listed
+  // and greyed rather than dropped, on `SearchableDropdown`'s own B-028 rule
+  // — a stage that silently vanishes from a ribbon-ordered list reads as lost
+  // data, whereas one greyed with a reason says what is going on.
+  const currentStageCode =
+    ribbon?.segments?.find((segment) => segment.state === 'CURRENT')?.stageCode ??
+    ribbon?.currentStageCode ??
+    ticket.currentStageCode ??
+    undefined
+
   // "Assign-to filtered to the receiving role's project members" — §4A. The
   // roster read (`GET /projects/{projectId}/members`) carries `openTicketCount`,
   // which `useListUsers` does not, and showing it is the entire point of this
@@ -182,9 +197,42 @@ function HandoffForm({
         label="Next stage"
         required
         error={errors.toStageCode?.message}
-        hint={ribbon ? 'Pre-filled from the ribbon — change it to send the ticket somewhere else.' : undefined}
+        hint={
+          ribbon
+            ? 'Pre-filled from the ribbon — change it to send the ticket somewhere else.'
+            : 'Every stage defined across the workflow templates, since this ticket has no ribbon yet.'
+        }
       >
-        {(aria) => <Input {...aria} {...register('toStageCode')} disabled={handoff.isPending} />}
+        {(aria) => (
+          <Controller
+            control={control}
+            name="toStageCode"
+            render={({ field }) => (
+              <SearchableDropdown<HandoffStageOption>
+                {...aria}
+                options={stageOptions}
+                value={stageOptions.find((s) => s.stageCode === field.value) ?? null}
+                onChange={(stage) => field.onChange(stage.stageCode)}
+                getKey={(stage) => stage.stageCode}
+                // Code alongside the label, not instead of it: the code is what
+                // reaches `ticket_stage_transitions` and what every other
+                // screen shows, so hiding it would make the two hard to line up.
+                getLabel={(stage) =>
+                  stage.displayName === stage.stageCode
+                    ? stage.stageCode
+                    : `${stage.displayName} · ${stage.stageCode}`
+                }
+                getSearchable={(stage) => [stage.stageCode, stage.ownerRole ?? '']}
+                getOptionDisabled={(stage) =>
+                  stage.stageCode === currentStageCode ? 'The ticket is already here' : null
+                }
+                placeholder="Pick the stage this ticket is moving to…"
+                emptyText="No stages available — the workflow templates have not loaded"
+                disabled={handoff.isPending}
+              />
+            )}
+          />
+        )}
       </FormField>
 
       <FormField

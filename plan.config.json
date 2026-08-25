@@ -5,7 +5,6 @@
     "the 09:00 job, `plan watch status` to check the push watcher.",
     "See docs/plan/README.md for how the whole thing works."
   ],
-
   "project": "EduTrack",
   "repo": "debashisedunext/EduTrack",
   "start": "2026-08-03",
@@ -14,14 +13,26 @@
   "task_id": "[A-D]-\\d{3}",
   "title_max": 68,
   "blocked_hint": "See `docs/DEPENDENCIES.md` §5 for what to pick up instead.",
-
+  "phases": [
+    {
+      "key": "P1",
+      "title": "Phase 1 — Ticketing",
+      "_comment": "No `milestones` globs: the first phase is the catch-all, so every existing milestone stays here and adding phase 2 reclassifies nothing."
+    },
+    {
+      "key": "P2",
+      "title": "Phase 2 — Client Onboarding",
+      "milestones": [
+        "OB*"
+      ]
+    }
+  ],
   "artifact": {
     "url": "https://claude.ai/code/artifact/3d96e4c6-7008-45ba-aeb5-01ce1e7e2483",
     "favicon": "📊",
     "model": "haiku",
     "description": "EduTrack master schedule — 222 tasks, 4 streams, status derived from git."
   },
-
   "streams": {
     "A": {
       "title": "Platform & Security",
