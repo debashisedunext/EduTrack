@@ -69,15 +69,23 @@ export function DashboardWidgetBatch({
   // and the generated params want the contract's key enum. Sound because the
   // signature was built from a WidgetKey[] two lines up and widget keys contain
   // no comma, so the round-trip is exact rather than merely plausible.
+  //
+  // The empty case is handled separately: `''.split(',')` is `['']`, not `[]`
+  // — a one-element array holding an empty string, which is not a widget key
+  // and would reach the server as one. Every caller passed a non-empty
+  // literal until the dashboard settings menu made "everything hidden" a
+  // real, reachable state.
   const keyList = React.useMemo(
-    () => keySignature.split(',') as WidgetKey[],
+    () => (keySignature === '' ? [] : (keySignature.split(',') as WidgetKey[])),
     [keySignature],
   )
 
-  const { data, isPending, isError } = useGetDashboardWidgets({
-    keys: keyList,
-    ...params,
-  })
+  const { data, isPending, isError } = useGetDashboardWidgets(
+    { keys: keyList, ...params },
+    // Nothing to ask the server for — firing a request naming zero widgets
+    // would be a round trip whose answer is always an empty list.
+    { query: { enabled: keyList.length > 0 } },
+  )
 
   const value = React.useMemo<BatchValue>(() => {
     const byKey = new Map<string, WidgetPayload>()

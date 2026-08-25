@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 
 import { DashboardDateRange, type DateRange } from './DashboardDateRange'
+import { DashboardWidgetChooserMenu } from './DashboardWidgetChooserMenu'
 import { DashboardWidgets } from './DashboardWidgets'
 import { DrillDownPanel } from './DrillDownPanel'
 import { KpiCard, KpiCardSkeleton } from './KpiCard'
@@ -140,6 +141,10 @@ export function DashboardPage() {
           <Button variant="secondary" onClick={() => refetch()} disabled={isFetching}>
             {isFetching ? 'Refreshing…' : 'Refresh'}
           </Button>
+          {/* Which of the fourteen widgets below render at all — a per-user,
+              per-browser choice, not a filter and not part of the URL state
+              the rest of this header holds. */}
+          <DashboardWidgetChooserMenu />
         </div>
       </header>
 
