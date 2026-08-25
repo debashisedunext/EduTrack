@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import * as React from 'react'
 
 import type { GetDashboardWidgetParams } from '@/api/generated/model'
@@ -87,6 +88,35 @@ export interface WidgetSeries {
   points: WidgetPoint[]
 }
 
+/**
+ * What a frame needs to be draggable, supplied by whoever owns the order.
+ *
+ * The frame draws the controls and knows nothing about what a move means —
+ * `DashboardWidgets` holds the drag state and the store holds the order. That
+ * split is what keeps this component renderable in isolation (Storybook, the
+ * existing tests) by simply not passing the prop.
+ */
+export interface WidgetReorderControls {
+  /** 1-based position among the widgets actually drawn, for the control labels. */
+  position: number
+  total: number
+  /** Undefined at the ends of the list, which is what disables the button. */
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+  onDragStart: () => void
+  onDragEnd: () => void
+  onDropHere: () => void
+  /** The pointer has entered or left this card mid-drag. */
+  onDragOverHere: () => void
+  onDragLeaveHere: () => void
+  /** This frame is the one being dragged. */
+  isDragging: boolean
+  /** Some frame is being dragged, so this one should accept a drop. */
+  isDragActive: boolean
+  /** The pointer is over this card and releasing would drop here. */
+  isDropTarget: boolean
+}
+
 export interface WidgetFrameProps {
   widgetKey: WidgetKey
   title: string
@@ -98,6 +128,8 @@ export interface WidgetFrameProps {
   children: (series: WidgetSeries[]) => React.ReactNode
   /** Spans two columns in the grid — the wide time-series widgets. */
   wide?: boolean
+  /** Omitted where the frame is not arrangeable — Storybook, and every test that predates it. */
+  reorder?: WidgetReorderControls
 }
 
 /** Shared so a skeleton, a notice and a drawing all occupy the same box and nothing reflows. */
@@ -126,6 +158,7 @@ export function WidgetFrame({
   categoryLabel,
   children,
   wide = false,
+  reorder,
 }: WidgetFrameProps) {
   const { data, isPending, isError } = useWidget(widgetKey, params)
 
@@ -135,6 +168,42 @@ export function WidgetFrame({
 
   return (
     <section
+      // `draggable` lives on the grip, not here. A panel this size marked
+      // draggable would swallow ordinary gestures inside it — selecting a figure
+      // to copy, dragging across a chart that shows a tooltip — and the legend's
+      // drill-down links have native drag behaviour of their own that it would
+      // override. The gesture starts on one small control; the whole card is
+      // still what accepts a drop, which is why these handlers are here and
+      // `dragstart` is caught on its way up rather than bound below.
+      onDragStart={(e) => {
+        if (!reorder) return
+        // Firefox starts no drag at all unless something is on the dataTransfer.
+        e.dataTransfer.setData('text/plain', widgetKey)
+        e.dataTransfer.effectAllowed = 'move'
+        // Without this the drag preview is the grip icon alone — a few pixels
+        // that say nothing about what is being moved. Offset so the card sits
+        // under the cursor where it was picked up rather than jumping.
+        const card = e.currentTarget
+        const box = card.getBoundingClientRect()
+        e.dataTransfer.setDragImage(card, e.clientX - box.left, e.clientY - box.top)
+        reorder.onDragStart()
+      }}
+      onDragEnd={() => reorder?.onDragEnd()}
+      onDragOver={(e) => {
+        // Only while one of our own frames is in flight. Without the guard this
+        // card would advertise itself as a drop target for files dragged in from
+        // the desktop, and then silently do nothing with them.
+        if (!reorder?.isDragActive) return
+        e.preventDefault()
+        reorder.onDragOverHere()
+      }}
+      onDragLeave={() => reorder?.onDragLeaveHere()}
+      onDrop={(e) => {
+        if (!reorder?.isDragActive) return
+        e.preventDefault()
+        reorder.onDropHere()
+      }}
+      data-widget-key={widgetKey}
       // `relative` is load-bearing, not cosmetic. The hidden data table below
       // carries `sr-only`, which is `position: absolute` — and an absolutely
       // positioned element resolves against its nearest *positioned* ancestor.
@@ -147,15 +216,27 @@ export function WidgetFrame({
       // well past the end of the app shell into empty space. Positioning the
       // section puts the table back inside the scroller where it belongs.
       className={`relative rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-4
-                  flex flex-col gap-3 ${wide ? 'xl:col-span-2' : ''}`}
+                  flex flex-col gap-3 ${wide ? 'xl:col-span-2' : ''}
+                  ${reorder?.isDragging ? 'opacity-50' : ''}
+                  ${
+                    // Exactly one card is marked at a time — the one the pointer
+                    // is actually over. Ringing every card that *could* take a
+                    // drop marks thirteen of them and tells the reader nothing
+                    // about where releasing would put it.
+                    reorder?.isDropTarget ? 'ring-2 ring-[color:var(--primary)]' : ''
+                  }`}
       aria-labelledby={`widget-${widgetKey}-title`}
     >
-      <h2
-        id={`widget-${widgetKey}-title`}
-        className="text-sm font-semibold text-[color:var(--text-primary)]"
-      >
-        {title}
-      </h2>
+      <div className="flex items-start gap-2">
+        {reorder && <WidgetDragHandle title={title} />}
+        <h2
+          id={`widget-${widgetKey}-title`}
+          className="flex-1 text-sm font-semibold text-[color:var(--text-primary)]"
+        >
+          {title}
+        </h2>
+        {reorder && <WidgetMoveButtons title={title} reorder={reorder} />}
+      </div>
 
       {isPending ? (
         <Skeleton className="w-full" style={{ height: CHART_HEIGHT }} />
@@ -183,6 +264,75 @@ export function WidgetFrame({
         </>
       )}
     </section>
+  )
+}
+
+/**
+ * The pointer affordance, and only that.
+ *
+ * `aria-hidden`, deliberately: HTML5 drag is unreachable by keyboard and
+ * unavailable on touch, so announcing a grip would offer a screen-reader or
+ * tablet user a control they cannot operate. The accessible route is
+ * `WidgetMoveButtons` beside it, which does the same job and is not a lesser
+ * path — it is the one that works everywhere.
+ */
+function WidgetDragHandle({ title }: { title: string }) {
+  return (
+    <span
+      draggable
+      aria-hidden="true"
+      title={`Drag to move ${title}`}
+      className="mt-0.5 cursor-grab select-none text-[color:var(--text-secondary)] active:cursor-grabbing"
+    >
+      <GripVertical className="h-4 w-4" />
+    </span>
+  )
+}
+
+/**
+ * The keyboard path to the same reorder, and the only one on touch.
+ *
+ * Both buttons are always rendered and disabled at the ends rather than removed,
+ * so the control row does not change width as a widget travels up the grid and
+ * the next card does not shift under a pointer aiming at it.
+ *
+ * The labels name the widget and its position because these buttons repeat
+ * fourteen times on one screen: "Move up" alone, read out of context, is
+ * fourteen identical controls.
+ */
+function WidgetMoveButtons({
+  title,
+  reorder,
+}: {
+  title: string
+  reorder: WidgetReorderControls
+}) {
+  const buttonClass =
+    'rounded-control px-1.5 py-0.5 text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-subtle)] ' +
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--primary)] ' +
+    'disabled:cursor-not-allowed disabled:opacity-40'
+
+  return (
+    <span className="flex shrink-0 items-center gap-0.5">
+      <button
+        type="button"
+        className={buttonClass}
+        disabled={!reorder.onMoveUp}
+        aria-label={`Move ${title} earlier (currently ${reorder.position} of ${reorder.total})`}
+        onClick={reorder.onMoveUp}
+      >
+        <ChevronUp className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        className={buttonClass}
+        disabled={!reorder.onMoveDown}
+        aria-label={`Move ${title} later (currently ${reorder.position} of ${reorder.total})`}
+        onClick={reorder.onMoveDown}
+      >
+        <ChevronDown className="h-4 w-4" />
+      </button>
+    </span>
   )
 }
 
