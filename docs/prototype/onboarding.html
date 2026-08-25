@@ -1,0 +1,1263 @@
+<title>EduTrack Client Onboarding</title>
+<style>
+  :root{
+    --bg-app:#F7F8FC; --bg-surface:#FFFFFF; --bg-subtle:#F1F3F9; --border:#E5E8F0;
+    --primary:#4F46E5; --primary-soft:#EEF2FF; --text:#111827; --text-2:#6B7280;
+    --success:#10B981; --success-soft:#ECFDF5; --warning:#F59E0B; --warning-soft:#FFFBEB;
+    --danger:#EF4444; --danger-soft:#FEF2F2; --info:#3B82F6; --info-soft:#EFF6FF;
+    --chart-1:#4F46E5; --chart-2:#06B6D4;
+    --shadow:0 1px 2px rgba(16,24,40,.05); --shadow-lg:0 8px 24px rgba(16,24,40,.10);
+    --r-card:12px; --r-input:8px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg-app);color:var(--text);font:14px/20px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  h1{font-size:24px;line-height:32px;font-weight:600} h2{font-size:20px;line-height:28px;font-weight:600}
+  h3{font-size:16px;line-height:24px;font-weight:600} .cap{font-size:12px;line-height:16px;color:var(--text-2)}
+  .eyebrow{font-size:11px;line-height:16px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
+  a{color:var(--primary)} button{font:inherit;cursor:pointer}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+  input,select,textarea{font:inherit;color:var(--text);background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-input);padding:8px 10px;width:100%}
+  label{display:block;font-size:12px;font-weight:600;color:var(--text-2);margin:0 0 4px}
+  .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text);border-radius:var(--r-input);padding:8px 14px;font-weight:500}
+  .btn:hover{background:var(--bg-subtle)}
+  .btn-p{background:var(--primary);border-color:var(--primary);color:#fff}
+  .btn-p:hover{background:#4338CA}
+  .btn-danger{background:var(--danger-soft);border-color:#FECACA;color:#B91C1C}
+  .btn-ghost{border-color:transparent;background:transparent;color:var(--primary)}
+  .btn-sm{padding:4px 10px;font-size:12px}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+  .card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--shadow);padding:20px}
+  .chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600;white-space:nowrap}
+  .chip-green{background:var(--success-soft);color:#047857}.chip-amber{background:var(--warning-soft);color:#B45309}
+  .chip-red{background:var(--danger-soft);color:#B91C1C}.chip-blue{background:var(--info-soft);color:#1D4ED8}
+  .chip-indigo{background:var(--primary-soft);color:var(--primary)}.chip-grey{background:var(--bg-subtle);color:var(--text-2)}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th{background:var(--bg-subtle);text-align:left;font-size:12px;color:var(--text-2);font-weight:600;padding:8px 12px;white-space:nowrap}
+  td{padding:10px 12px;border-top:1px solid var(--border);vertical-align:top}
+  tr.rowlink{cursor:pointer} tr.rowlink:hover td{background:var(--bg-subtle)}
+  .tblwrap{overflow-x:auto}
+  .grid{display:grid;gap:16px}
+  .avatar{width:26px;height:26px;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
+  /* ---------- login & launcher ---------- */
+  .center-page{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;flex-direction:column;gap:24px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px}
+  .logo-mark{width:34px;height:34px;border-radius:9px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800}
+  .login-card{width:400px;max-width:100%}
+  .demo-users{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .demo-users button{border:1px solid var(--border);background:var(--bg-subtle);border-radius:999px;padding:3px 10px;font-size:12px}
+  .demo-users button:hover{background:var(--primary-soft);color:var(--primary)}
+  .err{background:var(--danger-soft);color:#B91C1C;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:12px}
+  .mod-cards{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+  .mod-card{width:320px;max-width:100%;text-align:left;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--shadow);padding:24px;transition:box-shadow .15s ease-out,transform .15s ease-out}
+  .mod-card:not([disabled]):hover{box-shadow:var(--shadow-lg);transform:translateY(-2px)}
+  .mod-card[disabled]{opacity:.55;cursor:not-allowed}
+  .mod-ic{width:44px;height:44px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:14px}
+  /* ---------- shell ---------- */
+  .shell{display:flex;min-height:100vh}
+  .side{width:230px;flex:none;background:var(--bg-surface);border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow:auto}
+  .side .logo{padding:4px 10px 14px}
+  .nav-btn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;background:none;border-radius:8px;padding:9px 12px;color:var(--text-2);font-weight:500}
+  .nav-btn:hover{background:var(--bg-subtle);color:var(--text)}
+  .nav-btn.on{background:var(--primary-soft);color:var(--primary);font-weight:600}
+  .nav-sec{margin:14px 12px 4px}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .topbar{display:flex;align-items:center;gap:12px;background:var(--bg-surface);border-bottom:1px solid var(--border);padding:10px 24px;position:sticky;top:0;z-index:30}
+  .topbar .sp{flex:1}
+  .content{padding:24px;display:flex;flex-direction:column;gap:20px;max-width:1280px;width:100%;margin:0 auto}
+  .page-head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+  .page-head .sp{flex:1}
+  .bell{position:relative;border:1px solid var(--border);background:var(--bg-surface);border-radius:8px;width:36px;height:36px;display:flex;align-items:center;justify-content:center}
+  .bell .dot{position:absolute;top:6px;right:7px;width:8px;height:8px;border-radius:50%;background:var(--danger);border:2px solid var(--bg-surface)}
+  .notif-pop{position:absolute;right:24px;top:54px;width:380px;max-width:calc(100vw - 32px);background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--shadow-lg);z-index:50;overflow:hidden}
+  .notif-item{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--border);font-size:13px}
+  .notif-item.unread{background:var(--primary-soft)}
+  /* ---------- KPI tiles ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px}
+  .kpi{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--shadow);padding:16px 20px}
+  .kpi .v{font-size:28px;line-height:36px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .kpi .d{font-size:12px;margin-top:2px}
+  /* ---------- charts ---------- */
+  .hbar-row{display:grid;grid-template-columns:190px 1fr 34px;align-items:center;gap:10px;padding:4px 0}
+  .hbar-lbl{font-size:13px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hbar-track{height:18px;display:flex;align-items:center}
+  .hbar{height:14px;border-radius:0 4px 4px 0;background:var(--chart-1);min-width:2px;transition:width .2s ease-out}
+  .hbar-val{font-size:12px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
+  .vbars{display:flex;align-items:flex-end;gap:14px;height:170px;padding:8px 4px 0}
+  .vbar-g{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+  .vbar-stack{display:flex;align-items:flex-end;gap:3px;height:130px}
+  .vbar{width:22px;border-radius:4px 4px 0 0;background:var(--chart-1);min-height:2px}
+  .vbar.c2{background:var(--chart-2)}
+  .vbar-x{font-size:11px;color:var(--text-2);white-space:nowrap}
+  .vbar-v{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--text-2);align-items:center;flex-wrap:wrap}
+  .legend .sw{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:6px;vertical-align:-1px}
+  .tooltip{position:fixed;z-index:99;background:#1F2937;color:#F9FAFB;border-radius:8px;padding:7px 10px;font-size:12px;line-height:17px;pointer-events:none;box-shadow:var(--shadow-lg);max-width:260px;display:none}
+  /* ---------- RAG board ---------- */
+  .rag-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+  .rag-col{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--shadow);overflow:hidden}
+  .rag-col .hd{padding:10px 16px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)}
+  .rag-card{display:block;width:100%;text-align:left;border:0;background:none;padding:12px 16px;border-top:1px solid var(--border);font-size:13px}
+  .rag-card:first-of-type{border-top:0}
+  .rag-card:hover{background:var(--bg-subtle)}
+  /* ---------- ribbon ---------- */
+  .ribbon-wrap{overflow-x:auto;padding:6px 2px 10px}
+  .ribbon{display:flex;align-items:stretch;min-width:max-content}
+  .seg{width:148px;flex:none;border:1px solid var(--border);border-radius:10px;background:var(--bg-surface);padding:10px 12px;text-align:left;cursor:pointer;position:relative;transition:box-shadow .15s ease-out}
+  .seg:hover{box-shadow:var(--shadow-lg)}
+  .seg.sel{outline:2px solid var(--primary);outline-offset:1px}
+  .seg .st{font-size:11px;font-weight:700;display:flex;gap:5px;align-items:center;margin-bottom:4px}
+  .seg .nm{font-size:12.5px;font-weight:600;line-height:16px;min-height:32px}
+  .seg .meta{font-size:11px;color:var(--text-2);margin-top:6px;display:flex;align-items:center;gap:6px}
+  .seg-done{background:var(--success-soft);border-color:#A7F3D0}.seg-done .st{color:#047857}
+  .seg-cur{background:var(--primary-soft);border-color:#C7D2FE}.seg-cur .st{color:var(--primary)}
+  .seg-cur::after{content:"";position:absolute;inset:-5px;border:2px solid #C7D2FE;border-radius:13px;animation:pulse 2s ease-out infinite;pointer-events:none}
+  @keyframes pulse{0%{opacity:.9}70%{opacity:0}100%{opacity:0}}
+  .seg-pend .st{color:#9CA3AF}
+  .seg-wait{background:var(--warning-soft);border-color:#FDE68A}.seg-wait .st{color:#B45309}
+  .seg-block{border-left:4px solid var(--danger)}.seg-block .st{color:#B91C1C}
+  .seg-breach{background:var(--danger-soft);border-color:#FECACA}.seg-breach .st{color:#B91C1C}
+  .conn{width:26px;flex:none;display:flex;align-items:center}
+  .conn i{display:block;width:100%;border-top:2px solid var(--success)}
+  .conn.pend i{border-top-style:dashed;border-color:#D1D5DB}
+  .tatbar{height:4px;border-radius:2px;background:rgba(17,24,39,.08);margin-top:8px;overflow:hidden}
+  .tatbar i{display:block;height:100%;border-radius:2px;background:var(--success)}
+  .tatbar.amber i{background:var(--warning)} .tatbar.red i{background:var(--danger)}
+  /* ---------- misc ---------- */
+  .split{display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start}
+  @media(max-width:980px){.split{grid-template-columns:1fr}}
+  .tl{list-style:none}
+  .tl li{position:relative;padding:0 0 16px 22px;border-left:2px solid var(--border);margin-left:8px}
+  .tl li:last-child{padding-bottom:0}
+  .tl li::before{content:"";position:absolute;left:-7px;top:2px;width:12px;height:12px;border-radius:50%;background:var(--bg-surface);border:3px solid var(--primary)}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .tab{border:0;background:none;padding:9px 14px;font-weight:500;color:var(--text-2);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+  .frow{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:700px){.frow{grid-template-columns:1fr}}
+  .steps-ind{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text-2)}
+  .steps-ind b{color:var(--primary)}
+  .toasts{position:fixed;bottom:20px;right:20px;z-index:200;display:flex;flex-direction:column;gap:8px}
+  .toast{background:#1F2937;color:#F9FAFB;padding:11px 16px;border-radius:10px;box-shadow:var(--shadow-lg);font-size:13px;max-width:360px;animation:rise .2s ease-out}
+  .toast.ok{border-left:4px solid var(--success)} .toast.warn{border-left:4px solid var(--warning)} .toast.bad{border-left:4px solid var(--danger)}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .banner-live{background:var(--success-soft);border:1px solid #A7F3D0;color:#047857;border-radius:var(--r-card);padding:14px 20px;display:flex;gap:10px;align-items:center;font-weight:600}
+  .otp{display:flex;gap:8px;justify-content:center}
+  .otp input{width:44px;height:52px;text-align:center;font-size:22px;font-weight:700}
+  .mask{color:var(--text-2);letter-spacing:.12em}
+  .chip-x{border:0;background:none;color:inherit;cursor:pointer;font-size:11px;padding:0 0 0 6px;line-height:1}
+  .chip-x:hover{color:var(--danger)}
+  .empty{padding:28px;text-align:center;color:var(--text-2)}
+  .empty .big{font-size:26px;margin-bottom:6px}
+  @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+  @media(max-width:860px){.side{display:none}.topbar .m-nav{display:block}}
+  .m-nav{display:none}
+</style>
+
+<div id="app"></div>
+<div class="toasts" id="toasts"></div>
+<div class="tooltip" id="tip" role="tooltip"></div>
+
+<script>
+"use strict";
+/* ============================== DEMO DATA ============================== */
+const TODAY = "20 Aug 2026";
+const USERS = [
+  {id:"u1", name:"Anita Rao",     email:"admin@edunext.io",   role:"OB_ADMIN",   modules:["TICKETING","ONBOARDING"]},
+  {id:"u2", name:"Vikram Mehta",  email:"manager@edunext.io", role:"MANAGER",    modules:["ONBOARDING"]},
+  {id:"u3", name:"Priya Nair",    email:"priya@edunext.io",   role:"STEP_OWNER", modules:["ONBOARDING"]},
+  {id:"u4", name:"Rohan Gupta",   email:"sales@edunext.io",   role:"SALES",      modules:["ONBOARDING","TICKETING"]},
+  {id:"u5", name:"Meera Iyer",    email:"finance@edunext.io", role:"FINANCE",    modules:["ONBOARDING"]},
+  {id:"u6", name:"Suresh Kumar",  email:"viewer@edunext.io",  role:"VIEWER",     modules:["ONBOARDING"]},
+  {id:"u7", name:"Kavya Sharma",  email:"kavya@edunext.io",   role:"STEP_OWNER", modules:["ONBOARDING"]},
+];
+const ROLE_LABEL = {OB_ADMIN:"OB Admin", MANAGER:"Onboarding Manager", STEP_OWNER:"Step Owner", SALES:"Sales", FINANCE:"Finance", VIEWER:"Viewer (Management)"};
+const PASSWORD = "demo123";
+
+const TPL_STEPS = [
+  {name:"Kickoff call",              tat:8,  owner:"u4", signoff:false, docs:[],
+   subs:["Intro call done & teams mapped","Scope re-confirmed with SPOC","Kickoff MoM shared"]},
+  {name:"Requirements confirmation", tat:16, owner:"u3", signoff:true,  docs:["Signed requirement sheet"],
+   subs:["Requirement sheet filled","Custom fields & reports listed","Gaps flagged to product team"]},
+  {name:"Account & environment setup",tat:24,owner:"u7", signoff:false, docs:[],
+   subs:["Tenant provisioned","Admin accounts created","SSO / custom domain configured"]},
+  {name:"Data migration",            tat:40, owner:"u7", signoff:false, docs:["Migration source file","Validation report"],
+   subs:["Source data received","Validation errors resolved","Dry-run migration verified","Client confirmed sample records"]},
+  {name:"Configuration & branding",  tat:24, owner:"u3", signoff:false, docs:[],
+   subs:["Logo & colours applied","Notice / report templates set","Roles & permissions configured"]},
+  {name:"Admin & user training",     tat:16, owner:"u3", signoff:false, docs:["Attendance sheet"],
+   subs:["Admin training conducted","End-user training conducted","Training material shared"]},
+  {name:"UAT & issue closure",       tat:24, owner:"u7", signoff:true,  docs:[],
+   subs:["UAT scenarios executed","All logged issues closed","UAT report shared"]},
+  {name:"Go-live sign-off",          tat:8,  owner:"u2", signoff:true,  docs:[],
+   subs:["Go-live checklist reviewed","Support handover completed"]},
+];
+const cpSteps = arr => arr.map(s=>({...s, docs:[...s.docs], subs:[...s.subs]}));
+let TEMPLATES = [
+  {id:"t1", name:"Standard SaaS Onboarding", version:3, steps: cpSteps(TPL_STEPS), active:true},
+  {id:"t2", name:"Enterprise (with data migration audit)", version:1, steps: cpSteps(TPL_STEPS), active:false},
+];
+
+// step statuses: DONE | CURRENT | WAITING | BLOCKED | PENDING
+function mkSteps(currentIdx, opts={}){
+  return TPL_STEPS.map((t,i)=>{
+    const st = {name:t.name, tat:t.tat, owner:t.owner, signoff:t.signoff, docsReq:[...t.docs],
+      subs: t.subs.map((n,k)=>({name:n, val: i<currentIdx?true : (i===currentIdx && k===0 ? true : null), remark:""})),
+      docs:[], comms:[], status: i<currentIdx?"DONE": i===currentIdx?"CURRENT":"PENDING",
+      pct: i<currentIdx?100: i===currentIdx?(opts.pct??30):0,
+      signoffState:"NONE", due: i===currentIdx?(opts.due||"21 Aug, 15:00"):"", blockReason:"", completedOn: i<currentIdx? "": ""};
+    if(i<currentIdx){ st.completedOn = "earlier"; st.docs=[...t.docs]; }
+    if(i===currentIdx && opts.status) st.status = opts.status;
+    if(i===currentIdx && opts.block)  st.blockReason = opts.block;
+    if(i===currentIdx && opts.signoffState) st.signoffState = opts.signoffState;
+    return st;
+  });
+}
+function comm(when, type, dir, by, text){ return {when, type, dir, by, text}; }
+
+let CLIENTS = [
+  {id:"c1", name:"GreenValley International School", pan:"AAGCG1204F", city:"Pune", addr:"14 Ridge Rd, Aundh, Pune 411007",
+   desc:"K-12 chain, 3 campuses, moving off spreadsheets.", sales:"Rohan Gupta", licenseType:"Enterprise · Annual", payMode:"Bank transfer",
+   onboardDate:"12 Jun 2026", status:"LIVE", liveAt:"07 Aug 2026", createdBy:"u4",
+   spocs:[{name:"Deepa Kulkarni", email:"deepa@greenvalley.edu.in", phone:"+91 98220 11223", primary:true}],
+   apps:[{name:"EduTrack Core", lic:"Enterprise", units:120},{name:"Parent Portal", lic:"Add-on", units:2400}],
+   payments:[{kind:"Advance", amount:400000, mode:"Bank transfer", due:"12 Jun 2026", recv:"12 Jun 2026", ref:"INV-2026-0341"},
+             {kind:"Balance", amount:400000, mode:"Bank transfer", due:"05 Aug 2026", recv:"06 Aug 2026", ref:"INV-2026-0402"}],
+   requirements:"Migrate 6 yrs of student records; SSO with Google Workspace; Marathi + English notices.",
+   attachments:["PO_GreenValley.pdf","MSA_signed.pdf","Migration_mapping.xlsx"],
+   steps: mkSteps(8), csat:5},
+  {id:"c2", name:"Sunrise EdTech Pvt Ltd", pan:"AASCS8821K", city:"Bengaluru", addr:"77 Residency Rd, Bengaluru 560025",
+   desc:"Test-prep startup, 40 counsellors.", sales:"Rohan Gupta", licenseType:"Professional · Annual", payMode:"UPI / NEFT",
+   onboardDate:"28 Jul 2026", status:"ONBOARDING", liveAt:"", createdBy:"u4",
+   spocs:[{name:"Arjun Shetty", email:"arjun@sunrise-ed.com", phone:"+91 98450 77812", primary:true}],
+   apps:[{name:"EduTrack Core", lic:"Professional", units:40}],
+   payments:[{kind:"Advance", amount:150000, mode:"NEFT", due:"28 Jul 2026", recv:"29 Jul 2026", ref:"INV-2026-0398"},
+             {kind:"Balance", amount:150000, mode:"NEFT", due:"15 Sep 2026", recv:"", ref:""}],
+   requirements:"Bulk import of 12k leads; WhatsApp counselling follow-ups.",
+   attachments:["PO_Sunrise.pdf"],
+   steps: mkSteps(3,{pct:132, due:"18 Aug, 11:00 (missed)"}) },
+  {id:"c3", name:"Horizon Academy", pan:"AAHCH3310Q", city:"Hyderabad", addr:"5-9-22 Banjara Hills, Hyderabad 500034",
+   desc:"CBSE senior secondary, 2,100 students.", sales:"Anita Rao", licenseType:"Professional · Annual", payMode:"Cheque",
+   onboardDate:"03 Aug 2026", status:"ONBOARDING", liveAt:"", createdBy:"u1",
+   spocs:[{name:"Fatima Begum", email:"fatima@horizon.ac.in", phone:"+91 90000 44556", primary:true}],
+   apps:[{name:"EduTrack Core", lic:"Professional", units:60},{name:"Exam Module", lic:"Add-on", units:1}],
+   payments:[{kind:"Advance", amount:220000, mode:"Cheque", due:"03 Aug 2026", recv:"04 Aug 2026", ref:"INV-2026-0407"},
+             {kind:"Balance", amount:180000, mode:"Cheque", due:"30 Sep 2026", recv:"", ref:""}],
+   requirements:"Exam-hall seating plans; report-card templates in Telugu.",
+   attachments:["PO_Horizon.pdf","Report_card_samples.zip"],
+   steps: mkSteps(5,{pct:78, due:"Today, 18:30"}) },
+  {id:"c4", name:"Bluebell Public School", pan:"AABCB9022L", city:"Jaipur", addr:"C-31 Malviya Nagar, Jaipur 302017",
+   desc:"Single campus, first ERP purchase.", sales:"Rohan Gupta", licenseType:"Starter · Annual", payMode:"Bank transfer",
+   onboardDate:"10 Aug 2026", status:"ONBOARDING", liveAt:"", createdBy:"u4",
+   spocs:[{name:"Nikhil Saxena", email:"nikhil@bluebell.edu.in", phone:"+91 94140 22110", primary:true}],
+   apps:[{name:"EduTrack Core", lic:"Starter", units:15}],
+   payments:[{kind:"Advance", amount:60000, mode:"Bank transfer", due:"10 Aug 2026", recv:"10 Aug 2026", ref:"INV-2026-0415"},
+             {kind:"Balance", amount:60000, mode:"Bank transfer", due:"10 Oct 2026", recv:"", ref:""}],
+   requirements:"Fee reminders on WhatsApp; Hindi UI labels where available.",
+   attachments:["PO_Bluebell.pdf"],
+   steps: mkSteps(1,{status:"WAITING", pct:40, due:"Paused — waiting on client"}) },
+  {id:"c5", name:"Nalanda Group of Institutions", pan:"AANCN5540D", city:"Patna", addr:"Boring Rd, Patna 800001",
+   desc:"3 colleges + 2 schools under one trust.", sales:"Anita Rao", licenseType:"Enterprise · 3-year", payMode:"Bank transfer",
+   onboardDate:"12 Aug 2026", status:"ONBOARDING", liveAt:"", createdBy:"u1",
+   spocs:[{name:"Ritu Verma", email:"ritu@nalandagroup.org", phone:"+91 98350 66778", primary:true},
+          {name:"A. K. Singh", email:"aksingh@nalandagroup.org", phone:"+91 94310 11224", primary:false}],
+   apps:[{name:"EduTrack Core", lic:"Enterprise", units:200},{name:"Parent Portal", lic:"Add-on", units:9000},{name:"Exam Module", lic:"Add-on", units:1}],
+   payments:[{kind:"Advance", amount:900000, mode:"Bank transfer", due:"12 Aug 2026", recv:"13 Aug 2026", ref:"INV-2026-0419"},
+             {kind:"Balance", amount:1500000, mode:"Bank transfer", due:"12 Nov 2026", recv:"", ref:""}],
+   requirements:"Phased rollout college-by-college; UGC report formats.",
+   attachments:["MSA_Nalanda.pdf","Rollout_plan_v2.pptx"],
+   steps: mkSteps(2,{pct:35, due:"22 Aug, 12:00"}) },
+  {id:"c6", name:"Cambridge Heights School", pan:"AACCC7714M", city:"Mumbai", addr:"Linking Rd, Bandra W, Mumbai 400050",
+   desc:"IB curriculum, high-touch onboarding.", sales:"Rohan Gupta", licenseType:"Professional · Annual", payMode:"Bank transfer",
+   onboardDate:"20 Jul 2026", status:"ONBOARDING", liveAt:"", createdBy:"u4",
+   spocs:[{name:"Sana Qureshi", email:"sana@cambridgeheights.in", phone:"+91 98200 33445", primary:true}],
+   apps:[{name:"EduTrack Core", lic:"Professional", units:85}],
+   payments:[{kind:"Advance", amount:250000, mode:"Bank transfer", due:"20 Jul 2026", recv:"20 Jul 2026", ref:"INV-2026-0389"},
+             {kind:"Balance", amount:250000, mode:"Bank transfer", due:"20 Sep 2026", recv:"", ref:""}],
+   requirements:"IB grade descriptors; UAT with 8 teachers before go-live.",
+   attachments:["PO_CambridgeHeights.pdf","UAT_checklist.xlsx"],
+   steps: mkSteps(6,{pct:55, due:"22 Aug, 17:00", signoffState:"REQUESTED"}) },
+  {id:"c7", name:"Little Scholars Preschool", pan:"AALCL2201B", city:"Kochi", addr:"MG Rd, Kochi 682016",
+   desc:"Preschool chain, 6 centres.", sales:"Rohan Gupta", licenseType:"Starter · Annual", payMode:"UPI",
+   onboardDate:"19 Aug 2026", status:"ONBOARDING", liveAt:"", createdBy:"u4",
+   spocs:[{name:"Divya Menon", email:"divya@littlescholars.in", phone:"+91 98470 88990", primary:true}],
+   apps:[{name:"EduTrack Core", lic:"Starter", units:12}],
+   payments:[{kind:"Advance", amount:45000, mode:"UPI", due:"19 Aug 2026", recv:"19 Aug 2026", ref:"INV-2026-0428"},
+             {kind:"Balance", amount:45000, mode:"UPI", due:"19 Oct 2026", recv:"", ref:""}],
+   requirements:"Photo-sharing consent workflow for parents.",
+   attachments:[],
+   steps: mkSteps(0,{pct:20, due:"Today, 17:00"}) },
+  {id:"c8", name:"Trinity College of Commerce", pan:"AATCT6635H", city:"Chennai", addr:"Anna Salai, Chennai 600002",
+   desc:"UG college, 4,000 students.", sales:"Anita Rao", licenseType:"Professional · Annual", payMode:"Bank transfer",
+   onboardDate:"25 Jul 2026", status:"ONBOARDING", liveAt:"", createdBy:"u1",
+   spocs:[{name:"George Thomas", email:"george@trinitycc.ac.in", phone:"+91 98410 55667", primary:true}],
+   apps:[{name:"EduTrack Core", lic:"Professional", units:70},{name:"Exam Module", lic:"Add-on", units:1}],
+   payments:[{kind:"Advance", amount:200000, mode:"Bank transfer", due:"25 Jul 2026", recv:"27 Jul 2026", ref:"INV-2026-0393"},
+             {kind:"Balance", amount:200000, mode:"Bank transfer", due:"25 Sep 2026", recv:"", ref:""}],
+   requirements:"Semester exam schedules; college branding on portal.",
+   attachments:["PO_Trinity.pdf","Brand_guidelines.pdf"],
+   steps: mkSteps(4,{status:"BLOCKED", pct:90, block:"Branding assets pending from client's design vendor", due:"21 Aug, 10:00"}) },
+];
+// seed a few communications
+CLIENTS[1].steps[3].comms = [
+  comm("16 Aug, 10:12","CALL","OUT","Kavya Sharma","Walked Arjun through the lead-import template; he will resend the corrected CSV."),
+  comm("18 Aug, 09:30","EMAIL","OUT","Kavya Sharma","Reminder sent — migration file still has 214 rows failing phone validation."),
+  comm("19 Aug, 16:05","WHATSAPP","OUT","System","TAT breach alert delivered to owner and manager.")];
+CLIENTS[5].steps[6].comms = [
+  comm("18 Aug, 14:20","MEETING","OUT","Kavya Sharma","UAT round 2 with 8 teachers — 3 minor issues logged, all fixed."),
+  comm("19 Aug, 11:00","EMAIL","OUT","System","Sign-off link sent to Sana Qureshi (email + WhatsApp).")];
+CLIENTS[3].steps[1].comms = [
+  comm("17 Aug, 12:40","CALL","OUT","Priya Nair","Requirement sheet shared; Nikhil needs trustee approval before confirming."),
+  comm("17 Aug, 12:45","NOTE","INT","Priya Nair","Clock paused — waiting on client for signed requirement sheet.")];
+// seed sub-category answers on in-flight steps
+Object.assign(CLIENTS[1].steps[3].subs[1], {val:false, remark:"214 rows failing phone validation — corrected CSV awaited from client"});
+CLIENTS[1].steps[3].subs[2].val = null;
+Object.assign(CLIENTS[7].steps[4].subs[0], {val:false, remark:"Awaiting final brand assets from client's design vendor"});
+CLIENTS[7].steps[4].subs[2].val = true;
+CLIENTS[5].steps[6].subs.forEach(sb=>sb.val=true);
+CLIENTS[2].steps[5].subs[1].val = null;
+CLIENTS[7].steps[4].comms = [
+  comm("14 Aug, 15:10","EMAIL","IN","George Thomas","Design vendor is travelling; logo files expected by 22 Aug."),
+  comm("14 Aug, 15:20","NOTE","INT","Priya Nair","Blocked — cannot theme the portal without final brand assets.")];
+
+let NOTIFS = [
+  {id:1, when:"19 Aug, 16:05", icon:"⛔", text:"TAT breached — Data migration for Sunrise EdTech (owner: Kavya Sharma). Escalated to L2.", unread:true, client:"c2"},
+  {id:2, when:"19 Aug, 11:00", icon:"✍️", text:"Sign-off requested from Cambridge Heights (UAT & issue closure).", unread:true, client:"c6"},
+  {id:3, when:"19 Aug, 09:15", icon:"🟠", text:"Amber warning — Admin & user training for Horizon Academy is at 78% of TAT.", unread:true, client:"c3"},
+  {id:4, when:"18 Aug, 17:30", icon:"⏸️", text:"Clock paused — Bluebell Public School waiting on client for requirement sheet.", unread:false, client:"c4"},
+  {id:5, when:"07 Aug, 12:02", icon:"🟢", text:"GreenValley International School is LIVE. Time to live: 24 working days.", unread:false, client:"c1"},
+];
+let MSG_TEMPLATES = [
+  {name:"Step assigned", channel:"EMAIL", status:"Approved", body:"Hi {{owner}}, the step “{{step}}” for {{client}} is now assigned to you. TAT: {{tat}} working hours (due {{due}})."},
+  {name:"TAT breach — immediate", channel:"WHATSAPP", status:"Approved", body:"⚠️ EduTrack: step “{{step}}” for {{client}} has BREACHED its TAT (due {{due}}). Please act now or the escalation matrix will engage."},
+  {name:"Amber warning (75%)", channel:"WHATSAPP", status:"Approved", body:"⏳ EduTrack: “{{step}}” for {{client}} has used {{pct}}% of its TAT. Due {{due}}."},
+  {name:"Sign-off request (client)", channel:"WHATSAPP", status:"Pending approval", body:"Hello {{spoc}}, {{org}} requests your sign-off on “{{step}}”. Review and accept here: {{link}} (OTP will be sent to this number)."},
+  {name:"Client live", channel:"EMAIL", status:"Approved", body:"🎉 {{client}} is fully onboarded and LIVE as of {{date}}. Onboarding summary attached."},
+];
+let SETTINGS = {amber:75, cadence:"Every 5 minutes",
+  esc:[{lvl:"L1", who:"Step owner + backup", after:"At breach"},
+       {lvl:"L2", who:"Onboarding Manager", after:"4 working hrs unacknowledged"},
+       {lvl:"L3", who:"OB Admin + Sales owner", after:"8 working hrs unacknowledged"}]};
+
+/* ============================== STATE ============================== */
+let S = {user:null, view:"login", params:{}, loginErr:"", notifOpen:false,
+  filters:{q:"", rag:"ALL", status:"ALL"}, reportTab:"funnel", wizard:null, signoff:null, tplEdit:null};
+
+/* ============================== HELPERS ============================== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const uById = id => USERS.find(u=>u.id===id) || {name:"Unassigned"};
+const initials = n => n.split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase();
+const inr = n => "₹" + Number(n).toLocaleString("en-IN");
+const canSeeMoney = () => S.user && ["FINANCE","OB_ADMIN","MANAGER"].includes(S.user.role);
+const money = n => canSeeMoney() ? inr(n) : '<span class="mask" title="Visible to Finance, Manager and OB Admin only">₹ •••••</span>';
+const maskPan = p => canSeeMoney() ? p : p.slice(0,5)+"••••"+p.slice(9);
+function currentIdx(c){ const i = c.steps.findIndex(s=>s.status!=="DONE"); return i===-1 ? c.steps.length : i; }
+function stepRag(s){
+  if(s.status==="DONE") return "GREEN";
+  if(s.status==="BLOCKED" || s.pct>=100) return "RED";
+  if(s.status==="WAITING") return "PAUSED";
+  if(s.pct>=SETTINGS.amber) return "AMBER";
+  return "GREEN";
+}
+function clientRag(c){
+  if(c.status==="LIVE") return "LIVE";
+  const rags = c.steps.map(stepRag);
+  if(rags.includes("RED")) return "RED";
+  if(rags.includes("AMBER")) return "AMBER";
+  return "GREEN";
+}
+const RAG_CHIP = {
+  LIVE:'<span class="chip chip-green">● Live</span>',
+  GREEN:'<span class="chip chip-green">✓ On track</span>',
+  AMBER:'<span class="chip chip-amber">⚠ At risk</span>',
+  RED:'<span class="chip chip-red">⚠ Breached / blocked</span>',
+  PAUSED:'<span class="chip chip-grey">⏸ Waiting on client</span>',
+};
+function toast(msg, kind="ok"){
+  const t = document.createElement("div"); t.className = "toast "+kind; t.textContent = msg;
+  $("toasts").appendChild(t); setTimeout(()=>t.remove(), 4200);
+}
+function go(view, params={}){ S.view=view; S.params=params; S.notifOpen=false; render(); window.scrollTo(0,0); }
+function canEditStep(c, i){
+  const s = c.steps[i];
+  return S.user && (S.user.id===s.owner || ["OB_ADMIN","MANAGER"].includes(S.user.role));
+}
+function pushNotif(icon, text, clientId){
+  NOTIFS.unshift({id:Date.now(), when:"Today", icon, text, unread:true, client:clientId});
+}
+/* tooltip */
+function tipOn(ev, html){ const t=$("tip"); t.innerHTML=html; t.style.display="block"; tipMove(ev); }
+function tipMove(ev){ const t=$("tip"); const x=Math.min(ev.clientX+14, innerWidth-t.offsetWidth-10); t.style.left=x+"px"; t.style.top=(ev.clientY+14)+"px"; }
+function tipOff(){ $("tip").style.display="none"; }
+
+/* ============================== ACTIONS ============================== */
+const A = {};
+A.fill = (email)=>{ $("f-email").value=email; $("f-pass").value=PASSWORD; $("f-email").focus(); };
+A.login = ()=>{
+  const em = $("f-email").value.trim().toLowerCase(), pw = $("f-pass").value;
+  const u = USERS.find(x=>x.email===em);
+  if(!u || pw!==PASSWORD){ S.loginErr = "Invalid email or password. Use a demo account below with password demo123."; render(); return; }
+  S.user = u; S.loginErr = "";
+  go(u.modules.length>1 ? "launcher" : (u.modules[0]==="ONBOARDING" ? "dash" : "ticketing"));
+  toast("Welcome back, "+u.name.split(" ")[0]);
+};
+A.logout = ()=>{ S.user=null; go("login"); };
+A.enterModule = m=>{
+  if(!S.user.modules.includes(m)){ toast("You are not entitled to this module.", "bad"); return; }
+  go(m==="ONBOARDING" ? "dash" : "ticketing");
+};
+A.nav = v => go(v);
+A.toggleNotifs = ()=>{ S.notifOpen=!S.notifOpen; render(); };
+A.readNotifs = ()=>{ NOTIFS.forEach(n=>n.unread=false); render(); };
+A.openNotif = id=>{ const n=NOTIFS.find(x=>x.id===id); if(n){ n.unread=false; go("client",{id:n.client}); } };
+A.filter = ()=>{ S.filters.q=$("fl-q").value; S.filters.rag=$("fl-rag").value; S.filters.status=$("fl-st").value; render(); const q=$("fl-q"); q.focus(); q.setSelectionRange(q.value.length,q.value.length); };
+A.reportTab = t=>{ S.reportTab=t; render(); };
+A.exportStub = what=>toast(what+" export queued — XLSX download is stubbed in this mockup.");
+
+/* ---- wizard ---- */
+A.newClient = ()=>{
+  S.wizard = {step:1, data:{name:"", pan:"", city:"", addr:"", desc:"", sales:S.user.name, licenseType:"Professional · Annual",
+    payMode:"Bank transfer", onboardDate:TODAY, spocs:[{name:"",email:"",phone:"",primary:true}],
+    apps:[{name:"EduTrack Core", lic:"Professional", units:25}], adv:"", bal:"", advDue:TODAY, balDue:"20 Oct 2026",
+    requirements:"", attachments:[], template:"t1"}, err:""};
+  go("wizard");
+};
+function wzCollect(){
+  const d = S.wizard.data, st = S.wizard.step;
+  if(st===1){ ["name","pan","city","addr","desc","sales"].forEach(k=>{ const el=$("wz-"+k); if(el) d[k]=el.value; });
+    d.licenseType=$("wz-lic").value; d.onboardDate=$("wz-date").value; }
+  if(st===2){ d.spocs = d.spocs.map((s,i)=>({name:$("sp-n"+i).value, email:$("sp-e"+i).value, phone:$("sp-p"+i).value, primary:i===0})); }
+  if(st===3){ d.payMode=$("wz-paymode").value; d.adv=$("wz-adv").value; d.bal=$("wz-bal").value; d.advDue=$("wz-advdue").value; d.balDue=$("wz-baldue").value;
+    d.apps = d.apps.map((a,i)=>({name:$("ap-n"+i).value, lic:$("ap-l"+i).value, units:+$("ap-u"+i).value||1})); }
+  if(st===4){ d.requirements=$("wz-req").value; d.template=$("wz-tpl").value; }
+}
+A.wzNext = ()=>{
+  wzCollect();
+  const d=S.wizard.data, st=S.wizard.step;
+  if(st===1){
+    if(!d.name.trim()){ S.wizard.err="Client name is required."; return render(); }
+    if(!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(d.pan.trim().toUpperCase())){ S.wizard.err="PAN must look like ABCDE1234F."; return render(); }
+    d.pan=d.pan.trim().toUpperCase();
+    if(CLIENTS.some(c=>c.pan===d.pan)){ S.wizard.err="Duplicate PAN — "+CLIENTS.find(c=>c.pan===d.pan).name+" already exists with this PAN."; return render(); }
+  }
+  if(st===2 && !(d.spocs[0].name.trim() && d.spocs[0].email.trim())){ S.wizard.err="At least one SPOC with name and email is required."; return render(); }
+  if(st===3 && (!d.adv || isNaN(+d.adv))){ S.wizard.err="Advance amount is required (numbers only)."; return render(); }
+  S.wizard.err=""; S.wizard.step++; render();
+};
+A.wzBack = ()=>{ wzCollect(); S.wizard.err=""; S.wizard.step--; render(); };
+A.wzSpocAdd = ()=>{ wzCollect(); S.wizard.data.spocs.push({name:"",email:"",phone:"",primary:false}); render(); };
+A.wzAppAdd = ()=>{ wzCollect(); S.wizard.data.apps.push({name:"Parent Portal", lic:"Add-on", units:1}); render(); };
+A.wzAttach = ()=>{ const el=$("wz-file"); if(el.value.trim()){ wzCollect(); S.wizard.data.attachments.push(el.value.trim()); render(); } };
+A.wzFinish = ()=>{
+  wzCollect();
+  const d=S.wizard.data;
+  if(!d.requirements.trim()){ S.wizard.err="Capture at least one line of client requirements."; return render(); }
+  const tpl = TEMPLATES.find(t=>t.id===d.template);
+  const id = "c"+(CLIENTS.length+1)+"_"+Math.floor(1000+CLIENTS.length*7);
+  const steps = tpl.steps.map((t,i)=>({name:t.name, tat:t.tat, owner:t.owner, signoff:t.signoff, docsReq:[...t.docs],
+    subs:t.subs.map(n=>({name:n, val:null, remark:""})),
+    docs:[], comms:[], status:i===0?"CURRENT":"PENDING", pct:i===0?5:0, signoffState:"NONE",
+    due:i===0?"21 Aug, 12:00":"", blockReason:"", completedOn:""}));
+  CLIENTS.unshift({id, name:d.name, pan:d.pan, city:d.city, addr:d.addr, desc:d.desc, sales:d.sales,
+    licenseType:d.licenseType, payMode:d.payMode, onboardDate:d.onboardDate||TODAY, status:"ONBOARDING", liveAt:"", createdBy:S.user.id,
+    spocs:d.spocs.filter(s=>s.name.trim()), apps:d.apps,
+    payments:[{kind:"Advance", amount:+d.adv, mode:d.payMode, due:d.advDue, recv:"", ref:""},
+              ...(d.bal? [{kind:"Balance", amount:+d.bal, mode:d.payMode, due:d.balDue, recv:"", ref:""}]:[])],
+    requirements:d.requirements, attachments:[...d.attachments], steps});
+  pushNotif("🆕", d.name+" boarded — journey “"+tpl.name+" v"+tpl.version+"” started. Kickoff call assigned to "+uById(steps[0].owner).name+".", id);
+  toast(d.name+" created — journey instantiated from "+tpl.name+" v"+tpl.version+".");
+  S.wizard=null; go("client",{id});
+};
+
+/* ---- step actions ---- */
+function activateNext(c){
+  const i = c.steps.findIndex(s=>s.status!=="DONE");
+  if(i===-1){
+    c.status="LIVE"; c.liveAt=TODAY;
+    pushNotif("🎉", c.name+" is fully onboarded and LIVE. CSAT survey sent to SPOC.", c.id);
+    toast(c.name+" is LIVE — all steps complete and signed off. 🎉");
+  } else {
+    c.steps[i].status="CURRENT"; c.steps[i].pct=5; c.steps[i].due="Within "+c.steps[i].tat+" working hrs";
+    pushNotif("▶️", "“"+c.steps[i].name+"” activated for "+c.name+" — assigned to "+uById(c.steps[i].owner).name+". Email + WhatsApp sent.", c.id);
+  }
+}
+A.selStep = (cid,i)=>go("client",{id:cid, step:i});
+A.stStart = (cid,i)=>{ const c=CLIENTS.find(x=>x.id===cid); c.steps[i].status="CURRENT"; c.steps[i].pct=Math.max(5,c.steps[i].pct); toast("Step started. TAT clock running (working-calendar aware)."); render(); };
+A.stWait = (cid,i)=>{ const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i]; s.status="WAITING";
+  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Clock paused — waiting on client.")); toast("Clock paused — this wait is attributed to the client, not the owner.","warn"); render(); };
+A.stResume = (cid,i)=>{ const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i]; s.status="CURRENT"; s.blockReason="";
+  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Clock resumed.")); toast("Clock resumed — due date recomputed."); render(); };
+A.stBlock = (cid,i)=>{ const el=$("blk-reason"); if(!el.value.trim()){ toast("A block reason is mandatory — it powers the ‘where is it stuck’ report.","bad"); return; }
+  const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i]; s.status="BLOCKED"; s.blockReason=el.value.trim();
+  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Blocked — "+s.blockReason));
+  pushNotif("⛔","“"+s.name+"” for "+c.name+" marked blocked: "+s.blockReason, cid);
+  toast("Step blocked. Manager notified.","warn"); render(); };
+function subsGate(s){
+  const un = s.subs.filter(x=>x.val===null);
+  if(un.length) return "Answer all sub-categories first — "+un.length+" still unanswered (e.g. “"+un[0].name+"”).";
+  const nf = s.subs.find(x=>x.val===false && !x.remark.trim());
+  if(nf) return "A False answer needs a remark — add one on “"+nf.name+"”.";
+  return "";
+}
+A.subSet = (cid,i,j,val)=>{ const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i]; const sb=s.subs[j];
+  sb.val=val;
+  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Sub-category “"+sb.name+"” marked "+(val?"True":"False")+(sb.remark?" — "+sb.remark:"")+"."));
+  if(val===false) toast("Marked False — add a remark; the step can't complete without one.","warn");
+  render(); };
+A.subRemark = (cid,i,j,v)=>{ const c=CLIENTS.find(x=>x.id===cid); c.steps[i].subs[j].remark=v.trim(); render(); };
+A.stComplete = (cid,i)=>{
+  const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
+  const g = subsGate(s); if(g){ toast("Cannot complete — "+g,"bad"); return; }
+  if(s.docsReq.length && s.docs.length < s.docsReq.length){ toast("Cannot complete — required documents missing: "+s.docsReq.filter(d=>!s.docs.includes(d)).join(", "),"bad"); return; }
+  if(s.signoff && s.signoffState!=="ACCEPTED"){ toast("This step needs client sign-off before it can complete — use ‘Request client sign-off’.","bad"); return; }
+  s.status="DONE"; s.pct=100; s.completedOn=TODAY;
+  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Step completed."));
+  activateNext(c); render();
+};
+A.stAttach = (cid,i)=>{ const el=$("doc-name"); if(!el.value.trim()) return;
+  const c=CLIENTS.find(x=>x.id===cid); c.steps[i].docs.push(el.value.trim()); c.attachments.push(el.value.trim());
+  toast("Attached “"+el.value.trim()+"” (AV-scanned, served via signed URL in the real build)."); render(); };
+A.stComm = (cid,i)=>{
+  const type=$("cm-type").value, dir=$("cm-dir").value, txt=$("cm-text").value;
+  if(!txt.trim()){ toast("Write what was communicated.","bad"); return; }
+  const c=CLIENTS.find(x=>x.id===cid);
+  c.steps[i].comms.push(comm("Today",type,dir,S.user.name,txt.trim()));
+  toast("Communication logged (append-only)."); render();
+};
+A.stReassign = (cid,i)=>{ const c=CLIENTS.find(x=>x.id===cid); const nu=$("re-owner").value; const s=c.steps[i];
+  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Reassigned from "+uById(s.owner).name+" to "+uById(nu).name+"."));
+  s.owner=nu; pushNotif("👤","“"+s.name+"” for "+c.name+" reassigned to "+uById(nu).name+".", cid);
+  toast("Step reassigned — new owner notified by email + WhatsApp."); render(); };
+A.signoffReq = (cid,i)=>{
+  const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
+  const g = subsGate(s); if(g){ toast("Finish the checklist before asking the client to sign off — "+g,"bad"); return; }
+  s.signoffState="REQUESTED";
+  s.comms.push(comm("Today","EMAIL","OUT","System","Sign-off link sent to "+c.spocs[0].name+" (email + WhatsApp). Single-use token, OTP-protected."));
+  pushNotif("✉️","Sign-off requested from "+c.name+" for “"+s.name+"”.", cid);
+  toast("Sign-off link sent to "+c.spocs[0].name+"."); render();
+};
+A.signoffOpen = (cid,i)=>{ S.signoff={cid, i, otp:"", verified:false, err:""}; go("signoff"); };
+A.otpVerify = ()=>{
+  const digits = [...document.querySelectorAll(".otp input")].map(x=>x.value).join("");
+  if(digits==="123456"){ S.signoff.verified=true; S.signoff.err=""; }
+  else S.signoff.err="Incorrect OTP. (Demo hint: 123456)";
+  render();
+};
+A.signoffAccept = ()=>{
+  const {cid,i}=S.signoff; const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
+  s.signoffState="ACCEPTED"; s.status="DONE"; s.pct=100; s.completedOn=TODAY;
+  s.comms.push(comm("Today","NOTE","INT","System","Client sign-off ACCEPTED by "+c.spocs[0].name+" (OTP verified, IP 49.37.112.8). Acceptance PDF archived."));
+  pushNotif("✅", c.spocs[0].name+" accepted sign-off on “"+s.name+"” for "+c.name+".", cid);
+  activateNext(c);
+  S.signoff=null; go("client",{id:cid});
+};
+A.signoffObject = ()=>{
+  const reason=$("so-obj").value.trim();
+  if(!reason){ S.signoff.err="Please describe the objection."; return render(); }
+  const {cid,i}=S.signoff; const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
+  s.signoffState="OBJECTION"; s.status="CURRENT";
+  s.comms.push(comm("Today","NOTE","IN",c.spocs[0].name,"OBJECTION raised: "+reason));
+  pushNotif("⚠️", c.spocs[0].name+" raised an objection on “"+s.name+"”: "+reason, cid);
+  S.signoff=null; go("client",{id:cid, step:i});
+  toast("Objection recorded — step returned to In progress, owner notified.","warn");
+};
+
+/* ---- template designer ---- */
+A.tplEdit = id=>{ const t=TEMPLATES.find(x=>x.id===id); S.tplEdit={id, name:t.name, version:t.version, steps:cpSteps(t.steps)}; go("tplEdit"); };
+function tplCollect(){ S.tplEdit.steps.forEach((s,i)=>{ s.name=$("ts-n"+i).value; s.tat=+$("ts-t"+i).value||1; s.owner=$("ts-o"+i).value; s.signoff=$("ts-s"+i).checked; }); }
+A.tplMove = (i,d)=>{ tplCollect(); const st=S.tplEdit.steps; const j=i+d; if(j<0||j>=st.length) return; [st[i],st[j]]=[st[j],st[i]]; render(); };
+A.tplDel = i=>{ tplCollect(); S.tplEdit.steps.splice(i,1); render(); };
+A.tplAdd = ()=>{ tplCollect(); S.tplEdit.steps.push({name:"New step", tat:8, owner:"u3", signoff:false, docs:[], subs:[]}); render(); };
+A.tplSubAdd = i=>{ tplCollect(); const el=$("ts-sub"+i); const v=el.value.trim();
+  if(!v){ toast("Type the sub-category name first.","bad"); return; }
+  S.tplEdit.steps[i].subs.push(v); render(); const el2=$("ts-sub"+i); if(el2) el2.focus(); };
+A.tplSubDel = (i,j)=>{ tplCollect(); S.tplEdit.steps[i].subs.splice(j,1); render(); };
+A.tplSave = ()=>{
+  tplCollect();
+  const t=TEMPLATES.find(x=>x.id===S.tplEdit.id);
+  t.steps=cpSteps(S.tplEdit.steps); t.version++;
+  toast(t.name+" v"+t.version+" published. In-flight journeys keep the version they started on.");
+  go("templates");
+};
+
+/* ---- admin ---- */
+A.accessToggle = (uid,m)=>{ const u=USERS.find(x=>x.id===uid);
+  if(u.modules.includes(m)) u.modules=u.modules.filter(x=>x!==m); else u.modules.push(m);
+  toast("Module access updated for "+u.name+" (audited)."); render(); };
+A.roleSet = uid=>{ const u=USERS.find(x=>x.id===uid); u.role=$("rl-"+uid).value; toast("Onboarding role for "+u.name+" is now "+ROLE_LABEL[u.role]+"."); render(); };
+A.settingsSave = ()=>{ SETTINGS.amber=+$("st-amber").value||75; SETTINGS.cadence=$("st-cad").value;
+  SETTINGS.esc.forEach((e,i)=>e.after=$("st-esc"+i).value);
+  toast("Settings saved — the TAT scanner picks them up on its next sweep."); render(); };
+
+window.A = A;
+
+/* ============================== VIEW BUILDERS ============================== */
+function chipStatus(s){
+  const m={DONE:'<span class="chip chip-green">✓ Done</span>', CURRENT:'<span class="chip chip-indigo">▶ In progress</span>',
+    WAITING:'<span class="chip chip-grey">⏸ Waiting on client</span>', BLOCKED:'<span class="chip chip-red">⛔ Blocked</span>',
+    PENDING:'<span class="chip chip-grey">○ Pending</span>'};
+  return m[s.status];
+}
+function vLogin(){
+  return `<div class="center-page">
+    <div class="logo"><div class="logo-mark">E</div>EduTrack Platform</div>
+    <div class="card login-card">
+      <h2 style="margin-bottom:4px">Sign in</h2>
+      <p class="cap" style="margin-bottom:16px">One login for every EduTrack module you're entitled to.</p>
+      ${S.loginErr?`<div class="err" role="alert">${esc(S.loginErr)}</div>`:""}
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div><label for="f-email">Work email</label><input id="f-email" type="email" autocomplete="username" placeholder="you@edunext.io"></div>
+        <div><label for="f-pass">Password</label><input id="f-pass" type="password" autocomplete="current-password" placeholder="demo123" onkeydown="if(event.key==='Enter')A.login()"></div>
+        <button class="btn btn-p" style="justify-content:center" onclick="A.login()">Sign in</button>
+      </div>
+      <div style="margin-top:18px">
+        <div class="eyebrow">Demo accounts · password demo123</div>
+        <div class="demo-users">
+          ${USERS.map(u=>`<button onclick="A.fill('${u.email}')" title="${ROLE_LABEL[u.role]}">${esc(u.name.split(" ")[0])} · ${ROLE_LABEL[u.role]}</button>`).join("")}
+        </div>
+      </div>
+    </div>
+    <p class="cap">Prototype — no real data, no real network calls.</p>
+  </div>`;
+}
+function vLauncher(){
+  const u=S.user;
+  const active = CLIENTS.filter(c=>c.status==="ONBOARDING").length;
+  const breached = CLIENTS.filter(c=>clientRag(c)==="RED").length;
+  const tick = u.modules.includes("TICKETING");
+  const ob = u.modules.includes("ONBOARDING");
+  return `<div class="center-page">
+    <div class="logo"><div class="logo-mark">E</div>EduTrack Platform</div>
+    <div style="text-align:center">
+      <h1 style="text-wrap:balance">Where would you like to work, ${esc(u.name.split(" ")[0])}?</h1>
+      <p class="cap" style="margin-top:6px">You're entitled to ${u.modules.length} module${u.modules.length>1?"s":""}. Access is granted per module by the admin.</p>
+    </div>
+    <div class="mod-cards">
+      <button class="mod-card" ${tick?"":"disabled"} onclick="A.enterModule('TICKETING')" aria-label="Open Ticketing module">
+        <div class="mod-ic" style="background:var(--info-soft)">🎫</div>
+        <h3>Ticketing</h3>
+        <p class="cap" style="margin:6px 0 12px">Tasks, tickets, cycles and the Workflow Ribbon for delivery teams.</p>
+        ${tick?'<span class="chip chip-blue">37 open tickets</span>':'<span class="chip chip-grey">No access — ask your admin</span>'}
+      </button>
+      <button class="mod-card" ${ob?"":"disabled"} onclick="A.enterModule('ONBOARDING')" aria-label="Open Client Onboarding module">
+        <div class="mod-ic" style="background:var(--primary-soft)">🧭</div>
+        <h3>Client Onboarding</h3>
+        <p class="cap" style="margin:6px 0 12px">Board new clients through a step-by-step journey to Live.</p>
+        <span class="chip chip-indigo">${active} clients in flight</span>
+        ${breached?` <span class="chip chip-red">${breached} breached</span>`:""}
+      </button>
+    </div>
+    <button class="btn btn-ghost" onclick="A.logout()">Sign out</button>
+  </div>`;
+}
+function vTicketing(){
+  return shell(`<div class="content"><div class="card empty">
+    <div class="big">🎫</div>
+    <h3 style="margin-bottom:6px">Ticketing module</h3>
+    <p class="cap" style="max-width:420px;margin:0 auto 16px">The ticketing prototype lives separately (docs/prototype/index.html). This mockup focuses on the new Client Onboarding module — the two share only the platform: login, users and design system.</p>
+    <button class="btn btn-p" onclick="A.enterModule('ONBOARDING')">Switch to Client Onboarding</button>
+  </div></div>`, "ticketing");
+}
+
+/* ---------- shell ---------- */
+const NAV = [
+  {v:"dash", l:"Dashboard", ic:"📊", roles:null},
+  {v:"clients", l:"Clients", ic:"🏢", roles:null},
+  {v:"wizardGo", l:"New client", ic:"➕", roles:["OB_ADMIN","MANAGER","SALES"]},
+  {v:"reports", l:"Reports", ic:"📈", roles:null},
+  {sec:"Administration"},
+  {v:"templates", l:"Journey templates", ic:"🧩", roles:["OB_ADMIN"]},
+  {v:"access", l:"Roles & module access", ic:"🔐", roles:["OB_ADMIN"]},
+  {v:"settings", l:"TAT & escalation", ic:"⏱️", roles:["OB_ADMIN","MANAGER"]},
+  {v:"msgtpl", l:"Notification templates", ic:"✉️", roles:["OB_ADMIN"]},
+];
+function shell(inner, activeView){
+  const u=S.user;
+  const unread = NOTIFS.filter(n=>n.unread).length;
+  const navBtn = n=>{
+    if(n.sec) return `<div class="nav-sec eyebrow">${n.sec}</div>`;
+    if(n.roles && !n.roles.includes(u.role)) return "";
+    const on = activeView===n.v || (n.v==="clients"&&activeView==="client") || (n.v==="wizardGo"&&activeView==="wizard") || (n.v==="templates"&&activeView==="tplEdit");
+    const act = n.v==="wizardGo" ? "A.newClient()" : `A.nav('${n.v}')`;
+    return `<button class="nav-btn${on?" on":""}" onclick="${act}" ${on?'aria-current="page"':''}><span aria-hidden="true">${n.ic}</span>${n.l}</button>`;
+  };
+  const adminItems = NAV.filter(n=>n.roles).some(n=>n.roles.includes(u.role));
+  return `<div class="shell">
+    <nav class="side" aria-label="Onboarding navigation">
+      <div class="logo"><div class="logo-mark">E</div><div>EduTrack<div class="cap" style="font-weight:500">Client Onboarding</div></div></div>
+      ${NAV.filter(n=>!n.sec || adminItems).map(navBtn).join("")}
+      <div style="flex:1"></div>
+      <div style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center">
+        <span class="avatar">${initials(u.name)}</span>
+        <div style="min-width:0"><div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(u.name)}</div>
+        <div class="cap">${ROLE_LABEL[u.role]}</div></div>
+      </div>
+    </nav>
+    <div class="main">
+      <header class="topbar">
+        <button class="btn btn-sm m-nav" onclick="A.nav('dash')">☰</button>
+        <span class="cap">Today: <b style="color:var(--text)">${TODAY}</b> · TAT scanner: <b style="color:var(--success)">healthy</b> · last sweep 2 min ago</span>
+        <span class="sp"></span>
+        ${u.modules.length>1?`<button class="btn btn-sm" onclick="A.nav('launcher')" title="Switch module">⇄ Switch module</button>`:""}
+        <button class="bell" onclick="A.toggleNotifs()" aria-label="Notifications, ${unread} unread">🔔${unread?'<span class="dot"></span>':""}</button>
+        <button class="btn btn-sm" onclick="A.logout()">Sign out</button>
+        ${S.notifOpen?vNotifPop():""}
+      </header>
+      ${inner}
+    </div>
+  </div>`;
+}
+function vNotifPop(){
+  return `<div class="notif-pop" role="dialog" aria-label="Notifications">
+    <div style="display:flex;align-items:center;padding:12px 16px"><h3 style="flex:1">Notifications</h3>
+      <button class="btn btn-ghost btn-sm" onclick="A.readNotifs()">Mark all read</button></div>
+    <div style="max-height:340px;overflow:auto">
+    ${NOTIFS.map(n=>`<button class="notif-item${n.unread?" unread":""}" style="width:100%;text-align:left;border-left:0;border-right:0;border-bottom:0;background:${n.unread?"var(--primary-soft)":"none"};cursor:pointer" onclick="A.openNotif(${n.id})">
+      <span aria-hidden="true">${n.icon}</span><div><div>${esc(n.text)}</div><div class="cap" style="margin-top:2px">${n.when}</div></div></button>`).join("")}
+    </div></div>`;
+}
+
+/* ---------- dashboard ---------- */
+function vDash(){
+  const active = CLIENTS.filter(c=>c.status==="ONBOARDING");
+  const red = active.filter(c=>clientRag(c)==="RED"), amber = active.filter(c=>clientRag(c)==="AMBER"), green = active.filter(c=>clientRag(c)==="GREEN");
+  const live = CLIENTS.filter(c=>c.status==="LIVE");
+  const funnel = TPL_STEPS.map((t,i)=>({name:(i+1)+". "+t.name, n: active.filter(c=>currentIdx(c)===i).length}));
+  const maxF = Math.max(1,...funnel.map(f=>f.n));
+  const stuck = active.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>x.s.status==="BLOCKED"||x.s.status==="WAITING"));
+  const breach = active.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>x.s.status!=="DONE" && x.s.pct>=100));
+  const ragCol = (title, chip, list, hint) => `<div class="rag-col">
+    <div class="hd">${chip} ${title} <span class="cap" style="margin-left:auto">${list.length}</span></div>
+    ${list.length? list.map(c=>{
+      const i=currentIdx(c); const s=c.steps[i]||c.steps[c.steps.length-1];
+      return `<button class="rag-card" onclick="A.nav('clients');A.selStep('${c.id}',${Math.min(i,c.steps.length-1)})">
+        <b>${esc(c.name)}</b><div class="cap" style="margin-top:2px">Step ${Math.min(i+1,c.steps.length)}/8 · ${esc(s.name)} · ${esc(uById(s.owner).name)}</div></button>`;
+    }).join("") : `<div class="empty cap">${hint}</div>`}
+  </div>`;
+  return shell(`<div class="content">
+    <div class="page-head"><div><h1>Onboarding dashboard</h1><p class="cap" style="margin-top:2px">Every client in flight, where it is, and where it's stuck.</p></div><span class="sp"></span>
+      ${["OB_ADMIN","MANAGER","SALES"].includes(S.user.role)?'<button class="btn btn-p" onclick="A.newClient()">+ Board a new client</button>':""}
+    </div>
+    <div class="kpis" role="list" aria-label="Key metrics">
+      <div class="kpi" role="listitem"><div class="eyebrow">In flight</div><div class="v">${active.length}</div><div class="d cap">clients being onboarded</div></div>
+      <div class="kpi" role="listitem"><div class="eyebrow">Live</div><div class="v" style="color:var(--success)">${live.length}</div><div class="d cap">fully onboarded · latest ${live[0]?esc(live[0].liveAt):"—"}</div></div>
+      <div class="kpi" role="listitem"><div class="eyebrow">Breached / blocked</div><div class="v" style="color:var(--danger)">${red.length}</div><div class="d cap">need action now</div></div>
+      <div class="kpi" role="listitem"><div class="eyebrow">At risk (amber)</div><div class="v" style="color:var(--warning)">${amber.length}</div><div class="d cap">≥${SETTINGS.amber}% of a step TAT used</div></div>
+      <div class="kpi" role="listitem"><div class="eyebrow">Avg time to live</div><div class="v">24<span style="font-size:15px;font-weight:500;color:var(--text-2)"> days</span></div><div class="d cap">↓ 3 days vs last quarter</div></div>
+    </div>
+    <div class="rag-cols">
+      ${ragCol("Breached / blocked", "🔴", red, "Nothing breached. Keep it that way.")}
+      ${ragCol("At risk", "🟠", amber, "No client is close to a TAT limit.")}
+      ${ragCol("On track", "🟢", green, "—")}
+    </div>
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <section class="card" aria-label="Clients at each journey step">
+        <h3>Funnel — clients at each step</h3>
+        <p class="cap" style="margin:2px 0 12px">Active clients only. Click a row to filter the client list.</p>
+        ${funnel.map(f=>`<div class="hbar-row"><span class="hbar-lbl" title="${esc(f.name)}">${esc(f.name)}</span>
+          <span class="hbar-track"><span class="hbar" style="width:${Math.round(f.n/maxF*100)}%" onmouseenter="tipOn(event,'${esc(f.name)}: <b>${f.n}</b> client${f.n===1?"":"s"}')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></span></span>
+          <span class="hbar-val">${f.n}</span></div>`).join("")}
+      </section>
+      <section class="card" aria-label="Stuck steps">
+        <h3>Where it's stuck</h3>
+        <p class="cap" style="margin:2px 0 12px">Blocked or waiting-on-client steps, with the recorded reason.</p>
+        ${stuck.length? `<div class="tblwrap"><table><thead><tr><th>Client</th><th>Step</th><th>State</th><th>Reason</th></tr></thead><tbody>
+          ${stuck.map(x=>`<tr class="rowlink" tabindex="0" onclick="A.selStep('${x.c.id}',${x.i})" onkeydown="if(event.key==='Enter')A.selStep('${x.c.id}',${x.i})">
+            <td><b>${esc(x.c.name)}</b></td><td>${esc(x.s.name)}</td><td>${chipStatus(x.s)}</td>
+            <td class="cap">${esc(x.s.blockReason || "Waiting on client input")}</td></tr>`).join("")}
+        </tbody></table></div>` : '<div class="empty cap">Nothing stuck right now.</div>'}
+        <h3 style="margin-top:20px">TAT breaches</h3>
+        ${breach.length? `<div class="tblwrap"><table><thead><tr><th>Client</th><th>Step</th><th>Owner</th><th>Due</th></tr></thead><tbody>
+          ${breach.map(x=>`<tr class="rowlink" tabindex="0" onclick="A.selStep('${x.c.id}',${x.i})" onkeydown="if(event.key==='Enter')A.selStep('${x.c.id}',${x.i})">
+            <td><b>${esc(x.c.name)}</b></td><td>${esc(x.s.name)}</td><td>${esc(uById(x.s.owner).name)}</td>
+            <td><span class="chip chip-red">⚠ ${esc(x.s.due)}</span></td></tr>`).join("")}
+        </tbody></table></div>` : '<div class="empty cap" style="padding:14px">No breaches. The scanner will flag one the moment it happens.</div>'}
+      </section>
+    </div>
+  </div>`, "dash");
+}
+
+/* ---------- clients list ---------- */
+function vClients(){
+  const f=S.filters;
+  let list = CLIENTS.slice();
+  if(f.q) list = list.filter(c=>(c.name+" "+c.city+" "+c.sales).toLowerCase().includes(f.q.toLowerCase()));
+  if(f.status!=="ALL") list = list.filter(c=>c.status===f.status);
+  if(f.rag!=="ALL") list = list.filter(c=>clientRag(c)===f.rag);
+  return shell(`<div class="content">
+    <div class="page-head"><div><h1>Clients</h1><p class="cap" style="margin-top:2px">${CLIENTS.length} boarded · ${CLIENTS.filter(c=>c.status==="LIVE").length} live</p></div><span class="sp"></span>
+      ${["OB_ADMIN","MANAGER","SALES"].includes(S.user.role)?'<button class="btn btn-p" onclick="A.newClient()">+ Board a new client</button>':""}
+    </div>
+    <div class="card" style="padding:14px 20px;display:flex;gap:12px;flex-wrap:wrap;align-items:end">
+      <div style="flex:1;min-width:220px"><label for="fl-q">Search</label><input id="fl-q" value="${esc(f.q)}" placeholder="Client, city or sales person…" oninput="A.filter()"></div>
+      <div><label for="fl-st">Status</label><select id="fl-st" onchange="A.filter()">
+        <option value="ALL"${f.status==="ALL"?" selected":""}>All</option><option value="ONBOARDING"${f.status==="ONBOARDING"?" selected":""}>Onboarding</option><option value="LIVE"${f.status==="LIVE"?" selected":""}>Live</option></select></div>
+      <div><label for="fl-rag">Health</label><select id="fl-rag" onchange="A.filter()">
+        <option value="ALL"${f.rag==="ALL"?" selected":""}>All</option><option value="GREEN"${f.rag==="GREEN"?" selected":""}>On track</option>
+        <option value="AMBER"${f.rag==="AMBER"?" selected":""}>At risk</option><option value="RED"${f.rag==="RED"?" selected":""}>Breached / blocked</option>
+        <option value="LIVE"${f.rag==="LIVE"?" selected":""}>Live</option></select></div>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="tblwrap"><table>
+        <thead><tr><th>Client</th><th>Health</th><th>Current step</th><th>Step owner</th><th>Sales</th><th>License</th><th>Boarded</th></tr></thead>
+        <tbody>${list.length? list.map(c=>{
+          const i=currentIdx(c); const done = i>=c.steps.length;
+          const s=done? null : c.steps[i];
+          return `<tr class="rowlink" tabindex="0" onclick="A.selStep('${c.id}',${done?c.steps.length-1:i})" onkeydown="if(event.key==='Enter')A.selStep('${c.id}',${done?c.steps.length-1:i})">
+            <td><b>${esc(c.name)}</b><div class="cap">${esc(c.city)} · PAN ${maskPan(c.pan)}</div></td>
+            <td>${RAG_CHIP[clientRag(c)]}</td>
+            <td>${done?'<span class="cap">Journey complete</span>':`${i+1}/8 · ${esc(s.name)}`}</td>
+            <td>${done?"—":`<span style="display:inline-flex;align-items:center;gap:6px"><span class="avatar">${initials(uById(s.owner).name)}</span>${esc(uById(s.owner).name)}</span>`}</td>
+            <td>${esc(c.sales)}</td><td class="cap">${esc(c.licenseType)}</td><td class="cap">${esc(c.onboardDate)}</td></tr>`;
+        }).join("") : `<tr><td colspan="7"><div class="empty"><div class="big">🔍</div>No clients match these filters.</div></td></tr>`}</tbody>
+      </table></div>
+    </div>
+  </div>`, "clients");
+}
+
+/* ---------- new client wizard ---------- */
+function vWizard(){
+  const w=S.wizard, d=w.data;
+  const stepNames=["Client basics","SPOC contacts","Commercials","Requirements & journey"];
+  const ind = stepNames.map((n,i)=>`${i+1<w.step?"✓":""}<span>${i+1===w.step?"<b>"+(i+1)+". "+n+"</b>":(i+1)+". "+n}</span>`).join('<span aria-hidden="true">→</span>');
+  let body="";
+  if(w.step===1) body=`<div class="frow">
+      <div style="grid-column:1/-1"><label for="wz-name">Client name *</label><input id="wz-name" value="${esc(d.name)}" placeholder="e.g. Meadowbrook High School"></div>
+      <div><label for="wz-pan">PAN *</label><input id="wz-pan" value="${esc(d.pan)}" placeholder="ABCDE1234F" maxlength="10" style="text-transform:uppercase"><div class="cap" style="margin-top:4px">Checked for duplicates · encrypted at rest · masked for non-finance roles</div></div>
+      <div><label for="wz-date">Date of onboarding</label><input id="wz-date" value="${esc(d.onboardDate)}"></div>
+      <div><label for="wz-city">City</label><input id="wz-city" value="${esc(d.city)}"></div>
+      <div><label for="wz-lic">License type</label><select id="wz-lic">${["Starter · Annual","Professional · Annual","Enterprise · Annual","Enterprise · 3-year"].map(o=>`<option${o===d.licenseType?" selected":""}>${o}</option>`).join("")}</select></div>
+      <div style="grid-column:1/-1"><label for="wz-addr">Registered address</label><input id="wz-addr" value="${esc(d.addr)}"></div>
+      <div><label for="wz-sales">Sales person</label><input id="wz-sales" value="${esc(d.sales)}"></div>
+      <div><label for="wz-desc">Client description</label><input id="wz-desc" value="${esc(d.desc)}" placeholder="One line about the client"></div>
+    </div>`;
+  if(w.step===2) body = d.spocs.map((s,i)=>`<fieldset style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
+      <legend class="eyebrow" style="padding:0 6px">${i===0?"Primary SPOC *":"Additional contact"}</legend>
+      <div class="frow"><div><label for="sp-n${i}">Name</label><input id="sp-n${i}" value="${esc(s.name)}"></div>
+      <div><label for="sp-e${i}">Email</label><input id="sp-e${i}" type="email" value="${esc(s.email)}"></div>
+      <div><label for="sp-p${i}">Phone / WhatsApp</label><input id="sp-p${i}" value="${esc(s.phone)}" placeholder="+91 …"><div class="cap" style="margin-top:4px">WhatsApp opt-in is recorded at first send</div></div></div>
+    </fieldset>`).join("") + `<button class="btn btn-sm" onclick="A.wzSpocAdd()">+ Add another contact</button>`;
+  if(w.step===3) body = `
+      ${d.apps.map((a,i)=>`<div class="frow" style="grid-template-columns:2fr 1fr 1fr;margin-bottom:10px">
+        <div><label for="ap-n${i}">Application</label><select id="ap-n${i}">${["EduTrack Core","Parent Portal","Exam Module","Transport Module"].map(o=>`<option${o===a.name?" selected":""}>${o}</option>`).join("")}</select></div>
+        <div><label for="ap-l${i}">License</label><select id="ap-l${i}">${["Starter","Professional","Enterprise","Add-on"].map(o=>`<option${o===a.lic?" selected":""}>${o}</option>`).join("")}</select></div>
+        <div><label for="ap-u${i}">Units / seats</label><input id="ap-u${i}" type="number" min="1" value="${a.units}"></div></div>`).join("")}
+      <button class="btn btn-sm" style="margin-bottom:18px" onclick="A.wzAppAdd()">+ Add application</button>
+      <div class="frow">
+        <div><label for="wz-paymode">Payment mode</label><select id="wz-paymode">${["Bank transfer","Cheque","UPI","UPI / NEFT"].map(o=>`<option${o===d.payMode?" selected":""}>${o}</option>`).join("")}</select></div><div></div>
+        <div><label for="wz-adv">Advance payment (₹) *</label><input id="wz-adv" inputmode="numeric" value="${esc(d.adv)}" placeholder="150000"></div>
+        <div><label for="wz-advdue">Advance due date</label><input id="wz-advdue" value="${esc(d.advDue)}"></div>
+        <div><label for="wz-bal">Balance payment (₹)</label><input id="wz-bal" inputmode="numeric" value="${esc(d.bal)}"></div>
+        <div><label for="wz-baldue">Balance due date</label><input id="wz-baldue" value="${esc(d.balDue)}"></div>
+      </div>
+      <p class="cap" style="margin-top:10px">Other payment rows (GST, invoice refs) can be added on the client's Payments tab after boarding.</p>`;
+  if(w.step===4) body = `
+      <div style="margin-bottom:14px"><label for="wz-req">Client requirements *</label><textarea id="wz-req" rows="4" placeholder="What did we promise? Migration scope, integrations, languages, timelines…">${esc(d.requirements)}</textarea></div>
+      <div class="frow">
+        <div><label for="wz-tpl">Journey template</label><select id="wz-tpl">${TEMPLATES.map(t=>`<option value="${t.id}"${t.id===d.template?" selected":""}>${esc(t.name)} · v${t.version} · ${t.steps.length} steps</option>`).join("")}</select>
+          <div class="cap" style="margin-top:4px">The journey pins this version — later template edits won't touch this client.</div></div>
+        <div><label for="wz-file">Attachments</label>
+          <div style="display:flex;gap:8px"><input id="wz-file" placeholder="e.g. PO_Meadowbrook.pdf"><button class="btn" onclick="A.wzAttach()">Attach</button></div>
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${d.attachments.map(a=>`<span class="chip chip-grey">📎 ${esc(a)}</span>`).join("")||'<span class="cap">Nothing attached yet</span>'}</div></div>
+      </div>`;
+  return shell(`<div class="content" style="max-width:860px">
+    <div class="page-head"><div><h1>Board a new client</h1><div class="steps-ind" style="margin-top:6px">${ind}</div></div></div>
+    ${w.err?`<div class="err" role="alert">${esc(w.err)}</div>`:""}
+    <div class="card">${body}</div>
+    <div style="display:flex;gap:10px">
+      ${w.step>1?'<button class="btn" onclick="A.wzBack()">← Back</button>':'<button class="btn" onclick="A.nav(\'clients\')">Cancel</button>'}
+      <span style="flex:1"></span>
+      ${w.step<4?'<button class="btn btn-p" onclick="A.wzNext()">Continue →</button>'
+                :'<button class="btn btn-p" onclick="A.wzFinish()">Create client & start journey</button>'}
+    </div>
+  </div>`, "wizard");
+}
+
+/* ---------- client detail + ribbon ---------- */
+function segClass(s, isCurrent){
+  if(s.status==="DONE") return "seg-done";
+  if(s.status==="BLOCKED") return "seg-block"+(s.pct>=100?" seg-breach":"");
+  if(s.status==="WAITING") return "seg-wait";
+  if(s.status==="CURRENT") return s.pct>=100 ? "seg-breach" : "seg-cur";
+  return "seg-pend";
+}
+function segState(s){
+  if(s.status==="DONE") return "✓ DONE";
+  if(s.status==="BLOCKED") return "⛔ BLOCKED";
+  if(s.status==="WAITING") return "⏸ WAITING";
+  if(s.status==="CURRENT") return s.pct>=100 ? "⚠ BREACHED" : "▶ IN PROGRESS";
+  return "○ PENDING";
+}
+function vClient(){
+  const c = CLIENTS.find(x=>x.id===S.params.id);
+  if(!c) return shell('<div class="content"><div class="card empty">Client not found (404 — out-of-scope IDs don’t reveal existence).</div></div>',"clients");
+  const selIdx = S.params.step ?? Math.min(currentIdx(c), c.steps.length-1);
+  const s = c.steps[selIdx];
+  const rag = clientRag(c);
+  const doneCount = c.steps.filter(x=>x.status==="DONE").length;
+  const editable = canEditStep(c, selIdx) && c.status!=="LIVE";
+  const owner = uById(s.owner);
+  const ribbon = c.steps.map((st,i)=>{
+    const tat = st.status==="DONE" ? "" :
+      `<div class="tatbar ${st.pct>=100?"red":st.pct>=SETTINGS.amber?"amber":""}"><i style="width:${Math.min(100,st.pct)}%"></i></div>`;
+    return `${i>0?`<div class="conn${c.steps[i-1].status==="DONE"?"":" pend"}" aria-hidden="true"><i></i></div>`:""}
+      <button class="seg ${segClass(st)}${i===selIdx?" sel":""}" onclick="A.selStep('${c.id}',${i})" aria-label="Step ${i+1}: ${esc(st.name)}, ${segState(st)}">
+        <div class="st">${segState(st)}</div><div class="nm">${i+1}. ${esc(st.name)}</div>
+        <div class="meta"><span class="avatar" style="width:20px;height:20px;font-size:9px">${initials(uById(st.owner).name)}</span>
+          <span>${st.status==="DONE"?"Done":st.tat+"h TAT"}${st.subs.length?` · ☑ ${st.subs.filter(x=>x.val!==null).length}/${st.subs.length}`:""}</span></div>${tat}
+      </button>`;
+  }).join("");
+  const docsMissing = s.docsReq.filter(d=>!s.docs.includes(d));
+  const actions = c.status==="LIVE" ? "" : !editable
+    ? `<p class="cap" style="background:var(--bg-subtle);border-radius:8px;padding:10px 12px">You can view this step, but only <b>${esc(owner.name)}</b> (or a Manager/Admin) can update it — that's the role model working.</p>`
+    : `<div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${s.status==="PENDING"?`<button class="btn btn-p btn-sm" onclick="A.stStart('${c.id}',${selIdx})">▶ Start step</button>`:""}
+        ${(s.status==="CURRENT")?`
+          ${s.signoff? (s.signoffState==="REQUESTED"
+              ? `<button class="btn btn-sm" onclick="A.signoffOpen('${c.id}',${selIdx})">🔗 Open client sign-off link (simulate)</button>`
+              : `<button class="btn btn-p btn-sm" onclick="A.signoffReq('${c.id}',${selIdx})">✉ Request client sign-off</button>`)
+            : `<button class="btn btn-p btn-sm" onclick="A.stComplete('${c.id}',${selIdx})">✓ Mark complete</button>`}
+          <button class="btn btn-sm" onclick="A.stWait('${c.id}',${selIdx})">⏸ Waiting on client</button>`:""}
+        ${(s.status==="WAITING"||s.status==="BLOCKED")?`<button class="btn btn-p btn-sm" onclick="A.stResume('${c.id}',${selIdx})">▶ Resume clock</button>`:""}
+      </div>
+      ${s.status!=="BLOCKED" && s.status!=="PENDING" ? `<div style="display:flex;gap:8px;margin-top:10px">
+        <input id="blk-reason" placeholder="Block reason (mandatory) — e.g. awaiting vendor assets" style="flex:1">
+        <button class="btn btn-danger btn-sm" onclick="A.stBlock('${c.id}',${selIdx})">⛔ Block</button></div>`:""}
+      ${["OB_ADMIN","MANAGER"].includes(S.user.role)?`<div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+        <select id="re-owner" style="flex:1">${USERS.filter(u=>u.modules.includes("ONBOARDING")).map(u=>`<option value="${u.id}"${u.id===s.owner?" selected":""}>${esc(u.name)} · ${ROLE_LABEL[u.role]}</option>`).join("")}</select>
+        <button class="btn btn-sm" onclick="A.stReassign('${c.id}',${selIdx})">Reassign</button></div>`:""}`;
+  return shell(`<div class="content">
+    <button class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="A.nav('clients')">← All clients</button>
+    ${c.status==="LIVE"?`<div class="banner-live">🎉 Fully onboarded & LIVE since ${esc(c.liveAt)} — all 8 steps complete, final sign-off on record${c.csat?` · CSAT ${c.csat}/5`:""}.</div>`:""}
+    <div class="page-head">
+      <div><h1 style="text-wrap:balance">${esc(c.name)}</h1>
+        <p class="cap" style="margin-top:4px">${esc(c.city)} · PAN ${maskPan(c.pan)} · ${esc(c.licenseType)} · Sales: ${esc(c.sales)} · Boarded ${esc(c.onboardDate)}</p></div>
+      <span class="sp"></span>
+      <div style="text-align:right">${RAG_CHIP[rag]}<div class="cap" style="margin-top:6px">${doneCount}/8 steps complete</div></div>
+    </div>
+    <section class="card" style="padding:16px 20px" aria-label="Onboarding journey ribbon">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3>Onboarding journey</h3>
+        <span class="cap">· Standard SaaS Onboarding v3 · TATs in working hours (weekends & holidays excluded)</span></div>
+      <div class="ribbon-wrap"><div class="ribbon" role="list">${ribbon}</div></div>
+    </section>
+    <div class="split">
+      <section class="card" aria-label="Selected step detail">
+        <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <div><div class="eyebrow">Step ${selIdx+1} of 8</div><h2 style="margin-top:2px">${esc(s.name)}</h2></div>
+          <span class="sp" style="flex:1"></span>${chipStatus(s)}
+        </div>
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin:14px 0 18px">
+          <div><div class="eyebrow">Responsible</div><div style="display:flex;align-items:center;gap:8px;margin-top:4px"><span class="avatar">${initials(owner.name)}</span>${esc(owner.name)}</div></div>
+          <div><div class="eyebrow">TAT</div><div style="margin-top:4px">${s.tat} working hrs</div></div>
+          <div><div class="eyebrow">Due</div><div style="margin-top:4px">${s.status==="DONE"?"Completed "+esc(s.completedOn||""):esc(s.due||"—")}</div></div>
+          <div><div class="eyebrow">TAT used</div><div style="margin-top:4px;font-weight:600;color:${s.pct>=100?"var(--danger)":s.pct>=SETTINGS.amber?"var(--warning)":"var(--success)"}">${Math.min(s.pct,999)}%</div></div>
+          <div><div class="eyebrow">Sub-categories</div><div style="margin-top:4px">☑ ${s.subs.filter(x=>x.val!==null).length}/${s.subs.length} answered</div></div>
+        </div>
+        ${s.blockReason?`<div class="err">⛔ Blocked: ${esc(s.blockReason)}</div>`:""}
+        ${s.signoff?`<p class="cap" style="margin-bottom:12px">✍️ This step requires <b>client sign-off</b> — status: <b>${s.signoffState==="NONE"?"not yet requested":s.signoffState==="REQUESTED"?"link sent, awaiting client":s.signoffState==="ACCEPTED"?"accepted ✓":"objection raised ⚠"}</b></p>`:""}
+        ${s.docsReq.length?`<p class="cap" style="margin-bottom:12px">📋 Required documents: ${s.docsReq.map(d=>s.docs.includes(d)?`<span class="chip chip-green">✓ ${esc(d)}</span>`:`<span class="chip chip-grey">○ ${esc(d)}</span>`).join(" ")}</p>`:""}
+        ${s.subs.length?`<div style="border:1px solid var(--border);border-radius:10px;margin-bottom:16px;overflow:hidden">
+          <div style="padding:9px 14px;background:var(--bg-subtle);display:flex;align-items:center;gap:8px">
+            <b style="font-size:13px">Sub-categories</b>
+            <span class="cap">${s.subs.filter(x=>x.val!==null).length}/${s.subs.length} answered${s.subs.some(x=>x.val===false)?" · has exceptions":""}</span>
+            <span class="cap" style="margin-left:auto">step can't complete until all are answered; False needs a remark</span></div>
+          ${s.subs.map((sb,j)=>{
+            const canAns = editable && s.status!=="PENDING" && c.status!=="LIVE" && s.status!=="DONE";
+            return `<div style="padding:10px 14px;border-top:1px solid var(--border)">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <span style="font-size:13px;font-weight:500;flex:1;min-width:160px">${esc(sb.name)}</span>
+                ${canAns?`<span style="display:inline-flex;gap:6px" role="group" aria-label="${esc(sb.name)} answer">
+                  <button class="btn btn-sm" style="${sb.val===true?"background:var(--success-soft);border-color:#A7F3D0;color:#047857;font-weight:700":""}" onclick="A.subSet('${c.id}',${selIdx},${j},true)" aria-pressed="${sb.val===true}">✓ True</button>
+                  <button class="btn btn-sm" style="${sb.val===false?"background:var(--danger-soft);border-color:#FECACA;color:#B91C1C;font-weight:700":""}" onclick="A.subSet('${c.id}',${selIdx},${j},false)" aria-pressed="${sb.val===false}">✗ False</button></span>`
+                : sb.val===null?'<span class="chip chip-grey">— Unanswered</span>':sb.val?'<span class="chip chip-green">✓ True</span>':'<span class="chip chip-red">✗ False</span>'}
+              </div>
+              ${canAns?`<input value="${esc(sb.remark)}" placeholder="Remark${sb.val===false?" (required for a False answer)":" (optional)"}…" style="margin-top:8px;font-size:13px" onchange="A.subRemark('${c.id}',${selIdx},${j},this.value)" aria-label="Remark for ${esc(sb.name)}">`
+                : sb.remark?`<div class="cap" style="margin-top:6px">📝 ${esc(sb.remark)}</div>`:""}
+            </div>`;}).join("")}
+        </div>`:""}
+        ${actions}
+        ${editable && s.status!=="PENDING" ? `<div style="display:flex;gap:8px;margin-top:10px">
+          <input id="doc-name" placeholder="Attach a document… ${docsMissing.length?"e.g. "+esc(docsMissing[0]):""}" style="flex:1">
+          <button class="btn btn-sm" onclick="A.stAttach('${c.id}',${selIdx})">📎 Attach</button></div>`:""}
+        <h3 style="margin:22px 0 4px">Communication on this step</h3>
+        <p class="cap" style="margin-bottom:14px">Append-only — corrections are new entries, never edits.</p>
+        ${editable && s.status!=="PENDING" && c.status!=="LIVE" ? `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+          <select id="cm-type" style="width:130px">${["CALL","EMAIL","WHATSAPP","MEETING","NOTE"].map(t=>`<option>${t}</option>`).join("")}</select>
+          <select id="cm-dir" style="width:110px"><option value="OUT">Outbound</option><option value="IN">Inbound</option><option value="INT">Internal</option></select>
+          <input id="cm-text" placeholder="What was communicated?" style="flex:1;min-width:180px">
+          <button class="btn btn-p btn-sm" onclick="A.stComm('${c.id}',${selIdx})">Log</button></div>`:""}
+        ${s.comms.length? `<ul class="tl">${s.comms.slice().reverse().map(m=>`<li>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip chip-${m.type==="WHATSAPP"?"green":m.type==="EMAIL"?"blue":m.type==="CALL"?"indigo":"grey"}">${m.type}</span>
+            <b style="font-size:13px">${esc(m.by)}</b><span class="cap">${esc(m.when)} · ${m.dir==="IN"?"inbound":m.dir==="OUT"?"outbound":"internal"}</span></div>
+            <div style="margin-top:4px;font-size:13px">${esc(m.text)}</div></li>`).join("")}</ul>`
+          : '<div class="empty cap">No communication logged on this step yet.</div>'}
+      </section>
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <section class="card" aria-label="Payments">
+          <h3>Payments</h3>
+          <div class="tblwrap" style="margin-top:10px"><table>
+            <thead><tr><th>Type</th><th>Amount</th><th>Due</th><th>Status</th></tr></thead>
+            <tbody>${c.payments.map(p=>`<tr><td>${p.kind}<div class="cap">${esc(p.mode)}${p.ref?" · "+esc(p.ref):""}</div></td>
+              <td>${money(p.amount)}</td><td class="cap">${esc(p.due)}</td>
+              <td>${p.recv?`<span class="chip chip-green">✓ ${esc(p.recv)}</span>`:'<span class="chip chip-amber">○ Pending</span>'}</td></tr>`).join("")}</tbody>
+          </table></div>
+          ${canSeeMoney()?"":'<p class="cap" style="margin-top:8px">Amounts are masked for your role.</p>'}
+        </section>
+        <section class="card" aria-label="Client information">
+          <h3>Client info</h3>
+          <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;font-size:13px">
+            <div><div class="eyebrow">SPOC</div>${c.spocs.map(sp=>`<div style="margin-top:4px">${esc(sp.name)}${sp.primary?' <span class="chip chip-indigo" style="font-size:10px">PRIMARY</span>':""}<div class="cap">${esc(sp.email)} · ${esc(sp.phone)}</div></div>`).join("")}</div>
+            <div><div class="eyebrow">Applications bought</div><div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${c.apps.map(a=>`<span class="chip chip-grey">${esc(a.name)} · ${esc(a.lic)} · ${a.units}</span>`).join("")}</div></div>
+            <div><div class="eyebrow">Requirements</div><div style="margin-top:4px">${esc(c.requirements)}</div></div>
+            <div><div class="eyebrow">Address</div><div style="margin-top:4px" class="cap">${esc(c.addr)}</div></div>
+            <div><div class="eyebrow">Attachments (${c.attachments.length})</div><div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${c.attachments.map(a=>`<span class="chip chip-grey">📎 ${esc(a)}</span>`).join("")||'<span class="cap">None</span>'}</div></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>`, "clients");
+}
+
+/* ---------- sign-off (public page simulation) ---------- */
+function vSignoff(){
+  const {cid,i,verified,err}=S.signoff;
+  const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
+  const isFinal = i===c.steps.length-1;
+  return `<div class="center-page" style="background:var(--bg-app)">
+    <div class="logo"><div class="logo-mark">E</div>EduTrack · secure sign-off</div>
+    <div class="card" style="width:520px;max-width:100%">
+      <div class="eyebrow">For ${esc(c.spocs[0].name)} · ${esc(c.name)}</div>
+      <h2 style="margin:4px 0 2px;text-wrap:balance">${isFinal?"Go-live sign-off":"Sign-off: "+esc(s.name)}</h2>
+      <p class="cap" style="margin-bottom:16px">Single-use link · expires in 48 h · your response is recorded with time, IP and OTP channel.</p>
+      ${!verified ? `
+        <p style="margin-bottom:12px">Enter the 6-digit OTP sent to your registered email and WhatsApp. <span class="cap">(Demo OTP: <b>123456</b>)</span></p>
+        ${err?`<div class="err" role="alert">${esc(err)}</div>`:""}
+        <div class="otp" style="margin-bottom:16px">${[0,1,2,3,4,5].map(n=>`<input maxlength="1" inputmode="numeric" aria-label="OTP digit ${n+1}" oninput="if(this.value&&this.nextElementSibling)this.nextElementSibling.focus()">`).join("")}</div>
+        <button class="btn btn-p" style="width:100%;justify-content:center" onclick="A.otpVerify()">Verify OTP</button>
+      ` : `
+        <div style="background:var(--bg-subtle);border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px">
+          <div class="eyebrow" style="margin-bottom:6px">You are signing off on</div>
+          ${isFinal? `All 8 onboarding steps for <b>${esc(c.name)}</b>, including requirements, data migration, configuration, training and UAT. Accepting marks the client <b>fully onboarded and Live</b>.`
+                   : `<b>${esc(s.name)}</b> — delivered by ${esc(uById(s.owner).name)}. ${s.docs.length?"Documents on record: "+s.docs.map(esc).join(", ")+".":""}`}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <button class="btn btn-p" style="justify-content:center" onclick="A.signoffAccept()">✓ Accept & sign off</button>
+          <div><label for="so-obj">Or raise an objection</label>
+            <div style="display:flex;gap:8px"><input id="so-obj" placeholder="What's not right?"><button class="btn btn-danger" onclick="A.signoffObject()">Object</button></div></div>
+        </div>
+        ${err?`<div class="err" role="alert" style="margin-top:10px">${esc(err)}</div>`:""}
+      `}
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="S.signoff=null;go('client',{id:'${cid}',step:${i}})">← Back to EduTrack (exit client view)</button>
+  </div>`;
+}
+
+/* ---------- templates ---------- */
+function vTemplates(){
+  return shell(`<div class="content">
+    <div class="page-head"><div><h1>Journey templates</h1><p class="cap" style="margin-top:2px">Admin-defined journeys. Editing publishes a new version; in-flight clients keep theirs.</p></div></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+      ${TEMPLATES.map(t=>`<div class="card">
+        <div style="display:flex;align-items:center;gap:8px"><h3>${esc(t.name)}</h3><span class="chip chip-indigo">v${t.version}</span>${t.active?'<span class="chip chip-green">Default</span>':""}</div>
+        <ol style="margin:12px 0 16px 18px;font-size:13px;display:flex;flex-direction:column;gap:6px">
+          ${t.steps.map(s=>`<li>${esc(s.name)} <span class="cap">· ${s.tat}h · ${esc(uById(s.owner).name)} · ${s.subs.length} sub-categor${s.subs.length===1?"y":"ies"}${s.signoff?" · ✍️ client sign-off":""}</span></li>`).join("")}
+        </ol>
+        <button class="btn btn-sm" onclick="A.tplEdit('${t.id}')">✎ Edit (publishes v${t.version+1})</button>
+      </div>`).join("")}
+    </div>
+  </div>`, "templates");
+}
+function vTplEdit(){
+  const t=S.tplEdit;
+  return shell(`<div class="content" style="max-width:900px">
+    <button class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="A.nav('templates')">← Templates</button>
+    <div class="page-head"><div><h1>${esc(t.name)}</h1><p class="cap" style="margin-top:2px">Editing v${t.version} → will publish as <b>v${t.version+1}</b>. Clients already in flight keep v${t.version}.</p></div>
+      <span class="sp"></span><button class="btn btn-p" onclick="A.tplSave()">Publish v${t.version+1}</button></div>
+    <div class="card" style="padding:0"><div class="tblwrap"><table>
+      <thead><tr><th style="width:36px">#</th><th>Step name</th><th style="width:110px">TAT (hrs)</th><th style="width:200px">Default responsible</th><th style="width:90px">Sign-off</th><th style="width:130px">Order</th></tr></thead>
+      <tbody>${t.steps.map((s,i)=>`<tr>
+        <td class="cap">${i+1}</td>
+        <td><input id="ts-n${i}" value="${esc(s.name)}" aria-label="Step ${i+1} name"></td>
+        <td><input id="ts-t${i}" type="number" min="1" value="${s.tat}" aria-label="Step ${i+1} TAT hours"></td>
+        <td><select id="ts-o${i}" aria-label="Step ${i+1} responsible">${USERS.filter(u=>u.modules.includes("ONBOARDING")).map(u=>`<option value="${u.id}"${u.id===s.owner?" selected":""}>${esc(u.name)}</option>`).join("")}</select></td>
+        <td style="text-align:center"><input id="ts-s${i}" type="checkbox"${s.signoff?" checked":""} style="width:auto" aria-label="Step ${i+1} requires client sign-off"></td>
+        <td><button class="btn btn-sm" onclick="A.tplMove(${i},-1)" aria-label="Move up">↑</button>
+            <button class="btn btn-sm" onclick="A.tplMove(${i},1)" aria-label="Move down">↓</button>
+            <button class="btn btn-sm" onclick="A.tplDel(${i})" aria-label="Delete step">✕</button></td>
+      </tr>
+      <tr><td style="border-top:0"></td><td colspan="5" style="border-top:0;padding-top:0">
+        <div class="cap" style="margin-bottom:6px">Sub-categories — shown when this step is clicked on the client page; each is answered True/False with a remark</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          ${s.subs.map((sb,j)=>`<span class="chip chip-grey">${esc(sb)}<button class="chip-x" onclick="A.tplSubDel(${i},${j})" aria-label="Remove sub-category ${esc(sb)}">✕</button></span>`).join("")}
+          <input id="ts-sub${i}" placeholder="Add a sub-category…" style="width:220px;padding:4px 10px;font-size:12px" onkeydown="if(event.key==='Enter')A.tplSubAdd(${i})">
+          <button class="btn btn-sm" onclick="A.tplSubAdd(${i})">+ Add</button>
+        </div>
+      </td></tr>`).join("")}</tbody>
+    </table></div></div>
+    <button class="btn" style="align-self:flex-start" onclick="A.tplAdd()">+ Add step</button>
+  </div>`, "tplEdit");
+}
+
+/* ---------- access admin ---------- */
+function vAccess(){
+  return shell(`<div class="content">
+    <div class="page-head"><div><h1>Roles & module access</h1><p class="cap" style="margin-top:2px">A person's onboarding role is independent of their ticketing role. Every grant/revoke is audited.</p></div></div>
+    <div class="card" style="padding:0"><div class="tblwrap"><table>
+      <thead><tr><th>User</th><th>Ticketing</th><th>Onboarding</th><th>Onboarding role</th></tr></thead>
+      <tbody>${USERS.map(u=>`<tr>
+        <td><div style="display:flex;gap:8px;align-items:center"><span class="avatar">${initials(u.name)}</span><div><b>${esc(u.name)}</b><div class="cap">${esc(u.email)}</div></div></div></td>
+        <td><input type="checkbox" style="width:auto" ${u.modules.includes("TICKETING")?"checked":""} onchange="A.accessToggle('${u.id}','TICKETING')" aria-label="Ticketing access for ${esc(u.name)}"></td>
+        <td><input type="checkbox" style="width:auto" ${u.modules.includes("ONBOARDING")?"checked":""} onchange="A.accessToggle('${u.id}','ONBOARDING')" aria-label="Onboarding access for ${esc(u.name)}" ${u.id===S.user.id?"disabled":""}></td>
+        <td><select id="rl-${u.id}" onchange="A.roleSet('${u.id}')" ${u.id===S.user.id?"disabled":""} style="max-width:240px" aria-label="Onboarding role for ${esc(u.name)}">
+          ${Object.keys(ROLE_LABEL).map(r=>`<option value="${r}"${u.role===r?" selected":""}>${ROLE_LABEL[r]}</option>`).join("")}</select></td>
+      </tr>`).join("")}</tbody>
+    </table></div></div>
+    <p class="cap">Sign in as any of these accounts (password demo123) to feel the role model — e.g. Priya can only update her own steps; Meera alone sees unmasked money.</p>
+  </div>`, "access");
+}
+
+/* ---------- settings ---------- */
+function vSettings(){
+  return shell(`<div class="content" style="max-width:760px">
+    <div class="page-head"><div><h1>TAT & escalation settings</h1><p class="cap" style="margin-top:2px">Picked up by the TAT scanner on its next sweep. All maths use the working calendar.</p></div></div>
+    <div class="card">
+      <div class="frow">
+        <div><label for="st-amber">Amber warning threshold (% of TAT used)</label><input id="st-amber" type="number" min="10" max="99" value="${SETTINGS.amber}"></div>
+        <div><label for="st-cad">Scanner cadence</label><select id="st-cad">${["Every 2 minutes","Every 5 minutes","Every 15 minutes"].map(o=>`<option${o===SETTINGS.cadence?" selected":""}>${o}</option>`).join("")}</select></div>
+      </div>
+      <h3 style="margin:20px 0 10px">Escalation matrix on TAT breach</h3>
+      <div class="tblwrap"><table>
+        <thead><tr><th style="width:60px">Level</th><th>Who is notified (email + WhatsApp)</th><th style="width:280px">Trigger</th></tr></thead>
+        <tbody>${SETTINGS.esc.map((e,i)=>`<tr><td><b>${e.lvl}</b></td><td>${esc(e.who)}</td><td><input id="st-esc${i}" value="${esc(e.after)}" aria-label="${e.lvl} trigger"></td></tr>`).join("")}</tbody>
+      </table></div>
+      <div style="margin-top:16px;display:flex"><span style="flex:1"></span><button class="btn btn-p" onclick="A.settingsSave()">Save settings</button></div>
+    </div>
+    <div class="card">
+      <h3>Clock rules (fixed by design)</h3>
+      <ul style="margin:10px 0 0 18px;font-size:13px;display:flex;flex-direction:column;gap:6px">
+        <li><b>Waiting on client</b> pauses the TAT clock — that time is attributed to the client, not the owner.</li>
+        <li><b>Blocked (internal)</b> does <b>not</b> pause the clock — an internal blockage is still our time. A Manager may pause with a logged reason.</li>
+        <li>Weekends, org holidays and the owner's approved leave never count against a TAT.</li>
+      </ul>
+    </div>
+  </div>`, "settings");
+}
+
+/* ---------- notification templates ---------- */
+function vMsgTpl(){
+  return shell(`<div class="content" style="max-width:860px">
+    <div class="page-head"><div><h1>Notification templates</h1><p class="cap" style="margin-top:2px">WhatsApp business templates need provider approval — submit them early; approval takes days to weeks.</p></div></div>
+    <div class="grid">${MSG_TEMPLATES.map(t=>`<div class="card" style="padding:16px 20px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><h3>${esc(t.name)}</h3>
+        <span class="chip chip-${t.channel==="WHATSAPP"?"green":"blue"}">${t.channel==="WHATSAPP"?"💬 WhatsApp":"✉ Email"}</span>
+        ${t.status==="Approved"?'<span class="chip chip-green">✓ Approved</span>':'<span class="chip chip-amber">⏳ Pending approval</span>'}</div>
+      <p style="margin-top:10px;font-size:13px;background:var(--bg-subtle);border-radius:8px;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(t.body)}</p>
+    </div>`).join("")}</div>
+  </div>`, "msgtpl");
+}
+
+/* ---------- reports ---------- */
+function vReports(){
+  const active = CLIENTS.filter(c=>c.status==="ONBOARDING");
+  const tabs=[["funnel","Funnel"],["tat","TAT compliance"],["ttl","Time to live"],["pay","Payments"],["sales","Sales pipeline"],["aging","Stuck & aging"],["signoff","Sign-offs pending"]];
+  let body="";
+  if(S.reportTab==="funnel"){
+    const funnel = TPL_STEPS.map((t,i)=>({name:(i+1)+". "+t.name, n: active.filter(c=>currentIdx(c)===i).length}));
+    const maxF=Math.max(1,...funnel.map(f=>f.n));
+    body=`<h3>Clients at each journey step</h3><p class="cap" style="margin:2px 0 14px">${active.length} active clients. A healthy funnel drains left to right.</p>
+      ${funnel.map(f=>`<div class="hbar-row"><span class="hbar-lbl">${esc(f.name)}</span>
+        <span class="hbar-track"><span class="hbar" style="width:${Math.round(f.n/maxF*100)}%" onmouseenter="tipOn(event,'${esc(f.name)}: <b>${f.n}</b>')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></span></span>
+        <span class="hbar-val">${f.n}</span></div>`).join("")}`;
+  }
+  if(S.reportTab==="tat"){
+    const pct=[92,84,76,58,81,88,73,95];
+    body=`<h3>% of steps completed within TAT — last 90 days</h3><p class="cap" style="margin:2px 0 14px">Waiting-on-client time excluded, so this measures <i>our</i> speed. Data migration is the bottleneck.</p>
+      ${TPL_STEPS.map((t,i)=>`<div class="hbar-row"><span class="hbar-lbl">${i+1}. ${esc(t.name)}</span>
+        <span class="hbar-track"><span class="hbar" style="width:${pct[i]}%;background:${pct[i]<70?"var(--danger)":pct[i]<85?"var(--warning)":"var(--chart-1)"}" onmouseenter="tipOn(event,'${esc(t.name)}: <b>${pct[i]}%</b> on time')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></span></span>
+        <span class="hbar-val">${pct[i]}%</span></div>`).join("")}
+      <p class="cap" style="margin-top:12px"><span class="sw" style="background:var(--danger);width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:6px;vertical-align:-1px"></span>below 70% <span class="sw" style="background:var(--warning);width:10px;height:10px;border-radius:3px;display:inline-block;margin:0 6px 0 14px;vertical-align:-1px"></span>70–85%</p>`;
+  }
+  if(S.reportTab==="ttl"){
+    const months=["Mar","Apr","May","Jun","Jul","Aug"], days=[34,31,29,27,26,24];
+    const W=560,H=180,P=34, maxY=40;
+    const x=i=>P+i*(W-2*P)/(months.length-1), y=v=>H-P-(v/maxY)*(H-2*P);
+    const pts=days.map((d,i)=>x(i)+","+y(d)).join(" ");
+    body=`<h3>Average time to live (working days)</h3><p class="cap" style="margin:2px 0 10px">Trending down 6 months straight — from 34 to 24 working days.</p>
+      <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Line chart: average onboarding time fell from 34 working days in March to 24 in August">
+        ${[10,20,30,40].map(g=>`<line x1="${P}" x2="${W-P}" y1="${y(g)}" y2="${y(g)}" stroke="var(--border)" stroke-width="1"/><text x="${P-8}" y="${y(g)+4}" text-anchor="end" font-size="11" fill="#6B7280">${g}</text>`).join("")}
+        <polyline points="${pts}" fill="none" stroke="var(--chart-1)" stroke-width="2"/>
+        ${days.map((d,i)=>`<circle cx="${x(i)}" cy="${y(d)}" r="${i===days.length-1?5:4}" fill="${i===days.length-1?"var(--chart-1)":"var(--bg-surface)"}" stroke="var(--chart-1)" stroke-width="2"
+           onmouseenter="tipOn(event,'${months[i]} 2026: <b>${d} working days</b>')" onmousemove="tipMove(event)" onmouseleave="tipOff()"/>`).join("")}
+        ${days.map((d,i)=> (i===0||i===days.length-1)?`<text x="${x(i)}" y="${y(d)-10}" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">${d}</text>`:"").join("")}
+        ${months.map((m,i)=>`<text x="${x(i)}" y="${H-P+16}" text-anchor="middle" font-size="11" fill="#6B7280">${m}</text>`).join("")}
+      </svg></div>`;
+  }
+  if(S.reportTab==="pay"){
+    const months=["Mar","Apr","May","Jun","Jul","Aug"];
+    const recvd=[6.2,7.5,5.8,9.4,11.2,8.1], out=[2.1,1.8,3.4,2.6,4.0,6.3]; // lakhs
+    const maxV=12;
+    const totalOut = CLIENTS.flatMap(c=>c.payments).filter(p=>!p.recv).reduce((a,p)=>a+p.amount,0);
+    body=`<h3>Collections — received vs outstanding (₹ lakh)</h3>
+      <div class="legend" style="margin:6px 0 10px"><span><span class="sw" style="background:var(--chart-1)"></span>Received</span><span><span class="sw" style="background:var(--chart-2)"></span>Outstanding</span></div>
+      <div class="vbars" role="img" aria-label="Monthly bar chart of payments received versus outstanding, March to August">
+        ${months.map((m,i)=>`<div class="vbar-g"><div class="vbar-stack">
+          <div class="vbar" style="height:${Math.round(recvd[i]/maxV*130)}px" onmouseenter="tipOn(event,'${m}: received <b>₹${recvd[i]}L</b>')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></div>
+          <div class="vbar c2" style="height:${Math.round(out[i]/maxV*130)}px" onmouseenter="tipOn(event,'${m}: outstanding <b>₹${out[i]}L</b>')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></div>
+        </div><span class="vbar-v">${recvd[i]} / ${out[i]}</span><span class="vbar-x">${m}</span></div>`).join("")}
+      </div>
+      <h3 style="margin-top:20px">Outstanding by client ${canSeeMoney()?`— total ${inr(totalOut)}`:""}</h3>
+      <div class="tblwrap" style="margin-top:8px"><table><thead><tr><th>Client</th><th>Type</th><th>Amount</th><th>Due</th><th>Mode</th></tr></thead><tbody>
+        ${CLIENTS.flatMap(c=>c.payments.filter(p=>!p.recv).map(p=>({c,p}))).map(x=>`<tr class="rowlink" tabindex="0" onclick="A.selStep('${x.c.id}',0)">
+          <td><b>${esc(x.c.name)}</b></td><td>${x.p.kind}</td><td>${money(x.p.amount)}</td><td class="cap">${esc(x.p.due)}</td><td class="cap">${esc(x.p.mode)}</td></tr>`).join("")}
+      </tbody></table></div>${canSeeMoney()?"":'<p class="cap" style="margin-top:8px">Amounts are masked for your role — sign in as Meera (finance@) to see them.</p>'}`;
+  }
+  if(S.reportTab==="sales"){
+    const by={};
+    CLIENTS.forEach(c=>{ by[c.sales]=by[c.sales]||{n:0,live:0}; by[c.sales].n++; if(c.status==="LIVE")by[c.sales].live++; });
+    const rows=Object.entries(by); const maxN=Math.max(...rows.map(([,v])=>v.n));
+    body=`<h3>Clients boarded per sales person</h3><p class="cap" style="margin:2px 0 14px">All time. Live count shown beside each bar.</p>
+      ${rows.map(([name,v])=>`<div class="hbar-row"><span class="hbar-lbl">${esc(name)}</span>
+        <span class="hbar-track"><span class="hbar" style="width:${Math.round(v.n/maxN*100)}%" onmouseenter="tipOn(event,'${esc(name)}: <b>${v.n}</b> boarded, ${v.live} live')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></span></span>
+        <span class="hbar-val">${v.n}</span></div>`).join("")}`;
+  }
+  if(S.reportTab==="aging"){
+    const rows = active.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>["BLOCKED","WAITING"].includes(x.s.status)||x.s.pct>=100));
+    body=`<h3>Stuck & aging steps</h3><p class="cap" style="margin:2px 0 14px">Blocked, waiting-on-client, or breached — with attribution, so TAT disputes die here.</p>
+      <div class="tblwrap"><table><thead><tr><th>Client</th><th>Step</th><th>State</th><th>Owner</th><th>Clock</th><th>Reason</th></tr></thead><tbody>
+      ${rows.map(x=>`<tr class="rowlink" tabindex="0" onclick="A.selStep('${x.c.id}',${x.i})">
+        <td><b>${esc(x.c.name)}</b></td><td>${esc(x.s.name)}</td><td>${chipStatus(x.s)}</td><td>${esc(uById(x.s.owner).name)}</td>
+        <td>${x.s.status==="WAITING"?'<span class="chip chip-grey">⏸ paused · client time</span>':'<span class="chip chip-red">⏱ running · our time</span>'}</td>
+        <td class="cap">${esc(x.s.blockReason||"Waiting on client input")}</td></tr>`).join("")}
+      </tbody></table></div>`;
+  }
+  if(S.reportTab==="signoff"){
+    const rows = CLIENTS.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>x.s.signoff&&x.s.status!=="DONE"));
+    body=`<h3>Client sign-offs — pending & upcoming</h3>
+      <div class="tblwrap" style="margin-top:12px"><table><thead><tr><th>Client</th><th>Step</th><th>SPOC</th><th>Status</th></tr></thead><tbody>
+      ${rows.map(x=>`<tr class="rowlink" tabindex="0" onclick="A.selStep('${x.c.id}',${x.i})">
+        <td><b>${esc(x.c.name)}</b></td><td>${esc(x.s.name)}</td><td>${esc(x.c.spocs[0].name)}<div class="cap">${esc(x.c.spocs[0].email)}</div></td>
+        <td>${x.s.signoffState==="REQUESTED"?'<span class="chip chip-amber">⏳ Link sent, awaiting client</span>':x.s.signoffState==="OBJECTION"?'<span class="chip chip-red">⚠ Objection raised</span>':'<span class="chip chip-grey">○ Not yet requested</span>'}</td></tr>`).join("")}
+      </tbody></table></div>`;
+  }
+  return shell(`<div class="content">
+    <div class="page-head"><div><h1>Reports</h1><p class="cap" style="margin-top:2px">All figures from pre-aggregated summaries — dashboards never run live counts.</p></div>
+      <span class="sp"></span><button class="btn" onclick="A.exportStub('${tabs.find(t=>t[0]===S.reportTab)[1]}')">⬇ Export XLSX</button></div>
+    <div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab${S.reportTab===k?" on":""}" role="tab" aria-selected="${S.reportTab===k}" onclick="A.reportTab('${k}')">${l}</button>`).join("")}</div>
+    <div class="card">${body}</div>
+  </div>`, "reports");
+}
+
+/* ============================== RENDER ============================== */
+function render(){
+  const app=$("app");
+  const v=S.view;
+  if(!S.user && v!=="login"){ S.view="login"; }
+  const map={login:vLogin, launcher:vLauncher, ticketing:vTicketing, dash:vDash, clients:vClients, client:vClient,
+    wizard:vWizard, templates:vTemplates, tplEdit:vTplEdit, access:vAccess, settings:vSettings, msgtpl:vMsgTpl,
+    reports:vReports, signoff:vSignoff};
+  app.innerHTML = (map[S.view]||vLogin)();
+}
+window.go = go; window.tipOn=tipOn; window.tipMove=tipMove; window.tipOff=tipOff; window.S=S;
+render();
+</script>
