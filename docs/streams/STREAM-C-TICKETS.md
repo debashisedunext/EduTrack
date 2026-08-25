@@ -466,3 +466,49 @@ Answer before M4 (PLAN.md §5):
 - **G-3** Can a Developer close a ticket, or only mark Resolved? *(Recommended: Resolved only — closure belongs to the Sign-off stage owner.)*
 - Can a ticket skip QA, and who authorises it? *(Recommended: PM/Admin only, reason mandatory, never for Production Bug.)*
 - Should comments default to internal or client-visible? *(Recommended: internal, always — an accidental leak costs far more than an extra click.)*
+
+---
+
+# Phase 2 — Client Onboarding
+
+*Added 25 Aug 2026. Authority: [`docs/PHASE-2-BUILD-PLAN.md`](../PHASE-2-BUILD-PLAN.md) for implementation, [`docs/Onboarding-Module-Plan.md`](../Onboarding-Module-Plan.md) for behaviour. Task IDs use the 100-block so phase 1 and phase 2 never collide.*
+
+**Stream D is not staffed in phase 2.** The TAT engine comes here, because it reads the clock events and step lifecycle you own; notification delivery goes to B and the contract to A.
+
+## OB2 — Journey engine & ribbon
+
+The heart of the module, and the closest analogue to the work you already did on the Workflow Ribbon — which is exactly why it must not import any of it.
+
+### Templates
+
+- [ ] **C-101** **Template domain and versioning** — steps and step items, publish-as-new-version. An admin edit never mutates an in-flight journey.
+- [ ] **C-102** **OB-07 — journey template designer** — order, **parallel groups, `depends_on`, per-item mandatory flags, the required-document list and step descriptions**. The prototype draws only name, TAT, owner, sign-off and sub-category labels; the five missing pieces are load-bearing for activation, so this is a four-day task rather than the two it looks like.
+
+### Instances
+
+- [ ] **C-103** 🔴 **Instantiation** — pin `template_id + version` at creation, resolve default owners to named users, and park unresolved steps on the Manager's unassigned list rather than letting the journey pass them.
+- [ ] **C-104** 🔴 **Step lifecycle** — start, complete, block-with-mandatory-reason, waiting-on-client, resume.
+- [ ] **C-105** 🔴 **Clock events and working-calendar `due_at`** — pause and resume as **rows**, and recompute `due_at` on resume. The design models this as a status flip; copying that is the mistake. Retrofitting it later invalidates every TAT figure recorded before the retrofit, and it is the mitigation for the module plan's own second-ranked risk.
+- [ ] **C-106** 🔴 **Sub-category answers and the completion gate** — one server-side gate: every mandatory item answered, a False carrying a remark, required documents attached, sign-off accepted where the step demands it. **Client sign-off must route through this same gate** — the design's acceptance path completes the step directly and enforces none of it.
+- [ ] **C-107** **Skip a step** — Manager and Admin only, reason mandatory, history row. Absent from the design; required by the module plan §3 and §4.
+- [ ] **C-108** **Backup owner** — assignment plus leave-aware inheritance against the working calendar. The column is in the schema and the affordance is nowhere in the design.
+
+### Screens
+
+- [ ] **C-109** 🔴 **The onboarding ribbon** — built fresh in `features/onboarding/`, **tokens only, no import from `components/ribbon/`**. The module plan is explicit that the ribbon is a visual language rather than a shared component; importing it couples two release cycles on day one and is very hard to undo once four screens depend on it. Extraction of shared primitives is a later, signed-off, cross-stream task or it does not happen.
+- [ ] **C-110** **OB-05 — client detail** — the ribbon across the top, step panel, payments, requirements, attachments, sign-off status.
+- [ ] **C-111** **OB-06 — step update panel** — the owner's working surface, opened by clicking a segment; read-only for anybody else's step.
+- [ ] **C-112** **Communications timeline** — per-step, plus the **client-level stitched view** the module plan §6 calls what management actually asks for and the design does not draw.
+
+## OB3 — TAT & escalation
+
+Stream D's in phase 1. It lands here because every input it reads — step state, clock events, `due_at` — is code you will have just written.
+
+- [ ] **C-113** 🔴 **TAT scanner worker job** — `worker/onboarding/`, same infrastructure pattern as the SLA scanner, its own schedule and package. Sweeps active steps, flips state, writes history, enqueues notifications.
+- [ ] **C-114** **RAG computation** — step Green → Amber at the configured threshold → Red on breach or blocked-past-threshold; client roll-up is the worst of its steps. Live-Green is a separate state reachable only through final sign-off.
+- [ ] **C-115** **Escalation matrix** — L1 to the owner at breach, L2 to the Manager after four working hours unacknowledged, L3 to OB Admin after eight. Configurable, with acknowledgement recorded.
+
+## OB5 — Hardening
+
+- [ ] **C-116** **Ribbon accessibility pass** — keyboard navigation, ARIA labels on every segment, sane focus order. WCAG AA is not optional.
+- [ ] **C-117** **Scanner load pass** — 500 active journeys, 4,000 open steps, and prove the sweep still finishes inside its cadence.

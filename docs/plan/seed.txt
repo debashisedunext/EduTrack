@@ -1,0 +1,105 @@
+# Estimates and dependencies, read ONCE per task — the first time it appears.
+# After that `tasks.csv` is the source of truth and this file is ignored for it.
+#
+#   ID | estimate_days | predecessor,predecessor | c or i
+#
+# c / i  confirmed (the owner agreed) or inferred (someone guessed).
+#        A critical path through inferred edges is a hypothesis, so get them
+#        confirmed before anyone quotes a date from it.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 2 — Client Onboarding.  Added 25 Aug 2026.
+#
+# Every edge below is INFERRED. They come from the build plan's reading of the
+# module plan, not from Shivendra, Ayush or Divyansh agreeing to them — none of
+# the three has seen this backlog yet. Treat the phase 2 finish date as a
+# hypothesis until they have, and re-mark the edges `c` as they confirm.
+#
+# Phase 1 tasks are deliberately absent: they were seeded before this file
+# existed and `tasks.csv` has owned their estimates ever since.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stream A — OB0: the ob_* schema ─────────────────────────────────────────
+A-101 | 2.0 |                   | i
+A-102 | 1.0 | A-101             | i
+A-103 | 2.0 |                   | i
+A-104 | 2.0 | A-101,A-103       | i
+A-105 | 1.0 | A-104             | i
+A-106 | 3.0 | A-104             | i
+A-107 | 2.0 | A-104             | i
+A-108 | 1.0 | A-104             | i
+A-109 | 1.0 | A-108             | i
+
+# ── Stream A — OB0: the module gate ─────────────────────────────────────────
+A-110 | 2.0 | A-109             | i
+A-111 | 2.0 | A-110             | i
+A-112 | 3.0 | A-111             | i
+A-113 | 3.0 | A-101             | i
+A-114 | 2.0 | A-112             | i
+A-115 | 2.0 | A-106             | i
+
+# ── Stream A — OB0: shell and contract ──────────────────────────────────────
+A-116 | 2.0 | A-110             | i
+A-117 | 2.0 | A-116             | i
+A-118 | 3.0 |                   | i
+A-119 | 2.0 | A-118             | i
+
+# ── Stream A — OB4 / OB5 ────────────────────────────────────────────────────
+A-120 | 3.0 | A-107             | i
+A-121 | 2.0 | A-120             | i
+A-122 | 2.0 | A-114             | i
+A-123 | 2.0 | A-106             | i
+
+# ── Stream B — OB1: client capture ──────────────────────────────────────────
+B-101 | 2.0 | A-104             | i
+B-102 | 3.0 | A-112,A-113       | i
+B-103 | 1.0 | B-102             | i
+B-104 | 1.0 | B-102             | i
+B-105 | 2.0 | B-102             | i
+B-106 | 1.0 | B-102             | i
+B-107 | 1.0 | B-102             | i
+B-108 | 2.0 | B-102             | i
+B-109 | 3.0 | B-103,B-104,B-105,B-106,B-107 | i
+
+# ── Stream B — OB3: notifications (email only) ──────────────────────────────
+B-110 | 2.0 | A-107             | i
+B-111 | 1.0 | B-110             | i
+B-112 | 2.0 | B-110             | i
+B-113 | 2.0 | C-115             | i
+B-114 | 1.0 | B-112             | i
+
+# ── Stream B — OB4: sign-off, dashboard, reports ────────────────────────────
+B-115 | 2.0 | A-121             | i
+B-116 | 2.0 | B-115             | i
+B-117 | 1.0 | B-115             | i
+B-118 | 1.0 | B-116             | i
+B-119 | 2.0 | B-118             | i
+B-120 | 2.0 | A-108             | i
+B-121 | 3.0 | B-120             | i
+B-122 | 3.0 | B-120             | i
+B-123 | 1.0 | B-122             | i
+
+# ── Stream C — OB2: templates and instances ─────────────────────────────────
+C-101 | 3.0 | A-103             | i
+C-102 | 4.0 | C-101             | i
+C-103 | 3.0 | C-101,A-104       | i
+C-104 | 3.0 | C-103             | i
+C-105 | 3.0 | C-104,A-105       | i
+C-106 | 2.0 | C-104             | i
+C-107 | 1.0 | C-104             | i
+C-108 | 2.0 | C-104             | i
+
+# ── Stream C — OB2: screens ─────────────────────────────────────────────────
+C-109 | 3.0 |                   | i
+C-110 | 3.0 | C-109,B-102       | i
+C-111 | 3.0 | C-106,C-110       | i
+C-112 | 2.0 | C-111             | i
+
+# ── Stream C — OB3: the TAT engine ──────────────────────────────────────────
+C-113 | 3.0 | C-105             | i
+C-114 | 2.0 | C-113             | i
+C-115 | 3.0 | C-114             | i
+
+# ── Stream C — OB5 ──────────────────────────────────────────────────────────
+C-116 | 2.0 | C-111             | i
+C-117 | 2.0 | C-115             | i

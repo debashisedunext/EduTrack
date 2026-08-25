@@ -1,6 +1,6 @@
 # EduTrack — Master Schedule
 
-**Generated Tue 25 Aug 2026 · day 16 of the plan · finish forecast Fri 28 Aug**
+**Generated Tue 25 Aug 2026 · day 16 of the plan · finish forecast Tue 17 Nov**
 
 > Regenerated automatically at 09:00 every working day by `tools/plan/schedule.py`. **Do not hand-edit.** Change an estimate or a dependency in [`tasks.csv`](tasks.csv); record a status git cannot see in [`overrides.json`](overrides.json).
 
@@ -10,6 +10,12 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 
 ## Where we are
 
+Each phase is counted on its own. A phase's *working days available* is the span of that phase alone, so a finished phase does not flatter the load of the one running now, and a new phase does not make a finished one look incomplete.
+
+### Phase 1 — Ticketing
+
+*Wed 05 Aug → Fri 28 Aug*
+
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 241 of 244 (99%) | 360.8 of 365.8 (99%) |
@@ -17,38 +23,73 @@ Interactive chart: [`gantt.html`](gantt.html) · Today's briefs: [`standup/2026-
 | On the driving chain | 2 | 4.0 |
 | Zero float (no slack at all) | 2 | 4.0 |
 
-### By developer
+| Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
+|---|---|---:|---:|---:|---:|---:|---|
+| **A** | Shivendra | 65 | 63 | 95.0 | 18 | 528% ⚠️ | Fri 28 Aug |
+| **B** | Ayush | 55 | 55 | 89.8 | 18 | 499% ⚠️ | Sat 22 Aug |
+| **C** | Divyansh | 59 | 58 | 90.0 | 18 | 500% ⚠️ | Tue 25 Aug |
+| **D** | Debashis | 65 | 65 | 91.0 | 18 | 506% ⚠️ | Sat 22 Aug |
+
+### Phase 2 — Client Onboarding
+
+*Wed 26 Aug → Tue 17 Nov*
+
+| | Tasks | Effort (days) |
+|---|---:|---:|
+| Complete | 0 of 63 (0%) | 0.0 of 132.0 (0%) |
+| In flight | 0 | 0.0 |
+| On the driving chain | 31 | 57.0 |
+| Zero float (no slack at all) | 31 | 57.0 |
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
-| **A** | Shivendra | 65 | 63 | 95.0 | 19 | 500% ⚠️ | Fri 28 Aug |
-| **B** | Ayush | 55 | 55 | 89.8 | 19 | 472% ⚠️ | Sat 22 Aug |
-| **C** | Divyansh | 59 | 58 | 90.0 | 19 | 474% ⚠️ | Tue 25 Aug |
-| **D** | Debashis | 65 | 65 | 91.0 | 19 | 479% ⚠️ | Sat 22 Aug |
+| **A** | Shivendra | 23 | 0 | 47.0 | 60 | 78% | Tue 03 Nov |
+| **B** | Ayush | 23 | 0 | 41.0 | 60 | 68% | Tue 17 Nov |
+| **C** | Divyansh | 17 | 0 | 44.0 | 60 | 73% | Sat 07 Nov |
+
+### Whole plan
+
+| | Tasks | Effort (days) |
+|---|---:|---:|
+| Complete | 241 of 307 (79%) | 360.8 of 497.8 (72%) |
+| In flight | 0 | 0.0 |
+| On the driving chain | 33 | 61.0 |
+| Zero float (no slack at all) | 33 | 61.0 |
+
+| Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
+|---|---|---:|---:|---:|---:|---:|---|
+| **A** | Shivendra | 88 | 63 | 142.0 | 76 | 187% ⚠️ | Tue 03 Nov |
+| **B** | Ayush | 78 | 55 | 130.8 | 76 | 172% ⚠️ | Tue 17 Nov |
+| **C** | Divyansh | 76 | 58 | 134.0 | 76 | 176% ⚠️ | Sat 07 Nov |
+| **D** | Debashis | 65 | 65 | 91.0 | 76 | 120% ⚠️ | Sat 22 Aug |
+
 
 ### Slipping
 
 | Task | Owner | Baseline end | Forecast end | Slip |
 |---|---|---|---|---:|
-| `A-001` Maven multi-module skeleton: common, domain, api | Shivendra | Thu 06 Aug | Tue 25 Aug | +13d |
-| `A-002` docker-compose.yml — MySQL 8.4, Redis 7, MinIO,  | Shivendra | Thu 06 Aug | Tue 25 Aug | +13d |
-| `A-007` Flyway baseline 5/5 — masters & ops | Shivendra | Thu 06 Aug | Tue 25 Aug | +13d |
-| `A-008` Immutability triggers — two per table | Shivendra | Thu 06 Aug | Tue 25 Aug | +13d |
-| `A-009` Generated columns + indexes replacing PostgreSQL | Shivendra | Thu 06 Aug | Tue 25 Aug | +13d |
-| `A-011` CI pipeline | Shivendra | Thu 06 Aug | Tue 25 Aug | +13d |
-| `A-023` Opaque refresh token, 7 days, HttpOnly + Secure  | Shivendra | Fri 14 Aug | Mon 10 Aug | +11d |
-| `A-020` Login endpoint — Argon2id | Shivendra | Tue 11 Aug | Sat 22 Aug | +9d |
-| `A-025` Logout | Shivendra | Tue 18 Aug | Mon 10 Aug | +9d |
-| `A-026` Forced password change on first login — must_cha | Shivendra | Wed 19 Aug | Mon 10 Aug | +8d |
-| `B-007` Ticket fixture corpus | Ayush | Wed 19 Aug | Mon 10 Aug | +8d |
-| `A-027` Forgot/reset password — single-use, 30-min TTL,  | Shivendra | Thu 20 Aug | Mon 10 Aug | +7d |
-| `C-011` Ticket ID generation | Divyansh | Thu 20 Aug | Mon 10 Aug | +7d |
-| `B-006` MapStruct base configuration | Ayush | Fri 21 Aug | Mon 10 Aug | +6d |
-| `B-031` Step 1 — template download | Ayush | Tue 25 Aug | Mon 17 Aug | +5d |
-| `C-010` Create ticket — all field groups from blueprint  | Divyansh | Tue 25 Aug | Mon 10 Aug | +4d |
-| `B-032` Step 2 — upload, max 5 MB / 5,000 rows, event-dr | Ayush | Thu 27 Aug | Mon 17 Aug | +3d |
-| `C-013` Actions: Save & Assign · Save as Draft · Save &  | Divyansh | Wed 26 Aug | Mon 10 Aug | +3d |
-| `A-013` Negative tests proving triggers reject UPDATE an | Shivendra | Thu 06 Aug | Fri 07 Aug | +1d |
+| `A-023` Opaque refresh token, 7 days, HttpOnly + Secure  | Shivendra | Fri 14 Aug | Mon 10 Aug | +68d |
+| `A-025` Logout | Shivendra | Tue 18 Aug | Mon 10 Aug | +66d |
+| `A-026` Forced password change on first login — must_cha | Shivendra | Wed 19 Aug | Mon 10 Aug | +65d |
+| `B-007` Ticket fixture corpus | Ayush | Wed 19 Aug | Mon 10 Aug | +65d |
+| `A-027` Forgot/reset password — single-use, 30-min TTL,  | Shivendra | Thu 20 Aug | Mon 10 Aug | +64d |
+| `C-011` Ticket ID generation | Divyansh | Thu 20 Aug | Mon 10 Aug | +64d |
+| `B-006` MapStruct base configuration | Ayush | Fri 21 Aug | Mon 10 Aug | +63d |
+| `B-031` Step 1 — template download | Ayush | Tue 25 Aug | Mon 17 Aug | +62d |
+| `C-010` Create ticket — all field groups from blueprint  | Divyansh | Tue 25 Aug | Mon 10 Aug | +61d |
+| `B-032` Step 2 — upload, max 5 MB / 5,000 rows, event-dr | Ayush | Thu 27 Aug | Mon 17 Aug | +60d |
+| `C-013` Actions: Save & Assign · Save as Draft · Save &  | Divyansh | Wed 26 Aug | Mon 10 Aug | +60d |
+| `B-034` Step 4 — dry-run validation preview | Ayush | Wed 02 Sep | Mon 17 Aug | +56d |
+| `C-015` Saved views | Divyansh | Tue 01 Sep | Mon 10 Aug | +56d |
+| `C-016` Row colour cues | Divyansh | Wed 02 Sep | Mon 10 Aug | +55d |
+| `B-035` Step 5 — commit as a background job with progres | Ayush | Fri 04 Sep | Mon 17 Aug | +54d |
+| `A-052` /tickets/{id}/full aggregated endpoint | Shivendra | Fri 18 Sep | Sun 16 Aug | +48d |
+| `C-028` Delete within 15 minutes by the uploader; after  | Divyansh | Fri 18 Sep | Sun 16 Aug | +48d |
+| `A-053` Cursor pagination + virtualised grid rendering b | Shivendra | Tue 29 Sep | Sun 16 Aug | +41d |
+| `C-030` @mention type-ahead over project members, firing | Divyansh | Wed 23 Sep | Mon 17 Aug | +41d |
+| `D-013` Channel interceptor authorising subscriptions wi | Debashis | Tue 22 Sep | Mon 10 Aug | +41d |
+
+*…and 36 more — see the interactive chart.*
 
 ---
 
@@ -62,6 +103,37 @@ Each of these is held up either by the one before it or by the fact that the sam
 | 2 | `A-053` | Shivendra | Cursor pagination + virtualised grid rendering beyon | 1.5 | Sun 16 Aug | Sun 16 Aug | `A-052` finished |
 | 3 | `A-073` | Shivendra | Performance | 2 | Tue 25 Aug | Wed 26 Aug | `A-053` finished |
 | 4 | `A-075` | Shivendra | Go-live runbook, deployment, TLS, secrets in vault | 2 | Thu 27 Aug | Fri 28 Aug | `A-073` finished |
+| 5 | `A-118` | Shivendra | OpenAPI contract for the whole module | 3 | Sat 29 Aug | Wed 02 Sep | Shivendra was busy on `A-075` |
+| 6 | `A-119` | Shivendra | Wire-conformance ratchet for onboarding DTOs | 2 | Thu 03 Sep | Fri 04 Sep | `A-118` finished |
+| 7 | `A-101` | Shivendra | Client capture tables | 2 | Sat 05 Sep | Tue 08 Sep | Shivendra was busy on `A-119` |
+| 8 | `A-102` | Shivendra | ob_payments and ob_attachments | 1 | Wed 09 Sep | Wed 09 Sep | `A-101` finished |
+| 9 | `A-103` | Shivendra | Journey template tables | 2 | Thu 10 Sep | Fri 11 Sep | Shivendra was busy on `A-102` |
+| 10 | `A-104` | Shivendra | Journey instance tables | 2 | Sat 12 Sep | Tue 15 Sep | `A-103` finished |
+| 11 | `A-106` | Shivendra | Append-only pair, hash-chained | 3 | Wed 16 Sep | Fri 18 Sep | `A-104` finished |
+| 12 | `A-105` | Shivendra | ob_step_clock_events | 1 | Sat 19 Sep | Sat 19 Sep | Shivendra was busy on `A-106` |
+| 13 | `A-107` | Shivendra | Sign-off, outbox and escalation tables | 2 | Tue 22 Sep | Wed 23 Sep | Shivendra was busy on `A-105` |
+| 14 | `B-110` | Ayush | Outbox dispatcher with retry | 2 | Thu 24 Sep | Fri 25 Sep | `A-107` finished |
+| 15 | `B-111` | Ayush | Email templates through the existing mail engine — n | 1 | Sat 26 Sep | Sat 26 Sep | `B-110` finished |
+| 16 | `B-112` | Ayush | OB-13 | 2 | Tue 29 Sep | Wed 30 Sep | Ayush was busy on `B-111` |
+| 17 | `B-114` | Ayush | Daily digest to managers | 1 | Thu 01 Oct | Thu 01 Oct | `B-112` finished |
+| 18 | `B-120` | Ayush | ob_dashboard_summary refresh job | 2 | Fri 02 Oct | Sat 03 Oct | Ayush was busy on `B-114` |
+| 19 | `B-121` | Ayush | OB-02 | 3 | Tue 06 Oct | Thu 08 Oct | `B-120` finished |
+| 20 | `B-122` | Ayush | OB-10 | 3 | Fri 09 Oct | Tue 13 Oct | Ayush was busy on `B-121` |
+| 21 | `B-123` | Ayush | Export redaction | 1 | Wed 14 Oct | Wed 14 Oct | `B-122` finished |
+| 22 | `B-102` | Ayush | Client CRUD and the duplicate guard | 3 | Thu 15 Oct | Sat 17 Oct | Ayush was busy on `B-123` |
+| 23 | `B-103` | Ayush | SPOC contacts — multiple per client, one primary | 1 | Tue 20 Oct | Tue 20 Oct | `B-102` finished |
+| 24 | `B-104` | Ayush | Applications purchased — with license start and end  | 1 | Wed 21 Oct | Wed 21 Oct | Ayush was busy on `B-103` |
+| 25 | `B-105` | Ayush | Payment schedule | 2 | Thu 22 Oct | Fri 23 Oct | Ayush was busy on `B-104` |
+| 26 | `B-106` | Ayush | Requirements | 1 | Sat 24 Oct | Sat 24 Oct | Ayush was busy on `B-105` |
+| 27 | `B-107` | Ayush | Client attachments — the existing upload pipeline, u | 1 | Tue 27 Oct | Tue 27 Oct | Ayush was busy on `B-106` |
+| 28 | `B-108` | Ayush | OB-03 — client list — filter by status, RAG, owner a | 2 | Wed 28 Oct | Thu 29 Oct | Ayush was busy on `B-107` |
+| 29 | `B-109` | Ayush | OB-04 | 3 | Fri 30 Oct | Tue 03 Nov | Ayush was busy on `B-108` |
+| 30 | `B-113` | Ayush | OB-11 and OB-12 | 2 | Wed 04 Nov | Thu 05 Nov | Ayush was busy on `B-109` |
+| 31 | `B-115` | Ayush | OB-09 | 2 | Fri 06 Nov | Sat 07 Nov | Ayush was busy on `B-113` |
+| 32 | `B-117` | Ayush | The objection path | 1 | Tue 10 Nov | Tue 10 Nov | `B-115` finished |
+| 33 | `B-116` | Ayush | Acceptance PDF | 2 | Wed 11 Nov | Thu 12 Nov | Ayush was busy on `B-117` |
+| 34 | `B-118` | Ayush | Go-live flip | 1 | Fri 13 Nov | Fri 13 Nov | `B-116` finished |
+| 35 | `B-119` | Ayush | CSAT — a public one-question page, storage, and a su | 2 | Sat 14 Nov | Tue 17 Nov | `B-118` finished |
 
 ---
 
@@ -77,12 +149,16 @@ gantt
     axisFormat %d %b
     title Stream A — Shivendra
     excludes weekends
-    section Milestones
+    section Phase 1 — Ticketing
     Sprint 0 — weeks 1–2 :done, a0, 2026-08-05, 15d
     M1 — Authentication & the scope guard — weeks :done, a1, 2026-08-07, 13d
     Hardening — weeks 17–18 :active, a2, 2026-08-12, 13d
     M2 — Immutability core — weeks 8–9 :done, a3, 2026-08-14, 1d
     M6 — Dashboard & reports — weeks 10–16 :done, a4, 2026-08-15, 7d
+    section Phase 2 — Client Onboarding
+    OB0 — Gate & schema :a5, 2026-08-29, 38d
+    OB4 — Sign-off  dashboard  reports :a6, 2026-10-22, 5d
+    OB5 — Hardening :a7, 2026-10-29, 4d
 ```
 
 ### Stream B — Masters & Clients · Ayush
@@ -93,11 +169,16 @@ gantt
     axisFormat %d %b
     title Stream B — Ayush
     excludes weekends
-    section Milestones
-    Sprint 0 — weeks 1–2 :done, b0, 2026-08-06, 18d
-    M3 — Master data — weeks 3–9 :done, b1, 2026-08-10, -5d
+    section Phase 1 — Ticketing
+    Sprint 0 — weeks 1–2 :done, b0, 2026-08-06, 75d
+    M3 — Master data — weeks 3–9 :done, b1, 2026-08-10, -62d
     Weeks 12–14 — M6 reports :done, b2, 2026-08-19, 4d
     Weeks 10–11 — join Stream C on the ribbon :done, b3, 2026-08-20, 3d
+    section Phase 2 — Client Onboarding
+    OB1 — Client capture :b4, 2026-09-16, 35d
+    OB3 — Notifications :b5, 2026-09-24, 31d
+    OB4 — Sign-off  dashboard  reports :b6, 2026-10-02, 33d
+    OB5 — Hardening :b7, 2026-10-14, 1d
 ```
 
 ### Stream C — Tickets & Ribbon · Divyansh
@@ -108,9 +189,13 @@ gantt
     axisFormat %d %b
     title Stream C — Divyansh
     excludes weekends
-    section Milestones
+    section Phase 1 — Ticketing
     Sprint 0 — weeks 1–2 :done, c0, 2026-08-06, 3d
     M4 — Tickets — weeks 3–14 :active, c1, 2026-08-08, 12d
+    section Phase 2 — Client Onboarding
+    OB2 — Journey engine & ribbon :c2, 2026-08-26, 52d
+    OB3 — TAT & escalation :c3, 2026-10-13, 8d
+    OB5 — Hardening :c4, 2026-10-23, 12d
 ```
 
 ### Stream D — Engines & Realtime · Debashis
@@ -121,9 +206,9 @@ gantt
     axisFormat %d %b
     title Stream D — Debashis
     excludes weekends
-    section Milestones
+    section Phase 1 — Ticketing
     Sprint 0 — weeks 1–2 :done, d0, 2026-08-06, 13d
-    Infrastructure — weeks 3–5 :done, d1, 2026-08-07, 17d
+    Infrastructure — weeks 3–5 :done, d1, 2026-08-07, 74d
     M5 — SLA  escalation & mail — weeks 6–11 :done, d2, 2026-08-07, 11d
     M7 — Chat & realtime — weeks 12–16 :done, d3, 2026-08-08, 10d
     Contract changes :done, d4, 2026-08-11, 1d
@@ -138,7 +223,7 @@ gantt
 `▲` critical path · `🔴` another developer is waiting on it · float is working days of slack before the finish date moves.
 
 <details>
-<summary><b>Stream A — Platform & Security · Shivendra · 65 tasks</b></summary>
+<summary><b>Stream A — Platform & Security · Shivendra · 88 tasks</b></summary>
 
 | | Task | Title | Est | Predecessors | Start | End | Float | Status |
 |---|---|---|---:|---|---|---|---:|---|
@@ -207,11 +292,34 @@ gantt
 | ▲ | `A-075` | Go-live runbook, deployment, TLS, secrets in vault | 2 | `A-073` `A-074` ᶦ | Thu 27 Aug | Fri 28 Aug | 0 | ▫️ to do |
 |  | `A-076` | Login throttle — the half A-021 deferred | 1 | — | Wed 12 Aug | Wed 12 Aug | 12 | ✅ done |
 |  | `A-077` | Project dashboard | 2 | — | Fri 21 Aug | Fri 21 Aug | 5 | ✅ done |
+| ▲ | `A-101` | Client capture tables | 2 | — | Sat 05 Sep | Tue 08 Sep | 0 | ▫️ to do |
+| ▲ | `A-102` | ob_payments and ob_attachments | 1 | `A-101` ᶦ | Wed 09 Sep | Wed 09 Sep | 0 | ▫️ to do |
+| ▲ | `A-103` | Journey template tables | 2 | — | Thu 10 Sep | Fri 11 Sep | 0 | ▫️ to do |
+| ▲ | `A-104` | Journey instance tables | 2 | `A-101` `A-103` ᶦ | Sat 12 Sep | Tue 15 Sep | 0 | ▫️ to do |
+| ▲ | `A-105` | ob_step_clock_events | 1 | `A-104` ᶦ | Sat 19 Sep | Sat 19 Sep | 0 | ▫️ to do |
+| ▲🔴 | `A-106` | Append-only pair, hash-chained | 3 | `A-104` ᶦ | Wed 16 Sep | Fri 18 Sep | 0 | ▫️ to do |
+| ▲ | `A-107` | Sign-off, outbox and escalation tables | 2 | `A-104` ᶦ | Tue 22 Sep | Wed 23 Sep | 0 | ▫️ to do |
+|  | `A-108` | ob_dashboard_summary — pre-aggregated | 1 | `A-104` ᶦ | Thu 24 Sep | Thu 24 Sep | 3 | ▫️ to do |
+| 🔴 | `A-109` | user_module_access and the grants | 1 | `A-108` ᶦ | Fri 25 Sep | Fri 25 Sep | 3 | ▫️ to do |
+| 🔴 | `A-110` | modules JWT claim | 2 | `A-109` ᶦ | Sat 26 Sep | Tue 29 Sep | 3 | ▫️ to do |
+| 🔴 | `A-111` | ModuleGuard | 2 | `A-110` ᶦ | Wed 30 Sep | Thu 01 Oct | 3 | ▫️ to do |
+| 🔴 | `A-112` | OnboardingScopeResolver and ScopedJourneys | 3 | `A-111` ᶦ | Fri 02 Oct | Tue 06 Oct | 3 | ▫️ to do |
+|  | `A-113` | PAN encryption and the reveal audit | 3 | `A-101` ᶦ | Wed 07 Oct | Fri 09 Oct | 3 | ▫️ to do |
+|  | `A-114` | Permission-matrix entries | 2 | `A-112` ᶦ | Sat 10 Oct | Tue 13 Oct | 6 | ▫️ to do |
+|  | `A-115` | ArchUnit: the two modules stay separable | 2 | `A-106` ᶦ | Wed 14 Oct | Thu 15 Oct | 6 | ▫️ to do |
+|  | `A-116` | Module launcher and switcher | 2 | `A-110` ᶦ | Fri 16 Oct | Sat 17 Oct | 6 | ▫️ to do |
+|  | `A-117` | OB-08 | 2 | `A-116` ᶦ | Tue 20 Oct | Wed 21 Oct | 6 | ▫️ to do |
+| ▲🔴 | `A-118` | OpenAPI contract for the whole module | 3 | — | Sat 29 Aug | Wed 02 Sep | 0 | ▫️ to do |
+| ▲🔴 | `A-119` | Wire-conformance ratchet for onboarding DTOs | 2 | `A-118` ᶦ | Thu 03 Sep | Fri 04 Sep | 0 | ▫️ to do |
+|  | `A-120` | Public sign-off surface | 3 | `A-107` ᶦ | Thu 22 Oct | Sat 24 Oct | 6 | ▫️ to do |
+|  | `A-121` | OTP issue and verify | 2 | `A-120` ᶦ | Tue 27 Oct | Wed 28 Oct | 6 | ▫️ to do |
+|  | `A-122` | Permission-matrix completeness | 2 | `A-114` ᶦ | Thu 29 Oct | Fri 30 Oct | 10 | ▫️ to do |
+|  | `A-123` | Mutation tests on the append-only pair | 2 | `A-106` ᶦ | Sat 31 Oct | Tue 03 Nov | 10 | ▫️ to do |
 
 </details>
 
 <details>
-<summary><b>Stream B — Masters & Clients · Ayush · 55 tasks</b></summary>
+<summary><b>Stream B — Masters & Clients · Ayush · 78 tasks</b></summary>
 
 | | Task | Title | Est | Predecessors | Start | End | Float | Status |
 |---|---|---|---:|---|---|---|---:|---|
@@ -270,11 +378,34 @@ gantt
 |  | `B-066` | Client 360 | 2 | — | Sat 22 Aug | Sat 22 Aug | 4 | ✅ done |
 |  | `B-067` | Masters index — the sidebar's Masters entry lands on a placeholder | 1 | — | Sat 22 Aug | Sat 22 Aug | 4 | ✅ done |
 |  | `B-068` | Org settings screen — decided the API is enough | 1 | — | Sat 22 Aug | Sat 22 Aug | 4 | ✅ done |
+|  | `B-101` | Fixture corpus | 2 | `A-104` ᶦ | Wed 16 Sep | Thu 17 Sep | 4 | ▫️ to do |
+| ▲🔴 | `B-102` | Client CRUD and the duplicate guard | 3 | `A-112` `A-113` ᶦ | Thu 15 Oct | Sat 17 Oct | 0 | ▫️ to do |
+| ▲ | `B-103` | SPOC contacts — multiple per client, one primary | 1 | `B-102` ᶦ | Tue 20 Oct | Tue 20 Oct | 0 | ▫️ to do |
+| ▲ | `B-104` | Applications purchased — with license start and end dates | 1 | `B-102` ᶦ | Wed 21 Oct | Wed 21 Oct | 0 | ▫️ to do |
+| ▲ | `B-105` | Payment schedule | 2 | `B-102` ᶦ | Thu 22 Oct | Fri 23 Oct | 0 | ▫️ to do |
+| ▲ | `B-106` | Requirements | 1 | `B-102` ᶦ | Sat 24 Oct | Sat 24 Oct | 0 | ▫️ to do |
+| ▲ | `B-107` | Client attachments — the existing upload pipeline, unchanged | 1 | `B-102` ᶦ | Tue 27 Oct | Tue 27 Oct | 0 | ▫️ to do |
+| ▲ | `B-108` | OB-03 — client list — filter by status, RAG, owner and sales person | 2 | `B-102` ᶦ | Wed 28 Oct | Thu 29 Oct | 0 | ▫️ to do |
+| ▲ | `B-109` | OB-04 | 3 | `B-103` `B-104` `B-105` `B-106` `B-107` ᶦ | Fri 30 Oct | Tue 03 Nov | 0 | ▫️ to do |
+| ▲🔴 | `B-110` | Outbox dispatcher with retry | 2 | `A-107` ᶦ | Thu 24 Sep | Fri 25 Sep | 0 | ▫️ to do |
+| ▲ | `B-111` | Email templates through the existing mail engine — no new transport | 1 | `B-110` ᶦ | Sat 26 Sep | Sat 26 Sep | 0 | ▫️ to do |
+| ▲ | `B-112` | OB-13 | 2 | `B-110` ᶦ | Tue 29 Sep | Wed 30 Sep | 0 | ▫️ to do |
+| ▲ | `B-113` | OB-11 and OB-12 | 2 | `C-115` ᶦ | Wed 04 Nov | Thu 05 Nov | 0 | ▫️ to do |
+| ▲ | `B-114` | Daily digest to managers | 1 | `B-112` ᶦ | Thu 01 Oct | Thu 01 Oct | 0 | ▫️ to do |
+| ▲ | `B-115` | OB-09 | 2 | `A-121` ᶦ | Fri 06 Nov | Sat 07 Nov | 0 | ▫️ to do |
+| ▲ | `B-116` | Acceptance PDF | 2 | `B-115` ᶦ | Wed 11 Nov | Thu 12 Nov | 0 | ▫️ to do |
+| ▲🔴 | `B-117` | The objection path | 1 | `B-115` ᶦ | Tue 10 Nov | Tue 10 Nov | 0 | ▫️ to do |
+| ▲ | `B-118` | Go-live flip | 1 | `B-116` ᶦ | Fri 13 Nov | Fri 13 Nov | 0 | ▫️ to do |
+| ▲ | `B-119` | CSAT — a public one-question page, storage, and a summary | 2 | `B-118` ᶦ | Sat 14 Nov | Tue 17 Nov | 0 | ▫️ to do |
+| ▲ | `B-120` | ob_dashboard_summary refresh job | 2 | `A-108` ᶦ | Fri 02 Oct | Sat 03 Oct | 0 | ▫️ to do |
+| ▲ | `B-121` | OB-02 | 3 | `B-120` ᶦ | Tue 06 Oct | Thu 08 Oct | 0 | ▫️ to do |
+| ▲ | `B-122` | OB-10 | 3 | `B-120` ᶦ | Fri 09 Oct | Tue 13 Oct | 0 | ▫️ to do |
+| ▲ | `B-123` | Export redaction | 1 | `B-122` ᶦ | Wed 14 Oct | Wed 14 Oct | 0 | ▫️ to do |
 
 </details>
 
 <details>
-<summary><b>Stream C — Tickets & Ribbon · Divyansh · 59 tasks</b></summary>
+<summary><b>Stream C — Tickets & Ribbon · Divyansh · 76 tasks</b></summary>
 
 | | Task | Title | Est | Predecessors | Start | End | Float | Status |
 |---|---|---|---:|---|---|---|---:|---|
@@ -337,6 +468,23 @@ gantt
 |  | `C-066` | Shared rich-text editor in components/ui/ + Storybook | 1.5 | `C-003` | Tue 11 Aug | Tue 11 Aug | 12 | ✅ done |
 | 🔴 | `C-071` | Per-project settings are configurable and ignored | 1 | — | Fri 21 Aug | Fri 21 Aug | 5 | ✅ done |
 |  | `C-072` | A deactivated priority can still be chosen | 1 | — | Fri 21 Aug | Fri 21 Aug | 5 | ✅ done |
+|  | `C-101` | Template domain and versioning | 3 | `A-103` ᶦ | Sat 12 Sep | Wed 16 Sep | 6 | ▫️ to do |
+|  | `C-102` | OB-07 | 4 | `C-101` ᶦ | Thu 17 Sep | Tue 22 Sep | 6 | ▫️ to do |
+| 🔴 | `C-103` | Instantiation | 3 | `C-101` `A-104` ᶦ | Wed 23 Sep | Fri 25 Sep | 6 | ▫️ to do |
+| 🔴 | `C-104` | Step lifecycle | 3 | `C-103` ᶦ | Sat 26 Sep | Wed 30 Sep | 6 | ▫️ to do |
+| 🔴 | `C-105` | Clock events and working-calendar due_at | 3 | `C-104` `A-105` ᶦ | Thu 08 Oct | Sat 10 Oct | 6 | ▫️ to do |
+| 🔴 | `C-106` | Sub-category answers and the completion gate — one server-side gate | 2 | `C-104` ᶦ | Thu 01 Oct | Fri 02 Oct | 6 | ▫️ to do |
+|  | `C-107` | Skip a step — Manager and Admin only, reason mandatory, history row | 1 | `C-104` ᶦ | Sat 03 Oct | Sat 03 Oct | 6 | ▫️ to do |
+|  | `C-108` | Backup owner | 2 | `C-104` ᶦ | Tue 06 Oct | Wed 07 Oct | 6 | ▫️ to do |
+| 🔴 | `C-109` | The onboarding ribbon | 3 | — | Wed 26 Aug | Fri 28 Aug | 16 | ▫️ to do |
+|  | `C-110` | OB-05 | 3 | `C-109` `B-102` ᶦ | Tue 27 Oct | Thu 29 Oct | 6 | ▫️ to do |
+|  | `C-111` | OB-06 | 3 | `C-106` `C-110` ᶦ | Fri 30 Oct | Tue 03 Nov | 6 | ▫️ to do |
+|  | `C-112` | Communications timeline | 2 | `C-111` ᶦ | Wed 04 Nov | Thu 05 Nov | 6 | ▫️ to do |
+| 🔴 | `C-113` | TAT scanner worker job | 3 | `C-105` ᶦ | Tue 13 Oct | Thu 15 Oct | 6 | ▫️ to do |
+|  | `C-114` | RAG computation | 2 | `C-113` ᶦ | Fri 16 Oct | Sat 17 Oct | 6 | ▫️ to do |
+|  | `C-115` | Escalation matrix | 3 | `C-114` ᶦ | Tue 20 Oct | Thu 22 Oct | 6 | ▫️ to do |
+|  | `C-116` | Ribbon accessibility pass | 2 | `C-111` ᶦ | Fri 06 Nov | Sat 07 Nov | 6 | ▫️ to do |
+|  | `C-117` | Scanner load pass | 2 | `C-115` ᶦ | Fri 23 Oct | Sat 24 Oct | 6 | ▫️ to do |
 
 </details>
 
