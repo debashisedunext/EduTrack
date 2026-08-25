@@ -138,8 +138,16 @@ function typeSteps(html: string) {
   fireEvent.input(editor)
 }
 
-/** The three fields Save & Assign insists on beyond project and task type. */
-function fillTicketBody(title: string) {
+/**
+ * The four fields Save & Assign insists on beyond project and task type.
+ *
+ * The assignee is picked first, and it is why this is `async` — every caller
+ * has already chosen a project, which is what enables the dropdown, and leaving
+ * the pick last would move focus onto its trigger a frame after the popup
+ * closes and race the focus assertions two tests below make.
+ */
+async function fillTicketBody(title: string) {
+  await pickFromDropdown('assigneeId', /Ravi Kumar/)
   fireEvent.change(screen.getByLabelText(/Title \/ summary/), { target: { value: title } })
   typeDescription('<p>Card payments hang at the confirmation step, then fail.</p>')
   fireEvent.change(screen.getByLabelText(/Estimated effort/), { target: { value: '4.5' } })
@@ -437,7 +445,7 @@ describe('S-19 Create Ticket', () => {
     await pickFromDropdown('clientId', /ACME/)
     // Filled, or zod refuses the body first and `onSubmit` never runs — which
     // would make this test pass while asserting nothing about the client.
-    fillTicketBody('Card payments hang at confirmation')
+    await fillTicketBody('Card payments hang at confirmation')
 
     // Deactivated underneath the open form, exactly as S-32 would, and the
     // list reloaded — a window refocus, or the next Save & Create Another.
@@ -508,7 +516,7 @@ describe('S-19 Create Ticket', () => {
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
     await pickFromDropdown('moduleId', /^Fees$/)
-    fillTicketBody('Payment gateway times out on checkout')
+    await fillTicketBody('Payment gateway times out on checkout')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
 
     // The mock allocates from the project's own sequence, so the ID proves the
@@ -534,6 +542,10 @@ describe('S-19 Create Ticket', () => {
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
     await pickFromDropdown('moduleId', /^Fees$/)
+    // Not `fillTicketBody`, which writes its own description — but the save
+    // still has to get past the assignee rule to reach the wire this test is
+    // about.
+    await pickFromDropdown('assigneeId', /Ravi Kumar/)
     fireEvent.change(screen.getByLabelText(/Title \/ summary/), {
       target: { value: 'Payment gateway times out on checkout' },
     })
@@ -586,18 +598,58 @@ describe('S-19 actions — C-013', () => {
     }
   })
 
-  it('says whether the ticket is about to be saved unassigned', async () => {
+  it('says which button will take a ticket with nobody on it', async () => {
     renderPage()
     await formReady()
 
-    // §7.5 does not mark Assigned To required and C-015 ships an Unassigned
-    // saved view, so this is a supported outcome — but "Save & Assign" reads
-    // like a promise that someone will get it, so it is worth stating.
-    expect(screen.getByText(/Saves unassigned/)).toBeInTheDocument()
+    // Save & Assign insists on an assignee, so the empty state names the one
+    // action that still does not — repeating the field's own error there would
+    // say nothing the asterisk has not already said.
+    expect(screen.getByText(/only Save as Draft will take it without one/)).toBeInTheDocument()
 
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('assigneeId', /Ravi Kumar/)
     expect(await screen.findByText(/Will be assigned to/)).toHaveTextContent('Ravi Kumar')
+  })
+
+  it('refuses Save & Assign with nobody on it, and takes the same form as a draft', async () => {
+    // The deviation, driven through the screen rather than the schema: §7.5
+    // does not mark Assigned To required, so this is the assertion that keeps
+    // it from being quietly reconciled back to the blueprint. Unassigned
+    // tickets still exist — D-036's email-to-ticket and B-053's import raise
+    // them — which is why the rule is the form's and not the wire's.
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Change Request$/)
+    fireEvent.change(screen.getByLabelText(/Title \/ summary/), {
+      target: { value: 'Add a duplicate watermark toggle' },
+    })
+    typeDescription('<p>Reprints should carry the watermark the original does.</p>')
+    fireEvent.change(screen.getByLabelText(/Estimated effort/), { target: { value: '4.5' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+    expect(await screen.findByText('Pick who this ticket is assigned to')).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+
+    // Waived on the draft path, the same shape the description and the
+    // estimate already have: who picks a half-written ticket up is a common
+    // reason to park it.
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }))
+    await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
+    expect((await bodyOf(0)).assigneeId).toBeNull()
+  })
+
+  it('marks Assigned to required for a screen reader, not only with an asterisk', async () => {
+    renderPage()
+    await formReady()
+
+    // The asterisk is `aria-hidden` and paired with an `sr-only` "(required)",
+    // so this reads what a screen reader reads rather than what is drawn — and
+    // unlike Module's, it does not wait on a task type: the rule is the form's
+    // own, so the marker is there from first render.
+    expect(screen.getByText('Assigned to').textContent).toMatch(/\(required\)/)
   })
 
   it('saves a draft without the description and effort the primary action demands', async () => {
@@ -665,8 +717,10 @@ describe('S-19 actions — C-013', () => {
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
     await pickFromDropdown('moduleId', /^Fees$/)
-    await pickFromDropdown('assigneeId', /Ravi Kumar/)
-    fillTicketBody('First of a batch')
+    // The assignee is picked inside `fillTicketBody` now that Save & Assign
+    // insists on one — and it is picked first there, so the focus assertion
+    // below still measures the trigger the last popup closed onto.
+    await fillTicketBody('First of a batch')
 
     // Radix restores focus to a dropdown's trigger a frame after the popup
     // closes. A real user's next act is clicking a button, which happens long
@@ -715,7 +769,7 @@ describe('S-19 actions — C-013', () => {
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
     await pickFromDropdown('moduleId', /^Fees$/)
-    fillTicketBody('First of a batch')
+    await fillTicketBody('First of a batch')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Create Another' }))
     // Both waits are on a real round trip through MSW, which carries a
     // deliberate 120 ms latency, and this is the only test in the file that
@@ -728,7 +782,7 @@ describe('S-19 actions — C-013', () => {
       timeout: 4000,
     })
 
-    fillTicketBody('Second of a batch')
+    await fillTicketBody('Second of a batch')
     // C-068 · re-picked, not inherited. `retainedForNextTicket` deliberately
     // clears the module while keeping the project, client, type and level — so
     // the second bug of a batch costs one dropdown and gets a module somebody
@@ -772,7 +826,7 @@ describe('C-068 — Where it happened', () => {
 
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
-    fillTicketBody('Receipt reprint drops the duplicate watermark')
+    await fillTicketBody('Receipt reprint drops the duplicate watermark')
 
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
     expect(
@@ -792,7 +846,7 @@ describe('C-068 — Where it happened', () => {
 
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Change Request$/)
-    fillTicketBody('Add a duplicate watermark toggle to receipt printing')
+    await fillTicketBody('Add a duplicate watermark toggle to receipt printing')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
 
     await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
@@ -811,7 +865,7 @@ describe('C-068 — Where it happened', () => {
       target: { value: 'Reprint with duplicate watermark' },
     })
     typeSteps('<p>1. Open Fees → Receipts</p><script>alert(1)</script>')
-    fillTicketBody('Receipt reprint drops the duplicate watermark')
+    await fillTicketBody('Receipt reprint drops the duplicate watermark')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
 
     await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
@@ -844,7 +898,7 @@ describe('C-068 — Where it happened', () => {
 
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
-    fillTicketBody('Receipt reprint drops the duplicate watermark')
+    await fillTicketBody('Receipt reprint drops the duplicate watermark')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
 
     expect(
@@ -1169,7 +1223,7 @@ describe("C-071 — the project's own settings", () => {
     await formReady()
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Change Request$/)
-    fillTicketBody('Add a duplicate watermark toggle')
+    await fillTicketBody('Add a duplicate watermark toggle')
 
     // The asterisk is `aria-hidden` and paired with an `sr-only` "(required)",
     // so this reads what a screen reader reads rather than what is drawn.
@@ -1215,7 +1269,7 @@ describe("C-071 — the project's own settings", () => {
     await formReady()
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Change Request$/)
-    fillTicketBody('Add a duplicate watermark toggle')
+    await fillTicketBody('Add a duplicate watermark toggle')
     await settingsApplied('Screen name')
 
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))

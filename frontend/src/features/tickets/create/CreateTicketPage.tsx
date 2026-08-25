@@ -1081,7 +1081,13 @@ export function CreateTicketPage() {
           <FormField
             id="assigneeId"
             label="Assigned to"
-            required={mandates('ASSIGNEE')}
+            // Unconditional, like Task description and Estimated effort and
+            // unlike the `mandates(…)` fields around it: this is the form's own
+            // rule now, not a project setting. Drawn on the draft path too, for
+            // the same reason those two are — a marker that appears and
+            // disappears as the pointer moves between save buttons is worse
+            // than one that states the primary action's rule.
+            required
             error={errors.assigneeId?.message}
             hint="Open-ticket load shown per person, so you can see who is free."
           >
@@ -1238,10 +1244,11 @@ export function CreateTicketPage() {
       {/* ── Actions — §7.5 ───────────────────────────────────────────────── */}
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-surface px-8 py-4 shadow-modal">
         <div className="mx-auto flex max-w-4xl items-center gap-4">
-          {/* What the save will actually do with the assignee. §7.5 does not
-              mark Assigned To required and C-015 ships an Unassigned saved
-              view, so saving without one is a supported outcome — but it is
-              worth stating, because "Save & Assign" implies otherwise.
+          {/* What the save will actually do with the assignee. Save & Assign
+              now insists on one, so the empty state is no longer "this will
+              save unassigned" but "Save as Draft is the only button that will
+              take this" — the one path that still waives the rule. Saying which
+              button works is worth more than repeating the field's own error.
 
               `min-w-0 flex-1` is load-bearing: without it the hint holds its
               full width and pushes the primary action onto a second row, off
@@ -1257,7 +1264,7 @@ export function CreateTicketPage() {
                 Will be assigned to <span className="font-medium text-content">{selectedAssignee.displayName}</span>.
               </>
             ) : (
-              'Saves unassigned — it will show in the Unassigned view.'
+              'Pick who it is assigned to — only Save as Draft will take it without one.'
             )}
           </p>
           <div className="flex shrink-0 items-center gap-2">
