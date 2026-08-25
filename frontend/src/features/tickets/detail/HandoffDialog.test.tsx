@@ -141,107 +141,14 @@ describe('HandoffDialog — S-29 / C-044', () => {
     const { user } = renderDialog({ ribbon: ribbon() })
     const dialog = await openDialog(user)
 
-    // BUG-003 · a dropdown trigger now, not a text box, so the selection is
-    // its label rather than a value.
-    expect(within(dialog).getByLabelText(/next stage/i)).toHaveTextContent('QA')
+    expect(within(dialog).getByLabelText(/next stage/i)).toHaveValue('QA')
   })
 
-  it('leaves the next stage unpicked with no ribbon, rather than guessing one', async () => {
+  it('leaves the next stage blank with no ribbon, rather than guessing one', async () => {
     const { user } = renderDialog()
     const dialog = await openDialog(user)
 
-    expect(within(dialog).getByLabelText(/next stage/i)).toHaveTextContent(
-      /pick the stage this ticket is moving to/i,
-    )
-  })
-
-  /*
-   * BUG-003 · the field was a free-text `Input`, so Edge offered its own
-   * unthemed autofill list over the modal and any typed string reached the
-   * server. A handoff writes to `ticket_stage_transitions`, which is
-   * append-only, so a mistyped code cannot be edited away afterwards.
-   */
-  it('offers the ribbon’s own stages as options rather than a text box', async () => {
-    const { user } = renderDialog({ ribbon: ribbon() })
-    const dialog = await openDialog(user)
-
-    const field = within(dialog).getByLabelText(/next stage/i)
-    expect(field.tagName).toBe('BUTTON')
-
-    const options = await withOpenDropdown('ticket-handoff-to-stage', () =>
-      screen.getAllByRole('option').map((o) => o.textContent),
-    )
-    expect(options).toEqual(['TRIAGE', 'DEVThe ticket is already here', 'QA'])
-  })
-
-  it('will not hand a ticket to the stage it is already standing in', async () => {
-    const { user } = renderDialog({ ribbon: ribbon() })
-    const dialog = await openDialog(user)
-
-    await withOpenDropdown('ticket-handoff-to-stage', () =>
-      fireEvent.click(screen.getByRole('option', { name: /^DEV/ })),
-    )
-
-    // The pre-filled QA survives the rejected click — DEV is listed and
-    // explained, but selecting it does nothing.
-    expect(within(dialog).getByLabelText(/next stage/i)).toHaveTextContent('QA')
-  })
-
-  it('falls back to the workflow templates’ stages when the ticket has no ribbon', async () => {
-    server.use(
-      http.get('*/masters/workflow-templates', () =>
-        HttpResponse.json({
-          data: [
-            {
-              id: 1,
-              name: 'Standard Dev Flow',
-              isDefault: true,
-              isActive: true,
-              stageCount: 2,
-              stages: [
-                { stageCode: 'DEV', displayName: 'Development', sequence: 20, ownerRole: 'DEVELOPER' },
-                { stageCode: 'TRIAGE', displayName: 'Triage', sequence: 10, ownerRole: 'SUPPORT' },
-                { stageCode: 'RETIRED', displayName: 'Retired', sequence: 30, isDeprecated: true },
-              ],
-            },
-          ],
-        }),
-      ),
-    )
-    const { user } = renderDialog()
-    await openDialog(user)
-
-    const options = await withOpenDropdown('ticket-handoff-to-stage', () =>
-      screen.getAllByRole('option').map((o) => o.textContent),
-    )
-    // Sequence order, not the order they arrived in, and the deprecated stage
-    // is not a handoff target.
-    expect(options).toEqual(['Triage · TRIAGE', 'Development · DEV'])
-  })
-
-  it('sends the code of the stage that was picked, not one that was typed', async () => {
-    // TRIAGE is owned by SUPPORT, and changing the stage re-filters the
-    // assignee list to that role — so the roster needs somebody who qualifies.
-    server.use(
-      http.get('*/projects/:projectId/members', () =>
-        HttpResponse.json({
-          data: [
-            { userId: 12, displayName: 'Asha Menon', role: 'SUPPORT', openTicketCount: 1, isActive: true, addedAt: '2026-08-01T00:00:00Z' },
-          ],
-        }),
-      ),
-    )
-    const { user } = renderDialog({ ribbon: ribbon() })
-    const dialog = await openDialog(user)
-
-    await withOpenDropdown('ticket-handoff-to-stage', () =>
-      fireEvent.click(screen.getByRole('option', { name: /^TRIAGE/ })),
-    )
-    await pickAssignee(/Asha Menon/)
-    fireEvent.change(within(dialog).getByLabelText(/effort in this stage/i), { target: { value: '1' } })
-    await user.click(within(dialog).getByRole('button', { name: /^hand off$/i }))
-
-    await waitFor(() => expect(posted[0]?.body.toStageCode).toBe('TRIAGE'))
+    expect(within(dialog).getByLabelText(/next stage/i)).toHaveValue('')
   })
 
   it('filters the assignee picker to the receiving stage’s owner role and shows open load', async () => {

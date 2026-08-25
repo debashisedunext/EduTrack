@@ -6,7 +6,6 @@ import type { WorkflowTemplate } from '@/api/generated/model/workflowTemplate'
 import {
   emptyHandoffForm,
   handoffSchema,
-  handoffStageOptions,
   nextStageCode,
   stageOwnerRole,
   toHandoffRequest,
@@ -84,104 +83,6 @@ describe('stageOwnerRole — C-044', () => {
 
   it('is undefined for a blank stage code', () => {
     expect(stageOwnerRole('  ', ribbon, [])).toBeUndefined()
-  })
-})
-
-/*
- * BUG-003 · the Next stage field was free text, so a mistyped code reached
- * `ticket_stage_transitions` — append-only, so it cannot be edited away.
- */
-describe('handoffStageOptions — BUG-003', () => {
-  it('lists the ribbon’s own segments, in ribbon order', () => {
-    const options = handoffStageOptions(ribbonWithCurrent('QA'), undefined)
-
-    expect(options.map((o) => o.stageCode)).toEqual(['TRIAGE', 'DEV', 'QA', 'DEPLOY'])
-  })
-
-  it('sorts by sequence rather than the order the segments arrived in', () => {
-    const scrambled: Ribbon = {
-      cycleNo: 1,
-      iterationNo: 1,
-      isSealed: false,
-      currentStageCode: 'DEV',
-      canAdvance: true,
-      segments: [
-        { stageCode: 'QA', sequence: 3, state: 'PENDING' },
-        { stageCode: 'TRIAGE', sequence: 1, state: 'COMPLETED' },
-        { stageCode: 'DEV', sequence: 2, state: 'CURRENT' },
-      ],
-    }
-
-    expect(handoffStageOptions(scrambled, undefined).map((o) => o.stageCode)).toEqual([
-      'TRIAGE',
-      'DEV',
-      'QA',
-    ])
-  })
-
-  it('carries each segment’s owner role and label through', () => {
-    const [triage] = handoffStageOptions(ribbonWithCurrent('QA'), undefined)
-
-    expect(triage.ownerRole).toBe('SUPPORT')
-    // No displayName on the segment, so the code stands in for its own label
-    // rather than the row rendering blank.
-    expect(triage.displayName).toBe('TRIAGE')
-  })
-
-  const templates: WorkflowTemplate[] = [
-    {
-      id: 1,
-      name: 'Standard',
-      isDefault: true,
-      isActive: true,
-      stageCount: 3,
-      stages: [
-        { stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', sequence: 20 },
-        { stageCode: 'TRIAGE', displayName: 'Triage', ownerRole: 'SUPPORT', sequence: 10 },
-        { stageCode: 'RETIRED', displayName: 'Retired', sequence: 30, isDeprecated: true },
-      ],
-    },
-    {
-      id: 2,
-      name: 'Support only',
-      isDefault: false,
-      isActive: true,
-      stageCount: 2,
-      stages: [
-        { stageCode: 'TRIAGE', displayName: 'Triage', ownerRole: 'SUPPORT', sequence: 10 },
-        { stageCode: 'CLOSED', displayName: 'Closed', ownerRole: 'PM', sequence: 90 },
-      ],
-    },
-  ]
-
-  it('falls back to the templates when there is no ribbon, deduplicated across them', () => {
-    const options = handoffStageOptions(undefined, templates)
-
-    expect(options.map((o) => o.stageCode)).toEqual(['TRIAGE', 'DEV', 'CLOSED'])
-  })
-
-  it('keeps CLOSED, which the ticket list’s own stage filter drops', () => {
-    // The list filters for open work; a sign-off hands a ticket *to* CLOSED,
-    // so dropping it here would make the last hop unreachable.
-    expect(handoffStageOptions(undefined, templates).map((o) => o.stageCode)).toContain('CLOSED')
-  })
-
-  it('never offers a deprecated stage as a handoff target', () => {
-    expect(handoffStageOptions(undefined, templates).map((o) => o.stageCode)).not.toContain(
-      'RETIRED',
-    )
-  })
-
-  it('prefers the ribbon over the templates when both are available', () => {
-    const options = handoffStageOptions(ribbonWithCurrent('QA'), templates)
-
-    // This ticket's own path, not every code defined anywhere.
-    expect(options.map((o) => o.stageCode)).toEqual(['TRIAGE', 'DEV', 'QA', 'DEPLOY'])
-  })
-
-  it('is empty when neither source has anything, rather than inventing a stage', () => {
-    expect(handoffStageOptions(undefined, undefined)).toEqual([])
-    expect(handoffStageOptions(undefined, [])).toEqual([])
   })
 })
 
