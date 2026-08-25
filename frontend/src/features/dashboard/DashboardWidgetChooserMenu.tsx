@@ -4,7 +4,7 @@ import { Settings2 } from 'lucide-react'
 import { useDashboardWidgetPreferencesStore } from './dashboardWidgetPreferencesStore'
 import { FULL_KEYS, OWN_WORK_KEYS } from './DashboardWidgets'
 import { useDashboardVariant } from './useDashboardVariant'
-import { WIDGET_CATALOG } from './widgetCatalog'
+import { ALL_WIDGET_KEYS, WIDGET_CATALOG } from './widgetCatalog'
 
 /**
  * The dashboard's own "⚙ Widgets" settings — pick which of the charts below
@@ -30,7 +30,13 @@ import { WIDGET_CATALOG } from './widgetCatalog'
 export function DashboardWidgetChooserMenu() {
   const hiddenWidgets = useDashboardWidgetPreferencesStore((s) => s.hiddenWidgets)
   const toggleWidget = useDashboardWidgetPreferencesStore((s) => s.toggleWidget)
+  const widgetOrder = useDashboardWidgetPreferencesStore((s) => s.widgetOrder)
+  const resetOrder = useDashboardWidgetPreferencesStore((s) => s.resetOrder)
   const variant = useDashboardVariant()
+
+  // Offered only once it would do something. A Reset that is always there
+  // invites the question "reset to what?" on a dashboard nobody has arranged.
+  const arranged = widgetOrder.some((key, index) => key !== ALL_WIDGET_KEYS[index])
 
   const availableKeys: readonly string[] = variant === 'own-work' ? OWN_WORK_KEYS : FULL_KEYS
   const offeredWidgets = WIDGET_CATALOG.filter((widget) => availableKeys.includes(widget.key))
@@ -70,6 +76,27 @@ export function DashboardWidgetChooserMenu() {
               </li>
             ))}
           </ul>
+
+          {/* Where the order is *changed* is the grid itself — dragging a panel
+              by its grip, or its ↑/↓ buttons. This menu only offers the way
+              back, because a second reorder control here would be a list that
+              has to stay in step with the one on screen while showing a
+              different subset of it. */}
+          <div className="mt-1 border-t border-border pt-1.5">
+            {arranged ? (
+              <button
+                type="button"
+                onClick={resetOrder}
+                className="w-full rounded-control px-2 py-1.5 text-left text-sm text-content hover:bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                Reset widget order
+              </button>
+            ) : (
+              <p className="px-2 py-1.5 text-caption text-content-muted">
+                Drag a panel by its handle to rearrange the dashboard.
+              </p>
+            )}
+          </div>
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
