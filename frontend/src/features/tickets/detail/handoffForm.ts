@@ -100,6 +100,76 @@ export function stageOwnerRole(
   return undefined
 }
 
+/** One row of the **Next stage** dropdown — BUG-003. */
+export interface HandoffStageOption {
+  stageCode: string
+  /** The template's own label where there is one, else the code itself. */
+  displayName: string
+  ownerRole?: RoleCode
+  sequence: number
+}
+
+/**
+ * The stages offered by the **Next stage** dropdown — BUG-003.
+ *
+ * The field was a free-text `Input` until this. Two things were wrong with
+ * that: the browser offered its own unthemed autofill list of previously
+ * typed codes over a dark modal, and nothing client-side checked that a typed
+ * code existed at all. The second is the one that mattered — a handoff writes
+ * a row to `ticket_stage_transitions`, which is append-only, so a typo cannot
+ * be edited away afterwards and needs a compensating entry.
+ *
+ * Ribbon first, exactly as `nextStageCode` and `stageOwnerRole` already do:
+ * `ribbon.segments` is *this ticket's own* template resolved server-side, so
+ * it is the only source that answers "which stages does this ticket have"
+ * rather than "which stage codes exist anywhere". Falls back to deduplicating
+ * across every template — `TicketListPage`'s `stageOptions` precedent — for a
+ * ticket with no ribbon, which against the real backend is still every ticket
+ * until C-051/C-053 land.
+ *
+ * Unlike that precedent this keeps `CLOSED`: the list filter drops it because
+ * it filters for open work, whereas a sign-off hands a ticket *to* `CLOSED`
+ * and dropping it here would make the last hop unreachable.
+ */
+export function handoffStageOptions(
+  ribbon: Ribbon | undefined,
+  templates: WorkflowTemplate[] | undefined,
+): HandoffStageOption[] {
+  const fromRibbon: HandoffStageOption[] = []
+  ;(ribbon?.segments ?? []).forEach((segment, index) => {
+    if (!segment.stageCode) return
+    fromRibbon.push({
+      stageCode: segment.stageCode,
+      displayName: segment.displayName ?? segment.stageCode,
+      ownerRole: segment.ownerRole,
+      // Ribbon order is the sequence the server resolved; index only holds the
+      // left-to-right order it arrived in when a segment carries none.
+      sequence: segment.sequence ?? index,
+    })
+  })
+  if (fromRibbon.length > 0) return fromRibbon.sort((a, b) => a.sequence - b.sequence)
+
+  const byCode = new Map<string, HandoffStageOption>()
+  for (const template of templates ?? []) {
+    for (const stage of template.stages ?? []) {
+      // Deprecated stages keep rendering on ribbons they are already on but
+      // accept no new entry, so they are never a handoff target.
+      if (!stage.stageCode || stage.isDeprecated || byCode.has(stage.stageCode)) continue
+      byCode.set(stage.stageCode, {
+        stageCode: stage.stageCode,
+        displayName: stage.displayName ?? stage.stageCode,
+        ownerRole: stage.ownerRole,
+        sequence: stage.sequence ?? 0,
+      })
+    }
+  }
+  // Codes shared across templates can disagree on sequence, so the code breaks
+  // the tie and the list is at least stable between renders.
+  return [...byCode.values()].sort(
+    (a, b) => a.sequence - b.sequence || a.stageCode.localeCompare(b.stageCode),
+  )
+}
+
 const requiredId = (message: string) =>
   z
     .number()
