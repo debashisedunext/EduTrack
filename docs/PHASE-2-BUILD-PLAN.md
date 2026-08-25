@@ -32,12 +32,11 @@ Three phase-1 tasks remain, and only two are on the critical path:
 | A-075 — Go-live runbook, TLS, secrets in vault | Shivendra | 27–28 Aug | 0 (critical) |
 | C-047 — Skip a stage | Divyansh | 25 Aug | 3 days |
 
-The phase-1 critical path ends **Fri 28 Aug 2026**. Phase 2 week 1 therefore begins **Mon 31 Aug 2026**.
+The phase-1 critical path ends **Fri 28 Aug 2026** — and only Shivendra is on it. Ayush and Divyansh have nothing left, so phase 2 opens for them on **Wed 26 Aug**, while Shivendra's phase-2 queue waits behind A-073 and A-075. The scheduler enforces that per developer; see §5.
 
-Two things are worth doing *before* then, because both are cheap and both are on phase 2's critical path from day one:
+**Stream D is not staffed in phase 2.** Debashis integrates rather than building, so the four-stream shape of phase 1 becomes three. §6.0 says where D's 23 days went.
 
-- **Commit the two source documents** (above).
-- ~~Submit the WhatsApp business templates.~~ **WhatsApp is out of scope for phase 2 — decided 25 Aug 2026.** See §6.1.
+~~Submit the WhatsApp business templates.~~ **WhatsApp is out of scope — decided 25 Aug 2026.** See §6.1.
 
 ---
 
@@ -83,7 +82,7 @@ Twelve items. Each gets a ruling here rather than being discovered by whoever bu
 
 ## 4. Task IDs — use the 100-block
 
-Phase 2 tasks are numbered **from 101 upward in each existing stream**: `A-101`, `B-101`, `C-101`, `D-101`.
+Phase 2 tasks are numbered **from 101 upward in each staffed stream**: `A-101`, `B-101`, `C-101`. The `D-1xx` block stays unused and reserved, so Stream D can be restaffed without renumbering anything.
 
 This is deliberate and it is the cheapest option available:
 
@@ -101,150 +100,81 @@ Branches, commits and migrations are unchanged in form: `feat/onboarding/journey
 
 ## 5. Schedule
 
-Ten weeks, 31 Aug – 6 Nov 2026. The shape is different from phase 1: OB0 gates everything, so week 1–2 is lopsided toward Stream A while the others do contract, fixtures and template work that does not need the schema.
+**Three developers, not four. Stream D is not staffed in phase 2** — see §6 for where its work went.
 
-| Weeks | Stream A — Platform | Stream B — Masters/Clients | Stream C — Journey/Ribbon | Stream D — Engines |
-|---|---|---|---|---|
-| **1 · 31 Aug** | OB0 schema 1–3 (`ob_*` tables) | Fixture corpus from the design's 8-step template | Ribbon component spike — tokens only, no ticket imports | **OpenAPI contract for the whole module** + mock server |
-| **2 · 7 Sep** | OB0 append-only triggers, grants, `user_module_access` | Client CRUD groundwork, duplicate-PAN guard | Template + step-item domain, versioning | **Wire-conformance ratchet** (see §8), scanner skeleton |
-| **3 · 14 Sep** | `modules` JWT claim, ModuleGuard, OnboardingScopeResolver | Client CRUD, duplicate-PAN guard, contacts | Template designer OB-07 | Outbox dispatcher, mail templates |
-| **4 · 21 Sep** | PAN encryption + reveal-and-audit, permission matrix | Applications, payments schedule, requirements | Instantiation + step lifecycle | Notification events, delivery status |
-| **5 · 28 Sep** | Module launcher shell, switcher, OB-08 | Attachments, client list OB-03 | Clock events + working-calendar `due_at` | TAT scanner, RAG, amber |
-| **6 · 5 Oct** | ArchUnit isolation rules | New client wizard OB-04 | Sub-category gate, client detail OB-05 | Escalation matrix, OB-11 |
-| **7 · 12 Oct** | Public-surface security review | Dashboard OB-02 | Step panel OB-06, skip, backup owner | Notification centre OB-13, OB-12 |
-| **8 · 19 Oct** | — | Reports hub OB-10 (7 tabs) | Communications timeline, stitched view | Daily digest, delivery-status reconciliation |
-| **9 · 26 Oct** | Sign-off token/OTP surface | Sign-off page OB-09, acceptance PDF, go-live flip, CSAT | UAT fixes | UAT fixes |
-| **10 · 2 Nov** | OB5 permission matrix × 6 roles, mutation tests | OB5 UAT fixes | OB5 ribbon accessibility pass | OB5 scanner load pass |
+Dates below come from the scheduler, not from arithmetic here. It levels against the working calendar, each developer's own queue, and the phase-1 tail that is still open.
 
-**The one hard dependency to watch** is the same shape as phase 1's scope guard: **OnboardingScopeResolver and ModuleGuard land in week 3**. Until they do, every onboarding endpoint is unscoped. B, C and D must not write their own filtering as a workaround — that is the exact failure `CLAUDE.md` ranks as the top risk, and it has a name in this repository now.
+| | |
+|---|---|
+| **Phase 2 runs** | **Wed 26 Aug → Tue 17 Nov 2026** |
+| Shivendra (A) | 23 tasks · 47 days · finishes Tue 03 Nov · **78% loaded** |
+| Ayush (B) | 23 tasks · 41 days · finishes Tue 17 Nov · **68% loaded** |
+| Divyansh (C) | 17 tasks · 44 days · finishes Sat 07 Nov · **73% loaded** |
 
-Real dates come from the scheduler once the rows are in `docs/plan/tasks.csv`. The grid above is the intended shape, not a forecast; `plan refresh` computes against the working calendar, holidays and leave, and it will disagree with any arithmetic done here.
+**It starts on the 26th rather than after phase 1 finishes, and that is deliberate.** Ayush and Divyansh have no phase-1 work left; only Shivendra does, and the scheduler holds his phase-2 queue behind A-073 and A-075 rather than letting it jump. Phases are sequential *per developer*, not across the team — a developer with nothing ready in the earlier phase pulls later work forward rather than idling, which is the same rule `GANTT.md` has always applied within a phase.
+
+**Nobody is over capacity.** Phase 1 ran at 102% — 365.8 effort-days across four developers over 90 working days. Phase 2 at 68–78% across three is materially lighter, and that headroom is where UAT, review and rework live, none of which is a task row.
+
+**The one hard dependency**, the same shape as phase 1's scope guard: **`A-112` `OnboardingScopeResolver` and `A-111` ModuleGuard**. Until they land every onboarding endpoint is unscoped. B and C must not write their own filtering as a workaround — `dev-noauth` exists so they do not have to, and this is the exact failure `CLAUDE.md` ranks as the top risk.
+
+The interactive chart is [`docs/plan/gantt.html`](plan/gantt.html); its **Phase** selector opens on the phase that still has work in it. The per-phase tables are at the top of [`docs/plan/GANTT.md`](plan/GANTT.md).
 
 ---
 
 ## 6. The backlog
 
-63 tasks, 132 working days of effort. Estimates in working days.
+**63 tasks, 132 working days.** IDs use the 100-block (§4). Full text — with the reasoning, the traps and the cross-stream flags — lives in each stream's own backlog, which is what the plan tooling reads:
 
-**WhatsApp is excluded** — see §6.1 for what was removed and what is deliberately kept.
+- [`docs/streams/STREAM-A-PLATFORM.md`](streams/STREAM-A-PLATFORM.md) — 23 tasks, 47 days
+- [`docs/streams/STREAM-B-MASTERS.md`](streams/STREAM-B-MASTERS.md) — 23 tasks, 41 days
+- [`docs/streams/STREAM-C-TICKETS.md`](streams/STREAM-C-TICKETS.md) — 17 tasks, 44 days
 
-### OB0 — Gate & schema · Stream A (Shivendra) · 17 tasks, 33 days
+Estimates and dependency edges are in [`docs/plan/seed.txt`](plan/seed.txt). **Every edge is marked `i` — inferred.** They are this document's reading of the module plan, not three developers agreeing to them; none of the three has seen the backlog yet. **The 17 Nov finish is a hypothesis until they have**, and the edges should be re-marked `c` as they confirm.
 
-| ID | Title | Est | Predecessors |
-|---|---|---|---|
-| A-101 | `ob_clients`, contacts, applications, requirements | 2 | — |
-| A-102 | `ob_payments`, `ob_attachments` | 1 | A-101 |
-| A-103 | `ob_journey_templates`, template steps, template step items | 2 | — |
-| A-104 | `ob_journeys`, `ob_journey_steps`, `ob_journey_step_items` | 2 | A-101, A-103 |
-| A-105 | `ob_step_clock_events` | 1 | A-104 |
-| A-106 | `ob_step_history` + `ob_step_communications`, hash-chained, own chain | 3 | A-104 |
-| A-107 | `ob_signoffs`, `ob_notification_outbox`, `ob_escalations` | 2 | A-104 |
-| A-108 | `ob_dashboard_summary` | 1 | A-104 |
-| A-109 | `user_module_access` + **`make grants` for all 18 new tables** | 1 | A-108 |
-| A-110 | `modules` JWT claim + `CallerIdentity` extension | 2 | A-109 |
-| A-111 | ModuleGuard — no entitlement → 404, before RolesGuard | 2 | A-110 |
-| A-112 | `OnboardingScopeResolver` + `ScopedJourneys` | 3 | A-111 |
-| A-113 | PAN encryption at rest (AES-GCM), masking, reveal-and-audit | 3 | A-101 |
-| A-114 | Permission-matrix entries: 6 OB roles × every onboarding route | 2 | A-112 |
-| A-115 | ArchUnit: no `ob_*` ↔ ticket coupling, append-only enforcement | 2 | A-106 |
-| A-116 | Module launcher + top-bar switcher (frontend) | 2 | A-110 |
-| A-117 | OB-08 — Roles & module access admin, audited | 2 | A-116 |
+### 6.0 Where Stream D's work went
 
-**A-109 is the one that will bite.** Phase 1 hit `Schema-validation: missing table [x]` twice because `edutrack_app` holds per-table grants and nobody re-ran `make grants`. Eighteen tables arrive at once here. The symptom is *not* "access denied", which is what the docs predict — it is a startup failure naming a table that plainly exists.
+D carried the OpenAPI contract, the SLA scanners, the mail engine and the notification centre in phase 1. Without it, 23 days redistribute by fit rather than by arithmetic:
 
-**A-106 needs the same courtesy review as any protected table.** It does not touch `tickets`, `ticket_history`, `ticket_effort_logs` or `ticket_stage_transitions`, so no review is *triggered* — but it adopts their trigger pattern, and the trigger DDL is where that pattern is easy to get subtly wrong.
+| Work | To | Days | Why there |
+|---|---|---:|---|
+| OpenAPI contract + wire-conformance ratchet | **A** | 5 | The contract is `common`/platform, and A is in the schema first — it must be written ahead of the screens |
+| Outbox dispatcher, email templates, digest, notification centre, OB-11/OB-12 | **B** | 8 | Delivery plumbing and admin screens, which is the shape of B's phase-1 work |
+| TAT scanner, RAG, escalation matrix, scanner load pass | **C** | 10 | Every input it reads — step state, clock events, `due_at` — is code C writes in OB2. Putting the scanner anywhere else means two people coordinating on one data model |
 
-### OB1 — Client capture · Stream B (Ayush) · 9 tasks, 16 days
+### Milestones
 
-| ID | Title | Est | Predecessors |
-|---|---|---|---|
-| B-102 | Fixture corpus: the 8-step template + 6 demo clients from the design | 2 | A-104 |
-| B-103 | Client CRUD + duplicate-PAN guard + near-duplicate name warning | 3 | A-112, A-113 |
-| B-104 | SPOC contacts + **`whatsapp_opt_in` captured now** (§6.1) | 1 | B-103 |
-| B-105 | Applications purchased + license start/end (the renewal anchor) | 1 | B-103 |
-| B-106 | Payment schedule + outstanding roll-up + GST/invoice fields | 2 | B-103 |
-| B-107 | Requirements — structured rows + sanitised rich text via `api/text/` | 1 | B-103 |
-| B-108 | Client attachments through the existing AV/signed-URL pipeline | 1 | B-103 |
-| B-109 | OB-03 — client list, filter by status/RAG/owner/sales person | 2 | B-103 |
-| B-110 | OB-04 — new client wizard, 4 steps | 3 | B-104…B-108 |
+| Milestone | Contents | Owner |
+|---|---|---|
+| **OB0 — Gate & schema** | 18 `ob_*` tables, append-only pair, `user_module_access`, `modules` claim, ModuleGuard, OnboardingScopeResolver, PAN encryption, ArchUnit, launcher, OB-08, **the contract and the ratchet** | A |
+| **OB1 — Client capture** | Fixtures, client CRUD + duplicate guard, contacts, applications, payments, requirements, attachments, OB-03, OB-04 | B |
+| **OB2 — Journey engine & ribbon** | Templates + OB-07, instantiation, step lifecycle, clock events, sub-category gate, skip, backup owner, the ribbon, OB-05, OB-06, communications | C |
+| **OB3 — TAT & notifications** | Scanner, RAG, escalation *(C)* · outbox, email, notification centre, OB-11/OB-12, digest *(B)* | C + B |
+| **OB4 — Sign-off, dashboard, reports** | Public token surface + OTP *(A)* · OB-09, PDF, objection path, go-live flip, CSAT, summary job, OB-02, OB-10 *(B)* | A + B |
+| **OB5 — Hardening** | Permission matrix × 6 roles, mutation tests *(A)* · ribbon accessibility, scanner load pass *(C)* · export redaction *(B)* | All |
 
-**B-107 touches `api/text/`, which is shared and needs both C's and D's sign-off.** It should need no change at all — `RichTextSanitizer` is already the allow-list — but if it does, that is the conversation, not a quiet edit.
+### The four tasks worth watching
 
-### OB2 — Journey engine & ribbon · Stream C (Divyansh) · 12 tasks, 32 days
+Not the longest — the ones where getting it wrong is expensive to undo.
 
-| ID | Title | Est | Predecessors |
-|---|---|---|---|
-| C-101 | Template + step + step-item domain, publish-as-new-version | 3 | A-103 |
-| C-102 | OB-07 — designer: order, **parallel groups, depends_on, per-item mandatory, required documents, descriptions** | 4 | C-101 |
-| C-103 | Instantiation: pin `template_id + version`, resolve owners, unassigned list | 3 | C-101, A-104 |
-| C-104 | Step lifecycle: start · complete · block-with-reason · waiting · resume | 3 | C-103 |
-| C-105 | **Clock events + working-calendar `due_at`**, recompute on resume | 3 | C-104, A-105 |
-| C-106 | Sub-category answers + the single completion gate (§3 #4) | 2 | C-104 |
-| C-107 | Skip a step — Manager/Admin, mandatory reason, history row (§3 #1) | 1 | C-104 |
-| C-108 | Backup owner — assignment + leave-aware inheritance (§3 #2) | 2 | C-104 |
-| C-109 | Onboarding ribbon component — **fresh, `features/onboarding/`, tokens only** | 3 | — |
-| C-110 | OB-05 — client detail | 3 | C-109, B-103 |
-| C-111 | OB-06 — step update panel | 3 | C-106, C-110 |
-| C-112 | Communications timeline: per-step + **client-level stitched view** (§3 #3) | 2 | C-111 |
+**`A-109` — the grants.** Eighteen tables arrive at once and `edutrack_app` holds per-table grants. `make grants` runs *inside* the task. The failure mode is a startup error naming a table that plainly exists, and it cost two debugging sessions in phase 1.
 
-**C-109 is the item most likely to go wrong, and it will not look like it at the time.** The module plan is explicit: the ribbon is a *visual language*, not a shared component. Importing `components/ribbon/` couples two release cycles on day one and is very hard to undo once four screens depend on it. Extraction of shared primitives is a later, signed-off, cross-stream task or it does not happen.
+**`A-119` — the conformance ratchet, in week 2.** Before a screen exists. Phase 1 added this after the fact and paid three shipped bugs and a blank detail page for the privilege (§8).
 
-### OB3 — TAT & notifications · Stream D (Debashis) · 10 tasks, 21 days
+**`C-105` — clock events as rows.** The design models the waiting-on-client clock as a status flip. Copying that is the mistake: retrofitting real pause/resume rows invalidates every TAT figure recorded before the retrofit.
 
-| ID | Title | Est | Predecessors |
-|---|---|---|---|
-| D-101 | **OpenAPI contract for the whole module** + MSW mock server | 3 | — |
-| D-102 | **Wire-conformance ratchet** for onboarding DTOs (§8) | 2 | D-101 |
-| D-103 | TAT scanner worker job — `worker/onboarding/` | 3 | C-105 |
-| D-104 | RAG computation, amber threshold, client roll-up | 2 | D-103 |
-| D-105 | Escalation matrix L1/L2/L3 + `ob_escalations` + acknowledgement | 3 | D-104 |
-| D-106 | Outbox dispatcher with retry, **behind a channel-agnostic adapter** (§6.1) | 2 | A-107 |
-| D-107 | Email templates through the existing mail engine | 1 | D-106 |
-| D-109 | OB-13 — notification centre (page) + bell popover | 2 | D-106 |
-| D-110 | OB-11 + OB-12 — TAT/escalation settings, email templates | 2 | D-105 |
-| D-111 | Daily digest to Managers — journeys stuck > x days | 1 | D-109 |
-
-**D-101 and D-102 come first, before any screen exists.** That ordering is the single most important structural change from phase 1 — see §8.
-
-**Every notification in phase 2 goes out by email.** The adapter interface in D-106 is what keeps that from being a one-way door — see §6.1.
-
-### OB4 — Sign-off, dashboard, reports · 10 tasks, 21 days
-
-| ID | Title | Est | Owner | Predecessors |
-|---|---|---|---|---|
-| A-118 | Public sign-off surface: hashed single-use token, TTL, rate limits, no enumeration | 3 | A | A-107 |
-| A-119 | OTP issue + verify against the SPOC's registered email/phone | 2 | A | A-118 |
-| B-111 | OB-09 — public sign-off page, shell-less | 2 | B | A-119 |
-| B-112 | Acceptance PDF + archive as attachment | 2 | B | B-111 |
-| B-113 | Objection path — step returns to `IN_PROGRESS`, clock resumes, owner notified | 1 | B | B-111 |
-| B-114 | Go-live flip to LIVE/Green + `live_at` + support handover note | 1 | B | B-112 |
-| B-115 | **CSAT — public one-question page, storage, summary** (§3 #9) | 2 | B | B-114 |
-| B-116 | `ob_dashboard_summary` refresh job — see the ownership note in §7 | 2 | B | A-108 |
-| B-117 | OB-02 — dashboard: RAG board, funnel, stuck list, breach list, TAT tiles | 3 | B | B-116 |
-| B-118 | OB-10 — reports hub, the 7 designed tabs + XLSX/CSV export | 3 | B | B-116 |
-
-**OB4b — the 5 reports in §10 that the design does not draw** (breach log, escalation log, owner workload, communication audit per client, CSAT summary): ~4 days, all straightforward reads over data that exists by then. Held pending the §11.6 call.
-
-### OB5 — Hardening · all streams · 5 tasks, 9 days
-
-| ID | Title | Est | Owner |
-|---|---|---|---|
-| A-120 | Permission-matrix completeness: all 6 OB roles × every route | 2 | A |
-| A-121 | Mutation tests against `ob_step_history` / `ob_step_communications` | 2 | A |
-| C-113 | Ribbon accessibility pass — keyboard, ARIA, focus order | 2 | C |
-| D-112 | Scanner load pass — 500 active journeys, 4,000 open steps | 2 | D |
-| B-119 | Export redaction for non-Finance roles (PAN, amounts) | 1 | B |
+**`C-109` — the ribbon, built fresh.** No import from `components/ribbon/`. Importing couples two release cycles on day one and is very hard to undo once four screens depend on it.
 
 ### Load per developer
 
-| Stream | Days of work | Capacity over 10 weeks | Slack |
+| Stream | Days of work | Working days in phase | Load |
 |---|---:|---:|---:|
-| A — Shivendra | 42 | 50 | 8 |
-| B — Ayush | 33 | 50 | 17 |
-| C — Divyansh | 34 | 50 | 16 |
-| D — Debashis | 23 | 50 | 27 |
+| A — Shivendra | 47 | 60 | 78% |
+| B — Ayush | 41 | 60 | 68% |
+| C — Divyansh | 44 | 60 | 73% |
 
-The slack is not spare time — it is UAT, integration, review and the rework every one of those produces, none of which is a task row. But the distribution is uneven enough to say plainly: **Stream A carries OB0 nearly alone in weeks 1–2 and is the tightest all phase**, and Stream D finishes its critical work by week 8 — more so now that WhatsApp is out. If OB4b ships, D is the stream with room for it.
+**Stream A carries OB0 nearly alone in the first fortnight** and is the tightest of the three. The slack is not spare time — it is UAT, integration, review and the rework each produces, none of which appears as a task row.
+
+**OB4b — the 5 reports §10 specifies and the design does not draw** (breach log, escalation log, owner workload, communication audit, CSAT summary): ~4 days, all straightforward reads over data that exists by then. Not in the ledger; held pending the §11.6 call.
 
 ---
 
@@ -252,17 +182,17 @@ The slack is not spare time — it is UAT, integration, review and the rework ev
 
 **Phase 2 notifies by email only.** WhatsApp is out of scope: no provider account, no template submission, no adapter implementation, no webhook.
 
-This is a deviation from the module plan, whose §7 specifies email **and** WhatsApp, and it is recorded here rather than made quietly. Two tasks come out — B-101 (template submission pack, 1 day) and D-108 (provider adapter, signed webhook, delivery status, 3 days) — and OB-12 narrows to email templates only.
+This is a deviation from the module plan, whose §7 specifies email **and** WhatsApp, and it is recorded here rather than made quietly. Two tasks come out — a template submission pack (1 day) and the provider adapter with its signed webhook and delivery status (3 days) — and OB-12 narrows to email templates only.
 
 **Three things stay in, because leaving them out is what would make this expensive to reverse:**
 
 | Kept | Why |
 |---|---|
 | `ob_notification_outbox.channel ENUM('EMAIL','WHATSAPP')` | The enum value costs nothing now. Adding it later is a migration against a table with production rows |
-| `whatsapp_opt_in` capture on contacts (B-104) | **Consent cannot be backfilled.** Every SPOC boarded without it has to be re-approached before a single message can be sent, and business-initiated WhatsApp requires recorded opt-in. This is the one item that is genuinely irreversible |
-| A channel-agnostic adapter interface in D-106 | Turns "add WhatsApp" into one implementation class rather than a redesign of the dispatcher |
+| `whatsapp_opt_in` capture on contacts (`B-103`) | **Consent cannot be backfilled.** Every SPOC boarded without it has to be re-approached before a single message can be sent, and business-initiated WhatsApp requires recorded opt-in. This is the one item that is genuinely irreversible |
+| A channel-agnostic adapter interface in `B-110` | Turns "add WhatsApp" into one implementation class rather than a redesign of the dispatcher |
 
-**What re-enabling costs, later:** the provider decision, an account with a verified business, template approval (days to weeks, unchanged), and D-108's three days. Roughly a week of work behind an unknown amount of waiting — which is exactly why the opt-in column stays.
+**What re-enabling costs, later:** the provider decision, an account with a verified business, template approval (days to weeks, unchanged), and the adapter's three days. Roughly a week of work behind an unknown amount of waiting — which is exactly why the opt-in column stays.
 
 **The trade this makes.** The module plan reached for WhatsApp specifically because breach and escalation alerts have to *land*, and §7 marks them mandatory-delivery for that reason. Email-only means a step owner who is not in their inbox misses a breach until the L2 escalation reaches their manager four working hours later. The escalation matrix still works — that is what it is for — but the first alert is softer than the design intended. Worth knowing; not worth reopening.
 
@@ -277,15 +207,16 @@ backend/
   api/feature/onboarding/clients/          → B
   api/feature/onboarding/journeys/         → C    templates, steps, instantiation, lifecycle
   api/feature/onboarding/signoff/          → B    (public surface reviewed by A)
-  api/feature/onboarding/notifications/    → D
+  api/feature/onboarding/notifications/    → B    outbox, mail, notification centre
   api/feature/onboarding/reports/          → B
-  worker/onboarding/                       → D    TAT scanner, escalation, outbox dispatch
-  worker/onboarding/stats/                 → B    ⚠️ see below
+  worker/onboarding/                       → C    TAT scanner, RAG, escalation
+  worker/onboarding/outbox/                → B    dispatch  ⚠️ two owners under one root
+  worker/onboarding/stats/                 → B    summary refresh  ⚠️ see below
 frontend/src/
   features/onboarding/launcher/            → A
   features/onboarding/clients/             → B
   features/onboarding/journey/             → C    including the onboarding ribbon
-  features/onboarding/notifications/       → D
+  features/onboarding/notifications/       → B
   features/onboarding/reports/             → B
 ```
 
@@ -293,7 +224,9 @@ frontend/src/
 >
 > In phase 1 the summary-refresh job lived in `worker/`, which the map assigned to Stream D, while the dashboards it fed were Stream A's. A-051, A-056 and A-057 then edited another stream's directory three times before anyone wrote it down, and TEAM-PLAN §6 still carries the note about it.
 >
-> The identical shape recurs here: `ob_dashboard_summary` feeds B's dashboard (OB4), and every new tile B adds needs a new aggregate. **Name the carve-out in CODEOWNERS on day one** and it costs nothing. Discover it in week 8 and it costs the same three unannounced edits.
+> The identical shape recurs here, and now twice over. `worker/onboarding/` holds three jobs with **two owners**: C's TAT scanner and B's outbox dispatcher and summary refresh. `ob_dashboard_summary` feeds B's dashboard, and every new tile B adds needs a new aggregate.
+>
+> **Name both carve-outs in CODEOWNERS on day one** and it costs nothing. Discover them in week 8 and it costs the same three unannounced edits to somebody else's directory that phase 1 paid.
 
 **Prove every CODEOWNERS pattern resolves before merging it** — `git ls-files | grep -E '<pattern>'`. Seventeen of twenty backend rules matched nothing until A-040, and a rule that matches nothing looks exactly like one that works.
 
@@ -309,9 +242,9 @@ Phase 1 shipped three separate bugs with a single root cause: **the MSW mock fol
 
 Every one of these was invisible in the mock, invisible in unit tests, and only visible against the real server. `ContractConformanceTest` compares paths and verbs; nothing compared response *shapes* until a conformance ratchet was written after the fact.
 
-**So D-102 lands in week 2, before a single onboarding screen exists.** It asserts that every onboarding DTO serialises to the shape its contract schema declares, with a known-gap list that can only shrink. The mechanism already exists — `TicketWireConformanceTest` is the template, and its gap list has already gone from 12 entries to 9 by exactly this mechanism.
+**So `A-119` lands in week 2, before a single onboarding screen exists.** It asserts that every onboarding DTO serialises to the shape its contract schema declares, with a known-gap list that can only shrink. The mechanism already exists — `TicketWireConformanceTest` is the template, and its gap list has already gone from 12 entries to 9 by exactly this mechanism.
 
-The contract itself (D-101) is written before the schema is finished, not after. Nothing else in this plan has a better return per day spent.
+The contract itself (`A-118`) is written before the schema is finished, not after. Nothing else in this plan has a better return per day spent.
 
 ---
 
@@ -334,7 +267,7 @@ Everything in `CLAUDE.md`, plus four:
 - [ ] **Module-gated:** the route 404s for a user without the `ONBOARDING` entitlement, and there is a test that proves it
 - [ ] **Scoped:** the route returns 404, not 403, for an in-module user outside their scope
 - [ ] **No ticketing coupling:** no import from `feature/tickets`, `feature/transitions` or `components/ribbon`; ArchUnit enforces it (A-115)
-- [ ] **Contract-conformant:** the response shape matches the contract, or the gap is on D-102's list with a reason
+- [ ] **Contract-conformant:** the response shape matches the contract, or the gap is on `A-119`'s list with a reason
 
 ---
 
@@ -347,7 +280,7 @@ One of the module plan's six is now answered by the design. Five remain, plus on
 | 1 | ~~Module entry: launcher or direct routing~~ | — | **Closed — Option A**, per the design |
 | 2 | ~~WhatsApp provider~~ | — | **Closed — deferred out of phase 2 on 25 Aug 2026** (§6.1). Reopens only when WhatsApp re-enters scope |
 | 3 | **PAN encryption and key management** | Week 3 (A-113) | Application-level AES-GCM, key from the secrets vault A-075 is standing up this week. Reuse it rather than inventing a second key path |
-| 4 | **Ownership:** distribute across A–D vs a new Stream E | Before the backlog loads | **Distribute.** §6 assigns every task to the stream that already owns the analogous phase-1 surface; a fifth developer would need the platform knowledge that the other four spent 18 weeks acquiring |
+| 4 | ~~Ownership: distribute vs a new Stream E~~ | — | **Closed — 25 Aug 2026.** Three streams: A, B and C. D is unstaffed and its work is redistributed by fit (§6.0). The backlog is loaded and scheduled |
 | 5 | **Statutory e-sign** (Aadhaar eSign/DSC) vs recorded acceptance | Week 9 (A-118) | Recorded acceptance for v1, as the module plan recommends. Revisit only if a client's contract demands it |
 | 6 | **The 5 undesigned reports** — phase 2 or later (§3 #8) | Week 8 | Client's call. ~4 days, no new data |
 | 7 | **`worker/onboarding/stats/` ownership** (§7) | Before OB4 | B, named in CODEOWNERS from day one |
@@ -365,5 +298,5 @@ The module plan's §14 stands. Three are worth restating with what phase 1 now t
 | **TAT disputes** | Nothing directly, but the append-only chain is the thing that made ticket effort defensible | Clock events from day one (C-105). Retrofitting invalidates every figure recorded before it |
 | **Ribbon coupling to ticketing** | The ticket ribbon took three attempts and a contract-shape bug to get right; it is exactly the component someone will want to reuse | Separate component, ArchUnit-enforced (A-115), extraction only as a signed-off cross-stream task |
 | **The scope guard arriving late** | This was phase 1's top risk and the `dev-noauth` profile is why it did not become a permanent hole | Same pattern: `dev-noauth` covers weeks 1–2; nobody writes their own filtering |
-| **Contract/server drift** | Three shipped bugs, one blank page, several days | D-102 in week 2, before any screen |
+| **Contract/server drift** | Three shipped bugs, one blank page, several days | `A-119` in week 2, before any screen |
 | **Per-table grants** | Two startup failures with a misleading error | A-109 runs `make grants` as part of the task, not after it |
