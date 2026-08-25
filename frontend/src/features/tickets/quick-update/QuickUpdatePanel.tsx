@@ -6,7 +6,6 @@ import { Zap } from 'lucide-react'
 
 import { newIdempotencyKey, ApiError } from '@/api/http'
 import { useGetMe } from '@/api/generated/auth/auth'
-import { getListTicketsQueryKey } from '@/api/generated/tickets/tickets'
 import type { Ticket } from '@/api/generated/model/ticket'
 
 import { Button } from '@/components/ui/button'
@@ -33,7 +32,7 @@ import { STATUS_LABEL } from '../list/columns'
 import { titleCase } from '../stageDisplay'
 import { TicketLevelControl } from '../detail/TicketLevelControl'
 import { slaClockStart } from '../detail/levelChange'
-import { useQuickUpdateMutation } from './useQuickUpdateMutation'
+import { invalidateAfterTicketWrite, useQuickUpdateMutation } from './useQuickUpdateMutation'
 import { canChangeLevelHere } from './quickUpdatePermissions'
 import { emptyQuickUpdateForm, quickUpdateSchema, toQuickUpdateRequest, type QuickUpdateFormValues } from './quickUpdateForm'
 
@@ -273,7 +272,9 @@ function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => voi
                 canEdit
                 onChanged={(updated) => {
                   if (updated?.level) setLevel(updated.level)
-                  void queryClient.invalidateQueries({ queryKey: getListTicketsQueryKey() })
+                  // BUG-002 · the list alone left the detail page stale, the
+                  // same way the panel's own submit did.
+                  invalidateAfterTicketWrite(queryClient, ticket.ticketId)
                 }}
               />
             )}

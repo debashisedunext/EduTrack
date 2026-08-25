@@ -604,16 +604,20 @@ export function CreateTicketPage() {
         void save('assign')
       }}
       noValidate
-      className="mx-auto max-w-4xl p-8 pb-28"
+      // BUG-001 · the form fills `<main>` and lays itself out as a column so
+      // the action bar can sit at the end of it. Centring moved onto the two
+      // content blocks below, which keeps the bar full-bleed across the shell
+      // while the fields stay at `max-w-4xl`.
+      className="flex min-h-full flex-col"
     >
-      <header className="mb-6">
+      <header className="mx-auto mb-6 w-full max-w-4xl px-8 pt-8">
         <h1 className="text-h1 text-content">New ticket</h1>
         <p className="mt-1 text-sm text-content-muted">
           Fields marked <span className="text-danger-text">*</span> are required.
         </p>
       </header>
 
-      <div className="flex flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-8 pb-8">
         {/* ── Identity ─────────────────────────────────────────────────── */}
         <FieldGroup
           title="Identity"
@@ -1242,7 +1246,13 @@ export function CreateTicketPage() {
       </div>
 
       {/* ── Actions — §7.5 ───────────────────────────────────────────────── */}
-      <div className="fixed inset-x-0 bottom-0 border-t border-border bg-surface px-8 py-4 shadow-modal">
+      {/* BUG-001 · `sticky bottom-0`, not `fixed`. Fixed pinned it to the
+          window, so it sat across the sidebar and detached from the end of the
+          shell whenever the two disagreed. Sticky inside `<main>` keeps it
+          visible while the form scrolls and flush with the shell's own bottom
+          edge; `mt-auto` holds it there when the form is shorter than the
+          viewport, and the form needs no bottom padding to clear it. */}
+      <div className="sticky bottom-0 z-10 mt-auto border-t border-border bg-surface px-8 py-4 shadow-modal">
         <div className="mx-auto flex max-w-4xl items-center gap-4">
           {/* What the save will actually do with the assignee. Save & Assign
               now insists on one, so the empty state is no longer "this will
