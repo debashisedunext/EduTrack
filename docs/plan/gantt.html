@@ -285,11 +285,17 @@ document.querySelectorAll("[data-s]").forEach(b => b.onclick = () => {
 const PHASES = META.phases || [];
 const phSel = document.getElementById("ph");
 if (PHASES.length) {
-  phSel.innerHTML = `<option value="">All phases</option>` + PHASES.map(p =>
-    `<option value="${p.key}">${p.title}</option>`).join("");
-  // Open on the phase that still has work in it, not on phase one forever.
-  const live = PHASES.find(p => TASKS.some(t => t.ph === p.key && t.st !== "done"));
-  if (live) phSel.value = live.key;
+  phSel.innerHTML = `<option value="">All phases (${TASKS.length})</option>` +
+    PHASES.map(p => {
+      const n = TASKS.filter(t => t.ph === p.key).length;
+      return `<option value="${p.key}">${p.title} (${n})</option>`;
+    }).join("");
+  // Opens on ALL phases. A chart that hides a third of the plan on load is a
+  // chart nobody trusts — and picking "the phase with open work" chose phase
+  // one here, because three of its 244 tasks were still running while all 63
+  // of phase two sat invisible. Focus is one click away; concealment is not
+  // recoverable by someone who does not know the control exists.
+  phSel.value = "";
 } else {
   phSel.style.display = "none";
 }
