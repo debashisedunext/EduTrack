@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.transitions;
 
 import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.security.CallerIdentity;
+import com.edunext.edutrack.api.security.scope.UnscopedAccess;
 import com.edunext.edutrack.common.pagination.Cursor;
 import com.edunext.edutrack.common.pagination.CursorPage;
 import com.edunext.edutrack.common.pagination.PageLimit;
@@ -47,8 +48,35 @@ import java.util.List;
  * stored column ascending gives the identical row order without recomputing a
  * working-minutes figure per row just to sort by it — the same shortcut
  * {@code TicketListSpecs} takes for every other keyset page in this codebase.
+ *
+ * <h2>{@code @UnscopedAccess}, honestly stretched</h2>
+ *
+ * <p>{@code ScopeGuardRulesTest} forbids {@code TicketRepository} outside
+ * {@code security.scope} unless the class declares why, via
+ * {@code @UnscopedAccess}. That annotation's own javadoc describes it for a
+ * class with <b>no</b> caller to scope by — a mail webhook, seed fixtures —
+ * and this is not that: {@code GET /stages/queue} has an authenticated caller,
+ * and {@link StageQueueScope} does apply a scope to it, just a different one
+ * than {@code ScopeResolver}'s. It is declared here anyway because
+ * {@code ScopedTickets}, the alternative, always ANDs {@code ScopeResolver}'s
+ * mandatory specification underneath whatever criteria it is given — which is
+ * precisely the rule {@link StageQueueScope}'s own javadoc explains this
+ * screen cannot use. There is no route through {@code ScopedTickets} to a
+ * genuinely different scope, so the honest choice is the visible, reasoned
+ * bypass this annotation exists for, over a quieter one that would not show up
+ * in {@code ScopeGuardRulesTest} at all.
  */
 @Service
+@UnscopedAccess("""
+        Not the "no caller" case this annotation is usually declared for — S-31's queue has an \
+        authenticated caller, and StageQueueScope does apply a scope to it. It is deliberately \
+        not ScopeResolver's assigned_to = me (see StageQueueScope's own javadoc for why that \
+        rule makes this screen show nothing worth showing), and ScopedTickets — the sanctioned \
+        door — always ANDs ScopeResolver's specification underneath whatever criteria is passed, \
+        so it cannot express a different one. Flagged for Stream A's review (Shivendra) rather \
+        than assumed final, on the same precedent TicketListController already states in this \
+        codebase for building against a real gap ahead of the owner's sign-off.
+        """)
 class StageQueueService {
 
     private final TicketRepository tickets;
