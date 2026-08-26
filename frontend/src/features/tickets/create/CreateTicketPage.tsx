@@ -172,13 +172,12 @@ export function CreateTicketPage() {
   const assigneeId = watch('assigneeId')
   const plannedCloseDate = watch('plannedCloseDate')
   /*
-    C-068 · whether the Module field draws its asterisk. `bugTypeIds` is empty
-    while the task-type master is still loading, so this is false first and true
-    once the answer arrives — the same direction `canChangeLevel` chose on S-20
-    and for the same reason: a required marker that appears late is a marker
-    somebody has already read past.
+    C-068 · Module's asterisk used to wait on `bugTypeIds` and appear only for
+    the bug-type three. It does not wait on anything now: a module is required
+    on every task type, so the marker is drawn from the first paint. That also
+    settles the worry the old comment carried — "a required marker that appears
+    late is a marker somebody has already read past" — by never being late.
   */
-  const moduleRequired = taskTypeId != null && bugTypeIds.has(taskTypeId)
   const modulesEmpty = modulesFailed || (modulesData != null && modules.length === 0)
 
   /*
@@ -948,7 +947,7 @@ export function CreateTicketPage() {
           <FormField
             id="moduleId"
             label="Module"
-            required={moduleRequired || mandates('MODULE')}
+            required
             error={errors.moduleId?.message}
             hint={
               /*
@@ -969,17 +968,15 @@ export function CreateTicketPage() {
               modulesEmpty
                 ? 'The module list could not be loaded, so there is nothing to choose from yet.'
                 : /*
-                     C-071 · the project's rule is named ahead of §7.5's, because
-                     it is the one that surprises: a change request needing a
-                     module is not something §7.5 would lead anyone to expect,
-                     and "required for bug-type tickets" shown on a change
-                     request reads as a bug in the form.
+                     C-071 · the project's rule is still named separately, even
+                     though both now come out as "required". The difference is
+                     what Save as Draft does: this form's rule is waived on a
+                     draft and a project's is not, so a reporter refused on a
+                     draft is owed the sentence that explains why.
                   */
                   mandates('MODULE')
-                  ? 'Required on every ticket in this project — it is what routes this to the right team.'
-                  : moduleRequired
-                    ? 'Required for bug-type tickets — it is what routes this to the right team.'
-                    : 'Optional for change requests and internal work. Leave it blank rather than guessing.'
+                  ? 'Required on every ticket in this project — not even a draft is taken without it.'
+                  : 'Required — it is what routes this to the right team. Only Save as Draft will take it without one.'
             }
           >
             {(aria) => (

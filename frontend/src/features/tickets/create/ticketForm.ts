@@ -56,9 +56,14 @@ export function clientRequiringTaskTypeIds(taskTypes: readonly TaskType[]): Read
 }
 
 /**
- * C-068 · which task types make Module mandatory — blueprint §7.5:
- * "**Mandatory for bug-type task types**, optional for change requests and
- * internal work."
+ * C-068 · blueprint §7.5's bug-type task types: "**Mandatory for bug-type task
+ * types**, optional for change requests and internal work."
+ *
+ * **These no longer decide whether Module is mandatory.** The schema requires a
+ * module on every task type — see the `superRefine` below for why §7.5 was
+ * widened. What this set still decides is how the refusal is worded, which is
+ * worth keeping precise: a Production Bug is told to pick "the module this bug
+ * is in", a change request "the module this ticket belongs to".
  *
  * **Matched on `code`, not on `name`, and that is the one difference from
  * `CLIENT_REQUIRING_TASK_TYPES` above.** That rule matches display strings and
@@ -97,7 +102,11 @@ export function bugTaskTypeIds(taskTypes: readonly TaskType[]): ReadonlySet<numb
 export interface TaskTypeRules {
   /** §4B.2 — task types that cannot be raised without a client. */
   clientRequired: ReadonlySet<number>
-  /** §7.5 — task types that cannot be raised without a module. */
+  /**
+   * §7.5's bug-type task types. **No longer a gate** — every task type needs
+   * a module now — but still the difference between "this bug" and "this
+   * ticket" in the message the reporter reads.
+   */
   bugTypes: ReadonlySet<number>
   /**
    * D-066 · the level codes the priority master currently declares.
@@ -421,19 +430,32 @@ export function ticketFormSchema(
           message: 'This task type is client-facing — pick the client it was raised for',
         })
       }
-      // §7.5, and the same shape as the description rule directly above it:
-      // a blueprint rule rather than a contract one, so a draft waives it.
-      // "Save as Draft waives it either way" is the blueprint's own sentence.
-      if (
-        !isDraft &&
-        values.taskTypeId != null &&
-        rules.bugTypes.has(values.taskTypeId) &&
-        values.moduleId == null
-      ) {
+      // §7.5 widened: **a module is mandatory on every task type now**, not
+      // only the bug-type three. This is a deliberate deviation from the
+      // blueprint, which argues the other way — a change request may genuinely
+      // span three modules, and forcing a choice there "teaches people to pick
+      // the first item in the list". It was widened anyway because an
+      // unroutable ticket costs the desk more than an imprecise module does the
+      // reporting, and because a rule that applies to some task types and not
+      // others is one people read past.
+      //
+      // `rules.bugTypes` survives and still earns its keep: it now decides the
+      // *wording* rather than whether the rule fires. "This bug" on a change
+      // request reads as a bug in the form.
+      //
+      // Otherwise the same shape as the description rule directly above it: a
+      // blueprint rule rather than a contract one, so a draft waives it. "Save
+      // as Draft waives it either way" is the blueprint's own sentence, and the
+      // waiver is the reason widening the rule is affordable — a ticket parked
+      // precisely because nobody knows yet where it happened still parks.
+      if (!isDraft && values.moduleId == null) {
+        const isBugType = values.taskTypeId != null && rules.bugTypes.has(values.taskTypeId)
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['moduleId'],
-          message: 'Pick the module this bug is in — it is what routes it to the right team',
+          message: isBugType
+            ? 'Pick the module this bug is in — it is what routes it to the right team'
+            : 'Pick the module this ticket belongs to — it is what routes it to the right team',
         })
       }
       // A contact without its client is a dangling foreign key. The UI clears

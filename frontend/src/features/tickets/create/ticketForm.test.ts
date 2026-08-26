@@ -74,7 +74,7 @@ describe('ticketFormSchema', () => {
   it('names every empty required field at once rather than one at a time', () => {
     const errors = errorsByField(emptyTicketForm)
     expect(Object.keys(errors).sort()).toEqual(
-      ['assigneeId', 'description', 'estimatedHrs', 'level', 'projectId', 'taskTypeId', 'title'].sort(),
+      ['assigneeId', 'description', 'estimatedHrs', 'level', 'moduleId', 'projectId', 'taskTypeId', 'title'].sort(),
     )
   })
 
@@ -121,7 +121,7 @@ describe('ticketFormSchema', () => {
     expect(errorsByField({ ...valid, taskTypeId: internalBug, clientId: null })).not.toHaveProperty('clientId')
   })
 
-  it('requires a module for bug-type task types and not for the others — §7.5', () => {
+  it('requires a module on every task type, not only the bug-type three', () => {
     const productionBug = TASK_TYPES.find((t) => t.code === 'PRODUCTION_BUG')!.id
     const changeRequest = TASK_TYPES.find((t) => t.code === 'CHANGE_REQUEST')!.id
     const serverIssue = TASK_TYPES.find((t) => t.code === 'SERVER_ISSUE')!.id
@@ -132,11 +132,28 @@ describe('ticketFormSchema', () => {
     expect(
       errorsByField({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: 2 }),
     ).not.toHaveProperty('moduleId')
-    // The half §7.5 argues hardest for: a change request may genuinely span
-    // three modules, and forcing a choice there teaches people to pick the
-    // first item in the list.
-    expect(errorsByField({ ...valid, taskTypeId: changeRequest, moduleId: null })).not.toHaveProperty('moduleId')
-    expect(errorsByField({ ...valid, taskTypeId: serverIssue, moduleId: null })).not.toHaveProperty('moduleId')
+    // The deliberate deviation from §7.5, which called these two optional. The
+    // assertion is written the way round it is on purpose: if the rule is ever
+    // narrowed back, this is the line that says so.
+    expect(errorsByField({ ...valid, taskTypeId: changeRequest, moduleId: null })).toHaveProperty('moduleId')
+    expect(errorsByField({ ...valid, taskTypeId: serverIssue, moduleId: null })).toHaveProperty('moduleId')
+    // ...and a module clears it on those two exactly as it does on a bug.
+    expect(errorsByField({ ...valid, taskTypeId: changeRequest, moduleId: 2 })).not.toHaveProperty('moduleId')
+  })
+
+  it('names the bug and the non-bug differently in the same refusal', () => {
+    // `bugTypes` stopped gating the rule and now only picks the wording. If it
+    // ever stops doing that too, it is dead weight in `TaskTypeRules` — this is
+    // the test that would notice.
+    const productionBug = TASK_TYPES.find((t) => t.code === 'PRODUCTION_BUG')!.id
+    const changeRequest = TASK_TYPES.find((t) => t.code === 'CHANGE_REQUEST')!.id
+
+    expect(errorsByField({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: null }).moduleId).toBe(
+      'Pick the module this bug is in — it is what routes it to the right team',
+    )
+    expect(errorsByField({ ...valid, taskTypeId: changeRequest, moduleId: null }).moduleId).toBe(
+      'Pick the module this ticket belongs to — it is what routes it to the right team',
+    )
   })
 
   it('bounds screen name, feature and steps at the contract lengths', () => {
@@ -148,10 +165,13 @@ describe('ticketFormSchema', () => {
     )
   })
 
-  it('leaves all four blank fields alone when nothing requires them', () => {
+  it('leaves the three remaining blank fields alone when nothing requires them', () => {
+    // Module used to be the fourth. It is required unconditionally now, so it
+    // is supplied here rather than asserted blank — the point of this test is
+    // that a blank *optional* field is not an error, and Module is no longer
+    // one of those.
     const changeRequest = TASK_TYPES.find((t) => t.code === 'CHANGE_REQUEST')!.id
-    const errors = errorsByField({ ...valid, taskTypeId: changeRequest, ...({ moduleId: null } as const) })
-    expect(errors).not.toHaveProperty('moduleId')
+    const errors = errorsByField({ ...valid, taskTypeId: changeRequest, moduleId: 3 })
     expect(errors).not.toHaveProperty('screenName')
     expect(errors).not.toHaveProperty('feature')
     expect(errors).not.toHaveProperty('stepsToGenerate')
@@ -318,10 +338,17 @@ describe('ticketFormSchema — the draft action (C-013)', () => {
 
   it('waives the §7.5 module rule too — "Save as Draft waives it either way"', () => {
     const productionBug = TASK_TYPES.find((t) => t.code === 'PRODUCTION_BUG')!.id
+    const changeRequest = TASK_TYPES.find((t) => t.code === 'CHANGE_REQUEST')!.id
     expect(draftSchema.safeParse({ ...draftable, taskTypeId: productionBug, moduleId: null }).success).toBe(true)
     expect(schema.safeParse({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: null }).success).toBe(
       false,
     )
+    // The waiver had to widen with the rule. A change request now needs a
+    // module to be saved live, so a draft is the only way to park one before
+    // the reporter knows where it happened — if the waiver did not cover the
+    // non-bug types, widening the rule would have taken that away.
+    expect(draftSchema.safeParse({ ...draftable, taskTypeId: changeRequest, moduleId: null }).success).toBe(true)
+    expect(schema.safeParse({ ...valid, taskTypeId: changeRequest, moduleId: null }).success).toBe(false)
   })
 
   it('waives the assignee, which is this screen’s rule and not the contract’s', () => {

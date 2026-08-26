@@ -806,18 +806,24 @@ describe('S-19 actions — C-013', () => {
 /* ── C-068 — the "Where it happened" group ─────────────────────────────── */
 
 describe('C-068 — Where it happened', () => {
-  it('marks Module required for a bug-type task type and optional for a change request', async () => {
+  it('marks Module required before a task type is picked and for every task type after', async () => {
     renderPage()
     await formReady()
-    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
 
     // The asterisk is `aria-hidden` and paired with an `sr-only` "(required)",
     // so this reads what a screen reader reads rather than what is drawn.
+    //
+    // It is asserted *before* a project or a task type is chosen on purpose:
+    // the marker used to wait on the task-type master and appear only for the
+    // bug-type three, and the rule it stands for no longer depends on either.
+    expect(screen.getByText('Module').textContent).toMatch(/\(required\)/)
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Production Bug$/)
     await waitFor(() => expect(screen.getByText('Module').textContent).toMatch(/\(required\)/))
 
     await pickFromDropdown('taskTypeId', /^Change Request$/)
-    await waitFor(() => expect(screen.getByText('Module').textContent).not.toMatch(/\(required\)/))
+    await waitFor(() => expect(screen.getByText('Module').textContent).toMatch(/\(required\)/))
   })
 
   it('refuses Save & Assign on a bug with no module, and accepts the same form as a draft', async () => {
@@ -840,7 +846,11 @@ describe('C-068 — Where it happened', () => {
     await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
   })
 
-  it('does not let a change request be blocked by a module it may not have', async () => {
+  it('refuses a change request with no module too, and says so in its own words', async () => {
+    // The inverse of what this test used to assert. §7.5 called Module optional
+    // for a change request; it is required on every task type now, and the
+    // refusal is worded "this ticket" rather than "this bug" so it does not
+    // read as the form mistaking a change request for one.
     renderPage()
     await formReady()
 
@@ -849,8 +859,15 @@ describe('C-068 — Where it happened', () => {
     await fillTicketBody('Add a duplicate watermark toggle to receipt printing')
     fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
 
+    expect(
+      await screen.findByText('Pick the module this ticket belongs to — it is what routes it to the right team'),
+    ).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+
+    await pickFromDropdown('moduleId', /^Fees$/)
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
     await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
-    expect('moduleId' in (await bodyOf(0))).toBe(false)
+    expect((await bodyOf(0)).moduleId).toBe(3)
   })
 
   it('sends all four fields, with the steps sanitised on the way out', async () => {
@@ -1224,6 +1241,10 @@ describe("C-071 — the project's own settings", () => {
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
     await pickFromDropdown('taskTypeId', /^Change Request$/)
     await fillTicketBody('Add a duplicate watermark toggle')
+    // Not part of this test's subject — the form requires a module on every
+    // ticket now, so without one the final save below is refused for a reason
+    // that has nothing to do with SCREEN_NAME.
+    await pickFromDropdown('moduleId', /^Fees$/)
 
     // The asterisk is `aria-hidden` and paired with an `sr-only` "(required)",
     // so this reads what a screen reader reads rather than what is drawn.
