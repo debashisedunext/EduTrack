@@ -41,6 +41,8 @@ export interface TicketDetailHeaderProps {
   onReopened?: () => void
   /** Refetch the detail payload — closing moves status, the sealed cycle and the History tab. */
   onClosed?: () => void
+  /** Refetch the detail payload — status, effort, % complete and ETA all moved. */
+  onChanged?: () => void
 }
 
 export function TicketDetailHeader({
@@ -49,6 +51,7 @@ export function TicketDetailHeader({
   now = new Date(),
   onReopened,
   onClosed,
+  onChanged,
 }: TicketDetailHeaderProps) {
   const lateBy = delayInDays(ticket, now)
   const allowed = new Set(availableActions ?? [])
@@ -86,7 +89,7 @@ export function TicketDetailHeader({
       <h1 className="text-h1 text-content">{ticket.title}</h1>
 
       <div className="flex flex-wrap items-center gap-2">
-        <QuickUpdateTrigger ticket={ticket} />
+        <QuickUpdateTrigger ticket={ticket} onChanged={onChanged} />
         {allowed.has('close') && onClosed && <CloseDialog ticket={ticket} onClosed={onClosed} />}
         {allowed.has('reopen') && onReopened && <ReopenDialog ticket={ticket} onReopened={onReopened} />}
         {HEADER_ACTIONS.filter(({ action }) => allowed.has(action)).map(({ action, label, owner }) => (

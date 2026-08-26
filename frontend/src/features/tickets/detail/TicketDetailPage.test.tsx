@@ -139,6 +139,28 @@ describe('S-20 Ticket detail shell — C-019', () => {
     await waitFor(() => expect(detailRequests.length).toBeGreaterThan(1))
   })
 
+  /**
+   * Regression: Quick Update's own mutation only ever invalidated the ticket
+   * *list* query, so a change made from this page's header was invisible
+   * until the whole page was reloaded — nothing here was listening for it.
+   * `onChanged` closes that gap the same way `onClosed`/`onReopened` already
+   * do above.
+   */
+  it('reflects a Quick Update without a page reload', async () => {
+    signInAsAdmin()
+    renderPage()
+    await waitForTicket()
+    const user = userEvent.setup()
+
+    await user.click(within(screen.getByRole('banner')).getByRole('button', { name: /quick update/i }))
+    const dialog = await screen.findByRole('dialog')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Update ✓' }))
+
+    await waitFor(() => expect(detailRequests.length).toBeGreaterThan(1))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
   it('makes every entity in the summary panel a link to its own screen', async () => {
     signInAsAdmin()
     renderPage()

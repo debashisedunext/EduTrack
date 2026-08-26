@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
@@ -99,5 +99,18 @@ describe('QuickUpdatePanel — S-21', () => {
     expect(await screen.findByText('Level')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /change the level/i })).toBeInTheDocument()
     expect(screen.queryByText(/and level\./i)).not.toBeInTheDocument()
+  })
+
+  it('calls onChanged once the update succeeds, so a caller holding its own copy of the ticket can refetch', async () => {
+    // The seeded walkthrough ticket is assigned to Meera the PM — a Developer
+    // is out of scope for it and would 404, same as the server's own guard.
+    getDb().currentUserId = PM_USER_ID
+    let changedCount = 0
+    const { user } = await openPanel({ onChanged: () => { changedCount += 1 } })
+
+    await user.click(screen.getByRole('button', { name: 'Update ✓' }))
+
+    await waitFor(() => expect(changedCount).toBe(1))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
