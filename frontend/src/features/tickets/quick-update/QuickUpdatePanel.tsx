@@ -48,11 +48,19 @@ export function QuickUpdateTrigger({
   ticket,
   triggerClassName,
   compact,
+  onChanged,
 }: {
   ticket: Ticket
   triggerClassName?: string
   /** Icon-only, for tight spaces like a Kanban card. Same action, same panel — just no label. */
   compact?: boolean
+  /**
+   * Refetch the caller's own view of the ticket. The mutation already
+   * invalidates the list query, but a caller holding an aggregated payload
+   * (the detail page's `/full`) needs its own refetch — same reason
+   * `TicketDetailHeader`'s `onReopened`/`onClosed` exist.
+   */
+  onChanged?: () => void
 }) {
   const [open, setOpen] = React.useState(false)
 
@@ -70,13 +78,27 @@ export function QuickUpdateTrigger({
         </Button>
       </SlideOverTrigger>
       <SlideOverContent onClick={(e) => e.stopPropagation()}>
-        {open && <QuickUpdateForm ticket={ticket} onDone={() => setOpen(false)} />}
+        {open && (
+          <QuickUpdateForm
+            ticket={ticket}
+            onDone={() => setOpen(false)}
+            onChanged={onChanged}
+          />
+        )}
       </SlideOverContent>
     </SlideOver>
   )
 }
 
-function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => void }) {
+function QuickUpdateForm({
+  ticket,
+  onDone,
+  onChanged,
+}: {
+  ticket: Ticket
+  onDone: () => void
+  onChanged?: () => void
+}) {
   const initial = React.useMemo(() => emptyQuickUpdateForm(ticket), [ticket])
   const {
     control,
@@ -126,6 +148,7 @@ function QuickUpdateForm({ ticket, onDone }: { ticket: Ticket; onDone: () => voi
         idempotencyKey: idempotencyKey.current,
       })
       toast({ variant: 'success', title: `${ticket.ticketId} updated` })
+      onChanged?.()
       onDone()
     } catch (error) {
       toast({
