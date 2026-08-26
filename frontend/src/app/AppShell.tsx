@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
@@ -13,8 +14,50 @@ import { NotificationStream } from '@/features/notifications/NotificationStream'
 // The chrome every screen renders inside — blueprint §7.2. Owned by C-005.
 export function AppShell() {
   const location = useLocation()
+
+  /*
+    BUG-001 · the shell must not be able to scroll the document.
+
+    Two scrollbars were showing side by side on every shell screen: `<main>`'s
+    own, and a second, document-level one that scrolled the entire shell —
+    sidebar and top bar included — up and out of the window, leaving dead
+    background beneath it and the create form's action bar stranded at the
+    bottom of the window with nothing above it.
+
+    The shell being `position: fixed` (below) is what stops it *contributing*
+    height to the document. This effect is what stops anything else from doing
+    so: while the shell is mounted the document itself does not scroll, full
+    stop, so `<main>` is the only place the app scrolls. Scoped to the shell's
+    lifetime rather than written into a stylesheet because the auth screens —
+    S-01 to S-03, which render outside the shell — are `min-h-screen` pages
+    that must still scroll the document normally on a short window.
+
+    The previous inline value is captured and restored rather than cleared, so
+    unmounting hands the document back exactly as it was found. Radix's dialogs
+    do the same thing while a modal is open and restore what they captured, so
+    the two nest without either clobbering the other.
+  */
+  useEffect(() => {
+    const { style } = document.body
+    const previous = style.overflow
+    style.overflow = 'hidden'
+    return () => {
+      style.overflow = previous
+    }
+  }, [])
+
   return (
-    <div className="flex h-screen overflow-hidden bg-app">
+    /*
+      `fixed inset-0`, not `h-screen`. `h-screen` is 100vh measured against a
+      document that anything at body level can make taller, and when that
+      happened the shell rendered as a 100vh band at the top of a taller page.
+      Fixed to the viewport it fills the window exactly and adds no height of
+      its own, whatever else is on the page.
+
+      `<main>`'s `overflow-y-auto` below is deliberately untouched: the inner
+      scrollbar is the one the app is supposed to have.
+    */
+    <div className="fixed inset-0 flex overflow-hidden bg-app">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
