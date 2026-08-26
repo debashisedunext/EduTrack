@@ -959,6 +959,20 @@ final class PermissionMatrix {
              */
             everyRole("GET", "/api/v1/tickets/{ticketId}/journey"),
 
+            // ── stage queue · C-062, S-31, blueprint §17 item 12 ──────────────
+            //
+            // Every role, on ticket-detail's own reasoning above: what differs
+            // per role is the ROWS StageQueueScope hands back — project
+            // membership, not ScopeResolver's assigned_to = me — never the right
+            // to ask. Denying the capability to a Developer would take away the
+            // one place §16's walkthrough has them watch their own handoff land.
+            //
+            // *Which* projects' queues a caller sees is StageQueueScope's
+            // question, not this file's — see that class's own javadoc for why
+            // it is a narrow, additive carve-out flagged for Stream A's review
+            // rather than a change to ScopeResolver itself.
+            everyRole("GET", "/api/v1/stages/queue"),
+
             // ── handoff · C-044, §4A, the ribbon's golden rule ────────────────
             //
             // ticket.handoff is granted to all six roles (V20260806_0900) — the

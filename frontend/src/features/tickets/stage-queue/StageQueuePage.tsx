@@ -46,19 +46,23 @@ import { defaultStageFor, findStage, isBreached, queueStages, queueTitle } from 
  * rather than the queue, and would put the wrong ticket on top with complete
  * confidence — the failure being that it looks exactly like the right one.
  *
- * ## 🔴 The backend endpoint does not exist yet, and its scope is Stream A's call
+ * ## 🟡 The backend endpoint exists now, on a scope flagged for Stream A's review
  *
- * `GET /stages/queue` is in the contract and in the mock; no controller serves
- * it. That is not the interesting part. The interesting part is that
+ * `GET /stages/queue` was mock-only until `fix/stage-queue`: the contract and
+ * the mock had it, no controller served it, and every screen built against
+ * the mock alone worked fine while the deployed backend answered 404 for
+ * everybody. `StageQueueController`/`StageQueueService` close that gap.
+ *
+ * The interesting part is still the one this note used to describe:
  * `ScopeResolver` gives a Developer, QA or Deployment resource
  * `assigned_to = me` on **every** ticket read, and under that rule this screen
- * returns only what the caller is already holding — the shared list §17 item 12
- * asks for cannot exist. `StageQueueSubscriptionScope` (D-014) already chose
- * project membership for the matching WebSocket room and deferred this decision
- * here in as many words. Deciding it means changing Stream A's guard, including
- * whether a ticket listed here can be opened at all, so it is raised with
- * Shivendra rather than assumed. This screen is built against the mock, which is
- * DEPENDENCIES §6's first rule and how every screen in this stream was built.
+ * would return only what the caller is already holding — the shared list §17
+ * item 12 asks for cannot exist. `StageQueueSubscriptionScope` (D-014) already
+ * chose project membership for the matching WebSocket room and deferred this
+ * decision here in as many words; `StageQueueScope` (backend) is that decision
+ * made for the REST read, deliberately as a narrow carve-out that does not
+ * touch `ScopeResolver` itself. It is raised with Shivendra rather than
+ * assumed final — see that class's own javadoc.
  */
 const PAGE_SIZE = 50
 
@@ -172,9 +176,11 @@ export function StageQueuePage() {
           <p className="mt-1 text-sm text-content-muted" role="status">
             {isPending
               ? 'Loading the queue…'
-              : rows.length === 0
-                ? 'Nothing waiting.'
-                : `${rows.length} waiting · ${unassignedCount} unassigned · ${breachedCount} past the stage SLA`}
+              : isError
+                ? 'Could not load the queue.'
+                : rows.length === 0
+                  ? 'Nothing waiting.'
+                  : `${rows.length} waiting · ${unassignedCount} unassigned · ${breachedCount} past the stage SLA`}
           </p>
         </div>
 

@@ -9,31 +9,43 @@
 assignment-driven ones. Without a shared 'waiting in QA' list, tickets stall
 between the handoff and someone noticing."*
 
-## 🔴 Open for Stream A — the scope rule this screen needs does not exist
+## 🟡 Flagged for Stream A's review — the scope rule this screen needed now exists, provisionally
 
 **This is the one thing to read before touching the screen.**
 
 `ScopeResolver` gives a Developer, QA or Deployment resource `assigned_to = me`
-on **every** ticket read (§10.2). Under that rule this screen returns only what
-the caller is already holding — "Waiting in QA" becomes My Tasks with a different
-title, and the shared list §17 item 12 asks for cannot exist at all.
+on **every** ticket read (§10.2). Under that rule this screen would return only
+what the caller is already holding — "Waiting in QA" becomes My Tasks with a
+different title, and the shared list §17 item 12 asks for cannot exist at all.
 
 `StageQueueSubscriptionScope` (D-014) hit the same wall for the matching
 WebSocket room, chose **project membership**, and deferred this decision here in
 as many words: a subscriber "refetches `GET /stages/queue`, which applies
 whatever scope C-062 gives it".
 
-Two things follow that are **not** this stream's to decide:
+As of `fix/stage-queue`, two things that used to be open are answered — provisionally:
 
-1. **`GET /stages/queue` has no controller.** The contract declares it, the mock
-   serves it, nothing on the server does.
-2. **A project-scoped queue lists tickets whose detail page 404s.** If a QA
-   resource can see a queued ticket but not open it, the screen is a list of
-   dead links — so the queue's scope and `ScopedTickets`' scope have to be
-   decided together. Two candidate rules are in the note on issue #3.
+1. **`GET /stages/queue` has a controller.** `StageQueueController` /
+   `StageQueueService`, in `api/feature/transitions/`. Until now the contract
+   declared it and the mock served it; nothing on the server did, which is why
+   the real backend answered 404 for every role while the screen worked fine
+   against the mock.
+2. **Its scope is project membership**, in `StageQueueScope` — the same rule
+   `StageQueueSubscriptionScope` already chose for the WebSocket room, applied
+   to the REST read as a narrow, additive carve-out that does not touch
+   `ScopeResolver` itself. `TicketScopeIT`'s pin on §10.2's four rules is
+   unaffected.
 
-Until then the screen is built against the mock, which is DEPENDENCIES §6's
-first rule and how every screen in this stream was built.
+**Still open, and still not this stream's to decide alone:** a project-scoped
+queue can list a ticket whose detail page 404s for the same viewer — if a QA
+resource can see a queued ticket but not open it, the screen is a list of dead
+links, so the queue's scope and `ScopedTickets`' scope have to agree in the
+end. `StageQueueScope`'s javadoc raises this with Shivendra rather than
+assuming it is settled; treat the backend piece as a starting point for Stream
+A to correct or take over, not a decision imposed on them.
+
+The screen itself is still built and tested against the mock, which is
+DEPENDENCIES §6's first rule and how every screen in this stream was built.
 
 ## Decisions
 
