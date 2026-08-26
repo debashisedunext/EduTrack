@@ -139,14 +139,21 @@ function typeSteps(html: string) {
 }
 
 /**
- * The four fields Save & Assign insists on beyond project and task type.
+ * The five fields Save & Assign insists on beyond project and task type.
  *
- * The assignee is picked first, and it is why this is `async` — every caller
- * has already chosen a project, which is what enables the dropdown, and leaving
- * the pick last would move focus onto its trigger a frame after the popup
- * closes and race the focus assertions two tests below make.
+ * The client is picked first and the assignee second, and that order is why
+ * this is `async`. Every caller has already chosen a project, which is what
+ * enables both dropdowns; the assignee has to be the *last* popup closed, or
+ * the focus assertions two tests below would measure the client's trigger
+ * instead — Radix restores focus to a trigger a frame after its popup closes.
+ *
+ * Picking a client also auto-fills its account manager onto the watchers, per
+ * §4B.2 and C-021. That is a real consequence of the field becoming mandatory
+ * rather than an artefact of this helper: every ticket saved from this screen
+ * now carries one.
  */
 async function fillTicketBody(title: string) {
+  await pickFromDropdown('clientId', /ACME — Acme Retail Ltd/)
   await pickFromDropdown('assigneeId', /Ravi Kumar/)
   fireEvent.change(screen.getByLabelText(/Title \/ summary/), { target: { value: title } })
   typeDescription('<p>Card payments hang at the confirmation step, then fail.</p>')
@@ -364,6 +371,67 @@ describe('S-19 Create Ticket', () => {
     expect(creates).toHaveLength(0)
   })
 
+  it('demands one on an internal task type too, and says so in its own words', async () => {
+    // The inverse of what §4B.2 asked for. "Internal Bug does not" require a
+    // client was the blueprint's own sentence; every task type does now, and
+    // the refusal is worded without "client-facing" so it does not read as the
+    // form mistaking an internal bug for a client one.
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    await pickFromDropdown('moduleId', /^Fees$/)
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Assign' }))
+
+    expect(await screen.findByText('Pick the client this ticket was raised for')).toBeInTheDocument()
+    expect(screen.queryByText(/client-facing/)).not.toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+  })
+
+  it('takes that same clientless form as a draft', async () => {
+    // Save as Draft waives it, like every other rule this form adds on top of
+    // the contract — and that waiver is what makes the widening affordable: a
+    // ticket parked precisely because nobody has established who it was raised
+    // for still parks. Its own test rather than a second half of the one above:
+    // three dropdowns and two round trips together run past the 5 s default,
+    // and no test in this file raises that.
+    renderPage()
+    await formReady()
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    // A title, because the contract requires one of every ticket and a draft
+    // does not waive what `TicketCreateRequest` marks required.
+    fireEvent.change(screen.getByLabelText(/Title \/ summary/), {
+      target: { value: 'Receipt reprint drops the duplicate watermark' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }))
+
+    await waitFor(() => expect(creates).toHaveLength(1), { timeout: 4000 })
+  })
+
+  it('marks Client required before a task type is picked and for every task type after', async () => {
+    renderPage()
+    await formReady()
+
+    // The asterisk is `aria-hidden` and paired with an `sr-only` "(required)",
+    // so this reads what a screen reader reads rather than what is drawn.
+    //
+    // Asserted *before* a project or a task type is chosen on purpose: the
+    // marker used to wait on the task-type master and appear only for the
+    // client-facing three, and the rule it stands for no longer depends on
+    // either.
+    expect(screen.getByText('Client').textContent).toMatch(/\(required\)/)
+
+    await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
+    await pickFromDropdown('taskTypeId', /^Client Bug$/)
+    await waitFor(() => expect(screen.getByText('Client').textContent).toMatch(/\(required\)/))
+
+    await pickFromDropdown('taskTypeId', /^Internal Bug$/)
+    await waitFor(() => expect(screen.getByText('Client').textContent).toMatch(/\(required\)/))
+  })
+
   /**
    * B-028 · blueprint line 948 — "at least one primary contact before the
    * client can be selected on a ticket".
@@ -388,7 +456,7 @@ describe('S-19 Create Ticket', () => {
     expect(options.some((o) => /KESTREL/.test(o) && /No primary contact/.test(o))).toBe(true)
 
     await pickFromDropdown('clientId', /KESTREL/)
-    expect(screen.getByLabelText(/^Client$/)).not.toHaveTextContent('Kestrel')
+    expect(screen.getByLabelText(/^Client\*/)).not.toHaveTextContent('Kestrel')
   })
 
   /**
@@ -457,7 +525,7 @@ describe('S-19 Create Ticket', () => {
     // to post. Waiting on this rather than on the dropdown so the popup is not
     // left open over the button the next line clicks.
     await waitFor(
-      () => expect(screen.getByLabelText(/^Client$/)).not.toHaveTextContent('Acme'),
+      () => expect(screen.getByLabelText(/^Client\*/)).not.toHaveTextContent('Acme'),
       { timeout: 4000 },
     )
 
@@ -471,9 +539,9 @@ describe('S-19 Create Ticket', () => {
     renderPage()
     await formReady()
 
-    expect(screen.getByLabelText(/^Client$/)).toBeDisabled()
+    expect(screen.getByLabelText(/^Client\*/)).toBeDisabled()
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
-    expect(screen.getByLabelText(/^Client$/)).toBeEnabled()
+    expect(screen.getByLabelText(/^Client\*/)).toBeEnabled()
 
     expect(screen.getByLabelText(/Client contact/)).toBeDisabled()
     await pickFromDropdown('clientId', /ACME — Acme Retail Ltd/)
@@ -543,8 +611,9 @@ describe('S-19 Create Ticket', () => {
     await pickFromDropdown('taskTypeId', /^Internal Bug$/)
     await pickFromDropdown('moduleId', /^Fees$/)
     // Not `fillTicketBody`, which writes its own description — but the save
-    // still has to get past the assignee rule to reach the wire this test is
-    // about.
+    // still has to get past the client and assignee rules to reach the wire
+    // this test is about.
+    await pickFromDropdown('clientId', /ACME — Acme Retail Ltd/)
     await pickFromDropdown('assigneeId', /Ravi Kumar/)
     fireEvent.change(screen.getByLabelText(/Title \/ summary/), {
       target: { value: 'Payment gateway times out on checkout' },

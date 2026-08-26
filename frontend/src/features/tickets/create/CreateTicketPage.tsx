@@ -722,17 +722,30 @@ export function CreateTicketPage() {
           <FormField
             id="clientId"
             label="Client"
-            required={mandates('CLIENT')}
+            /*
+              C-021 · Client's asterisk used to wait on `clientRequiredIds` and
+              appear only for the client-facing three — and, before the task-type
+              master answered, not at all. It does not wait on anything now: a
+              client is required on every task type, so the marker is drawn from
+              the first paint rather than arriving after somebody has read past
+              the field.
+            */
+            required
             error={errors.clientId?.message}
             hint={
               <>
+                {/*
+                  The project's rule is still named separately, even though both
+                  now come out as "required". The difference is what Save as
+                  Draft does: this form's rule is waived on a draft and a
+                  project's is not, so a reporter refused on a draft is owed the
+                  sentence that explains why.
+                */}
                 {mandates('CLIENT')
-                  ? 'Required on every ticket in this project.'
-                  : taskTypeId != null && clientRequiredIds.has(taskTypeId)
-                    ? 'Required for this task type.'
-                    : showAllClients
-                      ? 'Every active client, not only this project’s.'
-                      : 'Clients mapped to the selected project.'}
+                  ? 'Required on every ticket in this project — not even a draft is taken without it.'
+                  : showAllClients
+                    ? 'Required. Every active client, not only this project’s. Only Save as Draft will take it without one.'
+                    : 'Required. Clients mapped to the selected project. Only Save as Draft will take it without one.'}
                 {canViewAllClients && (
                   <label className="ml-1 inline-flex items-center gap-1.5">
                     <input
