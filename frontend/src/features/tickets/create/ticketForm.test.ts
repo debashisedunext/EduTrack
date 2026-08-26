@@ -47,6 +47,10 @@ const valid: TicketFormValues = {
   // the three live save actions, so a `valid` without one would make every
   // assertion in this file measure the assignee rule as well as its own.
   assigneeId: 9,
+  // And again for the client. §4B.2 used to ask for one only on the three
+  // client-facing types — task type 5 is Internal Bug, which was exactly the
+  // case that went without — and it is asked for on every type now.
+  clientId: 3,
   estimatedHrs: '4.5',
 }
 
@@ -74,7 +78,17 @@ describe('ticketFormSchema', () => {
   it('names every empty required field at once rather than one at a time', () => {
     const errors = errorsByField(emptyTicketForm)
     expect(Object.keys(errors).sort()).toEqual(
-      ['assigneeId', 'description', 'estimatedHrs', 'level', 'moduleId', 'projectId', 'taskTypeId', 'title'].sort(),
+      [
+        'assigneeId',
+        'clientId',
+        'description',
+        'estimatedHrs',
+        'level',
+        'moduleId',
+        'projectId',
+        'taskTypeId',
+        'title',
+      ].sort(),
     )
   })
 
@@ -112,13 +126,36 @@ describe('ticketFormSchema', () => {
     }
   })
 
-  it('requires a client for client-facing task types and not for internal ones', () => {
+  it('requires a client on every task type, not only the client-facing three', () => {
     const clientBug = TASK_TYPES.find((t) => t.name === 'Client Bug')!.id
     const internalBug = TASK_TYPES.find((t) => t.name === 'Internal Bug')!.id
 
     expect(errorsByField({ ...valid, taskTypeId: clientBug, clientId: null })).toHaveProperty('clientId')
     expect(errorsByField({ ...valid, taskTypeId: clientBug, clientId: 3 })).not.toHaveProperty('clientId')
-    expect(errorsByField({ ...valid, taskTypeId: internalBug, clientId: null })).not.toHaveProperty('clientId')
+    // The deliberate deviation from §4B.2, which said in as many words that
+    // "Internal Bug does not" require a client. The assertion is written the
+    // way round it is on purpose: if the rule is ever narrowed back, this is
+    // the line that says so.
+    expect(errorsByField({ ...valid, taskTypeId: internalBug, clientId: null })).toHaveProperty('clientId')
+    // ...and a client clears it there exactly as it does on a Client Bug.
+    expect(errorsByField({ ...valid, taskTypeId: internalBug, clientId: 3 })).not.toHaveProperty('clientId')
+  })
+
+  it('names the client-facing type and the internal one differently in the same refusal', () => {
+    // `clientRequired` stopped gating the rule and now only picks the wording,
+    // the same job `bugTypes` was left with. If it ever stops doing that too it
+    // is dead weight in `TaskTypeRules` — this is the test that would notice.
+    const clientBug = TASK_TYPES.find((t) => t.name === 'Client Bug')!.id
+    const internalBug = TASK_TYPES.find((t) => t.name === 'Internal Bug')!.id
+
+    expect(errorsByField({ ...valid, taskTypeId: clientBug, clientId: null }).clientId).toBe(
+      'This task type is client-facing — pick the client it was raised for',
+    )
+    // Telling somebody an Internal Bug is client-facing reads as a bug in the
+    // form, which is the whole reason the wording still forks.
+    expect(errorsByField({ ...valid, taskTypeId: internalBug, clientId: null }).clientId).toBe(
+      'Pick the client this ticket was raised for',
+    )
   })
 
   it('requires a module on every task type, not only the bug-type three', () => {
@@ -126,11 +163,11 @@ describe('ticketFormSchema', () => {
     const changeRequest = TASK_TYPES.find((t) => t.code === 'CHANGE_REQUEST')!.id
     const serverIssue = TASK_TYPES.find((t) => t.code === 'SERVER_ISSUE')!.id
 
-    expect(errorsByField({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: null })).toHaveProperty(
+    expect(errorsByField({ ...valid, taskTypeId: productionBug, moduleId: null })).toHaveProperty(
       'moduleId',
     )
     expect(
-      errorsByField({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: 2 }),
+      errorsByField({ ...valid, taskTypeId: productionBug, moduleId: 2 }),
     ).not.toHaveProperty('moduleId')
     // The deliberate deviation from §7.5, which called these two optional. The
     // assertion is written the way round it is on purpose: if the rule is ever
@@ -148,7 +185,7 @@ describe('ticketFormSchema', () => {
     const productionBug = TASK_TYPES.find((t) => t.code === 'PRODUCTION_BUG')!.id
     const changeRequest = TASK_TYPES.find((t) => t.code === 'CHANGE_REQUEST')!.id
 
-    expect(errorsByField({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: null }).moduleId).toBe(
+    expect(errorsByField({ ...valid, taskTypeId: productionBug, moduleId: null }).moduleId).toBe(
       'Pick the module this bug is in — it is what routes it to the right team',
     )
     expect(errorsByField({ ...valid, taskTypeId: changeRequest, moduleId: null }).moduleId).toBe(
@@ -194,9 +231,10 @@ describe('clientRequiringTaskTypeIds', () => {
 
   it('yields nothing when the master renames a type out from under it', () => {
     // The rule matches on a display string because `TaskType` has no
-    // `requiresClient` flag yet. This test exists so the failure mode is
-    // written down rather than discovered when a client ticket saves without
-    // a client — see this folder's README.
+    // `requiresClient` flag yet. The failure mode this pins is far cheaper than
+    // it was: a rename used to disable the client rule outright, and since the
+    // rule was widened to every task type it costs only the more specific of
+    // two refusal messages — see this folder's README.
     const renamed = TASK_TYPES.map((t) => ({ ...t, name: `${t.name} (v2)` }))
     expect(clientRequiringTaskTypeIds(renamed).size).toBe(0)
     expect(CLIENT_REQUIRING_TASK_TYPES).toContain('Client Bug')
@@ -213,7 +251,7 @@ describe('bugTaskTypeIds', () => {
     // rule matches on `name`. `TaskType.code` is documented in the contract as
     // immutable once created; a display name is whatever an admin last typed
     // into S-13, and the test directly above this describe block pins the fact
-    // that renaming one silently disables the older rule.
+    // that renaming one silently blunts the older rule's wording.
     const renamed = TASK_TYPES.map((t) => ({ ...t, name: `${t.name} (2026)` }))
     expect([...bugTaskTypeIds(renamed)].sort()).toEqual([2, 5, 6])
     expect(clientRequiringTaskTypeIds(renamed).size).toBe(0)
@@ -330,17 +368,24 @@ describe('ticketFormSchema — the draft action (C-013)', () => {
 
   it('waives the §4B.2 client rule, which is the blueprint’s and not the contract’s', () => {
     const clientBug = TASK_TYPES.find((t) => t.name === 'Client Bug')!.id
+    const internalBug = TASK_TYPES.find((t) => t.name === 'Internal Bug')!.id
     // Chasing down which client a half-written ticket belongs to is a common
     // reason to park it as a draft in the first place.
     expect(draftSchema.safeParse({ ...draftable, taskTypeId: clientBug }).success).toBe(true)
-    expect(schema.safeParse({ ...valid, taskTypeId: clientBug }).success).toBe(false)
+    expect(schema.safeParse({ ...valid, taskTypeId: clientBug, clientId: null }).success).toBe(false)
+    // The waiver had to widen with the rule, exactly as the module's did. An
+    // internal bug now needs a client to be saved live, so a draft is the only
+    // way to park one before the reporter knows who it was raised for — and
+    // `draftable` is task type 5, which is that internal bug.
+    expect(draftSchema.safeParse({ ...draftable, taskTypeId: internalBug }).success).toBe(true)
+    expect(schema.safeParse({ ...valid, taskTypeId: internalBug, clientId: null }).success).toBe(false)
   })
 
   it('waives the §7.5 module rule too — "Save as Draft waives it either way"', () => {
     const productionBug = TASK_TYPES.find((t) => t.code === 'PRODUCTION_BUG')!.id
     const changeRequest = TASK_TYPES.find((t) => t.code === 'CHANGE_REQUEST')!.id
     expect(draftSchema.safeParse({ ...draftable, taskTypeId: productionBug, moduleId: null }).success).toBe(true)
-    expect(schema.safeParse({ ...valid, taskTypeId: productionBug, clientId: 3, moduleId: null }).success).toBe(
+    expect(schema.safeParse({ ...valid, taskTypeId: productionBug, moduleId: null }).success).toBe(
       false,
     )
     // The waiver had to widen with the rule. A change request now needs a
@@ -548,15 +593,17 @@ describe('ticketFormSchema — the project rules (C-071)', () => {
   })
 
   it('reports every missing field at once', () => {
-    // CLIENT rather than ASSIGNEE, which this used to name: the assignee is
-    // mandatory on the form now, so `valid` carries one and the project's copy
-    // of the rule has nothing left to catch on this path. `valid` is task type
-    // 5, Internal Bug, so §4B.2 does not require a client of its own here and
-    // the only issue on `clientId` is the project's.
-    expect(Object.keys(parseWith(valid, requiring('SCREEN_NAME', 'FEATURE', 'CLIENT')))).toEqual([
+    // CLIENT_CONTACT rather than CLIENT, which this named until the client
+    // became mandatory on the form — and CLIENT rather than ASSIGNEE before
+    // that, for the same reason each time. `valid` now carries both a client
+    // and an assignee, so the project's copy of either rule has nothing left to
+    // catch here, and an issue raised by the form's own rule would be the one
+    // measured instead of the project's. The contact is the field `valid` still
+    // leaves empty.
+    expect(Object.keys(parseWith(valid, requiring('SCREEN_NAME', 'FEATURE', 'CLIENT_CONTACT')))).toEqual([
       'screenName',
       'feature',
-      'clientId',
+      'clientContactId',
     ])
   })
 

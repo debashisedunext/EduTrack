@@ -35,10 +35,19 @@ import { isRichTextEmpty, sanitizeRichText } from '@/components/ui/rich-text'
  * "Client Request, Client Bug and Production Bug require a client; Internal
  * Bug does not."
  *
+ * **These no longer decide whether Client is mandatory.** The schema requires a
+ * client on every task type — see the `superRefine` below for why §4B.2 was
+ * widened. What this set still decides is how the refusal is worded, the same
+ * job `BUG_TASK_TYPE_CODES` was left with when Module was widened: a Client Bug
+ * is told the type is client-facing, an Internal Bug is simply asked who it was
+ * raised for.
+ *
  * §4B.2 calls the rule *configurable per task type*, but `TaskType` carries no
  * `requiresClient` flag in the contract yet, so this matches on the master's
  * name. Move it onto the flag the day Stream D adds one — matching a display
- * string means a rename in the Task Type master silently disables the rule.
+ * string means a rename in the Task Type master silently changes the wording.
+ * That is a far cheaper failure than it used to be: a rename used to disable
+ * the rule outright, and now costs a less specific sentence.
  */
 export const CLIENT_REQUIRING_TASK_TYPES: readonly string[] = [
   'Client Request',
@@ -280,9 +289,9 @@ const HOURS = /^\d+(\.\d{1,2})?$/
  * - **Description** — §7.5 marks it mandatory; `TicketCreateRequest` has it
  *   optional. The strict path keeps the blueprint's rule.
  * - **Estimated effort** — same shape, same reasoning.
- * - **The client rule for client-facing task types** — §4B.2's, not the
- *   contract's. You often save a draft precisely because you are still chasing
- *   which client it belongs to.
+ * - **The client** — §4B.2's rule, widened to every task type, and this
+ *   screen's rather than the contract's. You often save a draft precisely
+ *   because you are still chasing which client it belongs to.
  * - **Assignee** — a recorded deviation rather than a blueprint rule; see the
  *   field. A draft is often parked precisely because who picks it up is the
  *   part not yet decided.
@@ -415,19 +424,33 @@ export function ticketFormSchema(
         .refine((s) => s === '' || !Number.isNaN(Date.parse(s)), 'Enter a valid date and time'),
     })
     .superRefine((values, ctx) => {
-      // §4B.2's rule, not the contract's — and chasing down which client a
-      // half-written ticket belongs to is a common reason to park it as a
-      // draft in the first place. It applies in full on every other path.
-      if (
-        !isDraft &&
-        values.taskTypeId != null &&
-        rules.clientRequired.has(values.taskTypeId) &&
-        values.clientId == null
-      ) {
+      // §4B.2 widened: **a client is mandatory on every task type now**, not
+      // only the client-facing three. Same deviation, and the same argument, as
+      // the module rule directly below: a ticket with no client is one nobody
+      // can bill, escalate or report on by account, and a rule that applies to
+      // three task types out of nine is one people read past. Internal work is
+      // the case it costs — and an organisation that raises internal tickets
+      // against no client at all has a client row for itself, which is a master
+      // datum somebody enters once.
+      //
+      // `rules.clientRequired` survives and still earns its keep: it now decides
+      // the *wording* rather than whether the rule fires. Telling somebody an
+      // Internal Bug is "client-facing" reads as a bug in the form.
+      //
+      // Draft-waived, like every other rule this form adds on top of the
+      // contract — and that waiver is what makes the widening affordable, since
+      // chasing down which client a half-written ticket belongs to is a common
+      // reason to park it as a draft in the first place. A *project's* own
+      // CLIENT mandate is still not waived; the hint says which rule is
+      // speaking.
+      if (!isDraft && values.clientId == null) {
+        const isClientFacing = values.taskTypeId != null && rules.clientRequired.has(values.taskTypeId)
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['clientId'],
-          message: 'This task type is client-facing — pick the client it was raised for',
+          message: isClientFacing
+            ? 'This task type is client-facing — pick the client it was raised for'
+            : 'Pick the client this ticket was raised for',
         })
       }
       // §7.5 widened: **a module is mandatory on every task type now**, not

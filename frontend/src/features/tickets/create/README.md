@@ -20,10 +20,10 @@ fact rather than a preference.** `TicketCreateRequest.required` is
 `[projectId, title, taskTypeId, level]`, so a draft missing any of those earns a
 400 whatever the form allows. What it *can* waive is the rules that are this
 screen's rather than the contract's: the mandatory **description** (§7.5), the
-mandatory **estimated effort** (§7.5), **§4B.2's client rule for client-facing
-task types** — you often park a ticket precisely because you are still chasing
-which client it belongs to — and the mandatory **assignee** (D-16, below), for
-the same reason. Level pre-fills from the task type, so a draft costs project +
+mandatory **estimated effort** (§7.5), the mandatory **client** (§4B.2 widened,
+below) — you often park a ticket precisely because you are still chasing which
+client it belongs to — and the mandatory **assignee** (D-16, below), for the
+same reason. Level pre-fills from the task type, so a draft costs project +
 task type + title.
 
 A draft still rejects a *malformed* entry: `4h` in the effort field fails on
@@ -99,9 +99,35 @@ B-053's Excel import and any direct API call go on creating unassigned tickets �
 nobody is standing in front of a form on those paths. C-015's Unassigned view,
 §14's escalation and §15's notification all keep their jobs.
 
-**Save as Draft waives it**, the fourth rule to join the description, the
-estimate and §4B.2's client rule — who picks a half-written ticket up is a
-common reason to park it. A project that wants the rule to hold on the draft
+**A client is required on every task type — a recorded deviation from §4B.2.**
+§4B.2 asked for one on Client Request, Client Bug and Production Bug and said in
+as many words that "Internal Bug does not" need one. The create form asks for
+one on every type, from 26 Aug 2026. The argument is the one the module widening
+made three days earlier: a ticket with no client is one nobody can bill,
+escalate or report on by account, and a rule that fires on three task types out
+of nine is a rule people read past. Internal work is the case it costs, and an
+organisation raising internal tickets against nobody has a client row for itself
+— a master datum entered once.
+
+`CLIENT_REQUIRING_TASK_TYPES` survives with the smaller job `BUG_TASK_TYPE_CODES`
+was left with: it picks the **wording**, not whether the rule fires. A Client Bug
+is told the type is client-facing; an Internal Bug is simply asked who it was
+raised for, because telling somebody an internal bug is client-facing reads as a
+bug in the form. The asterisk no longer waits on the task-type master either, so
+it is drawn on first paint rather than arriving after somebody has read past the
+field.
+
+Save as Draft waives it, which is what makes the widening affordable. A
+project's own **CLIENT** mandate is not waived on a draft, and the hint says
+which of the two rules is speaking.
+
+Not done: the server still accepts a null `clientId`, so the form is stricter
+than the write path. Closing that needs an OpenAPI change (Stream D) and a
+backend guard.
+
+**Save as Draft waives the assignee too**, the fourth rule to join the
+description, the estimate and §4B.2's client rule — who picks a half-written
+ticket up is a common reason to park it. A project that wants the rule to hold on the draft
 path too, and to hold server-side, ticks **ASSIGNEE** in B-019's Settings tab;
 `ProjectSettingsGate` enforces that code on every path and does not waive it for
 a draft. That is also why `ASSIGNEE` stays in `MANDATORY_FIELD_PATHS` even
@@ -351,8 +377,10 @@ Also for Stream D, smaller:
 §4B.2 calls the "requires a client" rule *configurable per task type*, but
 `TaskType` carries no `requiresClient` flag. `CLIENT_REQUIRING_TASK_TYPES`
 matches on the master's name instead, so a rename in the Task Type master
-silently disables the rule. `ticketForm.test.ts` has a test that spells out that
-failure mode. Move it onto a flag when one exists.
+silently changes what it decides. That is far cheaper than it was: the set no
+longer gates the rule, only the refusal's wording, so a rename costs the more
+specific of two messages rather than the rule itself. `ticketForm.test.ts` has a
+test that spells the failure mode out. Move it onto a flag when one exists.
 
 ## C-068 · the "Where it happened" group
 
@@ -371,8 +399,8 @@ Three decisions in `ticketForm.ts` are worth knowing about:
 
 - **The bug-type rule matches on `code`, not on `name`.** `CLIENT_REQUIRING_TASK_TYPES`
   directly above it matches display strings and carries an apology for it — a
-  rename in the Task Type master silently disables that rule, and there is a
-  test pinning that failure mode. `TaskType.code` is documented in the contract
+  rename in the Task Type master silently blunts that rule's wording, and there
+  is a test pinning that failure mode. `TaskType.code` is documented in the contract
   as immutable once created, so the module rule survives an admin renaming
   "Production Bug" in S-13. The three codes are **listed**, not derived from a
   `_BUG` suffix: a suffix test captures whatever a future admin happens to type,
