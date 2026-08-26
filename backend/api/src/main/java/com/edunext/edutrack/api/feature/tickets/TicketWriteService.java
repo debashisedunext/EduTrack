@@ -204,6 +204,19 @@ public class TicketWriteService {
 
         ticket.setPlannedCloseDate(plannedCloseDate);
 
+        // C-062 · every screen that answers "how long has this sat in its
+        // current stage" — S-31's queue foremost — reads this column, and nothing
+        // set it on creation until now: `openFirstCycleAndHop` below writes the
+        // genesis `ticket_stage_transitions` row with `enteredAt = now` but never
+        // wrote the ticket's own `stageEnteredAt`, so a brand-new ticket answered
+        // null for "when did it enter INTAKE" until its first real transition
+        // (`TransitionService.advance`) set the column for the first time. Set
+        // unconditionally, before the template resolution below, because
+        // `currentStage` defaults to INTAKE (Ticket's own field default) even for
+        // a template-less ticket — the same case `ReopenService.restartStage`
+        // already pairs `setCurrentStage`/`setStageEnteredAt` for.
+        ticket.setStageEnteredAt(now);
+
         // A project × task type with no rule and no default (TemplateResolver's
         // own §7.4 ladder) leaves the ticket with no template — the same
         // legacy/no-template state RibbonAssembler and SkipService.requireSkippable
