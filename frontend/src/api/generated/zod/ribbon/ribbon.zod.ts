@@ -445,13 +445,7 @@ export const getStageQueueQueryParams = zod.object({
 
 export const getStageQueueResponseDataItemTicketTicketIdRegExp = new RegExp('^[A-Z][A-Z0-9]{1,9}-\\d{2}-\\d{5,}$');
 export const getStageQueueResponseDataItemTicketProjectColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
-export const getStageQueueResponseDataItemTicketProjectAutoAssignRuleDefault = "MANUAL";export const getStageQueueResponseDataItemTicketScreenNameMax = 120;
-
-export const getStageQueueResponseDataItemTicketFeatureMax = 120;
-
-export const getStageQueueResponseDataItemTicketStepsToGenerateMax = 20000;
-
-export const getStageQueueResponseDataItemTicketLevelMax = 20;
+export const getStageQueueResponseDataItemTicketProjectAutoAssignRuleDefault = "MANUAL";export const getStageQueueResponseDataItemTicketLevelMax = 20;
 
 
 export const getStageQueueResponseDataItemTicketLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
@@ -461,18 +455,11 @@ export const getStageQueueResponseDataItemTicketOriginalLevelMax = 20;
 export const getStageQueueResponseDataItemTicketOriginalLevelRegExp = new RegExp('^[A-Z][A-Z0-9_]{0,19}$');
 
 
-export const getStageQueueResponseDataItemTicketPctCompleteMin = 0;
-export const getStageQueueResponseDataItemTicketPctCompleteMax = 100;
-
-
-
 export const getStageQueueResponse = zod.object({
   "data": zod.array(zod.object({
   "ticket": zod.object({
-  "id": zod.number().optional().describe('D-058 · \*\*the realtime anchor, and the only reason this is on the\nwire.\*\* Every §9.3 destination is keyed on the numeric row id —\n`\/topic\/ticket.{id}` — while every path and payload in this\ncontract identifies a ticket by its `ticketId` code. Without this\nfield a client holding a ticket cannot name the room its own\nupdates arrive on, so `stage.changed` (D-058), the chat ticket\nthread (D-050) and every later ticket topic are unsubscribable\nfrom the browser. `threadDestination.ts` records the same gap and\nnames it as mine to close.\n\n\*\*Not an alternative identifier.\*\* No route accepts it, nothing\nrenders it, and `ticketId` stays the ticket\'s identity everywhere\na human or a URL is involved — a sequential integer is guessable\nand a ticket code is not. Reading it confers nothing: it arrives\nonly on a ticket the caller could already read, and a subscription\nis authorised independently by D-013\'s channel interceptor.\n\nOptional because the ticket returned by a list row does not carry\nit — only a ticket you are looking at needs a room.\n'),
   "ticketId": zod.string().regex(getStageQueueResponseDataItemTicketTicketIdRegExp).describe('`{PROJECT_CODE}-{YY}-{NNNNN}`. Issued server-side; never guessable by count.\n\n\*\*Five digits is a minimum width, not a maximum\*\* (`\\d{5,}`, not `\\d{5}`).\n`projects.ticket_seq` is a per-project counter that does not reset at year\nrollover (PLAN.md §3.2, deviation D-8), so a long-lived project eventually\nissues `CRM-30-100000`. Because this schema also types the `ticketId`\n\*\*path parameter\*\*, an exact `\\d{5}` would have made every attachment,\ncomment and history call for that ticket fail client-side in the generated\nZod — the ticket would be created and stored correctly and then be\nunreachable. Narrowing this back is a breaking change, not a tidy-up.\n'),
   "title": zod.string(),
-  "description": zod.string().optional(),
   "project": zod.object({
   "id": zod.number(),
   "projectCode": zod.string().describe('Ticket-ID prefix. Immutable once the project has issued one.'),
@@ -500,10 +487,7 @@ export const getStageQueueResponse = zod.object({
   "clientContactId": zod.number().nullish(),
   "isClientRaised": zod.boolean().optional(),
   "taskTypeId": zod.number().optional(),
-  "moduleId": zod.number().nullish().describe('The product module the concern was raised against (§7.5). Resolve the\nname through `GET \/masters\/modules` rather than expecting it inline —\nthe master is small, cached, and includes deactivated rows precisely\nso an old ticket\'s module still has a name.\n'),
-  "screenName": zod.string().max(getStageQueueResponseDataItemTicketScreenNameMax).nullish(),
-  "feature": zod.string().max(getStageQueueResponseDataItemTicketFeatureMax).nullish(),
-  "stepsToGenerate": zod.string().max(getStageQueueResponseDataItemTicketStepsToGenerateMax).nullish().describe('\*\*Sanitised HTML\*\*, per PLAN.md §3.9 — render it through a sanitiser\nclient-side as well. The server sanitises on write, but a row written\nbefore the allow-list was last tightened is only protected if the\nrenderer applies today\'s list too.\n'),
+  "moduleId": zod.number().nullish(),
   "level": zod.string().min(1).max(getStageQueueResponseDataItemTicketLevelMax).regex(getStageQueueResponseDataItemTicketLevelRegExp).describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "originalLevel": zod.string().min(1).max(getStageQueueResponseDataItemTicketOriginalLevelMax).regex(getStageQueueResponseDataItemTicketOriginalLevelRegExp).optional().describe('D-066 · \*\*a priority code from the S-12 master, not a fixed\nvocabulary.\*\* Blueprint §9 S-12: \*\"Admin can add further levels without\na release.\"\* The four seeded codes are `LOW`, `MEDIUM`, `HIGH` and\n`CRITICAL`, and they will be the only four on most installations — but\nthey are seed data, not the type.\n\n\*\*This was an `enum` until D-066, and that was the bug.\*\* The server has\nnever agreed with it: `UnknownLevelException` validates against the\npriority master and says so in its own javadoc — \*\"validated against the\nmaster rather than an enum because S-12 lets an administrator add a\nlevel without a release … the day a fifth level is added, the contract\nis the thing that will be behind.\"\* `PriorityChangeRequest.level` and\n`TicketCreateRequest.level` are `@NotBlank String` on the wire for the\nsame reason. So the closed enum did not protect anything; it only\nstopped the generated client from ever \*sending\* a level an Admin had\njust created through a screen the blueprint promises them.\n\n\*\*What a client must therefore not do.\*\* Do not switch exhaustively on\nthis value, and do not index a lookup table with it without a fallback —\na colour, a label or a sort weight keyed on the four seeded codes will\nbe handed a fifth the day somebody adds one, and the failure is a blank\nchip rather than an error. Resolve presentation through\n`GET \/masters\/priorities`, which carries each level\'s colour, default\nSLA hours, escalation flag and rank, and treat a code missing from that\nmaster as unknown rather than as an assertion failure.\n\n\*\*Ordering is `rank` from the master, never string order.\*\* `CRITICAL`\nsorts before `LOW` alphabetically and after it by severity, and a fifth\nlevel has no defensible alphabetical position at all.\n'),
   "status": zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED']),
@@ -522,22 +506,24 @@ export const getStageQueueResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "cycleNo": zod.number().min(1).describe('Increments on reopen after closure. Independent of `iterationNo`.'),
-  "iterationNo": zod.number().min(1).optional().describe('Increments on a backward move within the current cycle. Independent of `cycleNo`.'),
+  "cycleNo": zod.number(),
+  "iterationNo": zod.number().optional(),
   "reopenCount": zod.number().optional(),
+  "isReopened": zod.boolean().optional(),
+  "dateReported": zod.string().datetime({}).optional(),
   "plannedCloseDate": zod.string().datetime({}).nullish(),
   "actualCloseDate": zod.string().datetime({}).nullish(),
-  "isDelayed": zod.boolean().optional(),
+  "isDelayed": zod.boolean(),
   "delayedSince": zod.string().datetime({}).nullish(),
-  "totalEffortHrs": zod.number().optional(),
   "estimatedHrs": zod.number().nullish(),
-  "pctComplete": zod.number().min(getStageQueueResponseDataItemTicketPctCompleteMin).max(getStageQueueResponseDataItemTicketPctCompleteMax).optional(),
-  "createdAt": zod.string().datetime({}).optional(),
-  "updatedAt": zod.string().datetime({}).optional()
-}).optional(),
-  "enteredStageAt": zod.string().datetime({}).optional(),
-  "timeInStageMins": zod.number().optional().describe('Working minutes.'),
-  "stageSlaBreached": zod.boolean().optional()
+  "totalEffortHrs": zod.number().optional(),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional(),
+  "createdAt": zod.string().datetime({})
+}).describe('D-061 · one \*\*row\*\* of S-17, not one ticket.\n\n`GET \/tickets` returns this rather than `Ticket`, and the difference is\ndeliberate: the list renders 25 rows at a time, and `description` plus\n`stepsToGenerate` are sanitised HTML that can run to kilobytes each. A\nlist that shipped them would be slower than the request waterfall A-052\nexists to remove, and no column on S-17 displays either. The detail page\nreads `GET \/tickets\/{ticketId}\/full`, which carries everything.\n\n\*\*Every name here is `Ticket`\'s name for the same thing.\*\* This is a\nstrict subset, never a rename — `ticketId` is the ticket code, exactly\nas it is on the path and in the other ~30 operations that take it. A row\nshape with its own vocabulary is what produced the blank ID column on\nS-17: the server answered `ticketCode`\/`assignedTo`, the generated\nclient bound `ticketId`\/`assignee`, and both were internally consistent\nwhile the grid rendered empty cells against a green build. D-062 now\nfails the build on exactly that.\n\nEmbedded refs rather than bare ids, again matching `Ticket`: the grid\nprints \"CRM — Client CRM Platform\" and an assignee\'s name and avatar, so\nids would push a second lookup into every consumer — the list, the S-06\ndrill-down and the CSV export — to save four joins on a 25-row page.\n').optional().describe('C-062 · a \*\*row\*\*, not a ticket — `TicketSummary`, and for the\nreason `GET \/tickets` gives for the same swap. This declared\n`Ticket` from D-001, when no server existed to disagree with\nit. S-31 draws six columns (id, title, project, level, held-by,\ntime-in-stage); `Ticket` is ~58 properties including\n`description` and `stepsToGenerate`, sanitised HTML running to\nkilobytes each. A queue that shipped a page of ticket bodies to\nrender six columns would be slower than the screen it replaces.\n\nIt is the same record S-17 binds, deliberately. Two row shapes\nwith different names for the same fact is what produced S-17\'s\nblank ID column (D-061), and a queue is a list of tickets by\nany reading.\n'),
+  "enteredStageAt": zod.string().datetime({}).optional().describe('When this ticket entered the stage it is in now —\n`tickets.stage_entered_at`, stamped by the genesis hop at\ncreation and restamped by every transition, so it is set even\nfor a ticket nobody has moved yet.\n'),
+  "timeInStageMins": zod.number().optional().describe('Working minutes since `enteredStageAt`, against the org\ncalendar and the project\'s holidays — never wall-clock. A\nFriday-18:00 handoff has not been waiting three days on Monday\nmorning, and a queue sorted on a wall-clock figure would put\nevery weekend on top.\n'),
+  "stageSlaBreached": zod.boolean().optional().describe('True only when the stage actually declares an SLA\n(`workflow_stages.sla_hours`) and it has been passed. A stage\nwith no SLA — which is most of them — is never breached rather\nthan always breached.\n')
 })),
   "meta": zod.object({
   "nextCursor": zod.string().nullish(),

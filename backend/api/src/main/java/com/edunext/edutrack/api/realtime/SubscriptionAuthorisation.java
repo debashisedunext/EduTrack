@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.realtime;
 
+import com.edunext.edutrack.api.security.CallerIdentity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.Message;
@@ -171,11 +172,24 @@ class SubscriptionAuthorisation implements ChannelInterceptor {
     }
 
     /** The same extraction {@code ChatTypingController} performs, for the same reason. */
+    /**
+     * <b>Delegates to {@code CallerIdentity}, which is the one place that knows
+     * what a caller looks like.</b> This used to cast to {@code DevPrincipal}
+     * and nothing else, so it understood only the {@code dev-noauth} profile's
+     * principal and returned {@code null} for the {@code JwtAuthenticationToken}
+     * the real chain produces - refusing every subscription under real
+     * authentication, {@code /user/queue/events} included, with "the socket
+     * carries no identified user".
+     *
+     * <p>That is exactly the divergence {@code CallerIdentity}'s own javadoc
+     * warns about: it accepts both shapes and says so, and the whole HTTP side
+     * has always gone through it. A second, narrower implementation of the same
+     * question is what made realtime work in development and fail in every
+     * other profile.
+     */
     private static Long userIdOf(Principal principal) {
-        if (principal instanceof Authentication authentication
-                && authentication.getPrincipal()
-                instanceof com.edunext.edutrack.api.security.dev.DevPrincipal dev) {
-            return dev.userId();
+        if (principal instanceof Authentication authentication) {
+            return CallerIdentity.of(authentication).map(CallerIdentity::userId).orElse(null);
         }
         return null;
     }
