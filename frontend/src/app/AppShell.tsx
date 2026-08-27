@@ -56,8 +56,24 @@ export function AppShell() {
 
       `<main>`'s `overflow-y-auto` below is deliberately untouched: the inner
       scrollbar is the one the app is supposed to have.
+
+      `overflow-clip`, not `overflow-hidden`. Both clip identically, but
+      `hidden` still leaves this div a scroll container — one the browser
+      itself is willing to move, with no scrollbar to show it happened.
+      Checking the ticket detail page's "Client visible" radio was the
+      reproduction: `<main>` (the div below, with its own `overflow-y-auto`)
+      happened to have nothing left to scroll at that moment, so the browser's
+      own scroll-the-checked-control-into-view walked past it to the next
+      scrollable ancestor it could find — this div — and set *its* scrollTop
+      instead, dragging the sidebar and top bar dozens of pixels off-screen.
+      Confirmed by instrumenting `Element.prototype.scrollTop` and
+      `scrollIntoView`: neither fired, so nothing in this app's own code is
+      scrolling anything — it is the browser's native focus-scroll picking the
+      wrong ancestor because `hidden` still qualifies as one. `overflow: clip`
+      does not establish a scroll container at all, so that walk has nothing
+      here to find.
     */
-    <div className="fixed inset-0 flex overflow-hidden bg-app">
+    <div className="fixed inset-0 flex overflow-clip bg-app">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
