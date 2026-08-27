@@ -94,16 +94,47 @@ public final class TicketWire {
             // already do for their own screens.
             UserRef reportedBy,
             @JsonProperty("assignee") UserRef assignee,
-            BigDecimal estimatedEffortHrs,
+
+            /*
+             * The four below carry the entity's accessor name in Java and the
+             * contract's name on the wire, annotated rather than renamed.
+             *
+             * WHAT THIS WAS DOING. The contract has declared `cycleNo`,
+             * `iterationNo`, `currentStageCode` and `estimatedHrs` since D-001;
+             * springdoc emits a record component's own name, so the server was
+             * sending `currentCycleNo`, `currentIteration`, `currentStage` and
+             * `estimatedEffortHrs`. The generated client binds the contract's
+             * names, so all four read `undefined` on every ticket — silently,
+             * because an absent optional field is indistinguishable from one the
+             * server chose not to send.
+             *
+             * The visible symptom was the cycle selector: `TicketDetailPage`
+             * computes `cycle ?? ticket.cycleNo ?? 1`, so with `cycleNo`
+             * undefined it fell through to 1 and highlighted "Cycle 1" while the
+             * ribbon beside it — which reads `Ribbon.cycleNo`, a different record
+             * that was mapped correctly — drew cycle 2. Two controls over one
+             * ticket, disagreeing, with nothing failing. The header's
+             * "Iteration N" chip and My Tasks' "↺ Iteration N" were dead for the
+             * same reason and nobody noticed, because both only render when the
+             * value is > 1.
+             *
+             * This is D-061's blank-ID column exactly: the server internally
+             * consistent, the client internally consistent, and the two never
+             * introduced. @JsonProperty rather than renaming the components,
+             * on the `assignee` line above's own precedent — the Java names
+             * match the entity accessors they are read from, and renaming them
+             * would move the mismatch rather than remove it.
+             */
+            @JsonProperty("estimatedHrs") BigDecimal estimatedEffortHrs,
             BigDecimal totalEffortHrs,
             Instant plannedCloseDate,
             Instant actualCloseDate,
             boolean isReopened,
             int reopenCount,
-            int currentCycleNo,
+            @JsonProperty("cycleNo") int currentCycleNo,
             boolean isDelayed,
-            String currentStage,
-            int currentIteration,
+            @JsonProperty("currentStageCode") String currentStage,
+            @JsonProperty("iterationNo") int currentIteration,
             int reworkCount,
             int pctComplete,
 
