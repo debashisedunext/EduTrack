@@ -224,15 +224,31 @@ class TemplateMasterIT {
     // ------------------------------------------------------------------
 
     /**
-     * §4A.9's seed, asserted rather than trusted.
+     * The seed as it now stands, asserted rather than trusted.
      *
      * <p>B-004's own stage seed was written by hand before any code validated it,
      * and B-040 records what that cost. The same applies here: a seed disagreeing
      * with what the screen assumes would show an Admin a routing configuration
      * they did not create and cannot explain.
+     *
+     * <p>🔴 <b>The split across three templates is gone, and that is deliberate
+     * rather than a regression.</b> This asserted §4A.9's routing table —
+     * Standard Dev Flow 3, Support Fast-Track 2, Infra Flow 2 — which
+     * {@code V20260826_1930} replaced on 26 Aug 2026 by repointing every
+     * task-type rule at Standard Dev Flow, so that every new ticket draws the
+     * full eight-stage ribbon. Under §4A.9 a Network Issue drew a ribbon with
+     * no Development, QA or Sign-off segment, which is what that migration was
+     * asked to fix. Its header carries the revert recipe if the routing is ever
+     * wanted back.
+     *
+     * <p><b>What this test still guards is the shape</b>, which the migration
+     * did not touch and which the screen does depend on: seven rules, one per
+     * task type, every one of them a wildcard on project. Rungs 1 and 2 of the
+     * resolution ladder are an Admin's to author per project and the seed
+     * still writes none.
      */
     @Test
-    @DisplayName("seeds §4A.9's seven task-type rules, all wildcard on project")
+    @DisplayName("seeds seven task-type rules, all wildcard on project, all Standard Dev Flow")
     void seedMatchesTheBlueprint() {
         assertThat(mappings.findAll()).hasSize(7);
         assertThat(mappings.findAll()).allSatisfy(m -> {
@@ -240,9 +256,9 @@ class TemplateMasterIT {
             assertThat(m.getTaskTypeId()).isNotNull();
         });
 
-        assertThat(mappings.findByTemplateIdOrderByIdAsc(templateId("Standard Dev Flow"))).hasSize(3);
-        assertThat(mappings.findByTemplateIdOrderByIdAsc(templateId("Support Fast-Track"))).hasSize(2);
-        assertThat(mappings.findByTemplateIdOrderByIdAsc(templateId("Infra Flow"))).hasSize(2);
+        assertThat(mappings.findByTemplateIdOrderByIdAsc(templateId("Standard Dev Flow"))).hasSize(7);
+        assertThat(mappings.findByTemplateIdOrderByIdAsc(templateId("Support Fast-Track"))).isEmpty();
+        assertThat(mappings.findByTemplateIdOrderByIdAsc(templateId("Infra Flow"))).isEmpty();
     }
 
     /**
@@ -259,7 +275,12 @@ class TemplateMasterIT {
         TemplateDtos.TemplateResolution answer =
                 resolver.explain(fixtureProjectId(), taskTypeId("SERVER_ISSUE"));
 
-        assertThat(answer.templateId()).isEqualTo(templateId("Infra Flow"));
+        // Standard Dev Flow rather than Infra Flow since V20260826_1930 - see
+        // seedMatchesTheBlueprint above. The rung is what this test is for and
+        // it is unchanged: SERVER_ISSUE is matched by a rule whose project_id
+        // is NULL, which is the wildcard predicate Spring Data cannot express
+        // in a derived name and which this exists to prove works in SQL.
+        assertThat(answer.templateId()).isEqualTo(templateId("Standard Dev Flow"));
         assertThat(answer.rung()).isEqualTo("TASK_TYPE");
     }
 
