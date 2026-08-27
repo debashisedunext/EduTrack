@@ -76,3 +76,35 @@ describe('D-063 the four dates asked for on 18 Aug', () => {
     expect(screen.getByText('—')).toBeInTheDocument()
   })
 })
+
+describe('assignee column shows the role alongside the name', () => {
+  const column = COLUMNS.find((c) => c.key === 'assignee')!
+  const context = { taskTypeNames: new Map<number, string>() } as never
+
+  it('renders the assignee name with their role in brackets', () => {
+    render(
+      <>{column.render(
+        ticket({ assignee: { id: 7, displayName: 'Farhan Sheikh', role: 'SUPPORT' } }),
+        context,
+      )}</>,
+    )
+
+    expect(screen.getByText('Farhan Sheikh')).toBeInTheDocument()
+    expect(screen.getByText('(Support)')).toBeInTheDocument()
+  })
+
+  it('falls back to the name alone when the assignee has no role on the record', () => {
+    render(
+      <>{column.render(ticket({ assignee: { id: 7, displayName: 'Farhan Sheikh' } }), context)}</>,
+    )
+
+    expect(screen.getByText('Farhan Sheikh')).toBeInTheDocument()
+    expect(screen.queryByText(/\(/)).not.toBeInTheDocument()
+  })
+
+  it('shows Unassigned when no assignee is set', () => {
+    render(<>{column.render(ticket({ assignee: undefined }), context)}</>)
+
+    expect(screen.getByText('Unassigned')).toBeInTheDocument()
+  })
+})

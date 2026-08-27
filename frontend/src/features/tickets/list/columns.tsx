@@ -10,6 +10,7 @@ import { Chip, type ChipProps } from '@/components/ui/chip'
 import { AvatarStack } from '@/components/ui/avatar-stack'
 import { RibbonDots } from '@/components/ribbon/RibbonDots'
 import type { CompactDot } from '@/components/ribbon/compactDots'
+import { ROLE_LABEL } from '@/lib/roleLabel'
 
 export type ColumnKey =
   | 'ticketId'
@@ -214,7 +215,12 @@ export const COLUMNS: ColumnDef[] = [
       t.assignee ? (
         <div className="flex items-center gap-2 whitespace-nowrap">
           <AvatarStack people={[{ id: String(t.assignee.id), name: t.assignee.displayName }]} max={1} size="sm" />
-          <span>{t.assignee.displayName}</span>
+          <span>
+            {t.assignee.displayName}
+            {t.assignee.role && (
+              <span className="text-content-muted"> ({ROLE_LABEL[t.assignee.role]})</span>
+            )}
+          </span>
         </div>
       ) : (
         <span className="text-content-muted">Unassigned</span>
