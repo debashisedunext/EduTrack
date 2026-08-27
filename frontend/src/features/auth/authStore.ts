@@ -4,6 +4,8 @@ import { setAccessToken } from '@/api/http';
 import type { Me } from '@/api/generated/model/me';
 import type { Session } from '@/api/generated/model/session';
 
+import { discardSessionState } from './sessionState';
+
 /**
  * Who is signed in — A-030.
  *
@@ -154,26 +156,45 @@ export const initialAuthState = {
   sessionStartedAt: null,
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   ...initialAuthState,
 
-  signIn: (session) =>
-    set((current) => {
-      setAccessToken(session.accessToken);
-      const now = Date.now();
-      return {
-        status: 'authenticated' as const,
-        user: session.user,
-        landingRoute: renderableLanding(session.landingRoute),
-        mustChangePassword: session.mustChangePassword ?? false,
-        expiresAt: now + session.expiresIn * 1000,
-        // Only a *new* session starts the absolute clock. Reaching here while
-        // already authenticated means this was a renewal, and a renewal that
-        // reset the anchor would make the 12-hour limit unreachable for exactly
-        // the users it exists for — the ones who never stop working.
-        sessionStartedAt: current.status === 'authenticated' ? current.sessionStartedAt : now,
-      };
-    }),
+  signIn: (session) => {
+    const current = get();
+
+    // A different person arriving at a browser the last one never signed out
+    // of. `LoginPage` sits outside `RequireAuth`, so anyone can navigate to
+    // /login while still authenticated and sign in as somebody else — a path
+    // that never passes through `signOut`, and would otherwise hand the new
+    // user the old one's cache.
+    //
+    // Guarded on the id rather than run unconditionally because renewal comes
+    // through here too, every ~14 minutes: clearing the cache on every renewal
+    // would blank the screen the user is in the middle of reading.
+    if (current.user !== null && current.user.id !== session.user.id) {
+      discardSessionState();
+    }
+
+    setAccessToken(session.accessToken);
+    const now = Date.now();
+
+    set({
+      status: 'authenticated',
+      user: session.user,
+      landingRoute: renderableLanding(session.landingRoute),
+      mustChangePassword: session.mustChangePassword ?? false,
+      expiresAt: now + session.expiresIn * 1000,
+      // Only a *new* session starts the absolute clock. Reaching here while
+      // already authenticated means this was a renewal, and a renewal that
+      // reset the anchor would make the 12-hour limit unreachable for exactly
+      // the users it exists for — the ones who never stop working.
+      //
+      // Read off `current`, captured above rather than through `set`'s updater
+      // form, because the clear above has to happen outside it: a zustand
+      // updater is expected to be a pure function of the state it is handed.
+      sessionStartedAt: current.status === 'authenticated' ? current.sessionStartedAt : now,
+    });
+  },
 
   signOut: () => {
     // Clear the token first. If this ran after `set`, React would re-render
@@ -181,6 +202,16 @@ export const useAuthStore = create<AuthState>((set) => ({
     // any query that refetched in that window would go out authenticated —
     // which is the one thing signing out is supposed to prevent.
     setAccessToken(null);
+
+    // Then everything cached *about* that user — before `set`, for the same
+    // reason and one step further. React batches both updates into a single
+    // render, and by the time that render runs the store must not be able to
+    // hand the anonymous tree, or the next user's tree, a page of the previous
+    // user's data. Here rather than in `useSignOut` because this is the funnel:
+    // the avatar menu, the idle timeout, the 12-hour limit and a refused
+    // refresh all end up on this line, and only one of them is a Logout click.
+    discardSessionState();
+
     set({
       status: 'anonymous',
       user: null,
