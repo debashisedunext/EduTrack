@@ -52,11 +52,26 @@ class ReopenExceptionHandlerTest {
         assertThat(properties).containsEntry("ticketStatus", "IN_PROGRESS");
     }
 
+    /**
+     * {@code IN_PROGRESS} rather than {@code RESOLVED}, and the swap is the
+     * point. {@code RESOLVED} is a status this route now <em>accepts</em> — the
+     * Support desk refusing a sign-off starts a new cycle — so
+     * {@link TicketNotClosedException}'s own javadoc says it "can never reach
+     * this exception". A test that built one was asserting on a case the code
+     * cannot produce. What is still refused is a ticket mid-attempt, which is
+     * what this now uses.
+     *
+     * <p>The detail is asserted to <em>name the status</em> and nothing more.
+     * Pinning the sentence contradicted the reason given one line above for
+     * switching on {@code type} instead — "detail is prose and gets reworded" —
+     * and it was that pinned phrase, not any behaviour, that turned the build
+     * red when the message was rewritten.
+     */
     @Test
     @DisplayName("a ticket that is not closed is 422 with a switchable type")
     void notClosedIs422() {
         ResponseEntity<ProblemDetail> response =
-                handler.handleNotClosed(new TicketNotClosedException("RESOLVED"));
+                handler.handleNotClosed(new TicketNotClosedException("IN_PROGRESS"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
         ProblemDetail problem = response.getBody();
@@ -64,8 +79,10 @@ class ReopenExceptionHandlerTest {
         assertThat(problem.getType())
                 .as("a stable URI the dialog switches on — detail is prose and gets reworded")
                 .hasToString("https://edutrack/errors/ticket-not-closed");
-        assertThat(problem.getDetail()).contains("RESOLVED rather than CLOSED");
-        assertThat(problem.getProperties()).containsEntry("ticketStatus", "RESOLVED");
+        assertThat(problem.getDetail())
+                .as("the reader has to be told which status blocked them, however it is worded")
+                .contains("IN_PROGRESS");
+        assertThat(problem.getProperties()).containsEntry("ticketStatus", "IN_PROGRESS");
     }
 
     /**
