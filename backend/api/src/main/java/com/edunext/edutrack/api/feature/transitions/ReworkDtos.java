@@ -18,15 +18,23 @@ final class ReworkDtos {
     }
 
     /**
-     * @param toStageCode required, and unlike {@code FORWARD} there is no
-     *                    default to fall back on — {@code
-     *                    TransitionService.resolveToStage} refuses a blank one
-     *                    for every backward action, because "a rework with a
-     *                    guessed destination moves a ticket somewhere nobody
-     *                    asked for". It must additionally be one of the
-     *                    current stage's {@code can_return_to} targets, which
-     *                    is {@link ReworkService}'s own check — see there for
-     *                    why {@code advance} does not make it
+     * @param toStageCode optional since the desk's Reopen. It must be one of
+     *                    the current stage's {@code can_return_to} targets,
+     *                    which is {@link ReworkService}'s own check — see
+     *                    there for why {@code advance} does not make it.
+     *                    <b>Omitted, the server answers it</b> when the stage
+     *                    declares exactly one target, which is what this
+     *                    contract already claimed: {@code ForceMoveRequest}
+     *                    says "unlike {@code rework}/{@code skip} there is no
+     *                    default; the caller always names the destination",
+     *                    and that sentence was only true of force-move. Two or
+     *                    more targets is a real choice and is still refused
+     *                    with {@link ToStageRequiredException}, because "a
+     *                    rework with a guessed destination moves a ticket
+     *                    somewhere nobody asked for" — the guess is what was
+     *                    forbidden, not the workflow's own single answer.
+     *                    {@link ReworkService#resolveReturnTarget} records why
+     *                    no client could supply this field for itself
      * @param reason      mandatory. §4A.1 requires it on every backward move,
      *                    and {@code TicketJournal.append} enforces it at the
      *                    ledger too — so this constraint is the caller-facing
@@ -51,7 +59,7 @@ final class ReworkDtos {
      *                    ticket is not confirming anybody's hours but their own
      */
     record ReworkRequest(
-            @NotBlank @Size(max = 20) String toStageCode,
+            @Size(max = 20) String toStageCode,
             @NotBlank @Size(min = 3, max = 2000) String reason,
             @Size(max = 20) String action,
             List<@Size(max = 500) String> defects,

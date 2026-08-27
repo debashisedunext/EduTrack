@@ -27,7 +27,7 @@ import { useWidget } from './widgetBatchContext'
  *   answer this. Rendered as the server's sentence, verbatim. Never as an
  *   empty chart, which would read as "nothing matched".
  * - **empty** — the request succeeded, the role can see it, and there is
- *   genuinely nothing in the window.
+ *   genuinely nothing in the window. 
  *
  * <h2>Every chart is readable without seeing it</h2>
  *

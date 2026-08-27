@@ -216,13 +216,13 @@ class TicketDetailServiceTest {
         }
 
         @Test
-        @DisplayName("a closed ticket offers it to nobody, same as handoff/rework")
-        void closedTicketOffersNothing() {
+        @DisplayName("a closed ticket offers it to nobody, same as handoff/rework — reopen is all that survives")
+        void closedTicketOffersNoStageAction() {
             ticket.setStatus("CLOSED");
 
             List<String> actions = detailFor(caller(CURRENT_ASSIGNEE + 1, "ADMIN")).availableActions();
 
-            assertThat(actions).isEmpty();
+            assertThat(actions).containsExactly("reopen");
         }
 
         private TicketDetailDtos.Detail detailFor(Authentication caller) {
@@ -240,6 +240,152 @@ class TicketDetailServiceTest {
             stage.setStageCode(code);
             stage.setDisplayName(code);
             stage.setOptional(optional);
+            return stage;
+        }
+    }
+
+    /**
+     * The closing hop — §4A.1's last segment, owned by SUPPORT since
+     * {@code V20260826_1520}.
+     *
+     * <p>The rule these pin is one sentence: <b>the PM signs off by handing
+     * the ticket to the desk, and the desk closes it.</b> Everything below is
+     * a consequence of that. {@code handoff} leaves the terminal stage because
+     * there is nowhere left to hand to; {@code close} appears in its place,
+     * for the owner rather than for whoever signed off; and once the ticket is
+     * CLOSED nothing on the ribbon applies to it at all, which is the "no Hand
+     * off button on a closed ticket" half of the same rule.
+     */
+    @Nested
+    @DisplayName("the closing hop — Support closes the terminal stage, not the PM who signed off")
+    class ClosingHop {
+
+        private static final long TEMPLATE = 3L;
+        private static final long SIGNING_PM = CURRENT_ASSIGNEE + 900L;
+
+        @BeforeEach
+        void standOnTheTerminalStage() {
+            ticket.setWorkflowTemplateId(TEMPLATE);
+            ticket.setCurrentStage("CLOSED");
+            ticket.setStatus("RESOLVED");
+            when(stages.findByTemplateIdOrderBySeqAsc(TEMPLATE))
+                    .thenReturn(List.of(stage("SIGNOFF"), stage("CLOSED")));
+        }
+
+        @Test
+        @DisplayName("the Support owner sees close, and no handoff — the stage has nowhere to hand to")
+        void supportOwnerSeesClose() {
+            List<String> actions = detailFor(caller(CURRENT_ASSIGNEE, "SUPPORT")).availableActions();
+
+            assertThat(actions).contains("close").doesNotContain("handoff");
+        }
+
+        @Test
+        @DisplayName("the PM sees close and reopen too — §2 grants all three roles, and the button must agree "
+                + "with the route")
+        void pmSeesBothOptions() {
+            List<String> actions = detailFor(caller(SIGNING_PM, "PM")).availableActions();
+
+            assertThat(actions).contains("close", "reopen").doesNotContain("handoff");
+        }
+
+        @Test
+        @DisplayName("Admin still sees close regardless of who holds it — the override every rule here admits")
+        void adminSeesCloseRegardlessOfAssignment() {
+            List<String> actions = detailFor(caller(SIGNING_PM, "ADMIN")).availableActions();
+
+            assertThat(actions).contains("close");
+        }
+
+        @Test
+        @DisplayName("close is withheld until the sign-off has made the ticket RESOLVED — CloseService would 422 it")
+        void closeWithheldUntilResolved() {
+            ticket.setStatus("IN_PROGRESS");
+
+            List<String> actions = detailFor(caller(CURRENT_ASSIGNEE, "SUPPORT")).availableActions();
+
+            assertThat(actions).doesNotContain("close", "handoff");
+        }
+
+        @Test
+        @DisplayName("a Developer holding the terminal stage sees neither close nor reopen — §2 ticks three roles")
+        void developerNeverSeesClose() {
+            List<String> actions = detailFor(caller(CURRENT_ASSIGNEE, "DEVELOPER")).availableActions();
+
+            assertThat(actions).doesNotContain("close", "reopen", "handoff");
+        }
+
+        @Test
+        @DisplayName("close and reopen are offered together — a decision with one button is not one")
+        void bothOptionsAreOfferedTogether() {
+            List<String> actions = detailFor(caller(CURRENT_ASSIGNEE, "SUPPORT")).availableActions();
+
+            assertThat(actions).contains("close", "reopen");
+        }
+
+        @Test
+        @DisplayName("an Admin who holds nothing on this ticket sees both — assignment is not the rule")
+        void unassignedAdminSeesBothOptions() {
+            List<String> actions = detailFor(caller(SIGNING_PM, "ADMIN")).availableActions();
+
+            assertThat(actions).contains("close", "reopen");
+        }
+
+        @Test
+        @DisplayName("reopen is withheld alongside close until the sign-off resolves the ticket")
+        void reopenWithheldUntilResolved() {
+            ticket.setStatus("IN_PROGRESS");
+
+            List<String> actions = detailFor(caller(CURRENT_ASSIGNEE, "SUPPORT")).availableActions();
+
+            assertThat(actions).doesNotContain("reopen");
+        }
+
+        @Test
+        @DisplayName("once closed the Support owner sees reopen and nothing else — no Hand off survives a close")
+        void closedOffersReopenOnly() {
+            ticket.setStatus("CLOSED");
+
+            List<String> actions = detailFor(caller(CURRENT_ASSIGNEE, "SUPPORT")).availableActions();
+
+            assertThat(actions).containsExactly("reopen");
+        }
+
+        @Test
+        @DisplayName("a closed ticket stays reopenable by a PM who never held it — the case §2 grants it for")
+        void closedTicketReopenableByAnyGrantedRole() {
+            ticket.setStatus("CLOSED");
+
+            assertThat(detailFor(caller(SIGNING_PM, "PM")).availableActions()).containsExactly("reopen");
+            assertThat(detailFor(caller(SIGNING_PM, "SUPPORT")).availableActions()).containsExactly("reopen");
+            assertThat(detailFor(caller(SIGNING_PM, "ADMIN")).availableActions()).containsExactly("reopen");
+        }
+
+        @Test
+        @DisplayName("a stage before the terminal one is untouched — handoff and rework, as C-043 left them")
+        void earlierStageStillHandsOff() {
+            ticket.setCurrentStage("SIGNOFF");
+            ticket.setStatus("IN_PROGRESS");
+
+            List<String> actions = detailFor(caller(CURRENT_ASSIGNEE, "DEVELOPER")).availableActions();
+
+            assertThat(actions).containsExactlyInAnyOrder("handoff", "rework");
+        }
+
+        private TicketDetailDtos.Detail detailFor(Authentication caller) {
+            return service.detail(caller, TICKET_CODE, null);
+        }
+
+        private Authentication caller(long userId, String role) {
+            return new TestingAuthenticationToken(
+                    new DevPrincipal(userId, "u" + userId, "User " + userId, role, List.of(PROJECT), List.of()),
+                    "n/a", "ticket.close");
+        }
+
+        private WorkflowStage stage(String code) {
+            WorkflowStage stage = new WorkflowStage();
+            stage.setStageCode(code);
+            stage.setDisplayName(code);
             return stage;
         }
     }

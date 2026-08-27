@@ -489,14 +489,32 @@ class ReopenServiceTest {
         }
 
         @Test
-        @DisplayName("RESOLVED is 422 — it has not been signed off, so there is no cycle to seal")
-        void resolvedIs422() {
+        @DisplayName("RESOLVED reopens too — the desk refusing a sign-off is a new cycle, not an iteration")
+        void resolvedReopensIntoANewCycle() {
+            // Was 422 until 26 Aug 2026. §4A.2's two counters answer two
+            // questions, and a desk that will not accept the sign-off is saying
+            // the whole attempt failed — so cycle moves and iteration resets,
+            // rather than the other way round. REOPENABLE records the reasoning.
             ticket.setStatus("RESOLVED");
 
-            assertThatThrownBy(() -> service.reopen(caller, TICKET_CODE, request()))
-                    .isInstanceOf(TicketNotClosedException.class)
-                    .hasMessageContaining("RESOLVED rather than CLOSED");
+            service.reopen(caller, TICKET_CODE, request());
 
+            assertThat(ticket.getCurrentCycleNo()).isEqualTo((short) 2);
+            assertThat(ticket.getReopenCount()).isEqualTo((short) 1);
+            assertThat(ticket.getCurrentIteration()).isEqualTo((short) 1);
+            assertThat(ticket.getStatus()).isEqualTo("REOPENED");
+        }
+
+        @Test
+        @DisplayName("a ticket mid-attempt is still 422 — going backwards inside a cycle is rework's job")
+        void inProgressIs422() {
+            ticket.setStatus("IN_PROGRESS");
+
+            assertThatThrownBy(() -> service.reopen(caller, TICKET_CODE, request()))
+                    .isInstanceOf(TicketNotClosedException.class);
+
+            assertThat(ticket.getCurrentCycleNo()).isEqualTo((short) 1);
+            assertThat(ticket.getReopenCount()).isZero();
             verifyNoInteractions(journal);
         }
 

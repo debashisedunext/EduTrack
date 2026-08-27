@@ -228,7 +228,7 @@ export const reworkTicketBodyReasonMax = 2000;
 
 
 export const reworkTicketBody = zod.object({
-  "toStageCode": zod.string().describe('Must be in the current stage\'s allowed return targets.'),
+  "toStageCode": zod.string().optional().describe('Must be in the current stage\'s allowed return targets\n(`workflow_stages.can_return_to`).\n\n\*\*Optional.\*\* Omitted, the server answers it when the stage\ndeclares exactly one target — which is what `ForceMoveRequest`\nbelow has always implied by saying \"unlike `rework`\/`skip` there\nis no default\". Two or more targets is a real choice and is\nrefused with 400 rather than guessed at.\n\nNo client can compute this for itself: the template list does not\nserve a template\'s stages, `RibbonSegment` does not carry\n`canReturnTo`, and `Ribbon` carries no `templateId` to look one up\nwith. The rule lives in `workflow_stages` and is read there.\n'),
   "reason": zod.string().min(reworkTicketBodyReasonMin).max(reworkTicketBodyReasonMax),
   "action": zod.enum(['FORWARD', 'REWORK', 'DEPLOY_FAILED', 'VERIFY_FAILED', 'SIGNOFF_REJECTED', 'CLARIFICATION', 'SKIP', 'OVERRIDE', 'STAGE_REASSIGNED']).optional(),
   "defects": zod.array(zod.string()).optional().describe('Expected on a QA failure.'),

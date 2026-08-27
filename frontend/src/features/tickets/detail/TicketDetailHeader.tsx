@@ -27,7 +27,12 @@ import { delayInDays } from './ticketSummary'
  * `handoff`, `rework` and `skip-stage` also arrive in that list, but they are
  * *stage* actions: the blueprint puts them on the ribbon's current segment
  * (§4A, C-052), not in the header, so they are deliberately absent here rather
- * than duplicated in two places a user could click. `priority` is inline in
+ * than duplicated in two places a user could click.
+ *
+ * The desk's **Reopen** on the terminal stage arrives under `reopen`, and is a
+ * lifecycle action like `close` beside it rather than a stage action — the two
+ * are the halves of one decision and splitting them across the screen would
+ * make neither readable. `priority` is inline in
  * the summary panel (C-020). `comment`, `effort` and `attach` are the surfaces
  * below the fold, not header buttons.
  */
@@ -91,6 +96,18 @@ export function TicketDetailHeader({
       <div className="flex flex-wrap items-center gap-2">
         <QuickUpdateTrigger ticket={ticket} onChanged={onChanged} />
         {allowed.has('close') && onClosed && <CloseDialog ticket={ticket} onClosed={onClosed} />}
+        {/*
+          One route, one meaning: a reopen starts a NEW CYCLE. §4A.2 keeps two
+          counters and they answer two questions — an iteration is work bouncing
+          backwards inside a cycle (QA fails a build), a cycle is the whole
+          attempt started again. The desk refusing a sign-off is the second: the
+          attempt delivered something the client would not take.
+
+          So this renders `ReopenDialog` whether the ticket is CLOSED or
+          RESOLVED, and `ReopenService` accepts both. It briefly branched to a
+          rework dialog on a RESOLVED ticket, which moved `iteration` instead of
+          `cycle` — the wrong counter for what the desk was saying.
+        */}
         {allowed.has('reopen') && onReopened && <ReopenDialog ticket={ticket} onReopened={onReopened} />}
         {HEADER_ACTIONS.filter(({ action }) => allowed.has(action)).map(({ action, label, owner }) => (
           <Button

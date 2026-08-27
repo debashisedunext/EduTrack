@@ -5,10 +5,12 @@ import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.feature.notifications.events.TicketEventNotifier;
 import com.edunext.edutrack.domain.journal.TicketJournal;
+import com.edunext.edutrack.domain.masters.WorkingHoursService;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketCycle;
 import com.edunext.edutrack.domain.tickets.TicketCycleRepository;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
+import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import com.edunext.edutrack.domain.identity.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -16,7 +18,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
@@ -60,13 +64,26 @@ import java.util.Optional;
  * close does not revert an escalated level, and nothing here reads either
  * column.
  *
- * <p><b>{@code current_stage} and the open {@code ticket_stage_transitions} hop.</b>
- * S-23's dialog closes the ticket; it does not draw the ribbon's terminal
- * segment. That is C-042's transition service, on {@link ReopenService}'s own
- * precedent for its new cycle's first hop — {@code TicketJournal} publishes
- * {@code seal} but no way to <em>find</em> the open row from this package
- * (A-040's door, A-037's rule). Left exactly where reopen left it: a real gap,
- * raised rather than worked around, and C-042's to close alongside reopen's.
+ * <p><b>{@code current_stage}.</b> Still untouched. S-23's dialog closes the
+ * ticket; it does not move it to a different stage, and there is nowhere for
+ * it to go — a close happens on the template's last stage, which is what
+ * {@code TicketDetailService} offers the button from.
+ *
+ * <h2>The open hop is now sealed, and that gap is closed</h2>
+ *
+ * <p>This javadoc used to record the opposite — that the open
+ * {@code ticket_stage_transitions} row was left exactly where reopen left it,
+ * because "{@code TicketJournal} publishes {@code seal} but no way to
+ * <em>find</em> the open row from this package (A-040's door, A-037's rule)."
+ * That has not been true since {@code TicketJournal.openHopFor} was published
+ * for C-042; the note simply outlived the gap it described.
+ *
+ * <p>It is sealed here because leaving it open is visible and wrong:
+ * {@code RibbonAssembler} keys {@code SegmentState.CURRENT} off
+ * {@code is_current} alone, so a closed ticket kept drawing its Closed segment
+ * as the current one, pulsing, with a clock counting up beside it. See
+ * {@link #sealTerminalHop} for what it does and does not seal. Reopen's own
+ * first-hop gap is untouched and still C-042's.
  *
  * <h2>Client verification is recorded, not acted on</h2>
  *
@@ -106,13 +123,20 @@ class CloseService {
      * rather than added quietly.
      */
     private final TicketEventNotifier notifier;
+    /**
+     * Only ever asked for the terminal hop's <b>working</b> minutes when the
+     * close seals it — see {@link #close}. Never wall-clock, on every other
+     * caller's reasoning in this codebase, and {@code TicketJournal.seal}
+     * refuses a figure that exceeds the elapsed gap for exactly that mistake.
+     */
+    private final WorkingHoursService workingHours;
     private final Clock clock;
     private final UserRepository users;
 
     @Autowired
     CloseService(ScopedTickets tickets, TicketCycleRepository cycles, TicketJournal journal,
-                 TicketEventNotifier notifier, UserRepository users) {
-        this(tickets, cycles, journal, notifier, Clock.systemUTC(), users);
+                 TicketEventNotifier notifier, WorkingHoursService workingHours, UserRepository users) {
+        this(tickets, cycles, journal, notifier, workingHours, Clock.systemUTC(), users);
     }
 
     /**
@@ -123,11 +147,13 @@ class CloseService {
      * the method took to run.
      */
     CloseService(ScopedTickets tickets, TicketCycleRepository cycles, TicketJournal journal,
-                 TicketEventNotifier notifier, Clock clock, UserRepository users) {
+                 TicketEventNotifier notifier, WorkingHoursService workingHours,
+                 Clock clock, UserRepository users) {
         this.tickets = tickets;
         this.cycles = cycles;
         this.journal = journal;
         this.notifier = notifier;
+        this.workingHours = workingHours;
         this.clock = clock;
         this.users = users;
     }
@@ -216,6 +242,9 @@ class CloseService {
         // at that cycle's History tab would expect to see.
         journal.append(closedEntry(ticketId, cycleNo, caller, request.resolutionSummary()));
 
+        // 6 · seal the ribbon's terminal hop. See the class javadoc.
+        sealTerminalHop(ticket, closedAt);
+
         // D-037 · §4B.6 row 12 — reporter, client contact and watchers. After
         // the history row, which is the record; a mail that cannot be queued
         // must never roll back a close, and the notifier swallows its own
@@ -223,6 +252,55 @@ class CloseService {
         notifier.closed(ticket, actorIdOrZero(caller));
 
         return TicketWire.of(ticket, users);
+    }
+
+    /**
+     * Stop the ribbon's last segment reading as live.
+     *
+     * <p>A close used to leave the open {@code ticket_stage_transitions} row
+     * exactly as it found it, and {@code RibbonAssembler} keys
+     * {@code SegmentState.CURRENT} off {@code is_current} alone — so a closed
+     * ticket kept drawing its Closed segment as the current one, pulsing, with
+     * a clock counting up beside it. The ticket was closed and its own ribbon
+     * said the desk was still working on it.
+     *
+     * <p>This is the one mutation {@code trg_stage_seal_only} permits —
+     * {@code exited_at} NULL to a timestamp — and it runs inside the same
+     * transaction as the rest of the close, so a ticket is never observed
+     * closed-but-unsealed. {@code TicketJournal.seal} is a no-op on an
+     * already-sealed hop by design, so a double close cannot corrupt the
+     * figure.
+     *
+     * <p><b>Only the current cycle's hop.</b> {@code openHopFor} finds the
+     * stale open row a reopen deliberately leaves behind, at the <em>wrong</em>
+     * cycle — {@code TransitionService.advance} filters on exactly this and
+     * refuses rather than sealing somebody else's cycle. Here it is skipped
+     * rather than refused: a mismatched hop is a pre-existing data artefact,
+     * and failing the close over it would leave a ticket that cannot be closed
+     * at all. No hop at all is skipped for the same reason — a ticket that
+     * never entered a stage has nothing to seal.
+     *
+     * <p>The duration is working minutes from the B-024 calendar, clamped to
+     * the wall-clock ceiling, {@code TransitionService.workingMinutesFor}'s own
+     * reasoning for the identical figure: two roundings can otherwise land a
+     * working-minutes figure a minute above an elapsed span that itself rounds
+     * to whole minutes, which {@code seal}'s guard would refuse outright.
+     */
+    private void sealTerminalHop(Ticket ticket, Instant closedAt) {
+        TicketStageTransition open = journal.openHopFor(ticket.getId()).orElse(null);
+        if (open == null || open.getCycleNo() != ticket.getCurrentCycleNo()) {
+            return;
+        }
+        journal.seal(open.getId(), closedAt, workingMinutesFor(open, closedAt, ticket));
+    }
+
+    private int workingMinutesFor(TicketStageTransition open, Instant exitedAt, Ticket ticket) {
+        BigDecimal workingHrs = workingHours.workingHoursBetween(
+                open.getEnteredAt(), exitedAt, ticket.getProjectId(), open.getToUserId());
+        long workingMins = workingHrs.multiply(BigDecimal.valueOf(60))
+                .setScale(0, RoundingMode.HALF_UP).longValueExact();
+        long wallClockMins = (Duration.between(open.getEnteredAt(), exitedAt).toSeconds() + 59) / 60;
+        return (int) Math.min(workingMins, wallClockMins);
     }
 
     private static TicketHistory closedEntry(long ticketId, short cycleNo,

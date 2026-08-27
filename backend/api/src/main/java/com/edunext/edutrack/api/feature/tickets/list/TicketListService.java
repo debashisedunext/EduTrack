@@ -40,7 +40,7 @@ import java.util.List;
  * list and deliberately not the fifth implementation.
  */
 @Service
-class TicketListService {
+public class TicketListService {
 
     private final ScopedTickets tickets;
     private final TicketListRefs refs;
@@ -98,7 +98,7 @@ class TicketListService {
      * offering both invites consumers to key on the surrogate, which is exactly
      * what the code exists to avoid being.
      */
-    static TicketListDtos.TicketSummary toSummary(Ticket t, TicketListRefs.Resolved refs) {
+    public static TicketListDtos.TicketSummary toSummary(Ticket t, TicketListRefs.Resolved refs) {
         return new TicketListDtos.TicketSummary(
                 t.getTicketCode(), t.getTitle(),
                 refs.project(t.getProjectId()), refs.client(t.getClientId()),
