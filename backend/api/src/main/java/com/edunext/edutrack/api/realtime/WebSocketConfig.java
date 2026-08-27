@@ -30,12 +30,15 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public static final String STOMP_ENDPOINT = "/ws";
 
     private final String[] allowedOrigins;
+    private final StompAuthentication stompAuthentication;
     private final SubscriptionAuthorisation subscriptionAuthorisation;
 
     public WebSocketConfig(
             @Value("${edutrack.realtime.allowed-origins:http://localhost:5173}") String[] allowedOrigins,
+            StompAuthentication stompAuthentication,
             SubscriptionAuthorisation subscriptionAuthorisation) {
         this.allowedOrigins = allowedOrigins;
+        this.stompAuthentication = stompAuthentication;
         this.subscriptionAuthorisation = subscriptionAuthorisation;
     }
 
@@ -47,10 +50,20 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
      * runs on every delivered message — the wrong cost, and it leaves a
      * subscription the client believes in.
      */
+    /**
+     * <p><b>Order matters and is not incidental.</b>
+     * {@link StompAuthentication} runs first because it is what puts the user
+     * on the session, and {@link SubscriptionAuthorisation} refuses any
+     * SUBSCRIBE that arrives without one. Registered the other way round, every
+     * subscription is refused on the first connection and works only after a
+     * reconnect - which is the intermittent version of the bug
+     * {@code StompAuthentication} was written to fix, and a far harder one to
+     * find.
+     */
     @Override
     public void configureClientInboundChannel(
             org.springframework.messaging.simp.config.ChannelRegistration registration) {
-        registration.interceptors(subscriptionAuthorisation);
+        registration.interceptors(stompAuthentication, subscriptionAuthorisation);
     }
 
     @Override

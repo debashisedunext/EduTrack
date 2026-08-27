@@ -1139,6 +1139,22 @@ final class PermissionMatrix {
             // can only narrow what they already see and never widen it.
             everyRole("GET", "/api/v1/tickets"),
 
+            // C-062 · the stage queue, S-31's "Waiting in QA". Every role, on
+            // the list's own reasoning one line above: a QA or Deployment
+            // resource who could not call it would have no landing page at all
+            // (LandingRoutes sends both roles straight here), and §2 has no
+            // "view a stage queue" row to narrow it with.
+            //
+            // *Which* rows is emphatically not this file's question, and the
+            // answer differs from the list's: ScopeResolver.stageQueueScope is
+            // wider than §10.2 — project membership rather than assigned_to =
+            // me — because a queue of work nobody has picked up yet cannot be
+            // scoped to the person it is not yet assigned to. What keeps that
+            // widening safe is the mandatory `stage` parameter and the
+            // unconditional exclusion of closed tickets, both applied in
+            // StageQueueSpecs rather than reachable from a query string.
+            everyRole("GET", "/api/v1/stages/queue"),
+
             /*
              * C-067 · the create and edit the contract has declared since D-001.
              *

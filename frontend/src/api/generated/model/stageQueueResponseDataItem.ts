@@ -46,12 +46,41 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { Ticket } from './ticket';
+import type { TicketSummary } from './ticketSummary';
 
 export type StageQueueResponseDataItem = {
-  ticket?: Ticket;
+  /** C-062 · a **row**, not a ticket — `TicketSummary`, and for the
+reason `GET /tickets` gives for the same swap. This declared
+`Ticket` from D-001, when no server existed to disagree with
+it. S-31 draws six columns (id, title, project, level, held-by,
+time-in-stage); `Ticket` is ~58 properties including
+`description` and `stepsToGenerate`, sanitised HTML running to
+kilobytes each. A queue that shipped a page of ticket bodies to
+render six columns would be slower than the screen it replaces.
+
+It is the same record S-17 binds, deliberately. Two row shapes
+with different names for the same fact is what produced S-17's
+blank ID column (D-061), and a queue is a list of tickets by
+any reading.
+ */
+  ticket?: TicketSummary;
+  /** When this ticket entered the stage it is in now —
+`tickets.stage_entered_at`, stamped by the genesis hop at
+creation and restamped by every transition, so it is set even
+for a ticket nobody has moved yet.
+ */
   enteredStageAt?: string;
-  /** Working minutes. */
+  /** Working minutes since `enteredStageAt`, against the org
+calendar and the project's holidays — never wall-clock. A
+Friday-18:00 handoff has not been waiting three days on Monday
+morning, and a queue sorted on a wall-clock figure would put
+every weekend on top.
+ */
   timeInStageMins?: number;
+  /** True only when the stage actually declares an SLA
+(`workflow_stages.sla_hours`) and it has been passed. A stage
+with no SLA — which is most of them — is never breached rather
+than always breached.
+ */
   stageSlaBreached?: boolean;
 };
