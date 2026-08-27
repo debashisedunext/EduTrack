@@ -58,6 +58,25 @@ describe('AppShell scrolling', () => {
     expect(main).toHaveClass('overflow-y-auto')
   })
 
+  /**
+   * A second bug in the same family, found on the ticket detail page: `hidden`
+   * clips identically to `clip` but — unlike `clip` — still makes this div a
+   * scroll container, and the browser's own scroll-a-just-checked-control-
+   * into-view will walk up to it and set its scrollTop when `<main>` has
+   * nothing left to scroll, dragging the sidebar and top bar off-screen with
+   * no scrollbar to explain it. jsdom has no layout engine and cannot
+   * reproduce the scroll itself; this pins the one class jsdom *can* see so
+   * `hidden` does not quietly come back.
+   */
+  it('clips the shell rather than hiding it, so the browser cannot scroll it either', async () => {
+    renderApp()
+    const main = await screen.findByRole('main', {}, { timeout: 4000 })
+    const shell = main.closest('div.fixed')
+
+    expect(shell).not.toHaveClass('overflow-hidden')
+    expect(shell).toHaveClass('overflow-clip')
+  })
+
   it('holds the document itself shut while the shell is mounted', async () => {
     const { unmount } = renderApp()
     await screen.findByRole('main', {}, { timeout: 4000 })
