@@ -74,10 +74,10 @@ class TicketWireConformanceTest {
      * <pre>
      *   contract            server
      *   ticketId            ticketCode
-     *   cycleNo             currentCycleNo
-     *   iterationNo         currentIteration
-     *   currentStageCode    currentStage
-     *   estimatedHrs        estimatedEffortHrs
+     *   cycleNo             (now emitted — removed 27 Aug)
+     *   iterationNo         (now emitted — removed 27 Aug)
+     *   currentStageCode    (now emitted — removed 27 Aug)
+     *   estimatedHrs        (now emitted — removed 27 Aug)
      *   assignee            (now emitted — removed from this list 21 Aug)
      *   project             projectId          (an object vs its id)
      *   client              —                  (never resolved)
@@ -85,9 +85,25 @@ class TicketWireConformanceTest {
      *
      * <p>{@code reportedBy} was on this list until 21 Aug. It came off by being
      * fixed, which is the only way an entry should ever leave it.
+     *
+     * <p><b>Four more came off on 27 Aug, and what they cost is worth
+     * recording.</b> This javadoc called reconciling them "a real task with a
+     * real blast radius across eleven call sites and the generated client".
+     * That turned out to be true of renaming the components and not of the fix
+     * actually needed: four {@code @JsonProperty} annotations, no call site
+     * touched, no client regenerated, because the contract's names were right
+     * all along and only the wire disagreed.
+     *
+     * <p>The delay had a price. {@code cycleNo} undefined meant
+     * {@code TicketDetailPage}'s {@code cycle ?? ticket.cycleNo ?? 1} fell
+     * through to 1, so the cycle selector highlighted "Cycle 1" while the
+     * ribbon beside it drew cycle 2 — two controls over one ticket
+     * disagreeing, with every test on both sides green. {@code iterationNo}
+     * undefined silently disabled the header's "Iteration N" chip and My
+     * Tasks' "↺ Iteration N", both of which only render above 1 and so looked
+     * like tickets that had simply never iterated.
      */
     private static final Set<String> KNOWN_GAPS = Set.of(
-            "cycleNo", "iterationNo", "currentStageCode", "estimatedHrs",
             "clientContactId", "isClientRaised", "delayedSince", "createdAt", "updatedAt");
 
     private static final ObjectMapper JSON =
