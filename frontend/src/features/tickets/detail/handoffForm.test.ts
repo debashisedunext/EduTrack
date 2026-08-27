@@ -6,6 +6,7 @@ import type { WorkflowTemplate } from '@/api/generated/model/workflowTemplate'
 import {
   emptyHandoffForm,
   handoffSchema,
+  handoffStageOptions,
   nextStageCode,
   stageOwnerRole,
   toHandoffRequest,
@@ -83,6 +84,66 @@ describe('stageOwnerRole — C-044', () => {
 
   it('is undefined for a blank stage code', () => {
     expect(stageOwnerRole('  ', ribbon, [])).toBeUndefined()
+  })
+})
+
+describe('handoffStageOptions — BUG-003', () => {
+  it('offers every other stage in the ribbon, in sequence order', () => {
+    // ribbonWithCurrent('QA') = TRIAGE(1, COMPLETED), DEV(2, COMPLETED),
+    // QA(3, CURRENT), DEPLOY(4, PENDING).
+    expect(handoffStageOptions(ribbonWithCurrent('QA'), undefined)).toEqual([
+      { stageCode: 'TRIAGE', displayName: 'TRIAGE', ownerRole: 'SUPPORT', sequence: 1 },
+      { stageCode: 'DEV', displayName: 'DEV', ownerRole: 'DEVELOPER', sequence: 2 },
+      { stageCode: 'DEPLOY', displayName: 'DEPLOY', ownerRole: 'DEPLOYMENT', sequence: 4 },
+    ])
+  })
+
+  it('never offers the CURRENT stage itself', () => {
+    const options = handoffStageOptions(ribbonWithCurrent('QA'), undefined)
+    expect(options.map((o) => o.stageCode)).not.toContain('QA')
+  })
+
+  it('is empty when CURRENT is the only segment', () => {
+    const ribbon: Ribbon = { segments: [{ stageCode: 'SIGNOFF', sequence: 1, state: 'CURRENT' }] }
+    expect(handoffStageOptions(ribbon, undefined)).toEqual([])
+  })
+
+  it('falls back to deduplicating across workflow templates with no ribbon at all', () => {
+    const templates: WorkflowTemplate[] = [
+      {
+        id: 1,
+        name: 'Standard Dev Flow',
+        isDefault: true,
+        isActive: true,
+        stageCount: 2,
+        stages: [
+          { stageCode: 'DEV', displayName: 'Development', sequence: 20, ownerRole: 'DEVELOPER' },
+          { stageCode: 'TRIAGE', displayName: 'Triage', sequence: 10, ownerRole: 'SUPPORT' },
+          { stageCode: 'RETIRED', displayName: 'Retired', sequence: 30, isDeprecated: true },
+        ],
+      },
+    ]
+    expect(handoffStageOptions(undefined, templates)).toEqual([
+      { stageCode: 'TRIAGE', displayName: 'Triage', ownerRole: 'SUPPORT', sequence: 10 },
+      { stageCode: 'DEV', displayName: 'Development', ownerRole: 'DEVELOPER', sequence: 20 },
+    ])
+  })
+
+  it('drops CLOSED from the template fallback — closing is CloseDialog’s own flow, not a handoff target', () => {
+    const templates: WorkflowTemplate[] = [
+      {
+        id: 1,
+        name: 'Standard',
+        isDefault: true,
+        isActive: true,
+        stageCount: 2,
+        stages: [
+          { stageCode: 'SIGNOFF', sequence: 1 },
+          { stageCode: 'CLOSED', sequence: 2 },
+        ],
+      },
+    ]
+    expect(handoffStageOptions(undefined, templates).map((o) => o.stageCode)).toEqual(['SIGNOFF'])
   })
 })
 

@@ -453,7 +453,8 @@ export function TicketDetailPage() {
   // action applies. `undefined` when nothing does, matching what the prop
   // meant before either dialog existed.
   const currentStageAction =
-    detail?.availableActions?.includes('handoff') || detail?.availableActions?.includes('skip-stage') ? (
+    detail?.availableActions?.includes('handoff') ||
+    detail?.availableActions?.includes('skip-stage') ? (
       <>
         {detail?.availableActions?.includes('handoff') && (
           <HandoffDialog ticket={ticket} ribbon={detail?.ribbon} onHandedOff={() => void refetch()} />

@@ -100,6 +100,68 @@ export function stageOwnerRole(
   return undefined
 }
 
+/** One row of the **Next stage** dropdown. */
+export interface HandoffStageOption {
+  stageCode: string
+  /** The template's own label where there is one, else the code itself. */
+  displayName: string
+  ownerRole?: RoleCode
+  sequence: number
+}
+
+/**
+ * The stages offered by the **Next stage** dropdown — every stage on this
+ * ticket's own workflow except the one it is already standing in, sorted by
+ * sequence.
+ *
+ * Ribbon first, exactly as `nextStageCode`/`stageOwnerRole` do: `ribbon.segments`
+ * is *this ticket's own* template resolved server-side. Falls back to
+ * deduplicating across every template — `TicketListPage`'s own `stageOptions`
+ * precedent, including its `CLOSED` exclusion, since closing a ticket is
+ * `CloseDialog`'s own dedicated flow, not a stage a handoff hands to — only
+ * when there is no ribbon, so every non-deprecated, non-`CLOSED` stage is
+ * offered rather than none.
+ */
+export function handoffStageOptions(
+  ribbon: Ribbon | undefined,
+  templates: WorkflowTemplate[] | undefined,
+): HandoffStageOption[] {
+  const segments = ribbon?.segments
+  if (segments && segments.length > 0) {
+    return segments
+      .filter(
+        (s): s is typeof s & { sequence: number; stageCode: string } =>
+          s.state !== 'CURRENT' && s.sequence != null && s.stageCode != null,
+      )
+      .map((s) => ({
+        stageCode: s.stageCode,
+        displayName: s.displayName ?? s.stageCode,
+        ownerRole: s.ownerRole,
+        sequence: s.sequence,
+      }))
+      .sort((a, b) => a.sequence - b.sequence)
+  }
+
+  const byCode = new Map<string, HandoffStageOption>()
+  for (const template of templates ?? []) {
+    for (const stage of template.stages ?? []) {
+      if (stage.stageCode === 'CLOSED' || stage.isDeprecated) continue
+      if (!stage.stageCode || byCode.has(stage.stageCode)) continue
+      byCode.set(stage.stageCode, {
+        stageCode: stage.stageCode,
+        displayName: stage.displayName ?? stage.stageCode,
+        ownerRole: stage.ownerRole,
+        sequence: stage.sequence ?? 0,
+      })
+    }
+  }
+  // Codes shared across templates can disagree on sequence, so the code breaks
+  // the tie and the list is at least stable between renders.
+  return [...byCode.values()].sort(
+    (a, b) => a.sequence - b.sequence || a.stageCode.localeCompare(b.stageCode),
+  )
+}
+
 const requiredId = (message: string) =>
   z
     .number()
