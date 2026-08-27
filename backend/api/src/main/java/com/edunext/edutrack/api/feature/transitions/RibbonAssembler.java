@@ -19,14 +19,25 @@ import java.util.Map;
  * C-044 · builds the {@link RibbonWire.Ribbon} a handoff (and, on the same
  * shape, C-046's rework and C-047's skip) answers with.
  *
- * <h2>Scope</h2>
+ * <h2>Scope — one named cycle, defaulting to the current one</h2>
  *
- * <p>Only the ticket's <b>current</b> cycle. That is everything a lifecycle
- * route's response needs — the caller already knows which ticket they just
- * moved — and it is deliberately not the cycle-selector-aware read C-051's
- * ribbon component and C-053's cycle selector own for {@code GET
- * /tickets/{ticketId}/ribbon}. This class exists so that route can share the
- * shape rather than invent it, not to pre-empt the route itself.
+ * <p>{@link #assembleCurrentCycle} is what the four lifecycle routes want:
+ * the caller already knows which ticket they just moved, and it is always the
+ * open cycle. {@link #assemble} is the same read for a cycle the caller names,
+ * which is what C-053's selector needs and what {@code TicketDetailService}
+ * passes {@code ?cycle=} to.
+ *
+ * <p>That parameter used to be missing, and the selector was broken by it:
+ * every cycle rendered the <em>current</em> cycle's ribbon, so stepping back
+ * to a sealed cycle 1 after a reopen showed cycle 2's stages, cycle 2's
+ * iteration and cycle 2's live segment. Its history and effort tabs already
+ * honoured the cycle beside it, so the page disagreed with itself.
+ *
+ * <p><b>A past cycle is sealed, whatever the ticket's status is now.</b> It
+ * has no live stage to stand in, nothing to advance, and its iteration count
+ * is its own final one rather than the ticket's live counter — which is
+ * exactly what {@code CycleIterationBadge} already documented as the reason it
+ * reads {@code Ribbon} rather than {@code Ticket}.
  *
  * <h2>One segment per template stage, not one per hop</h2>
  *
@@ -77,8 +88,25 @@ public class RibbonAssembler {
 
     /** @param canAdvance already resolved by the caller — {@link StageOwnership#mayAdvance} */
     public RibbonWire.Ribbon assembleCurrentCycle(Ticket ticket, boolean canAdvance) {
-        short cycleNo = ticket.getCurrentCycleNo();
-        boolean isSealed = "CLOSED".equals(ticket.getStatus());
+        return assemble(ticket, ticket.getCurrentCycleNo(), canAdvance);
+    }
+
+    /**
+     * The ribbon for one named cycle — see the class note on why this
+     * parameter exists.
+     *
+     * @param cycleNo    which cycle to read; the ticket's current one behaves
+     *                   exactly as {@link #assembleCurrentCycle} always did
+     * @param canAdvance already resolved by the caller
+     *                   ({@link StageOwnership#mayAdvance}), and ignored for a
+     *                   past cycle: whether this caller owns the ticket's
+     *                   <em>current</em> stage says nothing about a journey
+     *                   that finished, and the contextual action would be
+     *                   drawn on a segment nobody can act on
+     */
+    public RibbonWire.Ribbon assemble(Ticket ticket, short cycleNo, boolean canAdvance) {
+        boolean isCurrentCycle = cycleNo == ticket.getCurrentCycleNo();
+        boolean isSealed = !isCurrentCycle || "CLOSED".equals(ticket.getStatus());
 
         List<WorkflowStage> template = ticket.getWorkflowTemplateId() == null
                 ? List.of()
@@ -118,10 +146,10 @@ public class RibbonAssembler {
 
         return new RibbonWire.Ribbon(
                 cycleNo,
-                ticket.getCurrentIteration(),
+                isCurrentCycle ? ticket.getCurrentIteration() : finalIterationOf(hops),
                 isSealed,
                 isSealed ? null : ticket.getCurrentStage(),
-                canAdvance,
+                isCurrentCycle && canAdvance,
                 segments);
     }
 
@@ -183,6 +211,31 @@ public class RibbonAssembler {
                 effort, idleMins, last.getIterationNo(), loopBackCount,
                 skipped ? skipDeparture.getReason() : null,
                 last.getHandoffNote());
+    }
+
+    /**
+     * How far a finished cycle's own journey bounced — the highest
+     * {@code iteration_no} it recorded, not the ticket's live counter.
+     *
+     * <p>Read as a maximum rather than off the last hop because a hop's
+     * iteration is carried forward unchanged by a forward move
+     * ({@code TransitionService}'s numbering rule), so the last hop of a cycle
+     * does hold its final value — but a malformed ledger, or a future action
+     * that resets rather than carries, would make the last row quietly
+     * disagree with the cycle's real count. The maximum cannot.
+     *
+     * <p>{@code 1} for a cycle with no hops at all: a journey nobody walked
+     * has not iterated, and reporting {@code 0} would print "Iteration 0" for
+     * a cycle that did exist.
+     */
+    private static short finalIterationOf(List<TicketStageTransition> hops) {
+        short highest = 1;
+        for (TicketStageTransition hop : hops) {
+            if (hop.getIterationNo() > highest) {
+                highest = hop.getIterationNo();
+            }
+        }
+        return highest;
     }
 
     /** Two decimal places — {@code EffortLogDtos}' own rounding for an hours figure. */

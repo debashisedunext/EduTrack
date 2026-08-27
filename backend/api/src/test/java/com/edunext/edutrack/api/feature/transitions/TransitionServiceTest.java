@@ -34,6 +34,8 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -146,6 +148,72 @@ class TransitionServiceTest {
                 assertThat(ticket.getReworkCount())
                         .describedAs(code).isEqualTo((short) 1);
             }
+        }
+
+        @Test
+        @DisplayName("a hop to an earlier stage is a backward move whatever its action code says")
+        void backwardDestinationIncrements() {
+            standingIn("QA", (short) 1);
+
+            // What POST /handoff sends for every destination, including this one.
+            service.advance(caller, TICKET, request("FORWARD", "DEV", null));
+
+            assertThat(capturedHop().getIterationNo()).isEqualTo((short) 2);
+            assertThat(ticket.getCurrentIteration()).isEqualTo((short) 2);
+            assertThat(ticket.getReworkCount()).isEqualTo((short) 1);
+        }
+
+        @Test
+        @DisplayName("the trip back up does not count — QA to DEV to QA to DEV is iteration 3, not 5")
+        void onlyTheBackwardHalfOfABounceCounts() {
+            standingIn("QA", (short) 1);
+            service.advance(caller, TICKET, request("FORWARD", "DEV", null));
+            assertThat(ticket.getCurrentIteration()).isEqualTo((short) 2);
+
+            standingIn("DEV", ticket.getCurrentIteration());
+            service.advance(caller, TICKET, request("FORWARD", "QA", null));
+            assertThat(ticket.getCurrentIteration()).isEqualTo((short) 2);
+
+            standingIn("QA", ticket.getCurrentIteration());
+            service.advance(caller, TICKET, request("FORWARD", "DEV", null));
+            assertThat(ticket.getCurrentIteration()).isEqualTo((short) 3);
+            assertThat(ticket.getReworkCount()).isEqualTo((short) 2);
+        }
+
+        @Test
+        @DisplayName("OVERRIDE backwards still does not count — an override is not rework")
+        void overrideBackwardsDoesNotIncrement() {
+            standingIn("QA", (short) 1);
+
+            service.advance(caller, TICKET, request("OVERRIDE", "DEV", "wrong stage, moving it by hand"));
+
+            assertThat(ticket.getCurrentIteration()).isEqualTo((short) 1);
+            assertThat(ticket.getReworkCount()).isEqualTo((short) 0);
+        }
+
+        @Test
+        @DisplayName("a ticket with no template is not compared — the numbering is left as it was")
+        void noTemplateLeavesNumberingAlone() {
+            standingIn("QA", (short) 1);
+            ReflectionTestUtils.setField(ticket, "workflowTemplateId", null);
+
+            service.advance(caller, TICKET, request("FORWARD", "DEV", null));
+
+            assertThat(ticket.getCurrentIteration()).isEqualTo((short) 1);
+            assertThat(ticket.getReworkCount()).isEqualTo((short) 0);
+        }
+
+        /** Re-open the ledger on {@code stage}, as though the ticket had just arrived there. */
+        private void standingIn(String stage, short iterationNo) {
+            openHop = openHop(stage);
+            openHop.setIterationNo(iterationNo);
+            when(journal.openHopFor(TICKET)).thenReturn(Optional.of(openHop));
+            ticket.setCurrentStage(stage);
+            ticket.setCurrentIteration(iterationNo);
+            reset(journal);
+            when(journal.openHopFor(TICKET)).thenReturn(Optional.of(openHop));
+            when(journal.append(any(TicketStageTransition.class))).thenAnswer(call -> call.getArgument(0));
+            when(journal.append(any(TicketHistory.class))).thenAnswer(call -> call.getArgument(0));
         }
     }
 
@@ -510,6 +578,84 @@ class TransitionServiceTest {
         }
     }
 
+    /**
+     * Arriving forward on the template's last stage is the sign-off.
+     *
+     * <p>The fixture template ends at {@code DEPLOY}, so that is this class's
+     * terminal stage — the name does not matter, only that nothing follows it.
+     * What matters is that the ticket lands there RESOLVED, because RESOLVED is
+     * the only {@code from_status} {@code CloseService} will close from
+     * ({@code workflow_transitions} row 12, G-3), and the desk that now owns
+     * that stage after {@code V20260826_1520} has to be able to close it.
+     */
+    @Nested
+    @DisplayName("the terminal stage — a forward arrival is the sign-off, and resolves the ticket")
+    class TerminalArrival {
+
+        @Test
+        @DisplayName("FORWARD onto the last stage sets the ticket RESOLVED")
+        void forwardOntoLastStageResolves() {
+            service.advance(caller, TICKET, request("FORWARD", "DEPLOY", null));
+
+            assertThat(ticket.getStatus()).isEqualTo("RESOLVED");
+        }
+
+        @Test
+        @DisplayName("and writes it down as a STATUS_CHANGED row, not only as a stage move")
+        void writesAStatusChangedRow() {
+            service.advance(caller, TICKET, request("FORWARD", "DEPLOY", null));
+
+            ArgumentCaptor<TicketHistory> captor = ArgumentCaptor.forClass(TicketHistory.class);
+            verify(journal, times(2)).append(captor.capture());
+            TicketHistory status = captor.getAllValues().stream()
+                    .filter(e -> "STATUS_CHANGED".equals(e.getEventType()))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(status.getFieldName()).isEqualTo("status");
+            assertThat(status.getOldValue()).isEqualTo("IN_PROGRESS");
+            assertThat(status.getNewValue()).isEqualTo("RESOLVED");
+            assertThat(status.getActorId()).isEqualTo(ACTOR);
+            assertThat(status.getActorType()).isEqualTo("USER");
+        }
+
+        @Test
+        @DisplayName("a stage short of the last one resolves nothing")
+        void anEarlierStageDoesNotResolve() {
+            service.advance(caller, TICKET, request("FORWARD", "QA", null));
+
+            assertThat(ticket.getStatus()).isEqualTo("IN_PROGRESS");
+        }
+
+        @Test
+        @DisplayName("a backward move onto the last stage is not a sign-off — nobody claimed the work was done")
+        void backwardOntoLastStageDoesNotResolve() {
+            service.advance(caller, TICKET, request("REWORK", "DEPLOY", "redeploy it"));
+
+            assertThat(ticket.getStatus()).isEqualTo("IN_PROGRESS");
+        }
+
+        @Test
+        @DisplayName("an already-RESOLVED ticket is left alone — one status change in the history, not two")
+        void alreadyResolvedIsNotRewritten() {
+            ticket.setStatus("RESOLVED");
+
+            service.advance(caller, TICKET, request("FORWARD", "DEPLOY", null));
+
+            assertThat(ticket.getStatus()).isEqualTo("RESOLVED");
+            verify(journal, times(1)).append(any(TicketHistory.class));
+        }
+
+        @Test
+        @DisplayName("a ticket with no template has no last stage, so nothing resolves")
+        void noTemplateResolvesNothing() {
+            ReflectionTestUtils.setField(ticket, "workflowTemplateId", null);
+
+            service.advance(caller, TICKET, request("FORWARD", "DEPLOY", null));
+
+            assertThat(ticket.getStatus()).isEqualTo("IN_PROGRESS");
+        }
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
 
     private TicketStageTransition capturedHop() {
@@ -561,6 +707,22 @@ class TransitionServiceTest {
         WorkflowStage s = new WorkflowStage();
         ReflectionTestUtils.setField(s, "stageCode", code);
         ReflectionTestUtils.setField(s, "ownerRole", ownerRole);
+        ReflectionTestUtils.setField(s, "seq", seqOf(code));
         return s;
+    }
+
+    /**
+     * §4A.1's order. The fixture used to leave {@code seq} at its default,
+     * which was harmless while only the action code decided a hop's direction
+     * and is not now — {@code movesBackwards} reads exactly this field.
+     * A code outside the list sorts last rather than first, so an unrecognised
+     * destination never reads as a backward move by accident.
+     */
+    private static final List<String> STAGE_ORDER =
+            List.of("INTAKE", "TRIAGE", "DEV", "QA", "DEPLOY", "VERIFY", "SIGNOFF", "CLOSED");
+
+    private static short seqOf(String code) {
+        int index = STAGE_ORDER.indexOf(code);
+        return (short) ((index < 0 ? STAGE_ORDER.size() : index) * 10 + 10);
     }
 }

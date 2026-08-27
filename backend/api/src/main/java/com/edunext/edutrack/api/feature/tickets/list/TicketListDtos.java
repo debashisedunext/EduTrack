@@ -43,7 +43,7 @@ import java.util.List;
  * fields differently from the detail payload would make every consumer hold two
  * mental models of one ticket.
  */
-final class TicketListDtos {
+public final class TicketListDtos {
 
     private TicketListDtos() {
     }
@@ -65,7 +65,7 @@ final class TicketListDtos {
      * and a list is the wrong place to start paying for columns nothing renders.
      */
     @Schema(name = "TicketListUserRef")
-    record UserRef(long id, String displayName, String role) {
+    public record UserRef(long id, String displayName, String role) {
     }
 
     /**
@@ -87,12 +87,12 @@ final class TicketListDtos {
      * that. Same remedy as {@code StatusRequestDtos}, for the same reason.
      */
     @Schema(name = "TicketListProject")
-    record Project(long id, String projectCode, String name) {
+    public record Project(long id, String projectCode, String name) {
     }
 
     /** The contract's {@code ClientRef}. Named explicitly for the reason above. */
     @Schema(name = "TicketListClientRef")
-    record ClientRef(long id, String clientCode, String name) {
+    public record ClientRef(long id, String clientCode, String name) {
     }
 
     /**
@@ -115,7 +115,7 @@ final class TicketListDtos {
      * S-17 filters and groups by, while a screen name, a feature and kilobytes
      * of repro steps are the detail page's job.
      */
-    record TicketSummary(
+    public record TicketSummary(
             String ticketId,
             String title,
             Project project,

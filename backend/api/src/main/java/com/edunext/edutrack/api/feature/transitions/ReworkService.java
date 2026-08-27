@@ -134,7 +134,6 @@ class ReworkService {
         Ticket ticket = tickets.requireByCode(caller, ticketCode);
 
         String actionCode = resolveAction(request.action());
-        String toStage = normalize(request.toStageCode());
 
         // Captured before advance() mutates the ticket — HandoffService's own
         // rule, and for its own reason: the stage, cycle and iteration the
@@ -144,6 +143,7 @@ class ReworkService {
         short leavingCycle = ticket.getCurrentCycleNo();
         short leavingIteration = ticket.getCurrentIteration();
 
+        String toStage = resolveReturnTarget(ticket, leavingStage, request.toStageCode());
         requireReturnTargetAllowed(ticket, leavingStage, toStage);
 
         List<String> defects = cleanDefects(request.defects());
@@ -171,6 +171,65 @@ class ReworkService {
                 .map(identity -> StageOwnership.mayAdvance(identity, ticket))
                 .orElse(false);
         return new ReworkDtos.RibbonResponse(ribbon.assembleCurrentCycle(ticket, canAdvance));
+    }
+
+    /**
+     * Where the ticket goes back to — the caller's answer, or the stage's own.
+     *
+     * <p>An explicit {@code toStageCode} always wins and is checked against
+     * {@code can_return_to} exactly as before. What is new is the fallback,
+     * and the contract has described it all along: {@code ForceMoveRequest}'s
+     * own note says "Unlike {@code rework}/{@code skip} there is no default;
+     * the caller always names the destination", which only makes sense if
+     * rework <em>has</em> one. It did not, and every caller had to re-derive
+     * {@code can_return_to} to fill a field the server could answer itself.
+     *
+     * <p>That re-derivation is not merely redundant, it is not available.
+     * {@code GET /masters/workflow-templates} does not serve a template's
+     * stages ({@code TemplateDtos}' own header says so), {@code RibbonSegment}
+     * does not carry {@code canReturnTo}, and {@code Ribbon} carries no
+     * {@code templateId} to look one up with — so a client had no honest
+     * route to this rule at all. The rule lives in {@code workflow_stages};
+     * this is where it is read.
+     *
+     * <p><b>Exactly one target, or nothing.</b> A stage listing several legal
+     * ways back is a genuine choice and the caller must make it — defaulting
+     * would move the ticket somewhere nobody asked for, which is what
+     * {@code ToStageRequiredException} exists to prevent and why that refusal
+     * is preserved here rather than widened. A stage with no targets falls
+     * through to {@link #requireReturnTargetAllowed}, so the caller gets
+     * {@code StageMayNotReturnToException} naming the stage and its allowed
+     * list, rather than a vaguer complaint about a missing field.
+     */
+    private String resolveReturnTarget(Ticket ticket, String fromStageCode, String requested) {
+        String explicit = normalize(requested);
+        if (explicit != null && !explicit.isBlank()) {
+            return explicit;
+        }
+        List<String> allowed = allowedReturnTargets(ticket, fromStageCode);
+        if (allowed.size() == 1) {
+            return allowed.get(0);
+        }
+        if (allowed.isEmpty()) {
+            return null;
+        }
+        throw new ToStageRequiredException(
+                "REWORK from " + fromStageCode + " (" + String.join(", ", allowed) + ")");
+    }
+
+    /** {@code can_return_to} for the stage being left, normalised and de-blanked. */
+    private List<String> allowedReturnTargets(Ticket ticket, String fromStageCode) {
+        Long templateId = ticket.getWorkflowTemplateId();
+        if (templateId == null || fromStageCode == null || fromStageCode.isBlank()) {
+            return List.of();
+        }
+        return stages.findByTemplateIdAndStageCode(templateId, fromStageCode)
+                .map(WorkflowStage::getCanReturnTo)
+                .orElse(List.of())
+                .stream()
+                .filter(code -> code != null && !code.isBlank())
+                .map(ReworkService::normalize)
+                .toList();
     }
 
     /** One of §4A.1's four backward actions, defaulting to {@code REWORK}. */

@@ -90,6 +90,17 @@ import java.util.Set;
  * offer as a candidate — current load, project membership generally — is
  * still C-044's screen, not this engine.
  *
+ * <h2>The one case where this class writes {@code tickets.status}</h2>
+ *
+ * <p>A <em>forward</em> arrival on the template's last stage
+ * ({@link TerminalStage}) sets the ticket {@code RESOLVED}. That stage is
+ * §4A.1's Closed, owned by SUPPORT since {@code V20260826_1520}, so the move
+ * that lands a ticket there is the Sign-off owner handing it to the desk —
+ * "work claimed complete" by definition, and the only {@code from_status}
+ * {@code CloseService} will close from ({@code workflow_transitions} row 12,
+ * G-3). Every other move leaves the status alone, exactly as before;
+ * {@link ReworkService} still owns the one other status write in this package.
+ *
  * <h2>What advancing a ticket that has never had a first hop does</h2>
  *
  * <p>Refuses, with {@link NoOpenStageException}. Opening the very first hop
@@ -117,16 +128,35 @@ class TransitionService {
 
     /**
      * Mirrors {@code TicketJournal.BACKWARD_ACTIONS} exactly, and has to: that
-     * private set is what makes {@code reason} mandatory on the row, and
-     * {@code iterationNo} must increment on precisely the same four codes, or
-     * "cycle 2 · iteration 3" and the mandatory-reason rule would silently
-     * disagree about what a backward move is.
+     * private set is what makes {@code reason} mandatory on the row.
+     *
+     * <p>It is no longer the whole of what moves {@code iterationNo} — see
+     * {@link #movesBackwards}. The two rules stay in step because this set is
+     * still one of the two things that answers "is this a backward move":
+     * an action code that says so, or a destination that is behind the stage
+     * being left.
      */
     private static final Set<String> BACKWARD_ACTIONS =
             Set.of("REWORK", "DEPLOY_FAILED", "VERIFY_FAILED", "SIGNOFF_REJECTED");
 
+    /**
+     * The two actions whose direction is <em>not</em> allowed to answer the
+     * question, because each has a documented meaning that overrides it.
+     *
+     * <p>{@code OVERRIDE} is C-048's force-move: its entire purpose is going
+     * where the template does not allow, and "iteration is not incremented on
+     * an override even on a backward move — an override is not rework" is that
+     * route's own rule. {@code SKIP} lands the ticket past a stage rather than
+     * behind one, and a skip says where the ticket is, not something about
+     * the work.
+     */
+    private static final Set<String> DIRECTION_AGNOSTIC_ACTIONS = Set.of("OVERRIDE", "SKIP");
+
     private static final String FORWARD = "FORWARD";
     private static final String STAGE_CHANGED = "STAGE_CHANGED";
+    private static final String STATUS_CHANGED = "STATUS_CHANGED";
+    private static final String RESOLVED = "RESOLVED";
+    private static final String CLOSED = "CLOSED";
 
     private final ScopedTickets tickets;
     private final TicketJournal journal;
@@ -179,8 +209,10 @@ class TransitionService {
      *   <li>{@code cycleNo} is always the ticket's current cycle — this method
      *       only ever writes into the cycle already open.</li>
      *   <li>{@code seqNo} is the current hop's plus one.</li>
-     *   <li>{@code iterationNo} increments only for
-     *       {@link #BACKWARD_ACTIONS}; every other action carries the current
+     *   <li>{@code iterationNo} increments for a backward move — one of
+     *       {@link #BACKWARD_ACTIONS}, <em>or</em> any other action whose
+     *       destination is behind the stage being left
+     *       ({@link #movesBackwards}). Every forward move carries the current
      *       hop's iteration forward unchanged (§4A.2 — iteration counts
      *       backward moves, not hops).</li>
      * </ul>
@@ -231,7 +263,8 @@ class TransitionService {
 
         String toStage = resolveToStage(ticket, actionCode, open.getToStage(), request.toStageCode());
 
-        boolean backward = BACKWARD_ACTIONS.contains(actionCode);
+        boolean backward = BACKWARD_ACTIONS.contains(actionCode)
+                || movesBackwards(ticket, actionCode, open.getToStage(), toStage);
         short iterationNo = backward ? (short) (open.getIterationNo() + 1) : open.getIterationNo();
         int seqNo = open.getSeqNo() + 1;
         Long toUserId = resolveAssignee(ticket, toStage, request.assigneeId());
@@ -282,6 +315,37 @@ class TransitionService {
             ticket.setReworkCount((short) (ticket.getReworkCount() + 1));
         }
 
+        /*
+         * Arriving forward on the terminal stage IS the sign-off.
+         *
+         * §4A.1's last segment is Closed, and after V20260826_1520 it is owned
+         * by SUPPORT on every template — so the move that lands a ticket there
+         * is the Sign-off owner handing it to the desk, and the desk is what
+         * decides whether it closes or comes back. What that move means for
+         * `tickets.status` is RESOLVED: "work claimed complete", §3.1, and the
+         * only from_status `workflow_transitions` row 12 will take into CLOSED
+         * (G-3).
+         *
+         * Without this the ticket arrives on the terminal segment still NEW or
+         * IN_PROGRESS, `TicketDetailService` cannot honestly offer `close`
+         * (`CloseService` would 422 it), and the ribbon shows a Closed stage
+         * nobody can close — which is the state this whole change is fixing.
+         *
+         * Only forward. A backward action can reach the terminal stage only
+         * via an explicit `toStageCode`, and a rework that happens to point
+         * there is not somebody claiming the work is done. Already-RESOLVED is
+         * left alone rather than re-written so the history reads as one status
+         * change and not two, `PriorityChangeService`'s no-op-on-repeat rule;
+         * already-CLOSED is left alone because un-resolving a closed ticket
+         * from a stage move would silently undo a sealed cycle.
+         */
+        if (!backward && !RESOLVED.equals(ticket.getStatus()) && !CLOSED.equals(ticket.getStatus())
+                && TerminalStage.is(stages, ticket, toStage)) {
+            String fromStatus = ticket.getStatus();
+            ticket.setStatus(RESOLVED);
+            journal.append(statusChangedEntry(ticket, fromStatus, caller));
+        }
+
         // C-045 · the seam StageQueueBroadcaster's own javadoc names as
         // waiting on this task, plus D-058's ticket-topic push — both
         // action-agnostic, so raised here rather than by whichever route
@@ -289,6 +353,46 @@ class TransitionService {
         events.publishEvent(new TicketStageAdvanced(ticketId, ticket.getProjectId(), open.getToStage(), toStage));
 
         return TicketWire.of(ticket, users);
+    }
+
+    /**
+     * Is this hop going <em>back</em> down the template, whatever it calls
+     * itself?
+     *
+     * <p>§4A.2 defines iteration as counting backward moves, not hops — and
+     * until this method existed only the action code was consulted, so a
+     * ticket sent QA to DEV through {@code POST /handoff} (which hardcodes
+     * {@code FORWARD} for every destination) recorded a forward hop and left
+     * {@code iterationNo} where it was. The ribbon's per-segment loop-back
+     * badge counted the re-entry, because that counts hops into a stage rather
+     * than their action code, so the two numbers came off the same journey and
+     * disagreed: six bounces, and the header still read "Iteration 1". A move
+     * to an earlier stage is a backward move by §4A.2's own definition,
+     * whichever route wrote it.
+     *
+     * <p><b>Only the numbering follows from this</b> — {@code iterationNo} and
+     * {@code rework_count}, which have always moved together. The action code
+     * itself is left exactly as the caller sent it, so
+     * {@code TicketJournal.append}'s mandatory-reason rule for the four
+     * backward codes is untouched: nothing that used to be accepted starts
+     * being refused.
+     *
+     * <p><b>False when there is nothing to compare against</b> — no template,
+     * a blank stage code, or either code missing from the template —
+     * {@link #resolveToStage}'s own precedent for the identical gap, and the
+     * conservative answer: it leaves the numbering exactly as it was before.
+     */
+    private boolean movesBackwards(Ticket ticket, String actionCode, String fromStage, String toStage) {
+        if (DIRECTION_AGNOSTIC_ACTIONS.contains(actionCode)) {
+            return false;
+        }
+        Long templateId = ticket.getWorkflowTemplateId();
+        if (templateId == null || fromStage == null || fromStage.isBlank() || toStage == null || toStage.isBlank()) {
+            return false;
+        }
+        WorkflowStage from = stages.findByTemplateIdAndStageCode(templateId, normalize(fromStage)).orElse(null);
+        WorkflowStage to = stages.findByTemplateIdAndStageCode(templateId, normalize(toStage)).orElse(null);
+        return from != null && to != null && to.getSeq() < from.getSeq();
     }
 
     /**
@@ -422,6 +526,31 @@ class TransitionService {
         entry.setActorId(actor);
         entry.setActorType(actor == null ? "SYSTEM" : "USER");
         entry.setRemarks(request.reason() != null ? request.reason() : request.handoffNote());
+        return entry;
+    }
+
+    /**
+     * The {@code STATUS_CHANGED} row for the sign-off above — same event type
+     * and field name {@code QuickUpdateService} writes for the same column, so
+     * the History tab reads one vocabulary rather than two.
+     *
+     * <p>Written as its own entry beside {@code STAGE_CHANGED} rather than
+     * folded into it: they are two different facts about the same move, and a
+     * reader asking "when did this become RESOLVED?" should not have to know
+     * that the answer is hiding inside a stage row. Stamped with the ticket's
+     * current cycle, {@code stageChangedEntry}'s own reasoning.
+     */
+    private static TicketHistory statusChangedEntry(Ticket ticket, String fromStatus, Authentication caller) {
+        TicketHistory entry = new TicketHistory();
+        entry.setTicketId(ticket.getId());
+        entry.setCycleNo(ticket.getCurrentCycleNo());
+        entry.setEventType(STATUS_CHANGED);
+        entry.setFieldName("status");
+        entry.setOldValue(fromStatus);
+        entry.setNewValue(RESOLVED);
+        Long actor = actorId(caller);
+        entry.setActorId(actor);
+        entry.setActorType(actor == null ? "SYSTEM" : "USER");
         return entry;
     }
 

@@ -13,13 +13,17 @@ import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketCycle;
 import com.edunext.edutrack.domain.tickets.TicketCycleRepository;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
+import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import com.edunext.edutrack.domain.workflow.WorkflowStageRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
@@ -131,6 +135,32 @@ class ReopenService {
 
     /** The only status §4.1 reopens from — see {@link TicketNotClosedException}. */
     private static final String CLOSED = "CLOSED";
+
+    /**
+     * The statuses a reopen may start a new cycle from.
+     *
+     * <p><b>{@code RESOLVED} joined {@code CLOSED} on 26 Aug 2026</b>, and it
+     * is a product decision rather than a relaxation of a safety rule. §4A.2
+     * keeps two counters and they answer two different questions: an
+     * <em>iteration</em> is work bouncing backwards inside a cycle (QA fails a
+     * build, Verification rejects a deploy), and a <em>cycle</em> is the whole
+     * attempt being started again. When the Support desk refuses a sign-off,
+     * the attempt is what failed — cycle 1 delivered something the client would
+     * not take — so the counter that moves is {@code reopen_count} and cycle 1
+     * seals behind it.
+     *
+     * <p>{@code TicketNotClosedException}'s javadoc used to argue the opposite,
+     * that accepting {@code RESOLVED} "would increment the wrong counter and
+     * seal a cycle that had not finished". The first half no longer holds: on
+     * this route the cycle counter <em>is</em> the right one. The second half
+     * was the real concern and it is answered rather than waived — a cycle the
+     * desk has rejected has finished, which is exactly what the desk is
+     * saying, and {@link #reopen} seals it with a reason recorded on the new
+     * cycle. What is still refused is every other status: a ticket in
+     * {@code IN_PROGRESS} or {@code REWORK} is mid-attempt and going backwards
+     * inside it is {@code POST /rework}'s job, not this route's.
+     */
+    private static final java.util.Set<String> REOPENABLE = java.util.Set.of(CLOSED, "RESOLVED");
 
     private static final String REOPENED = "REOPENED";
 
@@ -253,7 +283,9 @@ class ReopenService {
         Ticket ticket = tickets.requireByCode(caller, ticketCode);
         long ticketId = ticket.getId();
 
-        if (!CLOSED.equals(ticket.getStatus())) {
+        // CLOSED or RESOLVED. See REOPENABLE's own note for why the second one
+        // joined the first.
+        if (!REOPENABLE.contains(ticket.getStatus())) {
             throw new TicketNotClosedException(ticket.getStatus());
         }
 
@@ -333,7 +365,11 @@ class ReopenService {
         // next scan clears the flag from the truth of the dates. Clearing it here
         // would be a second implementation of "is this ticket late".
 
-        // 6 · the history entry, last, and through the journal — which takes the
+        // 6 · the ribbon. Seal whatever hop cycle N was resting in, then open
+        // cycle N+1's first one at the restart stage. See openNewCycleRibbon.
+        openNewCycleRibbon(ticket, newCycleNo, restartStage, assignee, reopenedAt);
+
+        // 7 · the history entry, last, and through the journal — which takes the
         // per-ticket SELECT … FOR UPDATE and computes the hash chain (A-042).
         // Stamped with the NEW cycle: the History tab filtered to cycle 2 must
         // open with the reason cycle 2 exists, and a reader looking at the sealed
@@ -347,6 +383,74 @@ class ReopenService {
         notifier.reopened(ticket, actorIdOrZero(caller), assignee, newCycleNo);
 
         return TicketWire.of(ticket, users);
+    }
+
+    /**
+     * Seal whatever hop cycle N was resting on, and open cycle N+1's first one.
+     *
+     * <p><b>This closes the gap this class's own javadoc used to describe as
+     * C-042's.</b> That note said the seal could not be done from here because
+     * "{@code TicketJournal} publishes {@code seal} but no way to <em>find</em>
+     * the open hop". {@code TicketJournal.openHopFor} has been public since
+     * C-042 shipped; the note simply outlived the gap, exactly as
+     * {@code CloseService}'s identical paragraph did.
+     *
+     * <p>It matters more now than it did. Before, a reopened ticket merely had
+     * a stale hop; since the desk's Reopen starts a cycle rather than an
+     * iteration, a reopened ticket is one somebody is about to work on — and
+     * {@code TransitionService.advance} refuses a ticket whose open hop belongs
+     * to a different cycle ({@link NoOpenStageException}). Without the pair
+     * below, every reopen would land the ticket in a stage nobody could hand
+     * off from.
+     *
+     * <p>Both halves are conditional and neither invents anything:
+     *
+     * <ul>
+     *   <li><b>The seal</b> runs only on a hop that is genuinely open and
+     *       genuinely cycle N's. A ticket closed through {@code CloseService}
+     *       since 26 Aug already had its terminal hop sealed, so there is
+     *       nothing to do; a fixture-seeded ticket with no transition rows at
+     *       all is left alone rather than failed. Working minutes come from
+     *       the B-024 calendar and are clamped to the wall-clock ceiling —
+     *       {@code TransitionService.workingMinutesFor}'s own reasoning for
+     *       the same figure.</li>
+     *   <li><b>The opening hop</b> carries {@code fromStage = null} and
+     *       {@code actionCode = FORWARD}, which is exactly how a ticket's very
+     *       first hop is written: a new cycle has no stage to come from. Its
+     *       {@code seqNo} restarts at 1 and its {@code iterationNo} at 1,
+     *       matching {@code ticket.currentIteration} which this method's caller
+     *       has already reset — §4A.2's rule that iteration counts backward
+     *       moves <em>within</em> a cycle.</li>
+     * </ul>
+     */
+    private void openNewCycleRibbon(Ticket ticket, short newCycleNo, String restartStage,
+                                    Long assignee, Instant reopenedAt) {
+        journal.openHopFor(ticket.getId())
+                .filter(hop -> hop.getCycleNo() == (short) (newCycleNo - 1))
+                .ifPresent(hop -> journal.seal(hop.getId(), reopenedAt,
+                        workingMinutesFor(hop, reopenedAt, ticket)));
+
+        TicketStageTransition first = new TicketStageTransition();
+        first.setTicketId(ticket.getId());
+        first.setCycleNo(newCycleNo);
+        first.setIterationNo((short) 1);
+        first.setSeqNo(1);
+        first.setFromStage(null);
+        first.setToStage(restartStage);
+        first.setToUserId(assignee);
+        first.setActionCode("FORWARD");
+        first.setEnteredAt(reopenedAt);
+        journal.append(first);
+    }
+
+    /** Working minutes for the hop being sealed, clamped to elapsed. */
+    private int workingMinutesFor(TicketStageTransition hop, Instant exitedAt, Ticket ticket) {
+        java.math.BigDecimal workingHrs = workingHours.workingHoursBetween(
+                hop.getEnteredAt(), exitedAt, ticket.getProjectId(), hop.getToUserId());
+        long workingMins = workingHrs.multiply(java.math.BigDecimal.valueOf(60))
+                .setScale(0, java.math.RoundingMode.HALF_UP).longValueExact();
+        long wallClockMins = (java.time.Duration.between(hop.getEnteredAt(), exitedAt).toSeconds() + 59) / 60;
+        return (int) Math.min(workingMins, wallClockMins);
     }
 
     /**

@@ -4,6 +4,7 @@ import com.edunext.edutrack.api.feature.tickets.TicketWire;
 import com.edunext.edutrack.api.feature.tickets.links.TicketLinkService;
 import com.edunext.edutrack.api.feature.transitions.RibbonAssembler;
 import com.edunext.edutrack.api.feature.transitions.StageOwnership;
+import com.edunext.edutrack.api.feature.transitions.TerminalStage;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.api.security.permission.RolePermissions;
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
@@ -50,10 +51,13 @@ import java.util.List;
  *
  * <h2>{@code ribbon} — assembled via {@link RibbonAssembler}</h2>
  *
- * <p>The current cycle only, on the same reasoning {@link RibbonAssembler}'s
- * own javadoc gives — the caller here already knows which ticket it asked
- * for, and the cycle-selector-aware read is {@code GET
- * /tickets/{ticketId}/ribbon}'s job, not this route's. A ticket with no
+ * <p><b>The cycle {@code ?cycle=} names</b>, exactly like {@code history} and
+ * {@code effort} beside it. It was the current cycle only until this route
+ * started passing the parameter through, and the selector was broken by it:
+ * stepping back to a sealed cycle 1 rendered cycle 2's stages under cycle 1's
+ * history, so the page disagreed with itself. {@link RibbonAssembler#assemble}
+ * carries the rest of the rule — a past cycle is sealed, has no live stage and
+ * reports its own final iteration. A ticket with no
  * {@code workflow_template_id} — one that predates the workflow designer, or
  * was created before ticket creation resolved a template — gets a
  * {@code Ribbon} with an empty segment list rather than {@code null}, exactly
@@ -67,13 +71,41 @@ import java.util.List;
  * {@link StageOwnership#mayAdvance} the same question
  * {@code TransitionService.advance} gates on — <b>one predicate, not two</b>,
  * per that class's own javadoc on why a second copy here would diverge from
- * it the first time either one changes without the other. Only
- * {@code handoff}/{@code rework} are decided here: they are exactly what the
- * golden rule answers. {@code close}, {@code reopen}, {@code skip-stage} and
- * the rest of the contract's action vocabulary are a different, still-open
- * question — each is its own role rule, not this one — and are left off
- * rather than guessed at, the same restraint this class already applies to
- * {@code ribbon}.
+ * it the first time either one changes without the other. {@code skip-stage}
+ * is C-047's capability rule on top of it.
+ *
+ * <p><b>{@code close} and {@code reopen} are decided here too, and where they
+ * appear is the whole of §4A.1's closing hop.</b> The terminal stage —
+ * {@link TerminalStage} — has nothing after it, so {@code handoff} drops off
+ * it rather than offering a move {@code POST /handoff} would refuse with
+ * {@code NoNextStageException}. What replaces it is {@code close}, and only
+ * for the desk that now owns that stage after {@code V20260826_1520}: the PM
+ * signs off by handing the ticket to Support, and Support is who decides
+ * whether it closes or comes back. Both halves of that decision are offered at
+ * once — {@code close} and {@code reopen} together — because a decision with
+ * one button is not one. Once it <em>is</em> closed the list is {@code reopen}
+ * alone — no stage action survives a terminal status, which is what "no Hand
+ * off on a closed ticket" means here. See {@link #mayCloseOrReopen} for which
+ * half of that is a capability and which half is a row rule.
+ *
+ * <h2>{@code reopen} names two different routes, and the status says which</h2>
+ *
+ * <p>On a <b>CLOSED</b> ticket it is {@code POST /reopen}: a new cycle,
+ * {@code reopen_count}, a sealed cycle behind it. On a <b>RESOLVED</b> one
+ * standing on the terminal stage it is {@code POST /rework}: a new
+ * <em>iteration</em> in the cycle already open, back to the stage
+ * {@code can_return_to} names ({@code V20260826_1815}).
+ *
+ * <p>That is not a shortcut, it is the rule
+ * {@code TicketNotClosedException}'s javadoc states outright — "Accepting
+ * {@code RESOLVED} here would increment the wrong counter and seal a cycle
+ * that had not finished — §4A.2's two counters, confused in the one place it
+ * costs most" — and it names {@code RESOLVED} as "the one wrong answer a user
+ * would defend". One action code because the desk is answering one question
+ * ("does this ticket go back?"); two routes because a cycle and an iteration
+ * are not the same thing. {@code TicketDetailHeader} branches on
+ * {@code ticket.status} to pick the dialog, and the two can never both apply:
+ * a ticket is either closed or it is not.
  *
  * <h2>What {@code ?cycle=} selects, and what it does not</h2>
  *
@@ -89,6 +121,10 @@ import java.util.List;
  */
 @Service
 class TicketDetailService {
+
+    /** {@code tickets.status}, the two values {@link #availableActions} turns on. */
+    private static final String RESOLVED = "RESOLVED";
+    private static final String CLOSED = "CLOSED";
 
     private final ScopedTickets tickets;
     private final TicketCycleRepository cycles;
@@ -180,7 +216,7 @@ class TicketDetailService {
         return new TicketDetailDtos.Detail(
                 TicketWire.of(ticket, users, projects, clients),
                 cycles.findByTicketIdOrderByCycleNoAsc(ticketId).stream().map(this::toCycle).toList(),
-                ribbon.assembleCurrentCycle(ticket, canAdvance),
+                ribbon.assemble(ticket, cycle, canAdvance),
                 journal.historyFor(ticketId, cycle).stream().map(this::toHistory).toList(),
                 journal.effortFor(ticketId, cycle).stream().map(this::toEffort).toList(),
                 comments.findByTicketIdAndIsDeletedFalseOrderByCreatedAtAsc(ticketId).stream()
@@ -199,9 +235,15 @@ class TicketDetailService {
      * {@code canAdvance}: the golden rule ({@link StageOwnership#mayAdvance})
      * <em>and</em> a live stage to advance from — a closed ticket, or one
      * whose current stage code no longer resolves, has nothing to hand off
-     * even to its own owner. An unidentifiable caller (empty
-     * {@link CallerIdentity#of}) gets none, the same deny-by-default that
-     * class's own doc requires.
+     * even to its own owner, and neither has one already standing on the
+     * template's last stage ({@link TerminalStage}). An unidentifiable caller
+     * (empty {@link CallerIdentity#of}) gets none, the same deny-by-default
+     * that class's own doc requires.
+     *
+     * <p>The three branches are ordered by how much of the ribbon still
+     * applies, most-finished first: a CLOSED ticket (no stage actions at all,
+     * {@code reopen} only), then the terminal stage ({@code close} instead of
+     * {@code handoff}), then every stage before it (unchanged since C-043).
      *
      * <p>{@code skip-stage} — C-047 · added on top of the pair above rather
      * than folded into the same {@code mayAdvance} branch, because it is a
@@ -225,20 +267,93 @@ class TicketDetailService {
      */
     private List<String> availableActions(Authentication caller, Ticket ticket) {
         CallerIdentity identity = CallerIdentity.of(caller).orElse(null);
-        boolean hasLiveStage = ticket.getCurrentStage() != null && !"CLOSED".equals(ticket.getStatus());
-        if (identity == null || !hasLiveStage) {
+        if (identity == null) {
             return List.of();
         }
 
         List<String> actions = new ArrayList<>();
-        if (StageOwnership.mayAdvance(identity, ticket)) {
+
+        // A closed ticket has no live stage, so nothing on the ribbon applies
+        // to it — but it is not actionless. Reopening is the one move §3.2
+        // leaves from a terminal status, and withholding it here is what used
+        // to make a closed ticket look finished for good.
+        if (CLOSED.equals(ticket.getStatus())) {
+            if (mayCloseOrReopen(identity)) {
+                actions.add("reopen");
+            }
+            return List.copyOf(actions);
+        }
+
+        if (ticket.getCurrentStage() == null) {
+            return List.of();
+        }
+
+        if (TerminalStage.is(stages, ticket, ticket.getCurrentStage())) {
+            // The terminal stage — §4A.1's Closed. There is no stage after it,
+            // so `handoff` is not withheld here as a permission decision: there
+            // is genuinely nowhere to hand the ticket to, and `POST /handoff`
+            // would answer NoNextStageException. `close` is what stands in its
+            // place, offered only once the sign-off that put the ticket here
+            // has made it RESOLVED, because that is the only from_status
+            // CloseService will take (workflow_transitions row 12, G-3) — the
+            // same "never render a button the route would 422" rule
+            // `skip-stage` follows below.
+            if (RESOLVED.equals(ticket.getStatus()) && mayCloseOrReopen(identity)) {
+                actions.add("close");
+                // The desk's other option, and the two are deliberately offered
+                // together: a sign-off handed to Support is a decision, and a
+                // decision with only one button is not one. `reopen` rather
+                // than `rework` because that is the word for what it does to
+                // the ticket — see the class javadoc on why the same code means
+                // two different routes either side of a close.
+                actions.add("reopen");
+            }
+        } else if (StageOwnership.mayAdvance(identity, ticket)) {
             actions.add("handoff");
             actions.add("rework");
         }
+
         if (isSkipCapable(identity) && isCurrentStageSkippable(ticket)) {
             actions.add("skip-stage");
         }
         return List.copyOf(actions);
+    }
+
+    /**
+     * Whether {@code close}/{@code reopen} belong in this caller's list.
+     *
+     * <p>Two halves, and both are needed.
+     *
+     * <p><b>The capability.</b> §2's "Close ticket" and "Reopen ticket" rows
+     * tick Admin, PM and Support Desk and nobody else, and
+     * {@code workflow_transitions} rows 12 and 13 seed exactly those three —
+     * G-3 calls both LOCKED. Read by role code rather than re-derived from
+     * {@link RolePermissions}, on {@link #isSkipCapable}'s own reasoning for
+     * the identical shape.
+     *
+     * <p><b>The capability is the whole rule.</b> No row narrowing on top of
+     * it, and that is a correction: this method briefly also demanded the
+     * caller be the ticket's assignee or an Admin, so that a PM handing a
+     * ticket to the desk could not then close it themselves. The intent was
+     * right and the mechanism was wrong. It made the button disagree with the
+     * route — {@code CloseService} and {@code ReopenService} honour all three
+     * §2 names regardless of assignment — and "two implementations of the same
+     * rule always diverge" is the warning on {@code availableActions}' own
+     * contract entry, not advice this class gets to make an exception to. It
+     * also broke the case §2 grants these roles <em>for</em>: a ticket whose
+     * desk owner has left, or that nobody holds, must stay closable and
+     * reopenable by a PM.
+     *
+     * <p>What actually keeps the PM from closing their own sign-off is
+     * ownership, not a hidden button: {@code V20260826_1520} put the terminal
+     * stage in Support's hands, so the handoff lands the ticket on the desk.
+     * A PM who closes it anyway is exercising a permission §2 gives them on
+     * purpose.
+     */
+    private static boolean mayCloseOrReopen(CallerIdentity identity) {
+        return RolePermissions.ADMIN.equals(identity.roleCode())
+                || RolePermissions.PM.equals(identity.roleCode())
+                || RolePermissions.SUPPORT.equals(identity.roleCode());
     }
 
     private static boolean isSkipCapable(CallerIdentity identity) {

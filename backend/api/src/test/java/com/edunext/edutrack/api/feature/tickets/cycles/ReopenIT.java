@@ -385,11 +385,25 @@ class ReopenIT {
         /**
          * The rollback, which is the half a unit test cannot show. A 422 that had
          * already sealed cycle 1 would leave a closed ticket nobody can reopen.
+         *
+         * <p><b>{@code IN_PROGRESS}, not {@code RESOLVED}.</b> This used to
+         * refuse a RESOLVED ticket, and RESOLVED is now a status
+         * {@code ReopenService} <em>accepts</em> — the Support desk refusing a
+         * sign-off starts a new cycle rather than a rework iteration
+         * ({@code REOPENABLE}'s own note, and {@code V20260826_2130} in the
+         * whitelist). Asserting a refusal on it tested a path the code no
+         * longer has.
+         *
+         * <p>What this test is actually for is unchanged: a ticket that is
+         * genuinely mid-attempt is still refused, and the refusal must leave
+         * nothing behind. {@code IN_PROGRESS} is one of the statuses
+         * {@code TicketNotClosedException}'s javadoc still names as refused,
+         * so the rollback is exercised exactly as before.
          */
         @Test
-        @DisplayName("RESOLVED is 422, and cycle 1 is still unsealed with no new cycle")
-        void resolvedRollsBackWhole() {
-            jdbc.update("UPDATE tickets SET status = 'RESOLVED' WHERE id = ?", ticketId);
+        @DisplayName("a mid-attempt ticket is 422, and cycle 1 is still unsealed with no new cycle")
+        void midAttemptRollsBackWhole() {
+            jdbc.update("UPDATE tickets SET status = 'IN_PROGRESS' WHERE id = ?", ticketId);
 
             assertThatThrownBy(() -> service.reopen(pm(), ticketCode, request()))
                     .isInstanceOf(TicketNotClosedException.class);
@@ -397,7 +411,7 @@ class ReopenIT {
             assertThat(cycleCount()).isEqualTo(1);
             assertThat(sealed((short) 1)).isFalse();
             assertThat(historyCount()).isZero();
-            assertThat(ticketRow().get("status")).isEqualTo("RESOLVED");
+            assertThat(ticketRow().get("status")).isEqualTo("IN_PROGRESS");
         }
 
         @Test

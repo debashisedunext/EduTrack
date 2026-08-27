@@ -122,6 +122,36 @@ public class ScopedTickets {
     }
 
     /**
+     * C-062 · the stage queue's page, scoped by {@link ScopeResolver#stageQueueScope}
+     * instead of by {@link ScopeResolver#ticketScope}.
+     *
+     * <p>A second door, and deliberately a door rather than a bypass. The stage
+     * queue genuinely needs a different rule — read
+     * {@link ScopeResolver#stageQueueScope}'s javadoc for why §10.2's
+     * {@code assigned_to = me} answers the opposite of S-31's question — and the
+     * two ways of giving it one are to add a named method here or to let the
+     * feature query {@code TicketRepository} itself under an
+     * {@link UnscopedAccess} that would not even be true, since this endpoint
+     * has a perfectly good caller to scope by.
+     *
+     * <p>Named for the one endpoint it serves, and not generalised. There is no
+     * {@code page(caller, scope, criteria, pageable)} taking the scope as an
+     * argument, because that is a method whose whole purpose is to let the
+     * caller choose their own scope — which is {@code TicketRepository} with
+     * extra ceremony. Adding a third rule means adding a third named method, in
+     * a diff, in this file, where a security reviewer is already looking.
+     *
+     * <p>Read-only by construction: this returns a page and there is no write
+     * counterpart. Whatever the queue lists, moving or claiming one of those
+     * tickets still goes through {@link #require}, and therefore still through
+     * §10.2.
+     */
+    public Page<Ticket> queuePage(Authentication caller, Specification<Ticket> criteria, Pageable pageable) {
+        Specification<Ticket> mandatory = scope.stageQueueScope(caller);
+        return tickets.findAll(criteria == null ? mandatory : mandatory.and(criteria), pageable);
+    }
+
+    /**
      * Counts only what the caller can see, which is what makes a list header
      * honest: a total that counted rows the body cannot show would tell a
      * Developer how many tickets exist in projects they have no access to.

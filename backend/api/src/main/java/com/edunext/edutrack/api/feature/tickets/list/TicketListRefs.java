@@ -51,7 +51,7 @@ import java.util.Set;
  * know.
  */
 @Component
-class TicketListRefs {
+public class TicketListRefs {
 
     private final UserRepository users;
     private final ProjectRepository projects;
@@ -76,7 +76,7 @@ class TicketListRefs {
      *             an unassigned ticket being the ordinary case rather than the
      *             exceptional one
      */
-    Resolved resolve(Collection<Ticket> page) {
+    public Resolved resolve(Collection<Ticket> page) {
         Set<Long> userIds = new HashSet<>();
         Set<Long> projectIds = new HashSet<>();
         Set<Long> clientIds = new HashSet<>();
@@ -153,7 +153,7 @@ class TicketListRefs {
      * @param projects the same, for {@code project_id}
      * @param clients  the same, for {@code client_id}
      */
-    record Resolved(Map<Long, TicketListDtos.UserRef> people,
+    public record Resolved(Map<Long, TicketListDtos.UserRef> people,
                     Map<Long, TicketListDtos.Project> projects,
                     Map<Long, TicketListDtos.ClientRef> clients) {
 

@@ -175,7 +175,86 @@ class RibbonAssemblerTest {
         assertThat(ribbon.currentStageCode()).isNull();
     }
 
+    // ── the cycle selector ───────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a past cycle reads its own hops, not the current cycle's")
+    void pastCycleReadsItsOwnHops() {
+        ticket.setCurrentCycleNo((short) 2);
+        // Cycle 1 finished: it walked the whole template. Cycle 2 restarted at
+        // TRIAGE and has not reached DEPLOY. Asking for cycle 1 must not
+        // answer with cycle 2's journey, which is what it used to do.
+        when(journal.hopsFor(TICKET, (short) 1)).thenReturn(List.of(
+                cycleHop((short) 1, "TRIAGE", (short) 1),
+                cycleHop((short) 1, "DEV", (short) 1),
+                cycleHop((short) 1, "QA", (short) 1),
+                cycleHop((short) 1, "DEPLOY", (short) 1)));
+        when(journal.effortFor(TICKET, (short) 1)).thenReturn(List.of());
+
+        RibbonWire.Ribbon ribbon = assembler.assemble(ticket, (short) 1, true);
+
+        assertThat(ribbon.cycleNo()).isEqualTo(1);
+        assertThat(ribbon.segments()).allSatisfy(segment ->
+                assertThat(segment.state()).isEqualTo(RibbonWire.SegmentState.COMPLETED));
+    }
+
+    @Test
+    @DisplayName("a past cycle is sealed, has no live stage and cannot be advanced")
+    void pastCycleIsReadOnly() {
+        ticket.setCurrentCycleNo((short) 2);
+        when(journal.hopsFor(TICKET, (short) 1)).thenReturn(List.of(cycleHop((short) 1, "DEPLOY", (short) 1)));
+        when(journal.effortFor(TICKET, (short) 1)).thenReturn(List.of());
+
+        // canAdvance true — the caller owns the ticket's *current* stage, which
+        // says nothing about a journey that already finished.
+        RibbonWire.Ribbon ribbon = assembler.assemble(ticket, (short) 1, true);
+
+        assertThat(ribbon.isSealed()).isTrue();
+        assertThat(ribbon.currentStageCode()).isNull();
+        assertThat(ribbon.canAdvance()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a past cycle reports its own final iteration, not the ticket's live counter")
+    void pastCycleReportsItsOwnIteration() {
+        ticket.setCurrentCycleNo((short) 2);
+        ticket.setCurrentIteration((short) 5);
+        when(journal.hopsFor(TICKET, (short) 1)).thenReturn(List.of(
+                cycleHop((short) 1, "DEV", (short) 1),
+                cycleHop((short) 1, "QA", (short) 2),
+                cycleHop((short) 1, "DEV", (short) 3)));
+        when(journal.effortFor(TICKET, (short) 1)).thenReturn(List.of());
+
+        RibbonWire.Ribbon ribbon = assembler.assemble(ticket, (short) 1, false);
+
+        assertThat(ribbon.iterationNo()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("the current cycle is unchanged — live stage, live iteration, caller's canAdvance")
+    void currentCycleIsUnchanged() {
+        ticket.setCurrentCycleNo((short) 2);
+        ticket.setCurrentIteration((short) 4);
+        when(journal.hopsFor(TICKET, (short) 2)).thenReturn(List.of(hop("QA", true, "FORWARD")));
+        when(journal.effortFor(TICKET, (short) 2)).thenReturn(List.of());
+
+        RibbonWire.Ribbon ribbon = assembler.assemble(ticket, (short) 2, true);
+
+        assertThat(ribbon.isSealed()).isFalse();
+        assertThat(ribbon.currentStageCode()).isEqualTo("QA");
+        assertThat(ribbon.canAdvance()).isTrue();
+        assertThat(ribbon.iterationNo()).isEqualTo(4);
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
+
+    /** A sealed hop belonging to {@code cycleNo}, carrying its own iteration. */
+    private static TicketStageTransition cycleHop(short cycleNo, String toStage, short iterationNo) {
+        TicketStageTransition h = hop(toStage, false, "FORWARD");
+        h.setCycleNo(cycleNo);
+        h.setIterationNo(iterationNo);
+        return h;
+    }
 
     private static RibbonWire.RibbonSegment segment(RibbonWire.Ribbon ribbon, String stageCode) {
         return ribbon.segments().stream()

@@ -7,11 +7,13 @@ import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.TicketNotFoundException;
 import com.edunext.edutrack.domain.identity.UserRepository;
 import com.edunext.edutrack.domain.journal.TicketJournal;
+import com.edunext.edutrack.domain.masters.WorkingHoursService;
 import com.edunext.edutrack.domain.tickets.Ticket;
 import com.edunext.edutrack.domain.tickets.TicketCycle;
 import com.edunext.edutrack.domain.tickets.TicketCycleRepository;
 import com.edunext.edutrack.domain.tickets.TicketEffortLog;
 import com.edunext.edutrack.domain.tickets.TicketHistory;
+import com.edunext.edutrack.domain.workflow.TicketStageTransition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -50,6 +52,7 @@ class CloseServiceTest {
     private static final long PROJECT = 8L;
     private static final long ACTOR = 12L;
     private static final long CYCLE_ASSIGNEE = 44L;
+    private static final long OPEN_HOP = 902L;
 
     /** No sub-microsecond digits: what the service stores is truncated to micros. */
     private static final Instant NOW = Instant.parse("2026-08-18T09:30:00Z");
@@ -75,8 +78,15 @@ class CloseServiceTest {
      */
     private final UserRepository users = mock(UserRepository.class);
 
+    /**
+     * Asked only for the terminal hop's working minutes when the close seals
+     * it. Stubbed in {@code setUp} so every existing test still reaches the
+     * seal without each one having to know the figure.
+     */
+    private final WorkingHoursService workingHours = mock(WorkingHoursService.class);
+
     private final CloseService service = new CloseService(
-            tickets, cycles, journal, eventNotifier, Clock.fixed(NOW, ZoneOffset.UTC), users);
+            tickets, cycles, journal, eventNotifier, workingHours, Clock.fixed(NOW, ZoneOffset.UTC), users);
 
     /**
      * The three-argument constructor is load-bearing — {@code ReopenServiceTest}'s
@@ -99,6 +109,9 @@ class CloseServiceTest {
 
         when(tickets.requireByCode(any(), eq(TICKET_CODE))).thenReturn(ticket);
         when(cycles.findByTicketIdAndCycleNo(TICKET, (short) 1)).thenReturn(Optional.of(cycle));
+        when(journal.openHopFor(TICKET)).thenReturn(Optional.of(openHop()));
+        when(workingHours.workingHoursBetween(any(), any(), any(), any()))
+                .thenReturn(new BigDecimal("4.50"));
     }
 
     // ── the ticket row ───────────────────────────────────────────────────────
@@ -373,6 +386,59 @@ class CloseServiceTest {
         }
     }
 
+    /**
+     * The ribbon's terminal hop — a close seals it, so the Closed segment stops
+     * drawing itself as the current one.
+     */
+    @Nested
+    @DisplayName("the ribbon's open hop")
+    class TerminalHop {
+
+        @Test
+        @DisplayName("is sealed at the close instant, in working minutes")
+        void sealsTheOpenHop() {
+            service.close(caller, TICKET_CODE, request());
+
+            // 4.50 working hours = 270 minutes, under the 300 elapsed.
+            verify(journal).seal(OPEN_HOP, NOW, 270);
+        }
+
+        @Test
+        @DisplayName("clamps the figure to the wall-clock ceiling rather than letting seal refuse it")
+        void clampsToWallClock() {
+            when(workingHours.workingHoursBetween(any(), any(), any(), any()))
+                    .thenReturn(new BigDecimal("9.00"));
+
+            service.close(caller, TICKET_CODE, request());
+
+            verify(journal).seal(OPEN_HOP, NOW, 300);
+        }
+
+        @Test
+        @DisplayName("a ticket with no open hop closes anyway — there is nothing to seal")
+        void noOpenHopIsNotAFailure() {
+            when(journal.openHopFor(TICKET)).thenReturn(Optional.empty());
+
+            service.close(caller, TICKET_CODE, request());
+
+            assertThat(ticket.getStatus()).isEqualTo("CLOSED");
+            verify(journal, never()).seal(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a hop left open on an earlier cycle is not sealed — it is not this close's to touch")
+        void doesNotSealAnotherCyclesHop() {
+            TicketStageTransition stale = openHop();
+            stale.setCycleNo((short) 0);
+            when(journal.openHopFor(TICKET)).thenReturn(Optional.of(stale));
+
+            service.close(caller, TICKET_CODE, request());
+
+            assertThat(ticket.getStatus()).isEqualTo("CLOSED");
+            verify(journal, never()).seal(any(), any(), any());
+        }
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
 
     private static CloseDtos.CloseRequest request() {
@@ -393,6 +459,23 @@ class CloseServiceTest {
         t.setCurrentCycleNo((short) 1);
         t.setPlannedCloseDate(Instant.parse("2026-08-20T12:00:00Z"));
         return t;
+    }
+
+    /**
+     * The ribbon's terminal hop, open — what a close now seals. Entered five
+     * clock hours before {@code NOW}, so the 4.50 working hours the calendar
+     * mock answers with are a subset of the elapsed span rather than above it,
+     * which is the one thing {@code TicketJournal.seal} refuses.
+     */
+    private TicketStageTransition openHop() {
+        TicketStageTransition hop = new TicketStageTransition();
+        hop.setId(OPEN_HOP);
+        hop.setTicketId(TICKET);
+        hop.setCycleNo((short) 1);
+        hop.setToStage("CLOSED");
+        hop.setToUserId(CYCLE_ASSIGNEE);
+        hop.setEnteredAt(NOW.minusSeconds(5 * 3600));
+        return hop;
     }
 
     private TicketCycle cycle() {

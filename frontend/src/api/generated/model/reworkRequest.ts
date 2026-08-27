@@ -51,8 +51,21 @@ import type { ReworkRequestToUserId } from './reworkRequestToUserId';
 import type { ReworkRequestEffortHours } from './reworkRequestEffortHours';
 
 export interface ReworkRequest {
-  /** Must be in the current stage's allowed return targets. */
-  toStageCode: string;
+  /** Must be in the current stage's allowed return targets
+(`workflow_stages.can_return_to`).
+
+**Optional.** Omitted, the server answers it when the stage
+declares exactly one target — which is what `ForceMoveRequest`
+below has always implied by saying "unlike `rework`/`skip` there
+is no default". Two or more targets is a real choice and is
+refused with 400 rather than guessed at.
+
+No client can compute this for itself: the template list does not
+serve a template's stages, `RibbonSegment` does not carry
+`canReturnTo`, and `Ribbon` carries no `templateId` to look one up
+with. The rule lives in `workflow_stages` and is read there.
+ */
+  toStageCode?: string;
   /**
    * @minLength 3
    * @maxLength 2000

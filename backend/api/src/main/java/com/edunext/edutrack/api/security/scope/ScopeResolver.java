@@ -101,6 +101,72 @@ public class ScopeResolver {
         };
     }
 
+    /**
+     * C-062 · the scope for the <b>stage queue</b>, and for nothing else.
+     *
+     * <p>{@link #ticketScope} is the rule for reading <em>a ticket</em>. This is
+     * the rule for reading <em>a team's queue</em>, and they are different
+     * questions because S-31 is a different shape from every other ticket read.
+     * §17 item 12 states the shape in its own words — <em>"QA and Deployment are
+     * queue-driven teams, not assignment-driven ones. Without a shared 'waiting
+     * in QA' list, tickets stall between the handoff and someone noticing"</em>
+     * — so {@code assigned_to = me} would return a QA resource exactly the
+     * tickets they are already holding and none of the ones waiting to be picked
+     * up. The screen would load, look correct, and answer the opposite of the
+     * question it was built to answer.
+     *
+     * <p>So the queue is scoped by <b>project membership</b>: Admin sees every
+     * project, everybody else sees the projects they are on. That is not a new
+     * decision here — {@code StageQueueSubscriptionScope} (D-059) made it for
+     * the matching WebSocket room and deferred this half in as many words:
+     * a subscriber "refetches {@code GET /stages/queue}, which applies whatever
+     * scope C-062 gives it". This is C-062 giving it, and the two now agree.
+     *
+     * <h2>Two narrowings that are part of the rule, not of the caller's filter</h2>
+     *
+     * <p>The endpoint requires a {@code stage} and excludes closed tickets, and
+     * both belong here in spirit even though they are expressed as criteria in
+     * {@code StageQueueSpecs}. Without the first this widening degrades into
+     * "every ticket on my projects", which is a different and much larger grant;
+     * without the second a queue would accumulate an archive.
+     *
+     * <h2>⚠ What this deliberately does NOT change</h2>
+     *
+     * <p>{@link #ticketScope} is untouched, so a Developer, QA or Deployment
+     * caller still reads a <em>ticket</em> at {@code assigned_to = me}. A queue
+     * row for an unassigned ticket is therefore visible in the list and its
+     * detail page still answers 404. That is the deliberate, narrower half of
+     * the decision: the queue's job is to show a team what is waiting so somebody
+     * claims it, and claiming it is an assignment, not a read. Widening
+     * {@link #ticketScope} to match would change every ticket read in the
+     * application and is a §10.2 deviation that belongs in PLAN.md §4 — raised
+     * rather than taken here.
+     *
+     * @return never {@code null}; an unidentifiable caller gets deny-all
+     */
+    public Specification<Ticket> stageQueueScope(Authentication authentication) {
+        return CallerIdentity.of(authentication)
+                .map(ScopeResolver::stageQueueScope)
+                .orElse(DENY_ALL);
+    }
+
+    /** As {@link #stageQueueScope(Authentication)}, from an identity directly. */
+    public static Specification<Ticket> stageQueueScope(CallerIdentity caller) {
+        return switch (caller.roleCode()) {
+            case RolePermissions.ADMIN -> UNRESTRICTED;
+            // Every other seeded role, by membership — including PM and Support,
+            // for whom this is identical to their §10.2 rule. Written as one
+            // branch rather than as "PM, SUPPORT, DEVELOPER, QA, DEPLOYMENT"
+            // because the queue's question really is the same one for all five,
+            // and an enumeration would invite the sixth role to be forgotten.
+            case RolePermissions.PM, RolePermissions.SUPPORT, RolePermissions.DEVELOPER,
+                 RolePermissions.QA, RolePermissions.DEPLOYMENT -> inProjects(caller.projectIds());
+            // Same reasoning as ticketScope: a role the §2 matrix does not
+            // contain is a misconfiguration, and the safe answer is nothing.
+            default -> DENY_ALL;
+        };
+    }
+
     private static Specification<Ticket> inProjects(Collection<Long> projectIds) {
         if (projectIds.isEmpty()) {
             return DENY_ALL;
