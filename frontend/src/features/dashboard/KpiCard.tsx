@@ -83,7 +83,11 @@ export function KpiCard({
         // answer to anything. The panel must show what the card means.
         openPanel(drillDown, label, value)
       }}
-      className="rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-4
+      // `min-w-0` for the reason `WidgetFrame` sets out at length. This card is
+      // a grid item too, and its `Sparkline` is a fixed-width 96px SVG, so the
+      // six-column row at `xl` cannot fall below six sparklines plus their
+      // labels without it. Less dramatic than the chart widgets, same defect.
+      className="min-w-0 rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-4
                  flex flex-col gap-2 transition-shadow hover:shadow-sm
                  focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
                  focus-visible:outline-[color:var(--primary)]"

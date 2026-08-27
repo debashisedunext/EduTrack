@@ -145,7 +145,28 @@ export const CHART_HEIGHT = 240
  */
 export function ChartCanvas({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ height: CHART_HEIGHT }} aria-hidden="true">
+    /*
+      `overflow-clip` is the second half of the sideways-scrolling fix, and it
+      is the half that holds when the first one is not enough.
+      `min-w-0` on the grid item (see `WidgetFrame` below) lets the *column*
+      shrink — but it does nothing about an SVG that has already been painted
+      wider than this box. Recharts measures on mount and again through a
+      ResizeObserver, and a measurement taken before the shell has settled
+      leaves an `<svg width="1486">` sitting inside a 600px widget. Nothing is
+      drawn out there — the bars and axes are all at the left — so the page
+      shows no wider content, it just scrolls as if it had some, and the
+      heading and the first KPI card slide off the left edge.
+
+      This box is a fixed-height, `aria-hidden` decorative frame. Nothing it
+      contains has any business painting outside it, so clipping is the honest
+      description of what it is rather than a patch over the symptom.
+
+      `overflow-clip` rather than `overflow-hidden`, for the reason AppShell
+      records at the shell root: both clip identically, but `hidden` also
+      establishes a scroll container, and the browser's native focus-scroll
+      walks up to the nearest one. `clip` establishes nothing to find.
+    */
+    <div className="overflow-clip" style={{ height: CHART_HEIGHT }} aria-hidden="true">
       {children}
     </div>
   )
@@ -215,7 +236,20 @@ export function WidgetFrame({
       // The symptom is two scrollbars on the dashboard and a page that scrolls
       // well past the end of the app shell into empty space. Positioning the
       // section puts the table back inside the scroller where it belongs.
-      className={`relative rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-4
+      // `min-w-0` is the other half of the sideways-scrolling fix, and it is
+      // as load-bearing as the `relative` above. A grid item's `min-width`
+      // defaults to `auto`, so it refuses to shrink below its own min-content
+      // width — and `ResponsiveContainer` measures this box, then renders an
+      // `<svg width="712">` inside it. That SVG is replaced content with an
+      // intrinsic width, so from the second render onwards the column's floor
+      // *is* whatever width the chart last happened to be drawn at, and the
+      // grid can only ever grow from there.
+      //
+      // `min-width: 0` decouples the used width from min-content, which is
+      // what lets the container's ResizeObserver re-measure smaller and redraw
+      // the SVG to fit. `ChartCanvas` clips whatever is still too wide while
+      // that settles.
+      className={`relative min-w-0 rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-4
                   flex flex-col gap-3 ${wide ? 'xl:col-span-2' : ''}
                   ${reorder?.isDragging ? 'opacity-50' : ''}
                   ${
