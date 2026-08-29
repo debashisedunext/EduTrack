@@ -49,6 +49,7 @@ import { ReportsHubPage } from './features/reports/ReportsHubPage'
 import { ReportViewerPage } from './features/reports/ReportViewerPage'
 import { ScheduledReportsPage } from './features/reports/ScheduledReportsPage'
 import { ResourceProfilePage } from './features/resources/ResourceProfilePage'
+import { SettingsPage } from './features/settings/SettingsPage'
 
 export default function App() {
   return (
@@ -267,21 +268,22 @@ export default function App() {
                 the path is unchanged. */}
             <Route path="/masters/clients/import" element={<ClientImportPage />} />
             <Route path="/masters/clients/:clientId/edit" element={<ClientFormPage />} />
-            {/* B-068 · DEPENDENCIES.md row 24, decided rather than built. C-027
-                shipped `GET/PUT /attachments/limits` — the only org-wide
-                setting the product currently has — as an API and stopped
-                there, because no S-number specifies this screen. The sidebar
-                entry stays; the placeholder now says why there is no page
-                behind it instead of promising one a later task would build. */}
-            <Route
-              path="/settings"
-              element={
-                <ScreenPlaceholder
-                  title="Settings"
-                  description="There is no settings screen. Attachment limits — the only org-wide setting today — are configured through the API (PUT /attachments/limits) by an administrator."
-                />
-              }
-            />
+            {/* The personal half of Settings — profile, password, 2FA, theme
+                and the browser-push switch.
+
+                **B-068's decision is not reversed.** That task declined an
+                *org* settings screen around `PUT /attachments/limits`
+                (DEPENDENCIES.md row 24), and attachment limits are still not
+                here; that row stands untouched. What this replaces is the
+                consequence nobody chose — a sidebar entry every role can see,
+                leading to an empty state, while `POST /me/2fa/*` sat
+                implemented and reachable from no screen at all.
+
+                One route, three tabs, `?tab=` for linkability. The two tabs
+                that are missing — S-26's notification matrix and, if it is ever
+                revisited, Organisation — are named in `SettingsPage`'s comment
+                with whose they are. */}
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />
           </Route>
         </Route>
