@@ -1,8 +1,12 @@
 package com.edunext.edutrack.api.feature.tickets.list;
 
 import com.edunext.edutrack.common.pagination.Cursor;
+import com.edunext.edutrack.domain.masters.Status;
 import com.edunext.edutrack.domain.tickets.Ticket;
+import com.edunext.edutrack.domain.tickets.TicketCycle;
+import com.edunext.edutrack.domain.workflow.WorkflowStage;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -187,7 +191,33 @@ final class TicketListSpecs {
                         : cb.disjunction());
             }
             eq(and, cb, root, "level", f.level());
-            eq(and, cb, root, "status", f.status());
+
+            // Dashboard Rework Dev 1, PR 5 · `statusCategory` narrows to a whole
+            // work category (TODO is "not started" — NEW or REOPENED; IN_PROGRESS
+            // is the whole WIP category), which `status` cannot express since it
+            // takes one code. A correlated subquery over `statuses` rather than a
+            // hardcoded code list, for the same reason B-039 gave `category` its
+            // own column: a category's membership is the master's call, not this
+            // query's.
+            if (notBlank(f.statusCategory())) {
+                Subquery<String> categoryCodes = query.subquery(String.class);
+                var status = categoryCodes.from(Status.class);
+                categoryCodes.select(status.get("code"))
+                        .where(cb.equal(status.get("category"), f.statusCategory()));
+                and.add(root.get("status").in(categoryCodes));
+            }
+
+            // `status` names exactly one code; `statuses` is several at once, for
+            // a figure that counts an explicit set rather than a category — the
+            // Blocked card is `ON_HOLD,AWAITING_INFO`. The contract states
+            // `statuses` is ignored when `status` is also sent, so `status` wins
+            // outright rather than the two being ANDed into an impossible pair.
+            if (notBlank(f.status())) {
+                and.add(cb.equal(root.get("status"), f.status()));
+            } else if (f.statuses() != null && !f.statuses().isEmpty()) {
+                and.add(root.get("status").in(f.statuses()));
+            }
+
             eq(and, cb, root, "currentStage", f.stage());
             eq(and, cb, root, "assignedTo", f.assigneeId());
             eq(and, cb, root, "isDelayed", f.isDelayed());
@@ -215,6 +245,42 @@ final class TicketListSpecs {
             // over the wrong span: all time, silently.
             atOrAfter(and, cb, root, "dateReported", f.reportedFrom());
             before(and, cb, root, "dateReported", f.reportedTo());
+
+            // Dashboard Rework Dev 1, PR 5 · backs the Today tab's "updated
+            // today" and "WIP not updated" figures.
+            atOrAfter(and, cb, root, "updatedAt", f.updatedFrom());
+            before(and, cb, root, "updatedAt", f.updatedTo());
+
+            // `startedAt`/`finishedAt` read the *current cycle's* per-cycle
+            // stamps (ticket_cycles, PR 3), not a ticket-level column — a
+            // reopened ticket starts and finishes again in its new cycle, and a
+            // ticket-level column would count it once and for ever. Expressed as
+            // an EXISTS against the one cycle row that matches
+            // (ticketId, currentCycleNo) rather than a join, for the same reason
+            // `statusCategory` above is a subquery: nothing else in this
+            // specification joins another table, and an EXISTS keeps that true.
+            if (f.startedFrom() != null || f.startedTo() != null) {
+                and.add(currentCycleWindow(cb, query, root, "startedAt", f.startedFrom(), f.startedTo()));
+            }
+            if (f.finishedFrom() != null || f.finishedTo() != null) {
+                and.add(currentCycleWindow(cb, query, root, "finishedAt", f.finishedFrom(), f.finishedTo()));
+            }
+
+            // The Pending Review population, resolved from the stage master
+            // rather than a hardcoded VERIFY/SIGNOFF — see
+            // `workflow_stages.is_review_stage`'s own migration note. "RESOLVED
+            // but not CLOSED" is exactly `status = RESOLVED`: the two are
+            // different values of the same column, so RESOLVED already excludes
+            // CLOSED without a second predicate.
+            if (Boolean.TRUE.equals(f.pendingReview())) {
+                Subquery<String> reviewStages = query.subquery(String.class);
+                var stage = reviewStages.from(WorkflowStage.class);
+                reviewStages.select(stage.get("stageCode")).where(cb.isTrue(stage.get("isReviewStage")));
+
+                and.add(cb.or(
+                        cb.equal(root.get("status"), "RESOLVED"),
+                        root.get("currentStage").in(reviewStages)));
+            }
 
             return and.isEmpty() ? null : cb.and(and.toArray(Predicate[]::new));
         };
@@ -247,6 +313,31 @@ final class TicketListSpecs {
         return s != null && !s.isBlank();
     }
 
+    /**
+     * {@code EXISTS (SELECT 1 FROM ticket_cycles WHERE ticket_id = ? AND
+     * cycle_no = <this ticket's current cycle> AND <attribute> BETWEEN …)}
+     * — see {@link #filters}' own note on why an EXISTS and not a join.
+     */
+    private static Predicate currentCycleWindow(jakarta.persistence.criteria.CriteriaBuilder cb,
+                                                jakarta.persistence.criteria.CriteriaQuery<?> query,
+                                                jakarta.persistence.criteria.Root<Ticket> root,
+                                                String attribute, LocalDate from, LocalDate to) {
+        Subquery<Long> sub = query.subquery(Long.class);
+        var cycle = sub.from(TicketCycle.class);
+
+        List<Predicate> where = new ArrayList<>();
+        where.add(cb.equal(cycle.get("ticketId"), root.get("id")));
+        where.add(cb.equal(cycle.get("cycleNo"), root.get("currentCycleNo")));
+        if (from != null) {
+            where.add(cb.greaterThanOrEqualTo(cycle.get(attribute), from.atStartOfDay().toInstant(ZoneOffset.UTC)));
+        }
+        if (to != null) {
+            where.add(cb.lessThan(cycle.get(attribute), to.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC)));
+        }
+        sub.select(cycle.get("id")).where(where.toArray(Predicate[]::new));
+        return cb.exists(sub);
+    }
+
     /** Every filter the contract declares, so the controller signature stays readable. */
     record Filters(
             String q,
@@ -269,6 +360,16 @@ final class TicketListSpecs {
             LocalDate closedFrom,
             LocalDate closedTo,
             LocalDate reportedFrom,
-            LocalDate reportedTo) {
+            LocalDate reportedTo,
+            /** Dashboard Rework Dev 1, PR 5 · see {@link #filters} for all seven below. */
+            String statusCategory,
+            List<String> statuses,
+            LocalDate updatedFrom,
+            LocalDate updatedTo,
+            LocalDate startedFrom,
+            LocalDate startedTo,
+            LocalDate finishedFrom,
+            LocalDate finishedTo,
+            Boolean pendingReview) {
     }
 }

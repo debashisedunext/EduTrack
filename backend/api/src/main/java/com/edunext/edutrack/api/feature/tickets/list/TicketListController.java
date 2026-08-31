@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * {@code GET /tickets} — S-17's server side.
@@ -85,12 +86,25 @@ class TicketListController {
             // about which date it means.
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportedFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportedTo,
+            // Dashboard Rework Dev 1, PR 5 · the seven Today/Weekly drill-down
+            // parameters — see TicketListSpecs.filters for what each narrows.
+            @RequestParam(required = false) String statusCategory,
+            @RequestParam(required = false) List<String> statuses,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate updatedFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate updatedTo,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startedFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startedTo,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate finishedFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate finishedTo,
+            @RequestParam(required = false) Boolean pendingReview,
             @RequestParam(required = false) String sort) {
 
         TicketListSpecs.Filters filters = new TicketListSpecs.Filters(
                 q, projectId, clientId, taskTypeId, moduleId, level, status, stage, assigneeId,
                 isDelayed, isClientRaised, reopenedOnly, unassigned, excludeClosed,
-                dueFrom, dueTo, closedFrom, closedTo, reportedFrom, reportedTo);
+                dueFrom, dueTo, closedFrom, closedTo, reportedFrom, reportedTo,
+                statusCategory, statuses, updatedFrom, updatedTo,
+                startedFrom, startedTo, finishedFrom, finishedTo, pendingReview);
 
         CursorPage<TicketListDtos.TicketSummary> page =
                 list.list(caller, filters, sort, cursor, limit);
