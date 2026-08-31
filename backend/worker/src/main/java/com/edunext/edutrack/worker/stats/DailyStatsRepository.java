@@ -324,6 +324,190 @@ class DailyStatsRepository {
     }
 
     /**
+     * Dashboard Rework PR 4 · the Today's Progress cards' fourteen counters
+     * plus {@code open_by_role}, as a second pass over the rows {@link
+     * #refreshTicketStats} has just written — the {@link #refreshTypeCounts}
+     * shape, for the identical reason: reading {@code tickets} again from
+     * inside that method's {@code INSERT … SELECT} is the correlated-read
+     * that deadlocked A-056 against the shared locks the insert already
+     * holds.
+     *
+     * <h2>WIP excludes ON_HOLD / AWAITING_INFO on purpose</h2>
+     *
+     * <p>The plan's shorthand is "WIP = category IN_PROGRESS", and that
+     * category also holds ON_HOLD and AWAITING_INFO (B-039's backfill).
+     * Those two are the {@code blocked_*} card instead — precedent already
+     * set by {@link #refreshResourceStats}' {@code assigned_in_progress},
+     * which narrows the same category to {@code status IN ('IN_PROGRESS',
+     * 'REWORK')} for the identical reason: a paused ticket is not being
+     * worked, and folding it into "WIP" would overstate a team's live load
+     * on the one card meant to show it honestly.
+     *
+     * <h2>Two different "today"s, and why {@code wip_delayed} keeps the
+     * older boundary while {@code ns_overdue} needs a different one</h2>
+     *
+     * <p>{@code ns_overdue} ("overdue to start") and {@code ns_due_today}
+     * must be disjoint, so a not-started ticket due today reads as due, not
+     * overdue — {@code ns_overdue} is therefore {@code planned_close_date <
+     * dayStart} (due before today began), leaving {@code [dayStart, dayEnd)}
+     * for {@code ns_due_today}. {@code wip_delayed} has no matching
+     * "WIP due today" bucket to make room for, so it keeps the class's
+     * established {@code < dayEnd} boundary (the same one {@code
+     * open_delayed} and {@code is_delayed} already use) — a WIP ticket due
+     * at any point today is already late, not merely at risk.
+     *
+     * <h2>{@code wip_near_delay} is the gap {@code wip_delayed} leaves</h2>
+     *
+     * <p>"Due on or before the next working day" (the plan's own words),
+     * computed from a {@code nextWorkingDay} the caller passes in — see
+     * {@link WorkingHoursService#nextWorkingDay}. Because {@code
+     * wip_delayed} already claims everything due through the end of today,
+     * {@code wip_near_delay} only ever starts at {@code dayEnd}: on an
+     * ordinary weekday the two windows differ by exactly one day, and the
+     * only time this matters is a ticket due Saturday showing as near-delay
+     * on Friday, because Monday — not Saturday — is the next working day.
+     *
+     * <h2>{@code wip_updated_today} answers no question about the past</h2>
+     *
+     * <p>{@code tickets.updated_at} carries no history — the class note
+     * already says this of {@code assigned_to} and {@code
+     * planned_close_date} — so a day other than the one this pass is
+     * actually running on gets {@code NULL}, not a wrong count. {@code day}
+     * and {@code today} are the same value on every call except inside
+     * backfill, which is the only place they can differ.
+     *
+     * <h2>{@code pending_review} reads the stage master, never a stage code</h2>
+     *
+     * <p>{@code workflow_stages.is_review_stage} (V20260831_1615, PR 5) is what
+     * makes "never hardcode VERIFY/SIGNOFF" true here — a ticket qualifies
+     * either by status ({@code RESOLVED}, work claimed done but not yet
+     * closed) or by sitting in whichever stage ITS OWN template flags as a
+     * review gate, and the two are combined with {@code OR} rather than
+     * summed so a ticket resolved and awaiting sign-off is not counted
+     * twice.
+     *
+     * <h2>{@code started_today} / {@code finished_*} read {@code
+     * ticket_cycles}, not {@code tickets}</h2>
+     *
+     * <p>Per V20260831_1400's stamps, so a reopened ticket's new cycle
+     * counts again rather than staying permanently "finished". The
+     * early/on-time/late split is a judgement call in the same spirit as
+     * B-039's status-category backfill: "late" is anything that missed its
+     * own cycle's {@code planned_close_date}; "on time" is everything that
+     * did not, including a cycle with no commitment at all; "early" narrows
+     * "on time" further, to a cycle that finished on an earlier CALENDAR DAY
+     * than its due date rather than merely before its due instant — finished
+     * an hour ahead of a same-day deadline reads as "on time", not "early".
+     *
+     * <h2>{@code open_by_role} — same population as {@code open_total}, cut
+     * a different way</h2>
+     *
+     * <p>Keyed by {@code roles.code}, with the literal string {@code
+     * "UNASSIGNED"} for {@code assigned_to IS NULL} — not a role, and
+     * deliberately not folded into one, because "nobody holds this" is a
+     * different fact from "the smallest role holds this". {@code NULL}
+     * rather than {@code '{}'} for a project with nothing open, matching
+     * {@code type_counts} and {@code wip_by_stage}.
+     *
+     * @param day         the date being (re)computed
+     * @param today       the actual current day, per the worker's clock —
+     *                    equal to {@code day} outside a backfill pass
+     * @param computedAt  stamped into every row this pass touches
+     */
+    int refreshTodayStats(LocalDate day, LocalDate today, Instant computedAt) {
+        LocalDate nextWorkingDay = workingHours.nextWorkingDay(day);
+        return jdbc.sql("""
+                UPDATE daily_ticket_stats s
+                   LEFT JOIN (
+                       SELECT t.project_id,
+                           SUM(o.open_at_eod AND t.status IN ('NEW', 'REOPENED')) AS ns_total,
+                           SUM(o.open_at_eod AND t.status IN ('NEW', 'REOPENED')
+                               AND t.planned_close_date < :dayStart) AS ns_overdue,
+                           SUM(o.open_at_eod AND t.status IN ('NEW', 'REOPENED')
+                               AND t.planned_close_date >= :dayStart
+                               AND t.planned_close_date < :dayEnd) AS ns_due_today,
+                           SUM(o.open_at_eod AND t.status IN ('IN_PROGRESS', 'REWORK')) AS wip_total,
+                           SUM(o.open_at_eod AND t.status IN ('IN_PROGRESS', 'REWORK')
+                               AND t.updated_at >= :dayStart AND t.updated_at < :dayEnd) AS wip_updated_today,
+                           SUM(o.open_at_eod AND t.status IN ('IN_PROGRESS', 'REWORK')
+                               AND t.planned_close_date >= :dayEnd
+                               AND t.planned_close_date < :nearDelayEnd) AS wip_near_delay,
+                           SUM(o.open_at_eod AND t.status IN ('IN_PROGRESS', 'REWORK')
+                               AND t.planned_close_date < :dayEnd) AS wip_delayed,
+                           SUM(o.open_at_eod AND t.status = 'ON_HOLD') AS blocked_on_hold,
+                           SUM(o.open_at_eod AND t.status = 'AWAITING_INFO') AS blocked_awaiting_info,
+                           SUM(o.open_at_eod AND (t.status = 'RESOLVED'
+                               OR COALESCE(ws.is_review_stage, 0) = 1)) AS pending_review
+                         FROM tickets t
+                         LEFT JOIN LATERAL (
+                             SELECT (t.date_reported < :dayEnd
+                                     AND (t.actual_close_date IS NULL OR t.actual_close_date >= :dayEnd))
+                                    AS open_at_eod
+                         ) o ON TRUE
+                         LEFT JOIN workflow_stages ws
+                           ON ws.template_id = t.workflow_template_id AND ws.stage_code = t.current_stage
+                        GROUP BY t.project_id
+                   ) counts ON counts.project_id = s.project_id
+                   LEFT JOIN (
+                       SELECT ct.project_id,
+                           SUM(c.started_at >= :dayStart AND c.started_at < :dayEnd) AS started_today,
+                           SUM(c.finished_at >= :dayStart AND c.finished_at < :dayEnd
+                               AND c.planned_close_date IS NOT NULL
+                               AND c.finished_at <= c.planned_close_date
+                               AND DATE(c.finished_at) < DATE(c.planned_close_date)) AS finished_early,
+                           SUM(c.finished_at >= :dayStart AND c.finished_at < :dayEnd
+                               AND (c.planned_close_date IS NULL
+                                    OR (c.finished_at <= c.planned_close_date
+                                        AND DATE(c.finished_at) = DATE(c.planned_close_date))))
+                               AS finished_on_time,
+                           SUM(c.finished_at >= :dayStart AND c.finished_at < :dayEnd
+                               AND c.planned_close_date IS NOT NULL
+                               AND c.finished_at > c.planned_close_date) AS finished_late
+                         FROM ticket_cycles c
+                         JOIN tickets ct ON ct.id = c.ticket_id
+                        GROUP BY ct.project_id
+                   ) cycles ON cycles.project_id = s.project_id
+                   LEFT JOIN (
+                       SELECT g.project_id, JSON_OBJECTAGG(g.role_code, g.cnt) AS counts
+                         FROM (SELECT t.project_id,
+                                      COALESCE(r.code, 'UNASSIGNED') AS role_code,
+                                      COUNT(*) AS cnt
+                                 FROM tickets t
+                                 LEFT JOIN users u ON u.id = t.assigned_to
+                                 LEFT JOIN roles r ON r.id = u.role_id
+                                WHERE t.date_reported < :dayEnd
+                                  AND (t.actual_close_date IS NULL OR t.actual_close_date >= :dayEnd)
+                                GROUP BY t.project_id, COALESCE(r.code, 'UNASSIGNED')) g
+                        GROUP BY g.project_id
+                   ) roleCounts ON roleCounts.project_id = s.project_id
+                   SET s.ns_total               = COALESCE(counts.ns_total, 0),
+                       s.ns_overdue             = COALESCE(counts.ns_overdue, 0),
+                       s.ns_due_today           = COALESCE(counts.ns_due_today, 0),
+                       s.wip_total              = COALESCE(counts.wip_total, 0),
+                       s.wip_updated_today      = CASE WHEN :day = :today
+                                                        THEN COALESCE(counts.wip_updated_today, 0)
+                                                        ELSE NULL END,
+                       s.wip_near_delay         = COALESCE(counts.wip_near_delay, 0),
+                       s.wip_delayed            = COALESCE(counts.wip_delayed, 0),
+                       s.blocked_on_hold        = COALESCE(counts.blocked_on_hold, 0),
+                       s.blocked_awaiting_info  = COALESCE(counts.blocked_awaiting_info, 0),
+                       s.pending_review         = COALESCE(counts.pending_review, 0),
+                       s.started_today          = COALESCE(cycles.started_today, 0),
+                       s.finished_early         = COALESCE(cycles.finished_early, 0),
+                       s.finished_on_time       = COALESCE(cycles.finished_on_time, 0),
+                       s.finished_late          = COALESCE(cycles.finished_late, 0),
+                       s.open_by_role           = roleCounts.counts
+                 WHERE s.stat_date = :day
+                """)
+                .param("day", day)
+                .param("today", today)
+                .param("dayStart", day.atStartOfDay())
+                .param("dayEnd", day.plusDays(1).atStartOfDay())
+                .param("nearDelayEnd", nextWorkingDay.plusDays(1).atStartOfDay())
+                .update();
+    }
+
+    /**
      * Recompute {@code resource_daily_stats} for one date.
      *
      * <p>Only users who did something or hold something are given a row —
@@ -353,9 +537,27 @@ class DailyStatsRepository {
      * autocommitted statements — and every dashboard reading that day in the
      * gap between them would see the resource widgets empty. The class itself
      * is package-private, so this widens nothing outside {@code stats}.
+     *
+     * <h2>Dashboard Rework PR 4's fourteen columns, added to the same
+     * INSERT rather than a second pass</h2>
+     *
+     * <p>Unlike {@link #refreshTodayStats}, no correlated re-read of
+     * {@code tickets} is involved: every new figure joins into the same
+     * derived tables this statement already builds ({@code a} for the
+     * status-based counters, a new {@code rc} for the cycle-based ones), so
+     * there is no lock contention to dodge and no reason to split the write.
+     * {@code wip_updated_today} keeps the project table's "only for the
+     * actual current day" rule, expressed as {@code 0} rather than
+     * {@code NULL} because this column is {@code NOT NULL} — see the
+     * migration header for why the two tables answer "not computed" two
+     * different ways. {@code pending_review} resolves through {@code
+     * workflow_stages.is_review_stage} exactly as {@link #refreshTodayStats}
+     * does, against {@code tickets.current_stage} — today's stage, since
+     * this table already accepts {@code tickets.assigned_to}'s lack of
+     * history as its standing caveat.
      */
     @Transactional
-    public int refreshResourceStats(LocalDate day, Instant computedAt) {
+    public int refreshResourceStats(LocalDate day, LocalDate today, Instant computedAt) {
         jdbc.sql("DELETE FROM resource_daily_stats WHERE stat_date = :day")
                 .param("day", day)
                 .update();
@@ -368,6 +570,10 @@ class DailyStatsRepository {
                     assigned_aging_0_2, assigned_aging_3_7,
                     assigned_aging_8_30, assigned_aging_31_plus,
                     assigned_due_today, assigned_due_next_7,
+                    ns_total, ns_overdue, ns_due_today,
+                    wip_total, wip_updated_today, wip_near_delay, wip_delayed,
+                    started_today, finished_early, finished_on_time, finished_late,
+                    blocked_on_hold, blocked_awaiting_info, pending_review,
                     computed_at)
                 SELECT :day, u.id,
                     COALESCE(c.closed, 0),
@@ -382,6 +588,20 @@ class DailyStatsRepository {
                     COALESCE(a.aging_31_plus, 0),
                     COALESCE(a.due_today, 0),
                     COALESCE(a.due_next_7, 0),
+                    COALESCE(a.ns_total, 0),
+                    COALESCE(a.ns_overdue, 0),
+                    COALESCE(a.ns_due_today, 0),
+                    COALESCE(a.wip_total, 0),
+                    CASE WHEN :day = :today THEN COALESCE(a.wip_updated_today, 0) ELSE 0 END,
+                    COALESCE(a.wip_near_delay, 0),
+                    COALESCE(a.wip_delayed, 0),
+                    COALESCE(rc.started_today, 0),
+                    COALESCE(rc.finished_early, 0),
+                    COALESCE(rc.finished_on_time, 0),
+                    COALESCE(rc.finished_late, 0),
+                    COALESCE(a.blocked_on_hold, 0),
+                    COALESCE(a.blocked_awaiting_info, 0),
+                    COALESCE(a.pending_review, 0),
                     :computedAt
                 FROM users u
                 LEFT JOIN (
@@ -456,16 +676,70 @@ class DailyStatsRepository {
                            -- construction, which is the containment the two
                            -- labels claim.
                            SUM(planned_close_date >= :dayStart
-                               AND planned_close_date < :weekEnd) AS due_next_7
+                               AND planned_close_date < :weekEnd) AS due_next_7,
+                           -- Dashboard Rework PR 4 · the same status-category
+                           -- split refreshTodayStats uses, over the identical
+                           -- open-and-assigned population this subquery
+                           -- already scopes — see that method for the
+                           -- boundary choices (ns_overdue vs ns_due_today;
+                           -- wip_delayed vs wip_near_delay).
+                           SUM(status IN ('NEW', 'REOPENED')) AS ns_total,
+                           SUM(status IN ('NEW', 'REOPENED')
+                               AND planned_close_date < :dayStart) AS ns_overdue,
+                           SUM(status IN ('NEW', 'REOPENED')
+                               AND planned_close_date >= :dayStart
+                               AND planned_close_date < :dayEnd) AS ns_due_today,
+                           SUM(status IN ('IN_PROGRESS', 'REWORK')) AS wip_total,
+                           SUM(status IN ('IN_PROGRESS', 'REWORK')
+                               AND updated_at >= :dayStart AND updated_at < :dayEnd) AS wip_updated_today,
+                           SUM(status IN ('IN_PROGRESS', 'REWORK')
+                               AND planned_close_date >= :dayEnd
+                               AND planned_close_date < :nearDelayEnd) AS wip_near_delay,
+                           SUM(status IN ('IN_PROGRESS', 'REWORK')
+                               AND planned_close_date < :dayEnd) AS wip_delayed,
+                           SUM(status = 'ON_HOLD') AS blocked_on_hold,
+                           SUM(status = 'AWAITING_INFO') AS blocked_awaiting_info,
+                           SUM(status = 'RESOLVED' OR COALESCE(ws.is_review_stage, 0) = 1)
+                               AS pending_review
                       FROM tickets
+                      LEFT JOIN workflow_stages ws
+                        ON ws.template_id = tickets.workflow_template_id
+                       AND ws.stage_code = tickets.current_stage
                      WHERE assigned_to IS NOT NULL
                        AND date_reported < :dayEnd
                        AND (actual_close_date IS NULL OR actual_close_date >= :dayEnd)
                      GROUP BY assigned_to
                 ) a ON a.uid = u.id
-                WHERE c.uid IS NOT NULL OR e.uid IS NOT NULL OR a.uid IS NOT NULL
+                LEFT JOIN (
+                    -- Dashboard Rework PR 4 · attributed to whoever
+                    -- ticket_cycles.assigned_to names for THAT cycle, not to
+                    -- tickets.assigned_to today — the one figure on this
+                    -- table that is faithfully historical rather than
+                    -- resting on the class's standing "not faithful —
+                    -- assigned_to" caveat, because a sealed cycle row never
+                    -- changes who it names.
+                    SELECT c.assigned_to AS uid,
+                           SUM(c.started_at >= :dayStart AND c.started_at < :dayEnd) AS started_today,
+                           SUM(c.finished_at >= :dayStart AND c.finished_at < :dayEnd
+                               AND c.planned_close_date IS NOT NULL
+                               AND c.finished_at <= c.planned_close_date
+                               AND DATE(c.finished_at) < DATE(c.planned_close_date)) AS finished_early,
+                           SUM(c.finished_at >= :dayStart AND c.finished_at < :dayEnd
+                               AND (c.planned_close_date IS NULL
+                                    OR (c.finished_at <= c.planned_close_date
+                                        AND DATE(c.finished_at) = DATE(c.planned_close_date))))
+                               AS finished_on_time,
+                           SUM(c.finished_at >= :dayStart AND c.finished_at < :dayEnd
+                               AND c.planned_close_date IS NOT NULL
+                               AND c.finished_at > c.planned_close_date) AS finished_late
+                      FROM ticket_cycles c
+                     WHERE c.assigned_to IS NOT NULL
+                     GROUP BY c.assigned_to
+                ) rc ON rc.uid = u.id
+                WHERE c.uid IS NOT NULL OR e.uid IS NOT NULL OR a.uid IS NOT NULL OR rc.uid IS NOT NULL
                 """)
                 .param("day", day)
+                .param("today", today)
                 .param("dayStart", day.atStartOfDay())
                 .param("dayEnd", day.plusDays(1).atStartOfDay())
                 // A-062 · the exclusive upper bound of "today plus six more
@@ -474,6 +748,11 @@ class DailyStatsRepository {
                 // 17:00 on the seventh day is inside the week and `< day+6`
                 // would drop it.
                 .param("weekEnd", day.plusDays(7).atStartOfDay())
+                // Dashboard Rework PR 4 · through the end of the next working
+                // day, computed once by the caller — see WorkingHoursService
+                // .nextWorkingDay and refreshTodayStats' own note on why this
+                // starts at dayEnd rather than dayStart.
+                .param("nearDelayEnd", workingHours.nextWorkingDay(day).plusDays(1).atStartOfDay())
                 .param("computedAt", computedAt)
                 .update();
     }
