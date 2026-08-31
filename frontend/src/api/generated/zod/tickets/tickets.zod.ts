@@ -88,6 +88,15 @@ export const listTicketsQueryParams = zod.object({
   "closedTo": zod.string().date().optional().describe('Filters on actualCloseDate, inclusive.'),
   "reportedFrom": zod.string().date().optional().describe('Filters on dateReported, inclusive.'),
   "reportedTo": zod.string().date().optional().describe('Filters on dateReported, inclusive.'),
+  "statusCategory": zod.enum(['TODO', 'IN_PROGRESS', 'DONE']).optional().describe('Narrows to one work category. TODO is \"not started\" (NEW, REOPENED), IN_PROGRESS is \"WIP\". Not a synonym for `excludeClosed` — RESOLVED is category DONE while its ticket record is still open.\n'),
+  "statuses": zod.array(zod.enum(['NEW', 'IN_PROGRESS', 'ON_HOLD', 'AWAITING_INFO', 'REWORK', 'RESOLVED', 'CLOSED', 'REOPENED'])).optional().describe('Several status codes at once, comma-separated. Use where a figure counts an explicit set rather than a whole category — the Blocked card is `ON_HOLD,AWAITING_INFO` and nothing else. Ignored when `status` is also sent, which names exactly one.\n'),
+  "updatedFrom": zod.string().date().optional().describe('Filters on updatedAt, inclusive. Backs the \"updated today\" and \"not updated\" figures.'),
+  "updatedTo": zod.string().date().optional().describe('Filters on updatedAt, inclusive.'),
+  "startedFrom": zod.string().date().optional().describe('Filters on the current cycle\'s startedAt, inclusive.'),
+  "startedTo": zod.string().date().optional().describe('Filters on the current cycle\'s startedAt, inclusive.'),
+  "finishedFrom": zod.string().date().optional().describe('Filters on the current cycle\'s finishedAt, inclusive.'),
+  "finishedTo": zod.string().date().optional().describe('Filters on the current cycle\'s finishedAt, inclusive.'),
+  "pendingReview": zod.boolean().optional().describe('True returns the Pending Review population as one set: RESOLVED but not CLOSED, \*\*plus\*\* tickets sitting in a stage the stage master marks as review. A ticket that is both is returned once. The review stages come from the master, never a hardcoded VERIFY\/SIGNOFF list, so a project that renames its sign-off stage keeps working.\n'),
   "sort": zod.string().default(listTicketsQuerySortDefault)
 })
 

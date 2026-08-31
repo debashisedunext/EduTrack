@@ -62,13 +62,20 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  DashboardOverviewResponse,
   DashboardSummaryResponse,
+  DashboardWeeklyResponse,
   DashboardWidgetsResponse,
+  GetDashboardOverviewParams,
   GetDashboardSummaryParams,
+  GetDashboardTodayParams,
+  GetDashboardWeeklyParams,
   GetDashboardWidgetParams,
   GetDashboardWidgetsParams,
   NotFoundResponse,
+  TodayProgressResponse,
   UnauthorizedResponse,
+  ValidationFailedResponse,
   WidgetResponse
 } from '.././model';
 
@@ -391,6 +398,336 @@ export function useGetDashboardWidgets<TData = Awaited<ReturnType<typeof getDash
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetDashboardWidgetsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Everything on today's plate in seven cards, then one row per resource.
+
+**"Today" is the UTC civil day**, matching how the summary tables are
+keyed. A user in IST sees the day roll at 05:30 local; that is the same
+boundary every other figure on the platform already uses, and a
+per-viewer day would make two people disagree about the same card.
+
+**The response has two shapes, chosen server-side from the caller's
+role.** Developer, QA and Deployment get `variant: OWN_WORK` — their own
+figures, no `resources` grid and no `openIssues` role split, because
+both answer questions about other people. Admin, PM and Support get
+`variant: FULL`. The client renders what it is given rather than
+deciding for itself, which is the same reason `DashboardScope` narrows
+rows on the server and never trusts a filter from the page.
+
+**Near delay means due on or before the next working day**, walked over
+the working calendar — weekends and org holidays included. A Friday
+ticket is near-delay against Monday, not Saturday.
+
+**Started Today and Finished Today are not cards.** They were removed by
+product decision and survive as sections and as MIS columns. Their
+figures are still here, on the resource rows.
+
+ * @summary Today's Progress — tab 1 of S-05
+ */
+export const getDashboardToday = (
+    params?: GetDashboardTodayParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<TodayProgressResponse>(
+      {url: `/dashboard/today`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetDashboardTodayQueryKey = (params?: GetDashboardTodayParams,) => {
+    return [
+    `/dashboard/today`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getGetDashboardTodayQueryOptions = <TData = Awaited<ReturnType<typeof getDashboardToday>>, TError = UnauthorizedResponse>(params?: GetDashboardTodayParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardToday>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDashboardTodayQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDashboardToday>>> = ({ signal }) => getDashboardToday(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDashboardToday>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDashboardTodayQueryResult = NonNullable<Awaited<ReturnType<typeof getDashboardToday>>>
+export type GetDashboardTodayQueryError = UnauthorizedResponse
+
+
+export function useGetDashboardToday<TData = Awaited<ReturnType<typeof getDashboardToday>>, TError = UnauthorizedResponse>(
+ params: undefined |  GetDashboardTodayParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardToday>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDashboardToday>>,
+          TError,
+          Awaited<ReturnType<typeof getDashboardToday>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardToday<TData = Awaited<ReturnType<typeof getDashboardToday>>, TError = UnauthorizedResponse>(
+ params?: GetDashboardTodayParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardToday>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDashboardToday>>,
+          TError,
+          Awaited<ReturnType<typeof getDashboardToday>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardToday<TData = Awaited<ReturnType<typeof getDashboardToday>>, TError = UnauthorizedResponse>(
+ params?: GetDashboardTodayParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardToday>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Today's Progress — tab 1 of S-05
+ */
+
+export function useGetDashboardToday<TData = Awaited<ReturnType<typeof getDashboardToday>>, TError = UnauthorizedResponse>(
+ params?: GetDashboardTodayParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardToday>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetDashboardTodayQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Four cards over the selected range, the ten busiest assignees, and the
+status split.
+
+**`assignees` reports open state, not throughput.** Each bar is what that
+person is holding *now* — in progress, overdue, not started — and not
+what they completed inside `from`..`to`. The two readings are easy to
+confuse and answer opposite questions: the cards above say what happened
+in the window, this says who is carrying what today. Sorted by open
+total, capped at ten.
+
+The three states are disjoint, so a bar's segments sum to that person's
+open total and never double-count.
+
+ * @summary Ticket Overview — tab 2 of S-05
+ */
+export const getDashboardOverview = (
+    params?: GetDashboardOverviewParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<DashboardOverviewResponse>(
+      {url: `/dashboard/overview`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetDashboardOverviewQueryKey = (params?: GetDashboardOverviewParams,) => {
+    return [
+    `/dashboard/overview`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getGetDashboardOverviewQueryOptions = <TData = Awaited<ReturnType<typeof getDashboardOverview>>, TError = UnauthorizedResponse>(params?: GetDashboardOverviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardOverview>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDashboardOverviewQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDashboardOverview>>> = ({ signal }) => getDashboardOverview(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDashboardOverview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDashboardOverviewQueryResult = NonNullable<Awaited<ReturnType<typeof getDashboardOverview>>>
+export type GetDashboardOverviewQueryError = UnauthorizedResponse
+
+
+export function useGetDashboardOverview<TData = Awaited<ReturnType<typeof getDashboardOverview>>, TError = UnauthorizedResponse>(
+ params: undefined |  GetDashboardOverviewParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardOverview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDashboardOverview>>,
+          TError,
+          Awaited<ReturnType<typeof getDashboardOverview>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardOverview<TData = Awaited<ReturnType<typeof getDashboardOverview>>, TError = UnauthorizedResponse>(
+ params?: GetDashboardOverviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardOverview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDashboardOverview>>,
+          TError,
+          Awaited<ReturnType<typeof getDashboardOverview>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardOverview<TData = Awaited<ReturnType<typeof getDashboardOverview>>, TError = UnauthorizedResponse>(
+ params?: GetDashboardOverviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardOverview>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Ticket Overview — tab 2 of S-05
+ */
+
+export function useGetDashboardOverview<TData = Awaited<ReturnType<typeof getDashboardOverview>>, TError = UnauthorizedResponse>(
+ params?: GetDashboardOverviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardOverview>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetDashboardOverviewQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Four cards for one ISO week, each against the week before it.
+
+**The week starts Monday, in UTC.** `weekStart` must be a Monday; any
+other date is a 400 rather than a silently shifted window, because a
+request for Wednesday-to-Wednesday would return figures that look
+ordinary and compare against the wrong seven days.
+
+**A card with no prior week shows no delta, not a zero.** `deltaPct` is
+null when the comparison window has no data — the first week of a
+project has nothing to improve on, and rendering that as 0% claims it
+held steady.
+
+**There is no S-Curve**, by decision. The four cards and the five
+accordion sections are the whole tab.
+
+ * @summary Weekly Progress — tab 3 of S-05
+ */
+export const getDashboardWeekly = (
+    params?: GetDashboardWeeklyParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<DashboardWeeklyResponse>(
+      {url: `/dashboard/weekly`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetDashboardWeeklyQueryKey = (params?: GetDashboardWeeklyParams,) => {
+    return [
+    `/dashboard/weekly`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getGetDashboardWeeklyQueryOptions = <TData = Awaited<ReturnType<typeof getDashboardWeekly>>, TError = ValidationFailedResponse | UnauthorizedResponse>(params?: GetDashboardWeeklyParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWeekly>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDashboardWeeklyQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDashboardWeekly>>> = ({ signal }) => getDashboardWeekly(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDashboardWeekly>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDashboardWeeklyQueryResult = NonNullable<Awaited<ReturnType<typeof getDashboardWeekly>>>
+export type GetDashboardWeeklyQueryError = ValidationFailedResponse | UnauthorizedResponse
+
+
+export function useGetDashboardWeekly<TData = Awaited<ReturnType<typeof getDashboardWeekly>>, TError = ValidationFailedResponse | UnauthorizedResponse>(
+ params: undefined |  GetDashboardWeeklyParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWeekly>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDashboardWeekly>>,
+          TError,
+          Awaited<ReturnType<typeof getDashboardWeekly>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardWeekly<TData = Awaited<ReturnType<typeof getDashboardWeekly>>, TError = ValidationFailedResponse | UnauthorizedResponse>(
+ params?: GetDashboardWeeklyParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWeekly>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDashboardWeekly>>,
+          TError,
+          Awaited<ReturnType<typeof getDashboardWeekly>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardWeekly<TData = Awaited<ReturnType<typeof getDashboardWeekly>>, TError = ValidationFailedResponse | UnauthorizedResponse>(
+ params?: GetDashboardWeeklyParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWeekly>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Weekly Progress — tab 3 of S-05
+ */
+
+export function useGetDashboardWeekly<TData = Awaited<ReturnType<typeof getDashboardWeekly>>, TError = ValidationFailedResponse | UnauthorizedResponse>(
+ params?: GetDashboardWeeklyParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWeekly>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetDashboardWeeklyQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

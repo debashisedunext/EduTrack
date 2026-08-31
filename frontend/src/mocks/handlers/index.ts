@@ -1,4 +1,5 @@
 import { delay, http } from 'msw';
+import { dashboardTabHandlers } from './dashboardTabs';
 import { fileHandlers } from './files';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
@@ -31,6 +32,9 @@ export const handlers = [
   ...ticketHandlers,
   ...ribbonHandlers,
   ...restHandlers,
+  // S-05 rework · the three tab endpoints. After restHandlers, which holds the
+  // other dashboard routes; no path overlaps, so order is presentation only.
+  ...dashboardTabHandlers,
 
   // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the
   // `/api/v1` prefix, because a signed URL points at MinIO and not at the API —

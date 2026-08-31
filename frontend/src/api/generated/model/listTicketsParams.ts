@@ -50,6 +50,7 @@ import type { CursorParameter } from './cursorParameter';
 import type { LimitParameter } from './limitParameter';
 import type { Level } from './level';
 import type { StatusCode } from './statusCode';
+import type { StatusCategory } from './statusCategory';
 
 export type ListTicketsParams = {
 /**
@@ -105,5 +106,44 @@ reportedFrom?: string;
  * Filters on dateReported, inclusive.
  */
 reportedTo?: string;
+/**
+ * Narrows to one work category. TODO is "not started" (NEW, REOPENED), IN_PROGRESS is "WIP". Not a synonym for `excludeClosed` — RESOLVED is category DONE while its ticket record is still open.
+
+ */
+statusCategory?: StatusCategory;
+/**
+ * Several status codes at once, comma-separated. Use where a figure counts an explicit set rather than a whole category — the Blocked card is `ON_HOLD,AWAITING_INFO` and nothing else. Ignored when `status` is also sent, which names exactly one.
+
+ */
+statuses?: StatusCode[];
+/**
+ * Filters on updatedAt, inclusive. Backs the "updated today" and "not updated" figures.
+ */
+updatedFrom?: string;
+/**
+ * Filters on updatedAt, inclusive.
+ */
+updatedTo?: string;
+/**
+ * Filters on the current cycle's startedAt, inclusive.
+ */
+startedFrom?: string;
+/**
+ * Filters on the current cycle's startedAt, inclusive.
+ */
+startedTo?: string;
+/**
+ * Filters on the current cycle's finishedAt, inclusive.
+ */
+finishedFrom?: string;
+/**
+ * Filters on the current cycle's finishedAt, inclusive.
+ */
+finishedTo?: string;
+/**
+ * True returns the Pending Review population as one set: RESOLVED but not CLOSED, **plus** tickets sitting in a stage the stage master marks as review. A ticket that is both is returned once. The review stages come from the master, never a hardcoded VERIFY/SIGNOFF list, so a project that renames its sign-off stage keeps working.
+
+ */
+pendingReview?: boolean;
 sort?: string;
 };
