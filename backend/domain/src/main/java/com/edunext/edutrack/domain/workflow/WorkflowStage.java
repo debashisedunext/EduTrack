@@ -116,6 +116,19 @@ public class WorkflowStage {
     @Column(name = "deprecated_at")
     private Instant deprecatedAt;
 
+    /**
+     * Dashboard Rework Dev 1, PR 5 · whether this stage counts toward the
+     * Pending Review population — "RESOLVED but not CLOSED, plus tickets
+     * in verify/sign-off stages". Seeded {@code true} for {@code VERIFY}
+     * and {@code SIGNOFF} across every template; read by {@code GET
+     * /tickets}' {@code pendingReview} filter and by {@code
+     * TodayProgressService}'s Pending Review card, neither of which may
+     * hardcode a stage code — a renamed or added review stage would
+     * silently stop counting.
+     */
+    @Column(name = "is_review_stage", nullable = false)
+    private boolean isReviewStage;
+
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
@@ -214,6 +227,14 @@ public class WorkflowStage {
 
     public void setDeprecatedAt(Instant deprecatedAt) {
         this.deprecatedAt = deprecatedAt;
+    }
+
+    public boolean isReviewStage() {
+        return isReviewStage;
+    }
+
+    public void setReviewStage(boolean reviewStage) {
+        this.isReviewStage = reviewStage;
     }
 
     public Instant getCreatedAt() {

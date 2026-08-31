@@ -76,6 +76,20 @@ public class TicketCycle {
     @Column(name = "client_verification_requested", nullable = false)
     private boolean clientVerificationRequested;
 
+    /**
+     * Dashboard Rework Dev 1, PR 3 · the first moment this cycle's status
+     * entered {@code IN_PROGRESS}. Null until then, and null for ever on a
+     * cycle that never did. Mapped here so {@code GET /tickets}' PR 5
+     * {@code startedFrom}/{@code startedTo} can read it — stamping it at
+     * transition time is Stream C's paired PR.
+     */
+    @Column(name = "started_at")
+    private Instant startedAt;
+
+    /** The first moment this cycle's status entered {@code DONE} — see {@link #startedAt}. */
+    @Column(name = "finished_at")
+    private Instant finishedAt;
+
     @Column(name = "is_sealed", nullable = false)
     private boolean isSealed;
 
@@ -193,6 +207,22 @@ public class TicketCycle {
 
     public void setClientVerificationRequested(boolean clientVerificationRequested) {
         this.clientVerificationRequested = clientVerificationRequested;
+    }
+
+    public Instant getStartedAt() {
+        return startedAt;
+    }
+
+    public void setStartedAt(Instant startedAt) {
+        this.startedAt = startedAt;
+    }
+
+    public Instant getFinishedAt() {
+        return finishedAt;
+    }
+
+    public void setFinishedAt(Instant finishedAt) {
+        this.finishedAt = finishedAt;
     }
 
     public boolean isSealed() {

@@ -17,6 +17,9 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -112,6 +115,22 @@ class TicketListIT {
                 "list probe " + tag, level, level, status, assignee);
     }
 
+    /** Dashboard Rework Dev 1, PR 5 · the id-returning form the new tests need to link a cycle row. */
+    private long insertTicketReturningId(long project, long assignee, String level, String status) {
+        insertTicket(project, assignee, level, status);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    /** cycle_no 1, matching every fixture ticket's default current_cycle_no. */
+    private void insertCycle(long ticketId, Instant startedAt, Instant finishedAt) {
+        jdbc.update("""
+                INSERT INTO ticket_cycles (ticket_id, cycle_no, start_date, started_at, finished_at)
+                VALUES (?, 1, NOW(6), ?, ?)
+                """, ticketId,
+                startedAt == null ? null : Timestamp.from(startedAt),
+                finishedAt == null ? null : Timestamp.from(finishedAt));
+    }
+
     private Authentication caller(long userId, String role, List<Long> projectIds) {
         return new UsernamePasswordAuthenticationToken(
                 new DevPrincipal(userId, "list.fixture", "Fixture", role, projectIds, List.of()),
@@ -124,13 +143,15 @@ class TicketListIT {
     }
 
     private TicketListSpecs.Filters filters(Long projectId) {
-        // A-060 added reportedFrom/reportedTo — the last two. Twenty positional
-        // nulls is a call site that breaks on every new filter and gives no
-        // clue which slot moved; a builder or a `Filters.none()` would fix that
-        // for good. Left alone here deliberately: this is Stream C's file and
-        // A-060's business is the two parameters, not a refactor of it.
+        // A-060 added reportedFrom/reportedTo; PR 5 added the seven after that.
+        // Twenty-nine positional nulls is a call site that breaks on every new
+        // filter and gives no clue which slot moved; a builder or a
+        // `Filters.none()` would fix that for good. Left alone here
+        // deliberately: this is Stream C's file and each addition's business is
+        // its own parameters, not a refactor of it.
         return new TicketListSpecs.Filters(null, projectId, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null);
     }
 
     private TicketListSpecs.Filters unfiltered() {
@@ -350,7 +371,8 @@ class TicketListIT {
         void levelFilters() {
             TicketListSpecs.Filters high = new TicketListSpecs.Filters(
                     null, mineProject, null, null, null, "HIGH", null, null, null,
-                    null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null);
 
             CursorPage<TicketListDtos.TicketSummary> page =
                     service.list(caller(me, "ADMIN", List.of()), high, null, null, 200);
@@ -371,7 +393,8 @@ class TicketListIT {
 
             TicketListSpecs.Filters unassigned = new TicketListSpecs.Filters(
                     null, mineProject, null, null, null, null, null, null, null,
-                    null, null, null, true, null, null, null, null, null, null, null);
+                    null, null, null, true, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null);
 
             CursorPage<TicketListDtos.TicketSummary> page =
                     service.list(caller(me, "ADMIN", List.of()), unassigned, null, null, 200);
@@ -433,7 +456,184 @@ class TicketListIT {
 
         private TicketListSpecs.Filters withModule(Long moduleId) {
             return new TicketListSpecs.Filters(null, mineProject, null, null, moduleId, null, null, null,
-                    null, null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null);
+        }
+
+        // ── Dashboard Rework Dev 1, PR 5 · the seven Today/Weekly params ────
+
+        /**
+         * TODO is "not started" — NEW or REOPENED. Two different codes, one
+         * category: the case `status` alone cannot express, which is the whole
+         * reason `statusCategory` exists rather than the caller filtering by
+         * `status=NEW` and missing every reopened ticket.
+         */
+        @Test
+        @DisplayName("statusCategory matches every code in the category, not one")
+        void statusCategoryFilters() {
+            insertTicket(mineProject, me, "HIGH", "NEW");
+            insertTicket(mineProject, me, "HIGH", "REOPENED");
+            insertTicket(mineProject, me, "HIGH", "IN_PROGRESS");
+
+            CursorPage<TicketListDtos.TicketSummary> page = service.list(
+                    caller(me, "ADMIN", List.of()), withStatusCategory("TODO"), null, null, 200);
+
+            assertThat(page.data())
+                    .as("NEW and REOPENED are both TODO; IN_PROGRESS is not")
+                    .extracting(TicketListDtos.TicketSummary::status)
+                    .containsExactlyInAnyOrder("NEW", "REOPENED");
+        }
+
+        @Test
+        @DisplayName("statuses matches an explicit set of codes, comma-separated")
+        void statusesFilters() {
+            insertTicket(mineProject, me, "HIGH", "ON_HOLD");
+            insertTicket(mineProject, me, "HIGH", "AWAITING_INFO");
+            insertTicket(mineProject, me, "HIGH", "IN_PROGRESS");
+
+            CursorPage<TicketListDtos.TicketSummary> page = service.list(caller(me, "ADMIN", List.of()),
+                    withStatuses(null, List.of("ON_HOLD", "AWAITING_INFO")), null, null, 200);
+
+            assertThat(page.data())
+                    .as("the Blocked card's set — ON_HOLD and AWAITING_INFO, nothing else")
+                    .extracting(TicketListDtos.TicketSummary::status)
+                    .containsExactlyInAnyOrder("ON_HOLD", "AWAITING_INFO");
+        }
+
+        /** The contract's own rule: statuses is ignored the moment status names exactly one. */
+        @Test
+        @DisplayName("statuses is ignored once status is also sent")
+        void statusWinsOverStatuses() {
+            insertTicket(mineProject, me, "HIGH", "NEW");
+            insertTicket(mineProject, me, "HIGH", "ON_HOLD");
+
+            CursorPage<TicketListDtos.TicketSummary> page = service.list(caller(me, "ADMIN", List.of()),
+                    withStatuses("NEW", List.of("ON_HOLD", "AWAITING_INFO")), null, null, 200);
+
+            assertThat(page.data())
+                    .as("status=NEW alone, not ANDed and not ORed with statuses")
+                    .extracting(TicketListDtos.TicketSummary::status)
+                    .containsExactly("NEW");
+        }
+
+        @Test
+        @DisplayName("updatedFrom/updatedTo filters on updatedAt")
+        void updatedWindowFilters() {
+            long recent = insertTicketReturningId(mineProject, me, "HIGH", "NEW");
+            long stale = insertTicketReturningId(mineProject, me, "HIGH", "NEW");
+            jdbc.update("UPDATE tickets SET updated_at = ? WHERE id = ?",
+                    Timestamp.from(Instant.parse("2020-01-01T00:00:00Z")), stale);
+
+            CursorPage<TicketListDtos.TicketSummary> page = service.list(caller(me, "ADMIN", List.of()),
+                    withUpdatedWindow(LocalDate.now(java.time.ZoneOffset.UTC).minusDays(1), null),
+                    null, null, 200);
+
+            assertThat(page.data()).extracting(t -> t.ticketId())
+                    .as("the backdated ticket falls outside the window; the fresh one is inside it")
+                    .doesNotContain(codeOf(stale)).contains(codeOf(recent));
+        }
+
+        /**
+         * Reads the *current cycle's* stamp, not a ticket-level column — PR 3's
+         * whole reason for a per-cycle pair rather than one on `tickets`.
+         */
+        @Test
+        @DisplayName("startedFrom/startedTo filters on the current cycle's startedAt")
+        void startedWindowFilters() {
+            long started = insertTicketReturningId(mineProject, me, "HIGH", "IN_PROGRESS");
+            long notStarted = insertTicketReturningId(mineProject, me, "HIGH", "NEW");
+            insertCycle(started, Instant.parse("2026-08-20T09:00:00Z"), null);
+            // notStarted carries no ticket_cycles row at all — the common case
+            // for a ticket nobody has picked up — and must not match either.
+
+            CursorPage<TicketListDtos.TicketSummary> page = service.list(caller(me, "ADMIN", List.of()),
+                    withStartedWindow(LocalDate.parse("2026-08-19"), LocalDate.parse("2026-08-21")),
+                    null, null, 200);
+
+            assertThat(page.data()).extracting(t -> t.ticketId())
+                    .as("only the ticket with a matching cycle stamp; the cycle-less one cannot match")
+                    .containsExactly(codeOf(started))
+                    .doesNotContain(codeOf(notStarted));
+        }
+
+        @Test
+        @DisplayName("finishedFrom/finishedTo filters on the current cycle's finishedAt")
+        void finishedWindowFilters() {
+            long finished = insertTicketReturningId(mineProject, me, "HIGH", "RESOLVED");
+            long stillOpen = insertTicketReturningId(mineProject, me, "HIGH", "IN_PROGRESS");
+            insertCycle(finished, Instant.parse("2026-08-20T09:00:00Z"), Instant.parse("2026-08-20T17:00:00Z"));
+            insertCycle(stillOpen, Instant.parse("2026-08-20T09:00:00Z"), null);
+
+            CursorPage<TicketListDtos.TicketSummary> page = service.list(caller(me, "ADMIN", List.of()),
+                    withFinishedWindow(LocalDate.parse("2026-08-19"), LocalDate.parse("2026-08-21")),
+                    null, null, 200);
+
+            assertThat(page.data()).extracting(t -> t.ticketId())
+                    .as("finished has a finishedAt in range; stillOpen's is null and cannot match a window")
+                    .containsExactly(codeOf(finished));
+        }
+
+        /**
+         * Resolved from the stage master (`is_review_stage`), not a hardcoded
+         * VERIFY/SIGNOFF list — this fixture proves the join actually reaches
+         * the flag, which a stub returning true for every ticket would also
+         * pass if the assertion only checked "not empty".
+         */
+        @Test
+        @DisplayName("pendingReview matches RESOLVED tickets and tickets in a review stage")
+        void pendingReviewFilters() {
+            long resolved = insertTicketReturningId(mineProject, me, "HIGH", "RESOLVED");
+            long inSignoff = insertTicketReturningId(mineProject, me, "HIGH", "IN_PROGRESS");
+            long inQa = insertTicketReturningId(mineProject, me, "HIGH", "IN_PROGRESS");
+            jdbc.update("UPDATE tickets SET current_stage = 'SIGNOFF' WHERE id = ?", inSignoff);
+            jdbc.update("UPDATE tickets SET current_stage = 'QA' WHERE id = ?", inQa);
+
+            CursorPage<TicketListDtos.TicketSummary> page = service.list(
+                    caller(me, "ADMIN", List.of()), withPendingReview(), null, null, 200);
+
+            assertThat(page.data()).extracting(t -> t.ticketId())
+                    .as("RESOLVED and SIGNOFF (a review stage) match; QA — testing, not review — does not")
+                    .containsExactlyInAnyOrder(codeOf(resolved), codeOf(inSignoff));
+        }
+
+        private String codeOf(long ticketId) {
+            return jdbc.queryForObject("SELECT ticket_code FROM tickets WHERE id = ?", String.class, ticketId);
+        }
+
+        private TicketListSpecs.Filters withStatusCategory(String category) {
+            return new TicketListSpecs.Filters(null, mineProject, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    category, null, null, null, null, null, null, null, null);
+        }
+
+        private TicketListSpecs.Filters withStatuses(String status, List<String> statuses) {
+            return new TicketListSpecs.Filters(null, mineProject, null, null, null, null, status, null,
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, statuses, null, null, null, null, null, null, null);
+        }
+
+        private TicketListSpecs.Filters withUpdatedWindow(LocalDate from, LocalDate to) {
+            return new TicketListSpecs.Filters(null, mineProject, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, from, to, null, null, null, null, null);
+        }
+
+        private TicketListSpecs.Filters withStartedWindow(LocalDate from, LocalDate to) {
+            return new TicketListSpecs.Filters(null, mineProject, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, from, to, null, null, null);
+        }
+
+        private TicketListSpecs.Filters withFinishedWindow(LocalDate from, LocalDate to) {
+            return new TicketListSpecs.Filters(null, mineProject, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, from, to, null);
+        }
+
+        private TicketListSpecs.Filters withPendingReview() {
+            return new TicketListSpecs.Filters(null, mineProject, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, true);
         }
     }
 }
