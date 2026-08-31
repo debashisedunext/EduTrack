@@ -172,6 +172,60 @@ tfoot td{background:var(--bg-subtle);font-weight:650;border-top:1px solid var(--
 .tip.on{opacity:1}
 .tip b{color:#fff;display:block;margin-bottom:2px}
 .tip i{color:#C7D2FE;font-style:normal}
+
+/* ── S-05 dashboard tabs ────────────────────────────────────────── */
+.dtabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:16px;overflow-x:auto}
+.dtab{padding:10px 16px;font-size:13.5px;color:var(--ink-2);border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:550;white-space:nowrap}
+.dtab[aria-selected="true"]{color:var(--primary);border-bottom-color:var(--primary);font-weight:650}
+.dpane{display:none}
+.dpane.on{display:block}
+/* multi-figure summary card (Today) */
+.cards8{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:12px}
+.mcard .t{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin-bottom:10px}
+.mfigs{display:flex}
+.mfig{flex:1;min-width:0}
+.mfig+.mfig{border-left:1px solid var(--border);padding-left:12px;margin-left:12px}
+.mfig .v{font-size:22px;font-weight:680;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.mfig .l{font-size:10px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin-top:4px}
+.v.red{color:#B91C1C}.v.amb{color:#B45309}.v.grn{color:#047857}
+.rolechips{display:flex;gap:5px;flex-wrap:wrap;margin-top:9px}
+/* MIS table */
+#mis td.bad{color:#B91C1C;font-weight:650}
+#mis td.z{color:var(--ink-3)}
+/* collapsible sections + nested accordion */
+.acc{margin-bottom:12px}
+.acc-h{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:12px 16px}
+.acc-h .ttl{font-size:13px;font-weight:650}
+.acc-h .n{background:var(--bg-subtle);color:var(--ink-2);font-size:11px;font-weight:650;padding:1px 7px;border-radius:var(--r-chip)}
+.chev{margin-left:auto;color:var(--ink-3);font-size:11px;transition:transform .15s}
+.acc.open>.acc-h .chev,.node.open>.gr .chev{transform:rotate(180deg)}
+.acc-b{display:none;border-top:1px solid var(--border)}
+.acc.open>.acc-b{display:block}
+.node>.kids{display:none}
+.node.open>.kids{display:block}
+.gr{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:10px 16px;border-top:1px solid var(--bg-subtle);font-size:13px}
+.gr:hover{background:var(--bg-subtle)}
+.gr .n{background:var(--bg-subtle);color:var(--ink-2);font-size:11px;font-weight:650;padding:1px 7px;border-radius:var(--r-chip)}
+.gr.l1{font-weight:650}
+.gr.l2{padding-left:36px}
+.gr.l3{padding-left:56px}
+.trow{display:flex;align-items:center;gap:10px;padding:9px 16px 9px 76px;border-top:1px solid var(--bg-subtle);font-size:12.5px;flex-wrap:wrap}
+.trow .ttl2{flex:1;min-width:150px}
+.morerow{padding:9px 16px;font-size:12px;color:var(--primary);font-weight:600;border-top:1px solid var(--bg-subtle)}
+/* half-donut legend */
+.dleg{display:flex;flex-direction:column;gap:7px;margin-top:12px}
+.dleg .row{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.dleg .row b{margin-left:auto;font-variant-numeric:tabular-nums}
+.dleg .row i{font-style:normal;color:var(--ink-3);width:38px;text-align:right;font-variant-numeric:tabular-nums}
+/* drill-down affordance — anything with .drv opens the S-06 slide-over */
+.drv{cursor:pointer}
+.drv:hover{background:var(--bg-subtle)}
+button.mfig{background:none;border:0;padding:0;text-align:left;border-radius:6px}
+.mfig.drv:hover{background:var(--primary-soft)}
+td.drv:hover{background:var(--primary-soft)!important}
+path.drv:hover{opacity:.78}
+button.kpi{text-align:left;width:100%}
+.dleg button.row{width:100%;border-radius:6px;padding:2px 4px}
 </style>
 
 <div class="banner">
@@ -185,10 +239,10 @@ tfoot td{background:var(--bg-subtle);font-weight:650;border-top:1px solid var(--
   <!-- ══ rail ══ -->
   <nav class="rail">
     <div class="brand"><div class="mk">E</div><span>EduTrack</span></div>
-    <button class="nav" data-go="dash"><span class="ic">◧</span>Dashboard</button>
+    <button class="nav" aria-current="true" data-go="dash"><span class="ic">◧</span>Dashboard</button>
     <button class="nav" data-go="mine"><span class="ic">◑</span>My Tasks<span class="cnt">7</span></button>
     <button class="nav" data-go="list"><span class="ic">☰</span>Tickets<span class="cnt">263</span></button>
-    <button class="nav" aria-current="true" data-go="detail"><span class="ic">◈</span>Ticket detail</button>
+    <button class="nav" data-go="detail"><span class="ic">◈</span>Ticket detail</button>
     <button class="nav" style="opacity:.45;cursor:default"><span class="ic">◇</span>Projects</button>
     <button class="nav" style="opacity:.45;cursor:default"><span class="ic">◌</span>Chat</button>
     <button class="nav" style="opacity:.45;cursor:default"><span class="ic">◍</span>Reports</button>
@@ -208,7 +262,7 @@ tfoot td{background:var(--bg-subtle);font-weight:650;border-top:1px solid var(--
     <div class="page">
 
       <!-- ══════════ S-20 TICKET DETAIL ══════════ -->
-      <section class="screen on" id="detail">
+      <section class="screen" id="detail">
         <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:6px">
           <div>
             <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
@@ -309,12 +363,79 @@ tfoot td{background:var(--bg-subtle);font-weight:650;border-top:1px solid var(--
         </div>
       </section>
 
-      <!-- ══════════ S-05 DASHBOARD ══════════ -->
-      <section class="screen" id="dash">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
-          <div><span class="eyebrow">S-05 · Dashboard</span><h1 class="h-page" style="margin-top:5px">Good morning, Meera</h1></div>
-          <div style="margin-left:auto;display:flex;gap:8px"><span class="chip gry">Last 30 days ▾</span><span class="chip gry">All resources ▾</span></div>
+      <!-- ══════════ S-05 DASHBOARD — TABBED ══════════ -->
+      <section class="screen on" id="dash">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+          <div><span class="eyebrow">S-05 · Dashboard</span><h1 class="h-page" style="margin-top:5px">Good morning, Meera</h1>
+            <div class="sub" style="margin-top:3px">Thursday 27 Aug 2026 · figures as at 09:35 — refreshed every five minutes</div></div>
+          <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap"><span class="chip gry">CRM Portal ▾</span><span class="chip gry">All resources ▾</span></div>
         </div>
+
+        <div class="dtabs" role="tablist" aria-label="Dashboard views">
+          <button class="dtab" role="tab" aria-selected="true" data-dt="today">Today's Progress</button>
+          <button class="dtab" role="tab" aria-selected="false" data-dt="overview">Ticket Overview</button>
+          <button class="dtab" role="tab" aria-selected="false" data-dt="weekly">Weekly Progress</button>
+          <button class="dtab" role="tab" aria-selected="false" data-dt="analytics">Analytics</button>
+        </div>
+
+        <!-- ── TAB 1 · TODAY'S PROGRESS ── -->
+        <div class="dpane on" id="dp-today" role="tabpanel">
+          <div class="cards8" id="tCards"></div>
+          <div class="card" style="margin-top:14px">
+            <div style="padding:14px 16px 4px;display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+              <span class="eyebrow">Assignee MIS</span>
+              <span class="sub" style="font-size:12px">Per resource, as of now — red is where the conversation is</span>
+              <span style="margin-left:auto;font-size:11.5px;color:var(--ink-3)">7 rows</span>
+            </div>
+            <div class="scroll-x"><table id="mis"></table></div>
+          </div>
+          <div id="tSections" style="margin-top:14px"></div>
+        </div>
+
+        <!-- ── TAB 2 · TICKET OVERVIEW ── -->
+        <div class="dpane" id="dp-overview" role="tabpanel">
+          <div class="kpis" id="ovCards" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))"></div>
+          <div class="grid2" style="margin-top:14px">
+            <div class="card pad">
+              <div class="eyebrow">Top assignees</div>
+              <div class="sub" style="margin:2px 0 12px">Open tickets per assignee — click any segment for the tickets behind it</div>
+              <div id="ovAssignees"></div>
+              <div class="lgd">
+                <span><span class="dot" style="background:var(--c1)"></span>In progress</span>
+                <span><span class="dot" style="background:var(--danger)"></span>Overdue</span>
+                <span><span class="dot" style="background:#9CA3AF"></span>Not started</span>
+              </div>
+            </div>
+            <div class="card pad">
+              <div class="eyebrow">Ticket status distribution</div>
+              <div class="sub" style="margin:2px 0 6px">Everything reported in the range — three buckets, no more</div>
+              <div id="ovDonut" style="display:flex;justify-content:center"></div>
+              <div class="dleg" id="ovLegend"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── TAB 3 · WEEKLY PROGRESS ── -->
+        <div class="dpane" id="dp-weekly" role="tabpanel">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+            <div class="cyclesel">
+              <button data-wk="this" aria-pressed="true">This week</button>
+              <button data-wk="last">Last week</button>
+            </div>
+            <span class="sub" id="wkLabel">Mon 24 – Sun 30 Aug 2026</span>
+          </div>
+          <div class="kpis" id="wkCards" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))"></div>
+          <div id="wkSections" style="margin-top:14px"></div>
+          <div class="note">
+            <b>The grouping is the point.</b> Every list on this tab nests Client → Module → Severity → tickets, so a
+            manager reads it the way a client call goes: which client, which part of their product, how bad. Counts on
+            every level roll up from the rows beneath them. There is no S-curve here by decision — tickets have no
+            baseline curve worth plotting; the four cards above carry the week-over-week story instead.
+          </div>
+        </div>
+
+        <!-- ── TAB 4 · ANALYTICS (previous dashboard, unchanged) ── -->
+        <div class="dpane" id="dp-analytics" role="tabpanel">
         <div class="kpis" id="kpis"></div>
 
         <div class="grid2" style="margin-top:14px">
@@ -348,6 +469,17 @@ tfoot td{background:var(--bg-subtle);font-weight:650;border-top:1px solid var(--
           </div>
         </div>
 
+        <div class="card pad" style="margin-top:14px">
+          <div class="eyebrow">Module-wise total open tickets</div>
+          <div class="sub" style="margin:2px 0 12px">47 open across 6 modules — click any segment for the tickets behind it</div>
+          <div id="modopen"></div>
+          <div class="lgd">
+            <span><span class="dot" style="background:var(--c1)"></span>WIP</span>
+            <span><span class="dot" style="background:var(--danger)"></span>Overdue</span>
+            <span><span class="dot" style="background:#9CA3AF"></span>Not started</span>
+          </div>
+        </div>
+
         <div class="note" style="margin-top:14px">
           <b>Two recommendations to review.</b>
           The blueprint specifies a donut for task-type distribution; with 11 categories a donut is very hard to read, so
@@ -356,6 +488,7 @@ tfoot td{background:var(--bg-subtle);font-weight:650;border-top:1px solid var(--
           indistinguishable for deuteranopes, and green and cyan are close even in full colour. The charts here use a
           validated subset. A corrected eight-hue set is in the handover notes.
         </div>
+        </div><!-- /dp-analytics -->
       </section>
 
       <!-- ══════════ S-17 TICKET LIST ══════════ -->
@@ -437,6 +570,30 @@ tfoot td{background:var(--bg-subtle);font-weight:650;border-top:1px solid var(--
     </div>
   </div>
   <footer><button class="btn" data-close>Cancel</button><button class="btn pri" data-close>Update ✓</button></footer>
+</aside>
+
+<!-- ══════════ S-06 DRILL-DOWN (opens from any dashboard value) ══════════ -->
+<aside class="over" id="drill" aria-hidden="true" style="width:560px">
+  <header>
+    <div><span class="eyebrow">S-06 · Drill-down</span>
+      <div style="font-weight:650;margin-top:3px" id="drTitle"></div></div>
+    <button class="btn" data-close>✕</button>
+  </header>
+  <div class="body" style="gap:12px">
+    <div id="drMeta" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center"></div>
+    <div class="scroll-x" style="border:1px solid var(--border);border-radius:10px">
+      <table>
+        <thead><tr><th>ID</th><th>Description</th><th>Assignee</th><th>Level</th><th>Status / stage</th><th>Due</th></tr></thead>
+        <tbody id="drBody"></tbody>
+      </table>
+    </div>
+    <div id="drFoot" style="font-size:11.5px;color:var(--ink-3);line-height:1.5"></div>
+  </div>
+  <footer>
+    <button class="btn" data-close>Close</button>
+    <button class="btn">Export CSV</button>
+    <button class="btn pri" data-close>Open full ticket list →</button>
+  </footer>
 </aside>
 <div class="tip" id="tip"></div>
 
@@ -622,6 +779,21 @@ $("#kpis").innerHTML=KPI.map(k=>`<div class="card kpi">
     <span class="num" style="width:32px;text-align:right;font-size:12px;font-weight:600">${t[1]}</span></div>`).join("");
 })();
 
+/* module-wise open tickets — WIP / Overdue / Not started, per-segment drill-down */
+(function(){
+  const M=[["Checkout",6,5,2],["Invoicing",4,3,2],["Auth",3,2,2],["Reports",3,1,3],["Admin Console",2,2,2],["Notifications",2,0,3]];
+  const mx=Math.max(...M.map(m=>m[1]+m[2]+m[3]));
+  const seg=(mod,v,col,lbl)=>v?`<div class="drv" data-t="${mod} — ${lbl}" data-n="${v}"
+      data-tip="<b>${mod}</b><i>${lbl}: ${v} — click for tickets</i>" style="width:${v/mx*100}%;background:${col};height:100%"></div>`:"";
+  $("#modopen").innerHTML=M.map(m=>{
+    const tot=m[1]+m[2]+m[3];
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px">
+      <span style="width:110px;font-size:12px;color:var(--ink-2);flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m[0]}</span>
+      <div style="flex:1;height:16px;display:flex;gap:2px">${seg(m[0],m[1],"var(--c1)","WIP")}${seg(m[0],m[2],"var(--danger)","Overdue")}${seg(m[0],m[3],"#9CA3AF","Not started")}</div>
+      <span class="num" style="width:24px;text-align:right;font-size:12px;font-weight:650">${tot}</span></div>`;
+  }).join("");
+})();
+
 /* attention list */
 $("#attn tbody").innerHTML=[
  ["CRM-26-00347","Payment gateway timeout","Anil Sharma","-3d","crit"],
@@ -679,6 +851,284 @@ $("#mytasks").innerHTML=GRP.map(g=>`
      <button class="btn pri" data-qu>⚡ Quick update</button>
    </div>`).join("")}</div>`).join("");
 
+/* ── S-05 tabbed dashboard ─────────────────────────────────────── */
+$$(".dtab").forEach(b=>b.onclick=()=>{
+  $$(".dtab").forEach(t=>t.setAttribute("aria-selected","false"));
+  b.setAttribute("aria-selected","true");
+  $$(".dpane").forEach(p=>p.classList.toggle("on",p.id==="dp-"+b.dataset.dt));
+});
+
+/* ── TODAY: summary cards (figures reconcile with the MIS below) ─
+   Every figure is a .drv button — clicking opens the S-06 drill-down. */
+const fig=(v,l,c,t)=>`<button class="mfig drv" data-n="${v}" data-t="${t||l}" aria-label="${t||l}: ${v} — open drill-down"><div class="v ${c||""}">${v}</div><div class="l">${l}</div></button>`;
+$("#tCards").innerHTML=[
+ {t:"☀ Today's work",n:"Today's work",f:[[14,"not started","amb"],[16,"on time","grn"],[20,"wip",""],[13,"overdue","red"]]},
+ {t:"⚠ Overdue",n:"Overdue",f:[[6,"not started","red"],[7,"wip","red"]]},
+ {t:"◔ Not started",n:"Not started",f:[[6,"overdue start","red"],[2,"due today","amb"],[14,"total",""]]},
+ {t:"◑ Work in progress",n:"WIP",f:[[22,"total wip",""],[9,"updated today","grn"],[13,"not updated","amb"]]},
+ {t:"⚠ WIP breakdown",n:"WIP",f:[[4,"near delay","amb"],[7,"delayed","red"],[11,"on time","grn"]]},
+ {t:"❚❚ Blocked",n:"Blocked",f:[[3,"on hold",""],[4,"awaiting info","amb"]]},
+ {t:"✎ Pending review",n:"Pending review",f:[[8,"resolved + sign-off",""]]},
+].map(c=>`<div class="card pad mcard"><div class="t">${c.t}</div><div class="mfigs">${c.f.map(x=>fig(x[0],x[1],x[2],c.n+" — "+x[1])).join("")}</div></div>`).join("")
++`<div class="card pad mcard"><div class="t">◎ Open issues — who holds them</div>
+   <div class="mfigs">${fig(47,"open, not closed","","Open issues — all open tickets")}</div>
+   <div class="rolechips">
+     <button class="chip ind drv" data-t="Open with Developers" data-n="18">DEV 18</button>
+     <button class="chip ind drv" data-t="Open with QA" data-n="9">QA 9</button>
+     <button class="chip ind drv" data-t="Open with PMs" data-n="6">PM 6</button>
+     <button class="chip ind drv" data-t="Open with Support" data-n="5">SUP 5</button>
+     <button class="chip ind drv" data-t="Open with Deployment" data-n="4">DEP 4</button>
+     <button class="chip gry drv" data-t="Open — unassigned" data-n="5">Unassigned 5</button>
+   </div></div>`;
+
+/* ── TODAY: assignee MIS (columns sum to the cards above) ──────── */
+const MIS=[
+ ["Ravi Kumar",   2,1,3, 4,2, 1,2,1, 1,1],
+ ["Anil Sharma",  1,0,2, 3,2, 1,1,1, 2,0],
+ ["Neha Singh",   2,0,3, 4,1, 1,2,1, 0,1],
+ ["Amit Rao",     1,1,2, 5,2, 1,1,3, 2,0],
+ ["Sunil Vaz",    0,0,1, 3,1, 0,1,2, 1,0],
+ ["Karan Desai",  0,0,1, 3,1, 0,0,3, 0,0],
+ ["Unassigned",   0,0,2, 0,0, 0,0,0, 0,0]];
+const misCell=(v,bad,who,met)=>`<td class="num drv" style="text-align:right" tabindex="0" role="button" data-t="${who} — ${met}" data-n="${v}" data-a="${who}" aria-label="${who}, ${met}: ${v} — open drill-down">${bad&&v>0?`<span style="color:#B91C1C;font-weight:650">${v}</span>`:v===0?`<span style="color:var(--ink-3)">0</span>`:v}</td>`;
+$("#mis").innerHTML=`<thead><tr><th>Assignee</th>
+  <th style="text-align:right;color:#B91C1C">Overdue start</th><th style="text-align:right">Due today</th><th style="text-align:right">Not started</th>
+  <th style="text-align:right">WIP</th><th style="text-align:right">Updated</th>
+  <th style="text-align:right">Near delay</th><th style="text-align:right;color:#B91C1C">Delayed</th><th style="text-align:right">On time</th>
+  <th style="text-align:right">Finished today</th><th style="text-align:right;color:#B91C1C">Finished late</th></tr></thead>
+ <tbody>${MIS.map(r=>`<tr>
+   <td><div class="who2">${r[0]==="Unassigned"?'<span class="av" style="background:#9CA3AF">—</span>':av(r[0])}<span style="font-size:12.5px">${r[0]}</span></div></td>
+   ${misCell(r[1],true,r[0],"Overdue start")}${misCell(r[2],false,r[0],"Due today")}${misCell(r[3],false,r[0],"Not started")}${misCell(r[4],false,r[0],"WIP")}${misCell(r[5],false,r[0],"Updated today")}
+   ${misCell(r[6],true,r[0],"WIP near delay")}${misCell(r[7],true,r[0],"WIP delayed")}${misCell(r[8],false,r[0],"WIP on time")}${misCell(r[9],false,r[0],"Finished today")}${misCell(r[10],true,r[0],"Finished late")}</tr>`).join("")}</tbody>`;
+
+/* ── TODAY: collapsible sections with ticket tables ────────────── */
+const trow=t=>`<tr class="${t[7]||""}"><td class="tid">${t[0]}</td><td style="min-width:210px">${t[1]}</td>
+  <td><div class="who2">${av(t[2])}<span style="font-size:12px">${t[2]}</span></div></td>
+  <td><span class="chip ${t[3]}">${t[4]}</span></td><td><span class="chip gry">${t[5]}</span></td>
+  <td class="num" style="white-space:nowrap">${t[6]}</td></tr>`;
+const SEC=[
+ ["⚠ Not started — overdue / due today",8,"open",[
+  ["CRM-26-00951","Client portal shows stale ticket count","Neha Singh","med","Medium","New","-4d ⚠","critical"],
+  ["CRM-26-00958","Reconcile duplicate client contacts","Ravi Kumar","med","Medium","New","-3d ⚠","critical"],
+  ["CRM-26-00969","Password reset mail lands in spam","Ravi Kumar","high","High","New","-1d ⚠","critical"],
+  ["CRM-26-00974","Add GST column to invoice export","Amit Rao","low","Low","New","-1d ⚠","critical"],
+  ["CRM-26-00981","Search ignores archived tickets flag","Anil Sharma","med","Medium","Reopened","-1d ⚠","critical"],
+  ["CRM-26-00984","Dashboard tiles overlap at 125% zoom","Neha Singh","low","Low","New","-1d ⚠","critical"],
+  ["CRM-26-00987","Notify PM on level change","Amit Rao","med","Medium","New","today","delayed"],
+  ["CRM-26-00990","Weekly digest mail formatting","Ravi Kumar","low","Low","New","today","delayed"]]],
+ ["▷ Started today",5,"",[
+  ["CRM-26-00987","Notify PM on level change","Amit Rao","med","Medium","Development","28 Aug",""],
+  ["CRM-26-00982","Rate-limit login endpoint","Ravi Kumar","high","High","Development","29 Aug",""],
+  ["CRM-26-00978","Client CSV import trims phone zeros","Neha Singh","med","Medium","Triage","30 Aug",""],
+  ["CRM-26-00961","Align ribbon icons on Safari","Sunil Vaz","low","Low","Development","01 Sep",""],
+  ["CRM-26-00955","Effort log rejects 0.25 h","Anil Sharma","med","Medium","QA","28 Aug",""]]],
+ ["✓ Finished today",6,"",[
+  ["CRM-26-00893","Ticket export misses UTF-8 BOM","Amit Rao","med","Medium","Closed","was due 28 Aug",""],
+  ["CRM-26-00901","Stage SLA timer off by one hour","Anil Sharma","high","High","Closed","on time",""],
+  ["CRM-26-00907","Chat scroll jumps on new message","Sunil Vaz","low","Low","Closed","on time",""],
+  ["CRM-26-00912","Duplicate watcher emails","Ravi Kumar","med","Medium","Closed","on time",""],
+  ["CRM-26-00887","Attachment preview 404 on rename","Neha Singh","med","Medium","Closed","-2d late","delayed"],
+  ["CRM-26-00879","Calendar ignores org holiday","Amit Rao","high","High","Closed","-1d late","delayed"]]],
+ ["● WIP — updated today",9,"",[
+  ["CRM-26-00347","Payment gateway timeout on checkout","Anil Sharma","crit","Critical","QA","12 Aug ⚠","critical"],
+  ["CRM-26-00871","Invoice PDF renders blank for AU tax","Ravi Kumar","high","High","QA","20 Aug",""],
+  ["CRM-26-00915","Export to CSV truncates long fields","Amit Rao","high","High","Development","20 Aug",""],
+  ["CRM-26-00944","Bulk close skips audit note","Neha Singh","med","Medium","Development","01 Sep",""],
+  ["CRM-26-00948","Slow ticket list beyond page 40","Sunil Vaz","med","Medium","Development","02 Sep",""]]],
+ ["◌ WIP — not updated today",13,"",[
+  ["CRM-26-00902","Login fails on Safari 17","Neha Singh","crit","Critical","Rework","14 Aug ⚠","critical"],
+  ["CRM-26-00844","Session drops after 20 minutes idle","Sunil Vaz","high","High","Deployment","22 Aug","delayed"],
+  ["CRM-26-00860","Report footer truncates page count","Karan Desai","low","Low","Development","03 Sep",""],
+  ["CRM-26-00868","Module master rejects & in names","Amit Rao","med","Medium","Development","04 Sep",""],
+  ["CRM-26-00874","Client contact dedupe rule","Ravi Kumar","med","Medium","Triage","05 Sep",""]]],
+ ["❚❚ Blocked / on hold",7,"",[
+  ["CRM-26-00921","SSO cert renewal — waiting on client IT","Karan Desai","high","High","On Hold","30 Aug","delayed"],
+  ["CRM-26-00926","Sandbox refresh blocked by data masking","Sunil Vaz","med","Medium","On Hold","02 Sep",""],
+  ["CRM-26-00931","Awaiting repro steps from Acme","Neha Singh","med","Medium","Awaiting Info","29 Aug",""],
+  ["CRM-26-00936","Awaiting sample invoice from Zenith","Amit Rao","med","Medium","Awaiting Info","01 Sep",""]]]];
+$("#tSections").innerHTML=SEC.map((s,i)=>`<div class="card acc${s[2]==="open"?" open":""}">
+  <button class="acc-h" data-acc><span class="ttl">${s[0]}</span><span class="n">${s[1]}</span><span class="chev">▼</span></button>
+  <div class="acc-b"><div class="scroll-x"><table>
+    <thead><tr><th>ID</th><th>Description</th><th>Assignee</th><th>Level</th><th>Status / stage</th><th>Due</th></tr></thead>
+    <tbody>${s[3].map(trow).join("")}</tbody></table></div>
+    ${s[1]>s[3].length?`<div class="morerow">…and ${s[1]-s[3].length} more — View all in ticket list →</div>`:""}
+  </div></div>`).join("");
+
+/* ── OVERVIEW: cards, stacked assignee bars, half-donut ────────── */
+const OV={total:128,pending:47,prog:22,done:59};
+$("#ovCards").innerHTML=[
+ ["Total tickets",OV.total,"reported in range",""],
+ ["Pending",OV.pending,"not started yet","amb"],
+ ["In progress",OV.prog,"being worked now",""],
+ ["Completed",OV.done,"resolved or closed","grn"]
+].map(c=>`<button class="card kpi drv" data-t="${c[0]} — last 30 days" data-n="${c[1]}"><div class="k">${c[0]}</div><div class="v ${c[3]}">${c[1]}</div>
+  <div class="d"><span style="color:var(--ink-3)">${c[2]}</span></div></button>`).join("");
+(function(){
+  const A=[["Ravi Kumar",2,4,1],["Neha Singh",2,4,1],["Amit Rao",4,2,1],["Anil Sharma",2,2,1],
+           ["Sunil Vaz",2,1,1],["Karan Desai",3,0,1],["Priya Nair",1,0,0],["Unassigned",0,0,2]];
+  const mx=Math.max(...A.map(a=>a[1]+a[2]+a[3]));
+  $("#ovAssignees").innerHTML=A.map(a=>{
+    const tot=a[1]+a[2]+a[3];
+    const seg=(v,col,lbl)=>v?`<div class="drv" data-t="${a[0]} — ${lbl}" data-n="${v}" data-a="${a[0]}" data-tip="<b>${a[0]}</b><i>${lbl}: ${v} — click for tickets</i>" style="width:${v/mx*100}%;background:${col};height:100%"></div>`:"";
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px">
+      <span style="width:96px;font-size:12px;color:var(--ink-2);flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a[0]}</span>
+      <div style="flex:1;height:16px;display:flex;gap:2px">${seg(a[1],"var(--c1)","In progress")}${seg(a[2],"var(--danger)","Overdue")}${seg(a[3],"#9CA3AF","Not started")}</div>
+      <span class="num" style="width:24px;text-align:right;font-size:12px;font-weight:650">${tot}</span></div>`;
+  }).join("");
+})();
+(function(){
+  const segs=[["Not started / pending",OV.pending,"#9CA3AF"],["In progress",OV.prog,"var(--c1)"],["Completed",OV.done,"var(--c3)"]];
+  const cx=110,cy=104,r=76,gap=3*Math.PI/180,total=OV.total;
+  let a0=Math.PI, out="";
+  const pt=a=>[cx+r*Math.cos(a),cy-r*Math.sin(a)];
+  segs.forEach(s=>{
+    const sweep=s[1]/total*Math.PI, a1=a0-sweep;
+    const [x0,y0]=pt(a0-gap/2),[x1,y1]=pt(a1+gap/2);
+    out+=`<path class="drv" d="M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r} ${r} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}"
+      fill="none" stroke="${s[2]}" stroke-width="26" data-t="${s[0]} — last 30 days" data-n="${s[1]}" data-tip="<b>${s[0]}</b><i>${s[1]} tickets · ${Math.round(s[1]/total*100)}% — click for tickets</i>"/>`;
+    a0=a1;
+  });
+  $("#ovDonut").innerHTML=`<svg width="220" height="118" viewBox="0 0 220 118" role="img"
+    aria-label="Status distribution: ${segs.map(s=>s[0]+" "+s[1]).join(", ")} of ${total} tickets">${out}
+    <text x="110" y="88" text-anchor="middle" font-size="26" font-weight="680" fill="#111827">${total}</text>
+    <text x="110" y="106" text-anchor="middle" font-size="10.5" fill="#9CA3AF">TOTAL TICKETS</text></svg>`;
+  $("#ovLegend").innerHTML=segs.map(s=>`<button class="row drv" data-t="${s[0]} — last 30 days" data-n="${s[1]}"><span class="dot" style="background:${s[2]}"></span>${s[0]}
+    <b>${s[1]}</b><i>${Math.round(s[1]/total*100)}%</i></button>`).join("");
+})();
+
+/* ── WEEKLY: cards + Client → Module → Severity accordion ──────── */
+const WKC={this:{lbl:"Mon 24 – Sun 30 Aug 2026",cards:[
+   ["Avg progress — open tickets","54%","▲ 6 pts vs last week","up"],
+   ["Due this week","18","9 finished so far",""],
+   ["Delayed — open","7","was 9 last week","up"],
+   ["Avg delay","3.2 d","▼ 0.8 d vs last week","up"]]},
+ last:{lbl:"Mon 17 – Sun 23 Aug 2026",cards:[
+   ["Avg progress — open tickets","48%","▲ 2 pts vs prior week","up"],
+   ["Due that week","21","14 finished",""],
+   ["Delayed — open","9","was 8 the week before","dn"],
+   ["Avg delay","4.0 d","▲ 0.3 d vs prior week","dn"]]}};
+function wkCards(k){
+  $("#wkLabel").textContent=WKC[k].lbl;
+  $("#wkCards").innerHTML=WKC[k].cards.map(c=>`<button class="card kpi drv" data-t="${c[0]}" data-n="${parseInt(c[1])||0}"><div class="k">${c[0]}</div>
+    <div class="v">${c[1]}</div><div class="d ${c[3]}">${c[2]}</div></button>`).join("");
+}
+wkCards("this");
+$$("[data-wk]").forEach(b=>b.onclick=()=>{
+  $$("[data-wk]").forEach(x=>x.removeAttribute("aria-pressed"));
+  b.setAttribute("aria-pressed","true"); wkCards(b.dataset.wk);
+});
+const SEV={Critical:"crit",High:"high",Medium:"med",Low:"low"};
+const wt=t=>`<div class="trow"><span class="tid">${t[0]}</span><span class="ttl2">${t[1]}</span>
+  <span class="who2">${av(t[2])}<span style="font-size:12px">${t[2]}</span></span>
+  <span class="num" style="color:var(--ink-3)">${t[3]}</span><span class="chip gry">${t[4]}</span></div>`;
+const WSEC=[
+ ["⚠ Critical — should have started",[
+   ["Acme Retail Ltd",[["Checkout",[["Critical",[
+     ["CRM-26-01012","Apply-coupon dead on mobile web","Ravi Kumar","due 24 Aug ⚠","New"]]]]],
+    ["Invoicing",[["High",[
+     ["CRM-26-01018","Credit-note numbering gap","Amit Rao","due 25 Aug ⚠","New"]]]]]]],
+   ["Zenith Finserv",[["Auth",[["Critical",[
+     ["CRM-26-01021","MFA lockout for imported users","Neha Singh","due 26 Aug ⚠","New"]]]]]]]]],
+ ["◔ Not started this week",[
+   ["Acme Retail Ltd",[["Checkout",[["Medium",[
+     ["CRM-26-01025","Gift-card balance rounding","Sunil Vaz","due 29 Aug","New"],
+     ["CRM-26-01027","Address form loses state on back","Neha Singh","due 30 Aug","New"]]]]],
+    ["Reports",[["Low",[
+     ["CRM-26-01029","Export watermark option","Amit Rao","due 02 Sep","New"]]]]]]],
+   ["Medway Hospitals",[["Admin Console",[["High",[
+     ["CRM-26-01031","Role clone copies stale permissions","Ravi Kumar","due 28 Aug","New"]]],
+    ["Medium",[
+     ["CRM-26-01033","Audit log filter by ward","Anil Sharma","due 01 Sep","New"]]]]]]]]],
+ ["● WIP — updated this week",[
+   ["Acme Retail Ltd",[["Checkout",[["Critical",[
+     ["CRM-26-00347","Payment gateway timeout on checkout","Anil Sharma","QA · it 2","In Progress"]]],
+    ["High",[
+     ["CRM-26-00915","Export to CSV truncates long fields","Amit Rao","Development","In Progress"]]]]],
+    ["Invoicing",[["High",[
+     ["CRM-26-00871","Invoice PDF renders blank for AU tax","Ravi Kumar","QA","In Progress"]]]]]]],
+   ["Zenith Finserv",[["Auth",[["Medium",[
+     ["CRM-26-00944","Bulk close skips audit note","Neha Singh","Development","In Progress"]]]]],
+    ["Reports",[["Medium",[
+     ["CRM-26-00948","Slow ticket list beyond page 40","Sunil Vaz","Development","In Progress"]]]]]]]]],
+ ["✓ Finished this week",[
+   ["Acme Retail Ltd",[["Checkout",[["High",[
+     ["CRM-26-00901","Stage SLA timer off by one hour","Anil Sharma","closed 27 Aug","On time"]]],
+    ["Medium",[
+     ["CRM-26-00893","Ticket export misses UTF-8 BOM","Amit Rao","closed 27 Aug","Early"],
+     ["CRM-26-00912","Duplicate watcher emails","Ravi Kumar","closed 26 Aug","On time"]]]]]]],
+   ["Medway Hospitals",[["Admin Console",[["Medium",[
+     ["CRM-26-00887","Attachment preview 404 on rename","Neha Singh","closed 27 Aug","2d late"]]],
+    ["High",[
+     ["CRM-26-00879","Calendar ignores org holiday","Amit Rao","closed 27 Aug","1d late"]]]]]]],
+   ["Zenith Finserv",[["Auth",[["Low",[
+     ["CRM-26-00907","Chat scroll jumps on new message","Sunil Vaz","closed 25 Aug","On time"]]]]]]]]],
+ ["⚠ WIP not finishing — overdue",[
+   ["Acme Retail Ltd",[["Checkout",[["Critical",[
+     ["CRM-26-00347","Payment gateway timeout on checkout","Anil Sharma","-15d ⚠","In Progress"],
+     ["CRM-26-00902","Login fails on Safari 17","Neha Singh","-13d ⚠","Rework"]]]]]]],
+   ["Zenith Finserv",[["Auth",[["High",[
+     ["CRM-26-00844","Session drops after 20 minutes idle","Sunil Vaz","-5d ⚠","Deployment"]]]]],
+    ["Reports",[["High",[
+     ["CRM-26-00860","Report footer truncates page count","Karan Desai","-2d ⚠","In Progress"]]]]]]],
+   ["Medway Hospitals",[["Admin Console",[["High",[
+     ["CRM-26-00921","SSO cert renewal — waiting on client IT","Karan Desai","-1d ⚠","On Hold"]]]]]]]]]];
+function countSev(sv){return sv[1].length;}
+function countMod(m){return m[1].reduce((s,sv)=>s+countSev(sv),0);}
+function countCli(c){return c[1].reduce((s,m)=>s+countMod(m),0);}
+$("#wkSections").innerHTML=WSEC.map((sec,si)=>{
+  const n=sec[1].reduce((s,c)=>s+countCli(c),0);
+  const body=sec[1].map(c=>`<div class="node">
+    <button class="gr l1">🏢 ${c[0]}<span class="n">${countCli(c)}</span><span class="chev">▼</span></button>
+    <div class="kids">${c[1].map(m=>`<div class="node">
+      <button class="gr l2">▣ ${m[0]}<span class="n">${countMod(m)}</span><span class="chev">▼</span></button>
+      <div class="kids">${m[1].map(sv=>`<div class="node open">
+        <button class="gr l3"><span class="chip ${SEV[sv[0]]}">${sv[0]}</span><span class="n">${countSev(sv)}</span><span class="chev">▼</span></button>
+        <div class="kids">${sv[1].map(wt).join("")}</div>
+      </div>`).join("")}</div>
+    </div>`).join("")}</div>
+  </div>`).join("");
+  return `<div class="card acc${si===0?" open":""}">
+    <button class="acc-h" data-acc><span class="ttl">${sec[0]}</span><span class="n">${n}</span><span class="chev">▼</span></button>
+    <div class="acc-b">${body}</div></div>`;
+}).join("");
+/* ── S-06 drill-down: any .drv value opens the right slide-over ── */
+const TPOOL=(()=>{const seen=new Set(),out=[];SEC.forEach(s=>s[3].forEach(t=>{if(!seen.has(t[0])){seen.add(t[0]);out.push(t);}}));return out;})();
+function openDrill(d){
+  const n=+d.n||0;
+  let rows=d.a&&d.a!=="Unassigned"?TPOOL.filter(r=>r[2]===d.a):TPOOL;
+  rows=rows.slice(0,Math.min(6,n||6));
+  $("#drTitle").textContent=d.t;
+  $("#drMeta").innerHTML=`<span class="chip ind">${n} ticket${n===1?"":"s"}</span>
+    ${d.a?`<span class="chip gry">Assignee: ${d.a}</span>`:""}
+    <span class="chip gry">CRM Portal</span><span class="chip gry">as at 09:35</span>`;
+  $("#drBody").innerHTML = n===0
+    ? `<tr><td colspan="6" style="text-align:center;color:var(--ink-3);padding:22px">Nothing behind this figure right now — that is the good kind of empty.</td></tr>`
+    : rows.map(trow).join("");
+  $("#drFoot").innerHTML = n===0?"":
+    `Showing a sample of ${Math.min(rows.length,n)} of <b>${n}</b> — in the built screen this panel lists every matching ticket,
+     served by the ticket-list API with exactly the filters this figure represents. Every row deep-links to the ticket.`;
+  $("#veil").classList.add("on");
+  $("#drill").classList.add("on");
+  $("#drill").setAttribute("aria-hidden","false");
+}
+/* accordion + nested group toggles + drill clicks */
+document.addEventListener("click",e=>{
+  const dv=e.target.closest(".drv");
+  if(dv&&!e.target.closest("[data-close]")){openDrill(dv.dataset);return;}
+  const h=e.target.closest("[data-acc]");
+  if(h){h.closest(".acc").classList.toggle("open");return;}
+  const g=e.target.closest(".gr");
+  if(g){g.closest(".node").classList.toggle("open");}
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Enter"||e.key===" "){
+    const dv=e.target.closest?e.target.closest("td.drv"):null;
+    if(dv){e.preventDefault();openDrill(dv.dataset);}
+  }
+  if(e.key==="Escape"){$("#veil").classList.remove("on");$("#drill").classList.remove("on");$("#drill").setAttribute("aria-hidden","true");
+    $("#over").classList.remove("on");$("#over").setAttribute("aria-hidden","true");}
+});
+
 /* ── interactions ──────────────────────────────────────────────── */
 $$(".nav[data-go]").forEach(b=>b.onclick=()=>{
   $$(".nav").forEach(n=>n.removeAttribute("aria-current"));
@@ -694,7 +1144,7 @@ document.addEventListener("click",e=>{
   const seg=e.target.closest("[data-seg]");
   if(seg){filt=filt===seg.dataset.seg?null:seg.dataset.seg;journey();return;}
   if(e.target.closest("[data-qu]")){$("#veil").classList.add("on");$("#over").classList.add("on");$("#over").setAttribute("aria-hidden","false");}
-  if(e.target.closest("[data-close]")||e.target.id==="veil"){$("#veil").classList.remove("on");$("#over").classList.remove("on");$("#over").setAttribute("aria-hidden","true");}
+  if(e.target.closest("[data-close]")||e.target.id==="veil"){$("#veil").classList.remove("on");$("#over").classList.remove("on");$("#over").setAttribute("aria-hidden","true");$("#drill").classList.remove("on");$("#drill").setAttribute("aria-hidden","true");}
   const tb=e.target.closest(".tab");
   if(tb){$$(".tab",tb.parentElement).forEach(t=>t.setAttribute("aria-selected","false"));tb.setAttribute("aria-selected","true");}
 });
