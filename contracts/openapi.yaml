@@ -6080,8 +6080,7 @@ paths:
           enum:
             [type-donut, daily-stacked, velocity, resource-load, priority-bar,
              aging-buckets, calendar-heatmap, sla-gauge, project-treemap,
-             stage-funnel, rework, stage-duration, handoff-latency, client-volume,
-             module-open]
+             stage-funnel, rework, stage-duration, handoff-latency, client-volume]
     get:
       tags: [dashboard]
       operationId: getDashboardWidget
@@ -6157,8 +6156,7 @@ paths:
               enum:
                 [type-donut, daily-stacked, velocity, resource-load, priority-bar,
                  aging-buckets, calendar-heatmap, sla-gauge, project-treemap,
-                 stage-funnel, rework, stage-duration, handoff-latency, client-volume,
-                 module-open]
+                 stage-funnel, rework, stage-duration, handoff-latency, client-volume]
         - { name: projectId, in: query, schema: { type: integer, format: int64 } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
