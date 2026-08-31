@@ -22,9 +22,9 @@ function renderFilters(initialEntry = '/dashboard') {
 }
 
 describe('useDashboardFilters', () => {
-  it('reads the three filters off the URL', () => {
+  it('reads the four filters off the URL', () => {
     const { result } = renderFilters(
-      '/dashboard?projectId=4&assigneeId=9&from=2026-08-01&to=2026-08-19',
+      '/dashboard?projectId=4&assigneeId=9&from=2026-08-01&to=2026-08-19&tab=weekly',
     )
 
     expect(result.current.filters).toEqual({
@@ -32,7 +32,15 @@ describe('useDashboardFilters', () => {
       assigneeId: '9',
       from: '2026-08-01',
       to: '2026-08-19',
+      tab: 'weekly',
     })
+  })
+
+  /** No default applied here — that is `DashboardPage`'s call, not this hook's. */
+  it('reads tab as null rather than defaulting it when absent', () => {
+    const { result } = renderFilters('/dashboard')
+
+    expect(result.current.filters.tab).toBeNull()
   })
 
   /**

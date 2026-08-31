@@ -1228,6 +1228,18 @@ final class PermissionMatrix {
             // "the dashboard is broken", not "the two routes disagree".
             everyRole("GET", "/api/v1/dashboard/widgets"),
 
+            // Dashboard Rework Dev 1, PR 2 · the three new tab routes, stubbed
+            // in this PR and filled in by later ones (today: PR 6; overview
+            // and weekly: Dev 2's PR 9 and PR 12). Same reasoning as summary
+            // above, restated rather than assumed: every role has a
+            // dashboard, and which figures answer — or whether the caller
+            // gets the OWN_WORK variant with no MIS grid at all — is
+            // TodayProgressService/OverviewService/WeeklyProgressService's
+            // decision against DashboardScope, never a capability gate here.
+            everyRole("GET", "/api/v1/dashboard/today"),
+            everyRole("GET", "/api/v1/dashboard/overview"),
+            everyRole("GET", "/api/v1/dashboard/weekly"),
+
             // ── reports · A-063, and the dashboard's argument a third time ───
             //
             // §2's own matrix grants a reports section to all six roles, in

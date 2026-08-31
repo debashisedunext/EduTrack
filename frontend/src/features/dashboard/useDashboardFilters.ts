@@ -28,6 +28,13 @@ export interface DashboardFilters {
   assigneeId: string | null
   from: string | null
   to: string | null
+  /**
+   * Dashboard Rework Dev 1, PR 2 · which of the four tabs is showing. Raw
+   * URL value, possibly absent — `DashboardPage` applies the `today`
+   * default, the same way every other consumer of this hook applies its
+   * own default rather than this hook guessing one for it.
+   */
+  tab: string | null
 }
 
 export function useDashboardFilters() {
@@ -39,6 +46,7 @@ export function useDashboardFilters() {
       assigneeId: params.get('assigneeId'),
       from: params.get('from'),
       to: params.get('to'),
+      tab: params.get('tab'),
     }),
     [params],
   )
