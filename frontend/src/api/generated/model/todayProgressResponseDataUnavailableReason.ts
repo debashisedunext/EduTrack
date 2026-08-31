@@ -47,24 +47,8 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type GetDashboardWidgetsKeysItem = typeof GetDashboardWidgetsKeysItem[keyof typeof GetDashboardWidgetsKeysItem];
+/**
+ * Why these figures are withheld, in words a person reads, or null when they are served. Same contract as the KPI row's — set when `projectId` names a project outside the caller's scope, with `cards` empty. Not a 404, for the reason stated there: an out-of-scope project matches no rows, and no rows renders as a wall of zeroes, which is a measurement rather than an absence.
 
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const GetDashboardWidgetsKeysItem = {
-  'type-donut': 'type-donut',
-  'daily-stacked': 'daily-stacked',
-  velocity: 'velocity',
-  'resource-load': 'resource-load',
-  'priority-bar': 'priority-bar',
-  'aging-buckets': 'aging-buckets',
-  'calendar-heatmap': 'calendar-heatmap',
-  'sla-gauge': 'sla-gauge',
-  'project-treemap': 'project-treemap',
-  'stage-funnel': 'stage-funnel',
-  rework: 'rework',
-  'stage-duration': 'stage-duration',
-  'handoff-latency': 'handoff-latency',
-  'client-volume': 'client-volume',
-  'module-open': 'module-open',
-} as const;
+ */
+export type TodayProgressResponseDataUnavailableReason = string | null;

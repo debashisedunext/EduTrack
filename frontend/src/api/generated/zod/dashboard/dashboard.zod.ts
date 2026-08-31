@@ -89,7 +89,7 @@ dashboard polling faster than that gets `304` and costs nothing.
  * @summary One widget's series
  */
 export const getDashboardWidgetParams = zod.object({
-  "widgetKey": zod.enum(['type-donut', 'daily-stacked', 'velocity', 'resource-load', 'priority-bar', 'aging-buckets', 'calendar-heatmap', 'sla-gauge', 'project-treemap', 'stage-funnel', 'rework', 'stage-duration', 'handoff-latency', 'client-volume'])
+  "widgetKey": zod.enum(['type-donut', 'daily-stacked', 'velocity', 'resource-load', 'priority-bar', 'aging-buckets', 'calendar-heatmap', 'sla-gauge', 'project-treemap', 'stage-funnel', 'rework', 'stage-duration', 'handoff-latency', 'client-volume', 'module-open'])
 })
 
 export const getDashboardWidgetQueryParams = zod.object({
@@ -150,7 +150,7 @@ served.
  * @summary Several widgets' series in one request
  */
 export const getDashboardWidgetsQueryParams = zod.object({
-  "keys": zod.array(zod.enum(['type-donut', 'daily-stacked', 'velocity', 'resource-load', 'priority-bar', 'aging-buckets', 'calendar-heatmap', 'sla-gauge', 'project-treemap', 'stage-funnel', 'rework', 'stage-duration', 'handoff-latency', 'client-volume'])).describe('The widget keys to render. Repeat the parameter or pass one comma-separated value.\n'),
+  "keys": zod.array(zod.enum(['type-donut', 'daily-stacked', 'velocity', 'resource-load', 'priority-bar', 'aging-buckets', 'calendar-heatmap', 'sla-gauge', 'project-treemap', 'stage-funnel', 'rework', 'stage-duration', 'handoff-latency', 'client-volume', 'module-open'])).describe('The widget keys to render. Repeat the parameter or pass one comma-separated value.\n'),
   "projectId": zod.number().optional(),
   "from": zod.string().date().optional(),
   "to": zod.string().date().optional()
@@ -174,5 +174,215 @@ export const getDashboardWidgetsResponse = zod.object({
 })).optional()
 })).optional()
 }))
+})
+
+/**
+ * Everything on today's plate in seven cards, then one row per resource.
+
+**"Today" is the UTC civil day**, matching how the summary tables are
+keyed. A user in IST sees the day roll at 05:30 local; that is the same
+boundary every other figure on the platform already uses, and a
+per-viewer day would make two people disagree about the same card.
+
+**The response has two shapes, chosen server-side from the caller's
+role.** Developer, QA and Deployment get `variant: OWN_WORK` — their own
+figures, no `resources` grid and no `openIssues` role split, because
+both answer questions about other people. Admin, PM and Support get
+`variant: FULL`. The client renders what it is given rather than
+deciding for itself, which is the same reason `DashboardScope` narrows
+rows on the server and never trusts a filter from the page.
+
+**Near delay means due on or before the next working day**, walked over
+the working calendar — weekends and org holidays included. A Friday
+ticket is near-delay against Monday, not Saturday.
+
+**Started Today and Finished Today are not cards.** They were removed by
+product decision and survive as sections and as MIS columns. Their
+figures are still here, on the resource rows.
+
+ * @summary Today's Progress — tab 1 of S-05
+ */
+export const getDashboardTodayQueryParams = zod.object({
+  "projectId": zod.number().optional()
+})
+
+export const getDashboardTodayResponse = zod.object({
+  "data": zod.object({
+  "asOf": zod.string().datetime({}).nullish().describe('When the summary tables were last refreshed. At most five minutes old.'),
+  "variant": zod.enum(['FULL', 'OWN_WORK']).describe('Which shape of the Today payload was served. OWN_WORK for Developer, QA and Deployment — own figures only, no resource grid, no role split. Chosen server-side; the client renders what it is given.\n'),
+  "unavailableReason": zod.string().nullish().describe('Why these figures are withheld, in words a person reads, or null when they are served. Same contract as the KPI row\'s — set when `projectId` names a project outside the caller\'s scope, with `cards` empty. Not a 404, for the reason stated there: an out-of-scope project matches no rows, and no rows renders as a wall of zeroes, which is a measurement rather than an absence.\n'),
+  "cards": zod.array(zod.object({
+  "key": zod.enum(['todays-work', 'overdue', 'not-started', 'wip', 'wip-breakdown', 'blocked', 'pending-review']).describe('The seven cards, in the order the prototype shows them. Led by the two roll-ups: `todays-work` is the whole plate in one card, and `overdue` splits lateness into the two ways it happens.\n'),
+  "label": zod.string(),
+  "total": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}),
+  "figures": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "value": zod.number(),
+  "drillDown": zod.string().nullish()
+})).describe('The card\'s sub-figures, each independently clickable. Whether they sum to `total` is per card and deliberate — `overdue`\'s two do, and `wip`\'s updated\/not-updated pair does. `pending-review` carries none: it is one combined count of RESOLVED-not-CLOSED plus the review stages, de-duplicated, and splitting it would double-count a ticket that is both.\n')
+})),
+  "openIssues": zod.union([zod.object({
+  "total": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}),
+  "roles": zod.array(zod.object({
+  "role": zod.string(),
+  "label": zod.string(),
+  "value": zod.number(),
+  "drillDown": zod.string().nullish()
+})).describe('One chip per role plus `UNASSIGNED`, which is a real bucket and not a rounding error — a ticket nobody holds is the one most worth clicking. The chips sum to `total`.\n')
+}).describe('Every not-closed ticket, split by the role currently holding it. Answers \"who has the work\" rather than \"how much work is there\", which is why it sits apart from the seven cards. Absent on the OWN_WORK variant.\n'),zod.null()]).optional().describe('Null on the OWN_WORK variant.'),
+  "resources": zod.array(zod.object({
+  "userId": zod.number(),
+  "displayName": zod.string(),
+  "overdueStart": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional(),
+  "dueToday": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional(),
+  "notStarted": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional(),
+  "wip": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional(),
+  "updatedToday": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional(),
+  "nearDelay": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional(),
+  "delayed": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional(),
+  "onTime": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional(),
+  "finishedToday": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional(),
+  "finishedLate": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}).optional()
+}).describe('One resource\'s row in the MIS grid. Ten named columns rather than a key\/value map: a map generates as a TypeScript index signature and loses the per-column type, the same reason `DashboardWidgetsResponse` is an array rather than an object keyed by widget.\nEvery cell is a figure with its own drill-down, keyed by assignee \*and\* metric — clicking \"delayed\" on one row returns that person\'s delayed tickets, not everyone\'s.\n')).describe('The MIS grid, one row per resource. Empty on the OWN_WORK variant — a delivery role sees their own figures in the cards above and no grid at all.\n')
+})
+})
+
+/**
+ * Four cards over the selected range, the ten busiest assignees, and the
+status split.
+
+**`assignees` reports open state, not throughput.** Each bar is what that
+person is holding *now* — in progress, overdue, not started — and not
+what they completed inside `from`..`to`. The two readings are easy to
+confuse and answer opposite questions: the cards above say what happened
+in the window, this says who is carrying what today. Sorted by open
+total, capped at ten.
+
+The three states are disjoint, so a bar's segments sum to that person's
+open total and never double-count.
+
+ * @summary Ticket Overview — tab 2 of S-05
+ */
+export const getDashboardOverviewQueryParams = zod.object({
+  "projectId": zod.number().optional(),
+  "from": zod.string().date().optional(),
+  "to": zod.string().date().optional(),
+  "assigneeId": zod.number().optional()
+})
+
+export const getDashboardOverviewResponse = zod.object({
+  "data": zod.object({
+  "asOf": zod.string().datetime({}).nullish(),
+  "unavailableReason": zod.string().nullish(),
+  "cards": zod.array(zod.object({
+  "key": zod.enum(['total', 'pending', 'in-progress', 'completed']),
+  "label": zod.string(),
+  "value": zod.number(),
+  "drillDown": zod.string().nullish()
+})).describe('Total, Pending (category TODO), In Progress and Completed (category DONE) for the range.'),
+  "assignees": zod.array(zod.object({
+  "userId": zod.number(),
+  "displayName": zod.string(),
+  "inProgress": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}),
+  "overdue": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+}),
+  "notStarted": zod.object({
+  "value": zod.number(),
+  "drillDown": zod.string().nullish().describe('The `GET \/tickets` query returning exactly the rows this figure counted, or null where no list can express it. Built only from parameters that operation implements — `DrillDownContractTest` fails the build otherwise.\n')
+})
+})).describe('The ten busiest people by open total, each split into three disjoint states. Open state now — not completed-in-range.\n'),
+  "distribution": zod.array(zod.object({
+  "category": zod.enum(['TODO', 'IN_PROGRESS', 'DONE']).describe('B-039 · blueprint §7.4\'s S-13 tab 1 — \*\"categories (To-do \/ In progress \/\nDone)\"\*.\n\n\*\*Not derivable from `isOpen` and `isTerminal`, which is why it is a\ncolumn.\*\* `NEW` and `REOPENED` are `TODO` while `ON_HOLD`,\n`AWAITING_INFO` and `REWORK` are `IN_PROGRESS` — five statuses carrying\n`isOpen: true, isTerminal: false`, identical on both booleans and three\ncategories apart.\n\n`IN_PROGRESS` collides by name with the `StatusCode` of the same\nspelling and the two are unrelated: `ON_HOLD` is category `IN_PROGRESS`.\nKept because §7.4 names the three categories in those words, and a\nrenamed enum would make the screen\'s own labels a translation.\n\n`RESOLVED` is `DONE` while `isOpen` stays `true` — the category describes\nthe \*\*work\*\*, `isOpen` describes the \*\*ticket record\*\*. That gap is the\nreason this is not `isOpen` renamed.\n'),
+  "label": zod.string(),
+  "value": zod.number(),
+  "pct": zod.number(),
+  "drillDown": zod.string().nullish()
+})).describe('The half-donut\'s three arcs. `pct` is served rather than left to the client so the legend and the arc cannot round differently.\n')
+})
+})
+
+/**
+ * Four cards for one ISO week, each against the week before it.
+
+**The week starts Monday, in UTC.** `weekStart` must be a Monday; any
+other date is a 400 rather than a silently shifted window, because a
+request for Wednesday-to-Wednesday would return figures that look
+ordinary and compare against the wrong seven days.
+
+**A card with no prior week shows no delta, not a zero.** `deltaPct` is
+null when the comparison window has no data — the first week of a
+project has nothing to improve on, and rendering that as 0% claims it
+held steady.
+
+**There is no S-Curve**, by decision. The four cards and the five
+accordion sections are the whole tab.
+
+ * @summary Weekly Progress — tab 3 of S-05
+ */
+export const getDashboardWeeklyQueryParams = zod.object({
+  "projectId": zod.number().optional(),
+  "weekStart": zod.string().date().optional().describe('The Monday of the week to report, UTC. Defaults to the current week. A date that is not a Monday is refused.\n'),
+  "assigneeId": zod.number().optional()
+})
+
+export const getDashboardWeeklyResponse = zod.object({
+  "data": zod.object({
+  "asOf": zod.string().datetime({}).nullish(),
+  "unavailableReason": zod.string().nullish(),
+  "weekStart": zod.string().date().describe('The ISO Monday reported, echoed back so a deep link and the picker cannot disagree.'),
+  "weekEnd": zod.string().date().describe('The Sunday, inclusive.'),
+  "cards": zod.array(zod.object({
+  "key": zod.enum(['avg-progress', 'due-this-week', 'delayed-vs-last-week', 'avg-delay-days']),
+  "label": zod.string(),
+  "value": zod.number(),
+  "unit": zod.enum(['COUNT', 'PERCENT', 'DAYS']),
+  "secondaryValue": zod.number().nullish().describe('The second figure a card carries where it has one — `due-this-week` shows finished-so-far beside the total.\n'),
+  "secondaryLabel": zod.string().nullish(),
+  "deltaPct": zod.number().nullish().describe('Change against the prior week, or \*\*null when that week has no data\*\*. Null is not zero: a first week has nothing to compare against, and 0% would claim it held steady.\n'),
+  "drillDown": zod.string().nullish()
+})).describe('Four cards, each against the same week seven days earlier. `value` is a count except on `avg-progress`, which is a percentage, and `avg-delay-days`, which is days — read `unit` rather than assuming.\n')
+})
 })
 

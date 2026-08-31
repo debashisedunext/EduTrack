@@ -46,25 +46,24 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { DashboardFigure } from './dashboardFigure';
 
-export type GetDashboardWidgetsKeysItem = typeof GetDashboardWidgetsKeysItem[keyof typeof GetDashboardWidgetsKeysItem];
+/**
+ * One resource's row in the MIS grid. Ten named columns rather than a key/value map: a map generates as a TypeScript index signature and loses the per-column type, the same reason `DashboardWidgetsResponse` is an array rather than an object keyed by widget.
+Every cell is a figure with its own drill-down, keyed by assignee *and* metric — clicking "delayed" on one row returns that person's delayed tickets, not everyone's.
 
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const GetDashboardWidgetsKeysItem = {
-  'type-donut': 'type-donut',
-  'daily-stacked': 'daily-stacked',
-  velocity: 'velocity',
-  'resource-load': 'resource-load',
-  'priority-bar': 'priority-bar',
-  'aging-buckets': 'aging-buckets',
-  'calendar-heatmap': 'calendar-heatmap',
-  'sla-gauge': 'sla-gauge',
-  'project-treemap': 'project-treemap',
-  'stage-funnel': 'stage-funnel',
-  rework: 'rework',
-  'stage-duration': 'stage-duration',
-  'handoff-latency': 'handoff-latency',
-  'client-volume': 'client-volume',
-  'module-open': 'module-open',
-} as const;
+ */
+export interface AssigneeMisRow {
+  userId: number;
+  displayName: string;
+  overdueStart?: DashboardFigure;
+  dueToday?: DashboardFigure;
+  notStarted?: DashboardFigure;
+  wip?: DashboardFigure;
+  updatedToday?: DashboardFigure;
+  nearDelay?: DashboardFigure;
+  delayed?: DashboardFigure;
+  onTime?: DashboardFigure;
+  finishedToday?: DashboardFigure;
+  finishedLate?: DashboardFigure;
+}

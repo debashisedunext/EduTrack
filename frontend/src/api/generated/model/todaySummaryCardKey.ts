@@ -47,24 +47,20 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type GetDashboardWidgetsKeysItem = typeof GetDashboardWidgetsKeysItem[keyof typeof GetDashboardWidgetsKeysItem];
+/**
+ * The seven cards, in the order the prototype shows them. Led by the two roll-ups: `todays-work` is the whole plate in one card, and `overdue` splits lateness into the two ways it happens.
+
+ */
+export type TodaySummaryCardKey = typeof TodaySummaryCardKey[keyof typeof TodaySummaryCardKey];
 
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
-export const GetDashboardWidgetsKeysItem = {
-  'type-donut': 'type-donut',
-  'daily-stacked': 'daily-stacked',
-  velocity: 'velocity',
-  'resource-load': 'resource-load',
-  'priority-bar': 'priority-bar',
-  'aging-buckets': 'aging-buckets',
-  'calendar-heatmap': 'calendar-heatmap',
-  'sla-gauge': 'sla-gauge',
-  'project-treemap': 'project-treemap',
-  'stage-funnel': 'stage-funnel',
-  rework: 'rework',
-  'stage-duration': 'stage-duration',
-  'handoff-latency': 'handoff-latency',
-  'client-volume': 'client-volume',
-  'module-open': 'module-open',
+export const TodaySummaryCardKey = {
+  'todays-work': 'todays-work',
+  overdue: 'overdue',
+  'not-started': 'not-started',
+  wip: 'wip',
+  'wip-breakdown': 'wip-breakdown',
+  blocked: 'blocked',
+  'pending-review': 'pending-review',
 } as const;

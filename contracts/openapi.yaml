@@ -1322,6 +1322,57 @@ paths:
         # applied the right filter over all time. ⚠️ contracts/ is Stream D's.
         - { name: reportedFrom, in: query, schema: { type: string, format: date }, description: 'Filters on dateReported, inclusive.' }
         - { name: reportedTo, in: query, schema: { type: string, format: date }, description: 'Filters on dateReported, inclusive.' }
+        # ── the Today / Weekly drill-down parameters ───────────────────────────
+        # Every figure on the reworked S-05 carries a drillDown built ONLY from
+        # parameters this operation implements, and `DrillDownContractTest`
+        # fails the build if a service emits one that does not resolve here.
+        # These seven are what the seven cards, the MIS grid and the weekly
+        # accordions actually need.
+        #
+        # `statusCategory` is the one that could not be worked around. "Not
+        # started" is NEW *or* REOPENED and "WIP" is the whole IN_PROGRESS
+        # category; `status` takes a single code, so neither was expressible
+        # and both are on every card.
+        #
+        # WARNING contracts/ has no CODEOWNERS entry and so falls to the `*`
+        # rule — Debashis. Flagged for his sign-off.
+        - name: statusCategory
+          in: query
+          schema: { $ref: '#/components/schemas/StatusCategory' }
+          description: >
+            Narrows to one work category. TODO is "not started" (NEW, REOPENED),
+            IN_PROGRESS is "WIP". Not a synonym for `excludeClosed` — RESOLVED is
+            category DONE while its ticket record is still open.
+        - name: statuses
+          in: query
+          description: >
+            Several status codes at once, comma-separated. Use where a figure
+            counts an explicit set rather than a whole category — the Blocked
+            card is `ON_HOLD,AWAITING_INFO` and nothing else. Ignored when
+            `status` is also sent, which names exactly one.
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/StatusCode' }
+          style: form
+          explode: false
+        - { name: updatedFrom, in: query, schema: { type: string, format: date }, description: 'Filters on updatedAt, inclusive. Backs the "updated today" and "not updated" figures.' }
+        - { name: updatedTo, in: query, schema: { type: string, format: date }, description: 'Filters on updatedAt, inclusive.' }
+        # started/finished read the per-cycle stamps, not the ticket row: a
+        # reopened ticket starts and finishes again in its new cycle, and a
+        # ticket-level column would count it once and for ever.
+        - { name: startedFrom, in: query, schema: { type: string, format: date }, description: 'Filters on the current cycle''s startedAt, inclusive.' }
+        - { name: startedTo, in: query, schema: { type: string, format: date }, description: 'Filters on the current cycle''s startedAt, inclusive.' }
+        - { name: finishedFrom, in: query, schema: { type: string, format: date }, description: 'Filters on the current cycle''s finishedAt, inclusive.' }
+        - { name: finishedTo, in: query, schema: { type: string, format: date }, description: 'Filters on the current cycle''s finishedAt, inclusive.' }
+        - name: pendingReview
+          in: query
+          schema: { type: boolean }
+          description: >
+            True returns the Pending Review population as one set: RESOLVED but
+            not CLOSED, **plus** tickets sitting in a stage the stage master
+            marks as review. A ticket that is both is returned once. The review
+            stages come from the master, never a hardcoded VERIFY/SIGNOFF list,
+            so a project that renames its sign-off stage keeps working.
         - { name: sort, in: query, schema: { type: string, default: '-createdAt' } }
       responses:
         '200':
@@ -6029,7 +6080,8 @@ paths:
           enum:
             [type-donut, daily-stacked, velocity, resource-load, priority-bar,
              aging-buckets, calendar-heatmap, sla-gauge, project-treemap,
-             stage-funnel, rework, stage-duration, handoff-latency, client-volume]
+             stage-funnel, rework, stage-duration, handoff-latency, client-volume,
+             module-open]
     get:
       tags: [dashboard]
       operationId: getDashboardWidget
@@ -6105,7 +6157,8 @@ paths:
               enum:
                 [type-donut, daily-stacked, velocity, resource-load, priority-bar,
                  aging-buckets, calendar-heatmap, sla-gauge, project-treemap,
-                 stage-funnel, rework, stage-duration, handoff-latency, client-volume]
+                 stage-funnel, rework, stage-duration, handoff-latency, client-volume,
+                 module-open]
         - { name: projectId, in: query, schema: { type: integer, format: int64 } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
@@ -6118,6 +6171,126 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DashboardWidgetsResponse' }
         '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ── S-05 rework · the three tab endpoints ───────────────────────────────────
+  # The reworked dashboard is four tabs. Analytics is the existing surface above
+  # and is unchanged; Today, Ticket Overview and Weekly Progress are these three.
+  #
+  # All three obey the same two rules as everything above them. No figure is a
+  # live COUNT(*) — every number is read from the summary tables the worker
+  # refreshes every five minutes, and `asOf` says when. And every figure carries
+  # a `drillDown` built only from parameters `GET /tickets` implements, so a
+  # number a person cannot click back to its rows does not ship.
+  #
+  # Ticket *lists* are the exception and stay live: the sections, accordions and
+  # the drill-down panel all page through `GET /tickets`. Pre-aggregating a list
+  # would mean storing rows twice.
+  /dashboard/today:
+    get:
+      tags: [dashboard]
+      operationId: getDashboardToday
+      summary: Today's Progress — tab 1 of S-05
+      description: |
+        Everything on today's plate in seven cards, then one row per resource.
+
+        **"Today" is the UTC civil day**, matching how the summary tables are
+        keyed. A user in IST sees the day roll at 05:30 local; that is the same
+        boundary every other figure on the platform already uses, and a
+        per-viewer day would make two people disagree about the same card.
+
+        **The response has two shapes, chosen server-side from the caller's
+        role.** Developer, QA and Deployment get `variant: OWN_WORK` — their own
+        figures, no `resources` grid and no `openIssues` role split, because
+        both answer questions about other people. Admin, PM and Support get
+        `variant: FULL`. The client renders what it is given rather than
+        deciding for itself, which is the same reason `DashboardScope` narrows
+        rows on the server and never trusts a filter from the page.
+
+        **Near delay means due on or before the next working day**, walked over
+        the working calendar — weekends and org holidays included. A Friday
+        ticket is near-delay against Monday, not Saturday.
+
+        **Started Today and Finished Today are not cards.** They were removed by
+        product decision and survive as sections and as MIS columns. Their
+        figures are still here, on the resource rows.
+      parameters:
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TodayProgressResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /dashboard/overview:
+    get:
+      tags: [dashboard]
+      operationId: getDashboardOverview
+      summary: Ticket Overview — tab 2 of S-05
+      description: |
+        Four cards over the selected range, the ten busiest assignees, and the
+        status split.
+
+        **`assignees` reports open state, not throughput.** Each bar is what that
+        person is holding *now* — in progress, overdue, not started — and not
+        what they completed inside `from`..`to`. The two readings are easy to
+        confuse and answer opposite questions: the cards above say what happened
+        in the window, this says who is carrying what today. Sorted by open
+        total, capped at ten.
+
+        The three states are disjoint, so a bar's segments sum to that person's
+        open total and never double-count.
+      parameters:
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: assigneeId, in: query, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardOverviewResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /dashboard/weekly:
+    get:
+      tags: [dashboard]
+      operationId: getDashboardWeekly
+      summary: Weekly Progress — tab 3 of S-05
+      description: |
+        Four cards for one ISO week, each against the week before it.
+
+        **The week starts Monday, in UTC.** `weekStart` must be a Monday; any
+        other date is a 400 rather than a silently shifted window, because a
+        request for Wednesday-to-Wednesday would return figures that look
+        ordinary and compare against the wrong seven days.
+
+        **A card with no prior week shows no delta, not a zero.** `deltaPct` is
+        null when the comparison window has no data — the first week of a
+        project has nothing to improve on, and rendering that as 0% claims it
+        held steady.
+
+        **There is no S-Curve**, by decision. The four cards and the five
+        accordion sections are the whole tab.
+      parameters:
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - name: weekStart
+          in: query
+          schema: { type: string, format: date }
+          description: >
+            The Monday of the week to report, UTC. Defaults to the current
+            week. A date that is not a Monday is refused.
+        - { name: assigneeId, in: query, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardWeeklyResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /reports:
@@ -11660,6 +11833,246 @@ components:
         data:
           type: array
           items: { $ref: '#/components/schemas/DashboardWidget' }
+
+    # ── S-05 rework · the three tab payloads ─────────────────────────────────
+    # One figure, and the query that returns the rows behind it. Every number on
+    # all three tabs is this shape, which is what makes "every value is
+    # clickable" a property of the contract rather than a promise in a ticket.
+    DashboardFigure:
+      type: object
+      required: [value]
+      properties:
+        value: { type: integer, examples: [14] }
+        drillDown:
+          type: [string, 'null']
+          description: >
+            The `GET /tickets` query returning exactly the rows this figure
+            counted, or null where no list can express it. Built only from
+            parameters that operation implements — `DrillDownContractTest`
+            fails the build otherwise.
+          examples: ['/tickets?statusCategory=TODO&dueTo=2026-08-31&excludeClosed=true']
+
+    DashboardVariant:
+      type: string
+      enum: [FULL, OWN_WORK]
+      description: >
+        Which shape of the Today payload was served. OWN_WORK for Developer, QA
+        and Deployment — own figures only, no resource grid, no role split.
+        Chosen server-side; the client renders what it is given.
+
+    TodaySummaryCard:
+      type: object
+      required: [key, label, total, figures]
+      properties:
+        key:
+          type: string
+          enum: [todays-work, overdue, not-started, wip, wip-breakdown, blocked, pending-review]
+          description: >
+            The seven cards, in the order the prototype shows them. Led by the
+            two roll-ups: `todays-work` is the whole plate in one card, and
+            `overdue` splits lateness into the two ways it happens.
+        label: { type: string }
+        total: { $ref: '#/components/schemas/DashboardFigure' }
+        figures:
+          type: array
+          description: >
+            The card's sub-figures, each independently clickable. Whether they
+            sum to `total` is per card and deliberate — `overdue`'s two do, and
+            `wip`'s updated/not-updated pair does. `pending-review` carries
+            none: it is one combined count of RESOLVED-not-CLOSED plus the
+            review stages, de-duplicated, and splitting it would double-count a
+            ticket that is both.
+          items:
+            type: object
+            required: [key, label, value]
+            properties:
+              key: { type: string }
+              label: { type: string }
+              value: { type: integer }
+              drillDown: { type: [string, 'null'] }
+
+    OpenIssuesByRole:
+      type: object
+      required: [total, roles]
+      description: >
+        Every not-closed ticket, split by the role currently holding it. Answers
+        "who has the work" rather than "how much work is there", which is why it
+        sits apart from the seven cards. Absent on the OWN_WORK variant.
+      properties:
+        total: { $ref: '#/components/schemas/DashboardFigure' }
+        roles:
+          type: array
+          description: >
+            One chip per role plus `UNASSIGNED`, which is a real bucket and not
+            a rounding error — a ticket nobody holds is the one most worth
+            clicking. The chips sum to `total`.
+          items:
+            type: object
+            required: [role, label, value]
+            properties:
+              role: { type: string }
+              label: { type: string }
+              value: { type: integer }
+              drillDown: { type: [string, 'null'] }
+
+    AssigneeMisRow:
+      type: object
+      required: [userId, displayName]
+      description: >
+        One resource's row in the MIS grid. Ten named columns rather than a
+        key/value map: a map generates as a TypeScript index signature and loses
+        the per-column type, the same reason `DashboardWidgetsResponse` is an
+        array rather than an object keyed by widget.
+
+        Every cell is a figure with its own drill-down, keyed by assignee *and*
+        metric — clicking "delayed" on one row returns that person's delayed
+        tickets, not everyone's.
+      properties:
+        userId: { type: integer, format: int64 }
+        displayName: { type: string }
+        overdueStart: { $ref: '#/components/schemas/DashboardFigure' }
+        dueToday: { $ref: '#/components/schemas/DashboardFigure' }
+        notStarted: { $ref: '#/components/schemas/DashboardFigure' }
+        wip: { $ref: '#/components/schemas/DashboardFigure' }
+        updatedToday: { $ref: '#/components/schemas/DashboardFigure' }
+        nearDelay: { $ref: '#/components/schemas/DashboardFigure' }
+        delayed: { $ref: '#/components/schemas/DashboardFigure' }
+        onTime: { $ref: '#/components/schemas/DashboardFigure' }
+        finishedToday: { $ref: '#/components/schemas/DashboardFigure' }
+        finishedLate: { $ref: '#/components/schemas/DashboardFigure' }
+
+    TodayProgressResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [variant, cards, resources]
+          properties:
+            asOf:
+              type: [string, 'null']
+              format: date-time
+              description: When the summary tables were last refreshed. At most five minutes old.
+            variant: { $ref: '#/components/schemas/DashboardVariant' }
+            unavailableReason:
+              type: [string, 'null']
+              description: >
+                Why these figures are withheld, in words a person reads, or null
+                when they are served. Same contract as the KPI row's — set when
+                `projectId` names a project outside the caller's scope, with
+                `cards` empty. Not a 404, for the reason stated there: an
+                out-of-scope project matches no rows, and no rows renders as a
+                wall of zeroes, which is a measurement rather than an absence.
+            cards:
+              type: array
+              items: { $ref: '#/components/schemas/TodaySummaryCard' }
+            openIssues:
+              oneOf:
+                - { $ref: '#/components/schemas/OpenIssuesByRole' }
+                - { type: 'null' }
+              description: Null on the OWN_WORK variant.
+            resources:
+              type: array
+              description: >
+                The MIS grid, one row per resource. Empty on the OWN_WORK
+                variant — a delivery role sees their own figures in the cards
+                above and no grid at all.
+              items: { $ref: '#/components/schemas/AssigneeMisRow' }
+
+    DashboardOverviewResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [cards, assignees, distribution]
+          properties:
+            asOf: { type: [string, 'null'], format: date-time }
+            unavailableReason: { type: [string, 'null'] }
+            cards:
+              type: array
+              description: Total, Pending (category TODO), In Progress and Completed (category DONE) for the range.
+              items:
+                type: object
+                required: [key, label, value]
+                properties:
+                  key: { type: string, enum: [total, pending, in-progress, completed] }
+                  label: { type: string }
+                  value: { type: integer }
+                  drillDown: { type: [string, 'null'] }
+            assignees:
+              type: array
+              description: >
+                The ten busiest people by open total, each split into three
+                disjoint states. Open state now — not completed-in-range.
+              items:
+                type: object
+                required: [userId, displayName, inProgress, overdue, notStarted]
+                properties:
+                  userId: { type: integer, format: int64 }
+                  displayName: { type: string }
+                  inProgress: { $ref: '#/components/schemas/DashboardFigure' }
+                  overdue: { $ref: '#/components/schemas/DashboardFigure' }
+                  notStarted: { $ref: '#/components/schemas/DashboardFigure' }
+            distribution:
+              type: array
+              description: >
+                The half-donut's three arcs. `pct` is served rather than left to
+                the client so the legend and the arc cannot round differently.
+              items:
+                type: object
+                required: [category, label, value, pct]
+                properties:
+                  category: { $ref: '#/components/schemas/StatusCategory' }
+                  label: { type: string }
+                  value: { type: integer }
+                  pct: { type: number }
+                  drillDown: { type: [string, 'null'] }
+
+    DashboardWeeklyResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [weekStart, weekEnd, cards]
+          properties:
+            asOf: { type: [string, 'null'], format: date-time }
+            unavailableReason: { type: [string, 'null'] }
+            weekStart:
+              type: string
+              format: date
+              description: The ISO Monday reported, echoed back so a deep link and the picker cannot disagree.
+            weekEnd: { type: string, format: date, description: 'The Sunday, inclusive.' }
+            cards:
+              type: array
+              description: >
+                Four cards, each against the same week seven days earlier.
+                `value` is a count except on `avg-progress`, which is a
+                percentage, and `avg-delay-days`, which is days — read `unit`
+                rather than assuming.
+              items:
+                type: object
+                required: [key, label, value, unit]
+                properties:
+                  key: { type: string, enum: [avg-progress, due-this-week, delayed-vs-last-week, avg-delay-days] }
+                  label: { type: string }
+                  value: { type: number }
+                  unit: { type: string, enum: [COUNT, PERCENT, DAYS] }
+                  secondaryValue:
+                    type: [number, 'null']
+                    description: >
+                      The second figure a card carries where it has one —
+                      `due-this-week` shows finished-so-far beside the total.
+                  secondaryLabel: { type: [string, 'null'] }
+                  deltaPct:
+                    type: [number, 'null']
+                    description: >
+                      Change against the prior week, or **null when that week
+                      has no data**. Null is not zero: a first week has nothing
+                      to compare against, and 0% would claim it held steady.
+                  drillDown: { type: [string, 'null'] }
+
     ReportCategory:
       type: string
       description: >

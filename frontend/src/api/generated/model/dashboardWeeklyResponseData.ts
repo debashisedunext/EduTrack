@@ -46,25 +46,18 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { DashboardWeeklyResponseDataAsOf } from './dashboardWeeklyResponseDataAsOf';
+import type { DashboardWeeklyResponseDataUnavailableReason } from './dashboardWeeklyResponseDataUnavailableReason';
+import type { DashboardWeeklyResponseDataCardsItem } from './dashboardWeeklyResponseDataCardsItem';
 
-export type GetDashboardWidgetsKeysItem = typeof GetDashboardWidgetsKeysItem[keyof typeof GetDashboardWidgetsKeysItem];
-
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const GetDashboardWidgetsKeysItem = {
-  'type-donut': 'type-donut',
-  'daily-stacked': 'daily-stacked',
-  velocity: 'velocity',
-  'resource-load': 'resource-load',
-  'priority-bar': 'priority-bar',
-  'aging-buckets': 'aging-buckets',
-  'calendar-heatmap': 'calendar-heatmap',
-  'sla-gauge': 'sla-gauge',
-  'project-treemap': 'project-treemap',
-  'stage-funnel': 'stage-funnel',
-  rework: 'rework',
-  'stage-duration': 'stage-duration',
-  'handoff-latency': 'handoff-latency',
-  'client-volume': 'client-volume',
-  'module-open': 'module-open',
-} as const;
+export type DashboardWeeklyResponseData = {
+  asOf?: DashboardWeeklyResponseDataAsOf;
+  unavailableReason?: DashboardWeeklyResponseDataUnavailableReason;
+  /** The ISO Monday reported, echoed back so a deep link and the picker cannot disagree. */
+  weekStart: string;
+  /** The Sunday, inclusive. */
+  weekEnd: string;
+  /** Four cards, each against the same week seven days earlier. `value` is a count except on `avg-progress`, which is a percentage, and `avg-delay-days`, which is days — read `unit` rather than assuming.
+ */
+  cards: DashboardWeeklyResponseDataCardsItem[];
+};

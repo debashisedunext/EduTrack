@@ -46,25 +46,12 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { DashboardFigure } from './dashboardFigure';
 
-export type GetDashboardWidgetsKeysItem = typeof GetDashboardWidgetsKeysItem[keyof typeof GetDashboardWidgetsKeysItem];
-
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const GetDashboardWidgetsKeysItem = {
-  'type-donut': 'type-donut',
-  'daily-stacked': 'daily-stacked',
-  velocity: 'velocity',
-  'resource-load': 'resource-load',
-  'priority-bar': 'priority-bar',
-  'aging-buckets': 'aging-buckets',
-  'calendar-heatmap': 'calendar-heatmap',
-  'sla-gauge': 'sla-gauge',
-  'project-treemap': 'project-treemap',
-  'stage-funnel': 'stage-funnel',
-  rework: 'rework',
-  'stage-duration': 'stage-duration',
-  'handoff-latency': 'handoff-latency',
-  'client-volume': 'client-volume',
-  'module-open': 'module-open',
-} as const;
+export type DashboardOverviewResponseDataAssigneesItem = {
+  userId: number;
+  displayName: string;
+  inProgress: DashboardFigure;
+  overdue: DashboardFigure;
+  notStarted: DashboardFigure;
+};

@@ -46,25 +46,16 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { DashboardFigure } from './dashboardFigure';
+import type { OpenIssuesByRoleRolesItem } from './openIssuesByRoleRolesItem';
 
-export type GetDashboardWidgetsKeysItem = typeof GetDashboardWidgetsKeysItem[keyof typeof GetDashboardWidgetsKeysItem];
+/**
+ * Every not-closed ticket, split by the role currently holding it. Answers "who has the work" rather than "how much work is there", which is why it sits apart from the seven cards. Absent on the OWN_WORK variant.
 
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const GetDashboardWidgetsKeysItem = {
-  'type-donut': 'type-donut',
-  'daily-stacked': 'daily-stacked',
-  velocity: 'velocity',
-  'resource-load': 'resource-load',
-  'priority-bar': 'priority-bar',
-  'aging-buckets': 'aging-buckets',
-  'calendar-heatmap': 'calendar-heatmap',
-  'sla-gauge': 'sla-gauge',
-  'project-treemap': 'project-treemap',
-  'stage-funnel': 'stage-funnel',
-  rework: 'rework',
-  'stage-duration': 'stage-duration',
-  'handoff-latency': 'handoff-latency',
-  'client-volume': 'client-volume',
-  'module-open': 'module-open',
-} as const;
+ */
+export interface OpenIssuesByRole {
+  total: DashboardFigure;
+  /** One chip per role plus `UNASSIGNED`, which is a real bucket and not a rounding error — a ticket nobody holds is the one most worth clicking. The chips sum to `total`.
+ */
+  roles: OpenIssuesByRoleRolesItem[];
+}

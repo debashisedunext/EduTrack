@@ -46,25 +46,17 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { TodaySummaryCardKey } from './todaySummaryCardKey';
+import type { DashboardFigure } from './dashboardFigure';
+import type { TodaySummaryCardFiguresItem } from './todaySummaryCardFiguresItem';
 
-export type GetDashboardWidgetsKeysItem = typeof GetDashboardWidgetsKeysItem[keyof typeof GetDashboardWidgetsKeysItem];
-
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const GetDashboardWidgetsKeysItem = {
-  'type-donut': 'type-donut',
-  'daily-stacked': 'daily-stacked',
-  velocity: 'velocity',
-  'resource-load': 'resource-load',
-  'priority-bar': 'priority-bar',
-  'aging-buckets': 'aging-buckets',
-  'calendar-heatmap': 'calendar-heatmap',
-  'sla-gauge': 'sla-gauge',
-  'project-treemap': 'project-treemap',
-  'stage-funnel': 'stage-funnel',
-  rework: 'rework',
-  'stage-duration': 'stage-duration',
-  'handoff-latency': 'handoff-latency',
-  'client-volume': 'client-volume',
-  'module-open': 'module-open',
-} as const;
+export interface TodaySummaryCard {
+  /** The seven cards, in the order the prototype shows them. Led by the two roll-ups: `todays-work` is the whole plate in one card, and `overdue` splits lateness into the two ways it happens.
+ */
+  key: TodaySummaryCardKey;
+  label: string;
+  total: DashboardFigure;
+  /** The card's sub-figures, each independently clickable. Whether they sum to `total` is per card and deliberate — `overdue`'s two do, and `wip`'s updated/not-updated pair does. `pending-review` carries none: it is one combined count of RESOLVED-not-CLOSED plus the review stages, de-duplicated, and splitting it would double-count a ticket that is both.
+ */
+  figures: TodaySummaryCardFiguresItem[];
+}

@@ -46,25 +46,24 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { TodayProgressResponseDataAsOf } from './todayProgressResponseDataAsOf';
+import type { DashboardVariant } from './dashboardVariant';
+import type { TodayProgressResponseDataUnavailableReason } from './todayProgressResponseDataUnavailableReason';
+import type { TodaySummaryCard } from './todaySummaryCard';
+import type { TodayProgressResponseDataOpenIssues } from './todayProgressResponseDataOpenIssues';
+import type { AssigneeMisRow } from './assigneeMisRow';
 
-export type GetDashboardWidgetsKeysItem = typeof GetDashboardWidgetsKeysItem[keyof typeof GetDashboardWidgetsKeysItem];
-
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const GetDashboardWidgetsKeysItem = {
-  'type-donut': 'type-donut',
-  'daily-stacked': 'daily-stacked',
-  velocity: 'velocity',
-  'resource-load': 'resource-load',
-  'priority-bar': 'priority-bar',
-  'aging-buckets': 'aging-buckets',
-  'calendar-heatmap': 'calendar-heatmap',
-  'sla-gauge': 'sla-gauge',
-  'project-treemap': 'project-treemap',
-  'stage-funnel': 'stage-funnel',
-  rework: 'rework',
-  'stage-duration': 'stage-duration',
-  'handoff-latency': 'handoff-latency',
-  'client-volume': 'client-volume',
-  'module-open': 'module-open',
-} as const;
+export type TodayProgressResponseData = {
+  /** When the summary tables were last refreshed. At most five minutes old. */
+  asOf?: TodayProgressResponseDataAsOf;
+  variant: DashboardVariant;
+  /** Why these figures are withheld, in words a person reads, or null when they are served. Same contract as the KPI row's — set when `projectId` names a project outside the caller's scope, with `cards` empty. Not a 404, for the reason stated there: an out-of-scope project matches no rows, and no rows renders as a wall of zeroes, which is a measurement rather than an absence.
+ */
+  unavailableReason?: TodayProgressResponseDataUnavailableReason;
+  cards: TodaySummaryCard[];
+  /** Null on the OWN_WORK variant. */
+  openIssues?: TodayProgressResponseDataOpenIssues;
+  /** The MIS grid, one row per resource. Empty on the OWN_WORK variant — a delivery role sees their own figures in the cards above and no grid at all.
+ */
+  resources: AssigneeMisRow[];
+};
