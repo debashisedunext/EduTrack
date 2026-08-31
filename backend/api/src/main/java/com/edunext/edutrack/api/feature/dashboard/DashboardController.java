@@ -43,10 +43,17 @@ class DashboardController {
 
     private final DashboardService dashboard;
     private final WidgetService widgets;
+    private final TodayProgressService today;
+    private final OverviewService overview;
+    private final WeeklyProgressService weekly;
 
-    DashboardController(DashboardService dashboard, WidgetService widgets) {
+    DashboardController(DashboardService dashboard, WidgetService widgets, TodayProgressService today,
+                         OverviewService overview, WeeklyProgressService weekly) {
         this.dashboard = dashboard;
         this.widgets = widgets;
+        this.today = today;
+        this.overview = overview;
+        this.weekly = weekly;
     }
 
     @GetMapping(path = "/summary", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -59,12 +66,72 @@ class DashboardController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) Long assigneeId) {
 
-        CallerIdentity identity = CallerIdentity.of(caller)
+        return new DashboardDtos.SummaryResponse(
+                dashboard.summary(identity(caller), projectId, from, to, assigneeId));
+    }
+
+    /**
+     * Dashboard Rework Dev 1, PR 2 · {@code GET /dashboard/today} — tab 1's
+     * seven cards and MIS grid. <b>Stubbed.</b> {@link TodayProgressService}
+     * answers empty until PR 6, once PR 4's {@code daily_ticket_stats}
+     * counters exist to read; {@code variant} is real already.
+     */
+    @GetMapping(path = "/today", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    @Operation(operationId = "getDashboardToday", summary = "Today's Progress — tab 1 of S-05")
+    TodayProgressDtos.TodayProgressResponse today(
+            Authentication caller,
+            @RequestParam(required = false) Long projectId) {
+
+        return new TodayProgressDtos.TodayProgressResponse(today.today(identity(caller), projectId));
+    }
+
+    /**
+     * Dashboard Rework Dev 1, PR 2 · {@code GET /dashboard/overview} —
+     * tab 2's range cards, Top Assignees bars and status donut.
+     * <b>Stubbed.</b> {@link OverviewService} answers empty until Dev 2's
+     * PR 9.
+     */
+    @GetMapping(path = "/overview", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    @Operation(operationId = "getDashboardOverview", summary = "Ticket Overview — tab 2 of S-05")
+    DashboardOverviewDtos.DashboardOverviewResponse overview(
+            Authentication caller,
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) Long assigneeId) {
+
+        return new DashboardOverviewDtos.DashboardOverviewResponse(
+                overview.overview(identity(caller), projectId, from, to, assigneeId));
+    }
+
+    /**
+     * Dashboard Rework Dev 1, PR 2 · {@code GET /dashboard/weekly} — tab 3's
+     * four cards and the grouped accordions. <b>Stubbed.</b> {@link
+     * WeeklyProgressService} answers empty cards until Dev 2's PR 12;
+     * {@code weekStart}/{@code weekEnd} are real already. The contract's
+     * "a date that is not a Monday is refused" 400 is <b>not yet
+     * enforced</b> — left for PR 12, see that service's own note.
+     */
+    @GetMapping(path = "/weekly", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    @Operation(operationId = "getDashboardWeekly", summary = "Weekly Progress — tab 3 of S-05")
+    DashboardWeeklyDtos.DashboardWeeklyResponse weekly(
+            Authentication caller,
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart,
+            @RequestParam(required = false) Long assigneeId) {
+
+        return new DashboardWeeklyDtos.DashboardWeeklyResponse(
+                weekly.weekly(identity(caller), projectId, weekStart, assigneeId));
+    }
+
+    /** Every handler above needs the same identity or the same refusal; stated once. */
+    private static CallerIdentity identity(Authentication caller) {
+        return CallerIdentity.of(caller)
                 .orElseThrow(() -> new IllegalStateException(
                         "an authenticated request reached the dashboard with no CallerIdentity"));
-
-        return new DashboardDtos.SummaryResponse(
-                dashboard.summary(identity, projectId, from, to, assigneeId));
     }
 
     /**
@@ -92,12 +159,8 @@ class DashboardController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
 
-        CallerIdentity identity = CallerIdentity.of(caller)
-                .orElseThrow(() -> new IllegalStateException(
-                        "an authenticated request reached the dashboard with no CallerIdentity"));
-
         WidgetService.Rendered rendered = widgets
-                .widget(identity, widgetKey, projectId, from, to)
+                .widget(identity(caller), widgetKey, projectId, from, to)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "No widget is served for '" + widgetKey + "'."));
 
@@ -154,11 +217,7 @@ class DashboardController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
 
-        CallerIdentity identity = CallerIdentity.of(caller)
-                .orElseThrow(() -> new IllegalStateException(
-                        "an authenticated request reached the dashboard with no CallerIdentity"));
-
-        WidgetService.RenderedBatch rendered = widgets.widgets(identity, keys, projectId, from, to);
+        WidgetService.RenderedBatch rendered = widgets.widgets(identity(caller), keys, projectId, from, to);
 
         if (rendered.etag() != null && matches(ifNoneMatch, rendered.etag())) {
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(rendered.etag()).build();

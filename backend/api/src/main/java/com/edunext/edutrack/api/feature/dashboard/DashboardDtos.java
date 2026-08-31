@@ -65,4 +65,15 @@ final class DashboardDtos {
             List<BigDecimal> sparkline,
             String drillDown) {
     }
+
+    /**
+     * Dashboard Rework Dev 1, PR 2 · the one-figure shape the Today, Overview
+     * and Weekly tabs all build their cards from — {@code DashboardFigure} in
+     * the contract. Shared here rather than declared per tab, since
+     * {@code TodayProgressDtos}, {@code DashboardOverviewDtos} and
+     * {@code DashboardWeeklyDtos} each use it several times over and a figure
+     * is the same two things everywhere: a count and the list it opens.
+     */
+    record Figure(long value, String drillDown) {
+    }
 }
