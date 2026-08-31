@@ -8,7 +8,7 @@ You have the harder half on purpose: the entire API contract, three verticals ag
 
 ### H1 — the contract, and it is entirely yours
 
-You own `contracts/openapi.yaml` outright and every regeneration of the client. On day one you author and commit **the whole delta, both halves**: your `/dashboard/overview`, `/dashboard/weekly` and the `module-open` widget key, *and* Dev 1's `/dashboard/today` response and the seven new `GET /tickets` params. Dev 1 hands you their requirements in writing that morning and then stays out of the file.
+You own `contracts/openapi.yaml` outright and every regeneration of the client. On day one you author and commit **the whole delta, both halves**: your `/dashboard/overview` and `/dashboard/weekly`, *and* Dev 1's `/dashboard/today` response and the seven new `GET /tickets` params. **Not the `module-open` widget key** — that one ships with its implementation in PR 14, for the reason recorded there. Dev 1 hands you their requirements in writing that morning and then stays out of the file.
 
 One author means the most contended file in the feature cannot conflict at all. It also means **Dev 1 cannot start PR 5 or PR 6 until you are done** — and PR 5 is one of the two PRs *you* are waiting on. A slow contract comes back to you: it delays PR 5, which delays your PR 14 Ready flip and your PR 13. Finish it on day one.
 
@@ -37,11 +37,14 @@ The whole vertical, yours end to end:
 - **`module_daily_stats`** on the `client_daily_stats` precedent — copy `V20260819_0443__client_daily_stats.sql`: `stat_date, project_id, module_id, open_wip, open_overdue, open_not_started, computed_at`.
 - **`ModuleStatsRepository`** — the class Dev 1 has already wired into `StatsRefreshWorker` for you, so you fill the body and touch no shared file.
 - The `module-open` branch in `WidgetService` plus a 15th key in its `IMPLEMENTED` list (`WidgetService.java:114` — the plan calls this `WIDGET_CATALOG`, but there is no constant by that name; **append** to the end of the list, never reorder). Adding the key there makes the chooser and drag-reorder work for free.
+- **The key also goes back into the two `widgetKey` enums in `contracts/openapi.yaml`, in this same commit.** It was deliberately left out of the H1 contract — see below.
 - `ModuleOpenBar` — horizontal stacked bar per module, segments WIP / Overdue / Not Started.
 
 **The segments are disjoint and Overdue takes precedence**: an overdue WIP ticket is counted once, under Overdue. Put that in the SQL *and* in a test, or the bars over-count and nobody notices for a month.
 
 Each point carries a `drillDown` with `moduleId` plus state params. Register the service in `DrillDownContractTest.SOURCES` (append).
+
+**The contract enum and `IMPLEMENTED` move together, or the build breaks.** `DashboardWidgetIT.everyContractKeyIsServed` fails when a key sits in the contract's `widgetKey` enum with no `WidgetService` branch — the dashboard enumerates every key into the chooser and the batch request, so it asks for the widget on first paint and renders an error card for something the contract promised. Routes may be declared ahead of their controllers; widget keys may not, and H1 learned that the hard way (the key was in the frozen contract, CI went red, and it was pulled back out). Add it to the enum and to `IMPLEMENTED` in one commit and the test is satisfied from both directions. Nothing needed it earlier: the MSW widget handler takes any key, so `ModuleOpenBar` builds against mocks regardless.
 
 **One dependency, in the drill-downs only.** `GET /tickets` already implements `moduleId` and `isDelayed`, so the Overdue segment is expressible today — but Not Started is NEW *or* REOPENED and WIP is the whole IN_PROGRESS category, and the existing single-value `status` param cannot express either. Both need `statusCategory` from Dev 1's PR 5. Everything else here — migration, repository, `WidgetService` branch, catalog entry, the chart — is yours alone and can be finished first; `DrillDownContractTest` will fail until PR 5 lands, so build it now and mark it Ready then.
 
