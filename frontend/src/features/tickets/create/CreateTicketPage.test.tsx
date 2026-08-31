@@ -560,7 +560,7 @@ describe('S-19 Create Ticket', () => {
     await pickFromDropdown('projectId', /CRM — Client CRM Platform/)
 
     expect(await readDropdownOptions('assigneeId')).toContainEqual(
-      expect.stringMatching(/Ravi Kumar · \d+ open/),
+      expect.stringMatching(/Ravi Kumar \(Developer\) · \d+ open/),
     )
   })
 

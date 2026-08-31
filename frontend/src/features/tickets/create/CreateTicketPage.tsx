@@ -50,6 +50,7 @@ import { LevelPicker } from './LevelPicker'
 import { selectableLevels } from '../levels'
 import { WatcherPicker } from './WatcherPicker'
 import { useCreateTicket } from './createTicketMutation'
+import { ROLE_LABEL } from '@/lib/roleLabel'
 import {
   allowedTaskTypes,
   bugTaskTypeIds,
@@ -1112,11 +1113,18 @@ export function CreateTicketPage() {
                     value={selectedAssignee}
                     onChange={(user) => field.onChange(user.id)}
                     getKey={(user) => String(user.id)}
-                    getLabel={(user) =>
-                      user.openTicketCount != null
-                        ? `${user.displayName} · ${user.openTicketCount} open`
+                    getLabel={(user) => {
+                      // Role alongside the name, same `ROLE_LABEL` convention
+                      // the S-15 ticket list uses for `t.assignee` — a picker
+                      // full of names alone forces the assigner to already
+                      // know who does what.
+                      const withRole = user.role
+                        ? `${user.displayName} (${ROLE_LABEL[user.role]})`
                         : user.displayName
-                    }
+                      return user.openTicketCount != null
+                        ? `${withRole} · ${user.openTicketCount} open`
+                        : withRole
+                    }}
                     getSearchable={(user) => [user.email ?? '', user.role ?? '']}
                     placeholder={projectId == null ? 'Select a project first' : 'Search project members…'}
                     emptyText="No active members on this project"
