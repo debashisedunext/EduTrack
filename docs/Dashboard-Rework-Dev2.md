@@ -34,9 +34,9 @@ Pure ISO-Monday maths in UTC. This week / last week, week start and end, and the
 
 The whole vertical, yours end to end:
 
-- **`module_daily_stats`** on the `client_daily_stats` precedent: `stat_date, project_id, module_id, open_wip, open_overdue, open_not_started, computed_at`.
+- **`module_daily_stats`** on the `client_daily_stats` precedent — copy `V20260819_0443__client_daily_stats.sql`: `stat_date, project_id, module_id, open_wip, open_overdue, open_not_started, computed_at`.
 - **`ModuleStatsRepository`** — the class Dev 1 has already wired into `StatsRefreshWorker` for you, so you fill the body and touch no shared file.
-- The `module-open` branch in `WidgetService` plus a 15th `WIDGET_CATALOG` entry (**append** to the end of the list, never reorder), which makes the chooser and drag-reorder work for free.
+- The `module-open` branch in `WidgetService` plus a 15th key in its `IMPLEMENTED` list (`WidgetService.java:114` — the plan calls this `WIDGET_CATALOG`, but there is no constant by that name; **append** to the end of the list, never reorder). Adding the key there makes the chooser and drag-reorder work for free.
 - `ModuleOpenBar` — horizontal stacked bar per module, segments WIP / Overdue / Not Started.
 
 **The segments are disjoint and Overdue takes precedence**: an overdue WIP ticket is counted once, under Overdue. Put that in the SQL *and* in a test, or the bars over-count and nobody notices for a month.
