@@ -291,6 +291,64 @@ class WorkingHoursServiceTest {
     }
 
     // ------------------------------------------------------------------
+    // nextWorkingDay
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("nextWorkingDay")
+    class NextWorkingDay {
+
+        @Test
+        @DisplayName("an ordinary weekday's next working day is simply tomorrow")
+        void ordinaryWeekdayIsTomorrow() {
+            // Tuesday 2026-08-11.
+            assertThat(service.nextWorkingDay(LocalDate.of(2026, 8, 11)))
+                    .isEqualTo(LocalDate.of(2026, 8, 12));
+        }
+
+        @Test
+        @DisplayName("a Friday's next working day skips the weekend to Monday")
+        void fridaySkipsToMonday() {
+            // 2026-08-14 is a Friday.
+            assertThat(service.nextWorkingDay(LocalDate.of(2026, 8, 14)))
+                    .isEqualTo(LocalDate.of(2026, 8, 17));
+        }
+
+        @Test
+        @DisplayName("a holiday immediately after the date is skipped too")
+        void aHolidayRightAfterIsSkipped() {
+            // Wednesday 2026-08-12 is a holiday; Tuesday 11th's next working
+            // day must land on Thursday the 13th, not the holiday itself.
+            Holiday holiday = holiday(LocalDate.of(2026, 8, 12), false, null);
+            when(holidays.findAllOrgWideOrForProject(any())).thenReturn(List.of(holiday));
+
+            assertThat(service.nextWorkingDay(LocalDate.of(2026, 8, 11)))
+                    .isEqualTo(LocalDate.of(2026, 8, 13));
+        }
+
+        @Test
+        @DisplayName("the date itself is never returned, even when it is a working day")
+        void theDateItselfIsExcluded() {
+            LocalDate monday = LocalDate.of(2026, 8, 10);
+
+            assertThat(service.nextWorkingDay(monday)).isNotEqualTo(monday).isAfter(monday);
+        }
+
+        @Test
+        @DisplayName("resource leave plays no part — this is the org calendar only")
+        void resourceLeaveIsIgnored() {
+            // A leave record for some user must never affect an org-wide answer
+            // that carries no user id — nextWorkingDay has no such parameter.
+            ResourceLeave leave = leave(LocalDate.of(2026, 8, 12), LocalDate.of(2026, 8, 12), false, "APPROVED");
+            when(leaves.findApprovedOverlapping(any(), any(), any())).thenReturn(List.of(leave));
+
+            assertThat(service.nextWorkingDay(LocalDate.of(2026, 8, 11)))
+                    .isEqualTo(LocalDate.of(2026, 8, 12));
+            verify(leaves, times(0)).findApprovedOverlapping(any(), any(), any());
+        }
+    }
+
+    // ------------------------------------------------------------------
     // A broken calendar is a backstop, not a hang
     // ------------------------------------------------------------------
 
@@ -308,6 +366,21 @@ class WorkingHoursServiceTest {
         when(calendars.getCalendar()).thenReturn(brokenCalendar);
 
         assertThatThrownBy(() -> service.addWorkingHours(kolkata(2026, 8, 10, 9, 30), BigDecimal.ONE))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ck_working_calendar_weekly_off");
+    }
+
+    @Test
+    @DisplayName("nextWorkingDay fails loudly too, on the same broken calendar")
+    void nextWorkingDayFailsLoudlyRatherThanHanging() {
+        WorkingCalendar brokenCalendar = new WorkingCalendar();
+        brokenCalendar.setWeeklyOff(EnumSet.allOf(DayOfWeek.class));
+        brokenCalendar.setWorkDayStart(LocalTime.of(9, 30));
+        brokenCalendar.setWorkDayEnd(LocalTime.of(18, 30));
+        brokenCalendar.setTimezone("Asia/Kolkata");
+        when(calendars.getCalendar()).thenReturn(brokenCalendar);
+
+        assertThatThrownBy(() -> service.nextWorkingDay(LocalDate.of(2026, 8, 10)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("ck_working_calendar_weekly_off");
     }

@@ -193,6 +193,52 @@ public class WorkingHoursService {
                         + "day exists, so the calendar row itself is broken, not merely far in the future");
     }
 
+    /**
+     * The first working day strictly after {@code date} — org calendar only,
+     * per its single-argument signature.
+     *
+     * <p>Dashboard Rework PR 4's near-delay figure has no project or resource
+     * in scope at the point it needs this: {@link
+     * com.edunext.edutrack.worker.stats.DailyStatsRepository}'s daily pass
+     * computes it once per day across every project at once, the same way
+     * {@link #expandedHolidayDates} is queried without a project id when
+     * {@code projectId} is {@code null}. A project-specific "next working
+     * day" would need a call per project per day, which is the per-project
+     * loop {@code daily_ticket_stats}' own header names as the shape that
+     * stopped working first.
+     *
+     * <p>A short, bounded walk rather than routing through {@link
+     * #addWorkingHours}: that method measures a quantity of working TIME and
+     * returns an instant partway through whichever day satisfies it: asking
+     * it for a tiny positive amount to fake a date-only answer would still
+     * require the walk to land inside a real working window that day, which
+     * is extra machinery this simpler question does not need. This only
+     * asks "is this date a working day", walking forward one calendar day at
+     * a time until one is.
+     */
+    @Transactional(readOnly = true)
+    public LocalDate nextWorkingDay(LocalDate date) {
+        WorkingCalendar calendar = calendars.getCalendar();
+        LocalDate candidate = date.plusDays(1);
+        LocalDate horizon = candidate.plusDays(HORIZON_CHUNK_DAYS);
+        Set<LocalDate> holidayDates = expandedHolidayDates(null, candidate, horizon);
+
+        for (int walked = 0; walked <= MAX_WALK_DAYS; walked++, candidate = candidate.plusDays(1)) {
+            if (candidate.isAfter(horizon)) {
+                horizon = candidate.plusDays(HORIZON_CHUNK_DAYS);
+                holidayDates = expandedHolidayDates(null, candidate, horizon);
+            }
+            if (!calendar.isNonWorkingDay(candidate.getDayOfWeek()) && !holidayDates.contains(candidate)) {
+                return candidate;
+            }
+        }
+
+        throw new IllegalStateException(
+                "no working day found after " + date + " within " + MAX_WALK_DAYS + " calendar days — "
+                        + "ck_working_calendar_weekly_off guarantees at least one working day exists, so "
+                        + "the calendar row itself is broken, not merely far in the future");
+    }
+
     // ------------------------------------------------------------------
     // The per-day working window
     // ------------------------------------------------------------------
