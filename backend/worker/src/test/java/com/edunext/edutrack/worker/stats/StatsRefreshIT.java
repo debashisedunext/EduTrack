@@ -1350,6 +1350,77 @@ class StatsRefreshIT {
         }
     }
 
+    // ── Dashboard Rework Dev 2, PR 11 · weekly columns ────────────────────────
+
+    /**
+     * {@code tickets.pct_complete} carries no history — the migration's own
+     * reason, restated as a boundary: a ticket open across a backfilled day
+     * and today must answer {@code NULL} for the former and a real sum for
+     * the latter, from the identical ticket, in the identical pass.
+     */
+    @Test
+    @DisplayName("open_pct_sum answers only for the actual current day")
+    void openPctSumOnlyAnswersForToday() {
+        long id = ticketWithStatus("2026-07-20 09:00:00", "IN_PROGRESS", "2099-01-01 00:00:00");
+        jdbc.update("UPDATE tickets SET pct_complete = 40 WHERE id = ?", id);
+        worker.refreshOnce();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT open_pct_sum FROM daily_ticket_stats WHERE stat_date = ? AND project_id = ?",
+                Integer.class, LocalDate.of(2026, 7, 20), projectId))
+                .as("a backfilled day has no honest answer for a live-only column").isNull();
+        assertThat(stat(TODAY, "open_pct_sum")).as("today does").isEqualTo(40);
+    }
+
+    /**
+     * Unlike {@code pct_complete}, delay is pure arithmetic against {@code
+     * planned_close_date} — stable regardless of when the pass runs — so a
+     * backfilled day gets a real number, not {@code NULL}.
+     */
+    @Test
+    @DisplayName("delay_days_sum backfills honestly from planned_close_date")
+    void delayDaysSumBackfills() {
+        // Reported and due on 1 Aug; still open five days later on the 6th.
+        ticketWithStatus("2026-08-01 09:00:00", "IN_PROGRESS", "2026-08-01 09:00:00");
+        worker.refreshOnce();
+
+        assertThat(stat(LocalDate.of(2026, 8, 6), "delay_days_sum")).isEqualTo(5);
+        assertThat(stat(LocalDate.of(2026, 8, 1), "delay_days_sum"))
+                .as("due the same day it was reported — not yet late").isZero();
+    }
+
+    /** A ticket with no due date is not late by any measure — {@code DATEDIFF} against {@code NULL} must not poison the sum. */
+    @Test
+    @DisplayName("delay_days_sum ignores a ticket with no planned_close_date")
+    void delayDaysSumIgnoresNoDueDate() {
+        ticketWithStatus("2026-08-01 09:00:00", "IN_PROGRESS", null);
+        worker.refreshOnce();
+
+        assertThat(stat(TODAY, "delay_days_sum")).isZero();
+    }
+
+    @Test
+    @DisplayName("open_due_next_7 counts the seventh day and excludes the eighth")
+    void openDueNext7RespectsTheWindow() {
+        ticketWithStatus("2026-08-01 09:00:00", "NEW", "2026-08-07 10:00:00");
+        ticketWithStatus("2026-08-01 09:00:00", "NEW", "2026-08-08 10:00:00");
+        worker.refreshOnce();
+
+        assertThat(stat(LocalDate.of(2026, 8, 1), "open_due_next_7"))
+                .as("due on day 7 of a window starting day 1 — inside it").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("the resource table's weekly columns agree with the project table's for a single assignee")
+    void resourceWeeklyColumnsAgreeWithProjectColumns() {
+        long id = ticketWithStatus("2026-08-01 09:00:00", "IN_PROGRESS", "2026-08-01 09:00:00");
+        jdbc.update("UPDATE tickets SET pct_complete = 25 WHERE id = ?", id);
+        worker.refreshOnce();
+
+        assertThat(resourceStat(TODAY, userId, "pct_sum")).isEqualTo(stat(TODAY, "open_pct_sum"));
+        assertThat(resourceStat(TODAY, userId, "delay_days_sum")).isEqualTo(stat(TODAY, "delay_days_sum"));
+    }
+
     private long ticketWithStatus(String reportedAt, String status, String plannedCloseAt) {
         jdbc.update("INSERT INTO tickets (ticket_code, project_id, title, level, original_level, status, "
                         + "date_reported, planned_close_date, assigned_to) "

@@ -758,6 +758,108 @@ class DailyStatsRepository {
     }
 
     /**
+     * Dashboard Rework Dev 2, PR 11 · the three columns Weekly Progress's
+     * cards need beyond a single day's stock — {@code
+     * docs/Dashboard-Rework-Plan.md}, "Data" §4.
+     *
+     * <h2>⚠️ Stream D's directory, again — see the class note</h2>
+     *
+     * <p>This edit needs Debashis's sign-off exactly as the six edits above
+     * it did; {@code .github/CODEOWNERS} auto-requests it. It follows the
+     * class's own established shape rather than inventing a new one: a
+     * second pass over {@code tickets}, run after {@link #refreshTodayStats}
+     * and {@link #refreshResourceStats} have given both tables a row for
+     * {@code day} to update — {@link #refreshTodayStats}'s own reason, that a
+     * correlated read folded into either table's {@code INSERT} would
+     * contend with the shared locks it is already holding.
+     *
+     * <h2>Sums, not averages — see the migration</h2>
+     *
+     * <p>{@code open_pct_sum}/{@code pct_sum} and {@code delay_days_sum} are
+     * stored as sums so {@code WeeklyProgressService} (PR 12) can divide by
+     * whichever open total is current when it reads them, rather than by the
+     * open total that happened to be true when this pass ran.
+     *
+     * <h2>{@code open_pct_sum}/{@code pct_sum} is current-day-only; {@code
+     * delay_days_sum} and {@code open_due_next_7} are backfilled honestly</h2>
+     *
+     * <p>{@code tickets.pct_complete} carries no history — {@code
+     * wip_updated_today}'s own reason, restated a third time in this class.
+     * Delay days and the due-within-a-week count both derive purely from
+     * {@code planned_close_date} compared against {@code day}, which does not
+     * depend on when the pass runs, so both are backfilled exactly like
+     * {@code ns_overdue} and {@code ns_due_today} beside them rather than
+     * left {@code NULL}/zero outside today.
+     *
+     * <p>No {@code computed_at} write here, matching {@link
+     * #refreshTodayStats}: the row already carries the stamp {@link
+     * #refreshTicketStats}/{@link #refreshResourceStats} gave it earlier in
+     * the same pass, and this method only ever updates a row that already
+     * has one.
+     *
+     * @param day   the date being (re)computed
+     * @param today the actual current day, per the worker's clock — equal to
+     *              {@code day} outside a backfill pass
+     */
+    int refreshWeeklyStats(LocalDate day, LocalDate today) {
+        int rows = jdbc.sql("""
+                UPDATE daily_ticket_stats s
+                   LEFT JOIN (
+                       SELECT t.project_id,
+                           SUM(o.open_at_eod * t.pct_complete) AS open_pct_sum,
+                           SUM(o.open_at_eod
+                               * GREATEST(COALESCE(DATEDIFF(:day, t.planned_close_date), 0), 0))
+                               AS delay_days_sum,
+                           SUM(o.open_at_eod AND t.planned_close_date >= :dayStart
+                               AND t.planned_close_date < :weekEnd) AS open_due_next_7
+                         FROM tickets t
+                         LEFT JOIN LATERAL (
+                             SELECT (t.date_reported < :dayEnd
+                                     AND (t.actual_close_date IS NULL OR t.actual_close_date >= :dayEnd))
+                                    AS open_at_eod
+                         ) o ON TRUE
+                        GROUP BY t.project_id
+                   ) counts ON counts.project_id = s.project_id
+                   SET s.open_pct_sum    = CASE WHEN :day = :today
+                                                 THEN COALESCE(counts.open_pct_sum, 0)
+                                                 ELSE NULL END,
+                       s.delay_days_sum  = COALESCE(counts.delay_days_sum, 0),
+                       s.open_due_next_7 = COALESCE(counts.open_due_next_7, 0)
+                 WHERE s.stat_date = :day
+                """)
+                .param("day", day)
+                .param("today", today)
+                .param("dayStart", day.atStartOfDay())
+                .param("dayEnd", day.plusDays(1).atStartOfDay())
+                .param("weekEnd", day.plusDays(7).atStartOfDay())
+                .update();
+
+        rows += jdbc.sql("""
+                UPDATE resource_daily_stats s
+                   LEFT JOIN (
+                       SELECT assigned_to AS uid,
+                           SUM(pct_complete) AS pct_sum,
+                           SUM(GREATEST(COALESCE(DATEDIFF(:day, planned_close_date), 0), 0))
+                               AS delay_days_sum
+                         FROM tickets
+                        WHERE assigned_to IS NOT NULL
+                          AND date_reported < :dayEnd
+                          AND (actual_close_date IS NULL OR actual_close_date >= :dayEnd)
+                        GROUP BY assigned_to
+                   ) a ON a.uid = s.user_id
+                   SET s.pct_sum        = CASE WHEN :day = :today THEN COALESCE(a.pct_sum, 0) ELSE 0 END,
+                       s.delay_days_sum = COALESCE(a.delay_days_sum, 0)
+                 WHERE s.stat_date = :day
+                """)
+                .param("day", day)
+                .param("today", today)
+                .param("dayEnd", day.plusDays(1).atStartOfDay())
+                .update();
+
+        return rows;
+    }
+
+    /**
      * A-059 · recompute {@code client_daily_stats} for one date — §S-05's
      * widget 20 and, later, A-068's client report.
      *
