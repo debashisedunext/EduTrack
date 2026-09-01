@@ -110,6 +110,16 @@ class StatsRefreshIT {
     @Autowired
     StatsRefreshWorker worker;
 
+    /**
+     * PR 12 correction · driven directly for the one assertion the worker
+     * cannot express: what a <em>later</em> day's pass does to an earlier
+     * day's row. {@link StatsRefreshWorker#refreshOnce} always passes its own
+     * clock as {@code today}, so a second pass "from tomorrow" has no other
+     * way to be simulated against a fixed clock.
+     */
+    @Autowired
+    DailyStatsRepository stats;
+
     private long projectId;
     private long userId;
 
@@ -1370,6 +1380,38 @@ class StatsRefreshIT {
                 Integer.class, LocalDate.of(2026, 7, 20), projectId))
                 .as("a backfilled day has no honest answer for a live-only column").isNull();
         assertThat(stat(TODAY, "open_pct_sum")).as("today does").isEqualTo(40);
+    }
+
+    /**
+     * PR 12 correction · the defect PR 11 shipped, pinned so it cannot come
+     * back.
+     *
+     * <p>Every pass recomputes a trailing window, so the day that was
+     * {@code today} yesterday is revisited by today's pass with {@code day !=
+     * today}. PR 11 wrote {@code NULL} in that branch, which destroyed a
+     * genuinely-measured figure one day after it was taken — the column
+     * survived exactly one day, and the Weekly tab's prior-week delta could
+     * never be computed from it.
+     *
+     * <p>Asserting the value <em>survives</em> is the only way to catch this:
+     * a single pass looks correct, and {@link #openPctSumOnlyAnswersForToday}
+     * passes either way because a backfilled day is NULL under both
+     * behaviours.
+     */
+    @Test
+    @DisplayName("a measured open_pct_sum survives the next day's pass over the same row")
+    void openPctSumIsNotWipedByALaterPass() {
+        long id = ticketWithStatus("2026-08-10 09:00:00", "IN_PROGRESS", "2099-01-01 00:00:00");
+        jdbc.update("UPDATE tickets SET pct_complete = 40 WHERE id = ?", id);
+        worker.refreshOnce();
+        assertThat(stat(TODAY, "open_pct_sum")).as("measured while TODAY was today").isEqualTo(40);
+
+        // Tomorrow's pass revisits TODAY inside its trailing window.
+        stats.refreshWeeklyStats(TODAY, TODAY.plusDays(1));
+
+        assertThat(stat(TODAY, "open_pct_sum"))
+                .as("the figure was true when it was taken — a later pass must not erase it")
+                .isEqualTo(40);
     }
 
     /**

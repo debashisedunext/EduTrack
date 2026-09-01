@@ -820,9 +820,23 @@ class DailyStatsRepository {
                          ) o ON TRUE
                         GROUP BY t.project_id
                    ) counts ON counts.project_id = s.project_id
+                   -- PR 12 correction · ELSE keeps what is already there
+                   -- rather than writing NULL over it. PR 11 wrote NULL, and
+                   -- because every pass recomputes a trailing window (see
+                   -- StatsRefreshWorker#refreshOnce) that destroyed the value
+                   -- a day held while it WAS today, on the very next pass —
+                   -- so this column survived exactly one day and the Weekly
+                   -- tab's prior-week delta could never be computed.
+                   --
+                   -- Preserving is still honest about the thing PR 11 was
+                   -- protecting: a day that has never been `today` while this
+                   -- column existed was never written, so it stays NULL and
+                   -- no backfill pass invents today's slider position for it.
+                   -- What changes is only that a genuinely-measured value is
+                   -- no longer thrown away.
                    SET s.open_pct_sum    = CASE WHEN :day = :today
                                                  THEN COALESCE(counts.open_pct_sum, 0)
-                                                 ELSE NULL END,
+                                                 ELSE s.open_pct_sum END,
                        s.delay_days_sum  = COALESCE(counts.delay_days_sum, 0),
                        s.open_due_next_7 = COALESCE(counts.open_due_next_7, 0)
                  WHERE s.stat_date = :day
@@ -847,6 +861,22 @@ class DailyStatsRepository {
                           AND (actual_close_date IS NULL OR actual_close_date >= :dayEnd)
                         GROUP BY assigned_to
                    ) a ON a.uid = s.user_id
+                   -- ⚠️ No `ELSE s.pct_sum` counterpart to the project table
+                   -- above, and it would buy nothing: refreshResourceStats
+                   -- DELETEs and re-INSERTs this whole day earlier in the
+                   -- same pass, so by the time this statement runs the
+                   -- previous value is already gone and `s.pct_sum` reads the
+                   -- column default of 0. Preserving a genuinely-measured
+                   -- past day here needs the column carried in
+                   -- refreshResourceStats' own INSERT, which is a larger
+                   -- change to a statement that already deadlocked once —
+                   -- deliberately not attempted alongside PR 12's endpoint.
+                   --
+                   -- The consequence, stated rather than discovered:
+                   -- WeeklyProgressService's own-work variant can offer an
+                   -- avg-progress figure for the CURRENT week only, and never
+                   -- a prior-week delta on that one card. The project-keyed
+                   -- variant can do both, once a full week of passes has run.
                    SET s.pct_sum        = CASE WHEN :day = :today THEN COALESCE(a.pct_sum, 0) ELSE 0 END,
                        s.delay_days_sum = COALESCE(a.delay_days_sum, 0)
                  WHERE s.stat_date = :day
