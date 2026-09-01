@@ -120,7 +120,7 @@ describe('TodaySections', () => {
   })
 
   it('scopes every section to the dashboard\'s project filter', async () => {
-    const handler = vi.fn((_info: { request: Request }) => HttpResponse.json({ data: [], meta: {} }))
+    const handler = vi.fn(() => HttpResponse.json({ data: [], meta: {} }))
     server.use(http.get('/api/v1/tickets', handler))
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -135,7 +135,8 @@ describe('TodaySections', () => {
     await userEvent.click(screen.getByRole('button', { name: /Started today/ }))
     await screen.findByText('Nothing here')
 
-    const url = new URL(handler.mock.calls[0][0].request.url)
+    const [info] = handler.mock.calls[0] as unknown as [{ request: Request }]
+    const url = new URL(info.request.url)
     expect(url.searchParams.get('projectId')).toBe('4')
   })
 })
