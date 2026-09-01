@@ -10,12 +10,14 @@ import { useDashboardFilters } from '../../useDashboardFilters'
 import { pickerWeeks, thisWeek, weekFromParam, type Week } from '../../weeklyRange'
 import { WeekCaption, WeekPicker } from './WeekPicker'
 import { WeeklyCard, WeeklyCardSkeleton } from './WeeklyCard'
+import { WeeklySections } from './WeeklySections'
 
 /**
- * S-05 tab 3 · Weekly Progress — the picker and the four cards.
+ * S-05 tab 3 · Weekly Progress — the picker, the four cards and the five
+ * grouped accordion sections.
  *
- * The five grouped accordion sections are the second half of PR 13 and land
- * separately; splitting them keeps both halves inside the ~400-line rule.
+ * The sections landed separately as PR 13b, which is why the header above
+ * said they would.
  *
  * <h2>`weekStart` lives in the URL, but not in `useDashboardFilters`</h2>
  *
@@ -132,6 +134,24 @@ function WeeklyTabContent({
                 />
               ))}
         </section>
+      )}
+
+      {/* The sections render outside the card branch above: they are their own
+          live `GET /tickets` queries and stay useful when the summary tables
+          have not been built for this week, which is exactly when somebody
+          wants to look at the tickets themselves. They are skipped only for an
+          out-of-scope project, where the refusal applies to everything.
+          `weekStart`/`weekEnd` come from the server's echo where it has
+          answered, so a deep link to a past week reads that week. */}
+      {!payload?.unavailableReason && (
+        <WeeklySections
+          scope={{
+            weekStart: payload?.weekStart ?? week.start,
+            weekEnd: payload?.weekEnd ?? week.end,
+            ...(filters.projectId ? { projectId: Number(filters.projectId) } : {}),
+            ...(filters.assigneeId ? { assigneeId: Number(filters.assigneeId) } : {}),
+          }}
+        />
       )}
 
       {/* Mounted once for the tab rather than per card — one panel showing
