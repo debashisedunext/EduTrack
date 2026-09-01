@@ -64,6 +64,8 @@ class DrillDownContractTest {
             "src/main/java/com/edunext/edutrack/api/feature/dashboard/WidgetService.java",
             // Dashboard Rework Dev 1, PR 6 · every /tickets link the Today tab emits.
             "src/main/java/com/edunext/edutrack/api/feature/dashboard/TodayProgressService.java",
+            // Dashboard Rework Dev 2, PR 9 · every /tickets link the Overview tab emits.
+            "src/main/java/com/edunext/edutrack/api/feature/dashboard/OverviewService.java",
     };
 
     @Test
