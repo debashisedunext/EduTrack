@@ -41,6 +41,7 @@ const BOOLEAN_KEYS = [
   'reopenedOnly',
   'unassigned',
   'excludeClosed',
+  'pendingReview',
 ] as const
 
 const STRING_KEYS = [
@@ -55,6 +56,13 @@ const STRING_KEYS = [
   'closedTo',
   'reportedFrom',
   'reportedTo',
+  'statusCategory',
+  'updatedFrom',
+  'updatedTo',
+  'startedFrom',
+  'startedTo',
+  'finishedFrom',
+  'finishedTo',
 ] as const
 
 /**
@@ -82,6 +90,12 @@ export function drillDownToParams(drillDown: string): ListTicketsParams {
     if (raw !== null && raw !== '') params[key] = raw
   }
 
+  // `statuses` is the one array-valued filter the dashboard emits — comma-joined
+  // in the URL per `query()`'s `explode: false` convention in `api/http.ts`, and
+  // the Blocked card and the MIS grid's own equivalents are built from it.
+  const statuses = search.get('statuses')
+  if (statuses) params.statuses = statuses.split(',').filter(Boolean)
+
   return params as ListTicketsParams
 }
 
@@ -100,10 +114,13 @@ export function describeDrillDown(drillDown: string): string {
 
   if (params.level) parts.push(String(params.level).toLowerCase())
   if (params.status) parts.push(`status ${String(params.status).toLowerCase()}`)
+  if (params.statuses) parts.push(`status ${params.statuses.map((s) => String(s).toLowerCase()).join(', ')}`)
+  if (params.statusCategory) parts.push(`category ${String(params.statusCategory).toLowerCase().replace('_', ' ')}`)
   if (params.excludeClosed) parts.push('still open')
   if (params.isDelayed) parts.push('overdue')
   if (params.reopenedOnly) parts.push('reopened')
   if (params.unassigned) parts.push('unassigned')
+  if (params.pendingReview) parts.push('pending review')
 
   const from = params.reportedFrom
   const to = params.reportedTo
@@ -118,6 +135,24 @@ export function describeDrillDown(drillDown: string): string {
         : `closed ${params.closedFrom} to ${params.closedTo}`,
     )
   }
+
+  const updatedFrom = params.updatedFrom
+  const updatedTo = params.updatedTo
+  if (updatedFrom && updatedTo) parts.push(updatedFrom === updatedTo ? `updated on ${updatedFrom}` : `updated ${updatedFrom} to ${updatedTo}`)
+  else if (updatedTo) parts.push(`updated on or before ${updatedTo}`)
+  else if (updatedFrom) parts.push(`updated on or after ${updatedFrom}`)
+
+  const startedFrom = params.startedFrom
+  const startedTo = params.startedTo
+  if (startedFrom && startedTo) parts.push(startedFrom === startedTo ? `started on ${startedFrom}` : `started ${startedFrom} to ${startedTo}`)
+  else if (startedTo) parts.push(`started on or before ${startedTo}`)
+  else if (startedFrom) parts.push(`started on or after ${startedFrom}`)
+
+  const finishedFrom = params.finishedFrom
+  const finishedTo = params.finishedTo
+  if (finishedFrom && finishedTo) parts.push(finishedFrom === finishedTo ? `finished on ${finishedFrom}` : `finished ${finishedFrom} to ${finishedTo}`)
+  else if (finishedTo) parts.push(`finished on or before ${finishedTo}`)
+  else if (finishedFrom) parts.push(`finished on or after ${finishedFrom}`)
 
   return parts.length > 0 ? parts.join(' · ') : 'all tickets in scope'
 }
