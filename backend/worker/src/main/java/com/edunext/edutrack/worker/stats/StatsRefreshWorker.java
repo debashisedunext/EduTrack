@@ -140,6 +140,13 @@ class StatsRefreshWorker {
             // actually running on, never for a day already in the past.
             stats.refreshTodayStats(day, today, clock.instant());
             stats.refreshResourceStats(day, today, clock.instant());
+            // Dashboard Rework Dev 2, PR 11 · Weekly Progress's three
+            // columns. After both statements above: it updates rows they
+            // create rather than rows of its own, on daily_ticket_stats
+            // AND resource_daily_stats. Same flagged exception PR 14 (three
+            // lines below) already recorded for this file — see
+            // DailyStatsRepository#refreshWeeklyStats.
+            stats.refreshWeeklyStats(day, today);
             // A-059 · widget 20's table. Independent of the three above — it
             // reads tickets and writes its own table — so its position in this
             // sequence carries no dependency, only the cost of a fourth
