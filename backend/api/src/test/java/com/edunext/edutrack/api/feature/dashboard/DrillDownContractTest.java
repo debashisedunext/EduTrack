@@ -62,6 +62,8 @@ class DrillDownContractTest {
     private static final String[] SOURCES = {
             "src/main/java/com/edunext/edutrack/api/feature/dashboard/DashboardService.java",
             "src/main/java/com/edunext/edutrack/api/feature/dashboard/WidgetService.java",
+            // Dashboard Rework Dev 1, PR 6 · every /tickets link the Today tab emits.
+            "src/main/java/com/edunext/edutrack/api/feature/dashboard/TodayProgressService.java",
     };
 
     @Test
