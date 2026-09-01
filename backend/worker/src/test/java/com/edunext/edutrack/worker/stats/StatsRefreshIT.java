@@ -121,6 +121,15 @@ class StatsRefreshIT {
         jdbc.update("DELETE FROM stage_daily_stats");
         jdbc.update("DELETE FROM module_daily_stats");
 
+        // Dashboard Rework PR 4 · ticket_cycles carries no delete-blocking
+        // trigger — it sits beside the three protected tables without being
+        // one of them (V20260831_1400's own header) — so a plain DELETE
+        // clears whatever `cycle()` wrote last test, ahead of the tickets
+        // cleanup below: leaving a row behind would make its ticket
+        // undeletable by the same foreign key the append-only tables use on
+        // purpose, and this table does not earn that protection.
+        jdbc.update("DELETE FROM ticket_cycles");
+
         // ticket_effort_logs is append-only and hash-chained: A-008's trigger
         // refuses DELETE outright, so a fixture cannot truncate it and must not
         // try. A ticket an effort row points at is therefore undeletable too —
@@ -1155,6 +1164,245 @@ class StatsRefreshIT {
 
         assertThat(stageStat(LocalDate.of(2026, 8, 10), "DEV", "exited")).isEqualTo(1);
         assertThat(stageStat(LocalDate.of(2026, 8, 10), "DEV", "elapsed_mins")).isEqualTo(480);
+    }
+
+    // ── Dashboard Rework PR 4 · Today's Progress schema ──────────────────────
+
+    /**
+     * {@code ns_overdue} and {@code ns_due_today} must be disjoint so a
+     * not-started ticket due today reads as due, not overdue — see
+     * {@code DailyStatsRepository.refreshTodayStats}'s note on why this pair
+     * uses {@code dayStart} rather than {@code wip_delayed}'s {@code dayEnd}.
+     */
+    @Test
+    @DisplayName("not-started buckets: overdue-to-start and due-today are disjoint, both roll into the total")
+    void notStartedBuckets() {
+        ticketWithStatus("2026-08-01 09:00:00", "NEW", "2026-08-09 17:00:00");   // due yesterday
+        ticketWithStatus("2026-08-01 09:00:00", "REOPENED", "2026-08-10 17:00:00"); // due today
+        ticketWithStatus("2026-08-01 09:00:00", "NEW", "2026-08-20 17:00:00");   // due later
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(stat(d, "ns_total")).isEqualTo(3);
+        assertThat(stat(d, "ns_overdue")).as("due before today started").isEqualTo(1);
+        assertThat(stat(d, "ns_due_today")).as("due inside today's window").isEqualTo(1);
+    }
+
+    /**
+     * {@code wip_delayed} keeps the class's established {@code < dayEnd}
+     * boundary, so anything due today is already counted delayed and
+     * {@code wip_near_delay} only ever starts strictly after today.
+     */
+    @Test
+    @DisplayName("a WIP ticket due today is delayed, not near-delay")
+    void wipDueTodayIsDelayedNotNearDelay() {
+        ticketWithStatus("2026-08-01 09:00:00", "IN_PROGRESS", "2026-08-10 17:00:00");
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(stat(d, "wip_delayed")).isEqualTo(1);
+        assertThat(stat(d, "wip_near_delay")).isZero();
+    }
+
+    /**
+     * The scenario the plan names by name: a ticket due on a weekend day must
+     * show as near-delay on the Friday before it, because Monday — not
+     * Saturday — is {@code nextWorkingDay}, and {@code wip_near_delay} is
+     * "due on or before" it.
+     */
+    @Test
+    @DisplayName("near-delay reaches across the weekend to the next working day")
+    void nearDelaySpansTheWeekend() {
+        // Friday 2026-08-07. Saturday the 8th is inside the window; Tuesday
+        // the 11th (after Monday the 10th) is not.
+        ticketWithStatus("2026-08-01 09:00:00", "IN_PROGRESS", "2026-08-08 10:00:00");
+        ticketWithStatus("2026-08-01 09:00:00", "IN_PROGRESS", "2026-08-11 10:00:00");
+        worker.refreshOnce();
+
+        LocalDate friday = LocalDate.of(2026, 8, 7);
+        assertThat(stat(friday, "wip_near_delay"))
+                .as("due Saturday, and Monday is the next working day").isEqualTo(1);
+        assertThat(stat(friday, "wip_delayed")).isZero();
+    }
+
+    /**
+     * {@code tickets.updated_at} carries no history, so a day other than the
+     * one the worker is actually running on must answer {@code NULL} rather
+     * than a wrong count — see the migration header.
+     */
+    @Test
+    @DisplayName("wip_updated_today is NULL for any day that is not the actual current day")
+    void wipUpdatedTodayOnlyAnswersForToday() {
+        long id = ticketWithStatus("2026-07-20 09:00:00", "IN_PROGRESS", "2099-01-01 00:00:00");
+        // Forces updated_at into the backfill window this ticket was created in.
+        jdbc.update("UPDATE tickets SET updated_at = ? WHERE id = ?", "2026-07-20 10:00:00", id);
+        worker.refreshOnce();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT wip_updated_today FROM daily_ticket_stats WHERE stat_date = ? AND project_id = ?",
+                Integer.class, LocalDate.of(2026, 7, 20), projectId))
+                .as("a backfilled day has no honest answer for updated_at").isNull();
+        assertThat(stat(TODAY, "wip_updated_today")).as("today does").isNotNull();
+    }
+
+    @Test
+    @DisplayName("blocked splits ON_HOLD from AWAITING_INFO, and neither is WIP")
+    void blockedIsNotWip() {
+        ticketWithStatus("2026-08-01 09:00:00", "ON_HOLD", null);
+        ticketWithStatus("2026-08-01 09:00:00", "AWAITING_INFO", null);
+        worker.refreshOnce();
+
+        LocalDate d = TODAY;
+        assertThat(stat(d, "blocked_on_hold")).isEqualTo(1);
+        assertThat(stat(d, "blocked_awaiting_info")).isEqualTo(1);
+        assertThat(stat(d, "wip_total"))
+                .as("category IN_PROGRESS's paused sub-statuses are Blocked, not WIP").isZero();
+    }
+
+    /**
+     * The two ways onto the Pending Review card, combined with OR rather
+     * than summed — a ticket satisfying both must not be counted twice.
+     */
+    @Test
+    @DisplayName("pending review combines RESOLVED status and review-stage placement without double-counting")
+    void pendingReviewCombinesBothPathsOnce() {
+        long template = reviewTemplate();
+        ticketWithStatus("2026-08-01 09:00:00", "RESOLVED", null);   // status path only
+        long inStage = ticketWithStatus("2026-08-01 09:00:00", "IN_PROGRESS", null);
+        setStage(inStage, template, "SIGNOFF");                      // stage path only
+        long both = ticketWithStatus("2026-08-01 09:00:00", "RESOLVED", null);
+        setStage(both, template, "VERIFY");                          // both paths, one ticket
+
+        worker.refreshOnce();
+
+        assertThat(stat(TODAY, "pending_review"))
+                .as("three tickets, three qualifying paths, but the last collapses to one")
+                .isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("a stage the master does not flag as review does not count")
+    void nonReviewStageDoesNotCountAsPendingReview() {
+        long template = reviewTemplate();
+        long id = ticketWithStatus("2026-08-01 09:00:00", "IN_PROGRESS", null);
+        setStage(id, template, "DEV");   // DEV is never flagged is_review_stage
+
+        worker.refreshOnce();
+
+        assertThat(stat(TODAY, "pending_review")).isZero();
+    }
+
+    @Test
+    @DisplayName("started/finished today read ticket_cycles, bucketed against the cycle's own due date")
+    void startedAndFinishedBuckets() {
+        long onTime = ticket("2026-08-01 09:00:00", null, "MEDIUM");
+        long early = ticket("2026-08-01 09:00:00", null, "MEDIUM");
+        long late = ticket("2026-08-01 09:00:00", null, "MEDIUM");
+        cycle(onTime, 1, "2026-08-10 09:00:00", "2026-08-10 15:00:00", "2026-08-10 17:00:00");
+        cycle(early, 1, "2026-08-10 09:00:00", "2026-08-10 15:00:00", "2026-08-12 17:00:00");
+        cycle(late, 1, "2026-08-10 09:00:00", "2026-08-10 15:00:00", "2026-08-09 17:00:00");
+
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(stat(d, "started_today")).isEqualTo(3);
+        assertThat(stat(d, "finished_on_time")).isEqualTo(1);
+        assertThat(stat(d, "finished_early")).as("finished two calendar days ahead of its due date").isEqualTo(1);
+        assertThat(stat(d, "finished_late")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("open_by_role groups by the assignee's role, with UNASSIGNED for assigned_to IS NULL")
+    void openByRoleGroupsByAssigneeRole() {
+        long qaUser = userWithRole("QA");
+        ticketAssignedTo(qaUser);
+        ticketAssignedTo(qaUser);
+        jdbc.update("INSERT INTO tickets (ticket_code, project_id, title, level, original_level, "
+                        + "date_reported, planned_close_date) "
+                        + "VALUES (?, ?, 'unassigned probe', 'MEDIUM', 'MEDIUM', ?, '2099-01-01 00:00:00')",
+                "ST-26-" + SEQ.incrementAndGet(), projectId, "2026-08-01 09:00:00");
+
+        worker.refreshOnce();
+
+        String json = jdbc.queryForObject(
+                "SELECT open_by_role FROM daily_ticket_stats WHERE stat_date = ? AND project_id = ?",
+                String.class, TODAY, projectId);
+        assertThat(json).contains("\"QA\": 2").contains("\"UNASSIGNED\": 1");
+    }
+
+    /**
+     * The MIS table's own columns, computed the same way the project table's
+     * are — reconciling row for row is the whole point of naming them alike.
+     */
+    @Test
+    @DisplayName("the resource table's new counters agree with the project table's for a single assignee")
+    void resourceCountersAgreeWithProjectCounters() {
+        ticketWithStatus("2026-08-01 09:00:00", "NEW", "2026-08-09 17:00:00");
+        ticketWithStatus("2026-08-01 09:00:00", "IN_PROGRESS", "2026-08-10 17:00:00");
+        ticketWithStatus("2026-08-01 09:00:00", "ON_HOLD", null);
+        worker.refreshOnce();
+
+        for (String column : new String[] {
+                "ns_total", "ns_overdue", "wip_total", "wip_delayed", "blocked_on_hold"}) {
+            assertThat(resourceStat(TODAY, userId, column))
+                    .as(column)
+                    .isEqualTo(stat(TODAY, column));
+        }
+    }
+
+    private long ticketWithStatus(String reportedAt, String status, String plannedCloseAt) {
+        jdbc.update("INSERT INTO tickets (ticket_code, project_id, title, level, original_level, status, "
+                        + "date_reported, planned_close_date, assigned_to) "
+                        + "VALUES (?, ?, 'stats probe', 'MEDIUM', 'MEDIUM', ?, ?, ?, ?)",
+                "ST-26-" + SEQ.incrementAndGet(), projectId, status, reportedAt, plannedCloseAt, userId);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    private void ticketAssignedTo(long uid) {
+        jdbc.update("INSERT INTO tickets (ticket_code, project_id, title, level, original_level, "
+                        + "date_reported, planned_close_date, assigned_to) "
+                        + "VALUES (?, ?, 'role probe', 'MEDIUM', 'MEDIUM', ?, '2099-01-01 00:00:00', ?)",
+                "ST-26-" + SEQ.incrementAndGet(), projectId, "2026-08-01 09:00:00", uid);
+    }
+
+    private long userWithRole(String roleCode) {
+        int n = SEQ.incrementAndGet();
+        Long roleId = jdbc.queryForObject("SELECT id FROM roles WHERE code = ?", Long.class, roleCode);
+        jdbc.update("INSERT INTO users (emp_code, username, email, password_hash, full_name, role_id) "
+                        + "VALUES (?, ?, ?, 'x', 'Stats IT', ?)",
+                "E-R-" + n, "stats.role." + n, "stats.role." + n + "@example.com", roleId);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    /** A template with VERIFY and SIGNOFF flagged as review stages, DEV not. */
+    private long reviewTemplate() {
+        int n = SEQ.incrementAndGet();
+        jdbc.update("INSERT INTO workflow_templates (name) VALUES (?)", "Stats review template " + n);
+        long templateId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        jdbc.update("INSERT INTO workflow_stages (template_id, seq, stage_code, is_review_stage, "
+                        + "display_name, owner_role) VALUES (?, 1, 'DEV', 0, 'Development', 'DEVELOPER')",
+                templateId);
+        jdbc.update("INSERT INTO workflow_stages (template_id, seq, stage_code, is_review_stage, "
+                        + "display_name, owner_role) VALUES (?, 2, 'VERIFY', 1, 'Verification', 'DEVELOPER')",
+                templateId);
+        jdbc.update("INSERT INTO workflow_stages (template_id, seq, stage_code, is_review_stage, "
+                        + "display_name, owner_role) VALUES (?, 3, 'SIGNOFF', 1, 'Sign-off', 'PM')",
+                templateId);
+        return templateId;
+    }
+
+    private void setStage(long ticketId, long templateId, String stageCode) {
+        jdbc.update("UPDATE tickets SET workflow_template_id = ?, current_stage = ? WHERE id = ?",
+                templateId, stageCode, ticketId);
+    }
+
+    /** One cycle with a start, a finish, and the due date it is measured against. */
+    private void cycle(long ticketId, int cycleNo, String startDate, String finishedAt, String plannedCloseAt) {
+        jdbc.update("""
+                INSERT INTO ticket_cycles
+                       (ticket_id, cycle_no, start_date, started_at, finished_at, planned_close_date)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, ticketId, cycleNo, startDate, startDate, finishedAt, plannedCloseAt);
     }
 
     // ── A-058 fixtures ───────────────────────────────────────────────────────

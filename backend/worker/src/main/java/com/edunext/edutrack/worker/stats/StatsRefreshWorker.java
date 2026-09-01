@@ -118,12 +118,12 @@ class StatsRefreshWorker {
         LocalDate today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
         LocalDate windowStart = today.minusDays(windowDays - 1L);
 
-        int days = recompute(windowStart, today);
-        days += backfillOlderThan(windowStart);
+        int days = recompute(windowStart, today, today);
+        days += backfillOlderThan(windowStart, today);
         return days;
     }
 
-    private int recompute(LocalDate from, LocalDate to) {
+    private int recompute(LocalDate from, LocalDate to, LocalDate today) {
         int days = 0;
         for (LocalDate day = from; !day.isAfter(to); day = day.plusDays(1)) {
             stats.refreshTicketStats(day, clock.instant());
@@ -132,7 +132,14 @@ class StatsRefreshWorker {
             // shared locks it already held. Ordered after it because it updates
             // the rows that statement just wrote.
             stats.refreshTypeCounts(day, clock.instant());
-            stats.refreshResourceStats(day, clock.instant());
+            // Dashboard Rework PR 4 · another second pass over the same rows,
+            // for the identical reason — reads tickets, ticket_cycles and the
+            // stage master rather than adding a correlated read to the
+            // INSERT … SELECT above. today is threaded through so
+            // wip_updated_today only ever answers for the day this pass is
+            // actually running on, never for a day already in the past.
+            stats.refreshTodayStats(day, today, clock.instant());
+            stats.refreshResourceStats(day, today, clock.instant());
             // A-059 · widget 20's table. Independent of the three above — it
             // reads tickets and writes its own table — so its position in this
             // sequence carries no dependency, only the cost of a fourth
@@ -180,7 +187,7 @@ class StatsRefreshWorker {
      * in the middle — a gap reads as "nothing happened then", which is a
      * different and wrong statement.
      */
-    private int backfillOlderThan(LocalDate windowStart) {
+    private int backfillOlderThan(LocalDate windowStart, LocalDate today) {
         LocalDate earliest = stats.earliestActivity().orElse(null);
         if (earliest == null || !earliest.isBefore(windowStart)) {
             return 0;
@@ -193,7 +200,7 @@ class StatsRefreshWorker {
         if (to.isAfter(windowStart.minusDays(1))) {
             to = windowStart.minusDays(1);
         }
-        int days = recompute(from, to);
+        int days = recompute(from, to, today);
         if (days > 0) {
             log.info("stats: backfilled {} day(s) from {}", days, from);
         }
