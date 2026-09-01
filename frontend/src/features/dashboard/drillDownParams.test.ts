@@ -76,6 +76,44 @@ describe('drillDownToParams', () => {
   it('survives a link with no query at all', () => {
     expect(drillDownToParams('/tickets')).toEqual({})
   })
+
+  /**
+   * Dashboard Rework Dev 1, PR 8 · these seven keys are PR 5's own additions
+   * to `GET /tickets`, and every Today-tab card and MIS cell already builds
+   * its drill-down from them — `dashboardTabs.ts`'s mock server has done so
+   * since PR 6. Missing here, they were the silent-drop this parser exists to
+   * avoid: a MIS cell reading "Delayed: 7" would open a panel showing every
+   * ticket in progress instead of the seven that are actually late.
+   */
+  it('parses the Today-tab MIS and section keys PR 5 added', () => {
+    expect(
+      drillDownToParams(
+        '/tickets?assigneeId=3&statusCategory=IN_PROGRESS&updatedFrom=2026-09-01&updatedTo=2026-09-01',
+      ),
+    ).toEqual({
+      assigneeId: 3,
+      statusCategory: 'IN_PROGRESS',
+      updatedFrom: '2026-09-01',
+      updatedTo: '2026-09-01',
+    })
+
+    expect(drillDownToParams('/tickets?startedFrom=2026-09-01&startedTo=2026-09-01')).toEqual({
+      startedFrom: '2026-09-01',
+      startedTo: '2026-09-01',
+    })
+
+    expect(
+      drillDownToParams('/tickets?finishedFrom=2026-09-01&finishedTo=2026-09-01&isDelayed=true'),
+    ).toEqual({ finishedFrom: '2026-09-01', finishedTo: '2026-09-01', isDelayed: true })
+
+    expect(drillDownToParams('/tickets?pendingReview=true')).toEqual({ pendingReview: true })
+  })
+
+  it('parses the Blocked card and section link, comma-joined per `explode: false`', () => {
+    expect(drillDownToParams('/tickets?statuses=ON_HOLD,AWAITING_INFO')).toEqual({
+      statuses: ['ON_HOLD', 'AWAITING_INFO'],
+    })
+  })
 })
 
 describe('describeDrillDown', () => {
@@ -99,5 +137,21 @@ describe('describeDrillDown', () => {
 
   it('says something honest when nothing narrows it', () => {
     expect(describeDrillDown('/tickets')).toBe('all tickets in scope')
+  })
+
+  it('describes a MIS cell — category, an assignee-scoped range, and pending review', () => {
+    expect(describeDrillDown('/tickets?statusCategory=IN_PROGRESS&isDelayed=true')).toBe(
+      'category in progress · overdue',
+    )
+    expect(describeDrillDown('/tickets?finishedFrom=2026-09-01&finishedTo=2026-09-01')).toBe(
+      'finished on 2026-09-01',
+    )
+    expect(describeDrillDown('/tickets?pendingReview=true')).toBe('pending review')
+  })
+
+  it('describes the Blocked statuses list', () => {
+    expect(describeDrillDown('/tickets?statuses=ON_HOLD,AWAITING_INFO')).toBe(
+      'status on_hold, awaiting_info',
+    )
   })
 })
