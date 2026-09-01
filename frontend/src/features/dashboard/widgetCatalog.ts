@@ -119,6 +119,16 @@ export const WIDGET_CATALOG: WidgetDefinition[] = [
     categoryLabel: 'Client',
   },
   {
+    key: 'module-open',
+    label: 'Module-wise open tickets',
+    // "Open" rather than "total": the bars count outstanding work — the three
+    // segments partition it — and RESOLVED-not-CLOSED is deliberately excluded.
+    // A panel headed "Module-wise total" would invite being read as every
+    // ticket ever raised against the module, which is a different chart.
+    title: 'Module-wise open tickets',
+    categoryLabel: 'Module',
+  },
+  {
     key: 'stage-funnel',
     label: 'Stage funnel',
     title: 'Stage funnel (where work is sitting)',

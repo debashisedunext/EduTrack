@@ -91,6 +91,45 @@ function widgetPayload(db: ReturnType<typeof getDb>, key: string) {
         drillDown: `/tickets?stage=${s.stageCode}`,
       })),
     }];
+  } else if (key === 'module-open') {
+    /*
+      Dashboard Rework Dev 2, PR 14. Computed from the seeded tickets rather
+      than a generic fourteen-point ramp, because this widget's whole claim is
+      arithmetic: the three segments partition each module's open work, so a
+      mock whose segments did not add up would let the bar look right while
+      being the exact thing the server-side CASE exists to prevent.
+
+      Overdue wins, matching DailyStatsRepository.refreshModuleStats. Tickets
+      with no module are absent rather than zero, matching the migration.
+    */
+    const today = new Date().toISOString().slice(0, 10);
+    const open = rows.filter((t) => {
+      const category = db.statuses.find((x) => x.code === t.status)?.category;
+      return category === 'TODO' || category === 'IN_PROGRESS';
+    });
+    const modules = db.modules;
+    const segment = (
+      name: string,
+      pick: (t: (typeof open)[number]) => boolean,
+      params: string,
+    ) => ({
+      name,
+      points: modules.map((m) => ({
+        x: m.name,
+        y: open.filter((t) => t.moduleId === m.id && pick(t)).length,
+        drillDown: `/tickets?moduleId=${m.id}&excludeClosed=true${params}`,
+      })),
+    });
+    const isOverdue = (t: (typeof open)[number]) =>
+      t.plannedCloseDate != null && t.plannedCloseDate < today;
+    const categoryOf = (t: (typeof open)[number]) =>
+      db.statuses.find((x) => x.code === t.status)?.category;
+
+    series = [
+      segment('Not started', (t) => !isOverdue(t) && categoryOf(t) === 'TODO', '&statusCategory=TODO'),
+      segment('WIP', (t) => !isOverdue(t) && categoryOf(t) === 'IN_PROGRESS', '&statusCategory=IN_PROGRESS'),
+      segment('Overdue', isOverdue, '&isDelayed=true'),
+    ];
   } else {
     series = [{
       name: key,

@@ -128,7 +128,7 @@ describe('rearranging by keyboard', () => {
 
     await user.click(screen.getByRole('button', { name: /Move Daily task status earlier/ }))
 
-    expect(screen.getByText(/Daily task status moved to position 1 of 14/)).toBeInTheDocument()
+    expect(screen.getByText(/Daily task status moved to position 1 of 15/)).toBeInTheDocument()
   })
 
   /**
@@ -274,7 +274,7 @@ describe('an arrangement and the rest of the dashboard', () => {
     renderWidgets()
 
     expect(requestedKeys()[0]).toBe('rework')
-    expect(requestedKeys()).toHaveLength(14)
+    expect(requestedKeys()).toHaveLength(15)
   })
 
   it('still drops a hidden widget from both the order and the request', () => {

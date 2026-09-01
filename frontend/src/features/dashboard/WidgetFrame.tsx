@@ -76,6 +76,11 @@ export type WidgetKey =
   | 'rework'
   | 'stage-duration'
   | 'handoff-latency'
+  // Dashboard Rework Dev 2, PR 14 · widget 15. Widened here in the same commit
+  // as the contract's enum and WidgetService.IMPLEMENTED — this union, those
+  // two and DashboardWidgetIT.everyContractKeyIsServed are one agreement, and
+  // #326 proved it fails from whichever side moves alone.
+  | 'module-open'
 
 export interface WidgetPoint {
   x: string

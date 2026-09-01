@@ -11,6 +11,7 @@ import { widgetDefinition, widgetTitle } from './widgetCatalog'
 import { AgingBuckets } from './charts/AgingBuckets'
 import { CalendarHeatmap } from './charts/CalendarHeatmap'
 import { ClientVolumeBar } from './charts/ClientVolumeBar'
+import { ModuleOpenBar } from './charts/ModuleOpenBar'
 import { DailyStackedArea } from './charts/DailyStackedArea'
 import { HandoffLatencyLine } from './charts/HandoffLatencyLine'
 import { PriorityBar } from './charts/PriorityBar'
@@ -88,6 +89,8 @@ const RENDERERS: Record<WidgetKey, (series: WidgetSeries[]) => React.ReactNode> 
   rework: (series) => <ReworkPanel series={series} />,
   'stage-duration': (series) => <StageDurationBar series={series} />,
   'handoff-latency': (series) => <HandoffLatencyLine series={series} />,
+  // Dashboard Rework Dev 2, PR 14 · widget 15.
+  'module-open': (series) => <ModuleOpenBar series={series} />,
 }
 
 /**
@@ -124,6 +127,11 @@ export const FULL_KEYS = [
   'rework',
   'stage-duration',
   'handoff-latency',
+  // Dashboard Rework Dev 2, PR 14. Not in OWN_WORK_KEYS: module_daily_stats is
+  // keyed by project and module, and a delivery role's dashboard reads figures
+  // keyed by person — the service answers that variant with a sentence rather
+  // than a chart, and offering the tile would be a checkbox that does nothing.
+  'module-open',
 ] as const satisfies readonly WidgetKey[]
 
 export function DashboardWidgets({ params }: { params: GetDashboardWidgetParams }) {

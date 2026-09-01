@@ -149,6 +149,21 @@ class StatsRefreshWorker {
             // pass and not the first: reading that table from inside the
             // INSERT … SELECT above is the shape that deadlocked A-056 —
             // CannotAcquireLock, on a suite that had passed the day before.
+            // Dashboard Rework Dev 2, PR 14 · the module-open widget's table.
+            // Independent of everything above — it reads tickets and statuses
+            // and writes its own table — so its position carries no dependency,
+            // only the cost of one more statement per day. Inside the same loop
+            // rather than a pass of its own, for refreshClientStats' reason: a
+            // day is summarised completely or not at all, and two loops would
+            // leave a window in which the project charts had advanced and the
+            // module chart had not, on one dashboard.
+            //
+            // ⚠️ The split (docs/Dashboard-Rework-Split.md) has Dev 1 wiring all
+            // three new call sites in PR 4, so that Dev 2 never edits this file.
+            // PR 4 has not landed and PR 14 does nothing without a call site, so
+            // this one line is added here rather than waiting. Flagged rather
+            // than done quietly; the other two are still Dev 1's to add.
+            stats.refreshModuleStats(day, clock.instant());
             stats.refreshWipByStage(day, clock.instant());
             stats.refreshReworkCounts(day, clock.instant());
             stats.refreshStageStats(day, clock.instant());

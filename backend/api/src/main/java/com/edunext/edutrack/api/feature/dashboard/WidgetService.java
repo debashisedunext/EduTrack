@@ -114,7 +114,14 @@ class WidgetService {
     private static final List<String> IMPLEMENTED = List.of(
             "type-donut", "daily-stacked", "velocity", "resource-load", "priority-bar", "aging-buckets",
             "calendar-heatmap", "sla-gauge", "project-treemap", "client-volume",
-            "stage-funnel", "rework", "stage-duration", "handoff-latency");
+            "stage-funnel", "rework", "stage-duration", "handoff-latency",
+            // Dashboard Rework Dev 2, PR 14. Added here in the SAME commit as
+            // the contract's widgetKey enum: DashboardWidgetIT.everyContractKeyIsServed
+            // fails from either direction, and #326 learned that the hard way by
+            // freezing the key into the contract a fortnight before the branch
+            // below existed. A key in the enum is enumerated into the chooser
+            // and the batch request, so the dashboard asks for it on first paint.
+            "module-open");
 
     static boolean isImplemented(String widgetKey) {
         return IMPLEMENTED.contains(widgetKey);
@@ -288,6 +295,7 @@ class WidgetService {
             case "sla-gauge" -> slaGauge(scope, projectId, start, end, asOf);
             case "project-treemap" -> projectTreemap(scope, projectId, start, end, asOf);
             case "client-volume" -> clientVolume(scope, projectId, start, end, asOf);
+            case "module-open" -> moduleOpen(scope, projectId, asOf);
             // A-058 · the four the ribbon unlocks. All read stage_daily_stats or
             // wip_by_stage, both filled by the worker from
             // ticket_stage_transitions — never from that table directly.
@@ -312,6 +320,20 @@ class WidgetService {
             "This breakdown is not kept per resource. Your dashboard reads the figures for "
                     + "tickets assigned to you, and those are recorded per person and per day "
                     + "without this split.";
+
+    /**
+     * Dashboard Rework Dev 2, PR 14 · before the worker has written a single day.
+     *
+     * <p>Distinct from an empty series, which draws as "no open tickets" — a
+     * claim about the data rather than about the table, and a false one on a
+     * database where the refresh has simply not run yet. module_daily_stats is
+     * pure stock and does not backfill, so a new installation reads this
+     * sentence until the first pass completes rather than a chart of nothing.
+     */
+    private static final String NOT_COMPUTED_YET =
+            "Module figures have not been computed yet. The summary worker runs every five "
+                    + "minutes, and these figures begin from the first pass rather than being "
+                    + "backfilled.";
 
     /**
      * A-077 · the sentence for a project whose figures are not this caller's.
@@ -857,6 +879,88 @@ class WidgetService {
 
         return WidgetDtos.Widget.of("client-volume", asOf,
                 List.of(new WidgetDtos.Series("Tickets raised", points)));
+    }
+
+    /**
+     * Dashboard Rework Dev 2, PR 14 · module-wise total open tickets.
+     *
+     * <h2>Three series, and they partition</h2>
+     *
+     * <p>A stacked bar makes an arithmetic claim, so the three segments are
+     * disjoint and add up to the module's open total. The partition is made in
+     * {@code DailyStatsRepository.refreshModuleStats} rather than here — one
+     * {@code CASE} per ticket with overdue tested first — so an overdue WIP
+     * ticket is counted once and the segments cannot drift apart from the
+     * figure they are supposed to sum to.
+     *
+     * <p>Ordered overdue-last so the segment that needs reading against the
+     * axis ends the bar, which is {@code resourceLoad}'s reasoning applied to
+     * a different triple.
+     *
+     * <h2>One day, not the window</h2>
+     *
+     * <p>Every column is stock. Summing a date range would count a ticket that
+     * stayed open all week five times, so this reads the latest computed day
+     * and ignores {@code from}/{@code to} entirely. Stated in the drill-downs
+     * too: they carry no date window, because the figure has none.
+     *
+     * <h2>Delivery roles have no module figures</h2>
+     *
+     * <p>{@code module_daily_stats} is keyed by project and module; a delivery
+     * role's dashboard reads figures keyed by person. "Which modules are the
+     * tickets assigned to me in" is answerable, but not from this table, and
+     * borrowing the project figures would head a chart of the organisation's
+     * module mix as though it were theirs — the trap {@code clientVolume} and
+     * {@code dailyStacked} both name.
+     */
+    private WidgetDtos.Widget moduleOpen(DashboardScope scope, Long projectId, Instant asOf) {
+        if (scope.ownWorkOnly()) {
+            return WidgetDtos.Widget.unavailable("module-open", NO_RESOURCE_EQUIVALENT);
+        }
+
+        LocalDate day = widgets.latestModuleStatDate(scope.projectIds());
+        if (day == null) {
+            // Before the worker's first pass there is no day to read. An empty
+            // series would draw as "no open tickets", which is a claim about
+            // the data rather than about the table, and a false one.
+            return WidgetDtos.Widget.unavailable("module-open", NOT_COMPUTED_YET);
+        }
+
+        List<WidgetRepository.ModuleOpen> rows =
+                widgets.moduleOpen(day, scope.projectIds(), projectId);
+
+        List<WidgetDtos.Point> notStarted = new ArrayList<>(rows.size());
+        List<WidgetDtos.Point> wip = new ArrayList<>(rows.size());
+        List<WidgetDtos.Point> overdue = new ArrayList<>(rows.size());
+
+        for (WidgetRepository.ModuleOpen row : rows) {
+            // Only parameters GET /tickets implements — statusCategory and
+            // moduleId both landed before this widget did, and
+            // DrillDownContractTest fails the build on anything else. No date
+            // window: the figure is stock at one moment, and reportedFrom/To
+            // would narrow the list to tickets *raised* in a window the bar
+            // never counted by.
+            String where = "/tickets?moduleId=" + row.moduleId() + "&excludeClosed=true"
+                    + projectParam(projectId);
+            notStarted.add(new WidgetDtos.Point(row.moduleName(),
+                    java.math.BigDecimal.valueOf(row.notStarted()), where + "&statusCategory=TODO"));
+            wip.add(new WidgetDtos.Point(row.moduleName(),
+                    java.math.BigDecimal.valueOf(row.wip()), where + "&statusCategory=IN_PROGRESS"));
+            // The overdue segment is the one whose drill-down cannot be exact.
+            // isDelayed is the ticket's own flag; the segment counts
+            // planned_close_date in the past, and the SLA scanner sets the flag
+            // from the same date, so the two agree in every case the scanner has
+            // seen. A ticket that went overdue since the last scan is in the bar
+            // and not yet in the list — a lag, not a disagreement, and the
+            // alternative is a segment nobody can click.
+            overdue.add(new WidgetDtos.Point(row.moduleName(),
+                    java.math.BigDecimal.valueOf(row.overdue()), where + "&isDelayed=true"));
+        }
+
+        return WidgetDtos.Widget.of("module-open", asOf, List.of(
+                new WidgetDtos.Series("Not started", notStarted),
+                new WidgetDtos.Series("WIP", wip),
+                new WidgetDtos.Series("Overdue", overdue)));
     }
 
     private static final WidgetRepository.StockBreakdown EMPTY_BREAKDOWN =

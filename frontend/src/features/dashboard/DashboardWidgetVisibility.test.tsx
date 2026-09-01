@@ -73,7 +73,7 @@ describe('hiding a dashboard widget', () => {
     renderWidgets()
 
     expect(requestedKeys()).not.toContain('sla-gauge')
-    expect(requestedKeys()).toHaveLength(13)
+    expect(requestedKeys()).toHaveLength(14)
   })
 
   it('does not render the hidden widget’s frame', () => {

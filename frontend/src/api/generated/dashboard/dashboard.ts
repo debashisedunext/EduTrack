@@ -192,7 +192,7 @@ dashboard polling faster than that gets `304` and costs nothing.
  * @summary One widget's series
  */
 export const getDashboardWidget = (
-    widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume',
+    widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume' | 'module-open',
     params?: GetDashboardWidgetParams,
  signal?: AbortSignal
 ) => {
@@ -208,7 +208,7 @@ export const getDashboardWidget = (
 
 
 
-export const getGetDashboardWidgetQueryKey = (widgetKey?: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume',
+export const getGetDashboardWidgetQueryKey = (widgetKey?: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume' | 'module-open',
     params?: GetDashboardWidgetParams,) => {
     return [
     `/dashboard/widget/${widgetKey}`, ...(params ? [params]: [])
@@ -216,7 +216,7 @@ export const getGetDashboardWidgetQueryKey = (widgetKey?: 'type-donut' | 'daily-
     }
 
     
-export const getGetDashboardWidgetQueryOptions = <TData = Awaited<ReturnType<typeof getDashboardWidget>>, TError = void | NotFoundResponse>(widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume',
+export const getGetDashboardWidgetQueryOptions = <TData = Awaited<ReturnType<typeof getDashboardWidget>>, TError = void | NotFoundResponse>(widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume' | 'module-open',
     params?: GetDashboardWidgetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidget>>, TError, TData>>, }
 ) => {
 
@@ -240,7 +240,7 @@ export type GetDashboardWidgetQueryError = void | NotFoundResponse
 
 
 export function useGetDashboardWidget<TData = Awaited<ReturnType<typeof getDashboardWidget>>, TError = void | NotFoundResponse>(
- widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume',
+ widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume' | 'module-open',
     params: undefined |  GetDashboardWidgetParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidget>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDashboardWidget>>,
@@ -251,7 +251,7 @@ export function useGetDashboardWidget<TData = Awaited<ReturnType<typeof getDashb
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetDashboardWidget<TData = Awaited<ReturnType<typeof getDashboardWidget>>, TError = void | NotFoundResponse>(
- widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume',
+ widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume' | 'module-open',
     params?: GetDashboardWidgetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidget>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDashboardWidget>>,
@@ -262,7 +262,7 @@ export function useGetDashboardWidget<TData = Awaited<ReturnType<typeof getDashb
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetDashboardWidget<TData = Awaited<ReturnType<typeof getDashboardWidget>>, TError = void | NotFoundResponse>(
- widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume',
+ widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume' | 'module-open',
     params?: GetDashboardWidgetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidget>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -271,7 +271,7 @@ export function useGetDashboardWidget<TData = Awaited<ReturnType<typeof getDashb
  */
 
 export function useGetDashboardWidget<TData = Awaited<ReturnType<typeof getDashboardWidget>>, TError = void | NotFoundResponse>(
- widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume',
+ widgetKey: 'type-donut' | 'daily-stacked' | 'velocity' | 'resource-load' | 'priority-bar' | 'aging-buckets' | 'calendar-heatmap' | 'sla-gauge' | 'project-treemap' | 'stage-funnel' | 'rework' | 'stage-duration' | 'handoff-latency' | 'client-volume' | 'module-open',
     params?: GetDashboardWidgetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDashboardWidget>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
