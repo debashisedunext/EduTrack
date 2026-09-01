@@ -66,4 +66,5 @@ export const GetDashboardWidgetsKeysItem = {
   'stage-duration': 'stage-duration',
   'handoff-latency': 'handoff-latency',
   'client-volume': 'client-volume',
+  'module-open': 'module-open',
 } as const;

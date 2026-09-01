@@ -89,7 +89,7 @@ dashboard polling faster than that gets `304` and costs nothing.
  * @summary One widget's series
  */
 export const getDashboardWidgetParams = zod.object({
-  "widgetKey": zod.enum(['type-donut', 'daily-stacked', 'velocity', 'resource-load', 'priority-bar', 'aging-buckets', 'calendar-heatmap', 'sla-gauge', 'project-treemap', 'stage-funnel', 'rework', 'stage-duration', 'handoff-latency', 'client-volume'])
+  "widgetKey": zod.enum(['type-donut', 'daily-stacked', 'velocity', 'resource-load', 'priority-bar', 'aging-buckets', 'calendar-heatmap', 'sla-gauge', 'project-treemap', 'stage-funnel', 'rework', 'stage-duration', 'handoff-latency', 'client-volume', 'module-open'])
 })
 
 export const getDashboardWidgetQueryParams = zod.object({
@@ -150,7 +150,7 @@ served.
  * @summary Several widgets' series in one request
  */
 export const getDashboardWidgetsQueryParams = zod.object({
-  "keys": zod.array(zod.enum(['type-donut', 'daily-stacked', 'velocity', 'resource-load', 'priority-bar', 'aging-buckets', 'calendar-heatmap', 'sla-gauge', 'project-treemap', 'stage-funnel', 'rework', 'stage-duration', 'handoff-latency', 'client-volume'])).describe('The widget keys to render. Repeat the parameter or pass one comma-separated value.\n'),
+  "keys": zod.array(zod.enum(['type-donut', 'daily-stacked', 'velocity', 'resource-load', 'priority-bar', 'aging-buckets', 'calendar-heatmap', 'sla-gauge', 'project-treemap', 'stage-funnel', 'rework', 'stage-duration', 'handoff-latency', 'client-volume', 'module-open'])).describe('The widget keys to render. Repeat the parameter or pass one comma-separated value.\n'),
   "projectId": zod.number().optional(),
   "from": zod.string().date().optional(),
   "to": zod.string().date().optional()

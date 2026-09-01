@@ -1225,6 +1225,120 @@ class DailyStatsRepository {
                 .update());
     }
 
+    // ── Dashboard Rework Dev 2, PR 14 · the module-open widget's table ───────
+
+    /**
+     * Fills {@code module_daily_stats} — module-wise open tickets, split three
+     * ways for §S-05's {@code module-open} bar.
+     *
+     * <h2>The three segments are disjoint, and overdue takes precedence</h2>
+     *
+     * <p>This is the decision the whole widget turns on and the obvious
+     * implementation gets it wrong. A stacked bar makes an arithmetic claim —
+     * the segments add up to the whole — so a ticket that is both overdue and
+     * in progress must be counted once. Three independent {@code SUM}s over
+     * overlapping predicates would count it twice, every module's bar would
+     * overstate its load in proportion to how late that module is running, and
+     * nobody would notice for a month because each segment is individually
+     * plausible.
+     *
+     * <p>The {@code CASE} below is what makes it a partition rather than three
+     * counts: one arm per ticket, overdue tested first. The migration header
+     * carries the same rule, so the shape is stated where the table is defined
+     * and enforced where the rows are written.
+     *
+     * <h2>Category, not status code</h2>
+     *
+     * <p>Joined to {@code statuses} rather than matching codes inline. B-039
+     * made {@code category} a column precisely because it is not derivable —
+     * {@code ON_HOLD}, {@code AWAITING_INFO} and {@code REWORK} are all
+     * IN_PROGRESS while carrying the same two booleans as {@code NEW} — and an
+     * organisation may add statuses. A hardcoded list would silently drop a new
+     * status out of every segment.
+     *
+     * <p>Category DONE is excluded, which drops RESOLVED-not-CLOSED: work that
+     * is finished with its record still open. S-05 counts those on the Today
+     * tab's Pending Review card. Including them here would put finished work in
+     * a chart titled "open tickets" and in none of the three segments, so the
+     * bar would stop summing to its own total.
+     *
+     * <h2>Stock, computed at the end of the day</h2>
+     *
+     * <p>Every column here is stock and none of it backfills — see the
+     * migration. The table therefore starts empty and fills forward, and a
+     * chart blank for its first days is correct rather than broken.
+     *
+     * <p>The open predicate is deliberately the one {@link #refreshTicketStats}
+     * and {@link #refreshClientStats} already use, so a module's open count and
+     * its projects' open counts are computed by one definition and reconcile.
+     *
+     * <h2>The day is deleted and rewritten</h2>
+     *
+     * <p>{@link #refreshClientStats}' argument, for another mutable input: a
+     * (project, module) pair earns its row by having open work and can stop
+     * earning one, because §7.5's {@code module_id} is editable on the ticket.
+     * An upsert cannot retract what it wrote, so a re-pointed ticket would
+     * stand in two modules' bars at once.
+     *
+     * <p><b>Public deliberately</b>, for the reason spelled out on
+     * {@link #refreshResourceStats}: Spring's transaction attribute source
+     * ignores {@code @Transactional} on a non-public method and says nothing
+     * when it does, which would autocommit the DELETE and the INSERT separately
+     * and leave every dashboard reading that day in between with an empty chart.
+     */
+    @Transactional
+    public int refreshModuleStats(LocalDate day, Instant computedAt) {
+        jdbc.sql("DELETE FROM module_daily_stats WHERE stat_date = :day")
+                .param("day", day)
+                .update();
+
+        return jdbc.sql("""
+                INSERT INTO module_daily_stats (
+                    stat_date, project_id, module_id,
+                    open_overdue, open_wip, open_not_started, computed_at)
+                SELECT :day, t.project_id, t.module_id,
+                    -- One CASE, not three SUMs: the arms are evaluated in
+                    -- order, so a ticket lands in exactly one segment and the
+                    -- three add up to the module's open total. Overdue first,
+                    -- deliberately — see the class note.
+                    COALESCE(SUM(CASE
+                        WHEN t.planned_close_date IS NOT NULL
+                             AND t.planned_close_date < :day THEN 1
+                        ELSE 0 END), 0) AS overdue_at_eod,
+                    COALESCE(SUM(CASE
+                        WHEN t.planned_close_date IS NOT NULL
+                             AND t.planned_close_date < :day THEN 0
+                        WHEN s.category = 'IN_PROGRESS' THEN 1
+                        ELSE 0 END), 0) AS wip_at_eod,
+                    COALESCE(SUM(CASE
+                        WHEN t.planned_close_date IS NOT NULL
+                             AND t.planned_close_date < :day THEN 0
+                        WHEN s.category = 'TODO' THEN 1
+                        ELSE 0 END), 0) AS not_started_at_eod,
+                    :computedAt
+                FROM tickets t
+                JOIN statuses s ON s.code = t.status
+                WHERE t.module_id IS NOT NULL
+                  -- Outstanding work only. DONE covers CLOSED and
+                  -- RESOLVED-not-CLOSED alike; see the class note.
+                  AND s.category IN ('TODO', 'IN_PROGRESS')
+                  -- Still open when the day ended, by the same predicate
+                  -- refreshTicketStats and refreshClientStats use.
+                  AND t.date_reported < :dayEnd
+                  AND (t.actual_close_date IS NULL OR t.actual_close_date >= :dayEnd)
+                GROUP BY t.project_id, t.module_id
+                -- A pair with no open work earns no row. Without this every
+                -- module would get a row of zeroes on every day for ever,
+                -- growing the table by projects times modules times days
+                -- regardless of activity.
+                HAVING overdue_at_eod > 0 OR wip_at_eod > 0 OR not_started_at_eod > 0
+                """)
+                .param("day", day)
+                .param("dayEnd", day.plusDays(1).atStartOfDay())
+                .param("computedAt", computedAt)
+                .update();
+    }
+
     /**
      * One measured gap: a ticket left some stage at {@code leftAt} and arrived
      * at {@code stageCode} at {@code arrivedAt}.

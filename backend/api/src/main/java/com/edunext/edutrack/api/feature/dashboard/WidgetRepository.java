@@ -560,6 +560,57 @@ class WidgetRepository {
                 .list();
     }
 
+    /**
+     * Dashboard Rework Dev 2, PR 14 · one day of module_daily_stats.
+     *
+     * <p><b>One date, never a range.</b> These are stock columns: a ticket open
+     * on Monday and still open on Friday is in both days' rows, so summing a
+     * range would count it five times. {@code clientVolume} above sums freely
+     * because {@code created} is flow. The widget therefore reads the latest
+     * computed day rather than the caller's window — the same reason the
+     * treemap and the stock breakdowns do.
+     */
+    List<ModuleOpen> moduleOpen(LocalDate day, List<Long> projectIds, Long projectFilter) {
+        return jdbc.sql("""
+                        SELECT s.module_id, m.name,
+                               SUM(s.open_overdue)     AS overdue,
+                               SUM(s.open_wip)         AS wip,
+                               SUM(s.open_not_started) AS not_started
+                          FROM module_daily_stats s
+                          JOIN product_modules m ON m.id = s.module_id
+                         WHERE s.stat_date = :day
+                           AND (:unscoped = 1 OR s.project_id IN (:projectIds))
+                           AND (:projectFilter IS NULL OR s.project_id = :projectFilter)
+                         GROUP BY s.module_id, m.name
+                        HAVING overdue > 0 OR wip > 0 OR not_started > 0
+                         ORDER BY (overdue + wip + not_started) DESC, m.name
+                        """)
+                .param("day", day)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .param("projectFilter", projectFilter)
+                .query((rs, n) -> new ModuleOpen(
+                        rs.getLong("module_id"), rs.getString("name"),
+                        rs.getLong("overdue"), rs.getLong("wip"), rs.getLong("not_started")))
+                .list();
+    }
+
+    /** The most recent day module_daily_stats holds, or null before the worker has run. */
+    LocalDate latestModuleStatDate(List<Long> projectIds) {
+        return jdbc.sql("""
+                        SELECT MAX(stat_date) FROM module_daily_stats
+                         WHERE (:unscoped = 1 OR project_id IN (:projectIds))
+                        """)
+                .param("unscoped", projectIds.isEmpty() ? 1 : 0)
+                .param("projectIds", scopeOrSentinel(projectIds))
+                .query(LocalDate.class)
+                .optional()
+                .orElse(null);
+    }
+
+    record ModuleOpen(long moduleId, String moduleName, long overdue, long wip, long notStarted) {
+    }
+
     // ── A-058 · widgets 16–19, the four the ribbon unlocks ───────────────────
 
     /**

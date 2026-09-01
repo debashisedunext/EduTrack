@@ -119,6 +119,7 @@ class StatsRefreshIT {
         jdbc.update("DELETE FROM resource_daily_stats");
         jdbc.update("DELETE FROM client_daily_stats");
         jdbc.update("DELETE FROM stage_daily_stats");
+        jdbc.update("DELETE FROM module_daily_stats");
 
         // Dashboard Rework PR 4 · ticket_cycles carries no delete-blocking
         // trigger — it sits beside the three protected tables without being
@@ -761,6 +762,167 @@ class StatsRefreshIT {
                 "SELECT COUNT(*) FROM client_daily_stats "
                         + "WHERE stat_date = ? AND project_id = ? AND client_id = ?",
                 Integer.class, day, projectId, clientId);
+    }
+
+    // ── Dashboard Rework Dev 2, PR 14 · module_daily_stats ───────────────────
+
+    /**
+     * 🔴 The decision this widget turns on, and the obvious implementation
+     * fails it silently.
+     *
+     * <p>A stacked bar makes an arithmetic claim: the segments add up to the
+     * whole. Three independent SUMs over overlapping predicates would count an
+     * overdue in-progress ticket twice — once as overdue, once as WIP — and
+     * every module's bar would overstate its load in proportion to how late
+     * that module is running. Each segment stays individually plausible, which
+     * is why this is asserted rather than eyeballed.
+     */
+    @Test
+    @DisplayName("an overdue WIP ticket is counted once, under overdue")
+    void moduleSegmentsPartitionRatherThanOverlap() {
+        long module = module("BILLING");
+        // In progress AND past its planned close date — the ticket that gets
+        // double-counted by the intuitive query.
+        long id = moduleTicket(module, "2026-08-08 09:00:00");
+        jdbc.update("UPDATE tickets SET status = 'IN_PROGRESS', planned_close_date = ? WHERE id = ?",
+                "2026-08-09 00:00:00", id);
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(moduleStat(d, module, "open_overdue")).isEqualTo(1);
+        assertThat(moduleStat(d, module, "open_wip")).isZero();
+        assertThat(moduleStat(d, module, "open_not_started")).isZero();
+    }
+
+    /**
+     * The same property stated as arithmetic: whatever the mix, the three
+     * segments sum to the number of outstanding tickets in the module. This is
+     * what the bar's *length* means, and it is the assertion that survives
+     * somebody rewriting the CASE.
+     */
+    @Test
+    @DisplayName("the three segments sum to the module's open total")
+    void moduleSegmentsSumToTheOpenTotal() {
+        long module = module("FEES");
+        long overdue = moduleTicket(module, "2026-08-08 09:00:00");
+        jdbc.update("UPDATE tickets SET status = 'IN_PROGRESS', planned_close_date = ? WHERE id = ?",
+                "2026-08-09 00:00:00", overdue);
+        long wip = moduleTicket(module, "2026-08-08 09:00:00");
+        jdbc.update("UPDATE tickets SET status = 'IN_PROGRESS' WHERE id = ?", wip);
+        moduleTicket(module, "2026-08-09 09:00:00");    // NEW → not started
+        moduleTicket(module, "2026-08-09 10:00:00");    // NEW → not started
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(moduleStat(d, module, "open_overdue")
+                + moduleStat(d, module, "open_wip")
+                + moduleStat(d, module, "open_not_started"))
+                .isEqualTo(4);
+        assertThat(moduleStat(d, module, "open_wip")).isEqualTo(1);
+        assertThat(moduleStat(d, module, "open_not_started")).isEqualTo(2);
+    }
+
+    /**
+     * RESOLVED is category DONE with its record still open — finished work
+     * whose ticket has not been closed. S-05 counts it on the Today tab's
+     * Pending Review card. Counting it here would put finished work in a chart
+     * titled "open tickets" and, because it is in none of the three segments,
+     * would break the sum above.
+     */
+    @Test
+    @DisplayName("resolved-but-not-closed is not open work")
+    void resolvedIsNotCountedAsOpen() {
+        long module = module("LIBRARY");
+        long id = moduleTicket(module, "2026-08-09 09:00:00");
+        jdbc.update("UPDATE tickets SET status = 'RESOLVED' WHERE id = ?", id);
+        worker.refreshOnce();
+
+        assertThat(moduleRows(LocalDate.of(2026, 8, 10), module)).isZero();
+    }
+
+    /**
+     * §7.5's module fields postdate the tickets raised before them, so
+     * module_id is nullable. Those tickets belong to no module's bar — they
+     * must not be counted under another module, and must not invent one.
+     */
+    @Test
+    @DisplayName("tickets with no module are summarised nowhere")
+    void ticketsWithoutAModuleAreNotSummarised() {
+        long module = module("EXAM");
+        moduleTicket(module, "2026-08-09 09:00:00");
+        ticket("2026-08-09 09:00:00", null, "MEDIUM");   // no module_id
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(moduleStat(d, module, "open_not_started")).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT COALESCE(SUM(open_not_started), 0) FROM module_daily_stats "
+                        + "WHERE stat_date = ? AND project_id = ?",
+                Integer.class, d, projectId)).isEqualTo(1);
+    }
+
+    /**
+     * module_id is editable on the ticket, so a pair can stop earning its row.
+     * An upsert cannot retract what it wrote, and the ticket would then stand
+     * in two modules' bars at once — which is why the refresh deletes the day
+     * before rewriting it.
+     */
+    @Test
+    @DisplayName("re-pointing a ticket moves it rather than duplicating it")
+    void repointingAModuleDoesNotDoubleCount() {
+        long from = module("ATTEND");
+        long to = module("PARENT");
+        long id = moduleTicket(from, "2026-08-09 09:00:00");
+        worker.refreshOnce();
+        assertThat(moduleStat(LocalDate.of(2026, 8, 10), from, "open_not_started")).isEqualTo(1);
+
+        jdbc.update("UPDATE tickets SET module_id = ? WHERE id = ?", to, id);
+        worker.refreshOnce();
+
+        LocalDate d = LocalDate.of(2026, 8, 10);
+        assertThat(moduleRows(d, from)).isZero();
+        assertThat(moduleStat(d, to, "open_not_started")).isEqualTo(1);
+    }
+
+    /** A second pass over unchanged rows must not change the answer. */
+    @Test
+    @DisplayName("recompute is idempotent")
+    void moduleRecomputeIsIdempotent() {
+        long module = module("INVENT");
+        moduleTicket(module, "2026-08-09 09:00:00");
+        worker.refreshOnce();
+        Integer first = moduleStat(LocalDate.of(2026, 8, 10), module, "open_not_started");
+
+        worker.refreshOnce();
+
+        assertThat(moduleStat(LocalDate.of(2026, 8, 10), module, "open_not_started")).isEqualTo(first);
+        assertThat(moduleRows(LocalDate.of(2026, 8, 10), module)).isEqualTo(1);
+    }
+
+    private long module(String code) {
+        jdbc.update("INSERT INTO product_modules (code, name, seq) VALUES (?, ?, 0)",
+                code + SEQ.incrementAndGet(), code);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    private long moduleTicket(long moduleId, String reportedAt) {
+        long id = ticket(reportedAt, null, "MEDIUM");
+        jdbc.update("UPDATE tickets SET module_id = ? WHERE id = ?", moduleId, id);
+        return id;
+    }
+
+    private Integer moduleStat(LocalDate day, long moduleId, String column) {
+        return jdbc.queryForObject(
+                "SELECT " + column + " FROM module_daily_stats "
+                        + "WHERE stat_date = ? AND project_id = ? AND module_id = ?",
+                Integer.class, day, projectId, moduleId);
+    }
+
+    private Integer moduleRows(LocalDate day, long moduleId) {
+        return jdbc.queryForObject(
+                "SELECT COUNT(*) FROM module_daily_stats "
+                        + "WHERE stat_date = ? AND project_id = ? AND module_id = ?",
+                Integer.class, day, projectId, moduleId);
     }
 
     // ── A-058 · widgets 16–19, the four derived from the ribbon ──────────────

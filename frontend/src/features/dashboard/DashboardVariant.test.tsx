@@ -37,7 +37,7 @@ import { DashboardWidgets } from './DashboardWidgets'
  * rule, since all four of its widgets are keyed by project and refuse a
  * delivery role in words.
  */
-const MANAGER_WIDGETS = 14
+const MANAGER_WIDGETS = 15
 
 const useGetDashboardWidget = vi.fn()
 const useGetDashboardWidgets = vi.fn()
