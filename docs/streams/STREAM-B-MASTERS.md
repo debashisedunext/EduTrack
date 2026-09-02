@@ -848,14 +848,22 @@ Everything a client arrives with, before the journey starts moving.
 - [ ] **B-102** 🔴 **Client CRUD and the duplicate guard** — PAN unique and checked on create, plus a warning on a near-duplicate name. Two half-onboarded copies of one client is a mess no report survives.
 - [ ] **B-103** **SPOC contacts** — multiple per client, one primary. **Capture `whatsapp_opt_in` with its timestamp and source now**, even though nothing sends WhatsApp this phase: consent cannot be backfilled, and every SPOC boarded without it must be re-approached before a single message can go out.
 - [ ] **B-104** **Applications purchased** — with license start and end dates. That pair is the renewal anchor; capturing it now costs nothing and is the whole data set a renewals module would need.
-- [ ] **B-105** **Payment schedule** — advance, balance and other as rows with due date, received date, mode, reference, invoice number and GST fields, plus an outstanding roll-up. Finance asks for this in week one.
 - [ ] **B-106** **Requirements** — structured rows plus rich text through `api/text/`'s allow-list. That class is shared and needs C's and D's sign-off if it changes; it should not need to.
 - [ ] **B-107** **Client attachments** — the existing upload pipeline, unchanged: allow-list, MIME sniff, AV scan, signed URLs.
+
+### Prerequisites — the client's own checklist
+
+- [ ] **B-124** **Prerequisites master + OB-14** — versioned master task set: title, description, TAT, mandatory flag, admin reference docs; snapshot semantics like journey templates.
+- [ ] **B-125** **Per-client prerequisite instances** — snapshot + ad-hoc tasks; PENDING → SUBMITTED → VERIFIED (or returned) and SKIPPED for non-mandatory only, reason logged; `ob_prereq_history` on the hash-chain pattern.
+
+### Client account
+
+- [ ] **B-126** **Client-account panel** — explicit create/reset/disable on OB-05/OB-08; one-time credential mail to the primary SPOC; audited.
 
 ### The screens
 
 - [ ] **B-108** **OB-03 — client list** — filter by status, RAG, owner and sales person.
-- [ ] **B-109** **OB-04 — new client wizard** — four steps, template selection, duplicate-PAN guard inline rather than on submit.
+- [ ] **B-109** **OB-04 — new client wizard** — four steps, multi-product selection (one locked journey per product), duplicate-PAN guard inline, explicit “create client login” checkbox. No financial step — v1.1 removes financial tracking.
 
 ## OB3 — Notifications
 

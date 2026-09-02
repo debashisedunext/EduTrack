@@ -551,7 +551,8 @@ Nothing else in phase 2 starts until the gate and the schema exist. This milesto
 ### The `ob_*` schema
 
 - [ ] **A-101** **Client capture tables** — `ob_clients`, `ob_client_contacts`, `ob_client_applications`, `ob_client_requirements`. PAN column sized for the encrypted form, not the plaintext.
-- [ ] **A-102** **`ob_payments` and `ob_attachments`** — payments is a schedule of rows, not two columns; attachments is polymorphic within the module only.
+- [ ] **A-102** **`ob_attachments`** — polymorphic within the module; carries `uploaded_by_type STAFF·CLIENT` and `kind REFERENCE·SUBMISSION` for the prerequisites flow. *(`ob_payments` dropped — v1.1 removes financial tracking entirely.)*
+- [ ] **A-124** **`ob_products` master** — the catalogue journey templates bind to; `product_id` on `ob_client_applications` and `ob_journey_templates`.
 - [ ] **A-103** **Journey template tables** — `ob_journey_templates`, `ob_journey_template_steps`, `ob_journey_template_step_items`. Versioned; an edit publishes a new version rather than mutating.
 - [ ] **A-104** **Journey instance tables** — `ob_journeys` pinned to `template_id + version`, `ob_journey_steps`, `ob_journey_step_items`.
 - [ ] **A-105** **`ob_step_clock_events`** — pause/resume rows for the waiting-on-client clock. The one permitted mutation in the module is sealing a row (`resumed_at` NULL → timestamp); a trigger rejects the rest.
@@ -559,6 +560,11 @@ Nothing else in phase 2 starts until the gate and the schema exist. This milesto
 - [ ] **A-107** **Sign-off, outbox and escalation tables** — `ob_signoffs`, `ob_notification_outbox`, `ob_escalations`. `ob_signoffs` has the shape that triggers MySQL error 3823; probe it against the container before committing.
 - [ ] **A-108** **`ob_dashboard_summary`** — pre-aggregated. Dashboards never run a live `COUNT(*)`.
 - [ ] **A-109** 🔴 **`user_module_access` and the grants** — `edutrack_app` holds per-table grants and eighteen tables arrive at once. Run `make grants` inside this task, not after it: the failure is `Schema-validation: missing table [x]` at startup, which names a table that plainly exists and cost two debugging sessions in phase 1.
+
+### Client identity — the portal bridge
+
+- [ ] **A-125** **`client_accounts` + CLIENT principal** — identity-layer table (nullable refs to both client masters, CHECK at-least-one), Argon2id, generated username, must-change; JWT `principal_type: CLIENT` with its own refresh-token family.
+- [ ] **A-126** **Portal route trees + `ClientScopeResolver`** — `/api/portal/onboarding/**` and `/api/portal/tickets/**`; CLIENT on staff routes → 404 and vice versa; every portal query pinned to the principal's own client ids.
 
 ### The module gate
 
@@ -587,6 +593,10 @@ Your part is the public surface. It is the module's only unauthenticated route a
 
 - [ ] **A-120** **Public sign-off surface** — hashed single-use token, short TTL, aggressive rate limits, generic errors, no enumeration.
 - [ ] **A-121** **OTP issue and verify** — against the SPOC's registered email or phone, rate-limited per token and per contact.
+
+## OB5 — Client portal
+
+- [ ] **A-127** **`is_client_visible` activation** — the ticketing portal reads apply the dormant comment/attachment flags; mandatory Stream A security review of the whole portal surface.
 
 ## OB5 — Hardening
 

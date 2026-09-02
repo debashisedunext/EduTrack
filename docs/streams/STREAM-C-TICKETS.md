@@ -486,17 +486,23 @@ The heart of the module, and the closest analogue to the work you already did on
 
 ### Instances
 
-- [ ] **C-103** 🔴 **Instantiation** — pin `template_id + version` at creation, resolve default owners to named users, and park unresolved steps on the Manager's unassigned list rather than letting the journey pass them.
+- [ ] **C-103** 🔴 **Instantiation** — one **LOCKED** journey per purchased product, `template_id + version` pinned at creation; owners resolved, clocks dead until the gate opens; unresolved steps parked on the Manager's unassigned list.
 - [ ] **C-104** 🔴 **Step lifecycle** — start, complete, block-with-mandatory-reason, waiting-on-client, resume.
+- [ ] **C-119** **Step dependency graph** — `depends_on_step_id` (earlier step or none); completion re-evaluates the journey and activates every satisfied step, so dependency-free steps run in parallel; manual start of a blocked step is refused naming the blocker.
 - [ ] **C-105** 🔴 **Clock events and working-calendar `due_at`** — pause and resume as **rows**, and recompute `due_at` on resume. The design models this as a status flip; copying that is the mistake. Retrofitting it later invalidates every TAT figure recorded before the retrofit, and it is the mitigation for the module plan's own second-ranked risk.
 - [ ] **C-106** 🔴 **Sub-category answers and the completion gate** — one server-side gate: every mandatory item answered, a False carrying a remark, required documents attached, sign-off accepted where the step demands it. **Client sign-off must route through this same gate** — the design's acceptance path completes the step directly and enforces none of it.
 - [ ] **C-107** **Skip a step** — Manager and Admin only, reason mandatory, history row. Absent from the design; required by the module plan §3 and §4.
 - [ ] **C-108** **Backup owner** — assignment plus leave-aware inheritance against the working calendar. The column is in the schema and the affordance is nowhere in the design.
 
+### The gate
+
+- [ ] **C-118** 🔴 **PrerequisiteGateService** — every mandatory task VERIFIED (non-mandatory VERIFIED or SKIPPED) flips all LOCKED journeys OPEN, activates dependency-free steps, starts clocks, fires kickoff automation. No override — the only valve is skipping non-mandatory tasks.
+
 ### Screens
 
 - [ ] **C-109** 🔴 **The onboarding ribbon** — built fresh in `features/onboarding/`, **tokens only, no import from `components/ribbon/`**. The module plan is explicit that the ribbon is a visual language rather than a shared component; importing it couples two release cycles on day one and is very hard to undo once four screens depend on it. Extraction of shared primitives is a later, signed-off, cross-stream task or it does not happen.
-- [ ] **C-110** **OB-05 — client detail** — the ribbon across the top, step panel, payments, requirements, attachments, sign-off status.
+- [ ] **C-110** **OB-05 — client detail** — prerequisites accordion on top, then one accordion per product journey (strip: % complete, RAG step dots, TAT used/total); expanded = ribbon + step panel. Accordion interactions preserve scroll. No payments card.
+- [ ] **C-120** **Journey TAT roll-up** — total TAT (Σ step TATs) and utilized-so-far on every accordion strip, overrun highlighted; total on OB-07 template cards and the designer header.
 - [ ] **C-111** **OB-06 — step update panel** — the owner's working surface, opened by clicking a segment; read-only for anybody else's step.
 - [ ] **C-112** **Communications timeline** — per-step, plus the **client-level stitched view** the module plan §6 calls what management actually asks for and the design does not draw.
 
@@ -507,6 +513,13 @@ Stream D's in phase 1. It lands here because every input it reads — step state
 - [ ] **C-113** 🔴 **TAT scanner worker job** — `worker/onboarding/`, same infrastructure pattern as the SLA scanner, its own schedule and package. Sweeps active steps, flips state, writes history, enqueues notifications.
 - [ ] **C-114** **RAG computation** — step Green → Amber at the configured threshold → Red on breach or blocked-past-threshold; client roll-up is the worst of its steps. Live-Green is a separate state reachable only through final sign-off.
 - [ ] **C-115** **Escalation matrix** — L1 to the owner at breach, L2 to the Manager after four working hours unacknowledged, L3 to OB Admin after eight. Configurable, with acknowledgement recorded.
+
+## OB5 — Client portal
+
+### Portal screens
+
+- [ ] **C-121** **CP-01..CP-04** — portal login + forced password change, module chooser, onboarding home (interactive prerequisites above read-only journey accordions — no owners, no internal comms), prerequisite task detail with uploads and comments.
+- [ ] **C-122** **CP-05..CP-07** — sign-off list deep-linking the §8 flow, and read-only my-tickets filtered to client-visible content.
 
 ## OB5 — Hardening
 
