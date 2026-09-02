@@ -118,6 +118,8 @@ edunext-edutrack/
 
 `api` depends on `domain`; `worker` depends on `domain`; neither depends on the other. `worker` can be deployed as a separate process or, in small installations, run inside `api` behind a profile flag.
 
+**That profile flag does not exist yet — deploy both jars.** `worker` owns the 5-minute `@Scheduled` pass (A-051) that fills `daily_ticket_stats` and `resource_daily_stats`; the dashboard's Today's Progress and Weekly Progress tabs read only those tables (never live `COUNT(*)`) and stay at zero forever — not just stale — in any environment running the `api` jar without the `worker` jar alongside it. CI's `package` job now uploads both (`edutrack-api-jar`, `edutrack-worker-jar`) as of the fix for exactly this on nonprod; embedding `worker` inside `api` for real would mean moving `worker/stats/DailyStatsRepository` into `domain` first, which is its own cross-stream task — see the ⚠️ notes on A-051 in `STREAM-A-PLATFORM.md`.
+
 ---
 
 ## 3. PostgreSQL → MySQL translation
