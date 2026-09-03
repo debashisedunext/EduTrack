@@ -38,6 +38,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * ApplicationSmokeTest} on purpose. Spring's TestContext framework caches
  * contexts by configuration, so an identical one is reused rather than built
  * again — this test costs no extra startup. Keep them in step.
+ *
+ * <p><b>The match is on the package prefix, not the package.</b> It was an
+ * equality check until B-101, which is one sub-package deep — so the rule this
+ * test states would have been silently switched off for the corpus that
+ * arrived after it, in a test whose whole point is that nothing else was
+ * asserting it. A prefix match costs nothing and cannot be outgrown the same
+ * way.
  */
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=none",
@@ -61,7 +68,7 @@ class FixturesStayOutOfProductionTest {
                     // instantiate, so asking cannot itself create the bean we
                     // are checking for the absence of.
                     Class<?> type = context.getType(name, false);
-                    return type != null && type.getPackageName().equals(FIXTURES_PACKAGE);
+                    return type != null && type.getPackageName().startsWith(FIXTURES_PACKAGE);
                 })
                 .toList();
 
