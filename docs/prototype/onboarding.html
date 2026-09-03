@@ -1088,8 +1088,6 @@ function vDash(){
   const today = items.filter(x=>x.ser===TODAY_SER).length;
   const odItems = items.filter(x=>x.overdue);
   const od = odItems.length, odClients = new Set(odItems.map(x=>x.c.id)).size;
-  const funnel = TPL_STEPS.map((t,i)=>({name:(i+1)+". "+t.name, n: active.filter(c=>currentIdx(c)===i).length}));
-  const maxF = Math.max(1,...funnel.map(f=>f.n));
   const stuck = active.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>x.s.status==="BLOCKED"||x.s.status==="WAITING"));
   const breach = active.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>x.s.status!=="DONE" && x.s.pct>=100));
   const ragCol = (title, chip, list, hint) => `<div class="rag-col">
@@ -1117,14 +1115,7 @@ function vDash(){
       ${ragCol("At risk", "🟠", amber, "No client is close to a TAT limit.")}
       ${ragCol("On track", "🟢", green, "—")}
     </div>
-    <div class="grid" style="grid-template-columns:1fr 1fr">
-      <section class="card" aria-label="Clients at each journey step">
-        <h3>Funnel — clients at each step</h3>
-        <p class="cap" style="margin:2px 0 12px">Active clients only. Click a row to filter the client list.</p>
-        ${funnel.map(f=>`<div class="hbar-row"><span class="hbar-lbl" title="${esc(f.name)}">${esc(f.name)}</span>
-          <span class="hbar-track"><span class="hbar" style="width:${Math.round(f.n/maxF*100)}%" onmouseenter="tipOn(event,'${esc(f.name)}: <b>${f.n}</b> client${f.n===1?"":"s"}')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></span></span>
-          <span class="hbar-val">${f.n}</span></div>`).join("")}
-      </section>
+    <div class="grid" style="grid-template-columns:1fr">
       <section class="card" aria-label="Stuck steps">
         <h3>Where it's stuck</h3>
         <p class="cap" style="margin:2px 0 12px">Blocked or waiting-on-client steps, with the recorded reason.</p>
