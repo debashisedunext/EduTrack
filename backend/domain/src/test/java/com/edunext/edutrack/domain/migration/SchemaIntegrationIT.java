@@ -234,21 +234,35 @@ class SchemaIntegrationIT {
                         // rather than a convention, and a silent drop is exactly
                         // what this assertion exists to notice.
                         "trg_audit_no_update", "trg_audit_no_delete",
-                        // A-106 · the onboarding module's append-only pair. The
-                        // same reasoning the audit_logs line above gives, and
-                        // the reason it belongs here rather than in a test of
-                        // its own: this list is the one place a silently
-                        // dropped trigger is noticed, and a per-module list
-                        // would only notice a drop in the module somebody
-                        // remembered to check.
+                        // A-105 and A-106 · the onboarding module's
+                        // append-only tables. Found and fixed twice,
+                        // independently, in the same afternoon: A-105 and A-106
+                        // added six triggers and updated neither this list nor
+                        // anything else, so develop's own tip went red the
+                        // moment they merged — Divyansh hit it on C-101, which
+                        // touches none of this, and verified it against develop
+                        // HEAD directly before flagging it back to Stream A.
+                        // Both branches then carried the same fix, which is
+                        // what this line is the merge of.
+                        //
+                        // That is the assertion working. Its own argument above
+                        // is that names catch an addition and a deletion
+                        // separately where a count only says the total moved,
+                        // and an addition nobody registered is indistinguishable
+                        // to it from a drop it should shout about. It belongs
+                        // here rather than in a per-module test for the same
+                        // reason: this is the one place a silently dropped
+                        // trigger is noticed, and a per-module list would only
+                        // notice a drop in the module somebody remembered to
+                        // check.
                         "trg_ob_comms_no_update", "trg_ob_comms_no_delete",
                         "trg_ob_history_no_update", "trg_ob_history_no_delete",
-                        // A-105 · the step clock. Not annotated append-only by
-                        // the module plan — A-105 tightened it deliberately and
-                        // said so — which makes it the entry most likely to be
-                        // read as a mistake and "fixed" by deleting it. It is
-                        // the TAT record every breach and every
-                        // waiting-on-client attribution is computed from.
+                        // The clock pair is the one most likely to be read as a
+                        // mistake and removed: the module plan does not annotate
+                        // ob_step_clock_events append-only, A-105 tightened it
+                        // deliberately and said so, and it is the TAT record
+                        // every breach and every waiting-on-client attribution
+                        // is computed from.
                         "trg_ob_clock_no_update", "trg_ob_clock_no_delete");
             }
         }
