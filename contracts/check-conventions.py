@@ -58,6 +58,7 @@ NO_PAGINATION = {
     "/projects/{projectId}/sla-policies": "task types x 4 levels",
     "/clients/{clientId}/contacts":      "a short list per client",
     "/tickets/{ticketId}/attachments":   "capped at 20 per ticket",
+    "/onboarding/products":              "A-118 — the catalogue of what the organisation sells, on the /masters/task-types argument. A handful of rows, read whole by the OB-04 wizard's multi-select and by OB-07's product filter, both of which need the set to render at all. Worth naming the ceiling that is not enforced: nothing caps this server-side, so an organisation selling hundreds of products would grow it — but that is a different company, and the fix would be a real cursor rather than a wider exemption",
     "/notifications/pending":            "a queue drained by acknowledging, not paged; a cursor would outlive the rows it points past",
     "/me/notification-preferences":      "one row per NotificationEvent — 25, and bounded by the enum",
     "/tickets/{ticketId}/status-requests": "open requests on one ticket, and at most one per manager who can ask about it",
