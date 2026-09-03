@@ -103,3 +103,27 @@ C-115 | 3.0 | C-114             | i
 # ── Stream C — OB5 ──────────────────────────────────────────────────────────
 C-116 | 2.0 | C-111             | i
 C-117 | 2.0 | C-115             | i
+
+# v1.1 onboarding replan — per-product journeys, prerequisites gate, client portal
+A-124 | 1 | A-101 | i
+A-125 | 3 | A-110 | i
+A-126 | 3 | A-125 | i
+A-127 | 2 | A-126 | i
+B-124 | 3 | A-101 | i
+B-125 | 3 | B-124 | i
+B-126 | 2 | A-125 | i
+C-118 | 3 | C-103,B-125 | i
+C-119 | 3 | C-104 | i
+C-120 | 1 | C-110 | i
+C-121 | 4 | A-126,B-125 | i
+C-122 | 2 | C-121,A-127 | i
+D-101 | 3 | B-110 | i
+
+# v1.2 — service dependencies, dashboard rework, portal escalations
+A-128 | 1 | A-103 | i
+B-127 | 3 | B-119,C-113 | i
+B-128 | 2 | B-127 | i
+C-123 | 3 | C-118,A-128 | i
+C-125 | 2 | C-110 | i
+C-126 | 2 | C-121,A-128 | i
+D-102 | 1 | B-110 | i

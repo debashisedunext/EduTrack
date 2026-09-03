@@ -1,252 +1,232 @@
 # EduTrack — Client Onboarding Module Plan
 
-**Status: v1.0 draft — for review, not yet committed to the build plan.**
+**Status: v1.1 — revised architecture. Changes from v1.0: per-product journeys (a client has one journey per product bought), a prerequisites layer gating journey start, a client portal login spanning both modules, and — by explicit decision — no financial tracking anywhere in this module.**
 
-A second module on the EduTrack platform: **Client Onboarding**. Same deployment, same database, same auth kernel — **zero domain coupling to ticketing**. This document is the onboarding analogue of `PLAN.md`: it is the authority on what the module is and how it is built. Where it is silent, the conventions in `CLAUDE.md` and `PLAN.md` apply unchanged (feature packaging, timestamped migrations, UTC storage, working-calendar maths, no live `COUNT(*)`, append-only history).
+A second module on the EduTrack platform: **Client Onboarding**. Same deployment, same database, same auth kernel — **zero domain coupling to ticketing** (one sanctioned identity-layer bridge, §2.3). This document is the onboarding analogue of `PLAN.md`: the authority on what the module is and how it is built. Where it is silent, the conventions in `CLAUDE.md` and `PLAN.md` apply unchanged (feature packaging, timestamped migrations, UTC storage, working-calendar maths, no live `COUNT(*)`, append-only history).
+
+The visual reference is `docs/prototype/onboarding.html` — every screen and interaction in this plan is clickable there.
+
+**Terminology (v1.2 renames, by product decision):** the journey-template page is called **Module Service**; a journey's steps are **Services**; a step's checklist (formerly sub-categories) is its **Task List**; the delivery person owning a service is an **Implementor**. **TATs are defined and displayed in working days**, not hours. The underlying model is unchanged — these are the product's words for the same objects.
 
 ---
 
 ## 1. What we are building
 
-When a new client is signed, they are boarded through a defined, step-by-step **onboarding journey**. Every step has a responsible person and a TAT. Management sees, at a glance, where every client is, where the flow is stuck, and which steps have breached. When every mandatory step is complete **and the client has formally signed off**, the client turns **Green — Live**.
+When a client is signed they are boarded through **one journey per product they bought** — ERP has its own journey, Biometric Attendance its own, each instantiated from that product's admin-defined template with its own steps, sub-categories, owners and TATs. Before any journey starts, the client must clear a set of **prerequisites** — their own responsibilities. Management sees every client, every journey, and where things are stuck; the client sees their own progress through a **portal login**. When every journey completes (final sign-offs included), the client turns **Green — Live**.
 
-Core capabilities, from the requirement:
+Core capabilities:
 
-- Full client capture: name, SPOC, onboarding date, applications purchased, email, phone, PAN, address, description, sales person, license type, payment mode, advance/balance/other payment details, requirements, multiple attachments.
-- Admin-defined journey templates: steps, order, TAT, and responsible person per step.
-- **Sub-categories under every step**: admin defines any number of named checklist items under each step (category). On the client page, clicking a step in the ribbon shows its sub-categories, each answered **True / False with a remark**; a step cannot complete while mandatory items are unanswered, and a False answer requires a remark.
-- A **ribbon-style journey view** — the same visual language as the ticketing Workflow Ribbon, a separate component.
-- Per-step communication capture (calls, emails, WhatsApp, meetings, notes).
-- TAT breach → immediate highlight + notification (email **and WhatsApp**), with escalation.
-- Separate roles: everyone can *see* the journey; each user can *update only their own step*.
-- Client sign-off (per-step where configured, and a final go-live sign-off).
-- Management dashboard + multiple reports.
-- Module-gated access: only authorised users can enter the Onboarding module at all.
+- Client capture: name, SPOC(s), onboarding date, products purchased, email, phone, PAN, address, description, sales person, license type, requirements, multiple attachments. **No payment or financial fields — commercials live in the sales/billing system, never here.**
+- **Products master + per-product journey templates**: Admin creates a journey template *for a product* (steps, order, TAT, default owner, sub-categories, sign-off flags); creating a new journey = creating a new template for a product. One active template version per product; instances pin their version.
+- **Multiple journeys per client**: each purchased product instantiates its journey. Client page shows journeys as **accordions** — each strip carries product name, % complete, and every step as a **RAG-patterned dot**; expanding shows the full ribbon and step panel.
+- **Prerequisites**: an Admin-maintained master of client-responsibility tasks (description, date, TAT, comments, multiple attachments, status, **mandatory flag**, admin-attached reference documents), instantiated per client and shown **above the journey accordions**. **Hard gate: every mandatory task must be verified before any journey starts**; non-mandatory tasks can be skipped by an Admin (reason logged) and the journeys start.
+- Per-step sub-categories (True/False + remark) gating step completion; per-step communication capture; TAT breach → highlight + immediate notification (email + WhatsApp) with escalation; client sign-off per flagged step and at go-live.
+- **Client portal login** — one per client, created **as an explicit option** (wizard checkbox at boarding, or the "Create client login" panel on the client page). The client chooses Ticketing (view-only, own tickets) or Onboarding (own journeys read-only, prerequisites interactive, sign-offs) after login.
+- Management dashboard + reports; separate module roles; module-gated access.
 
-### 1.1 Architect's additions — things the requirement implies but does not say
-
-These are recommended into scope; each is cheap now and expensive to retrofit:
+### 1.1 Architect's additions (carried from v1.0, minus financials)
 
 | # | Addition | Why |
 |---|---|---|
-| 1 | **"Waiting on client" clock state** | The single most common cause of false breaches. When a step is blocked on the client (documents pending, sign-off pending), the TAT clock **pauses** and the wait is attributed to the client, not the owner. Without this, every TAT report is disputed within a month. |
-| 2 | **Template snapshot on instantiation** | Admin edits to a journey template must never mutate in-flight clients. Each journey pins the template version it was created from. |
-| 3 | **Amber before Red** | Notify at a configurable % of TAT elapsed (default 75%), not only at breach. A warning you can act on beats an alert you can only apologise for. |
-| 4 | **Backup owner per step** | People take leave mid-journey. Every step assignment carries an optional backup who inherits update rights when the owner is on leave (working-calendar aware). |
-| 5 | **Blocked-with-reason** | Marking a step blocked requires a reason category + note. This is what makes "where is it stuck" answerable, not just "which step is late". |
-| 6 | **Duplicate-client guard** | PAN is unique; creation checks it and warns on near-duplicate names. Two half-onboarded copies of the same client is a mess no report survives. |
-| 7 | **Document checklist per step** | A step can declare required documents; it cannot complete until they are attached. Turns tribal knowledge into configuration. |
-| 8 | **Payment schedule, not just two fields** | Advance/balance as rows in a payment schedule with due dates, received dates, mode, reference, and an outstanding roll-up — plus GST/invoice reference fields. Finance will ask for this in week one. |
-| 9 | **Welcome/kickoff automation** | On journey start, an automated welcome email to the SPOC with the named onboarding contact. First impressions are part of onboarding. |
-| 10 | **Go-live CSAT** | One-question satisfaction survey sent with the final sign-off confirmation. Management asked to *see* the journey; this tells them how it felt. |
-| 11 | **Append-only step history, hash-chained** | Same immutability pattern as `ticket_history`, its own chain. Sign-offs and TAT evidence are exactly the records someone will one day want to have quietly edited. |
-| 12 | **Renewal anchor** | Capture license start/end dates now. The day someone asks for a renewals module, the data already exists. |
+| 1 | **"Waiting on client" clock state** | TAT pauses when a step waits on the client; the wait is attributed to the client. Without it every TAT report is disputed within a month. |
+| 2 | **Template snapshot on instantiation** | Admin edits never mutate in-flight journeys; instances pin template version. Applies to journey templates *and* the prerequisites master. |
+| 3 | **Amber before Red** | Warn at a configurable % of TAT (default 75%) before breach. |
+| 4 | **Backup owner per step** | Leave coverage; working-calendar aware. |
+| 5 | **Blocked-with-reason** | Mandatory reason category + note; powers "where is it stuck". |
+| 6 | **Duplicate-client guard** | PAN unique; near-duplicate name warning. |
+| 7 | **Document checklist per step** | A step can't complete with required documents missing. |
+| 8 | **Welcome/kickoff automation** | Fires at **gate-open** (not client creation): journeys start, SPOC gets the kickoff mail. |
+| 9 | **Go-live CSAT** | One-question survey with the final sign-off confirmation. |
+| 10 | **Append-only, hash-chained histories** | Step history and prerequisite history on the platform's immutability pattern. |
+| 11 | **Renewal anchor** | License start/end captured now; renewals module later finds its data waiting. |
 
-### 1.2 Deliberate non-goals (v1)
+### 1.2 Deliberate non-goals (v1.1)
 
-- **No link to ticketing.** No foreign key between `ob_*` and any ticket table; no shared service; the onboarding client list is **not** the ticketing client master. A one-way "export to ticketing client master on go-live" is a phase-2 decision, off by default.
-- **No persistent client portal login.** Client sign-off is via secure link + OTP (§8). A full client login is phase 2.
-- **No per-client custom journeys drawn freehand.** Journeys always come from a template; admins may add/skip steps on an instance with a logged reason.
+- **No financial tracking.** No payment tables, no amounts, no collection reports — removed entirely by product decision. PAN is retained as *identity* (encrypted, masked, audited), not as a financial field.
+- **No FK between `ob_*` and any ticket table.** The identity-layer bridge (§2.3) is the *only* connection between the modules.
+- **No client-raised tickets.** The portal's ticketing side is **view-only**; raising tickets stays with the support desk (blueprint §16's fuller portal remains a later phase).
+- **No client self-registration, one account per client.** Accounts exist only when staff explicitly create them.
+- **No freehand per-client journeys.** Journeys always come from a product's template; admins may add/skip steps on an instance with a logged reason.
 
 ---
 
-## 2. Module boundary — how two modules share one platform
+## 2. Module boundary
 
-**Shared (platform):** user identity and login, Argon2id/JWT/refresh machinery, rate limiting, the working calendar and holiday master, file storage + AV pipeline, mail transport, design tokens, CI.
+**Shared (platform):** user identity and login machinery, working calendar and holiday master, file storage + AV pipeline, mail transport, design tokens, CI.
 
-**Not shared (domain):** every table (all onboarding tables are `ob_`-prefixed), every feature package, every route, every permission string, every report. The two modules must be separable by `grep ob_` and `grep onboarding` alone.
+**Not shared (domain):** every table (`ob_`-prefixed), feature package, route, permission string, report. Separable by `grep ob_` alone.
+
+### 2.1 Module access — the staff gate
+
+`user_module_access (user_id, module, module_role, granted_by, granted_at)` + a `modules` JWT claim; a **ModuleGuard** before RolesGuard on every `/api/onboarding/**` route; no entitlement → **404**.
+
+### 2.2 Getting to the module
+
+Module Launcher after login for dual-module users (Option A, as prototyped): cards with live summaries, top-bar switcher. The same chooser pattern serves the client principal (§2.3) with client-appropriate cards.
+
+### 2.3 Client identity — the bridge (new in v1.1)
+
+The client login spans both modules, but the two client masters stay disjoint. The resolution is an **identity-layer table owned by the auth kernel (Stream A)** — referenced by neither domain, referencing both:
 
 ```
-backend/
-  domain/ …/db/migration/V20260xxx__ob_*.sql     # own migrations, own tables
-  api/    src/…/feature/onboarding/…             # clients, journeys, steps, signoff, reports
-  worker/ src/…/onboarding/…                     # TAT scanner, escalations, outbox dispatch
-frontend/
-  src/features/onboarding/…                      # routes under /onboarding/*
-  src/components/…                               # shared design system only — NOT the ticket Ribbon
+client_accounts
+  id, username (generated, e.g. CL-XXXXX, unique), password_hash (Argon2id),
+  must_change_password DEFAULT TRUE,
+  ob_client_id NULL → ob_clients.id        (UNIQUE)
+  ticketing_client_id NULL → clients.id    (UNIQUE)
+  status (ACTIVE·LOCKED·DISABLED), failed_attempts, locked_until,
+  last_login_at, password_changed_at, created_by, created_at
+  CHECK (ob_client_id IS NOT NULL OR ticketing_client_id IS NOT NULL)
 ```
 
-**The ribbon is a visual language, not a shared component.** The onboarding ribbon is built fresh in `features/onboarding/`, reusing design tokens and layout idiom. If, later, both owners agree to extract shared primitives into `components/`, that is a deliberate cross-stream task with sign-off — not an import from day one that couples release cycles.
-
-### 2.1 Module access — the gate before everything
-
-A user is entitled to zero, one, or both modules, independently of their role inside each:
-
-- `user_module_access (user_id, module ENUM('TICKETING','ONBOARDING'), module_role, granted_by, granted_at)`
-- JWT gains a claim: `modules: ["TICKETING","ONBOARDING"]` plus module-scoped permissions.
-- A **ModuleGuard** runs before RolesGuard on every `/api/onboarding/**` route. No entitlement → **404** (same no-existence-leak rule as ticket scoping).
-- Admin screen to grant/revoke module access, fully audited.
-
-### 2.2 Getting to the module — two options
-
-**Option A — Module Launcher (recommended).** After login, a user entitled to both modules lands on a launcher: two cards, *Ticketing* and *Client Onboarding*, each with a one-line live summary (open tickets / clients in flight). Single-module users skip the launcher and land directly in their module. A compact module switcher sits in the top bar for dual-access users. *Why recommended:* one login, one session, zero duplicated shell, and the switcher is discoverable.
-
-**Option B — Direct routing by default module.** Every user has a default module and lands straight in it; `/onboarding` and `/tickets` are separate URL trees under the same login, and switching is by URL or a switcher shown only to dual-access users. *Why you might prefer it:* most users will only ever hold one module, and the launcher becomes a screen they see once. Marginally faster to daily work; marginally worse discoverability.
-
-Both options share the same backend gate (§2.1); the choice is purely a frontend/UX decision and can even be changed later. **Decision to lock before OB1.**
+- **Creation is an explicit staff action, never automatic**: a checkbox on the boarding wizard ("Create client portal login now") or the **Client portal access panel** on the client page (OB Admin/Manager). Username auto-generated; a one-time password is emailed to the primary SPOC; must-change on first login; resettable and disableable, all audited.
+- **JWT carries `principal_type: CLIENT`** with a separate refresh-token family. Portal routes live in their own trees — `/api/portal/onboarding/**`, `/api/portal/tickets/**`. A CLIENT principal on any staff route → 404, and vice versa: the fork is at the route tree, not per-endpoint conditionals.
+- **`ClientScopeResolver`** pins every portal query to the principal's own client ids, and on the ticketing side additionally applies `is_client_visible = TRUE` to comments/attachments — activating the blueprint's dormant hooks (`client_contacts.portal_access`, the `is_client_visible` flags) for exactly their intended purpose.
+- **Linking `ob_client ↔ ticketing client` is an explicit, audited admin picker** — never auto-matched by name/PAN, because a false positive shows one company another company's tickets.
 
 ---
 
 ## 3. Roles and responsibility
 
-Onboarding roles are their own set — a person's ticketing role (or absence of one) says nothing about their onboarding role.
-
 | Role | Sees | Can do |
 |---|---|---|
-| **OB Admin** | Everything | Define/version journey templates, steps, TATs; assign responsibilities; grant module access; manage WhatsApp/email templates; edit escalation matrix |
-| **Onboarding Manager** | Every journey | Reassign steps, force-escalate, override/skip a step with logged reason, all dashboards and reports |
-| **Sales** | Clients they created | Create client, capture sale-time details and payments, view journey progress read-only |
-| **Step Owner** (executor) | Full journey of any client that has a step assigned to them — read-only | Update **only their own steps**: start, log communications, attach documents, complete, mark blocked |
-| **Finance** | Payment data across clients | Record/verify payments; the only role (besides Admin/Manager) that sees unmasked payment details |
-| **Viewer** (management) | Everything, read-only | Dashboards and reports only |
+| **OB Admin** | Everything | Products, journey templates (create per product, version, publish), prerequisites master, module access, client accounts, escalation matrix, notification templates |
+| **Onboarding Manager** | Every journey | Reassign, escalate, verify/skip prerequisites, override steps with logged reason, create/reset client logins, dashboards, reports |
+| **Sales** | Clients they created | Board clients, capture sale details, view progress |
+| **Step Owner** | Journeys containing their steps (read) | Update **only their own steps**; verify prerequisite submissions routed to them |
+| **Viewer** | Everything, read-only | Dashboards and reports |
+| **Client (external principal)** | Their own data only | Portal: complete prerequisites (upload/comment/submit), view journey progress, sign off, view own tickets |
 
-Enforcement is server-side, mirroring the ticketing pattern: an **OnboardingScopeResolver** rewrites every query (`Step Owner → journeys containing steps assigned to me`, `Sales → created_by = me`, `Manager/Admin/Viewer → all`), and out-of-scope IDs return **404**. Field-level rule on top: PAN and payment amounts are masked for every role except Finance, Manager, and OB Admin, and every unmasked read of PAN is audit-logged.
+(The v1.0 Finance role is removed with financial tracking.) Enforcement is server-side: `OnboardingScopeResolver` for staff, `ClientScopeResolver` for the client principal; out-of-scope → 404. PAN is masked for everyone except OB Admin/Manager, with unmasked reads audited — and masked even on the client portal.
 
 ---
 
-## 4. Data model (~18 tables, all `ob_`-prefixed)
+## 4. Data model (~24 tables: `ob_`-prefixed + `client_accounts` in the identity layer)
 
 Client and capture:
 
-- `ob_clients` — name, description, onboarding_date, PAN (encrypted at rest, unique), address fields, sales_person_id, license_type, overall_status (`ONBOARDING · LIVE · ON_HOLD · DROPPED`), rag (`GREEN · AMBER · RED`), live_at, created_by.
-- `ob_client_contacts` — SPOCs: name, designation, email, phone, whatsapp_opt_in, is_primary. Multiple per client.
-- `ob_client_applications` — which applications were bought: application, license_type, units, license_start, license_end.
-- `ob_client_requirements` — structured requirement rows + rich text (sanitised per PLAN §3.9).
-- `ob_payments` — schedule rows: kind (`ADVANCE · BALANCE · OTHER`), amount, mode, due_date, received_date, reference, invoice_no, gst_details, notes.
-- `ob_attachments` — polymorphic within the module (client-level or step-level), same upload pipeline (allow-list, MIME sniff, AV, signed URLs).
+- `ob_clients` — name, description, onboarding_date, PAN (encrypted, unique), address, sales_person_id, license_type, overall_status (`ONBOARDING · LIVE · ON_HOLD · DROPPED`), rag, live_at, created_by. **No payment columns.**
+- `ob_client_contacts` — SPOCs: name, designation, email, phone, whatsapp_opt_in, is_primary.
+- `ob_products` — the product catalogue (code, name, is_active) that templates bind to.
+- `ob_client_applications` — purchase facts: product_id, license_type, units, license_start/end.
+- `ob_client_requirements`, `ob_attachments` (polymorphic; `uploaded_by_type STAFF·CLIENT`, `kind REFERENCE·SUBMISSION`).
 
 Journey definition and execution:
 
-- `ob_journey_templates` / `ob_journey_template_steps` — versioned. Step: sequence, name, description, TAT (working hours), default responsible (role or named user), parallel-group, depends_on, is_mandatory, requires_client_signoff, required document types.
-- `ob_journey_template_step_items` — the **sub-categories** under a template step: sequence, label, is_mandatory. Versioned with the template; an admin may add any number under any step.
-- `ob_journeys` — one per client, pinned to `template_id + template_version`.
-- `ob_journey_steps` — instantiated steps: status (`PENDING · IN_PROGRESS · WAITING_ON_CLIENT · BLOCKED · COMPLETED · SKIPPED`), owner_id, backup_owner_id, planned_start, due_at (computed calendar-aware at activation), started_at, completed_at, breach flags, block_reason.
-- `ob_journey_step_items` — instantiated sub-categories per step: value (`TRUE · FALSE · unanswered`), remark, answered_by, answered_at. Only the step owner (or Manager/Admin) may answer; every change writes to `ob_step_history`.
-- `ob_step_clock_events` — pause/resume rows for the waiting-on-client clock; the TAT engine sums working time between events.
-- `ob_step_communications` — **append-only**: type (`NOTE · CALL · EMAIL · WHATSAPP · MEETING`), direction, contact, body, occurred_at, logged_by, attachments. System-sent email/WhatsApp auto-log here with delivery status.
-- `ob_step_history` — **append-only, hash-chained**, same trigger pattern as PLAN §3.5–3.7 with its own chain. Every state change, reassignment, TAT recalculation, override.
+- `ob_journey_templates` — **+ `product_id NOT NULL`, `sequence` (the service order — drives instantiation and display order for every client), and `depends_on_template_id NULL`** (a service may depend on one other module service, cycle-free — the picker excludes anything that transitively depends on it). One *active* version per product; creating a new journey = a new template row for a product. / `ob_journey_template_steps` — **+ `depends_on_step_id NULL`**: each step declares at most one dependency, constrained to an **earlier step in the same template** (cycle-free by construction; enforced in the designer and by a service check). NULL = no dependency — the step activates at journey start and **runs in parallel**. / `ob_journey_template_step_items` (sub-categories) — all versioned.
+- `ob_journeys` — **+ `product_id`, many per client**: `UNIQUE(client_id, product_id)` among non-archived; **+ `gate_status (LOCKED·OPEN)`, gate_opened_at/by**. Journeys instantiate at boarding **LOCKED** (steps visible, owners resolved, clocks dead, scanner ignores) and open when the gate clears.
+- `ob_journey_steps`, `ob_journey_step_items`, `ob_step_clock_events`, `ob_step_communications` (append-only), `ob_step_history` (append-only, hash-chained).
+- Accordion strip data (% + RAG dots) is **derived per client page load** — a bounded query over one client's journeys; dashboards keep reading `ob_dashboard_summary`, which gains a product dimension.
 
-Sign-off, notification, escalation:
+Prerequisites (new):
 
-- `ob_signoffs` — step-level and final: token (hashed), sent_to contact, channel, otp_verified_at, outcome (`ACCEPTED · OBJECTION`), signed_name, ip, user_agent, acceptance PDF attachment id.
-- `ob_notification_outbox` — outbox pattern: channel (`EMAIL · WHATSAPP`), template, payload, status (`QUEUED · SENT · DELIVERED · READ · FAILED`), provider_message_id, retries.
-- `ob_escalations` — breach escalations raised: step, level, notified whom, when, acknowledged_at.
-- `ob_dashboard_summary` — pre-aggregated roll-up refreshed by the worker; dashboards **never** run live `COUNT(*)`.
+- `ob_prereq_template_tasks` — the versioned master: sequence, title, description, tat_hours, **is_mandatory**, is_active. / `ob_prereq_template_task_docs` — admin reference documents shown to the client.
+- `ob_client_prereqs` — per-client header (template_version, status `IN_PROGRESS·CLEARED`, cleared_at).
+- `ob_client_prereq_tasks` — snapshot instances + ad-hoc per-client tasks: title, description, is_mandatory, due_at (calendar-aware), **status `PENDING · SUBMITTED · VERIFIED · SKIPPED`**, submitted_at/via, verified_by/at, skipped_by/at + mandatory skip_reason (only non-mandatory tasks are skippable).
+- `ob_prereq_comments` (append-only; author_type STAFF·CLIENT) and `ob_prereq_history` (hash-chained, same trigger pattern).
+- `ob_client_escalations` — **raised by the client from the portal against a specific service**: step_id, comment (required), raised_by contact, raised_at, resolved_by/at. One open escalation per service; raising notifies the onboarding manager and the service owner **immediately** (email + WhatsApp); resolving acknowledges back to the client. Mirrored into the service's communication timeline as an `ESCALATION` entry.
 
-All migrations timestamp-versioned; none touch protected ticketing tables, so no Stream A review is triggered — but the two new append-only tables adopt Stream A's trigger pattern and should get a courtesy review of the trigger DDL.
+Sign-off, notification, escalation: `ob_signoffs`, `ob_notification_outbox`, `ob_escalations`, `ob_dashboard_summary` — as v1.0.
+
+Identity layer (Stream A, not `ob_`): `client_accounts` (§2.3).
 
 ---
 
 ## 5. The journey engine
 
-1. **Templates.** Admin defines named templates (e.g. per application or license type), each a versioned ordered list of steps with TATs and default owners. Editing publishes a new version; in-flight journeys keep theirs.
-2. **Instantiation.** Creating a client (or explicitly starting onboarding) instantiates the chosen template. Default owners resolve to named users; unresolved steps land on the Manager's "unassigned" list and the journey cannot pass them until assigned.
-3. **Activation and TAT.** A step activates when its dependencies complete (parallel groups activate together). `due_at` = activation time + TAT in **working hours** against the org calendar — weekends, holidays, and the owner's leave excluded, exactly as SLA maths in ticketing (convention, not code, is shared).
-4. **Clock states.** `WAITING_ON_CLIENT` pauses the clock; resume recomputes `due_at`. `BLOCKED` (internal) does **not** pause the clock by default — an internal blockage is still our time — but the Manager may pause with a logged reason.
-5. **Sub-category gate.** A step completes only when every mandatory sub-category is answered: True, or False accompanied by a remark. Answers are edited inline on the client page by the step owner; a False that survives to step completion is visible in reports as a delivered-with-exception flag.
-6. **RAG.** Step: Green on-track → Amber at ≥75% TAT elapsed (configurable) → Red on breach or blocked-past-threshold. Client roll-up: Red if any step Red, else Amber if any Amber, else Green. **Live-Green** is distinct and only reachable via §8.
-7. **The scanner.** A worker job (same infrastructure pattern as the SLA scanner, separate schedule and package) sweeps active steps every few minutes: flips Amber/Red, writes history, enqueues notifications, and raises escalations — L1 owner at breach, L2 manager after *n* working hours unacknowledged, L3 OB Admin after *2n*. Matrix configurable.
+1. **Templates per product.** Admin creates/edits templates bound to a product; editing publishes a new version; in-flight journeys keep theirs. The template designer is also where a *new* journey is born — pick product, name it, define steps.
+2. **Instantiation at boarding, LOCKED.** The wizard's product multi-select creates one journey per product with `gate_status = LOCKED`: fully visible (dots, owners, TATs) but no step activates and no clock runs. Everyone sees the plan from day one with zero false breaches.
+3. **The prerequisite gate.** One service method — *every mandatory task VERIFIED, every non-mandatory task VERIFIED or SKIPPED* — evaluated on every prerequisite transition. When satisfied: all LOCKED journeys flip OPEN, first steps activate, clocks start, kickoff automation fires. Step activation re-asserts gate OPEN (defence in depth). **There is no "open gate anyway" override** — the only valve is skipping non-mandatory tasks. Products bought after gate-open instantiate directly OPEN.
+4. **Prerequisite flow**: client submits (uploads, comments, marks done) → SUBMITTED → staff verify → VERIFIED, or return to PENDING with a comment. Prerequisite TATs are scanned as **client-attributed time** with reminder notifications.
+5. **Service-level dependency (between module services).** A module service may declare it depends on another service (e.g. *Biometric Device Rollout* after the ERP service). Per client, the dependent journey instantiates normally but **stays held — no step activates, no clock runs — until the client's journey from the dependency completes**; completion unlocks it automatically with a notification. If the client never bought the dependency's product, the dependency is vacuous and the journey starts normally. Services with no dependency run in parallel. Service **sequence** is admin-ordered on the Module Service page (↑/↓) and drives the order journeys instantiate and display.
+6. **Step activation follows dependencies, not sequence.** A step activates when its declared dependency completes — or at gate-open if it has none, so **dependency-free steps run in parallel** and a journey can hold several in-progress steps at once. Completing any step re-evaluates the whole journey and activates every step whose dependency is now satisfied. Manual start of a step whose dependency is incomplete is refused, naming the blocking step. The journey completes when **all** steps are DONE (parallel branches must all land, not just the longest chain). TAT/working-hours maths per step is unchanged; the ribbon marks each step `↳ N` (depends on step N) or `∥` (parallel).
+7. **Clock states** — WAITING_ON_CLIENT pauses; internal BLOCKED does not (unchanged).
+8. **Task-list gate** — a service completes only when every sub-category is answered; False requires a remark (unchanged).
+9. **RAG** — per step → per journey → client roll-up = worst across *open* journeys; all-journeys-locked shows "Prerequisites pending". **Live-Green requires every journey complete** (each with its sign-offs).
+10. **Journey TAT roll-up.** Every journey carries a **total TAT** — the sum of its services' TAT **days** from the pinned template version — and a **utilized** figure — working hours consumed so far (completed steps at their recorded consumption, the active step at its running clock, waiting-on-client time excluded per §5.6). Both render on the client page's accordion strip as `used / total` with overrun highlighted red and ≥75% amber; the total alone shows on every template card in OB-07 and in the designer header, so an Admin sees what a journey *costs* while composing it. Utilized is derived from `ob_step_clock_events` at read time for one client — never a stored aggregate that can disagree with its parts.
+11. **The scanner** — sweeps open journeys' steps *and* prerequisite tasks; Amber/Red, escalation L1→L2→L3 (unchanged pattern).
 
 ---
 
 ## 6. Communication capture
 
-Every step carries a communications timeline. Manual entries (call, meeting, note) are logged by the step owner with contact and outcome; system-sent emails and WhatsApp messages log themselves with provider delivery status. Entries are append-only — a wrong entry is corrected by a new entry referencing it, never edited. The client-level view stitches all steps' timelines into one chronological "everything we've said to this client" view, which is what management actually asks for.
-
----
+Per-step append-only timelines; client-level stitched view — unchanged. Prerequisite comment threads (staff + client) join the client-level view.
 
 ## 7. Notifications — email + WhatsApp
 
-- **Transport.** Email rides the existing mail engine. WhatsApp goes through a provider adapter behind an interface — **Meta WhatsApp Cloud API direct, or a BSP (Gupshup/Twilio)** — decision to lock (§12). All sends flow through `ob_notification_outbox` with retry and provider webhooks updating delivery status.
-- **Compliance.** WhatsApp business-initiated messages require pre-approved templates and recorded opt-in per contact (`whatsapp_opt_in` on the contact, with timestamp and source). Template approval takes days-to-weeks: **submit templates in OB1, not OB3.**
-- **Events.** Step assigned/reassigned · step activated · Amber warning · **TAT breach (immediate)** · escalation L2/L3 · step completed · sign-off requested (to client) · sign-off received · client Live · daily digest to Managers (journeys stuck > x days).
-- **Preferences.** Per-user channel preferences; breach and escalation events are mandatory-delivery and cannot be muted.
-
----
+As v1.0 (outbox, provider adapter, template approval early, preferences), plus new events: client login created / password reset · prerequisite submitted (→ verifier) · verified / returned (→ SPOC) · prerequisite TAT reminder (→ SPOC) · **gate opened, journeys started** (→ SPOC + owners) · non-mandatory skip (→ manager digest) · **client escalation raised (→ manager + service owner, immediate, cannot be muted) and resolved (→ SPOC)**.
 
 ## 8. Client sign-off
 
-- Steps flagged `requires_client_signoff`, plus one mandatory **final go-live sign-off**, generate a secure external link sent to the SPOC (email and/or WhatsApp): single-use token, short TTL, OTP verification against the SPOC's registered email/phone, rate-limited, no enumeration.
-- The client sees a read-only summary of what they are accepting (step deliverable, or the full journey for go-live) and either **Accepts** or **Raises an objection** with comments.
-- Acceptance records name, timestamp, IP, user agent and OTP channel, renders an acceptance PDF stored as an attachment, and completes the step. An objection reverts the step to `IN_PROGRESS` with the objection logged — clock resumes on our side.
-- Final sign-off accepted + all mandatory steps complete → client flips to **LIVE, Green**, live_at stamped, welcome-to-support handover note generated, CSAT question sent.
-- v1 is deliberately link + OTP (recorded acceptance), not a legal e-sign. If a statutory signature is ever required, that is the §12 e-sign decision.
+Unchanged mechanism — per flagged step and final go-live, secure link + OTP, recorded acceptance, PDF archived, objection reverts the step. The portal adds a **sign-off list** (pending + past) deep-linking into the same flow; the link+OTP path still works without a portal login and remains the legal record.
 
 ---
 
-## 9. Screens (~13)
+## 9. Screens
+
+Staff (changes from v1.0 in bold):
 
 | # | Screen | Notes |
 |---|---|---|
-| OB-01 | Module launcher / switcher | §2.2, whichever option is locked |
-| OB-02 | Onboarding dashboard | RAG board, funnel (clients per step), stuck list, breach list, TAT compliance tiles — reads `ob_dashboard_summary` |
-| OB-03 | Client list | Filterable by status/RAG/owner/sales person |
-| OB-04 | New client wizard | Capture §4 client data; template selection; duplicate-PAN guard |
-| OB-05 | Client detail | **The ribbon** across the top; step panel; communications timeline; payments; requirements; attachments; sign-off status |
-| OB-06 | Step update panel | Owner's working surface: answer the step's **sub-categories (True/False + remark)**, start, log communication, attach, complete, block, request sign-off — sub-categories appear on click of the step in the ribbon |
-| OB-07 | Journey template designer | Admin: steps, order, parallel groups, TATs, default owners, **sub-categories under each step**, document checklist, sign-off flags; versioning |
-| OB-08 | Responsibility & module access admin | Grant module access, map roles, assign default owners |
-| OB-09 | Sign-off page (public) | External, tokened + OTP; no shell, no navigation |
-| OB-10 | Reports hub | §10 |
-| OB-11 | Escalation & TAT settings | Amber threshold, escalation matrix, scanner cadence |
-| OB-12 | Notification templates | Email + WhatsApp template management and approval status |
-| OB-13 | Onboarding notification centre | Module-scoped in-app notifications |
+| OB-01 | Module launcher / switcher | unchanged |
+| OB-02 | Onboarding dashboard | Cards: **Ongoing Projects · This Week's Deadlines** (all client tasks — services + prerequisites — due Mon–Sun) **· Today's Delivery · Overdue Clients** · Live · At Risk — **Client Escalations** (count of clients with an open portal escalation) — **every card clicks open a right slide-over** (the S-06 pattern) listing the matching clients with product, item, owner, due and status, each row opening the client. Below the board: a **Delayed Projects grid** (client, start date, products bought, module in progress, current stage, responsible, expected completion, delayed-by days) and an **Implementor workload & performance grid** (one row per implementor *including those with zero clients*: clients, on track, not started, delayed, at risk, blocked/waiting, ahead of schedule, and a performance score chip computed from on-time + early completions weighted against delays and blocks). Roll-ups journey-counted with a product dimension. |
+| OB-03 | Client list | shows journey count + worst RAG; "Prerequisites pending" state |
+| OB-04 | New client wizard | **multi-select products → N locked journeys; prerequisites instance created; "Create client portal login now" checkbox. No payment step.** |
+| OB-05 | Client detail | **PAN is not shown in the header** (identity data stays in Client info for authorized roles). Ribbon: a completed service shows **SD/FD (start and finish dates) with an on-time / early / delayed marker** in the meta line — the state label appears once, at the top only. **Animated status emojis** per service: 👍 done on time · 🙌 completed early · 👎 closed delayed (or running breached) · 👏 in progress on time · 😢 blocked/waiting — CSS animations, disabled under `prefers-reduced-motion`. **Prerequisites as an accordion on top** (strip: gate chip + mandatory-progress bar; expands to task rows with verify/return/skip; defaults open until the gate clears, collapsed after) **→ journey accordions (strip: product, % complete, RAG step dots, and TAT `used / total` with overrun highlighting; expanded: ribbon + step panel) → Client portal access panel + client info. No payments card. Accordion UX rule: expanding/collapsing or selecting a step never scrolls the page — scroll position is preserved on all same-page interactions.** |
+| OB-06 | Step update panel | unchanged (journey-scoped) |
+| OB-07 | **Module Service** (journey template designer) — **with a product filter (select a product to see only its services), ↑/↓ card re-sequencing, and a per-service "Service depends on" picker (another service or none/parallel, cross-product allowed, cycles excluded)** | **grouped by product; "+ Create journey template" (name + product) is the way a new journey is defined; every template card shows its total TAT (Σ step TATs) at the top, and the designer header shows the running total while editing; per-step "Depends on" selector (an earlier step, or "none — runs parallel"; reorder/delete re-validates dependencies); one active version per product; versioned publish** |
+| OB-08 | Responsibility & module access admin | + client-account administration (create/reset/disable/link ticketing client) |
+| OB-09 | Sign-off page (public) | unchanged |
+| OB-10 | Reports hub | **payment/collection reports removed** |
+| OB-11 | Escalation & TAT settings | unchanged |
+| OB-12 | Notification templates | + new event templates |
+| OB-13 | Notification centre | unchanged |
+| **OB-14** | **Prerequisites master** | **admin CRUD: title, description, TAT, mandatory flag, reference docs; versioned; snapshot per client** |
 
-The ribbon renders every step with owner avatar, state colour, TAT bar, and pause/breach markers; clicking a step opens OB-06 (own step) or a read-only view (anyone else's). Fully keyboard-navigable with ARIA labels, per the accessibility rule. Design tokens from blueprint §12.1 only; RAG semantics map onto existing success/warning/danger tokens — no new colours.
+Client portal (own minimal shell, `principal_type = CLIENT` only):
 
----
+| # | Screen | Notes |
+|---|---|---|
+| CP-01 | Portal login + forced password change | rate-limited, lockout |
+| CP-02 | Module chooser | Ticketing / Onboarding cards |
+| CP-03 | Onboarding home | interactive prerequisites above **read-only** journey accordions — step status only; no owner names, internal comms, or block reasons. **Each running service carries an Escalate action (comment required)** — one open escalation per service, shown as a red chip until staff resolve it |
+| CP-04 | Prerequisite task detail | description, reference docs, comment thread, uploads, **Submit for verification** |
+| CP-05 | Sign-offs | pending + past, deep-linking to the §8 flow |
+| CP-06/07 | My tickets (list + read-only detail) | own tickets; `is_client_visible` comments/attachments only; **no raise-ticket** |
 
 ## 10. Reports
 
-Onboarding funnel · TAT compliance by step and by owner · stuck/aging (with block reasons and waiting-on-client attribution) · time-to-live trend · breach log · escalation log · sales-person pipeline · payment outstanding (advance vs balance vs received) · sign-off pending · owner workload · communication audit per client · CSAT summary. All exportable (XLSX/CSV) via the existing export infrastructure; all reads from summary tables or bounded queries.
+Journey-counted funnel (per product) · TAT compliance by step/owner · stuck & aging (block reasons + client-attributed waits, **including prerequisite aging**) · time-to-live trend per product · breach & escalation logs · sales pipeline · sign-off pending · owner workload · communication audit · CSAT. **All payment/collection reports removed.** Exports via existing infra; reads from summary tables.
 
----
+## 11. Security notes
 
-## 11. Security notes specific to this module
-
-- PAN encrypted at rest (application-level AES-GCM; key from the secrets vault, never in code), masked in UI and logs, unmasked reads audited.
-- Public sign-off endpoints are the module's only unauthenticated surface: hashed single-use tokens, OTP, aggressive rate limits, generic errors, no ID enumeration.
-- ModuleGuard → RolesGuard → OnboardingScopeResolver on every route; 404 for out-of-scope, per platform rule.
-- Attachments through the existing AV/signed-URL pipeline; WhatsApp webhook endpoint verified by provider signature.
-
----
+- v1.0 items unchanged (PAN encryption + masking + audited reads; public sign-off endpoint hardening; attachment pipeline; ModuleGuard chain).
+- Client principal: separate route trees; separate portal DTO serializers (never staff DTOs with fields hidden client-side); portal rate limits + account lockout + upload caps; the never-visible list (owners, internal comms, escalations, TAT internals, other clients' anything); PAN masked even for the client.
 
 ## 12. Decisions to lock before build
 
-1. **Module entry: Option A (launcher) or B (direct routing)** — recommendation: A.
-2. **WhatsApp provider:** Meta Cloud API direct vs BSP (Gupshup/Twilio) — cost vs onboarding speed vs template-approval tooling.
-3. **PAN encryption & key management** approach.
-4. **Ownership:** distribute across Streams A–D along existing expertise (recommended, see §13) vs a new Stream E.
-5. **Whether go-live sign-off needs statutory e-sign** (Aadhaar eSign/DSC) or recorded acceptance suffices — recommendation: recorded acceptance for v1.
-6. **Phase-2 stance** on one-way export of a Live client into the ticketing client master.
+1. WhatsApp provider (Cloud API vs BSP). 2. PAN encryption & key custody. 3. Stream ownership (recommend: distribute per §13). 4. Statutory e-sign vs recorded acceptance (recommend: recorded, v1). 5. Credential delivery channel (recommend: email one-time password + WhatsApp notify). 6. Per-SPOC logins later (table already supports it; one account per client in v1).
 
----
+## 13. Milestones
 
-## 13. Milestones and suggested ownership
-
-Sequenced to start once the current M-series critical path allows; each milestone is independently shippable behind the module gate.
-
-| Milestone | Contents | Natural owner |
+| Milestone | Contents | Owner |
 |---|---|---|
-| **OB0 — Gate & schema** | `ob_*` migrations, module entitlement + ModuleGuard, JWT claim, OnboardingScopeResolver, append-only triggers, launcher/switcher shell | Stream A |
-| **OB1 — Client capture** | Client wizard, contacts, applications, payments, requirements, attachments, duplicate guard, client list; **submit WhatsApp templates now** | Stream B |
-| **OB2 — Journey engine & ribbon** | Templates + designer, instantiation, step lifecycle, clock states, step update panel, client detail with ribbon, communications timeline | Stream C |
-| **OB3 — TAT, notifications, WhatsApp** | Scanner, RAG, escalation matrix, outbox + provider adapter + webhooks, notification centre, digests | Stream D |
-| **OB4 — Sign-off, dashboard, reports** | Public sign-off flow + PDF, Live-Green flip, CSAT, `ob_dashboard_summary`, dashboard, reports hub | Stream B (reports) + Stream A (public surface review) |
-| **OB5 — Hardening** | Permission-matrix tests for all onboarding roles on every route, mutation-check on append-only guarantees, load pass on scanner, accessibility pass on ribbon | All |
-
-Definition of done, git workflow, batch integration, and verification rules are unchanged from `CLAUDE.md` — onboarding PRs join the same batches.
-
----
+| OB0 — Gate & schema | `ob_*` migrations incl. products/prereqs, **`client_accounts` + portal JWT principal + portal route trees + ClientScopeResolver**, ModuleGuard, launcher | Stream A |
+| OB1 — Client capture & masters | wizard (multi-product, no financials, login checkbox), contacts, requirements, attachments, duplicate guard, **OB-14 prerequisites master + per-client instances**, client-account panel; submit WhatsApp templates now | Stream B |
+| OB2 — Journey engine & accordions | per-product templates (+ create flow), instantiation LOCKED, gate service, step lifecycle, clock states, **accordion client detail + ribbon** | Stream C |
+| OB3 — TAT, notifications, WhatsApp | scanner (steps + prereqs), RAG, escalations, outbox + adapter + webhooks, new events | Stream D |
+| OB4 — Sign-off, dashboard, reports | §8 flow + PDF, Live-on-all-journeys, CSAT, journey-counted summaries, reports | Stream B + A |
+| OB5 — Client portal | CP-01..07, `is_client_visible` activation on ticketing reads, portal DTO layer | Stream C + **mandatory Stream A security review** |
+| OB6 — Hardening | permission-matrix tests all roles incl. CLIENT on every route, **cross-client access + principal-type confusion tests**, mutation-check on both scope resolvers, a11y pass | All |
 
 ## 14. Risks
 
 | Risk | Mitigation |
 |---|---|
-| WhatsApp template approval lead time blocks OB3 | Templates submitted during OB1; email-only degradation path built in |
-| TAT disputes ("that wasn't our time") | Waiting-on-client clock state + per-step clock events from day one |
-| Ribbon component coupling to ticketing | Separate component; extraction only as a signed-off cross-stream task |
-| Template edits corrupting in-flight journeys | Version pinning + snapshot at instantiation |
-| Public sign-off endpoint abuse | Token + OTP + rate limits + short TTL; security review before OB4 ships |
-| PII (PAN) leakage via logs/exports | Encryption at rest, masking by default, audited unmasked reads, export redaction for non-Finance roles |
-| Scope creep toward a client portal | Explicit v1 non-goal; link+OTP only |
+| Client-principal confusion reaching staff routes | separate route trees; principal-type tests in OB6 |
+| Wrong ticketing-client link leaking tickets | explicit audited picker, unlink action, never auto-match |
+| Credential interception | one-time password, must-change, resettable, delivery audited; creation is explicit, never silent |
+| Gate stalls all journeys on a slow client | client-attributed TAT + reminders + non-mandatory skip valve; mandatory list kept short in the master |
+| Template edits corrupting in-flight journeys | version pinning + snapshots (journeys *and* prerequisites) |
+| TAT disputes | waiting-on-client clock + prereq time attributed to client |
+| Portal scope creep (raise tickets, payments visibility) | explicit non-goals; revisit deliberately, not by drift |

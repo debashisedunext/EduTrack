@@ -147,6 +147,55 @@
   .mask{color:var(--text-2);letter-spacing:.12em}
   .chip-x{border:0;background:none;color:inherit;cursor:pointer;font-size:11px;padding:0 0 0 6px;line-height:1}
   .chip-x:hover{color:var(--danger)}
+  /* animated status emojis (respect prefers-reduced-motion via the global rule) */
+  .emo{display:inline-block;font-size:15px;line-height:1}
+  .emo.up{animation:eBounce 1.2s ease-in-out infinite}
+  .emo.hi{animation:ePop 1.4s ease-in-out infinite}
+  .emo.down{animation:eShake 1.6s ease-in-out infinite}
+  .emo.clap{animation:eClap 1s ease-in-out infinite}
+  .emo.sad{animation:eSad 2s ease-in-out infinite}
+  @keyframes eBounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+  @keyframes ePop{0%,100%{transform:scale(1) rotate(0)}50%{transform:scale(1.25) rotate(8deg)}}
+  @keyframes eShake{0%,100%{transform:rotate(0)}25%{transform:rotate(-12deg)}75%{transform:rotate(12deg)}}
+  @keyframes eClap{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
+  @keyframes eSad{0%,100%{transform:translateY(0)}50%{transform:translateY(2px) rotate(-6deg)}}
+  /* dashboard drill slide-over (S-06 pattern) */
+  .dveil{position:fixed;inset:0;background:rgba(17,24,39,.34);z-index:90}
+  .dpanel{position:fixed;top:0;right:0;bottom:0;width:540px;max-width:94vw;background:var(--bg-surface);box-shadow:var(--shadow-lg);z-index:95;display:flex;flex-direction:column;animation:dslide .18s ease-out}
+  @keyframes dslide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+  .dpanel header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center}
+  .dpanel .bd{flex:1;overflow:auto}
+  .drow{display:flex;gap:10px;align-items:center;padding:11px 18px;border-bottom:1px solid var(--bg-subtle);font-size:13px;flex-wrap:wrap}
+  .drow:hover{background:var(--bg-subtle)}
+  button.kpi{text-align:left;cursor:pointer;transition:box-shadow .15s ease-out}
+  button.kpi:hover{box-shadow:var(--shadow-lg)}
+  /* v1.1 — journey accordions */
+  .jacc{border:1px solid var(--border);border-radius:var(--r-card);background:var(--bg-surface);box-shadow:var(--shadow);margin-bottom:12px;overflow:hidden}
+  .jstrip{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px 18px;background:none;border:0;flex-wrap:wrap}
+  .jstrip:hover{background:var(--bg-subtle)}
+  .jstrip .jname{font-weight:650;font-size:14px}
+  .jstrip .jpct{font-weight:700;font-variant-numeric:tabular-nums}
+  .jdots{display:inline-flex;gap:4px;align-items:center}
+  .jdots i{width:10px;height:10px;border-radius:50%;display:block;background:var(--bg-subtle);border:1.5px solid var(--border)}
+  .jdots i.g{background:var(--success);border-color:var(--success)}
+  .jdots i.c{background:var(--primary);border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft)}
+  .jdots i.a{background:var(--warning);border-color:var(--warning)}
+  .jdots i.r{background:var(--danger);border-color:var(--danger)}
+  .jdots i.w{background:#D1D5DB;border-color:#D1D5DB}
+  .jbody{border-top:1px solid var(--border);padding:16px 18px;background:var(--bg-app)}
+  /* prerequisites */
+  .prq{border:1px solid var(--border);border-radius:var(--r-card);background:var(--bg-surface);box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden}
+  .prq-h{width:100%;text-align:left;border:0;padding:12px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg-subtle);cursor:pointer}
+  .prq-h:hover{background:var(--primary-soft)}
+  .prq-body{display:none}
+  .prq.open .prq-body{display:block}
+  .prq-row{display:flex;gap:10px;align-items:flex-start;padding:12px 18px;border-top:1px solid var(--border);flex-wrap:wrap}
+  .prq-row .ttl{font-size:13px;font-weight:600;min-width:200px;flex:1}
+  .gatebar{height:6px;border-radius:3px;background:var(--bg-subtle);overflow:hidden;flex:1;min-width:120px}
+  .gatebar i{display:block;height:100%;background:var(--success)}
+  /* client portal */
+  .ptop{background:var(--bg-surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:12px}
+  .pwrap{max-width:900px;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:18px}
   .empty{padding:28px;text-align:center;color:var(--text-2)}
   .empty .big{font-size:26px;margin-bottom:6px}
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
@@ -170,26 +219,27 @@ const USERS = [
   {id:"u5", name:"Meera Iyer",    email:"finance@edunext.io", role:"FINANCE",    modules:["ONBOARDING"]},
   {id:"u6", name:"Suresh Kumar",  email:"viewer@edunext.io",  role:"VIEWER",     modules:["ONBOARDING"]},
   {id:"u7", name:"Kavya Sharma",  email:"kavya@edunext.io",   role:"STEP_OWNER", modules:["ONBOARDING"]},
+  {id:"u8", name:"Nikhil Joshi",   email:"nikhilj@edunext.io", role:"STEP_OWNER", modules:["ONBOARDING"]},
 ];
 const ROLE_LABEL = {OB_ADMIN:"OB Admin", MANAGER:"Onboarding Manager", STEP_OWNER:"Step Owner", SALES:"Sales", FINANCE:"Finance", VIEWER:"Viewer (Management)"};
 const PASSWORD = "demo123";
 
 const TPL_STEPS = [
-  {name:"Kickoff call",              tat:8,  owner:"u4", signoff:false, docs:[],
+  {name:"Kickoff call", dep:null,              tat:1,  owner:"u4", signoff:false, docs:[],
    subs:["Intro call done & teams mapped","Scope re-confirmed with SPOC","Kickoff MoM shared"]},
-  {name:"Requirements confirmation", tat:16, owner:"u3", signoff:true,  docs:["Signed requirement sheet"],
+  {name:"Requirements confirmation", dep:0, tat:2, owner:"u3", signoff:true,  docs:["Signed requirement sheet"],
    subs:["Requirement sheet filled","Custom fields & reports listed","Gaps flagged to product team"]},
-  {name:"Account & environment setup",tat:24,owner:"u7", signoff:false, docs:[],
+  {name:"Account & environment setup", dep:1,tat:3,owner:"u7", signoff:false, docs:[],
    subs:["Tenant provisioned","Admin accounts created","SSO / custom domain configured"]},
-  {name:"Data migration",            tat:40, owner:"u7", signoff:false, docs:["Migration source file","Validation report"],
+  {name:"Data migration", dep:2,            tat:5, owner:"u7", signoff:false, docs:["Migration source file","Validation report"],
    subs:["Source data received","Validation errors resolved","Dry-run migration verified","Client confirmed sample records"]},
-  {name:"Configuration & branding",  tat:24, owner:"u3", signoff:false, docs:[],
+  {name:"Configuration & branding", dep:2,  tat:3, owner:"u3", signoff:false, docs:[],
    subs:["Logo & colours applied","Notice / report templates set","Roles & permissions configured"]},
-  {name:"Admin & user training",     tat:16, owner:"u3", signoff:false, docs:["Attendance sheet"],
+  {name:"Admin & user training", dep:4,     tat:2, owner:"u3", signoff:false, docs:["Attendance sheet"],
    subs:["Admin training conducted","End-user training conducted","Training material shared"]},
-  {name:"UAT & issue closure",       tat:24, owner:"u7", signoff:true,  docs:[],
+  {name:"UAT & issue closure", dep:5,       tat:3, owner:"u7", signoff:true,  docs:[],
    subs:["UAT scenarios executed","All logged issues closed","UAT report shared"]},
-  {name:"Go-live sign-off",          tat:8,  owner:"u2", signoff:true,  docs:[],
+  {name:"Go-live sign-off", dep:6,          tat:1,  owner:"u2", signoff:true,  docs:[],
    subs:["Go-live checklist reviewed","Support handover completed"]},
 ];
 const cpSteps = arr => arr.map(s=>({...s, docs:[...s.docs], subs:[...s.subs]}));
@@ -199,20 +249,32 @@ let TEMPLATES = [
 ];
 
 // step statuses: DONE | CURRENT | WAITING | BLOCKED | PENDING
-function mkSteps(currentIdx, opts={}){
-  return TPL_STEPS.map((t,i)=>{
-    const st = {name:t.name, tat:t.tat, owner:t.owner, signoff:t.signoff, docsReq:[...t.docs],
+// serial dates: 1 = 01 Jun 2026 … 81 = 20 Aug (TODAY) … working days approximated as calendar days
+function dstr(n){ const L=[["Jun",30],["Jul",31],["Aug",31],["Sep",30],["Oct",31]]; let m=0;
+  while(n>L[m][1]){ n-=L[m][1]; m++; } return String(n).padStart(2,"0")+" "+L[m][0]; }
+const TODAY_SER = 81;
+function mkStepsFrom(TS, currentIdx, opts={}){
+  let cur = opts.start ?? 58;
+  return TS.map((t,i)=>{
+    const st = {name:t.name, tat:t.tat, owner:t.owner, signoff:t.signoff, dep:(t.dep??null), docsReq:[...t.docs],
       subs: t.subs.map((n,k)=>({name:n, val: i<currentIdx?true : (i===currentIdx && k===0 ? true : null), remark:""})),
       docs:[], comms:[], status: i<currentIdx?"DONE": i===currentIdx?"CURRENT":"PENDING",
       pct: i<currentIdx?100: i===currentIdx?(opts.pct??30):0,
-      signoffState:"NONE", due: i===currentIdx?(opts.due||"21 Aug, 15:00"):"", blockReason:"", completedOn: i<currentIdx? "": ""};
-    if(i<currentIdx){ st.completedOn = "earlier"; st.docs=[...t.docs]; }
+      signoffState:"NONE", due: i===currentIdx?(opts.due||"21 Aug, 15:00"):"", blockReason:"",
+      completedOn:"", closed:"", sd:"", fd:""};
+    if(i<currentIdx){
+      st.completedOn = "earlier"; st.docs=[...t.docs];
+      st.closed = i%4===1 ? "early" : (i%5===3 ? "late" : "ontime");
+      const span = Math.max(1, t.tat + (st.closed==="late"?2 : st.closed==="early"?-Math.ceil(t.tat/3):0));
+      st.sd = dstr(cur); st.fd = dstr(cur+span); cur += span+1;
+    } else if(i===currentIdx){ st.sd = dstr(Math.min(cur, TODAY_SER)); }
     if(i===currentIdx && opts.status) st.status = opts.status;
     if(i===currentIdx && opts.block)  st.blockReason = opts.block;
     if(i===currentIdx && opts.signoffState) st.signoffState = opts.signoffState;
     return st;
   });
 }
+const mkSteps = (i,o)=>mkStepsFrom(TPL_STEPS,i,o);
 function comm(when, type, dir, by, text){ return {when, type, dir, by, text}; }
 
 let CLIENTS = [
@@ -225,7 +287,7 @@ let CLIENTS = [
              {kind:"Balance", amount:400000, mode:"Bank transfer", due:"05 Aug 2026", recv:"06 Aug 2026", ref:"INV-2026-0402"}],
    requirements:"Migrate 6 yrs of student records; SSO with Google Workspace; Marathi + English notices.",
    attachments:["PO_GreenValley.pdf","MSA_signed.pdf","Migration_mapping.xlsx"],
-   steps: mkSteps(8), csat:5},
+   steps: mkSteps(8,{start:12}), csat:5},
   {id:"c2", name:"Sunrise EdTech Pvt Ltd", pan:"AASCS8821K", city:"Bengaluru", addr:"77 Residency Rd, Bengaluru 560025",
    desc:"Test-prep startup, 40 counsellors.", sales:"Rohan Gupta", licenseType:"Professional · Annual", payMode:"UPI / NEFT",
    onboardDate:"28 Jul 2026", status:"ONBOARDING", liveAt:"", createdBy:"u4",
@@ -235,7 +297,7 @@ let CLIENTS = [
              {kind:"Balance", amount:150000, mode:"NEFT", due:"15 Sep 2026", recv:"", ref:""}],
    requirements:"Bulk import of 12k leads; WhatsApp counselling follow-ups.",
    attachments:["PO_Sunrise.pdf"],
-   steps: mkSteps(3,{pct:132, due:"18 Aug, 11:00 (missed)"}) },
+   steps: mkSteps(3,{pct:132, due:"18 Aug, 11:00 (missed)", start:58}) },
   {id:"c3", name:"Horizon Academy", pan:"AAHCH3310Q", city:"Hyderabad", addr:"5-9-22 Banjara Hills, Hyderabad 500034",
    desc:"CBSE senior secondary, 2,100 students.", sales:"Anita Rao", licenseType:"Professional · Annual", payMode:"Cheque",
    onboardDate:"03 Aug 2026", status:"ONBOARDING", liveAt:"", createdBy:"u1",
@@ -245,7 +307,7 @@ let CLIENTS = [
              {kind:"Balance", amount:180000, mode:"Cheque", due:"30 Sep 2026", recv:"", ref:""}],
    requirements:"Exam-hall seating plans; report-card templates in Telugu.",
    attachments:["PO_Horizon.pdf","Report_card_samples.zip"],
-   steps: mkSteps(5,{pct:78, due:"Today, 18:30"}) },
+   steps: mkSteps(5,{pct:78, due:"Today, 18:30", start:64}) },
   {id:"c4", name:"Bluebell Public School", pan:"AABCB9022L", city:"Jaipur", addr:"C-31 Malviya Nagar, Jaipur 302017",
    desc:"Single campus, first ERP purchase.", sales:"Rohan Gupta", licenseType:"Starter · Annual", payMode:"Bank transfer",
    onboardDate:"10 Aug 2026", status:"ONBOARDING", liveAt:"", createdBy:"u4",
@@ -255,7 +317,7 @@ let CLIENTS = [
              {kind:"Balance", amount:60000, mode:"Bank transfer", due:"10 Oct 2026", recv:"", ref:""}],
    requirements:"Fee reminders on WhatsApp; Hindi UI labels where available.",
    attachments:["PO_Bluebell.pdf"],
-   steps: mkSteps(1,{status:"WAITING", pct:40, due:"Paused — waiting on client"}) },
+   steps: mkSteps(1,{status:"WAITING", pct:40, due:"Paused — waiting on client", start:71}) },
   {id:"c5", name:"Nalanda Group of Institutions", pan:"AANCN5540D", city:"Patna", addr:"Boring Rd, Patna 800001",
    desc:"3 colleges + 2 schools under one trust.", sales:"Anita Rao", licenseType:"Enterprise · 3-year", payMode:"Bank transfer",
    onboardDate:"12 Aug 2026", status:"ONBOARDING", liveAt:"", createdBy:"u1",
@@ -266,7 +328,7 @@ let CLIENTS = [
              {kind:"Balance", amount:1500000, mode:"Bank transfer", due:"12 Nov 2026", recv:"", ref:""}],
    requirements:"Phased rollout college-by-college; UGC report formats.",
    attachments:["MSA_Nalanda.pdf","Rollout_plan_v2.pptx"],
-   steps: mkSteps(2,{pct:35, due:"22 Aug, 12:00"}) },
+   steps: mkSteps(2,{pct:35, due:"22 Aug, 12:00", start:73}) },
   {id:"c6", name:"Cambridge Heights School", pan:"AACCC7714M", city:"Mumbai", addr:"Linking Rd, Bandra W, Mumbai 400050",
    desc:"IB curriculum, high-touch onboarding.", sales:"Rohan Gupta", licenseType:"Professional · Annual", payMode:"Bank transfer",
    onboardDate:"20 Jul 2026", status:"ONBOARDING", liveAt:"", createdBy:"u4",
@@ -276,7 +338,7 @@ let CLIENTS = [
              {kind:"Balance", amount:250000, mode:"Bank transfer", due:"20 Sep 2026", recv:"", ref:""}],
    requirements:"IB grade descriptors; UAT with 8 teachers before go-live.",
    attachments:["PO_CambridgeHeights.pdf","UAT_checklist.xlsx"],
-   steps: mkSteps(6,{pct:55, due:"22 Aug, 17:00", signoffState:"REQUESTED"}) },
+   steps: mkSteps(6,{pct:55, due:"22 Aug, 17:00", signoffState:"REQUESTED", start:50}) },
   {id:"c7", name:"Little Scholars Preschool", pan:"AALCL2201B", city:"Kochi", addr:"MG Rd, Kochi 682016",
    desc:"Preschool chain, 6 centres.", sales:"Rohan Gupta", licenseType:"Starter · Annual", payMode:"UPI",
    onboardDate:"19 Aug 2026", status:"ONBOARDING", liveAt:"", createdBy:"u4",
@@ -286,7 +348,7 @@ let CLIENTS = [
              {kind:"Balance", amount:45000, mode:"UPI", due:"19 Oct 2026", recv:"", ref:""}],
    requirements:"Photo-sharing consent workflow for parents.",
    attachments:[],
-   steps: mkSteps(0,{pct:20, due:"Today, 17:00"}) },
+   steps: mkSteps(0,{pct:20, due:"Today, 17:00", start:80}) },
   {id:"c8", name:"Trinity College of Commerce", pan:"AATCT6635H", city:"Chennai", addr:"Anna Salai, Chennai 600002",
    desc:"UG college, 4,000 students.", sales:"Anita Rao", licenseType:"Professional · Annual", payMode:"Bank transfer",
    onboardDate:"25 Jul 2026", status:"ONBOARDING", liveAt:"", createdBy:"u1",
@@ -296,7 +358,7 @@ let CLIENTS = [
              {kind:"Balance", amount:200000, mode:"Bank transfer", due:"25 Sep 2026", recv:"", ref:""}],
    requirements:"Semester exam schedules; college branding on portal.",
    attachments:["PO_Trinity.pdf","Brand_guidelines.pdf"],
-   steps: mkSteps(4,{status:"BLOCKED", pct:90, block:"Branding assets pending from client's design vendor", due:"21 Aug, 10:00"}) },
+   steps: mkSteps(4,{status:"BLOCKED", pct:90, block:"Branding assets pending from client's design vendor", due:"21 Aug, 10:00", start:55}) },
 ];
 // seed a few communications
 CLIENTS[1].steps[3].comms = [
@@ -320,7 +382,72 @@ CLIENTS[7].steps[4].comms = [
   comm("14 Aug, 15:10","EMAIL","IN","George Thomas","Design vendor is travelling; logo files expected by 22 Aug."),
   comm("14 Aug, 15:20","NOTE","INT","Priya Nair","Blocked — cannot theme the portal without final brand assets.")];
 
+/* ===== v1.1: products, per-product journeys, prerequisites, client accounts ===== */
+const PRODUCTS = [
+  {id:"p1", name:"EduTrack ERP", icon:"🏫"},
+  {id:"p2", name:"Biometric Attendance", icon:"🖐️"},
+  {id:"p3", name:"Parent Portal", icon:"👪"},
+  {id:"p4", name:"Exam Module", icon:"📝"},
+];
+const prodById = id => PRODUCTS.find(p=>p.id===id) || {name:"?",icon:"❓"};
+const BIO_STEPS = [
+  {name:"Kickoff & site survey", dep:null,        tat:1,  owner:"u4", signoff:false, docs:[], subs:["Sites listed & device counts confirmed","Network readiness checked"]},
+  {name:"Device dispatch & installation", dep:0,tat:5,owner:"u7", signoff:false, docs:["Delivery challan"], subs:["Devices dispatched","Devices mounted & powered","Connectivity verified"]},
+  {name:"Device configuration & ERP sync", dep:1,tat:3,owner:"u7",signoff:false, docs:[], subs:["Devices registered in ERP","Sync schedule configured"]},
+  {name:"User enrollment", dep:2,              tat:3, owner:"u3", signoff:false, docs:["Enrollment completion sheet"], subs:["Staff enrolled","Students enrolled","Exceptions resolved"]},
+  {name:"Go-live sign-off", dep:3,             tat:1,  owner:"u2", signoff:true,  docs:[], subs:["Attendance flowing to ERP","Support handover completed"]},
+];
+TEMPLATES[0].product="p1"; TEMPLATES[1].product="p1";
+TEMPLATES.push({id:"t3", name:"Biometric Device Rollout", version:2, product:"p2", steps:cpSteps(BIO_STEPS), active:true, dep:"t1"});
+TEMPLATES.forEach(t=>{ if(t.dep===undefined) t.dep=null; });
+
+// wrap every client's flat steps into journeys[0] (ERP); c.steps stays aliased to journeys[0].steps
+CLIENTS.forEach(c=>{ c.journeys=[{prod:"p1", tplId:"t1", tpl:"Standard SaaS Onboarding", ver:3, gate:"OPEN", steps:c.steps}]; });
+// second journeys for selected clients
+CLIENTS[0].journeys.push({prod:"p2", tplId:"t3", tpl:"Biometric Device Rollout", ver:2, gate:"OPEN", steps:mkStepsFrom(BIO_STEPS,5,{start:40})});           // GreenValley — both complete, LIVE
+function heldJourney(tplId, start){ const t=TEMPLATES.find(x=>x.id===tplId);
+  const st=mkStepsFrom(t.steps,0,{start}); Object.assign(st[0],{status:"PENDING",pct:0,due:""});
+  return {prod:t.product, tplId, tpl:t.name, ver:t.version, gate:"OPEN", steps:st}; }
+CLIENTS[4].journeys.push(heldJourney("t3",74)); // Nalanda — Biometric waits for the ERP service to complete
+CLIENTS[2].journeys.push(heldJourney("t3",65)); // Horizon — same
+// parallel-dependency demo: on Sunrise, "Configuration & branding" depends only on step 3
+// (Account setup, done) — so it runs alongside the delayed Data migration.
+Object.assign(CLIENTS[1].steps[4], {status:"CURRENT", pct:20, due:"22 Aug, 17:00"});
+
+// prerequisites master (OB-14) + per-client instances
+let PREREQ_MASTER = [
+  {id:"q1", title:"Share final student & staff master data", tat:6, mand:true,  refDoc:"Master_data_template.xlsx", desc:"Fill the shared template exactly — this feeds data migration."},
+  {id:"q2", title:"Nominate SPOC & escalation contact",      tat:2, mand:true,  refDoc:"", desc:"One primary and one backup contact, with email and WhatsApp."},
+  {id:"q3", title:"Confirm branding assets (logo, colours)", tat:3, mand:true,  refDoc:"Brand_asset_checklist.pdf", desc:"Vector logo plus colour codes."},
+  {id:"q4", title:"Whitelist EduTrack mail & WhatsApp IDs",  tat:1,  mand:false, refDoc:"IT_whitelisting_note.pdf", desc:"So OTPs and alerts never land in spam."},
+  {id:"q5", title:"Advance payment confirmation",            tat:3, mand:true,  refDoc:"", desc:"Share the UTR / reference of the advance payment."},
+];
+CLIENTS.forEach(c=>{ c.prereqs = PREREQ_MASTER.map(m=>({...m, due:"18 Aug 2026", status:"VERIFIED", docs:[], comments:[], skipReason:""})); });
+// Bluebell: one non-mandatory task skipped (the valve)
+Object.assign(CLIENTS[3].prereqs[3], {status:"SKIPPED", skipReason:"Client IT policy blocks whitelisting; monitored via delivery reports."});
+// Little Scholars: prerequisites in flight → gate LOCKED, journey not started
+(function(){
+  const c = CLIENTS[6];
+  Object.assign(c.prereqs[0], {status:"SUBMITTED", docs:["Student_master_v1.xlsx"],
+    comments:[{by:"Divya Menon (Client)", when:"19 Aug", text:"Uploaded first cut — two centres still pending."}]});
+  c.prereqs[2].status="PENDING"; c.prereqs[3].status="PENDING"; c.prereqs[4].status="PENDING";
+  const s0=c.journeys[0].steps[0]; s0.status="PENDING"; s0.pct=0; s0.due="";
+  c.journeys[0].gate="LOCKED";
+})();
+
+// one login per client — generated with the client (platform identity, not a staff user)
+const CLIENT_ACCOUNTS = [
+  {username:"CL-30412", clientId:"c1"},
+  {username:"CL-30655", clientId:"c2"},
+  {username:"CL-30977", clientId:"c7"},
+];
+
+// seed one client escalation (raised from the portal by Sunrise EdTech's SPOC)
+CLIENTS[1].steps[3].clientEsc = {when:"19 Aug, 17:40", by:"Arjun Shetty", text:"Migration delay is holding our launch date — please expedite."};
+CLIENTS[1].steps[3].comms.push(comm("19 Aug, 17:40","ESCALATION","IN","Arjun Shetty (Client)","Migration delay is holding our launch date — please expedite."));
+
 let NOTIFS = [
+  {id:0, when:"19 Aug, 17:40", icon:"🚨", text:"CLIENT ESCALATION — Sunrise EdTech escalated “Data migration”: migration delay is holding their launch date.", unread:true, client:"c2"},
   {id:1, when:"19 Aug, 16:05", icon:"⛔", text:"TAT breached — Data migration for Sunrise EdTech (owner: Kavya Sharma). Escalated to L2.", unread:true, client:"c2"},
   {id:2, when:"19 Aug, 11:00", icon:"✍️", text:"Sign-off requested from Cambridge Heights (UAT & issue closure).", unread:true, client:"c6"},
   {id:3, when:"19 Aug, 09:15", icon:"🟠", text:"Amber warning — Admin & user training for Horizon Academy is at 78% of TAT.", unread:true, client:"c3"},
@@ -341,7 +468,8 @@ let SETTINGS = {amber:75, cadence:"Every 5 minutes",
 
 /* ============================== STATE ============================== */
 let S = {user:null, view:"login", params:{}, loginErr:"", notifOpen:false,
-  filters:{q:"", rag:"ALL", status:"ALL"}, reportTab:"funnel", wizard:null, signoff:null, tplEdit:null};
+  filters:{q:"", rag:"ALL", status:"ALL"}, reportTab:"funnel", wizard:null, signoff:null, tplEdit:null,
+  prqOpen:{}, drill:null, escOpen:null, msProd:"ALL"};  // per-client prerequisites-accordion state; default: open until gate clears
 
 /* ============================== HELPERS ============================== */
 const $ = id => document.getElementById(id);
@@ -362,7 +490,9 @@ function stepRag(s){
 }
 function clientRag(c){
   if(c.status==="LIVE") return "LIVE";
-  const rags = c.steps.map(stepRag);
+  const open = c.journeys.filter(j=>j.gate!=="LOCKED");
+  if(!open.length) return "GATE";
+  const rags = open.flatMap(j=>j.steps).map(stepRag);
   if(rags.includes("RED")) return "RED";
   if(rags.includes("AMBER")) return "AMBER";
   return "GREEN";
@@ -373,15 +503,62 @@ const RAG_CHIP = {
   AMBER:'<span class="chip chip-amber">⚠ At risk</span>',
   RED:'<span class="chip chip-red">⚠ Breached / blocked</span>',
   PAUSED:'<span class="chip chip-grey">⏸ Waiting on client</span>',
+  GATE:'<span class="chip chip-grey">🔒 Prerequisites pending</span>',
 };
+const gateOk = c => c.prereqs.every(t=> t.status==="VERIFIED" || (!t.mand && t.status==="SKIPPED"));
+const tplOf = j => TEMPLATES.find(x=>x.id===j.tplId);
+function jDepBlocked(c, j){
+  const t=tplOf(j); if(!t||!t.dep) return null;
+  const depT=TEMPLATES.find(x=>x.id===t.dep); if(!depT) return null;
+  const depJ=c.journeys.find(x=>x.tplId===t.dep);
+  if(!depJ) return null;                                    // client never bought it — vacuous
+  return depJ.steps.every(st=>st.status==="DONE") ? null : depT.name;
+}
+function msDepChain(id){ const out=[]; let t=TEMPLATES.find(x=>x.id===id);
+  let guard=0; while(t&&t.dep&&guard++<20){ out.push(t.dep); t=TEMPLATES.find(x=>x.id===t.dep); } return out; }
+const jPct = j => Math.round(j.steps.filter(s=>s.status==="DONE").length / j.steps.length * 100);
+const jTat = j => j.steps.reduce((a,s)=>a+s.tat, 0);
+const jTatUsed = j => j.gate==="LOCKED" ? 0 : Math.round(j.steps.reduce((a,s)=>a + (s.status==="DONE" ? s.tat : s.tat*Math.min(s.pct,150)/100), 0));
+function stEmoji(st){
+  let e="",c="",t="";
+  if(st.status==="DONE"){
+    if(st.closed==="early"){e="🙌";c="hi";t="Completed before time";}
+    else if(st.closed==="late"){e="👎";c="down";t="Closed delayed";}
+    else {e="👍";c="up";t="Done on time";}
+  } else if(st.status==="BLOCKED"||st.status==="WAITING"){ e="😢";c="sad";t="Blocked / waiting"; }
+  else if(st.status==="CURRENT"){ if(st.pct>=100){e="👎";c="down";t="Running delayed";} else {e="👏";c="clap";t="On time";} }
+  return e?`<span class="emo ${c}" title="${t}" aria-label="${t}">${e}</span>`:"";
+}
+function jTatChip(j){
+  const tot=jTat(j), used=jTatUsed(j);
+  const cls = used>tot ? "chip-red" : (used/tot>=0.75 && !j.steps.every(s=>s.status==="DONE")) ? "chip-amber" : "chip-grey";
+  return `<span class="chip ${cls}" title="Working hours consumed vs the journey's total TAT">⏱ ${used}d / ${tot}d TAT${used>tot?" · overrun":""}</span>`;
+}
+function jDots(j){
+  return '<span class="jdots" aria-hidden="true">'+j.steps.map(s=>{
+    if(j.gate==="LOCKED") return `<i title="${esc(s.name)} — locked"></i>`;
+    const r=stepRag(s);
+    const cls = s.status==="DONE"?"g": r==="RED"?"r": r==="AMBER"?"a": s.status==="CURRENT"?"c": s.status==="WAITING"?"w":"";
+    return `<i class="${cls}" title="${esc(s.name)}"></i>`;
+  }).join("")+'</span>';
+}
 function toast(msg, kind="ok"){
   const t = document.createElement("div"); t.className = "toast "+kind; t.textContent = msg;
   $("toasts").appendChild(t); setTimeout(()=>t.remove(), 4200);
 }
-function go(view, params={}){ S.view=view; S.params=params; S.notifOpen=false; render(); window.scrollTo(0,0); }
-function canEditStep(c, i){
-  const s = c.steps[i];
-  return S.user && (S.user.id===s.owner || ["OB_ADMIN","MANAGER"].includes(S.user.role));
+function go(view, params={}){
+  // Accordion feel: navigating within the same page (toggling a journey, selecting
+  // a step) must not throw the reader back to the top — preserve scroll there,
+  // reset only on genuine page changes.
+  const stay = view===S.view && (view==="client" || view==="cphome") && (!S.params.id || !params.id || S.params.id===params.id);
+  const y = window.scrollY;
+  S.view=view; S.params=params; S.notifOpen=false; render();
+  if(stay) requestAnimationFrame(()=>window.scrollTo(0,y));
+  else window.scrollTo(0,0);
+}
+function canEditStep(c, ji, si){
+  const s = c.journeys[ji].steps[si];
+  return S.user && S.user.role!=="CLIENT" && (S.user.id===s.owner || ["OB_ADMIN","MANAGER"].includes(S.user.role));
 }
 function pushNotif(icon, text, clientId){
   NOTIFS.unshift({id:Date.now(), when:"Today", icon, text, unread:true, client:clientId});
@@ -396,6 +573,14 @@ const A = {};
 A.fill = (email)=>{ $("f-email").value=email; $("f-pass").value=PASSWORD; $("f-email").focus(); };
 A.login = ()=>{
   const em = $("f-email").value.trim().toLowerCase(), pw = $("f-pass").value;
+  const acct = CLIENT_ACCOUNTS.find(a=>a.username.toLowerCase()===em);
+  if(acct && pw===PASSWORD){
+    const c = CLIENTS.find(x=>x.id===acct.clientId);
+    S.user = {id:acct.username, name:c.name, role:"CLIENT", clientId:c.id, modules:["TICKETING","ONBOARDING"]};
+    S.loginErr=""; go("cpchooser");
+    toast("Welcome, "+c.name+" — client portal (scoped to your data only).");
+    return;
+  }
   const u = USERS.find(x=>x.email===em);
   if(!u || pw!==PASSWORD){ S.loginErr = "Invalid email or password. Use a demo account below with password demo123."; render(); return; }
   S.user = u; S.loginErr = "";
@@ -405,6 +590,7 @@ A.login = ()=>{
 A.logout = ()=>{ S.user=null; go("login"); };
 A.enterModule = m=>{
   if(!S.user.modules.includes(m)){ toast("You are not entitled to this module.", "bad"); return; }
+  if(S.user.role==="CLIENT"){ go(m==="ONBOARDING" ? "cphome" : "cptickets"); return; }
   go(m==="ONBOARDING" ? "dash" : "ticketing");
 };
 A.nav = v => go(v);
@@ -418,9 +604,9 @@ A.exportStub = what=>toast(what+" export queued — XLSX download is stubbed in 
 /* ---- wizard ---- */
 A.newClient = ()=>{
   S.wizard = {step:1, data:{name:"", pan:"", city:"", addr:"", desc:"", sales:S.user.name, licenseType:"Professional · Annual",
-    payMode:"Bank transfer", onboardDate:TODAY, spocs:[{name:"",email:"",phone:"",primary:true}],
-    apps:[{name:"EduTrack Core", lic:"Professional", units:25}], adv:"", bal:"", advDue:TODAY, balDue:"20 Oct 2026",
-    requirements:"", attachments:[], template:"t1"}, err:""};
+    onboardDate:TODAY, spocs:[{name:"",email:"",phone:"",primary:true}],
+    apps:[{name:"EduTrack Core", lic:"Professional", units:25}],
+    requirements:"", attachments:[], products:["p1"], mkLogin:true}, err:""};
   go("wizard");
 };
 function wzCollect(){
@@ -428,9 +614,10 @@ function wzCollect(){
   if(st===1){ ["name","pan","city","addr","desc","sales"].forEach(k=>{ const el=$("wz-"+k); if(el) d[k]=el.value; });
     d.licenseType=$("wz-lic").value; d.onboardDate=$("wz-date").value; }
   if(st===2){ d.spocs = d.spocs.map((s,i)=>({name:$("sp-n"+i).value, email:$("sp-e"+i).value, phone:$("sp-p"+i).value, primary:i===0})); }
-  if(st===3){ d.payMode=$("wz-paymode").value; d.adv=$("wz-adv").value; d.bal=$("wz-bal").value; d.advDue=$("wz-advdue").value; d.balDue=$("wz-baldue").value;
-    d.apps = d.apps.map((a,i)=>({name:$("ap-n"+i).value, lic:$("ap-l"+i).value, units:+$("ap-u"+i).value||1})); }
-  if(st===4){ d.requirements=$("wz-req").value; d.template=$("wz-tpl").value; }
+  if(st===3){ d.apps = d.apps.map((a,i)=>({name:$("ap-n"+i).value, lic:$("ap-l"+i).value, units:+$("ap-u"+i).value||1})); }
+  if(st===4){ d.requirements=$("wz-req").value;
+    d.products = PRODUCTS.filter(p=>{ const el=$("wzp-"+p.id); return el && el.checked; }).map(p=>p.id);
+    const ml=$("wz-mklogin"); d.mkLogin = ml ? ml.checked : true; }
 }
 A.wzNext = ()=>{
   wzCollect();
@@ -442,7 +629,6 @@ A.wzNext = ()=>{
     if(CLIENTS.some(c=>c.pan===d.pan)){ S.wizard.err="Duplicate PAN — "+CLIENTS.find(c=>c.pan===d.pan).name+" already exists with this PAN."; return render(); }
   }
   if(st===2 && !(d.spocs[0].name.trim() && d.spocs[0].email.trim())){ S.wizard.err="At least one SPOC with name and email is required."; return render(); }
-  if(st===3 && (!d.adv || isNaN(+d.adv))){ S.wizard.err="Advance amount is required (numbers only)."; return render(); }
   S.wizard.err=""; S.wizard.step++; render();
 };
 A.wzBack = ()=>{ wzCollect(); S.wizard.err=""; S.wizard.step--; render(); };
@@ -453,91 +639,131 @@ A.wzFinish = ()=>{
   wzCollect();
   const d=S.wizard.data;
   if(!d.requirements.trim()){ S.wizard.err="Capture at least one line of client requirements."; return render(); }
-  const tpl = TEMPLATES.find(t=>t.id===d.template);
+  if(!d.products.length){ S.wizard.err="Select at least one product — each product gets its own journey."; return render(); }
   const id = "c"+(CLIENTS.length+1)+"_"+Math.floor(1000+CLIENTS.length*7);
-  const steps = tpl.steps.map((t,i)=>({name:t.name, tat:t.tat, owner:t.owner, signoff:t.signoff, docsReq:[...t.docs],
-    subs:t.subs.map(n=>({name:n, val:null, remark:""})),
-    docs:[], comms:[], status:i===0?"CURRENT":"PENDING", pct:i===0?5:0, signoffState:"NONE",
-    due:i===0?"21 Aug, 12:00":"", blockReason:"", completedOn:""}));
+  const journeys = TEMPLATES.filter(t=>t.active && d.products.includes(t.product)).map(tpl=>{
+    return {prod:tpl.product, tplId:tpl.id, tpl:tpl.name, ver:tpl.version, gate:"LOCKED",
+      steps: tpl.steps.map((t,i)=>({name:t.name, tat:t.tat, owner:t.owner, signoff:t.signoff, dep:(t.dep??null), docsReq:[...t.docs],
+        subs:t.subs.map(n=>({name:n, val:null, remark:""})),
+        docs:[], comms:[], status:"PENDING", pct:0, signoffState:"NONE", due:"", blockReason:"", completedOn:""}))};
+  });
   CLIENTS.unshift({id, name:d.name, pan:d.pan, city:d.city, addr:d.addr, desc:d.desc, sales:d.sales,
-    licenseType:d.licenseType, payMode:d.payMode, onboardDate:d.onboardDate||TODAY, status:"ONBOARDING", liveAt:"", createdBy:S.user.id,
+    licenseType:d.licenseType, onboardDate:d.onboardDate||TODAY, status:"ONBOARDING", liveAt:"", createdBy:S.user.id,
     spocs:d.spocs.filter(s=>s.name.trim()), apps:d.apps,
-    payments:[{kind:"Advance", amount:+d.adv, mode:d.payMode, due:d.advDue, recv:"", ref:""},
-              ...(d.bal? [{kind:"Balance", amount:+d.bal, mode:d.payMode, due:d.balDue, recv:"", ref:""}]:[])],
-    requirements:d.requirements, attachments:[...d.attachments], steps});
-  pushNotif("🆕", d.name+" boarded — journey “"+tpl.name+" v"+tpl.version+"” started. Kickoff call assigned to "+uById(steps[0].owner).name+".", id);
-  toast(d.name+" created — journey instantiated from "+tpl.name+" v"+tpl.version+".");
+    requirements:d.requirements, attachments:[...d.attachments],
+    journeys, steps: journeys[0].steps,
+    prereqs: PREREQ_MASTER.map(m=>({...m, due:"Within "+m.tat+" working day(s)", status:"PENDING", docs:[], comments:[], skipReason:""}))});
+  pushNotif("🆕", d.name+" boarded with "+journeys.length+" journey"+(journeys.length>1?"s":"")+" (locked) — prerequisites sent to the client.", id);
+  if(d.mkLogin) A.acctCreate(id, true);
+  toast(d.name+" created — "+journeys.length+" journey(s) instantiated LOCKED"+(d.mkLogin?"; client login issued":"")+".");
   S.wizard=null; go("client",{id});
 };
+/* ---- client account (explicit option — wizard checkbox or client-detail panel) ---- */
+A.acctCreate = (cid, silent)=>{
+  if(CLIENT_ACCOUNTS.some(a=>a.clientId===cid)){ toast("This client already has a login.","bad"); return; }
+  const c=CLIENTS.find(x=>x.id===cid);
+  const username="CL-"+(31000+CLIENTS.length*37+CLIENT_ACCOUNTS.length*11);
+  CLIENT_ACCOUNTS.push({username, clientId:cid});
+  pushNotif("🔑","Client login "+username+" created for "+c.name+" — one-time password emailed to "+(c.spocs[0]?c.spocs[0].name:"the SPOC")+" (must change on first login).", cid);
+  if(!silent){ toast("Login "+username+" created — one-time password emailed to the primary SPOC (demo password: demo123)."); render(); }
+};
+A.acctReset = cid=>{ const a=CLIENT_ACCOUNTS.find(x=>x.clientId===cid);
+  toast("Password reset for "+a.username+" — new one-time password emailed to the primary SPOC (audited)."); };
 
-/* ---- step actions ---- */
-function activateNext(c){
-  const i = c.steps.findIndex(s=>s.status!=="DONE");
-  if(i===-1){
-    c.status="LIVE"; c.liveAt=TODAY;
-    pushNotif("🎉", c.name+" is fully onboarded and LIVE. CSAT survey sent to SPOC.", c.id);
-    toast(c.name+" is LIVE — all steps complete and signed off. 🎉");
-  } else {
-    c.steps[i].status="CURRENT"; c.steps[i].pct=5; c.steps[i].due="Within "+c.steps[i].tat+" working hrs";
-    pushNotif("▶️", "“"+c.steps[i].name+"” activated for "+c.name+" — assigned to "+uById(c.steps[i].owner).name+". Email + WhatsApp sent.", c.id);
-  }
+/* ---- step actions (journey-aware: cid, ji = journey index, si = step index) ---- */
+const jStep = (cid,ji,si)=>{ const c=CLIENTS.find(x=>x.id===cid); return {c, j:c.journeys[ji], s:c.journeys[ji].steps[si]}; };
+function depReady(j, s){ return s.dep===null || s.dep===undefined || (j.steps[s.dep] && j.steps[s.dep].status==="DONE"); }
+function activateReady(c, ji){
+  // Dependency model: a step activates when its declared dependency is DONE
+  // (or immediately, if it has none — such steps run in parallel).
+  const j = c.journeys[ji];
+  if(jDepBlocked(c, j)) return;
+  j.steps.forEach(s=>{
+    if(s.status==="PENDING" && depReady(j, s)){
+      s.status="CURRENT"; s.pct=5; s.due="Within "+s.tat+" working day(s)";
+      pushNotif("▶️", "“"+s.name+"” ("+prodById(j.prod).name+") activated for "+c.name+" — assigned to "+uById(s.owner).name+".", c.id);
+    }
+  });
 }
-A.selStep = (cid,i)=>go("client",{id:cid, step:i});
-A.stStart = (cid,i)=>{ const c=CLIENTS.find(x=>x.id===cid); c.steps[i].status="CURRENT"; c.steps[i].pct=Math.max(5,c.steps[i].pct); toast("Step started. TAT clock running (working-calendar aware)."); render(); };
-A.stWait = (cid,i)=>{ const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i]; s.status="WAITING";
+function activateNext(c, ji){
+  const j = c.journeys[ji];
+  if(j.steps.every(s=>s.status==="DONE")){
+    pushNotif("🏁", prodById(j.prod).name+" journey complete for "+c.name+".", c.id);
+    c.journeys.forEach((j2,k)=>{ if(k!==ji && !jDepBlocked(c,j2) && j2.gate==="OPEN" && j2.steps.some(st=>st.status==="PENDING") && !j2.steps.some(st=>st.status!=="PENDING")){
+      activateReady(c,k);
+      pushNotif("⛓","“"+prodById(j2.prod).name+"” service unlocked for "+c.name+" — its dependency just completed.", c.id);
+    }});
+    if(c.journeys.every(x=>x.steps.every(s=>s.status==="DONE"))){
+      c.status="LIVE"; c.liveAt=TODAY;
+      pushNotif("🎉", c.name+" is fully onboarded and LIVE across all products. CSAT survey sent to SPOC.", c.id);
+      toast(c.name+" is LIVE — every journey complete and signed off. 🎉");
+    } else toast(prodById(j.prod).name+" journey complete — other journeys still in flight.");
+  } else activateReady(c, ji);
+}
+A.selStep = (cid,i,ji=0)=>go("client",{id:cid, j:ji, step:i});
+A.selJourney = (cid,ji)=>{ const c=CLIENTS.find(x=>x.id===cid);
+  if((S.params.j??-1)===ji){ go("client",{id:cid}); return; }  // toggle closed (no journey selected opens none? keep first open)
+  const cur=c.journeys[ji].steps.findIndex(s=>s.status!=="DONE");
+  go("client",{id:cid, j:ji, step: cur===-1? c.journeys[ji].steps.length-1 : cur}); };
+A.stStart = (cid,ji,si)=>{ const {c,j,s}=jStep(cid,ji,si);
+  if(j.gate==="LOCKED"){ toast("Journey is locked — mandatory prerequisites are not cleared yet.","bad"); return; }
+  const held=jDepBlocked(c,j); if(held){ toast("Cannot start — this service waits for “"+held+"” to complete first.","bad"); return; }
+  if(!depReady(j,s)){ toast("Cannot start — this step depends on “"+j.steps[s.dep].name+"” (step "+(s.dep+1)+"), which is not complete yet.","bad"); return; }
+  s.status="CURRENT"; s.pct=Math.max(5,s.pct); toast("Step started. TAT clock running (working-calendar aware)."); render(); };
+A.stWait = (cid,ji,si)=>{ const {s}=jStep(cid,ji,si); s.status="WAITING";
   s.comms.push(comm("Today","NOTE","INT",S.user.name,"Clock paused — waiting on client.")); toast("Clock paused — this wait is attributed to the client, not the owner.","warn"); render(); };
-A.stResume = (cid,i)=>{ const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i]; s.status="CURRENT"; s.blockReason="";
+A.stResume = (cid,ji,si)=>{ const {s}=jStep(cid,ji,si); s.status="CURRENT"; s.blockReason="";
   s.comms.push(comm("Today","NOTE","INT",S.user.name,"Clock resumed.")); toast("Clock resumed — due date recomputed."); render(); };
-A.stBlock = (cid,i)=>{ const el=$("blk-reason"); if(!el.value.trim()){ toast("A block reason is mandatory — it powers the ‘where is it stuck’ report.","bad"); return; }
-  const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i]; s.status="BLOCKED"; s.blockReason=el.value.trim();
+A.stBlock = (cid,ji,si)=>{ const el=$("blk-reason"); if(!el.value.trim()){ toast("A block reason is mandatory — it powers the ‘where is it stuck’ report.","bad"); return; }
+  const {c,s}=jStep(cid,ji,si); s.status="BLOCKED"; s.blockReason=el.value.trim();
   s.comms.push(comm("Today","NOTE","INT",S.user.name,"Blocked — "+s.blockReason));
   pushNotif("⛔","“"+s.name+"” for "+c.name+" marked blocked: "+s.blockReason, cid);
   toast("Step blocked. Manager notified.","warn"); render(); };
 function subsGate(s){
   const un = s.subs.filter(x=>x.val===null);
-  if(un.length) return "Answer all sub-categories first — "+un.length+" still unanswered (e.g. “"+un[0].name+"”).";
+  if(un.length) return "Answer the full task list first — "+un.length+" still unanswered (e.g. “"+un[0].name+"”).";
   const nf = s.subs.find(x=>x.val===false && !x.remark.trim());
   if(nf) return "A False answer needs a remark — add one on “"+nf.name+"”.";
   return "";
 }
-A.subSet = (cid,i,j,val)=>{ const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i]; const sb=s.subs[j];
+A.subSet = (cid,ji,si,k,val)=>{ const {s}=jStep(cid,ji,si); const sb=s.subs[k];
   sb.val=val;
-  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Sub-category “"+sb.name+"” marked "+(val?"True":"False")+(sb.remark?" — "+sb.remark:"")+"."));
+  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Task “"+sb.name+"” marked "+(val?"True":"False")+(sb.remark?" — "+sb.remark:"")+"."));
   if(val===false) toast("Marked False — add a remark; the step can't complete without one.","warn");
   render(); };
-A.subRemark = (cid,i,j,v)=>{ const c=CLIENTS.find(x=>x.id===cid); c.steps[i].subs[j].remark=v.trim(); render(); };
-A.stComplete = (cid,i)=>{
-  const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
+A.subRemark = (cid,ji,si,k,v)=>{ const {s}=jStep(cid,ji,si); s.subs[k].remark=v.trim(); render(); };
+A.stComplete = (cid,ji,si)=>{
+  const {c,s}=jStep(cid,ji,si);
   const g = subsGate(s); if(g){ toast("Cannot complete — "+g,"bad"); return; }
   if(s.docsReq.length && s.docs.length < s.docsReq.length){ toast("Cannot complete — required documents missing: "+s.docsReq.filter(d=>!s.docs.includes(d)).join(", "),"bad"); return; }
   if(s.signoff && s.signoffState!=="ACCEPTED"){ toast("This step needs client sign-off before it can complete — use ‘Request client sign-off’.","bad"); return; }
   s.status="DONE"; s.pct=100; s.completedOn=TODAY;
   s.comms.push(comm("Today","NOTE","INT",S.user.name,"Step completed."));
-  activateNext(c); render();
+  activateNext(c, ji); render();
 };
-A.stAttach = (cid,i)=>{ const el=$("doc-name"); if(!el.value.trim()) return;
-  const c=CLIENTS.find(x=>x.id===cid); c.steps[i].docs.push(el.value.trim()); c.attachments.push(el.value.trim());
+A.stAttach = (cid,ji,si)=>{ const el=$("doc-name"); if(!el.value.trim()) return;
+  const {c,s}=jStep(cid,ji,si); s.docs.push(el.value.trim()); c.attachments.push(el.value.trim());
   toast("Attached “"+el.value.trim()+"” (AV-scanned, served via signed URL in the real build)."); render(); };
-A.stComm = (cid,i)=>{
+A.stComm = (cid,ji,si)=>{
   const type=$("cm-type").value, dir=$("cm-dir").value, txt=$("cm-text").value;
   if(!txt.trim()){ toast("Write what was communicated.","bad"); return; }
-  const c=CLIENTS.find(x=>x.id===cid);
-  c.steps[i].comms.push(comm("Today",type,dir,S.user.name,txt.trim()));
+  const {s}=jStep(cid,ji,si);
+  s.comms.push(comm("Today",type,dir,S.user.name,txt.trim()));
   toast("Communication logged (append-only)."); render();
 };
-A.stReassign = (cid,i)=>{ const c=CLIENTS.find(x=>x.id===cid); const nu=$("re-owner").value; const s=c.steps[i];
+A.stReassign = (cid,ji,si)=>{ const {c,s}=jStep(cid,ji,si); const nu=$("re-owner").value;
   s.comms.push(comm("Today","NOTE","INT",S.user.name,"Reassigned from "+uById(s.owner).name+" to "+uById(nu).name+"."));
   s.owner=nu; pushNotif("👤","“"+s.name+"” for "+c.name+" reassigned to "+uById(nu).name+".", cid);
   toast("Step reassigned — new owner notified by email + WhatsApp."); render(); };
-A.signoffReq = (cid,i)=>{
-  const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
+A.signoffReq = (cid,ji,si)=>{
+  const {c,s}=jStep(cid,ji,si);
   const g = subsGate(s); if(g){ toast("Finish the checklist before asking the client to sign off — "+g,"bad"); return; }
   s.signoffState="REQUESTED";
   s.comms.push(comm("Today","EMAIL","OUT","System","Sign-off link sent to "+c.spocs[0].name+" (email + WhatsApp). Single-use token, OTP-protected."));
   pushNotif("✉️","Sign-off requested from "+c.name+" for “"+s.name+"”.", cid);
   toast("Sign-off link sent to "+c.spocs[0].name+"."); render();
 };
-A.signoffOpen = (cid,i)=>{ S.signoff={cid, i, otp:"", verified:false, err:""}; go("signoff"); };
+A.signoffOpen = (cid,ji,si)=>{ S.signoff={cid, ji, i:si, otp:"", verified:false, err:""}; go("signoff"); };
 A.otpVerify = ()=>{
   const digits = [...document.querySelectorAll(".otp input")].map(x=>x.value).join("");
   if(digits==="123456"){ S.signoff.verified=true; S.signoff.err=""; }
@@ -545,29 +771,88 @@ A.otpVerify = ()=>{
   render();
 };
 A.signoffAccept = ()=>{
-  const {cid,i}=S.signoff; const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
+  const {cid,ji,i}=S.signoff; const {c,s}=jStep(cid,ji,i);
   s.signoffState="ACCEPTED"; s.status="DONE"; s.pct=100; s.completedOn=TODAY;
   s.comms.push(comm("Today","NOTE","INT","System","Client sign-off ACCEPTED by "+c.spocs[0].name+" (OTP verified, IP 49.37.112.8). Acceptance PDF archived."));
   pushNotif("✅", c.spocs[0].name+" accepted sign-off on “"+s.name+"” for "+c.name+".", cid);
-  activateNext(c);
-  S.signoff=null; go("client",{id:cid});
+  activateNext(c, ji);
+  S.signoff=null; go(S.user&&S.user.role==="CLIENT" ? "cphome" : "client",{id:cid, j:ji});
 };
 A.signoffObject = ()=>{
   const reason=$("so-obj").value.trim();
   if(!reason){ S.signoff.err="Please describe the objection."; return render(); }
-  const {cid,i}=S.signoff; const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
+  const {cid,ji,i}=S.signoff; const {c,s}=jStep(cid,ji,i);
   s.signoffState="OBJECTION"; s.status="CURRENT";
   s.comms.push(comm("Today","NOTE","IN",c.spocs[0].name,"OBJECTION raised: "+reason));
   pushNotif("⚠️", c.spocs[0].name+" raised an objection on “"+s.name+"”: "+reason, cid);
-  S.signoff=null; go("client",{id:cid, step:i});
+  S.signoff=null; go(S.user&&S.user.role==="CLIENT" ? "cphome" : "client",{id:cid, j:ji, step:i});
   toast("Objection recorded — step returned to In progress, owner notified.","warn");
 };
 
+/* ---- prerequisites (submit → verify; mandatory tasks gate every journey) ---- */
+function tryOpenGate(c){
+  if(!gateOk(c)) return;
+  let opened=false;
+  c.journeys.forEach((j,ji)=>{ if(j.gate==="LOCKED"){ j.gate="OPEN"; activateReady(c, ji); opened=true; } });
+  if(opened){ pushNotif("🔓","Prerequisites cleared for "+c.name+" — all journeys started, kickoff mails sent, owners notified.", c.id);
+    toast("Gate open — journeys started for "+c.name+" 🎉"); }
+}
+A.prSubmit = (cid,qi)=>{ const c=CLIENTS.find(x=>x.id===cid); const t=c.prereqs[qi];
+  const el=$("prdoc-"+qi); if(el && el.value.trim()){ t.docs.push(el.value.trim()); }
+  t.status="SUBMITTED";
+  pushNotif("📥", c.name+" submitted prerequisite “"+t.title+"” — awaiting verification.", cid);
+  toast("Submitted — the onboarding team will verify it."); render(); };
+A.prVerify = (cid,qi)=>{ const c=CLIENTS.find(x=>x.id===cid); const t=c.prereqs[qi];
+  t.status="VERIFIED";
+  pushNotif("✅","Prerequisite “"+t.title+"” verified for "+c.name+".", cid);
+  toast("Verified."); tryOpenGate(c); render(); };
+A.prReturn = (cid,qi)=>{ const c=CLIENTS.find(x=>x.id===cid); const t=c.prereqs[qi];
+  t.status="PENDING"; t.comments.push({by:S.user.name, when:"Today", text:"Returned — please re-submit with corrections."});
+  pushNotif("↩️","Prerequisite “"+t.title+"” returned to "+c.name+" for rework.", cid);
+  toast("Returned to client with a comment.","warn"); render(); };
+A.prSkip = (cid,qi)=>{ const c=CLIENTS.find(x=>x.id===cid); const t=c.prereqs[qi];
+  if(t.mand){ toast("Mandatory prerequisites cannot be skipped — mandatory means mandatory.","bad"); return; }
+  const el=$("prskip-"+qi); if(!el || !el.value.trim()){ toast("A skip reason is required (it is logged).","bad"); return; }
+  t.status="SKIPPED"; t.skipReason=el.value.trim();
+  toast("Skipped with reason (logged)."); tryOpenGate(c); render(); };
+A.prComment = (cid,qi)=>{ const el=$("prcm-"+qi); if(!el.value.trim()) return;
+  const c=CLIENTS.find(x=>x.id===cid);
+  c.prereqs[qi].comments.push({by: S.user.role==="CLIENT" ? c.spocs[0].name+" (Client)" : S.user.name, when:"Today", text:el.value.trim()});
+  render(); };
+/* ---- prerequisites master (OB-14) ---- */
+A.pmToggle = i=>{ PREREQ_MASTER[i].mand=!PREREQ_MASTER[i].mand; toast("Publishing a new master version — existing clients keep their snapshot."); render(); };
+A.pmDel = i=>{ PREREQ_MASTER.splice(i,1); render(); };
+A.pmAdd = ()=>{ const t=$("pm-title").value.trim(); if(!t){ toast("Give the task a title.","bad"); return; }
+  PREREQ_MASTER.push({id:"q"+(PREREQ_MASTER.length+1)+"_"+Date.now()%1000, title:t, tat:+$("pm-tat").value||24,
+    mand:$("pm-mand").checked, refDoc:$("pm-doc").value.trim(), desc:$("pm-desc").value.trim()});
+  toast("Task added to the master — applies to every newly boarded client."); render(); };
+
 /* ---- template designer ---- */
-A.tplEdit = id=>{ const t=TEMPLATES.find(x=>x.id===id); S.tplEdit={id, name:t.name, version:t.version, steps:cpSteps(t.steps)}; go("tplEdit"); };
-function tplCollect(){ S.tplEdit.steps.forEach((s,i)=>{ s.name=$("ts-n"+i).value; s.tat=+$("ts-t"+i).value||1; s.owner=$("ts-o"+i).value; s.signoff=$("ts-s"+i).checked; }); }
-A.tplMove = (i,d)=>{ tplCollect(); const st=S.tplEdit.steps; const j=i+d; if(j<0||j>=st.length) return; [st[i],st[j]]=[st[j],st[i]]; render(); };
-A.tplDel = i=>{ tplCollect(); S.tplEdit.steps.splice(i,1); render(); };
+A.tplEdit = (id,fresh)=>{ const t=TEMPLATES.find(x=>x.id===id); S.tplEdit={id, name:t.name, version:t.version, product:t.product, steps:cpSteps(t.steps), fresh:!!fresh}; go("tplEdit"); };
+A.msFilter = v=>{ S.msProd=v; render(); };
+A.msMove = (id,dir)=>{ const i=TEMPLATES.findIndex(t=>t.id===id); const j=i+dir;
+  if(j<0||j>=TEMPLATES.length) return; [TEMPLATES[i],TEMPLATES[j]]=[TEMPLATES[j],TEMPLATES[i]];
+  toast("Service order updated — new clients instantiate journeys in this sequence."); render(); };
+A.msDep = (id,val)=>{ const t=TEMPLATES.find(x=>x.id===id);
+  t.dep = val||null;
+  toast(val? t.name+" now waits for “"+TEMPLATES.find(x=>x.id===val).name+"” to complete."
+           : t.name+" has no dependency — it runs in parallel."); render(); };
+A.tplNew = ()=>{
+  const name=$("tn-name").value.trim(), prod=$("tn-prod").value;
+  if(!name){ toast("Give the new journey template a name.","bad"); return; }
+  const id="t"+(TEMPLATES.length+1)+"n";
+  TEMPLATES.push({id, name, version:1, product:prod,
+    steps:[{name:"Kickoff call", tat:1, owner:"u4", signoff:false, dep:null, docs:[], subs:["Kickoff done & scope confirmed"]},
+           {name:"Go-live sign-off", tat:1, owner:"u2", signoff:true, dep:0, docs:[], subs:["Handover completed"]}],
+    active: !TEMPLATES.some(t=>t.product===prod && t.active), dep:null});
+  toast("New module service created for "+prodById(prod).name+" — add its steps and publish.");
+  A.tplEdit(id, true);
+};
+function tplCollect(){ S.tplEdit.steps.forEach((s,i)=>{ s.name=$("ts-n"+i).value; s.tat=+$("ts-t"+i).value||1; s.owner=$("ts-o"+i).value; s.signoff=$("ts-s"+i).checked;
+  const d=$("ts-d"+i); if(d) s.dep = d.value===""?null:+d.value; }); }
+function tplSanitizeDeps(st){ st.forEach((s,idx)=>{ if(s.dep!=null && s.dep>=idx) s.dep=null; }); }
+A.tplMove = (i,d)=>{ tplCollect(); const st=S.tplEdit.steps; const j=i+d; if(j<0||j>=st.length) return; [st[i],st[j]]=[st[j],st[i]]; tplSanitizeDeps(st); render(); };
+A.tplDel = i=>{ tplCollect(); S.tplEdit.steps.splice(i,1); tplSanitizeDeps(S.tplEdit.steps); render(); };
 A.tplAdd = ()=>{ tplCollect(); S.tplEdit.steps.push({name:"New step", tat:8, owner:"u3", signoff:false, docs:[], subs:[]}); render(); };
 A.tplSubAdd = i=>{ tplCollect(); const el=$("ts-sub"+i); const v=el.value.trim();
   if(!v){ toast("Type the sub-category name first.","bad"); return; }
@@ -576,7 +861,10 @@ A.tplSubDel = (i,j)=>{ tplCollect(); S.tplEdit.steps[i].subs.splice(j,1); render
 A.tplSave = ()=>{
   tplCollect();
   const t=TEMPLATES.find(x=>x.id===S.tplEdit.id);
-  t.steps=cpSteps(S.tplEdit.steps); t.version++;
+  const nm=$("te-name"); if(nm && nm.value.trim()) t.name=nm.value.trim();
+  t.steps=cpSteps(S.tplEdit.steps);
+  if(S.tplEdit.fresh){ toast(t.name+" v1 published for "+prodById(t.product).name+" — new clients buying it get this journey."); go("templates"); return; }
+  t.version++;
   toast(t.name+" v"+t.version+" published. In-flight journeys keep the version they started on.");
   go("templates");
 };
@@ -613,6 +901,10 @@ function vLogin(){
       </div>
       <div style="margin-top:18px">
         <div class="eyebrow">Demo accounts · password demo123</div>
+        <div class="demo-users" style="margin-bottom:8px">
+          <button onclick="A.fill('CL-30412')" title="Client portal — GreenValley (live)" style="border-color:#A7F3D0;background:var(--success-soft);color:#047857">🔑 CL-30412 · GreenValley (Client)</button>
+          <button onclick="A.fill('CL-30977')" title="Client portal — Little Scholars (prerequisites pending)" style="border-color:#FDE68A;background:var(--warning-soft);color:#B45309">🔑 CL-30977 · Little Scholars (Client)</button>
+        </div>
         <div class="demo-users">
           ${USERS.map(u=>`<button onclick="A.fill('${u.email}')" title="${ROLE_LABEL[u.role]}">${esc(u.name.split(" ")[0])} · ${ROLE_LABEL[u.role]}</button>`).join("")}
         </div>
@@ -644,7 +936,7 @@ function vLauncher(){
         <div class="mod-ic" style="background:var(--primary-soft)">🧭</div>
         <h3>Client Onboarding</h3>
         <p class="cap" style="margin:6px 0 12px">Board new clients through a step-by-step journey to Live.</p>
-        <span class="chip chip-indigo">${active} clients in flight</span>
+        <span class="chip chip-indigo">${active} ongoing projects</span>
         ${breached?` <span class="chip chip-red">${breached} breached</span>`:""}
       </button>
     </div>
@@ -667,7 +959,8 @@ const NAV = [
   {v:"wizardGo", l:"New client", ic:"➕", roles:["OB_ADMIN","MANAGER","SALES"]},
   {v:"reports", l:"Reports", ic:"📈", roles:null},
   {sec:"Administration"},
-  {v:"templates", l:"Journey templates", ic:"🧩", roles:["OB_ADMIN"]},
+  {v:"templates", l:"Module Service", ic:"🧩", roles:["OB_ADMIN"]},
+  {v:"prereqm", l:"Prerequisites master", ic:"📋", roles:["OB_ADMIN"]},
   {v:"access", l:"Roles & module access", ic:"🔐", roles:["OB_ADMIN"]},
   {v:"settings", l:"TAT & escalation", ic:"⏱️", roles:["OB_ADMIN","MANAGER"]},
   {v:"msgtpl", l:"Notification templates", ic:"✉️", roles:["OB_ADMIN"]},
@@ -719,12 +1012,136 @@ function vNotifPop(){
 }
 
 /* ---------- dashboard ---------- */
+/* ── dashboard data + S-06 drill slide-over ── */
+function dueSerial(due){
+  if(!due) return null;
+  if(/today/i.test(due)) return TODAY_SER;
+  const m=String(due).match(/(\d{1,2})\s+(Jun|Jul|Aug|Sep)/);
+  if(!m) return null;
+  return {Jun:0,Jul:30,Aug:61,Sep:92}[m[2]] + (+m[1]);
+}
+function dashItems(){
+  const items=[];
+  CLIENTS.forEach(c=>{
+    if(c.status!=="ONBOARDING") return;
+    c.journeys.forEach((j,ji)=>{ if(j.gate==="LOCKED") return;
+      j.steps.forEach((st,si)=>{ if(["CURRENT","WAITING","BLOCKED"].includes(st.status)){
+        const ser=dueSerial(st.due);
+        items.push({c,ji,si,label:st.name, owner:uById(st.owner).name, due:st.due||"—",
+          prod:prodById(j.prod).name, ser, overdue: st.pct>=100 || /missed/i.test(st.due||"") || (ser!==null&&ser<TODAY_SER)});
+      }});});
+    c.prereqs.forEach(t=>{ if(t.status==="PENDING"||t.status==="SUBMITTED"){
+      const ser=dueSerial(t.due);
+      items.push({c,ji:0,si:0,label:"Prerequisite: "+t.title, owner:"Client ("+(c.spocs[0]?c.spocs[0].name:"SPOC")+")",
+        due:t.due||"—", prod:"Prerequisites", ser, overdue: ser!==null&&ser<TODAY_SER});
+    }});
+  });
+  return items;
+}
+function drillRow(r){
+  return `<div class="drow"><b style="min-width:140px;flex:1">${esc(r.c.name)}</b>
+    <span class="chip chip-grey">${esc(r.prod)}</span><span style="flex:1;min-width:140px">${esc(r.label)}</span>
+    <span class="cap">${esc(r.owner)}</span><span class="cap num">${esc(r.due)}</span>
+    ${r.overdue?'<span class="chip chip-red">⚠ overdue</span>':""}
+    <button class="btn btn-sm" onclick="A.drillClose();A.selStep('${r.c.id}',${r.si},${r.ji})">Open →</button></div>`;
+}
+A.dashDrill = key=>{
+  const items=dashItems();
+  const active=CLIENTS.filter(c=>c.status==="ONBOARDING");
+  const inWeek=x=>x.ser!==null && x.ser>=78 && x.ser<=84;   // Mon 17 – Sun 23 Aug
+  let title="", rows=[];
+  if(key==="ongoing") { title="Ongoing projects"; rows=active.map(c=>{const i=Math.min(currentIdx(c),c.steps.length-1);
+      return {c,ji:0,si:i,label:c.steps[i].name,owner:uById(c.steps[i].owner).name,due:c.steps[i].due||"—",prod:prodById(c.journeys[0].prod).name,overdue:clientRag(c)==="RED"};}); }
+  if(key==="week")    { title="This week's deadlines"; rows=items.filter(inWeek); }
+  if(key==="today")   { title="Today's delivery";      rows=items.filter(x=>x.ser===TODAY_SER); }
+  if(key==="overdue") { title="Overdue clients";       rows=items.filter(x=>x.overdue); }
+  if(key==="live")    { title="Live clients";          rows=CLIENTS.filter(c=>c.status==="LIVE").map(c=>({c,ji:0,si:c.steps.length-1,label:"Live since "+c.liveAt,owner:"—",due:"—",prod:c.journeys.map(j=>prodById(j.prod).name).join(", "),overdue:false})); }
+  if(key==="risk")    { title="At-risk clients";       rows=items.filter(x=>{const cRag=clientRag(x.c);return cRag==="AMBER";}); }
+  if(key==="esc")     { title="Client escalations";    rows=[];
+    CLIENTS.forEach(c=>c.journeys.forEach((j,ji)=>j.steps.forEach((st,si)=>{ if(st.clientEsc)
+      rows.push({c,ji,si,label:st.name+" — “"+st.clientEsc.text+"”",owner:uById(st.owner).name,due:st.clientEsc.when,prod:prodById(j.prod).name,overdue:true}); }))); }
+  S.drill={title, count:rows.length, body:rows.length?rows.map(drillRow).join(""):'<div class="empty cap">Nothing here right now.</div>'};
+  render();
+};
+A.drillClose = ()=>{ S.drill=null; render(); };
+A.escToggle = k=>{ S.escOpen = S.escOpen===k? null : k; render(); };
+A.cpEscalate = (cid,ji,si)=>{
+  const el=$("esc-"+ji+"-"+si); if(!el || !el.value.trim()){ toast("Describe what you are escalating — the comment is required.","bad"); return; }
+  const {c,s}=jStep(cid,ji,si);
+  s.clientEsc={when:"Today", by:(c.spocs[0]?c.spocs[0].name:"Client"), text:el.value.trim()};
+  s.comms.push(comm("Today","ESCALATION","IN",(c.spocs[0]?c.spocs[0].name:"Client")+" (Client)", el.value.trim()));
+  pushNotif("🚨","CLIENT ESCALATION — "+c.name+" escalated “"+s.name+"”: "+el.value.trim(), cid);
+  S.escOpen=null;
+  toast("Escalated — the onboarding manager and the service owner have been notified immediately.");
+  render();
+};
+A.escResolve = (cid,ji,si)=>{
+  const {c,s}=jStep(cid,ji,si);
+  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Client escalation resolved and acknowledged back to "+(c.spocs[0]?c.spocs[0].name:"the client")+"."));
+  s.clientEsc=null;
+  toast("Escalation resolved — the client is notified."); render();
+};
+function drillHTML(){
+  const d=S.drill;
+  return `<div class="dveil" onclick="A.drillClose()"></div>
+  <aside class="dpanel" role="dialog" aria-label="${esc(d.title)}">
+    <header><div><div class="eyebrow">Drill-down</div><h3>${esc(d.title)}</h3></div>
+      <span class="chip chip-indigo">${d.count}</span><span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="A.drillClose()">✕</button></header>
+    <div class="bd">${d.body}</div>
+  </aside>`;
+}
+function delayedRows(){
+  const out=[];
+  CLIENTS.forEach(c=>{ if(c.status!=="ONBOARDING") return;
+    c.journeys.forEach((j,ji)=>{ if(j.gate==="LOCKED") return;
+      const bad=j.steps.map((st,si)=>({st,si})).filter(x=>stepRag(x.st)==="RED");
+      if(!bad.length) return;
+      const curI=j.steps.findIndex(st=>st.status!=="DONE");
+      const cur=j.steps[curI];
+      const ser=dueSerial(bad[0].st.due);
+      const delay=Math.max(1, ser!==null? TODAY_SER-ser : 2);
+      const remaining=j.steps.filter(st=>st.status!=="DONE").reduce((a,st)=>a+st.tat,0);
+      out.push({c,ji,si:curI, start:c.onboardDate, prods:c.journeys.map(x=>prodById(x.prod).name).join(", "),
+        mod:prodById(j.prod).name, stage:cur?cur.name:"—", owner:uById((cur||bad[0].st).owner).name,
+        eta:dstr(TODAY_SER+remaining+delay)+" 2026", delay});
+    });});
+  return out;
+}
+function implRows(){
+  const owners=new Map();
+  USERS.filter(u=>u.role==="STEP_OWNER").forEach(u=>owners.set(u.id,{u,clients:new Set(),ns:0,ok:0,risk:0,late:0,blk:0,ahead:0,doneOk:0,doneLate:0}));
+  CLIENTS.forEach(c=>{ if(c.status!=="ONBOARDING"&&c.status!=="LIVE") return;
+    c.journeys.forEach(j=>{ if(j.gate==="LOCKED") return;
+      j.steps.forEach(st=>{
+        if(!owners.has(st.owner)) { const u=uById(st.owner); owners.set(st.owner,{u,clients:new Set(),ns:0,ok:0,risk:0,late:0,blk:0,ahead:0,doneOk:0,doneLate:0}); }
+        const o=owners.get(st.owner);
+        if(c.status==="ONBOARDING") o.clients.add(c.id);
+        if(st.status==="PENDING") o.ns++;
+        else if(st.status==="BLOCKED"||st.status==="WAITING") o.blk++;
+        else if(st.status==="CURRENT") (st.pct>=100? o.late++ : st.pct>=SETTINGS.amber? o.risk++ : o.ok++);
+        else if(st.status==="DONE") (st.closed==="early"? o.ahead++ : st.closed==="late"? o.doneLate++ : o.doneOk++);
+      });});});
+  return [...owners.values()].map(o=>{
+    const done=o.doneOk+o.doneLate+o.ahead;
+    let perf=null;
+    if(done||o.late||o.blk){
+      perf=Math.round(100*(o.doneOk+o.ahead)/(done||1)) - 12*o.late - 6*o.blk - 3*o.risk + 3*o.ahead;
+      perf=Math.max(5,Math.min(100,perf));
+    }
+    return {...o, nclients:o.clients.size, perf};
+  }).sort((a,b)=>b.nclients-a.nclients);
+}
 function vDash(){
   const active = CLIENTS.filter(c=>c.status==="ONBOARDING");
   const red = active.filter(c=>clientRag(c)==="RED"), amber = active.filter(c=>clientRag(c)==="AMBER"), green = active.filter(c=>clientRag(c)==="GREEN");
   const live = CLIENTS.filter(c=>c.status==="LIVE");
-  const funnel = TPL_STEPS.map((t,i)=>({name:(i+1)+". "+t.name, n: active.filter(c=>currentIdx(c)===i).length}));
-  const maxF = Math.max(1,...funnel.map(f=>f.n));
+  const items = dashItems();
+  const wk = items.filter(x=>x.ser!==null && x.ser>=78 && x.ser<=84).length;
+  const today = items.filter(x=>x.ser===TODAY_SER).length;
+  const odItems = items.filter(x=>x.overdue);
+  const od = odItems.length, odClients = new Set(odItems.map(x=>x.c.id)).size;
+  const escN = new Set(CLIENTS.flatMap(c=>c.journeys.flatMap(j=>j.steps.some(st=>st.clientEsc)?[c.id]:[]))).size;
   const stuck = active.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>x.s.status==="BLOCKED"||x.s.status==="WAITING"));
   const breach = active.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>x.s.status!=="DONE" && x.s.pct>=100));
   const ragCol = (title, chip, list, hint) => `<div class="rag-col">
@@ -732,33 +1149,28 @@ function vDash(){
     ${list.length? list.map(c=>{
       const i=currentIdx(c); const s=c.steps[i]||c.steps[c.steps.length-1];
       return `<button class="rag-card" onclick="A.nav('clients');A.selStep('${c.id}',${Math.min(i,c.steps.length-1)})">
-        <b>${esc(c.name)}</b><div class="cap" style="margin-top:2px">Step ${Math.min(i+1,c.steps.length)}/8 · ${esc(s.name)} · ${esc(uById(s.owner).name)}</div></button>`;
+        <b>${esc(c.name)}</b><div class="cap" style="margin-top:2px">${c.journeys.length} journey${c.journeys.length>1?"s":""} · ERP step ${Math.min(i+1,c.steps.length)}/${c.steps.length} · ${esc(s.name)}</div></button>`;
     }).join("") : `<div class="empty cap">${hint}</div>`}
   </div>`;
   return shell(`<div class="content">
     <div class="page-head"><div><h1>Onboarding dashboard</h1><p class="cap" style="margin-top:2px">Every client in flight, where it is, and where it's stuck.</p></div><span class="sp"></span>
       ${["OB_ADMIN","MANAGER","SALES"].includes(S.user.role)?'<button class="btn btn-p" onclick="A.newClient()">+ Board a new client</button>':""}
     </div>
-    <div class="kpis" role="list" aria-label="Key metrics">
-      <div class="kpi" role="listitem"><div class="eyebrow">In flight</div><div class="v">${active.length}</div><div class="d cap">clients being onboarded</div></div>
-      <div class="kpi" role="listitem"><div class="eyebrow">Live</div><div class="v" style="color:var(--success)">${live.length}</div><div class="d cap">fully onboarded · latest ${live[0]?esc(live[0].liveAt):"—"}</div></div>
-      <div class="kpi" role="listitem"><div class="eyebrow">Breached / blocked</div><div class="v" style="color:var(--danger)">${red.length}</div><div class="d cap">need action now</div></div>
-      <div class="kpi" role="listitem"><div class="eyebrow">At risk (amber)</div><div class="v" style="color:var(--warning)">${amber.length}</div><div class="d cap">≥${SETTINGS.amber}% of a step TAT used</div></div>
-      <div class="kpi" role="listitem"><div class="eyebrow">Avg time to live</div><div class="v">24<span style="font-size:15px;font-weight:500;color:var(--text-2)"> days</span></div><div class="d cap">↓ 3 days vs last quarter</div></div>
+    <div class="kpis" role="list" aria-label="Key metrics — click any card for the client list">
+      <button class="kpi" role="listitem" onclick="A.dashDrill('ongoing')"><div class="eyebrow">Ongoing Projects</div><div class="v">${active.length}</div><div class="d cap">clients being onboarded</div></button>
+      <button class="kpi" role="listitem" onclick="A.dashDrill('week')"><div class="eyebrow">This Week's Deadlines</div><div class="v" style="color:var(--info)">${wk}</div><div class="d cap">client tasks due Mon–Sun</div></button>
+      <button class="kpi" role="listitem" onclick="A.dashDrill('today')"><div class="eyebrow">Today's Delivery</div><div class="v">${today}</div><div class="d cap">services due today</div></button>
+      <button class="kpi" role="listitem" onclick="A.dashDrill('overdue')"><div class="eyebrow">Overdue Clients</div><div class="v" style="color:var(--danger)">${odClients}</div><div class="d cap">${od} overdue items — need action now</div></button>
+      <button class="kpi" role="listitem" onclick="A.dashDrill('esc')"><div class="eyebrow">Client Escalations</div><div class="v" style="color:var(--danger)">${escN}</div><div class="d cap">clients escalated from the portal</div></button>
+      <button class="kpi" role="listitem" onclick="A.dashDrill('live')"><div class="eyebrow">Live</div><div class="v" style="color:var(--success)">${live.length}</div><div class="d cap">fully onboarded · latest ${live[0]?esc(live[0].liveAt):"—"}</div></button>
+      <button class="kpi" role="listitem" onclick="A.dashDrill('risk')"><div class="eyebrow">At Risk</div><div class="v" style="color:var(--warning)">${amber.length}</div><div class="d cap">≥${SETTINGS.amber}% of a service TAT used</div></button>
     </div>
     <div class="rag-cols">
       ${ragCol("Breached / blocked", "🔴", red, "Nothing breached. Keep it that way.")}
       ${ragCol("At risk", "🟠", amber, "No client is close to a TAT limit.")}
       ${ragCol("On track", "🟢", green, "—")}
     </div>
-    <div class="grid" style="grid-template-columns:1fr 1fr">
-      <section class="card" aria-label="Clients at each journey step">
-        <h3>Funnel — clients at each step</h3>
-        <p class="cap" style="margin:2px 0 12px">Active clients only. Click a row to filter the client list.</p>
-        ${funnel.map(f=>`<div class="hbar-row"><span class="hbar-lbl" title="${esc(f.name)}">${esc(f.name)}</span>
-          <span class="hbar-track"><span class="hbar" style="width:${Math.round(f.n/maxF*100)}%" onmouseenter="tipOn(event,'${esc(f.name)}: <b>${f.n}</b> client${f.n===1?"":"s"}')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></span></span>
-          <span class="hbar-val">${f.n}</span></div>`).join("")}
-      </section>
+    <div class="grid" style="grid-template-columns:1fr">
       <section class="card" aria-label="Stuck steps">
         <h3>Where it's stuck</h3>
         <p class="cap" style="margin:2px 0 12px">Blocked or waiting-on-client steps, with the recorded reason.</p>
@@ -775,6 +1187,38 @@ function vDash(){
         </tbody></table></div>` : '<div class="empty cap" style="padding:14px">No breaches. The scanner will flag one the moment it happens.</div>'}
       </section>
     </div>
+    <section class="card" aria-label="Delayed projects" style="padding:0">
+      <div style="padding:14px 16px 4px;display:flex;gap:9px;align-items:center"><span class="eyebrow">Delayed projects</span>
+        <span class="sub" style="font-size:12px">every journey running behind, with who holds it and the recomputed finish</span></div>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Client</th><th>Start date</th><th>Products bought</th><th>Module in progress</th><th>Current stage</th><th>Responsible</th><th>Expected completion</th><th style="text-align:right">Delayed by</th></tr></thead>
+        <tbody>${delayedRows().length? delayedRows().map(r=>`<tr class="rowlink" tabindex="0" onclick="A.selStep('${r.c.id}',${r.si},${r.ji})">
+          <td><b>${esc(r.c.name)}</b></td><td class="cap">${esc(r.start)}</td><td class="cap">${esc(r.prods)}</td>
+          <td>${esc(r.mod)}</td><td>${esc(r.stage)}</td><td>${esc(r.owner)}</td><td class="cap">${esc(r.eta)}</td>
+          <td style="text-align:right"><span class="chip chip-red">${r.delay}d</span></td></tr>`).join("")
+          : '<tr><td colspan="8"><div class="empty cap">No delayed projects. 🎉</div></td></tr>'}</tbody>
+      </table></div>
+    </section>
+    <section class="card" aria-label="Implementor workload and performance" style="padding:0">
+      <div style="padding:14px 16px 4px;display:flex;gap:9px;align-items:center"><span class="eyebrow">Implementor workload &amp; performance</span>
+        <span class="sub" style="font-size:12px">every implementor, including the bench — counts are the services they own</span></div>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Implementor</th><th style="text-align:right">Clients</th><th style="text-align:right">On track</th><th style="text-align:right">Not started</th><th style="text-align:right">Delayed</th><th style="text-align:right">At risk</th><th style="text-align:right">Blocked/Waiting</th><th style="text-align:right">Ahead of schedule</th><th>Performance</th></tr></thead>
+        <tbody>${implRows().map(r=>`<tr>
+          <td><div class="who2"><span class="avatar">${initials(r.u.name)}</span><span style="font-size:12.5px">${esc(r.u.name)}</span></div></td>
+          <td class="num" style="text-align:right">${r.nclients}</td>
+          <td class="num" style="text-align:right">${r.ok||'<span style="color:var(--text-2)">0</span>'}</td>
+          <td class="num" style="text-align:right">${r.ns||'<span style="color:var(--text-2)">0</span>'}</td>
+          <td class="num" style="text-align:right">${r.late?`<span style="color:#B91C1C;font-weight:650">${r.late}</span>`:'<span style="color:var(--text-2)">0</span>'}</td>
+          <td class="num" style="text-align:right">${r.risk?`<span style="color:#B45309;font-weight:650">${r.risk}</span>`:'<span style="color:var(--text-2)">0</span>'}</td>
+          <td class="num" style="text-align:right">${r.blk?`<span style="color:#B45309;font-weight:650">${r.blk}</span>`:'<span style="color:var(--text-2)">0</span>'}</td>
+          <td class="num" style="text-align:right">${r.ahead?`<span style="color:#047857;font-weight:650">${r.ahead}</span>`:'<span style="color:var(--text-2)">0</span>'}</td>
+          <td>${r.perf===null?'<span class="chip chip-grey">— no work yet</span>'
+              : r.perf>=85?`<span class="chip chip-green">★ ${r.perf}% · Excellent</span>`
+              : r.perf>=65?`<span class="chip chip-indigo">${r.perf}% · Good</span>`
+              : `<span class="chip chip-amber">${r.perf}% · Needs attention</span>`}</td></tr>`).join("")}</tbody>
+      </table></div>
+    </section>
   </div>`, "dash");
 }
 
@@ -807,7 +1251,7 @@ function vClients(){
           return `<tr class="rowlink" tabindex="0" onclick="A.selStep('${c.id}',${done?c.steps.length-1:i})" onkeydown="if(event.key==='Enter')A.selStep('${c.id}',${done?c.steps.length-1:i})">
             <td><b>${esc(c.name)}</b><div class="cap">${esc(c.city)} · PAN ${maskPan(c.pan)}</div></td>
             <td>${RAG_CHIP[clientRag(c)]}</td>
-            <td>${done?'<span class="cap">Journey complete</span>':`${i+1}/8 · ${esc(s.name)}`}</td>
+            <td>${done?'<span class="cap">Journeys complete</span>':`${c.journeys.length>1?`<span class="chip chip-grey" style="font-size:10px">${c.journeys.length} journeys</span> `:""}${i+1}/${c.steps.length} · ${esc(s.name)}`}</td>
             <td>${done?"—":`<span style="display:inline-flex;align-items:center;gap:6px"><span class="avatar">${initials(uById(s.owner).name)}</span>${esc(uById(s.owner).name)}</span>`}</td>
             <td>${esc(c.sales)}</td><td class="cap">${esc(c.licenseType)}</td><td class="cap">${esc(c.onboardDate)}</td></tr>`;
         }).join("") : `<tr><td colspan="7"><div class="empty"><div class="big">🔍</div>No clients match these filters.</div></td></tr>`}</tbody>
@@ -819,7 +1263,7 @@ function vClients(){
 /* ---------- new client wizard ---------- */
 function vWizard(){
   const w=S.wizard, d=w.data;
-  const stepNames=["Client basics","SPOC contacts","Commercials","Requirements & journey"];
+  const stepNames=["Client basics","SPOC contacts","Commercials","Requirements & journeys"];
   const ind = stepNames.map((n,i)=>`${i+1<w.step?"✓":""}<span>${i+1===w.step?"<b>"+(i+1)+". "+n+"</b>":(i+1)+". "+n}</span>`).join('<span aria-hidden="true">→</span>');
   let body="";
   if(w.step===1) body=`<div class="frow">
@@ -843,20 +1287,20 @@ function vWizard(){
         <div><label for="ap-n${i}">Application</label><select id="ap-n${i}">${["EduTrack Core","Parent Portal","Exam Module","Transport Module"].map(o=>`<option${o===a.name?" selected":""}>${o}</option>`).join("")}</select></div>
         <div><label for="ap-l${i}">License</label><select id="ap-l${i}">${["Starter","Professional","Enterprise","Add-on"].map(o=>`<option${o===a.lic?" selected":""}>${o}</option>`).join("")}</select></div>
         <div><label for="ap-u${i}">Units / seats</label><input id="ap-u${i}" type="number" min="1" value="${a.units}"></div></div>`).join("")}
-      <button class="btn btn-sm" style="margin-bottom:18px" onclick="A.wzAppAdd()">+ Add application</button>
-      <div class="frow">
-        <div><label for="wz-paymode">Payment mode</label><select id="wz-paymode">${["Bank transfer","Cheque","UPI","UPI / NEFT"].map(o=>`<option${o===d.payMode?" selected":""}>${o}</option>`).join("")}</select></div><div></div>
-        <div><label for="wz-adv">Advance payment (₹) *</label><input id="wz-adv" inputmode="numeric" value="${esc(d.adv)}" placeholder="150000"></div>
-        <div><label for="wz-advdue">Advance due date</label><input id="wz-advdue" value="${esc(d.advDue)}"></div>
-        <div><label for="wz-bal">Balance payment (₹)</label><input id="wz-bal" inputmode="numeric" value="${esc(d.bal)}"></div>
-        <div><label for="wz-baldue">Balance due date</label><input id="wz-baldue" value="${esc(d.balDue)}"></div>
-      </div>
-      <p class="cap" style="margin-top:10px">Other payment rows (GST, invoice refs) can be added on the client's Payments tab after boarding.</p>`;
+      <button class="btn btn-sm" onclick="A.wzAppAdd()">+ Add application</button>
+      <p class="cap" style="margin-top:14px">No financial capture here by design — commercials live in the sales/billing system, not the onboarding module.</p>`;
   if(w.step===4) body = `
       <div style="margin-bottom:14px"><label for="wz-req">Client requirements *</label><textarea id="wz-req" rows="4" placeholder="What did we promise? Migration scope, integrations, languages, timelines…">${esc(d.requirements)}</textarea></div>
       <div class="frow">
-        <div><label for="wz-tpl">Journey template</label><select id="wz-tpl">${TEMPLATES.map(t=>`<option value="${t.id}"${t.id===d.template?" selected":""}>${esc(t.name)} · v${t.version} · ${t.steps.length} steps</option>`).join("")}</select>
-          <div class="cap" style="margin-top:4px">The journey pins this version — later template edits won't touch this client.</div></div>
+        <div><label>Products bought — one journey per product</label>
+          ${PRODUCTS.map(p=>{ const tpl=TEMPLATES.find(t=>t.product===p.id&&t.active);
+            return `<label style="display:flex;gap:8px;align-items:center;font-weight:500;color:var(--text);margin:6px 0;font-size:13px">
+              <input type="checkbox" id="wzp-${p.id}" style="width:auto" ${d.products.includes(p.id)?"checked":""} ${tpl?"":"disabled"}>
+              ${p.icon} ${esc(p.name)} <span class="cap">${tpl?`→ ${esc(tpl.name)} v${tpl.version} (${tpl.steps.length} services)`:"no active template — define one first"}</span></label>`;}).join("")}
+          <div class="cap" style="margin-top:4px">Each product instantiates its own journey (locked until prerequisites clear); templates pin their version.</div>
+          <label style="display:flex;gap:8px;align-items:center;font-weight:500;color:var(--text);margin-top:12px;font-size:13px">
+            <input type="checkbox" id="wz-mklogin" style="width:auto" ${d.mkLogin?"checked":""}>
+            🔑 Create client portal login now <span class="cap">(username auto-generated; one-time password emailed to the primary SPOC — can also be done later from the client page)</span></label></div>
         <div><label for="wz-file">Attachments</label>
           <div style="display:flex;gap:8px"><input id="wz-file" placeholder="e.g. PO_Meadowbrook.pdf"><button class="btn" onclick="A.wzAttach()">Attach</button></div>
           <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${d.attachments.map(a=>`<span class="chip chip-grey">📎 ${esc(a)}</span>`).join("")||'<span class="cap">Nothing attached yet</span>'}</div></div>
@@ -869,7 +1313,7 @@ function vWizard(){
       ${w.step>1?'<button class="btn" onclick="A.wzBack()">← Back</button>':'<button class="btn" onclick="A.nav(\'clients\')">Cancel</button>'}
       <span style="flex:1"></span>
       ${w.step<4?'<button class="btn btn-p" onclick="A.wzNext()">Continue →</button>'
-                :'<button class="btn btn-p" onclick="A.wzFinish()">Create client & start journey</button>'}
+                :'<button class="btn btn-p" onclick="A.wzFinish()">Create client — journeys instantiate locked + login issued</button>'}
     </div>
   </div>`, "wizard");
 }
@@ -889,77 +1333,191 @@ function segState(s){
   if(s.status==="CURRENT") return s.pct>=100 ? "⚠ BREACHED" : "▶ IN PROGRESS";
   return "○ PENDING";
 }
+function prqChip(t){
+  return t.status==="VERIFIED" ? '<span class="chip chip-green">✓ Verified</span>'
+       : t.status==="SUBMITTED"? '<span class="chip chip-amber">📥 Submitted — awaiting verification</span>'
+       : t.status==="SKIPPED"  ? '<span class="chip chip-grey">⏭ Skipped</span>'
+       : '<span class="chip chip-grey">○ Pending with client</span>';
+}
+function prqOpenState(c){
+  return S.prqOpen[c.id] !== undefined ? S.prqOpen[c.id] : !gateOk(c);  // open until cleared
+}
+A.togglePrq = cid=>{ const c=CLIENTS.find(x=>x.id===cid); S.prqOpen[cid]=!prqOpenState(c); render(); };
+function prqPanel(c, staff){
+  const mand = c.prereqs.filter(t=>t.mand);
+  const mandOk = mand.filter(t=>t.status==="VERIFIED").length;
+  const cleared = gateOk(c);
+  const open = prqOpenState(c);
+  return `<div class="prq${open?" open":""}" aria-label="Client prerequisites">
+    <button class="prq-h" onclick="A.togglePrq('${c.id}')" aria-expanded="${open}">
+      <b style="font-size:13.5px">📋 Prerequisites — client responsibilities before any journey starts</b>
+      <span class="chip ${cleared?"chip-green":"chip-amber"}">${cleared?"✓ Cleared — gate open":`${mandOk}/${mand.length} mandatory verified — journeys locked`}</span>
+      <div class="gatebar" role="img" aria-label="${mandOk} of ${mand.length} mandatory verified"><i style="width:${mand.length?Math.round(mandOk/mand.length*100):100}%"></i></div>
+      <span class="cap" aria-hidden="true">${open?"▲":"▼"}</span>
+    </button>
+    <div class="prq-body">
+    ${c.prereqs.map((t,qi)=>`<div class="prq-row">
+      <div class="ttl">${esc(t.title)} ${t.mand?'<span class="chip chip-red" style="font-size:10px">MANDATORY</span>':'<span class="chip chip-grey" style="font-size:10px">OPTIONAL</span>'}
+        <div class="cap" style="font-weight:400;margin-top:3px">${esc(t.desc)} · TAT ${t.tat}d · due ${esc(t.due)}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:5px">
+          ${t.refDoc?`<span class="chip chip-blue">📄 ${esc(t.refDoc)} <span class="cap">(reference)</span></span>`:""}
+          ${t.docs.map(d=>`<span class="chip chip-grey">📎 ${esc(d)}</span>`).join("")}
+        </div>
+        ${t.comments.length?`<div class="cap" style="margin-top:5px">💬 ${t.comments.map(m=>esc(m.by)+": “"+esc(m.text)+"”").join(" · ")}</div>`:""}
+        ${t.status==="SKIPPED"&&t.skipReason?`<div class="cap" style="margin-top:4px">⏭ ${esc(t.skipReason)}</div>`:""}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+        ${prqChip(t)}
+        ${staff && S.user.role!=="VIEWER" ? `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${t.status==="SUBMITTED"||t.status==="PENDING"?`<button class="btn btn-sm" onclick="A.prVerify('${c.id}',${qi})">✓ Verify</button>`:""}
+          ${t.status==="SUBMITTED"?`<button class="btn btn-sm" onclick="A.prReturn('${c.id}',${qi})">↩ Return</button>`:""}
+          ${!t.mand && (t.status==="PENDING"||t.status==="SUBMITTED")?`<input id="prskip-${qi}" placeholder="Skip reason…" style="width:150px;padding:4px 8px;font-size:12px"><button class="btn btn-sm" onclick="A.prSkip('${c.id}',${qi})">⏭ Skip & proceed</button>`:""}
+        </div>`:""}
+        ${!staff && (t.status==="PENDING") ? `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          <input id="prdoc-${qi}" placeholder="Attach file… e.g. data.xlsx" style="width:170px;padding:4px 8px;font-size:12px">
+          <button class="btn btn-p btn-sm" onclick="A.prSubmit('${c.id}',${qi})">Submit for verification</button></div>`:""}
+        ${!staff ? `<div style="display:flex;gap:6px"><input id="prcm-${qi}" placeholder="Add a comment…" style="width:200px;padding:4px 8px;font-size:12px"><button class="btn btn-sm" onclick="A.prComment('${c.id}',${qi})">💬</button></div>`:""}
+      </div>
+    </div>`).join("")}
+    </div>
+  </div>`;
+}
 function vClient(){
   const c = CLIENTS.find(x=>x.id===S.params.id);
   if(!c) return shell('<div class="content"><div class="card empty">Client not found (404 — out-of-scope IDs don’t reveal existence).</div></div>',"clients");
-  const selIdx = S.params.step ?? Math.min(currentIdx(c), c.steps.length-1);
-  const s = c.steps[selIdx];
+  let ji = S.params.j;
+  if(ji===undefined){ ji = c.journeys.findIndex(j=>j.gate!=="LOCKED" && j.steps.some(s=>s.status!=="DONE")); if(ji<0) ji=0; }
+  const jn = c.journeys[ji], steps = jn.steps;
+  const selIdx = Math.min(S.params.step ?? Math.max(steps.findIndex(x=>x.status!=="DONE"),0), steps.length-1);
+  const s = steps[selIdx];
   const rag = clientRag(c);
-  const doneCount = c.steps.filter(x=>x.status==="DONE").length;
-  const editable = canEditStep(c, selIdx) && c.status!=="LIVE";
+  const editable = canEditStep(c, ji, selIdx) && c.status!=="LIVE" && jn.gate!=="LOCKED";
   const owner = uById(s.owner);
-  const ribbon = c.steps.map((st,i)=>{
+  const ribbon = steps.map((st,i)=>{
     const tat = st.status==="DONE" ? "" :
       `<div class="tatbar ${st.pct>=100?"red":st.pct>=SETTINGS.amber?"amber":""}"><i style="width:${Math.min(100,st.pct)}%"></i></div>`;
-    return `${i>0?`<div class="conn${c.steps[i-1].status==="DONE"?"":" pend"}" aria-hidden="true"><i></i></div>`:""}
-      <button class="seg ${segClass(st)}${i===selIdx?" sel":""}" onclick="A.selStep('${c.id}',${i})" aria-label="Step ${i+1}: ${esc(st.name)}, ${segState(st)}">
-        <div class="st">${segState(st)}</div><div class="nm">${i+1}. ${esc(st.name)}</div>
+    return `${i>0?`<div class="conn${steps[i-1].status==="DONE"?"":" pend"}" aria-hidden="true"><i></i></div>`:""}
+      <button class="seg ${segClass(st)}${i===selIdx?" sel":""}" onclick="A.selStep('${c.id}',${i},${ji})" aria-label="Step ${i+1}: ${esc(st.name)}, ${segState(st)}">
+        <div class="st">${segState(st)}<span style="margin-left:auto">${stEmoji(st)}</span></div><div class="nm">${i+1}. ${esc(st.name)}</div>
         <div class="meta"><span class="avatar" style="width:20px;height:20px;font-size:9px">${initials(uById(st.owner).name)}</span>
-          <span>${st.status==="DONE"?"Done":st.tat+"h TAT"}${st.subs.length?` · ☑ ${st.subs.filter(x=>x.val!==null).length}/${st.subs.length}`:""}</span></div>${tat}
+          <span>${st.status==="DONE"
+            ? `SD ${st.sd} · FD ${st.fd} · ${st.closed==="late"?"⚠ delayed":st.closed==="early"?"✓ early":"✓ on time"}`
+            : st.tat+"d TAT"+(st.sd?` · SD ${st.sd}`:"")}<span title="${st.dep!=null?"Depends on service "+(st.dep+1):"No dependency — runs parallel"}">${st.dep!=null?" · ↳"+(st.dep+1):" · ∥"}</span>${st.status!=="DONE"&&st.subs.length?` · ☑ ${st.subs.filter(x=>x.val!==null).length}/${st.subs.length}`:""}</span></div>${tat}
       </button>`;
   }).join("");
   const docsMissing = s.docsReq.filter(d=>!s.docs.includes(d));
-  const actions = c.status==="LIVE" ? "" : !editable
+  const jnHeld = jDepBlocked(c, jn);
+  const actions = c.status==="LIVE" ? "" : jn.gate==="LOCKED"
+    ? `<p class="cap" style="background:var(--warning-soft);border-radius:8px;padding:10px 12px">🔒 This journey is <b>locked</b> — it starts automatically the moment every mandatory prerequisite above is verified (non-mandatory ones can be skipped by an Admin).</p>`
+    : jnHeld
+    ? `<p class="cap" style="background:var(--warning-soft);border-radius:8px;padding:10px 12px">⛓ This service <b>waits for “${esc(jnHeld)}” to complete</b> — it starts automatically the moment that journey finishes. Change the dependency on the Module Service page.</p>`
+    : !editable
     ? `<p class="cap" style="background:var(--bg-subtle);border-radius:8px;padding:10px 12px">You can view this step, but only <b>${esc(owner.name)}</b> (or a Manager/Admin) can update it — that's the role model working.</p>`
     : `<div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${s.status==="PENDING"?`<button class="btn btn-p btn-sm" onclick="A.stStart('${c.id}',${selIdx})">▶ Start step</button>`:""}
+        ${s.status==="PENDING"?`<button class="btn btn-p btn-sm" onclick="A.stStart('${c.id}',${ji},${selIdx})">▶ Start step</button>`:""}
         ${(s.status==="CURRENT")?`
           ${s.signoff? (s.signoffState==="REQUESTED"
-              ? `<button class="btn btn-sm" onclick="A.signoffOpen('${c.id}',${selIdx})">🔗 Open client sign-off link (simulate)</button>`
-              : `<button class="btn btn-p btn-sm" onclick="A.signoffReq('${c.id}',${selIdx})">✉ Request client sign-off</button>`)
-            : `<button class="btn btn-p btn-sm" onclick="A.stComplete('${c.id}',${selIdx})">✓ Mark complete</button>`}
-          <button class="btn btn-sm" onclick="A.stWait('${c.id}',${selIdx})">⏸ Waiting on client</button>`:""}
-        ${(s.status==="WAITING"||s.status==="BLOCKED")?`<button class="btn btn-p btn-sm" onclick="A.stResume('${c.id}',${selIdx})">▶ Resume clock</button>`:""}
+              ? `<button class="btn btn-sm" onclick="A.signoffOpen('${c.id}',${ji},${selIdx})">🔗 Open client sign-off link (simulate)</button>`
+              : `<button class="btn btn-p btn-sm" onclick="A.signoffReq('${c.id}',${ji},${selIdx})">✉ Request client sign-off</button>`)
+            : `<button class="btn btn-p btn-sm" onclick="A.stComplete('${c.id}',${ji},${selIdx})">✓ Mark complete</button>`}
+          <button class="btn btn-sm" onclick="A.stWait('${c.id}',${ji},${selIdx})">⏸ Waiting on client</button>`:""}
+        ${(s.status==="WAITING"||s.status==="BLOCKED")?`<button class="btn btn-p btn-sm" onclick="A.stResume('${c.id}',${ji},${selIdx})">▶ Resume clock</button>`:""}
       </div>
       ${s.status!=="BLOCKED" && s.status!=="PENDING" ? `<div style="display:flex;gap:8px;margin-top:10px">
         <input id="blk-reason" placeholder="Block reason (mandatory) — e.g. awaiting vendor assets" style="flex:1">
-        <button class="btn btn-danger btn-sm" onclick="A.stBlock('${c.id}',${selIdx})">⛔ Block</button></div>`:""}
+        <button class="btn btn-danger btn-sm" onclick="A.stBlock('${c.id}',${ji},${selIdx})">⛔ Block</button></div>`:""}
       ${["OB_ADMIN","MANAGER"].includes(S.user.role)?`<div style="display:flex;gap:8px;margin-top:10px;align-items:center">
         <select id="re-owner" style="flex:1">${USERS.filter(u=>u.modules.includes("ONBOARDING")).map(u=>`<option value="${u.id}"${u.id===s.owner?" selected":""}>${esc(u.name)} · ${ROLE_LABEL[u.role]}</option>`).join("")}</select>
-        <button class="btn btn-sm" onclick="A.stReassign('${c.id}',${selIdx})">Reassign</button></div>`:""}`;
+        <button class="btn btn-sm" onclick="A.stReassign('${c.id}',${ji},${selIdx})">Reassign</button></div>`:""}`;
+  const jchip = j2 => { const held=jDepBlocked(c,j2); if(j2.gate!=="LOCKED"&&held) return `<span class="chip chip-amber">⛓ Waiting on ${esc(held)}</span>`;
+    return j2.gate==="LOCKED" ? '<span class="chip chip-grey">🔒 Locked — prerequisites</span>'
+    : j2.steps.every(x=>x.status==="DONE") ? '<span class="chip chip-green">✓ Complete</span>'
+    : j2.steps.map(stepRag).includes("RED") ? '<span class="chip chip-red">⚠ Attention</span>'
+    : j2.steps.map(stepRag).includes("AMBER") ? '<span class="chip chip-amber">⚠ At risk</span>'
+    : '<span class="chip chip-indigo">▶ In progress</span>'; };
+  const accordions = c.journeys.map((j2,k)=>{
+    const open = k===ji;
+    return `<div class="jacc">
+      <button class="jstrip" onclick="A.selJourney('${c.id}',${k})" aria-expanded="${open}">
+        <span style="font-size:18px" aria-hidden="true">${prodById(j2.prod).icon}</span>
+        <span class="jname">${esc(prodById(j2.prod).name)}</span>
+        <span class="cap">${esc(j2.tpl)} v${j2.ver} · ${j2.steps.length} services</span>
+        ${jchip(j2)}
+        ${jTatChip(j2)}
+        <span style="flex:1"></span>
+        ${jDots(j2)}
+        <span class="jpct">${jPct(j2)}%</span>
+        <span class="cap" aria-hidden="true">${open?"▲":"▼"}</span>
+      </button>
+      ${open?`<div class="jbody">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span class="eyebrow">Journey ribbon</span>
+          <span class="cap">TATs in working hours (weekends & holidays excluded)</span></div>
+        <div class="ribbon-wrap" style="background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;padding:12px">
+          <div class="ribbon" role="list">${ribbon}</div></div>
+        <div style="margin-top:14px">${stepCard(c, ji, selIdx, s, owner, editable, docsMissing, actions)}</div>
+      </div>`:""}
+    </div>`;
+  }).join("");
   return shell(`<div class="content">
     <button class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="A.nav('clients')">← All clients</button>
-    ${c.status==="LIVE"?`<div class="banner-live">🎉 Fully onboarded & LIVE since ${esc(c.liveAt)} — all 8 steps complete, final sign-off on record${c.csat?` · CSAT ${c.csat}/5`:""}.</div>`:""}
+    ${c.status==="LIVE"?`<div class="banner-live">🎉 Fully onboarded & LIVE since ${esc(c.liveAt)} — all ${c.journeys.length} journey${c.journeys.length>1?"s":""} complete, sign-offs on record${c.csat?` · CSAT ${c.csat}/5`:""}.</div>`:""}
     <div class="page-head">
       <div><h1 style="text-wrap:balance">${esc(c.name)}</h1>
-        <p class="cap" style="margin-top:4px">${esc(c.city)} · PAN ${maskPan(c.pan)} · ${esc(c.licenseType)} · Sales: ${esc(c.sales)} · Boarded ${esc(c.onboardDate)}</p></div>
+        <p class="cap" style="margin-top:4px">${esc(c.city)} · ${esc(c.licenseType)} · Sales: ${esc(c.sales)} · Boarded ${esc(c.onboardDate)} · Login: ${(CLIENT_ACCOUNTS.find(a=>a.clientId===c.id)||{}).username||"not issued"}</p></div>
       <span class="sp"></span>
-      <div style="text-align:right">${RAG_CHIP[rag]}<div class="cap" style="margin-top:6px">${doneCount}/8 steps complete</div></div>
+      <div style="text-align:right">${RAG_CHIP[rag]}<div class="cap" style="margin-top:6px">${c.journeys.length} product journey${c.journeys.length>1?"s":""}</div></div>
     </div>
-    <section class="card" style="padding:16px 20px" aria-label="Onboarding journey ribbon">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3>Onboarding journey</h3>
-        <span class="cap">· Standard SaaS Onboarding v3 · TATs in working hours (weekends & holidays excluded)</span></div>
-      <div class="ribbon-wrap"><div class="ribbon" role="list">${ribbon}</div></div>
-    </section>
-    <div class="split">
-      <section class="card" aria-label="Selected step detail">
+    ${prqPanel(c, true)}
+    ${accordions}
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <section class="card" aria-label="Client portal access" style="padding:20px">
+        <h3>Client portal access</h3>
+        <p class="cap" style="margin:6px 0 12px">One login per client — sees only their own journeys, prerequisites, sign-offs and tickets (view-only).</p>
+        ${(function(){ const a=CLIENT_ACCOUNTS.find(x=>x.clientId===c.id);
+          return a ? `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <span class="chip chip-green">🔑 ${a.username}</span><span class="chip chip-grey">Active</span>
+              ${["OB_ADMIN","MANAGER"].includes(S.user.role)?`<button class="btn btn-sm" onclick="A.acctReset('${c.id}')">Reset password</button>`:""}
+            </div>`
+          : ["OB_ADMIN","MANAGER"].includes(S.user.role)
+            ? `<button class="btn btn-p btn-sm" onclick="A.acctCreate('${c.id}')">🔑 Create client login</button>
+               <p class="cap" style="margin-top:8px">Generates a username and a one-time password, emailed to the primary SPOC; must change on first login.</p>`
+            : '<span class="cap">No login issued yet — an Admin or Manager can create one.</span>'; })()}
+      </section>
+      <section class="card" aria-label="Client information" style="padding:20px">
+        <h3>Client info</h3>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;font-size:13px">
+          <div><div class="eyebrow">SPOC</div>${c.spocs.map(sp=>`<div style="margin-top:4px">${esc(sp.name)}${sp.primary?' <span class="chip chip-indigo" style="font-size:10px">PRIMARY</span>':""}<div class="cap">${esc(sp.email)} · ${esc(sp.phone)}</div></div>`).join("")}</div>
+          <div><div class="eyebrow">Products bought</div><div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${c.journeys.map(j2=>`<span class="chip chip-grey">${prodById(j2.prod).icon} ${esc(prodById(j2.prod).name)}</span>`).join("")}</div></div>
+          <div><div class="eyebrow">Requirements</div><div style="margin-top:4px">${esc(c.requirements)}</div></div>
+          <div><div class="eyebrow">Address</div><div style="margin-top:4px" class="cap">${esc(c.addr)}</div></div>
+          <div><div class="eyebrow">Attachments (${c.attachments.length})</div><div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${c.attachments.map(a=>`<span class="chip chip-grey">📎 ${esc(a)}</span>`).join("")||'<span class="cap">None</span>'}</div></div>
+        </div>
+      </section>
+    </div>
+  </div>`, "clients");
+}
+function stepCard(c, ji, selIdx, s, owner, editable, docsMissing, actions){
+  const steps = c.journeys[ji].steps;
+  return `<section class="card" aria-label="Selected step detail">
         <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
-          <div><div class="eyebrow">Step ${selIdx+1} of 8</div><h2 style="margin-top:2px">${esc(s.name)}</h2></div>
+          <div><div class="eyebrow">Service ${selIdx+1} of ${steps.length}</div><h2 style="margin-top:2px">${esc(s.name)} ${stEmoji(s)}</h2></div>
           <span class="sp" style="flex:1"></span>${chipStatus(s)}
         </div>
         <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin:14px 0 18px">
           <div><div class="eyebrow">Responsible</div><div style="display:flex;align-items:center;gap:8px;margin-top:4px"><span class="avatar">${initials(owner.name)}</span>${esc(owner.name)}</div></div>
-          <div><div class="eyebrow">TAT</div><div style="margin-top:4px">${s.tat} working hrs</div></div>
+          <div><div class="eyebrow">TAT</div><div style="margin-top:4px">${s.tat} working day(s)</div></div>
           <div><div class="eyebrow">Due</div><div style="margin-top:4px">${s.status==="DONE"?"Completed "+esc(s.completedOn||""):esc(s.due||"—")}</div></div>
           <div><div class="eyebrow">TAT used</div><div style="margin-top:4px;font-weight:600;color:${s.pct>=100?"var(--danger)":s.pct>=SETTINGS.amber?"var(--warning)":"var(--success)"}">${Math.min(s.pct,999)}%</div></div>
-          <div><div class="eyebrow">Sub-categories</div><div style="margin-top:4px">☑ ${s.subs.filter(x=>x.val!==null).length}/${s.subs.length} answered</div></div>
+          <div><div class="eyebrow">Task list</div><div style="margin-top:4px">☑ ${s.subs.filter(x=>x.val!==null).length}/${s.subs.length} answered</div></div>
         </div>
+        ${s.clientEsc?`<div class="err" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">🚨 <b>Client escalation</b> — “${esc(s.clientEsc.text)}” <span class="cap">(${esc(s.clientEsc.by)}, ${esc(s.clientEsc.when)})</span>
+          ${["OB_ADMIN","MANAGER"].includes(S.user.role)?`<button class="btn btn-sm" style="margin-left:auto" onclick="A.escResolve('${c.id}',${ji},${selIdx})">✓ Resolve & acknowledge</button>`:""}</div>`:""}
         ${s.blockReason?`<div class="err">⛔ Blocked: ${esc(s.blockReason)}</div>`:""}
         ${s.signoff?`<p class="cap" style="margin-bottom:12px">✍️ This step requires <b>client sign-off</b> — status: <b>${s.signoffState==="NONE"?"not yet requested":s.signoffState==="REQUESTED"?"link sent, awaiting client":s.signoffState==="ACCEPTED"?"accepted ✓":"objection raised ⚠"}</b></p>`:""}
         ${s.docsReq.length?`<p class="cap" style="margin-bottom:12px">📋 Required documents: ${s.docsReq.map(d=>s.docs.includes(d)?`<span class="chip chip-green">✓ ${esc(d)}</span>`:`<span class="chip chip-grey">○ ${esc(d)}</span>`).join(" ")}</p>`:""}
         ${s.subs.length?`<div style="border:1px solid var(--border);border-radius:10px;margin-bottom:16px;overflow:hidden">
           <div style="padding:9px 14px;background:var(--bg-subtle);display:flex;align-items:center;gap:8px">
-            <b style="font-size:13px">Sub-categories</b>
+            <b style="font-size:13px">Task List</b>
             <span class="cap">${s.subs.filter(x=>x.val!==null).length}/${s.subs.length} answered${s.subs.some(x=>x.val===false)?" · has exceptions":""}</span>
             <span class="cap" style="margin-left:auto">step can't complete until all are answered; False needs a remark</span></div>
           ${s.subs.map((sb,j)=>{
@@ -968,62 +1526,38 @@ function vClient(){
               <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                 <span style="font-size:13px;font-weight:500;flex:1;min-width:160px">${esc(sb.name)}</span>
                 ${canAns?`<span style="display:inline-flex;gap:6px" role="group" aria-label="${esc(sb.name)} answer">
-                  <button class="btn btn-sm" style="${sb.val===true?"background:var(--success-soft);border-color:#A7F3D0;color:#047857;font-weight:700":""}" onclick="A.subSet('${c.id}',${selIdx},${j},true)" aria-pressed="${sb.val===true}">✓ True</button>
-                  <button class="btn btn-sm" style="${sb.val===false?"background:var(--danger-soft);border-color:#FECACA;color:#B91C1C;font-weight:700":""}" onclick="A.subSet('${c.id}',${selIdx},${j},false)" aria-pressed="${sb.val===false}">✗ False</button></span>`
+                  <button class="btn btn-sm" style="${sb.val===true?"background:var(--success-soft);border-color:#A7F3D0;color:#047857;font-weight:700":""}" onclick="A.subSet('${c.id}',${ji},${selIdx},${j},true)" aria-pressed="${sb.val===true}">✓ True</button>
+                  <button class="btn btn-sm" style="${sb.val===false?"background:var(--danger-soft);border-color:#FECACA;color:#B91C1C;font-weight:700":""}" onclick="A.subSet('${c.id}',${ji},${selIdx},${j},false)" aria-pressed="${sb.val===false}">✗ False</button></span>`
                 : sb.val===null?'<span class="chip chip-grey">— Unanswered</span>':sb.val?'<span class="chip chip-green">✓ True</span>':'<span class="chip chip-red">✗ False</span>'}
               </div>
-              ${canAns?`<input value="${esc(sb.remark)}" placeholder="Remark${sb.val===false?" (required for a False answer)":" (optional)"}…" style="margin-top:8px;font-size:13px" onchange="A.subRemark('${c.id}',${selIdx},${j},this.value)" aria-label="Remark for ${esc(sb.name)}">`
+              ${canAns?`<input value="${esc(sb.remark)}" placeholder="Remark${sb.val===false?" (required for a False answer)":" (optional)"}…" style="margin-top:8px;font-size:13px" onchange="A.subRemark('${c.id}',${ji},${selIdx},${j},this.value)" aria-label="Remark for ${esc(sb.name)}">`
                 : sb.remark?`<div class="cap" style="margin-top:6px">📝 ${esc(sb.remark)}</div>`:""}
             </div>`;}).join("")}
         </div>`:""}
         ${actions}
         ${editable && s.status!=="PENDING" ? `<div style="display:flex;gap:8px;margin-top:10px">
           <input id="doc-name" placeholder="Attach a document… ${docsMissing.length?"e.g. "+esc(docsMissing[0]):""}" style="flex:1">
-          <button class="btn btn-sm" onclick="A.stAttach('${c.id}',${selIdx})">📎 Attach</button></div>`:""}
+          <button class="btn btn-sm" onclick="A.stAttach('${c.id}',${ji},${selIdx})">📎 Attach</button></div>`:""}
         <h3 style="margin:22px 0 4px">Communication on this step</h3>
         <p class="cap" style="margin-bottom:14px">Append-only — corrections are new entries, never edits.</p>
         ${editable && s.status!=="PENDING" && c.status!=="LIVE" ? `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
           <select id="cm-type" style="width:130px">${["CALL","EMAIL","WHATSAPP","MEETING","NOTE"].map(t=>`<option>${t}</option>`).join("")}</select>
           <select id="cm-dir" style="width:110px"><option value="OUT">Outbound</option><option value="IN">Inbound</option><option value="INT">Internal</option></select>
           <input id="cm-text" placeholder="What was communicated?" style="flex:1;min-width:180px">
-          <button class="btn btn-p btn-sm" onclick="A.stComm('${c.id}',${selIdx})">Log</button></div>`:""}
+          <button class="btn btn-p btn-sm" onclick="A.stComm('${c.id}',${ji},${selIdx})">Log</button></div>`:""}
         ${s.comms.length? `<ul class="tl">${s.comms.slice().reverse().map(m=>`<li>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip chip-${m.type==="WHATSAPP"?"green":m.type==="EMAIL"?"blue":m.type==="CALL"?"indigo":"grey"}">${m.type}</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip chip-${m.type==="ESCALATION"?"red":m.type==="WHATSAPP"?"green":m.type==="EMAIL"?"blue":m.type==="CALL"?"indigo":"grey"}">${m.type}</span>
             <b style="font-size:13px">${esc(m.by)}</b><span class="cap">${esc(m.when)} · ${m.dir==="IN"?"inbound":m.dir==="OUT"?"outbound":"internal"}</span></div>
             <div style="margin-top:4px;font-size:13px">${esc(m.text)}</div></li>`).join("")}</ul>`
           : '<div class="empty cap">No communication logged on this step yet.</div>'}
-      </section>
-      <div style="display:flex;flex-direction:column;gap:20px">
-        <section class="card" aria-label="Payments">
-          <h3>Payments</h3>
-          <div class="tblwrap" style="margin-top:10px"><table>
-            <thead><tr><th>Type</th><th>Amount</th><th>Due</th><th>Status</th></tr></thead>
-            <tbody>${c.payments.map(p=>`<tr><td>${p.kind}<div class="cap">${esc(p.mode)}${p.ref?" · "+esc(p.ref):""}</div></td>
-              <td>${money(p.amount)}</td><td class="cap">${esc(p.due)}</td>
-              <td>${p.recv?`<span class="chip chip-green">✓ ${esc(p.recv)}</span>`:'<span class="chip chip-amber">○ Pending</span>'}</td></tr>`).join("")}</tbody>
-          </table></div>
-          ${canSeeMoney()?"":'<p class="cap" style="margin-top:8px">Amounts are masked for your role.</p>'}
-        </section>
-        <section class="card" aria-label="Client information">
-          <h3>Client info</h3>
-          <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;font-size:13px">
-            <div><div class="eyebrow">SPOC</div>${c.spocs.map(sp=>`<div style="margin-top:4px">${esc(sp.name)}${sp.primary?' <span class="chip chip-indigo" style="font-size:10px">PRIMARY</span>':""}<div class="cap">${esc(sp.email)} · ${esc(sp.phone)}</div></div>`).join("")}</div>
-            <div><div class="eyebrow">Applications bought</div><div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${c.apps.map(a=>`<span class="chip chip-grey">${esc(a.name)} · ${esc(a.lic)} · ${a.units}</span>`).join("")}</div></div>
-            <div><div class="eyebrow">Requirements</div><div style="margin-top:4px">${esc(c.requirements)}</div></div>
-            <div><div class="eyebrow">Address</div><div style="margin-top:4px" class="cap">${esc(c.addr)}</div></div>
-            <div><div class="eyebrow">Attachments (${c.attachments.length})</div><div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${c.attachments.map(a=>`<span class="chip chip-grey">📎 ${esc(a)}</span>`).join("")||'<span class="cap">None</span>'}</div></div>
-          </div>
-        </section>
-      </div>
-    </div>
-  </div>`, "clients");
+      </section>`;
 }
 
 /* ---------- sign-off (public page simulation) ---------- */
 function vSignoff(){
-  const {cid,i,verified,err}=S.signoff;
-  const c=CLIENTS.find(x=>x.id===cid); const s=c.steps[i];
-  const isFinal = i===c.steps.length-1;
+  const {cid,ji,i,verified,err}=S.signoff;
+  const c=CLIENTS.find(x=>x.id===cid); const s=c.journeys[ji].steps[i];
+  const isFinal = i===c.journeys[ji].steps.length-1;
   return `<div class="center-page" style="background:var(--bg-app)">
     <div class="logo"><div class="logo-mark">E</div>EduTrack · secure sign-off</div>
     <div class="card" style="width:520px;max-width:100%">
@@ -1038,7 +1572,7 @@ function vSignoff(){
       ` : `
         <div style="background:var(--bg-subtle);border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px">
           <div class="eyebrow" style="margin-bottom:6px">You are signing off on</div>
-          ${isFinal? `All 8 onboarding steps for <b>${esc(c.name)}</b>, including requirements, data migration, configuration, training and UAT. Accepting marks the client <b>fully onboarded and Live</b>.`
+          ${isFinal? `All ${c.journeys[ji].steps.length} steps of the <b>${esc(prodById(c.journeys[ji].prod).name)}</b> journey for <b>${esc(c.name)}</b>. Accepting completes this journey${c.journeys.length>1?" — the client goes Live when every product's journey is complete":" and marks the client <b>fully onboarded and Live</b>"}.`
                    : `<b>${esc(s.name)}</b> — delivered by ${esc(uById(s.owner).name)}. ${s.docs.length?"Documents on record: "+s.docs.map(esc).join(", ")+".":""}`}
         </div>
         <div style="display:flex;flex-direction:column;gap:10px">
@@ -1049,48 +1583,88 @@ function vSignoff(){
         ${err?`<div class="err" role="alert" style="margin-top:10px">${esc(err)}</div>`:""}
       `}
     </div>
-    <button class="btn btn-ghost btn-sm" onclick="S.signoff=null;go('client',{id:'${cid}',step:${i}})">← Back to EduTrack (exit client view)</button>
+    <button class="btn btn-ghost btn-sm" onclick="S.signoff=null;go(S.user&&S.user.role==='CLIENT'?'cphome':'client',{id:'${cid}',j:${ji},step:${i}})">← Back${S.user&&S.user.role==="CLIENT"?" to your portal":" to EduTrack (exit client view)"}</button>
   </div>`;
 }
 
 /* ---------- templates ---------- */
 function vTemplates(){
   return shell(`<div class="content">
-    <div class="page-head"><div><h1>Journey templates</h1><p class="cap" style="margin-top:2px">Admin-defined journeys. Editing publishes a new version; in-flight clients keep theirs.</p></div></div>
+    <div class="page-head"><div><h1>Module Service</h1><p class="cap" style="margin-top:2px">Each product's journey is defined here as a Module Service — its services, their dependencies, task lists and TATs. Editing publishes a new version; in-flight clients keep theirs.</p></div></div>
+    <div class="card" style="padding:14px 20px;display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px"><label for="tn-name">Create a new module service</label><input id="tn-name" placeholder="Template name — e.g. RFID Card Rollout"></div>
+      <div><label for="tn-prod">For product</label><select id="tn-prod">${PRODUCTS.map(p=>`<option value="${p.id}">${p.icon} ${esc(p.name)}</option>`).join("")}</select></div>
+      <button class="btn btn-p" onclick="A.tplNew()">+ Create module service</button>
+    </div>
+    <div class="card" style="padding:12px 20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="eyebrow">Show services for</span>
+      <select style="max-width:260px" onchange="A.msFilter(this.value)">
+        <option value="ALL"${S.msProd==="ALL"?" selected":""}>All products</option>
+        ${PRODUCTS.map(p=>`<option value="${p.id}"${S.msProd===p.id?" selected":""}>${p.icon} ${esc(p.name)}</option>`).join("")}
+      </select>
+      <span class="cap">Card order below is the service sequence — it drives the order journeys are instantiated and shown for every new client. Use ↑ ↓ to re-sequence.</span>
+    </div>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
-      ${TEMPLATES.map(t=>`<div class="card">
-        <div style="display:flex;align-items:center;gap:8px"><h3>${esc(t.name)}</h3><span class="chip chip-indigo">v${t.version}</span>${t.active?'<span class="chip chip-green">Default</span>':""}</div>
+      ${TEMPLATES.filter(t=>S.msProd==="ALL"||t.product===S.msProd).map(t=>{
+        const seq=TEMPLATES.indexOf(t)+1;
+        const depOpts=TEMPLATES.filter(o=>o.id!==t.id && !msDepChain(o.id).includes(t.id));
+        return `<div class="card">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span class="chip chip-grey num" title="Service sequence">#${seq}</span><h3>${esc(t.name)}</h3><span class="chip chip-indigo">v${t.version}</span>
+          <span style="margin-left:auto;display:inline-flex;gap:4px">
+            <button class="btn btn-sm" onclick="A.msMove('${t.id}',-1)" aria-label="Move ${esc(t.name)} up">↑</button>
+            <button class="btn btn-sm" onclick="A.msMove('${t.id}',1)" aria-label="Move ${esc(t.name)} down">↓</button></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <span class="chip chip-grey">${prodById(t.product).icon} ${esc(prodById(t.product).name)}</span>
+          <span class="chip chip-indigo" title="Sum of all service TATs">⏱ ${t.steps.reduce((a,s)=>a+s.tat,0)}d total TAT</span>
+          ${t.active?'<span class="chip chip-green">Active for product</span>':""}
+          ${t.dep?`<span class="chip chip-amber">⛓ after ${esc((TEMPLATES.find(x=>x.id===t.dep)||{}).name||"?")}</span>`:'<span class="chip chip-grey">∥ parallel</span>'}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <label style="margin:0;white-space:nowrap" for="msdep-${t.id}">Service depends on</label>
+          <select id="msdep-${t.id}" style="flex:1" onchange="A.msDep('${t.id}',this.value)">
+            <option value=""${!t.dep?" selected":""}>∥ No dependency — runs parallel</option>
+            ${depOpts.map(o=>`<option value="${o.id}"${t.dep===o.id?" selected":""}>⛓ ${esc(o.name)} (${esc(prodById(o.product).name)})</option>`).join("")}
+          </select>
+        </div>
         <ol style="margin:12px 0 16px 18px;font-size:13px;display:flex;flex-direction:column;gap:6px">
-          ${t.steps.map(s=>`<li>${esc(s.name)} <span class="cap">· ${s.tat}h · ${esc(uById(s.owner).name)} · ${s.subs.length} sub-categor${s.subs.length===1?"y":"ies"}${s.signoff?" · ✍️ client sign-off":""}</span></li>`).join("")}
+          ${t.steps.map(st=>`<li>${esc(st.name)} <span class="cap">· ${st.tat}d · ${esc(uById(st.owner).name)} · ${st.dep!=null?`↳ after step ${st.dep+1}`:"∥ parallel"}${st.signoff?" · ✍️ client sign-off":""}</span></li>`).join("")}
         </ol>
         <button class="btn btn-sm" onclick="A.tplEdit('${t.id}')">✎ Edit (publishes v${t.version+1})</button>
-      </div>`).join("")}
+      </div>`;}).join("")}
     </div>
   </div>`, "templates");
 }
 function vTplEdit(){
   const t=S.tplEdit;
   return shell(`<div class="content" style="max-width:900px">
-    <button class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="A.nav('templates')">← Templates</button>
-    <div class="page-head"><div><h1>${esc(t.name)}</h1><p class="cap" style="margin-top:2px">Editing v${t.version} → will publish as <b>v${t.version+1}</b>. Clients already in flight keep v${t.version}.</p></div>
-      <span class="sp"></span><button class="btn btn-p" onclick="A.tplSave()">Publish v${t.version+1}</button></div>
+    <button class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="A.nav('templates')">← Module Service</button>
+    <div class="page-head"><div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="te-name" value="${esc(t.name)}" style="font-size:18px;font-weight:650;max-width:380px" aria-label="Template name"><span class="chip chip-grey">${prodById(t.product).icon} ${esc(prodById(t.product).name)}</span></div>
+      <p class="cap" style="margin-top:6px">${t.fresh?`New template — publishing creates <b>v1</b> for ${esc(prodById(t.product).name)}.`:`Editing v${t.version} → will publish as <b>v${t.version+1}</b>. Clients already in flight keep v${t.version}.`} · <b>Total TAT: ${t.steps.reduce((a,s)=>a+s.tat,0)}d</b> across ${t.steps.length} services</p></div>
+      <span class="sp"></span><button class="btn btn-p" onclick="A.tplSave()">Publish ${t.fresh?"v1":"v"+(t.version+1)}</button></div>
     <div class="card" style="padding:0"><div class="tblwrap"><table>
-      <thead><tr><th style="width:36px">#</th><th>Step name</th><th style="width:110px">TAT (hrs)</th><th style="width:200px">Default responsible</th><th style="width:90px">Sign-off</th><th style="width:130px">Order</th></tr></thead>
+      <thead><tr><th style="width:36px">#</th><th>Service name</th><th style="width:90px">TAT (days)</th><th style="width:180px">Default responsible</th><th style="width:190px">Service depends on</th><th style="width:80px">Sign-off</th><th style="width:130px">Order</th></tr></thead>
       <tbody>${t.steps.map((s,i)=>`<tr>
         <td class="cap">${i+1}</td>
         <td><input id="ts-n${i}" value="${esc(s.name)}" aria-label="Step ${i+1} name"></td>
         <td><input id="ts-t${i}" type="number" min="1" value="${s.tat}" aria-label="Step ${i+1} TAT hours"></td>
         <td><select id="ts-o${i}" aria-label="Step ${i+1} responsible">${USERS.filter(u=>u.modules.includes("ONBOARDING")).map(u=>`<option value="${u.id}"${u.id===s.owner?" selected":""}>${esc(u.name)}</option>`).join("")}</select></td>
+        <td><select id="ts-d${i}" aria-label="Step ${i+1} depends on" ${i===0?"disabled":""}>
+          <option value=""${s.dep==null?" selected":""}>∥ none — runs parallel</option>
+          ${t.steps.slice(0,i).map((p,pi)=>`<option value="${pi}"${s.dep===pi?" selected":""}>↳ ${pi+1}. ${esc(p.name)}</option>`).join("")}
+        </select></td>
         <td style="text-align:center"><input id="ts-s${i}" type="checkbox"${s.signoff?" checked":""} style="width:auto" aria-label="Step ${i+1} requires client sign-off"></td>
         <td><button class="btn btn-sm" onclick="A.tplMove(${i},-1)" aria-label="Move up">↑</button>
             <button class="btn btn-sm" onclick="A.tplMove(${i},1)" aria-label="Move down">↓</button>
             <button class="btn btn-sm" onclick="A.tplDel(${i})" aria-label="Delete step">✕</button></td>
       </tr>
       <tr><td style="border-top:0"></td><td colspan="5" style="border-top:0;padding-top:0">
-        <div class="cap" style="margin-bottom:6px">Sub-categories — shown when this step is clicked on the client page; each is answered True/False with a remark</div>
+        <div class="cap" style="margin-bottom:6px">Task list — shown when this service is clicked on the client page; each task is answered True/False with a remark</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-          ${s.subs.map((sb,j)=>`<span class="chip chip-grey">${esc(sb)}<button class="chip-x" onclick="A.tplSubDel(${i},${j})" aria-label="Remove sub-category ${esc(sb)}">✕</button></span>`).join("")}
-          <input id="ts-sub${i}" placeholder="Add a sub-category…" style="width:220px;padding:4px 10px;font-size:12px" onkeydown="if(event.key==='Enter')A.tplSubAdd(${i})">
+          ${s.subs.map((sb,j)=>`<span class="chip chip-grey">${esc(sb)}<button class="chip-x" onclick="A.tplSubDel(${i},${j})" aria-label="Remove task ${esc(sb)}">✕</button></span>`).join("")}
+          <input id="ts-sub${i}" placeholder="Add a task…" style="width:220px;padding:4px 10px;font-size:12px" onkeydown="if(event.key==='Enter')A.tplSubAdd(${i})">
           <button class="btn btn-sm" onclick="A.tplSubAdd(${i})">+ Add</button>
         </div>
       </td></tr>`).join("")}</tbody>
@@ -1160,7 +1734,7 @@ function vMsgTpl(){
 /* ---------- reports ---------- */
 function vReports(){
   const active = CLIENTS.filter(c=>c.status==="ONBOARDING");
-  const tabs=[["funnel","Funnel"],["tat","TAT compliance"],["ttl","Time to live"],["pay","Payments"],["sales","Sales pipeline"],["aging","Stuck & aging"],["signoff","Sign-offs pending"]];
+  const tabs=[["funnel","Funnel"],["tat","TAT compliance"],["ttl","Time to live"],["sales","Sales pipeline"],["aging","Stuck & aging"],["signoff","Sign-offs pending"]];
   let body="";
   if(S.reportTab==="funnel"){
     const funnel = TPL_STEPS.map((t,i)=>({name:(i+1)+". "+t.name, n: active.filter(c=>currentIdx(c)===i).length}));
@@ -1192,25 +1766,6 @@ function vReports(){
         ${days.map((d,i)=> (i===0||i===days.length-1)?`<text x="${x(i)}" y="${y(d)-10}" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">${d}</text>`:"").join("")}
         ${months.map((m,i)=>`<text x="${x(i)}" y="${H-P+16}" text-anchor="middle" font-size="11" fill="#6B7280">${m}</text>`).join("")}
       </svg></div>`;
-  }
-  if(S.reportTab==="pay"){
-    const months=["Mar","Apr","May","Jun","Jul","Aug"];
-    const recvd=[6.2,7.5,5.8,9.4,11.2,8.1], out=[2.1,1.8,3.4,2.6,4.0,6.3]; // lakhs
-    const maxV=12;
-    const totalOut = CLIENTS.flatMap(c=>c.payments).filter(p=>!p.recv).reduce((a,p)=>a+p.amount,0);
-    body=`<h3>Collections — received vs outstanding (₹ lakh)</h3>
-      <div class="legend" style="margin:6px 0 10px"><span><span class="sw" style="background:var(--chart-1)"></span>Received</span><span><span class="sw" style="background:var(--chart-2)"></span>Outstanding</span></div>
-      <div class="vbars" role="img" aria-label="Monthly bar chart of payments received versus outstanding, March to August">
-        ${months.map((m,i)=>`<div class="vbar-g"><div class="vbar-stack">
-          <div class="vbar" style="height:${Math.round(recvd[i]/maxV*130)}px" onmouseenter="tipOn(event,'${m}: received <b>₹${recvd[i]}L</b>')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></div>
-          <div class="vbar c2" style="height:${Math.round(out[i]/maxV*130)}px" onmouseenter="tipOn(event,'${m}: outstanding <b>₹${out[i]}L</b>')" onmousemove="tipMove(event)" onmouseleave="tipOff()"></div>
-        </div><span class="vbar-v">${recvd[i]} / ${out[i]}</span><span class="vbar-x">${m}</span></div>`).join("")}
-      </div>
-      <h3 style="margin-top:20px">Outstanding by client ${canSeeMoney()?`— total ${inr(totalOut)}`:""}</h3>
-      <div class="tblwrap" style="margin-top:8px"><table><thead><tr><th>Client</th><th>Type</th><th>Amount</th><th>Due</th><th>Mode</th></tr></thead><tbody>
-        ${CLIENTS.flatMap(c=>c.payments.filter(p=>!p.recv).map(p=>({c,p}))).map(x=>`<tr class="rowlink" tabindex="0" onclick="A.selStep('${x.c.id}',0)">
-          <td><b>${esc(x.c.name)}</b></td><td>${x.p.kind}</td><td>${money(x.p.amount)}</td><td class="cap">${esc(x.p.due)}</td><td class="cap">${esc(x.p.mode)}</td></tr>`).join("")}
-      </tbody></table></div>${canSeeMoney()?"":'<p class="cap" style="margin-top:8px">Amounts are masked for your role — sign in as Meera (finance@) to see them.</p>'}`;
   }
   if(S.reportTab==="sales"){
     const by={};
@@ -1248,15 +1803,141 @@ function vReports(){
   </div>`, "reports");
 }
 
+/* ---------- OB-14 prerequisites master ---------- */
+function vPrereqMaster(){
+  return shell(`<div class="content" style="max-width:900px">
+    <div class="page-head"><div><h1>Prerequisites master</h1>
+      <p class="cap" style="margin-top:2px">The default client-responsibility checklist — applied to every newly boarded client. Mandatory tasks gate every journey; existing clients keep the snapshot they were boarded with.</p></div></div>
+    <div class="card" style="padding:0"><div class="tblwrap"><table>
+      <thead><tr><th>Task</th><th style="width:90px">TAT (days)</th><th style="width:110px">Mandatory</th><th>Reference doc for client</th><th style="width:60px"></th></tr></thead>
+      <tbody>${PREREQ_MASTER.map((t,i)=>`<tr>
+        <td><b>${esc(t.title)}</b><div class="cap">${esc(t.desc)}</div></td>
+        <td class="num">${t.tat}</td>
+        <td><input type="checkbox" style="width:auto" ${t.mand?"checked":""} onchange="A.pmToggle(${i})" aria-label="Mandatory: ${esc(t.title)}"></td>
+        <td>${t.refDoc?`<span class="chip chip-blue">📄 ${esc(t.refDoc)}</span>`:'<span class="cap">—</span>'}</td>
+        <td><button class="btn btn-sm" onclick="A.pmDel(${i})" aria-label="Delete ${esc(t.title)}">✕</button></td></tr>`).join("")}</tbody>
+    </table></div></div>
+    <div class="card" style="padding:16px 20px">
+      <div class="eyebrow" style="margin-bottom:10px">Add a task</div>
+      <div class="frow">
+        <div><label for="pm-title">Title *</label><input id="pm-title" placeholder="e.g. Share GST certificate"></div>
+        <div><label for="pm-tat">TAT (working days)</label><input id="pm-tat" type="number" value="3"></div>
+        <div style="grid-column:1/-1"><label for="pm-desc">Description for the client</label><input id="pm-desc" placeholder="What exactly do they need to do?"></div>
+        <div><label for="pm-doc">Reference document (attached for the client)</label><input id="pm-doc" placeholder="e.g. GST_format_sample.pdf"></div>
+        <div style="display:flex;align-items:end;gap:14px"><label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--text)"><input id="pm-mand" type="checkbox" style="width:auto" checked> Mandatory (gates the journeys)</label>
+          <button class="btn btn-p" onclick="A.pmAdd()">+ Add to master</button></div>
+      </div>
+    </div>
+  </div>`, "prereqm");
+}
+
+/* ---------- client portal (CP-01..CP-07 — scoped to one client) ---------- */
+function pshell(inner, active){
+  const c = CLIENTS.find(x=>x.id===S.user.clientId);
+  return `<div style="min-height:100vh;background:var(--bg-app)">
+    <div class="ptop">
+      <div class="logo" style="font-size:15px"><div class="logo-mark">E</div>EduTrack · Client Portal</div>
+      <span class="chip chip-indigo">${esc(c.name)}</span>
+      <span class="sp" style="flex:1"></span>
+      <button class="btn btn-sm" onclick="A.nav('cpchooser')">⇄ Switch module</button>
+      <button class="btn btn-sm" onclick="A.logout()">Sign out</button>
+    </div>
+    <div class="pwrap">${inner}</div>
+    <p class="cap" style="text-align:center;padding:0 0 24px">You are seeing <b>your organisation's data only</b> — scoped server-side, out-of-scope requests return 404.</p>
+  </div>`;
+}
+function vCpChooser(){
+  const c = CLIENTS.find(x=>x.id===S.user.clientId);
+  const prPending = c.prereqs.filter(t=>t.status==="PENDING"||t.status==="SUBMITTED").length;
+  return `<div class="center-page">
+    <div class="logo"><div class="logo-mark">E</div>EduTrack · Client Portal</div>
+    <div style="text-align:center"><h1 style="text-wrap:balance">Welcome, ${esc(c.name)}</h1>
+      <p class="cap" style="margin-top:6px">Where would you like to go?</p></div>
+    <div class="mod-cards">
+      <button class="mod-card" onclick="A.enterModule('TICKETING')">
+        <div class="mod-ic" style="background:var(--info-soft)">🎫</div><h3>Ticketing System</h3>
+        <p class="cap" style="margin:6px 0 12px">View the status of your support tickets (read-only).</p>
+        <span class="chip chip-blue">Your tickets</span></button>
+      <button class="mod-card" onclick="A.enterModule('ONBOARDING')">
+        <div class="mod-ic" style="background:var(--primary-soft)">🧭</div><h3>Onboarding</h3>
+        <p class="cap" style="margin:6px 0 12px">Your journeys, prerequisites and sign-offs.</p>
+        <span class="chip chip-indigo">${c.journeys.length} journey${c.journeys.length>1?"s":""}</span>
+        ${prPending?`<span class="chip chip-amber">${prPending} prerequisite${prPending>1?"s":""} pending</span>`:'<span class="chip chip-green">✓ Prerequisites cleared</span>'}</button>
+    </div>
+    <button class="btn btn-ghost" onclick="A.logout()">Sign out</button>
+  </div>`;
+}
+function vCpHome(){
+  const c = CLIENTS.find(x=>x.id===S.user.clientId);
+  const ji = S.params.j ?? 0;
+  const accordions = c.journeys.map((j2,k)=>{
+    const open = k===ji;
+    return `<div class="jacc">
+      <button class="jstrip" onclick="go('cphome',{j:${k}})" aria-expanded="${open}">
+        <span style="font-size:18px" aria-hidden="true">${prodById(j2.prod).icon}</span>
+        <span class="jname">${esc(prodById(j2.prod).name)}</span>
+        ${j2.gate==="LOCKED"?'<span class="chip chip-amber">Waiting on your prerequisites</span>'
+          : jDepBlocked(c,j2)?`<span class="chip chip-grey">⛓ Starts after ${esc(jDepBlocked(c,j2))}</span>`
+          : j2.steps.every(x=>x.status==="DONE")?'<span class="chip chip-green">✓ Complete</span>':'<span class="chip chip-indigo">▶ In progress</span>'}
+        <span style="flex:1"></span>${jDots(j2)}<span class="jpct">${jPct(j2)}%</span>
+        <span class="cap" aria-hidden="true">${open?"▲":"▼"}</span></button>
+      ${open?`<div class="jbody">${j2.steps.map((st,si)=>`
+        <div style="display:flex;gap:10px;align-items:center;padding:9px 4px;border-top:1px solid var(--border);flex-wrap:wrap">
+          <span class="cap num" style="width:18px">${si+1}</span>
+          <span style="font-size:13px;font-weight:500;flex:1;min-width:160px">${esc(st.name)}</span>
+          ${st.signoff && st.signoffState==="REQUESTED" ? `<button class="btn btn-p btn-sm" onclick="A.signoffOpen('${c.id}',${k},${si})">✍ Review & sign off</button>`:""}
+          ${st.clientEsc?'<span class="chip chip-red">🚨 Escalated</span>'
+            : st.status!=="DONE"&&j2.gate!=="LOCKED"?`<button class="btn btn-sm" onclick="A.escToggle('${k}-${si}')">🚨 Escalate</button>`:""}
+          ${chipStatus(st)}
+        </div>
+        ${S.escOpen===k+"-"+si?`<div style="display:flex;gap:8px;padding:4px 4px 10px 32px;flex-wrap:wrap">
+          <input id="esc-${k}-${si}" placeholder="What is the concern? (required — goes straight to the onboarding manager)" style="flex:1;min-width:220px;font-size:13px">
+          <button class="btn btn-p btn-sm" onclick="A.cpEscalate('${c.id}',${k},${si})">Send escalation</button></div>`:""}`).join("")}
+        <p class="cap" style="margin-top:10px">Step-level progress only — who is working on each step and internal notes stay with the EduNext team.</p>
+      </div>`:""}
+    </div>`;
+  }).join("");
+  return pshell(`
+    <div><h2 style="text-wrap:balance">Your onboarding</h2>
+      <p class="cap" style="margin-top:3px">Complete the prerequisites below — your journeys start automatically once every mandatory item is verified.</p></div>
+    ${prqPanel(c, false)}
+    <div><div class="eyebrow" style="margin-bottom:8px">Your journeys — one per product</div>${accordions}</div>
+  `, "cphome");
+}
+const CP_TICKETS = {
+  c1:[["GV-2026-0141","Parent Portal login OTP delayed","Resolved","med","18 Aug"],
+      ["GV-2026-0139","Report card template — Marathi labels","In Progress","high","19 Aug"],
+      ["GV-2026-0127","Fee receipt duplicate numbering","Closed","med","11 Aug"]],
+  c7:[["LS-2026-0102","Photo consent workflow query","In Progress","low","19 Aug"]],
+};
+function vCpTickets(){
+  const c = CLIENTS.find(x=>x.id===S.user.clientId);
+  const rows = CP_TICKETS[c.id]||[];
+  return pshell(`
+    <div><h2>Your tickets</h2><p class="cap" style="margin-top:3px">Read-only — raising and updating tickets stays with our support desk. Only client-visible comments and attachments are shown here.</p></div>
+    <div class="card" style="padding:0"><div class="tblwrap"><table>
+      <thead><tr><th>Ticket</th><th>Subject</th><th>Status</th><th>Priority</th><th>Last update</th></tr></thead>
+      <tbody>${rows.length?rows.map(t=>`<tr>
+        <td class="num" style="font-weight:600;color:var(--primary)">${t[0]}</td><td>${esc(t[1])}</td>
+        <td><span class="chip ${t[2]==="Closed"||t[2]==="Resolved"?"chip-green":"chip-indigo"}">${t[2]}</span></td>
+        <td><span class="chip chip-${t[3]==="high"?"amber":"grey"}">${t[3].toUpperCase()}</span></td>
+        <td class="cap">${t[4]}</td></tr>`).join(""):`<tr><td colspan="5"><div class="empty cap">No tickets yet.</div></td></tr>`}</tbody>
+    </table></div></div>
+  `, "cptickets");
+}
+
 /* ============================== RENDER ============================== */
+const CLIENT_VIEWS = ["login","cpchooser","cphome","cptickets","signoff"];
 function render(){
   const app=$("app");
   const v=S.view;
   if(!S.user && v!=="login"){ S.view="login"; }
+  if(S.user && S.user.role==="CLIENT" && !CLIENT_VIEWS.includes(S.view)){ S.view="cpchooser"; S.params={}; }
   const map={login:vLogin, launcher:vLauncher, ticketing:vTicketing, dash:vDash, clients:vClients, client:vClient,
     wizard:vWizard, templates:vTemplates, tplEdit:vTplEdit, access:vAccess, settings:vSettings, msgtpl:vMsgTpl,
-    reports:vReports, signoff:vSignoff};
-  app.innerHTML = (map[S.view]||vLogin)();
+    reports:vReports, signoff:vSignoff, prereqm:vPrereqMaster,
+    cpchooser:vCpChooser, cphome:vCpHome, cptickets:vCpTickets};
+  app.innerHTML = (map[S.view]||vLogin)() + (S.drill? drillHTML() : "");
 }
 window.go = go; window.tipOn=tipOn; window.tipMove=tipMove; window.tipOff=tipOff; window.S=S;
 render();

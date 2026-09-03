@@ -221,3 +221,12 @@ Answer during M5:
 - Does auto-escalation to Critical stay Critical after closure, or revert for reporting? *(Recommended: keep `original_level` and report both — coordinate with Stream A on G-4.)*
 - Notification fatigue policy: which events default on vs off in the preference matrix? *(Blueprint §17 flags fatigue as a real risk — escalations should be reserved for genuine breaches.)*
 - Data retention for closed tickets and chat. *(Recommended: 3 years live, then archive.)*
+
+## OB3 — Notifications
+
+### WhatsApp
+### WhatsApp
+
+- [ ] **D-102** **Escalation notification events** — client escalation raised → immediate, unmutable alert to manager + service owner (email + WhatsApp); resolved → acknowledgement to the SPOC.
+
+- [ ] **D-101** **WhatsApp provider adapter** — behind the outbox with delivery webhooks (sent/delivered/read/failed); business templates submitted during OB1 so approval lead time never blocks OB3.
