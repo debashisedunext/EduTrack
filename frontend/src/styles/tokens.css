@@ -101,6 +101,21 @@
   --ribbon-breached:      #EF4444;
   --ribbon-breached-text: #B91C1C;
 
+  /* C-109 — the two onboarding-journey states phase 1 never needed: a step
+     paused on WAITING_ON_CLIENT (§5.7) and one BLOCKED internally. Values are
+     the existing --warning/--danger family, not new hex — WAITING reads as
+     amber-pending the same way REWORKED already borrows --warning, and
+     BLOCKED reads as a neutral card with a danger accent rather than a full
+     danger fill, since --ribbon-breached is what a *breached* step (the
+     overlay on CURRENT/BLOCKED once §5.9's scanner or the client-side TAT
+     percent says so) already owns. */
+  --ribbon-waiting-fg:    #F59E0B;
+  --ribbon-waiting-bg:    #FFFBEB;
+  --ribbon-waiting-text:  #B45309;
+  --ribbon-blocked-fg:    #EF4444;
+  --ribbon-blocked-bg:    #F1F3F9;
+  --ribbon-blocked-text:  #B91C1C;
+
   /* Native UI — scrollbars, form controls, the caret. Declared explicitly in
      both themes rather than left to the browser: without it a dark app renders
      light scrollbars and a light date picker, which is the give-away that a
@@ -209,6 +224,15 @@
   --ribbon-reworked-text: #FCD34D;
   --ribbon-breached:      #F87171;
   --ribbon-breached-text: #FCA5A5;
+
+  /* C-109 dark forms — same --warning/--danger family the dark chart/level
+     ramps already use, one or two Tailwind steps lighter than light's. */
+  --ribbon-waiting-fg:    #FBBF24;
+  --ribbon-waiting-bg:    #451A03;
+  --ribbon-waiting-text:  #FCD34D;
+  --ribbon-blocked-fg:    #F87171;
+  --ribbon-blocked-bg:    #1F2430;
+  --ribbon-blocked-text:  #FCA5A5;
 
   color-scheme: dark;
 }
