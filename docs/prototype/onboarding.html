@@ -398,14 +398,18 @@ const BIO_STEPS = [
   {name:"Go-live sign-off", dep:3,             tat:1,  owner:"u2", signoff:true,  docs:[], subs:["Attendance flowing to ERP","Support handover completed"]},
 ];
 TEMPLATES[0].product="p1"; TEMPLATES[1].product="p1";
-TEMPLATES.push({id:"t3", name:"Biometric Device Rollout", version:2, product:"p2", steps:cpSteps(BIO_STEPS), active:true});
+TEMPLATES.push({id:"t3", name:"Biometric Device Rollout", version:2, product:"p2", steps:cpSteps(BIO_STEPS), active:true, dep:"t1"});
+TEMPLATES.forEach(t=>{ if(t.dep===undefined) t.dep=null; });
 
 // wrap every client's flat steps into journeys[0] (ERP); c.steps stays aliased to journeys[0].steps
-CLIENTS.forEach(c=>{ c.journeys=[{prod:"p1", tpl:"Standard SaaS Onboarding", ver:3, gate:"OPEN", steps:c.steps}]; });
+CLIENTS.forEach(c=>{ c.journeys=[{prod:"p1", tplId:"t1", tpl:"Standard SaaS Onboarding", ver:3, gate:"OPEN", steps:c.steps}]; });
 // second journeys for selected clients
-CLIENTS[0].journeys.push({prod:"p2", tpl:"Biometric Device Rollout", ver:2, gate:"OPEN", steps:mkStepsFrom(BIO_STEPS,5,{start:40})});           // GreenValley — both complete, LIVE
-CLIENTS[4].journeys.push({prod:"p2", tpl:"Biometric Device Rollout", ver:2, gate:"OPEN", steps:mkStepsFrom(BIO_STEPS,1,{pct:40, due:"23 Aug, 12:00", start:74})}); // Nalanda
-CLIENTS[2].journeys.push({prod:"p2", tpl:"Biometric Device Rollout", ver:2, gate:"OPEN", steps:mkStepsFrom(BIO_STEPS,2,{pct:30, due:"24 Aug, 15:00", start:65})}); // Horizon
+CLIENTS[0].journeys.push({prod:"p2", tplId:"t3", tpl:"Biometric Device Rollout", ver:2, gate:"OPEN", steps:mkStepsFrom(BIO_STEPS,5,{start:40})});           // GreenValley — both complete, LIVE
+function heldJourney(tplId, start){ const t=TEMPLATES.find(x=>x.id===tplId);
+  const st=mkStepsFrom(t.steps,0,{start}); Object.assign(st[0],{status:"PENDING",pct:0,due:""});
+  return {prod:t.product, tplId, tpl:t.name, ver:t.version, gate:"OPEN", steps:st}; }
+CLIENTS[4].journeys.push(heldJourney("t3",74)); // Nalanda — Biometric waits for the ERP service to complete
+CLIENTS[2].journeys.push(heldJourney("t3",65)); // Horizon — same
 // parallel-dependency demo: on Sunrise, "Configuration & branding" depends only on step 3
 // (Account setup, done) — so it runs alongside the delayed Data migration.
 Object.assign(CLIENTS[1].steps[4], {status:"CURRENT", pct:20, due:"22 Aug, 17:00"});
@@ -465,7 +469,7 @@ let SETTINGS = {amber:75, cadence:"Every 5 minutes",
 /* ============================== STATE ============================== */
 let S = {user:null, view:"login", params:{}, loginErr:"", notifOpen:false,
   filters:{q:"", rag:"ALL", status:"ALL"}, reportTab:"funnel", wizard:null, signoff:null, tplEdit:null,
-  prqOpen:{}, drill:null, escOpen:null};  // per-client prerequisites-accordion state; default: open until gate clears
+  prqOpen:{}, drill:null, escOpen:null, msProd:"ALL"};  // per-client prerequisites-accordion state; default: open until gate clears
 
 /* ============================== HELPERS ============================== */
 const $ = id => document.getElementById(id);
@@ -502,6 +506,16 @@ const RAG_CHIP = {
   GATE:'<span class="chip chip-grey">🔒 Prerequisites pending</span>',
 };
 const gateOk = c => c.prereqs.every(t=> t.status==="VERIFIED" || (!t.mand && t.status==="SKIPPED"));
+const tplOf = j => TEMPLATES.find(x=>x.id===j.tplId);
+function jDepBlocked(c, j){
+  const t=tplOf(j); if(!t||!t.dep) return null;
+  const depT=TEMPLATES.find(x=>x.id===t.dep); if(!depT) return null;
+  const depJ=c.journeys.find(x=>x.tplId===t.dep);
+  if(!depJ) return null;                                    // client never bought it — vacuous
+  return depJ.steps.every(st=>st.status==="DONE") ? null : depT.name;
+}
+function msDepChain(id){ const out=[]; let t=TEMPLATES.find(x=>x.id===id);
+  let guard=0; while(t&&t.dep&&guard++<20){ out.push(t.dep); t=TEMPLATES.find(x=>x.id===t.dep); } return out; }
 const jPct = j => Math.round(j.steps.filter(s=>s.status==="DONE").length / j.steps.length * 100);
 const jTat = j => j.steps.reduce((a,s)=>a+s.tat, 0);
 const jTatUsed = j => j.gate==="LOCKED" ? 0 : Math.round(j.steps.reduce((a,s)=>a + (s.status==="DONE" ? s.tat : s.tat*Math.min(s.pct,150)/100), 0));
@@ -627,9 +641,8 @@ A.wzFinish = ()=>{
   if(!d.requirements.trim()){ S.wizard.err="Capture at least one line of client requirements."; return render(); }
   if(!d.products.length){ S.wizard.err="Select at least one product — each product gets its own journey."; return render(); }
   const id = "c"+(CLIENTS.length+1)+"_"+Math.floor(1000+CLIENTS.length*7);
-  const journeys = d.products.map(pid=>{
-    const tpl = TEMPLATES.find(t=>t.product===pid && t.active);
-    return {prod:pid, tpl:tpl.name, ver:tpl.version, gate:"LOCKED",
+  const journeys = TEMPLATES.filter(t=>t.active && d.products.includes(t.product)).map(tpl=>{
+    return {prod:tpl.product, tplId:tpl.id, tpl:tpl.name, ver:tpl.version, gate:"LOCKED",
       steps: tpl.steps.map((t,i)=>({name:t.name, tat:t.tat, owner:t.owner, signoff:t.signoff, dep:(t.dep??null), docsReq:[...t.docs],
         subs:t.subs.map(n=>({name:n, val:null, remark:""})),
         docs:[], comms:[], status:"PENDING", pct:0, signoffState:"NONE", due:"", blockReason:"", completedOn:""}))};
@@ -664,6 +677,7 @@ function activateReady(c, ji){
   // Dependency model: a step activates when its declared dependency is DONE
   // (or immediately, if it has none — such steps run in parallel).
   const j = c.journeys[ji];
+  if(jDepBlocked(c, j)) return;
   j.steps.forEach(s=>{
     if(s.status==="PENDING" && depReady(j, s)){
       s.status="CURRENT"; s.pct=5; s.due="Within "+s.tat+" working day(s)";
@@ -675,6 +689,10 @@ function activateNext(c, ji){
   const j = c.journeys[ji];
   if(j.steps.every(s=>s.status==="DONE")){
     pushNotif("🏁", prodById(j.prod).name+" journey complete for "+c.name+".", c.id);
+    c.journeys.forEach((j2,k)=>{ if(k!==ji && !jDepBlocked(c,j2) && j2.gate==="OPEN" && j2.steps.some(st=>st.status==="PENDING") && !j2.steps.some(st=>st.status!=="PENDING")){
+      activateReady(c,k);
+      pushNotif("⛓","“"+prodById(j2.prod).name+"” service unlocked for "+c.name+" — its dependency just completed.", c.id);
+    }});
     if(c.journeys.every(x=>x.steps.every(s=>s.status==="DONE"))){
       c.status="LIVE"; c.liveAt=TODAY;
       pushNotif("🎉", c.name+" is fully onboarded and LIVE across all products. CSAT survey sent to SPOC.", c.id);
@@ -687,8 +705,9 @@ A.selJourney = (cid,ji)=>{ const c=CLIENTS.find(x=>x.id===cid);
   if((S.params.j??-1)===ji){ go("client",{id:cid}); return; }  // toggle closed (no journey selected opens none? keep first open)
   const cur=c.journeys[ji].steps.findIndex(s=>s.status!=="DONE");
   go("client",{id:cid, j:ji, step: cur===-1? c.journeys[ji].steps.length-1 : cur}); };
-A.stStart = (cid,ji,si)=>{ const {j,s}=jStep(cid,ji,si);
+A.stStart = (cid,ji,si)=>{ const {c,j,s}=jStep(cid,ji,si);
   if(j.gate==="LOCKED"){ toast("Journey is locked — mandatory prerequisites are not cleared yet.","bad"); return; }
+  const held=jDepBlocked(c,j); if(held){ toast("Cannot start — this service waits for “"+held+"” to complete first.","bad"); return; }
   if(!depReady(j,s)){ toast("Cannot start — this step depends on “"+j.steps[s.dep].name+"” (step "+(s.dep+1)+"), which is not complete yet.","bad"); return; }
   s.status="CURRENT"; s.pct=Math.max(5,s.pct); toast("Step started. TAT clock running (working-calendar aware)."); render(); };
 A.stWait = (cid,ji,si)=>{ const {s}=jStep(cid,ji,si); s.status="WAITING";
@@ -810,6 +829,14 @@ A.pmAdd = ()=>{ const t=$("pm-title").value.trim(); if(!t){ toast("Give the task
 
 /* ---- template designer ---- */
 A.tplEdit = (id,fresh)=>{ const t=TEMPLATES.find(x=>x.id===id); S.tplEdit={id, name:t.name, version:t.version, product:t.product, steps:cpSteps(t.steps), fresh:!!fresh}; go("tplEdit"); };
+A.msFilter = v=>{ S.msProd=v; render(); };
+A.msMove = (id,dir)=>{ const i=TEMPLATES.findIndex(t=>t.id===id); const j=i+dir;
+  if(j<0||j>=TEMPLATES.length) return; [TEMPLATES[i],TEMPLATES[j]]=[TEMPLATES[j],TEMPLATES[i]];
+  toast("Service order updated — new clients instantiate journeys in this sequence."); render(); };
+A.msDep = (id,val)=>{ const t=TEMPLATES.find(x=>x.id===id);
+  t.dep = val||null;
+  toast(val? t.name+" now waits for “"+TEMPLATES.find(x=>x.id===val).name+"” to complete."
+           : t.name+" has no dependency — it runs in parallel."); render(); };
 A.tplNew = ()=>{
   const name=$("tn-name").value.trim(), prod=$("tn-prod").value;
   if(!name){ toast("Give the new journey template a name.","bad"); return; }
@@ -817,7 +844,7 @@ A.tplNew = ()=>{
   TEMPLATES.push({id, name, version:1, product:prod,
     steps:[{name:"Kickoff call", tat:1, owner:"u4", signoff:false, dep:null, docs:[], subs:["Kickoff done & scope confirmed"]},
            {name:"Go-live sign-off", tat:1, owner:"u2", signoff:true, dep:0, docs:[], subs:["Handover completed"]}],
-    active: !TEMPLATES.some(t=>t.product===prod && t.active)});
+    active: !TEMPLATES.some(t=>t.product===prod && t.active), dep:null});
   toast("New module service created for "+prodById(prod).name+" — add its steps and publish.");
   A.tplEdit(id, true);
 };
@@ -1379,8 +1406,11 @@ function vClient(){
       </button>`;
   }).join("");
   const docsMissing = s.docsReq.filter(d=>!s.docs.includes(d));
+  const jnHeld = jDepBlocked(c, jn);
   const actions = c.status==="LIVE" ? "" : jn.gate==="LOCKED"
     ? `<p class="cap" style="background:var(--warning-soft);border-radius:8px;padding:10px 12px">🔒 This journey is <b>locked</b> — it starts automatically the moment every mandatory prerequisite above is verified (non-mandatory ones can be skipped by an Admin).</p>`
+    : jnHeld
+    ? `<p class="cap" style="background:var(--warning-soft);border-radius:8px;padding:10px 12px">⛓ This service <b>waits for “${esc(jnHeld)}” to complete</b> — it starts automatically the moment that journey finishes. Change the dependency on the Module Service page.</p>`
     : !editable
     ? `<p class="cap" style="background:var(--bg-subtle);border-radius:8px;padding:10px 12px">You can view this step, but only <b>${esc(owner.name)}</b> (or a Manager/Admin) can update it — that's the role model working.</p>`
     : `<div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1399,11 +1429,12 @@ function vClient(){
       ${["OB_ADMIN","MANAGER"].includes(S.user.role)?`<div style="display:flex;gap:8px;margin-top:10px;align-items:center">
         <select id="re-owner" style="flex:1">${USERS.filter(u=>u.modules.includes("ONBOARDING")).map(u=>`<option value="${u.id}"${u.id===s.owner?" selected":""}>${esc(u.name)} · ${ROLE_LABEL[u.role]}</option>`).join("")}</select>
         <button class="btn btn-sm" onclick="A.stReassign('${c.id}',${ji},${selIdx})">Reassign</button></div>`:""}`;
-  const jchip = j2 => j2.gate==="LOCKED" ? '<span class="chip chip-grey">🔒 Locked — prerequisites</span>'
+  const jchip = j2 => { const held=jDepBlocked(c,j2); if(j2.gate!=="LOCKED"&&held) return `<span class="chip chip-amber">⛓ Waiting on ${esc(held)}</span>`;
+    return j2.gate==="LOCKED" ? '<span class="chip chip-grey">🔒 Locked — prerequisites</span>'
     : j2.steps.every(x=>x.status==="DONE") ? '<span class="chip chip-green">✓ Complete</span>'
     : j2.steps.map(stepRag).includes("RED") ? '<span class="chip chip-red">⚠ Attention</span>'
     : j2.steps.map(stepRag).includes("AMBER") ? '<span class="chip chip-amber">⚠ At risk</span>'
-    : '<span class="chip chip-indigo">▶ In progress</span>';
+    : '<span class="chip chip-indigo">▶ In progress</span>'; };
   const accordions = c.journeys.map((j2,k)=>{
     const open = k===ji;
     return `<div class="jacc">
@@ -1565,14 +1596,43 @@ function vTemplates(){
       <div><label for="tn-prod">For product</label><select id="tn-prod">${PRODUCTS.map(p=>`<option value="${p.id}">${p.icon} ${esc(p.name)}</option>`).join("")}</select></div>
       <button class="btn btn-p" onclick="A.tplNew()">+ Create module service</button>
     </div>
+    <div class="card" style="padding:12px 20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="eyebrow">Show services for</span>
+      <select style="max-width:260px" onchange="A.msFilter(this.value)">
+        <option value="ALL"${S.msProd==="ALL"?" selected":""}>All products</option>
+        ${PRODUCTS.map(p=>`<option value="${p.id}"${S.msProd===p.id?" selected":""}>${p.icon} ${esc(p.name)}</option>`).join("")}
+      </select>
+      <span class="cap">Card order below is the service sequence — it drives the order journeys are instantiated and shown for every new client. Use ↑ ↓ to re-sequence.</span>
+    </div>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
-      ${TEMPLATES.map(t=>`<div class="card">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(t.name)}</h3><span class="chip chip-indigo">v${t.version}</span><span class="chip chip-grey">${prodById(t.product).icon} ${esc(prodById(t.product).name)}</span><span class="chip chip-indigo" title="Sum of all step TATs — the working hours this journey needs end to end">⏱ ${t.steps.reduce((a,s)=>a+s.tat,0)}d total TAT</span>${t.active?'<span class="chip chip-green">Active for product</span>':""}</div>
+      ${TEMPLATES.filter(t=>S.msProd==="ALL"||t.product===S.msProd).map(t=>{
+        const seq=TEMPLATES.indexOf(t)+1;
+        const depOpts=TEMPLATES.filter(o=>o.id!==t.id && !msDepChain(o.id).includes(t.id));
+        return `<div class="card">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span class="chip chip-grey num" title="Service sequence">#${seq}</span><h3>${esc(t.name)}</h3><span class="chip chip-indigo">v${t.version}</span>
+          <span style="margin-left:auto;display:inline-flex;gap:4px">
+            <button class="btn btn-sm" onclick="A.msMove('${t.id}',-1)" aria-label="Move ${esc(t.name)} up">↑</button>
+            <button class="btn btn-sm" onclick="A.msMove('${t.id}',1)" aria-label="Move ${esc(t.name)} down">↓</button></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <span class="chip chip-grey">${prodById(t.product).icon} ${esc(prodById(t.product).name)}</span>
+          <span class="chip chip-indigo" title="Sum of all service TATs">⏱ ${t.steps.reduce((a,s)=>a+s.tat,0)}d total TAT</span>
+          ${t.active?'<span class="chip chip-green">Active for product</span>':""}
+          ${t.dep?`<span class="chip chip-amber">⛓ after ${esc((TEMPLATES.find(x=>x.id===t.dep)||{}).name||"?")}</span>`:'<span class="chip chip-grey">∥ parallel</span>'}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <label style="margin:0;white-space:nowrap" for="msdep-${t.id}">Service depends on</label>
+          <select id="msdep-${t.id}" style="flex:1" onchange="A.msDep('${t.id}',this.value)">
+            <option value=""${!t.dep?" selected":""}>∥ No dependency — runs parallel</option>
+            ${depOpts.map(o=>`<option value="${o.id}"${t.dep===o.id?" selected":""}>⛓ ${esc(o.name)} (${esc(prodById(o.product).name)})</option>`).join("")}
+          </select>
+        </div>
         <ol style="margin:12px 0 16px 18px;font-size:13px;display:flex;flex-direction:column;gap:6px">
-          ${t.steps.map(s=>`<li>${esc(s.name)} <span class="cap">· ${s.tat}d · ${esc(uById(s.owner).name)} · ${s.dep!=null?`↳ after step ${s.dep+1}`:"∥ parallel"}${s.signoff?" · ✍️ client sign-off":""}</span></li>`).join("")}
+          ${t.steps.map(st=>`<li>${esc(st.name)} <span class="cap">· ${st.tat}d · ${esc(uById(st.owner).name)} · ${st.dep!=null?`↳ after step ${st.dep+1}`:"∥ parallel"}${st.signoff?" · ✍️ client sign-off":""}</span></li>`).join("")}
         </ol>
         <button class="btn btn-sm" onclick="A.tplEdit('${t.id}')">✎ Edit (publishes v${t.version+1})</button>
-      </div>`).join("")}
+      </div>`;}).join("")}
     </div>
   </div>`, "templates");
 }
@@ -1816,7 +1876,9 @@ function vCpHome(){
       <button class="jstrip" onclick="go('cphome',{j:${k}})" aria-expanded="${open}">
         <span style="font-size:18px" aria-hidden="true">${prodById(j2.prod).icon}</span>
         <span class="jname">${esc(prodById(j2.prod).name)}</span>
-        ${j2.gate==="LOCKED"?'<span class="chip chip-amber">Waiting on your prerequisites</span>': j2.steps.every(x=>x.status==="DONE")?'<span class="chip chip-green">✓ Complete</span>':'<span class="chip chip-indigo">▶ In progress</span>'}
+        ${j2.gate==="LOCKED"?'<span class="chip chip-amber">Waiting on your prerequisites</span>'
+          : jDepBlocked(c,j2)?`<span class="chip chip-grey">⛓ Starts after ${esc(jDepBlocked(c,j2))}</span>`
+          : j2.steps.every(x=>x.status==="DONE")?'<span class="chip chip-green">✓ Complete</span>':'<span class="chip chip-indigo">▶ In progress</span>'}
         <span style="flex:1"></span>${jDots(j2)}<span class="jpct">${jPct(j2)}%</span>
         <span class="cap" aria-hidden="true">${open?"▲":"▼"}</span></button>
       ${open?`<div class="jbody">${j2.steps.map((st,si)=>`
