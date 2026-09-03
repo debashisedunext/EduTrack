@@ -1,6 +1,7 @@
 import { delay, http } from 'msw';
 import { dashboardTabHandlers } from './dashboardTabs';
 import { fileHandlers } from './files';
+import { onboardingHandlers } from './onboarding';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
 import { slaHandlers } from './sla';
@@ -35,6 +36,11 @@ export const handlers = [
   // S-05 rework · the three tab endpoints. After restHandlers, which holds the
   // other dashboard routes; no path overlaps, so order is presentation only.
   ...dashboardTabHandlers,
+
+  // A-118 · the onboarding module. Nothing under /onboarding overlaps any
+  // ticketing route, so position here is presentation only — the module's
+  // whole premise is that its paths, tables and schemas are disjoint.
+  ...onboardingHandlers,
 
   // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the
   // `/api/v1` prefix, because a signed URL points at MinIO and not at the API —

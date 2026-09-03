@@ -100,6 +100,23 @@ tags:
   - name: audit
     description: Every login, permission change, master change and ticket action. Export only. S-16.
 
+  # ── A-118 · the Client Onboarding module ───────────────────────────────────
+  # A second module on the same deployment, database and auth kernel, with
+  # **zero domain coupling to ticketing**: every table is `ob_`-prefixed, every
+  # schema here is `Ob`-prefixed, and the two are separable by grep alone. The
+  # one sanctioned connection is the identity-layer `client_accounts` table,
+  # which references both client masters and is referenced by neither domain.
+  #
+  # Further tags land with their slices: `onboarding-journeys` (templates,
+  # services, the ribbon), `onboarding-prereqs` (the gate) and `portal` (the
+  # CLIENT principal's own route tree).
+  - name: onboarding
+    description: |
+      Client Onboarding — clients, their per-product journeys, and the
+      prerequisite gate that holds them. Module-gated: see `ObModuleGated`.
+  - name: onboarding-masters
+    description: Products and the per-product journey templates they bind to. OB-07.
+
 security:
   - bearerAuth: []
 
@@ -7141,6 +7158,365 @@ paths:
               schema: { $ref: '#/components/schemas/AuditLogListResponse' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ════════════════════════════════════════════════ onboarding · masters ══════
+  #
+  # A-118 · the Client Onboarding module. Every path below sits behind
+  # `ModuleGuard` (plan §2.1) and answers `404` — never `403` — to a caller
+  # without a `modules` claim carrying `ONBOARDING`. See the `onboarding` tag
+  # and `components/responses/ObModuleGated` for why that is not the same
+  # decision as CONVENTIONS.md §7, even though it reaches the same status code.
+
+  /onboarding/products:
+    get:
+      tags: [onboarding-masters]
+      operationId: listObProducts
+      summary: The product catalogue (OB-07)
+      description: |
+        `ob_products` — the catalogue journey templates bind to, and the
+        multi-select on the OB-04 wizard's purchase step.
+
+        **Not paginated**, on the `/masters/task-types` argument: this is a
+        catalogue of the things the organisation sells, and an organisation
+        with enough products to page has a different problem than a page
+        control solves. The exemption is recorded in CONVENTIONS.md §6 and in
+        `check-conventions.py`, so nobody has to guess whether it was an
+        oversight.
+
+        Ordered by name. `isActive: false` products are returned and marked
+        rather than filtered, because a client boarded against a product that
+        has since been retired still has a journey for it, and the name has to
+        render somewhere.
+      parameters:
+        - name: isActive
+          in: query
+          schema: { type: boolean }
+          description: |
+            Omit for the whole catalogue. `true` is the OB-04 wizard's call —
+            a product may only be *bought* while active. Retiring a product
+            never touches a journey already instantiated from it.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObProductListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    post:
+      tags: [onboarding-masters]
+      operationId: createObProduct
+      summary: Add a product to the catalogue (OB-07) — OB Admin
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        OB Admin only. `code` is unique case-insensitively, and the service
+        refuses a duplicate with a field-keyed `409` rather than letting the
+        index refuse it with a message naming a MySQL constraint — the call
+        `createClient` already made one master over.
+
+        **A product with no journey template cannot be bought.** Creating one
+        here does not make it selectable on OB-04; that needs an active
+        template (`ob_journey_templates.product_id`), because a purchase with
+        no template to instantiate would board a client into nothing. The
+        wizard's picker reads `hasActiveTemplate`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObProductWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObProductResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /onboarding/products/{obProductId}:
+    parameters: [{ $ref: '#/components/parameters/ObProductId' }]
+    get:
+      tags: [onboarding-masters]
+      operationId: getObProduct
+      summary: One product (OB-07)
+      description: |
+        **This exists to carry the `ETag` the `PATCH` requires as `If-Match`**,
+        per CONVENTIONS.md §5 — the gap `GET /masters/task-types/{taskTypeId}`
+        closed for its own master. A write whose precondition has no read to
+        come from is not a strict endpoint, it is a broken one.
+
+        The tag is taken over the content, `journeyCount` included: a client
+        boarded against this product while the edit dialog is open costs a
+        reload, which is correct, since that count is what a retire decision
+        is made against.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObProductResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    patch:
+      tags: [onboarding-masters]
+      operationId: updateObProduct
+      summary: Edit a product (OB-07) — OB Admin
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        OB Admin only. `code` is immutable once any client has bought the
+        product — `409` names the field, because a code is what a template and
+        an application both point at, and rewriting it would silently reattach
+        history.
+
+        Setting `isActive: false` **retires the product from the OB-04 picker
+        and changes nothing else**. In-flight journeys keep running, their
+        steps keep their owners and clocks, and the product's name keeps
+        rendering wherever those journeys appear. Deactivation is not deletion
+        and there is no delete route: a product with journeys behind it is a
+        row other rows depend on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObProductWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObProductResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  # ════════════════════════════════════════════════ onboarding · clients ══════
+
+  /onboarding/clients:
+    get:
+      tags: [onboarding]
+      operationId: listObClients
+      summary: Onboarding client list (OB-03)
+      description: |
+        Ordered by `onboardingDate` descending, then id — a keyset over the
+        date alone skips rows wherever two clients were boarded the same day,
+        and after a sales push they are.
+
+        **This is not `GET /clients`.** The onboarding client master and the
+        ticketing client master are disjoint tables with no foreign key
+        between them (plan §1.2). A client that exists in both is linked at the
+        identity layer through `client_accounts`, by an explicit audited admin
+        action, and never matched automatically by name or PAN — a false
+        positive there shows one company another company's tickets.
+
+        Scoped server-side by `OnboardingScopeResolver`: Sales sees the clients
+        they created, Step Owners see clients whose journeys contain one of
+        their steps, OB Admin/Manager/Viewer see all. Out of scope is absent
+        from the list and `404` by id, per CONVENTIONS.md §7.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: q
+          in: query
+          schema: { type: string }
+          description: Client name. Never PAN — see `ObClientDetail.pan`.
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ObClientStatus' }
+        - name: rag
+          in: query
+          schema: { $ref: '#/components/schemas/ObRag' }
+          description: |
+            Filters on the health colour only. A client whose journeys are all
+            still `LOCKED` has **no** RAG (`rag: null`, the "Prerequisites
+            pending" state) and is returned by none of the three colours — ask
+            for it with `gateStatus=LOCKED` instead.
+        - name: gateStatus
+          in: query
+          schema: { $ref: '#/components/schemas/ObGateStatus' }
+          description: OB-03's "Prerequisites pending" filter.
+        - name: productId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: Clients who bought this product — i.e. who have a journey for it.
+        - name: salesPersonId
+          in: query
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    post:
+      tags: [onboarding]
+      operationId: createObClient
+      summary: Board a client (OB-04)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        The OB-04 wizard, committing all four steps in **one** request. OB
+        Admin, Onboarding Manager and Sales.
+
+        ## What one call creates
+
+        This is the module's widest side effect and it is deliberately atomic —
+        a client boarded with no journeys, or journeys with no prerequisites,
+        is a half-state somebody has to notice and repair by hand:
+
+        1. the `ob_clients` row, its SPOCs and its requirements;
+        2. **one journey per purchased product**, each instantiated from that
+           product's active template *at its current version*, and each created
+           `gateStatus: LOCKED` — steps visible, owners resolved, TATs shown,
+           **clocks dead and the scanner ignoring them**. Everyone sees the
+           plan from day one and no TAT can breach before the client has been
+           asked for anything (plan §5.2);
+        3. the prerequisites instance, snapshotted from the active
+           `ob_prereq_template_tasks` version;
+        4. a portal login, **only if `createPortalLogin` is true.** Never
+           silently — plan §2.3. The one-time password goes to the primary
+           SPOC and the account is `mustChangePassword`.
+
+        Nothing starts running here. Journeys open when the prerequisite gate
+        clears, which is its own transition and its own notification.
+
+        ## The duplicate guard
+
+        `pan` is unique. A second client with the same PAN is `409`
+        `ob-client-pan-duplicate` and cannot be forced — two rows for one legal
+        entity is the state the guard exists to prevent.
+
+        A *similar name* is a different matter and is **a warning, not a
+        refusal**: "Acme Pvt Ltd" and "Acme Private Limited" are frequently two
+        real clients. The first attempt answers `409`
+        `ob-client-name-similar`, with the candidates in `detail`; resubmitting
+        with `acknowledgeSimilarNames: true` proceeds. Modelling it as a
+        forceable conflict rather than a silent create keeps the decision with
+        the person who can tell the two apart, and keeps it out of a query
+        parameter nobody reads twice.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObClientCreateRequest' }
+      responses:
+        '201':
+          description: |
+            Boarded. `data.journeys` carries the locked journeys that were
+            created, so the wizard's confirmation step can name them without a
+            second read.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: |
+            `ob-client-pan-duplicate` — final. `ob-client-name-similar` —
+            forceable with `acknowledgeSimilarNames`. `ob-product-no-template`
+            — a purchased product has no active journey template, so there is
+            nothing to instantiate.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/clients/{obClientId}:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    get:
+      tags: [onboarding]
+      operationId: getObClient
+      summary: Client detail (OB-05)
+      description: |
+        The OB-05 page in one read: client info, SPOCs, purchases, the
+        prerequisites accordion and every journey accordion strip.
+
+        **`journeys[].steps` is the strip, not the ribbon.** Each carries
+        enough to draw the RAG dots and the `used / total` TAT figure, and no
+        more; the expanded ribbon and the step panel are their own reads. The
+        strip is derived per page load — a bounded query over one client's
+        journeys, never `ob_dashboard_summary`, which is a dashboard aggregate
+        and would be stale by up to a refresh interval on the one screen where
+        somebody is watching their own edit land.
+
+        `ETag` covers the whole document, journeys included, so a step
+        transition made elsewhere costs the editor a reload rather than a lost
+        update.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    patch:
+      tags: [onboarding]
+      operationId: updateObClient
+      summary: Edit client info (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        The Client info card. OB Admin, Onboarding Manager, and Sales for a
+        client they created.
+
+        **Purchases are not editable here.** Adding a product is buying one —
+        it instantiates a journey — and removing one would orphan a journey
+        that may already have run. Both are their own operations under
+        `/onboarding/clients/{obClientId}/applications`, landing with the
+        journey-engine slice.
+
+        `pan` is immutable once set. It is the duplicate guard's key and an
+        identity fact, not a correctable typo: a wrong PAN is a wrong client
+        row, and the honest repair is `status: DROPPED` and a new one.
+
+        `status` is here rather than on its own setter because three of the
+        four values are a judgement somebody records with a reason —
+        `ON_HOLD`, `DROPPED`, and back — while the fourth, `LIVE`, **cannot be
+        set at all**: it is the go-live flip, earned when every journey
+        completes with its sign-offs (plan §5.9), and `422` if asked for
+        directly. A status a person can type is a status that disagrees with
+        the journeys underneath it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObClientUpdateRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422':
+          description: |
+            `ob-client-live-not-earned` — `LIVE` is derived from the journeys,
+            never set.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
 # ══════════════════════════════════════════════════════════ components ═══════
 components:
 
@@ -7295,6 +7671,21 @@ components:
         `users` is a registration, not a second implementation (B-030, B-038).
         Bolting `import` under `/clients/…` instead would collide with
         `/clients/{clientId}/…` on any three-segment path.
+    ObProductId:
+      name: obProductId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    ObClientId:
+      name: obClientId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A-118 · an `ob_clients` id, **not** a ticketing `clients` id. The two
+        masters are disjoint tables and the ids do not correspond; a client
+        present in both is joined at the identity layer by an explicit audited
+        link, never by a shared key.
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -7331,6 +7722,27 @@ components:
       description: |
         Not found — **or out of the caller's scope**. The two are deliberately
         indistinguishable. Returning `403` here would confirm the row exists.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ObModuleGated:
+      description: |
+        A-118 · not found, **out of scope, or the caller has no onboarding
+        module entitlement** — three causes, one indistinguishable answer.
+
+        The first two are CONVENTIONS.md §7 unchanged. The third is new and is
+        the reason this response exists rather than reusing `NotFound`:
+        `ModuleGuard` runs *before* `RolesGuard` on every `/onboarding/**`
+        route (plan §2.1), so a caller without `ONBOARDING` in their `modules`
+        claim never reaches the handler and never learns that the module is
+        deployed at all. `403` here would answer "this exists and you may not
+        have it", which for a whole module is a larger disclosure than for a
+        row — it tells a ticketing-only user what the organisation bought.
+
+        **It is on collection reads too**, which is why the shape looks unusual
+        beside the rest of this document: `GET /onboarding/clients` can answer
+        `404` even though a list cannot be "not found". The gate is on the
+        route tree, not on the row.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -12740,4 +13152,414 @@ components:
       required: [data]
       properties:
         data: { type: array, items: { $ref: '#/components/schemas/AuditLogEntry' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    # ── A-118 · onboarding module ──────────────────────────────────────────────
+    ObRag:
+      type: string
+      enum: [GREEN, AMBER, RED]
+      description: |
+        The health colour, computed identically at step, journey and client
+        level: worst-wins upward (plan §5.9). `AMBER` at a configurable share
+        of TAT — default 75% — so the warning arrives before the breach rather
+        than reporting it.
+
+        **This carries health and nothing else.** The prototype's client chip
+        merges six states into one label — on track, at risk, breached,
+        waiting, prerequisites pending, live — and that is right for a chip and
+        wrong for a field. Three of the six are not health: `LIVE` is
+        `ObClientStatus`, "prerequisites pending" is `ObGateStatus`, and
+        "waiting on client" is `ObStepClockState`. Folding them here would give
+        the OB-03 filter an enum where selecting `RED` and selecting `LIVE` are
+        the same kind of question, which they are not.
+
+        `null` where there is nothing to colour: a client whose journeys are
+        all `LOCKED` has no running clock, so it is neither green nor at risk.
+    ObGateStatus:
+      type: string
+      enum: [LOCKED, OPEN]
+      description: |
+        The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:
+        fully visible — steps, owners, TATs, dots — with **no step active and
+        no clock running**, and the TAT scanner skipping it entirely.
+
+        It flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`
+        and every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no
+        override, and no endpoint that sets this directly: the only valve is
+        skipping a non-mandatory task, which is an OB Admin action with a
+        logged reason. A gate an impatient manager can open is a gate that
+        does not hold.
+    ObClientStatus:
+      type: string
+      enum: [ONBOARDING, LIVE, ON_HOLD, DROPPED]
+      description: |
+        `ob_clients.overall_status`. **`LIVE` is earned, never set** — it is
+        the go-live flip that fires when every journey is complete with its
+        sign-offs, and `PATCH /onboarding/clients/{obClientId}` answers `422`
+        to a request for it. The other three are judgements a person records.
+    ObStepStatus:
+      type: string
+      enum: [PENDING, IN_PROGRESS, BLOCKED, WAITING_ON_CLIENT, DONE, SKIPPED]
+      description: |
+        A service's lifecycle state. `PENDING` covers both "gate still locked"
+        and "dependency not yet met" — the difference is visible in
+        `blockedByStepId`, and a step never needs to distinguish them in its
+        own field.
+
+        Both `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they
+        are separate because **only one of them stops the clock**: waiting on
+        the client pauses TAT and attributes the wait to the client, while an
+        internal block does not pause anything (plan §5.7). Merging them would
+        make every TAT report disputable within a month, which is the failure
+        the split exists to prevent.
+    ObProduct:
+      type: object
+      required: [id, code, name, isActive]
+      properties:
+        id: { type: integer, format: int64 }
+        code:
+          type: string
+          maxLength: 32
+          description: Unique case-insensitively. Immutable once a client has bought the product.
+        name: { type: string, maxLength: 160 }
+        isActive:
+          type: boolean
+          description: |
+            `false` retires the product from the OB-04 picker and changes
+            nothing else — in-flight journeys keep running.
+        hasActiveTemplate:
+          type: boolean
+          description: |
+            Whether an active `ob_journey_templates` row exists for this
+            product. **The OB-04 picker requires it**: a purchase with no
+            template to instantiate would board a client into nothing.
+        totalTatDays:
+          type: [integer, 'null']
+          description: |
+            Σ of the active template's service TATs, in working days — what a
+            journey for this product *costs*, shown on the OB-07 card. Null
+            when there is no active template.
+        journeyCount:
+          type: integer
+          description: |
+            Journeys instantiated from this product, across all clients. Inside
+            the `ETag`, because it is what a retire decision is made against.
+      description: '`ob_products` — the catalogue journey templates bind to.'
+    ObProductRef:
+      type: object
+      required: [id, code, name]
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string }
+        name: { type: string }
+      description: |
+        Kept to three fields: inlined into every journey and every purchase, so
+        a field here is a field in a dozen generated types.
+    ObProductWriteRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code: { type: string, maxLength: 32, pattern: '^[A-Z0-9_-]+$' }
+        name: { type: string, maxLength: 160 }
+        isActive: { type: boolean, default: true }
+    ObContact:
+      type: object
+      required: [id, name, email, isPrimary]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, maxLength: 160 }
+        designation: { type: [string, 'null'], maxLength: 120 }
+        email: { type: string, format: email }
+        phone: { type: [string, 'null'], maxLength: 32 }
+        whatsappOptIn:
+          type: boolean
+          description: |
+            Consent, held per contact rather than per client. WhatsApp
+            notification templates need prior opt-in, and a client's SPOCs do
+            not all give it.
+        isPrimary:
+          type: boolean
+          description: |
+            Exactly one per client. The primary SPOC receives the kickoff mail,
+            the one-time portal password, and every sign-off request — so a
+            client with none is a client nothing can be sent to, and
+            `createObClient` requires one.
+      description: '`ob_client_contacts` — the SPOCs.'
+    ObContactWriteRequest:
+      type: object
+      required: [name, email, isPrimary]
+      properties:
+        name: { type: string, maxLength: 160 }
+        designation: { type: [string, 'null'], maxLength: 120 }
+        email: { type: string, format: email }
+        phone: { type: [string, 'null'], maxLength: 32 }
+        whatsappOptIn: { type: boolean, default: false }
+        isPrimary: { type: boolean }
+    ObApplication:
+      type: object
+      required: [id, product]
+      properties:
+        id: { type: integer, format: int64 }
+        product: { $ref: '#/components/schemas/ObProductRef' }
+        licenseType: { type: [string, 'null'], maxLength: 64 }
+        units: { type: [integer, 'null'], minimum: 1 }
+        licenseStart: { type: [string, 'null'], format: date }
+        licenseEnd:
+          type: [string, 'null']
+          format: date
+          description: |
+            Captured now so the renewals module, when it arrives, finds its
+            data waiting rather than needing a backfill nobody can source
+            (plan §1.1 item 11). Nothing in this module reads it.
+      description: |
+        `ob_client_applications` — one purchased product. **A purchase fact,
+        not a commercial one:** there is no amount, no invoice and no payment
+        status anywhere in this module by explicit product decision (plan
+        §1.2). Commercials live in the sales system.
+    ObApplicationWriteRequest:
+      type: object
+      required: [productId]
+      properties:
+        productId: { type: integer, format: int64 }
+        licenseType: { type: [string, 'null'], maxLength: 64 }
+        units: { type: [integer, 'null'], minimum: 1 }
+        licenseStart: { type: [string, 'null'], format: date }
+        licenseEnd: { type: [string, 'null'], format: date }
+    ObJourneyStrip:
+      type: object
+      required: [id, product, gateStatus, percentComplete, steps]
+      properties:
+        id: { type: integer, format: int64 }
+        product: { $ref: '#/components/schemas/ObProductRef' }
+        gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
+        rag:
+          oneOf:
+            - { $ref: '#/components/schemas/ObRag' }
+            - { type: 'null' }
+          description: Null while `gateStatus` is `LOCKED` — nothing is running to colour.
+        percentComplete: { type: integer, minimum: 0, maximum: 100 }
+        heldByJourneyId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            Set when this journey is instantiated but held on a **service-level
+            dependency** — another journey of the same client that has to
+            complete first (plan §5.5). Distinct from `gateStatus`, which is
+            about the client's prerequisites: a journey can be past the gate
+            and still held behind a sibling. Null when nothing holds it.
+        totalTatDays:
+          type: integer
+          description: Σ of this journey's service TATs from its **pinned** template version.
+        utilizedHours:
+          type: number
+          format: double
+          description: |
+            Working hours consumed: completed services at their recorded
+            consumption, the active one at its running clock, waiting-on-client
+            time excluded. **Derived from `ob_step_clock_events` at read time**
+            for this one client — never a stored aggregate, which could
+            disagree with the parts it claims to sum.
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/ObStepDot' }
+          description: |
+            Every service, in template order — the RAG dots on the collapsed
+            strip. Not paginated and not pageable: this is one journey's
+            services, bounded by what the ribbon can render, and the strip
+            needs all of them to draw any of them.
+      description: |
+        One accordion strip on OB-05. **Deliberately not the ribbon** — the
+        expanded view and the step panel are their own reads, so a client with
+        six journeys does not pay for six ribbons on first paint.
+    ObStepDot:
+      type: object
+      required: [id, sequence, name, status]
+      properties:
+        id: { type: integer, format: int64 }
+        sequence: { type: integer }
+        name: { type: string }
+        status: { $ref: '#/components/schemas/ObStepStatus' }
+        rag:
+          oneOf:
+            - { $ref: '#/components/schemas/ObRag' }
+            - { type: 'null' }
+        dependsOnStepId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            The one service this one waits for, or null for **parallel** — the
+            ribbon marks these `↳ N` and `∥` respectively. Constrained to an
+            earlier step in the same template, so the graph is cycle-free by
+            construction rather than by a check that can be forgotten.
+      description: |
+        A single dot on the collapsed strip. Owner, comments, block reasons and
+        TAT internals are **absent by construction, not hidden client-side** —
+        the client portal renders this same strip, and a field the portal must
+        never show is a field that must not be in the schema it receives.
+    ObClient:
+      type: object
+      required: [id, name, onboardingDate, status, journeyCount, gateStatus]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, maxLength: 200 }
+        onboardingDate: { type: string, format: date }
+        status: { $ref: '#/components/schemas/ObClientStatus' }
+        rag:
+          oneOf:
+            - { $ref: '#/components/schemas/ObRag' }
+            - { type: 'null' }
+          description: |
+            Worst across the client's **open** journeys. Null while every
+            journey is locked — OB-03 renders that as "Prerequisites pending",
+            which is a gate state and not a colour.
+        gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
+        journeyCount: { type: integer, description: 'One per purchased product.' }
+        journeysComplete: { type: integer }
+        products:
+          type: array
+          items: { $ref: '#/components/schemas/ObProductRef' }
+        salesPerson: { $ref: '#/components/schemas/UserRef' }
+        primaryContact: { $ref: '#/components/schemas/ObContact' }
+        liveAt: { type: [string, 'null'], format: date-time }
+        hasPortalLogin:
+          type: boolean
+          description: |
+            Whether a `client_accounts` row exists for this client. **Not
+            whether one should** — creation is always an explicit staff action
+            (plan §2.3), so `false` is the ordinary state of a boarded client
+            and not an error to reconcile.
+      description: |
+        The OB-03 list row. No PAN and no address: identity data belongs to the
+        detail read, where the masking rule and its audit apply, and a list is
+        the wrong place to leak it a page at a time.
+    ObClientDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ObClient' }
+        - type: object
+          properties:
+            description: { type: [string, 'null'] }
+            address: { type: [string, 'null'] }
+            licenseType: { type: [string, 'null'], maxLength: 64 }
+            pan:
+              type: [string, 'null']
+              description: |
+                **Masked for every role except OB Admin and Onboarding
+                Manager** — `ABCDE****F` — and masked on the client portal too,
+                where the client's own PAN is still identity data the page has
+                no reason to carry.
+
+                Encrypted at rest. The unmasked value is not a field anyone can
+                widen a query to reach: it comes from its own reveal operation,
+                which writes an audit row per call, and that operation lands
+                with A-113. Until then this is masked for everyone, which is
+                the safe direction to be wrong in.
+            contacts:
+              type: array
+              items: { $ref: '#/components/schemas/ObContact' }
+            applications:
+              type: array
+              items: { $ref: '#/components/schemas/ObApplication' }
+            requirements:
+              type: array
+              items: { type: string }
+              description: Free-text capture from the wizard's requirements step.
+            journeys:
+              type: array
+              items: { $ref: '#/components/schemas/ObJourneyStrip' }
+              description: |
+                One per purchased product, in the admin-ordered service
+                sequence. Not paginated — a client's purchases are a handful,
+                and the accordion needs the set to render the page.
+            createdBy: { $ref: '#/components/schemas/UserRef' }
+            createdAt: { type: string, format: date-time }
+      description: 'The OB-05 page in one document.'
+    ObClientCreateRequest:
+      type: object
+      required: [name, onboardingDate, contacts, applications]
+      properties:
+        name: { type: string, maxLength: 200 }
+        description: { type: [string, 'null'] }
+        onboardingDate: { type: string, format: date }
+        pan:
+          type: [string, 'null']
+          pattern: '^[A-Z]{5}[0-9]{4}[A-Z]$'
+          description: |
+            Unique across `ob_clients`. Retained as **identity**, never as a
+            financial field — the duplicate guard's key and nothing else.
+        address: { type: [string, 'null'] }
+        salesPersonId: { type: [integer, 'null'], format: int64 }
+        licenseType: { type: [string, 'null'], maxLength: 64 }
+        contacts:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/ObContactWriteRequest' }
+          description: |
+            At least one, and **exactly one `isPrimary`**. The primary SPOC is
+            where the kickoff mail, the portal password and every sign-off
+            request go; a client without one cannot be onboarded, only stored.
+        applications:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/ObApplicationWriteRequest' }
+          description: |
+            The wizard's product multi-select. **Each one instantiates a locked
+            journey** from that product's active template, so an empty list
+            would board a client with nothing to onboard them through.
+        requirements:
+          type: array
+          items: { type: string }
+        createPortalLogin:
+          type: boolean
+          default: false
+          description: |
+            The wizard's "Create client portal login now" checkbox. Creates a
+            `client_accounts` row with a generated username and a one-time
+            password emailed to the primary SPOC.
+
+            **Defaults to false and is never implied.** Every other field here
+            describes a client; this one hands somebody outside the
+            organisation a credential, and the plan is explicit that it happens
+            only when staff ask for it (§2.3). It is also not a one-way door —
+            the OB-05 portal access panel creates one later just as well.
+        acknowledgeSimilarNames:
+          type: boolean
+          default: false
+          description: |
+            Set after a `409 ob-client-name-similar` to proceed anyway. Only
+            the name check is forceable; a duplicate PAN never is.
+    ObClientUpdateRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 200 }
+        description: { type: [string, 'null'] }
+        address: { type: [string, 'null'] }
+        salesPersonId: { type: [integer, 'null'], format: int64 }
+        licenseType: { type: [string, 'null'], maxLength: 64 }
+        status:
+          $ref: '#/components/schemas/ObClientStatus'
+          description: '`LIVE` is refused with `422` — it is earned, not set.'
+        statusReason:
+          type: [string, 'null']
+          description: Required when `status` moves to `ON_HOLD` or `DROPPED`.
+      description: |
+        Partial by field. `pan` is absent deliberately — immutable once set —
+        and so are `contacts` and `applications`, which are their own
+        operations because each has a side effect a field update cannot carry.
+    ObProductResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ObProduct' } }
+    ObProductListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ObProduct' } }
+    ObClientDetailResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ObClientDetail' } }
+    ObClientListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ObClient' } }
         meta: { $ref: '#/components/schemas/Meta' }

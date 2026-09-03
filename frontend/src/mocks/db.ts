@@ -593,6 +593,74 @@ export interface TimesheetApproval {
   approvedById: number; approvedAt: string; note: string | null;
 }
 
+// ── A-118 · client onboarding ───────────────────────────────────────────────
+// The second module's fixtures. `Ob`-prefixed like the contract's schemas and
+// the `ob_` tables, so the two modules stay separable by grep here too.
+
+/** `ob_products` — the catalogue journey templates bind to. */
+export interface ObProduct {
+  id: number; code: string; name: string; isActive: boolean;
+  /** Whether an active journey template exists. The OB-04 picker requires it. */
+  hasActiveTemplate: boolean;
+  /** Σ of the active template's service TATs, in working days. */
+  totalTatDays: number | null;
+}
+
+/** `ob_client_contacts` — the SPOCs. Exactly one `isPrimary` per client. */
+export interface ObContact {
+  id: number; name: string; designation: string | null;
+  email: string; phone: string | null; whatsappOptIn: boolean; isPrimary: boolean;
+}
+
+/**
+ * `ob_client_applications` — one purchased product.
+ *
+ * A purchase fact, **not a commercial one**: no amount, no invoice, no payment
+ * status anywhere in this module by explicit product decision (plan §1.2).
+ */
+export interface ObApplication {
+  id: number; productId: number; licenseType: string | null; units: number | null;
+  licenseStart: string | null; licenseEnd: string | null;
+}
+
+/** One service on a journey — a RAG dot on the OB-05 accordion strip. */
+export interface ObStep {
+  id: number; sequence: number; name: string;
+  status: 'PENDING' | 'IN_PROGRESS' | 'BLOCKED' | 'WAITING_ON_CLIENT' | 'DONE' | 'SKIPPED';
+  /** TAT in working **days** — the v1.2 rename, not hours. */
+  tatDays: number;
+  /** Working hours consumed. Waiting-on-client time is excluded. */
+  usedHours: number;
+  /** The one service this waits for; null runs in parallel. */
+  dependsOnStepId: number | null;
+}
+
+/** `ob_journeys` — one per purchased product, `UNIQUE(client_id, product_id)`. */
+export interface ObJourney {
+  id: number; productId: number;
+  gateStatus: 'LOCKED' | 'OPEN';
+  /** Set while held behind a sibling journey's completion (plan §5.5). */
+  heldByJourneyId: number | null;
+  steps: ObStep[];
+}
+
+/** `ob_clients`. No payment columns — see {@link ObApplication}. */
+export interface ObClient {
+  id: number; name: string; description: string | null; onboardingDate: string;
+  /** Stored unmasked here; every read masks it. Unique — the duplicate guard's key. */
+  pan: string | null;
+  address: string | null; licenseType: string | null;
+  salesPersonId: number | null;
+  status: 'ONBOARDING' | 'LIVE' | 'ON_HOLD' | 'DROPPED';
+  liveAt: string | null;
+  hasPortalLogin: boolean;
+  contacts: ObContact[];
+  applications: ObApplication[];
+  requirements: string[];
+  journeys: ObJourney[];
+  createdById: number; createdAt: string;
+}
+
 // ── the store ───────────────────────────────────────────────────────────────
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
@@ -619,6 +687,22 @@ export interface Db {
   chatAttachments: ChatAttachment[];
   statusRequests: StatusRequest[];
   timesheetApprovals: TimesheetApproval[];
+  /**
+   * A-118 · the Client Onboarding module.
+   *
+   * Held on `Db` rather than in `handlers/onboarding.ts` for the reason
+   * `calendar` gives below: state outside this object survives `resetDb()`,
+   * and the failure that produces is a test which passes alone and fails in a
+   * full run.
+   *
+   * **Disjoint from `clients` and `contacts` on purpose.** Those are the
+   * ticketing master; these are `ob_clients` and `ob_client_contacts`, a
+   * separate table with no foreign key between them (plan §1.2). The ids do
+   * not correspond and nothing here should ever join them — the mock is the
+   * first place that separation is either kept or quietly lost.
+   */
+  obProducts: ObProduct[];
+  obClients: ObClient[];
   currentUserId: number;
   seq: Record<string, number>;
   /**
@@ -1541,6 +1625,133 @@ const TEMPLATE_MAPPINGS: TemplateMappingRow[] = [
   { id: 7, templateId: 3, projectId: null, taskTypeId: 8 },
 ]
 
+// ── A-118 · onboarding fixtures ─────────────────────────────────────────────
+/**
+ * Two products, because one product cannot show what the module is for: a
+ * client buys several and gets **one journey per product** (plan §1.1), and a
+ * single-product fixture would let the accordion look finished while never
+ * rendering a second strip.
+ *
+ * `BIOMETRIC` has no active template, which is the state the OB-04 picker has
+ * to refuse — a purchase with nothing to instantiate would board a client into
+ * nothing. A fixture where every product is bookable never exercises that.
+ */
+const OB_PRODUCTS: ObProduct[] = [
+  { id: 1, code: 'ERP', name: 'ERP Suite', isActive: true, hasActiveTemplate: true, totalTatDays: 24 },
+  { id: 2, code: 'BIOMETRIC', name: 'Biometric Attendance', isActive: true, hasActiveTemplate: false, totalTatDays: null },
+  { id: 3, code: 'LMS', name: 'Learning Management', isActive: false, hasActiveTemplate: true, totalTatDays: 12 },
+];
+
+/**
+ * Three clients, chosen so the three states OB-03 has to render are all
+ * present on first open rather than reachable only by editing the fixture:
+ *
+ * - **Northwind** is past the gate and running — `rag` is a real colour, one
+ *   service breached and one waiting on the client, so the RED roll-up and the
+ *   paused clock are both visible.
+ * - **Acme** is still `LOCKED`. Its `rag` is **null**, not GREEN: nothing is
+ *   running to colour, and OB-03 renders that as "Prerequisites pending". A
+ *   fixture that coloured it green would make the null case unreachable and
+ *   the empty state untested.
+ * - **Contoso** is `LIVE`, so the go-live flip has something to have produced.
+ *
+ * Northwind buys two products and holds the second behind the first, which is
+ * the service-level dependency of plan §5.5 — `heldByJourneyId` set while
+ * `gateStatus` is already OPEN, the combination most likely to be modelled
+ * wrongly as one field.
+ */
+const OB_CLIENTS: ObClient[] = [
+  {
+    id: 1, name: 'Northwind Technologies Pvt Ltd', description: 'Mid-market ERP rollout across three campuses.',
+    onboardingDate: '2026-07-14', pan: 'AABCN1234M', address: 'Baner, Pune 411045',
+    licenseType: 'Subscription', salesPersonId: 5, status: 'ONBOARDING', liveAt: null,
+    hasPortalLogin: true,
+    contacts: [
+      { id: 1, name: 'Meena Raghavan', designation: 'IT Head', email: 'meena@northwind.example', phone: '+91 98200 11223', whatsappOptIn: true, isPrimary: true },
+      { id: 2, name: 'Sanjay Bose', designation: 'Finance Lead', email: 'sanjay@northwind.example', phone: null, whatsappOptIn: false, isPrimary: false },
+    ],
+    applications: [
+      { id: 1, productId: 1, licenseType: 'Subscription', units: 250, licenseStart: '2026-08-01', licenseEnd: '2027-07-31' },
+      { id: 2, productId: 2, licenseType: 'Perpetual', units: 8, licenseStart: '2026-08-01', licenseEnd: null },
+    ],
+    requirements: ['Single sign-on against their Azure AD', 'Data migration from Tally for FY25-26'],
+    journeys: [
+      {
+        id: 1, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
+        steps: [
+          { id: 1, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'DONE', tatDays: 3, usedHours: 19, dependsOnStepId: null },
+          { id: 2, sequence: 2, name: 'Environment Provisioning', status: 'DONE', tatDays: 4, usedHours: 26.5, dependsOnStepId: 1 },
+          { id: 3, sequence: 3, name: 'Data Migration', status: 'BLOCKED', tatDays: 8, usedHours: 71, dependsOnStepId: 2 },
+          { id: 4, sequence: 4, name: 'User Training', status: 'WAITING_ON_CLIENT', tatDays: 5, usedHours: 12, dependsOnStepId: null },
+          { id: 5, sequence: 5, name: 'Go-live Readiness', status: 'PENDING', tatDays: 4, usedHours: 0, dependsOnStepId: 3 },
+        ],
+      },
+      {
+        // Held behind the ERP journey — bought, instantiated, past the gate,
+        // and still not started. Plan §5.5.
+        id: 2, productId: 2, gateStatus: 'OPEN', heldByJourneyId: 1,
+        steps: [
+          { id: 6, sequence: 1, name: 'Device Rollout', status: 'PENDING', tatDays: 6, usedHours: 0, dependsOnStepId: null },
+          { id: 7, sequence: 2, name: 'Attendance Policy Mapping', status: 'PENDING', tatDays: 3, usedHours: 0, dependsOnStepId: 6 },
+        ],
+      },
+    ],
+    createdById: 5, createdAt: iso('2026-07-14T09:20:00'),
+  },
+  {
+    id: 2, name: 'Acme Private Limited', description: null,
+    onboardingDate: '2026-08-28', pan: 'AAACA9876Q', address: 'Andheri East, Mumbai 400069',
+    licenseType: 'Subscription', salesPersonId: 5, status: 'ONBOARDING', liveAt: null,
+    hasPortalLogin: false,
+    contacts: [
+      { id: 3, name: 'Priya Nair', designation: 'Operations Manager', email: 'priya@acme.example', phone: '+91 99300 44556', whatsappOptIn: true, isPrimary: true },
+    ],
+    applications: [
+      { id: 3, productId: 1, licenseType: 'Subscription', units: 40, licenseStart: '2026-09-01', licenseEnd: '2027-08-31' },
+    ],
+    requirements: [],
+    journeys: [
+      {
+        id: 3, productId: 1, gateStatus: 'LOCKED', heldByJourneyId: null,
+        steps: [
+          { id: 8, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'PENDING', tatDays: 3, usedHours: 0, dependsOnStepId: null },
+          { id: 9, sequence: 2, name: 'Environment Provisioning', status: 'PENDING', tatDays: 4, usedHours: 0, dependsOnStepId: 8 },
+          { id: 10, sequence: 3, name: 'Data Migration', status: 'PENDING', tatDays: 8, usedHours: 0, dependsOnStepId: 9 },
+          { id: 11, sequence: 4, name: 'User Training', status: 'PENDING', tatDays: 5, usedHours: 0, dependsOnStepId: null },
+          { id: 12, sequence: 5, name: 'Go-live Readiness', status: 'PENDING', tatDays: 4, usedHours: 0, dependsOnStepId: 10 },
+        ],
+      },
+    ],
+    createdById: 5, createdAt: iso('2026-08-28T14:05:00'),
+  },
+  {
+    id: 3, name: 'Contoso Education Trust', description: 'Completed rollout, retained for renewals.',
+    onboardingDate: '2026-04-02', pan: 'AAECC4567P', address: 'Salt Lake, Kolkata 700091',
+    licenseType: 'Perpetual', salesPersonId: 5, status: 'LIVE', liveAt: iso('2026-06-19T11:40:00'),
+    hasPortalLogin: true,
+    contacts: [
+      { id: 4, name: 'Arjun Sen', designation: 'Registrar', email: 'arjun@contoso.example', phone: '+91 98310 77889', whatsappOptIn: false, isPrimary: true },
+    ],
+    applications: [
+      { id: 4, productId: 1, licenseType: 'Perpetual', units: 120, licenseStart: '2026-04-15', licenseEnd: null },
+    ],
+    requirements: ['Bulk student import from their existing MIS'],
+    journeys: [
+      {
+        id: 4, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
+        steps: [
+          { id: 13, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'DONE', tatDays: 3, usedHours: 17, dependsOnStepId: null },
+          { id: 14, sequence: 2, name: 'Environment Provisioning', status: 'DONE', tatDays: 4, usedHours: 22, dependsOnStepId: 13 },
+          { id: 15, sequence: 3, name: 'Data Migration', status: 'DONE', tatDays: 8, usedHours: 54, dependsOnStepId: 14 },
+          { id: 16, sequence: 4, name: 'User Training', status: 'DONE', tatDays: 5, usedHours: 31, dependsOnStepId: null },
+          { id: 17, sequence: 5, name: 'Go-live Readiness', status: 'DONE', tatDays: 4, usedHours: 25, dependsOnStepId: 15 },
+        ],
+      },
+    ],
+    createdById: 5, createdAt: iso('2026-04-02T10:00:00'),
+  },
+];
+
 export function createDb(): Db {
   // Before anything reads `pick` or `int` — see `rewindFixtureRandom`. Without
   // this, two calls to this function produce different fixtures.
@@ -1591,6 +1802,9 @@ export function createDb(): Db {
     // A-065 · nor has anybody scheduled a report. The empty state is the one
     // most users meet first, so it is what the mock starts in.
     reportSchedules: [],
+    // A-118 · the onboarding module. See OB_PRODUCTS / OB_CLIENTS.
+    obProducts: structuredClone(OB_PRODUCTS),
+    obClients: structuredClone(OB_CLIENTS),
     calendar: {
       week: {
         weeklyOff: [6, 7],
