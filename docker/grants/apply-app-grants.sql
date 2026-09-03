@@ -155,6 +155,43 @@ BEGIN
       SET v_sql = CONCAT('GRANT SELECT, INSERT ON edutrack.`', v_table,
                          '` TO ''edutrack_app''@''%''');
 
+    ELSEIF v_table = 'ob_step_history' THEN
+      -- A-106 · the onboarding module's hash-chained narrative record.
+      -- SELECT, INSERT, UPDATE, never DELETE — the ticket_history branch
+      -- above, for the same reason and with the same caveat.
+      --
+      -- UPDATE is not a loosening: trg_ob_history_no_update SIGNALs on
+      -- every UPDATE unconditionally, with no exception carved out the way
+      -- trg_stage_seal_only has one. What the privilege exists for is the
+      -- chain-tail read. PLAN.md §3.7's append takes a pessimistic lock
+      -- before reading the previous row_hash, and since MySQL 8.0.13 a
+      -- locking read requires UPDATE whether or not the statement is one
+      -- (error 1142, "SELECT with locking clause command denied").
+      --
+      -- Without this branch the table falls to the default below and gains
+      -- DELETE, which is the one privilege that must never reach it: layer
+      -- 4 refuses the statement, but a chain whose rows can be removed by
+      -- a user holding DROP is not a chain, and the tail is exactly what a
+      -- truncation removes.
+      SET v_sql = CONCAT('GRANT SELECT, INSERT, UPDATE ON edutrack.`', v_table,
+                         '` TO ''edutrack_app''@''%''');
+
+    ELSEIF v_table IN ('ob_step_communications', 'ob_step_clock_events') THEN
+      -- A-106 and A-105 · append-only, and neither is hash-chained, so
+      -- neither needs the locking-read privilege ob_step_history does.
+      -- SELECT and INSERT, exactly like audit_logs.
+      --
+      -- ob_step_clock_events is the one worth pausing on, because plan §4
+      -- does not annotate it append-only — A-105 tightened it deliberately
+      -- and said so. Its rows are the TAT record that every breach,
+      -- escalation and waiting-on-client attribution is computed from, and
+      -- §14 names TAT disputes as the risk this clock mitigates. Granting
+      -- DELETE here would let the application remove the evidence for the
+      -- argument the table exists to settle, one layer below the trigger
+      -- that refuses the statement.
+      SET v_sql = CONCAT('GRANT SELECT, INSERT ON edutrack.`', v_table,
+                         '` TO ''edutrack_app''@''%''');
+
     ELSEIF v_table = 'flyway_schema_history' THEN
       -- Readable for diagnostics; never written by the application.
       SET v_sql = CONCAT('GRANT SELECT ON edutrack.`', v_table,

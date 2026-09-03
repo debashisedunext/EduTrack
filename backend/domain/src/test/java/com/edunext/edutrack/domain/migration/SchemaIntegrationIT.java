@@ -233,7 +233,23 @@ class SchemaIntegrationIT {
                         // layer that makes S-16's "never editable" a refusal
                         // rather than a convention, and a silent drop is exactly
                         // what this assertion exists to notice.
-                        "trg_audit_no_update", "trg_audit_no_delete");
+                        "trg_audit_no_update", "trg_audit_no_delete",
+                        // A-106 · the onboarding module's append-only pair. The
+                        // same reasoning the audit_logs line above gives, and
+                        // the reason it belongs here rather than in a test of
+                        // its own: this list is the one place a silently
+                        // dropped trigger is noticed, and a per-module list
+                        // would only notice a drop in the module somebody
+                        // remembered to check.
+                        "trg_ob_comms_no_update", "trg_ob_comms_no_delete",
+                        "trg_ob_history_no_update", "trg_ob_history_no_delete",
+                        // A-105 · the step clock. Not annotated append-only by
+                        // the module plan — A-105 tightened it deliberately and
+                        // said so — which makes it the entry most likely to be
+                        // read as a mistake and "fixed" by deleting it. It is
+                        // the TAT record every breach and every
+                        // waiting-on-client attribution is computed from.
+                        "trg_ob_clock_no_update", "trg_ob_clock_no_delete");
             }
         }
     }
