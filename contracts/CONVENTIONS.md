@@ -171,6 +171,7 @@ product already enforces:
 | `/me/awaiting-response` | Your own unanswered asks, capped server-side |
 | `/chat/ticket-cards` | Bounded by the caller's own `codes` list, and capped below that |
 | `/projects/{id}/members` | One project's team — tens of people, and the S-10 Team tab totals their allocations, so it reads the whole set every time regardless |
+| `/onboarding/products` | A-118 — the catalogue of what the organisation sells. The `/masters/task-types` argument: a handful of rows, and both callers need the whole set to render anything — OB-04's multi-select is the purchase step, OB-07's product filter groups templates by it. Unlike the masters above, nothing caps this server-side; the ceiling is the business, not a constraint. An organisation selling hundreds of products would need a real cursor here rather than a wider exemption |
 
 | `/dashboard/widgets` | A-073 — the caller supplies the keys, and the `keys` enum is closed at 14 |
 
