@@ -124,6 +124,7 @@ Prerequisites (new):
 - `ob_client_prereqs` — per-client header (template_version, status `IN_PROGRESS·CLEARED`, cleared_at).
 - `ob_client_prereq_tasks` — snapshot instances + ad-hoc per-client tasks: title, description, is_mandatory, due_at (calendar-aware), **status `PENDING · SUBMITTED · VERIFIED · SKIPPED`**, submitted_at/via, verified_by/at, skipped_by/at + mandatory skip_reason (only non-mandatory tasks are skippable).
 - `ob_prereq_comments` (append-only; author_type STAFF·CLIENT) and `ob_prereq_history` (hash-chained, same trigger pattern).
+- `ob_client_escalations` — **raised by the client from the portal against a specific service**: step_id, comment (required), raised_by contact, raised_at, resolved_by/at. One open escalation per service; raising notifies the onboarding manager and the service owner **immediately** (email + WhatsApp); resolving acknowledges back to the client. Mirrored into the service's communication timeline as an `ESCALATION` entry.
 
 Sign-off, notification, escalation: `ob_signoffs`, `ob_notification_outbox`, `ob_escalations`, `ob_dashboard_summary` — as v1.0.
 
@@ -152,7 +153,7 @@ Per-step append-only timelines; client-level stitched view — unchanged. Prereq
 
 ## 7. Notifications — email + WhatsApp
 
-As v1.0 (outbox, provider adapter, template approval early, preferences), plus new events: client login created / password reset · prerequisite submitted (→ verifier) · verified / returned (→ SPOC) · prerequisite TAT reminder (→ SPOC) · **gate opened, journeys started** (→ SPOC + owners) · non-mandatory skip (→ manager digest).
+As v1.0 (outbox, provider adapter, template approval early, preferences), plus new events: client login created / password reset · prerequisite submitted (→ verifier) · verified / returned (→ SPOC) · prerequisite TAT reminder (→ SPOC) · **gate opened, journeys started** (→ SPOC + owners) · non-mandatory skip (→ manager digest) · **client escalation raised (→ manager + service owner, immediate, cannot be muted) and resolved (→ SPOC)**.
 
 ## 8. Client sign-off
 
@@ -167,7 +168,7 @@ Staff (changes from v1.0 in bold):
 | # | Screen | Notes |
 |---|---|---|
 | OB-01 | Module launcher / switcher | unchanged |
-| OB-02 | Onboarding dashboard | Cards: **Ongoing Projects · This Week's Deadlines** (all client tasks — services + prerequisites — due Mon–Sun) **· Today's Delivery · Overdue Clients** · Live · At Risk — **every card clicks open a right slide-over** (the S-06 pattern) listing the matching clients with product, item, owner, due and status, each row opening the client. Below the board: a **Delayed Projects grid** (client, start date, products bought, module in progress, current stage, responsible, expected completion, delayed-by days) and an **Implementor workload & performance grid** (one row per implementor *including those with zero clients*: clients, on track, not started, delayed, at risk, blocked/waiting, ahead of schedule, and a performance score chip computed from on-time + early completions weighted against delays and blocks). Roll-ups journey-counted with a product dimension. |
+| OB-02 | Onboarding dashboard | Cards: **Ongoing Projects · This Week's Deadlines** (all client tasks — services + prerequisites — due Mon–Sun) **· Today's Delivery · Overdue Clients** · Live · At Risk — **Client Escalations** (count of clients with an open portal escalation) — **every card clicks open a right slide-over** (the S-06 pattern) listing the matching clients with product, item, owner, due and status, each row opening the client. Below the board: a **Delayed Projects grid** (client, start date, products bought, module in progress, current stage, responsible, expected completion, delayed-by days) and an **Implementor workload & performance grid** (one row per implementor *including those with zero clients*: clients, on track, not started, delayed, at risk, blocked/waiting, ahead of schedule, and a performance score chip computed from on-time + early completions weighted against delays and blocks). Roll-ups journey-counted with a product dimension. |
 | OB-03 | Client list | shows journey count + worst RAG; "Prerequisites pending" state |
 | OB-04 | New client wizard | **multi-select products → N locked journeys; prerequisites instance created; "Create client portal login now" checkbox. No payment step.** |
 | OB-05 | Client detail | **PAN is not shown in the header** (identity data stays in Client info for authorized roles). Ribbon: a completed service shows **SD/FD (start and finish dates) with an on-time / early / delayed marker** in the meta line — the state label appears once, at the top only. **Animated status emojis** per service: 👍 done on time · 🙌 completed early · 👎 closed delayed (or running breached) · 👏 in progress on time · 😢 blocked/waiting — CSS animations, disabled under `prefers-reduced-motion`. **Prerequisites as an accordion on top** (strip: gate chip + mandatory-progress bar; expands to task rows with verify/return/skip; defaults open until the gate clears, collapsed after) **→ journey accordions (strip: product, % complete, RAG step dots, and TAT `used / total` with overrun highlighting; expanded: ribbon + step panel) → Client portal access panel + client info. No payments card. Accordion UX rule: expanding/collapsing or selecting a step never scrolls the page — scroll position is preserved on all same-page interactions.** |
@@ -187,7 +188,7 @@ Client portal (own minimal shell, `principal_type = CLIENT` only):
 |---|---|---|
 | CP-01 | Portal login + forced password change | rate-limited, lockout |
 | CP-02 | Module chooser | Ticketing / Onboarding cards |
-| CP-03 | Onboarding home | interactive prerequisites above **read-only** journey accordions — step status only; no owner names, internal comms, escalations, or block reasons |
+| CP-03 | Onboarding home | interactive prerequisites above **read-only** journey accordions — step status only; no owner names, internal comms, or block reasons. **Each running service carries an Escalate action (comment required)** — one open escalation per service, shown as a red chip until staff resolve it |
 | CP-04 | Prerequisite task detail | description, reference docs, comment thread, uploads, **Submit for verification** |
 | CP-05 | Sign-offs | pending + past, deep-linking to the §8 flow |
 | CP-06/07 | My tickets (list + read-only detail) | own tickets; `is_client_visible` comments/attachments only; **no raise-ticket** |

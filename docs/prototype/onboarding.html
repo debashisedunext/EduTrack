@@ -434,10 +434,16 @@ Object.assign(CLIENTS[3].prereqs[3], {status:"SKIPPED", skipReason:"Client IT po
 // one login per client — generated with the client (platform identity, not a staff user)
 const CLIENT_ACCOUNTS = [
   {username:"CL-30412", clientId:"c1"},
+  {username:"CL-30655", clientId:"c2"},
   {username:"CL-30977", clientId:"c7"},
 ];
 
+// seed one client escalation (raised from the portal by Sunrise EdTech's SPOC)
+CLIENTS[1].steps[3].clientEsc = {when:"19 Aug, 17:40", by:"Arjun Shetty", text:"Migration delay is holding our launch date — please expedite."};
+CLIENTS[1].steps[3].comms.push(comm("19 Aug, 17:40","ESCALATION","IN","Arjun Shetty (Client)","Migration delay is holding our launch date — please expedite."));
+
 let NOTIFS = [
+  {id:0, when:"19 Aug, 17:40", icon:"🚨", text:"CLIENT ESCALATION — Sunrise EdTech escalated “Data migration”: migration delay is holding their launch date.", unread:true, client:"c2"},
   {id:1, when:"19 Aug, 16:05", icon:"⛔", text:"TAT breached — Data migration for Sunrise EdTech (owner: Kavya Sharma). Escalated to L2.", unread:true, client:"c2"},
   {id:2, when:"19 Aug, 11:00", icon:"✍️", text:"Sign-off requested from Cambridge Heights (UAT & issue closure).", unread:true, client:"c6"},
   {id:3, when:"19 Aug, 09:15", icon:"🟠", text:"Amber warning — Admin & user training for Horizon Academy is at 78% of TAT.", unread:true, client:"c3"},
@@ -459,7 +465,7 @@ let SETTINGS = {amber:75, cadence:"Every 5 minutes",
 /* ============================== STATE ============================== */
 let S = {user:null, view:"login", params:{}, loginErr:"", notifOpen:false,
   filters:{q:"", rag:"ALL", status:"ALL"}, reportTab:"funnel", wizard:null, signoff:null, tplEdit:null,
-  prqOpen:{}, drill:null};  // per-client prerequisites-accordion state; default: open until gate clears
+  prqOpen:{}, drill:null, escOpen:null};  // per-client prerequisites-accordion state; default: open until gate clears
 
 /* ============================== HELPERS ============================== */
 const $ = id => document.getElementById(id);
@@ -1024,10 +1030,30 @@ A.dashDrill = key=>{
   if(key==="overdue") { title="Overdue clients";       rows=items.filter(x=>x.overdue); }
   if(key==="live")    { title="Live clients";          rows=CLIENTS.filter(c=>c.status==="LIVE").map(c=>({c,ji:0,si:c.steps.length-1,label:"Live since "+c.liveAt,owner:"—",due:"—",prod:c.journeys.map(j=>prodById(j.prod).name).join(", "),overdue:false})); }
   if(key==="risk")    { title="At-risk clients";       rows=items.filter(x=>{const cRag=clientRag(x.c);return cRag==="AMBER";}); }
+  if(key==="esc")     { title="Client escalations";    rows=[];
+    CLIENTS.forEach(c=>c.journeys.forEach((j,ji)=>j.steps.forEach((st,si)=>{ if(st.clientEsc)
+      rows.push({c,ji,si,label:st.name+" — “"+st.clientEsc.text+"”",owner:uById(st.owner).name,due:st.clientEsc.when,prod:prodById(j.prod).name,overdue:true}); }))); }
   S.drill={title, count:rows.length, body:rows.length?rows.map(drillRow).join(""):'<div class="empty cap">Nothing here right now.</div>'};
   render();
 };
 A.drillClose = ()=>{ S.drill=null; render(); };
+A.escToggle = k=>{ S.escOpen = S.escOpen===k? null : k; render(); };
+A.cpEscalate = (cid,ji,si)=>{
+  const el=$("esc-"+ji+"-"+si); if(!el || !el.value.trim()){ toast("Describe what you are escalating — the comment is required.","bad"); return; }
+  const {c,s}=jStep(cid,ji,si);
+  s.clientEsc={when:"Today", by:(c.spocs[0]?c.spocs[0].name:"Client"), text:el.value.trim()};
+  s.comms.push(comm("Today","ESCALATION","IN",(c.spocs[0]?c.spocs[0].name:"Client")+" (Client)", el.value.trim()));
+  pushNotif("🚨","CLIENT ESCALATION — "+c.name+" escalated “"+s.name+"”: "+el.value.trim(), cid);
+  S.escOpen=null;
+  toast("Escalated — the onboarding manager and the service owner have been notified immediately.");
+  render();
+};
+A.escResolve = (cid,ji,si)=>{
+  const {c,s}=jStep(cid,ji,si);
+  s.comms.push(comm("Today","NOTE","INT",S.user.name,"Client escalation resolved and acknowledged back to "+(c.spocs[0]?c.spocs[0].name:"the client")+"."));
+  s.clientEsc=null;
+  toast("Escalation resolved — the client is notified."); render();
+};
 function drillHTML(){
   const d=S.drill;
   return `<div class="dveil" onclick="A.drillClose()"></div>
@@ -1088,6 +1114,7 @@ function vDash(){
   const today = items.filter(x=>x.ser===TODAY_SER).length;
   const odItems = items.filter(x=>x.overdue);
   const od = odItems.length, odClients = new Set(odItems.map(x=>x.c.id)).size;
+  const escN = new Set(CLIENTS.flatMap(c=>c.journeys.flatMap(j=>j.steps.some(st=>st.clientEsc)?[c.id]:[]))).size;
   const stuck = active.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>x.s.status==="BLOCKED"||x.s.status==="WAITING"));
   const breach = active.flatMap(c=>c.steps.map((s,i)=>({c,s,i})).filter(x=>x.s.status!=="DONE" && x.s.pct>=100));
   const ragCol = (title, chip, list, hint) => `<div class="rag-col">
@@ -1107,6 +1134,7 @@ function vDash(){
       <button class="kpi" role="listitem" onclick="A.dashDrill('week')"><div class="eyebrow">This Week's Deadlines</div><div class="v" style="color:var(--info)">${wk}</div><div class="d cap">client tasks due Mon–Sun</div></button>
       <button class="kpi" role="listitem" onclick="A.dashDrill('today')"><div class="eyebrow">Today's Delivery</div><div class="v">${today}</div><div class="d cap">services due today</div></button>
       <button class="kpi" role="listitem" onclick="A.dashDrill('overdue')"><div class="eyebrow">Overdue Clients</div><div class="v" style="color:var(--danger)">${odClients}</div><div class="d cap">${od} overdue items — need action now</div></button>
+      <button class="kpi" role="listitem" onclick="A.dashDrill('esc')"><div class="eyebrow">Client Escalations</div><div class="v" style="color:var(--danger)">${escN}</div><div class="d cap">clients escalated from the portal</div></button>
       <button class="kpi" role="listitem" onclick="A.dashDrill('live')"><div class="eyebrow">Live</div><div class="v" style="color:var(--success)">${live.length}</div><div class="d cap">fully onboarded · latest ${live[0]?esc(live[0].liveAt):"—"}</div></button>
       <button class="kpi" role="listitem" onclick="A.dashDrill('risk')"><div class="eyebrow">At Risk</div><div class="v" style="color:var(--warning)">${amber.length}</div><div class="d cap">≥${SETTINGS.amber}% of a service TAT used</div></button>
     </div>
@@ -1451,6 +1479,8 @@ function stepCard(c, ji, selIdx, s, owner, editable, docsMissing, actions){
           <div><div class="eyebrow">TAT used</div><div style="margin-top:4px;font-weight:600;color:${s.pct>=100?"var(--danger)":s.pct>=SETTINGS.amber?"var(--warning)":"var(--success)"}">${Math.min(s.pct,999)}%</div></div>
           <div><div class="eyebrow">Task list</div><div style="margin-top:4px">☑ ${s.subs.filter(x=>x.val!==null).length}/${s.subs.length} answered</div></div>
         </div>
+        ${s.clientEsc?`<div class="err" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">🚨 <b>Client escalation</b> — “${esc(s.clientEsc.text)}” <span class="cap">(${esc(s.clientEsc.by)}, ${esc(s.clientEsc.when)})</span>
+          ${["OB_ADMIN","MANAGER"].includes(S.user.role)?`<button class="btn btn-sm" style="margin-left:auto" onclick="A.escResolve('${c.id}',${ji},${selIdx})">✓ Resolve & acknowledge</button>`:""}</div>`:""}
         ${s.blockReason?`<div class="err">⛔ Blocked: ${esc(s.blockReason)}</div>`:""}
         ${s.signoff?`<p class="cap" style="margin-bottom:12px">✍️ This step requires <b>client sign-off</b> — status: <b>${s.signoffState==="NONE"?"not yet requested":s.signoffState==="REQUESTED"?"link sent, awaiting client":s.signoffState==="ACCEPTED"?"accepted ✓":"objection raised ⚠"}</b></p>`:""}
         ${s.docsReq.length?`<p class="cap" style="margin-bottom:12px">📋 Required documents: ${s.docsReq.map(d=>s.docs.includes(d)?`<span class="chip chip-green">✓ ${esc(d)}</span>`:`<span class="chip chip-grey">○ ${esc(d)}</span>`).join(" ")}</p>`:""}
@@ -1485,7 +1515,7 @@ function stepCard(c, ji, selIdx, s, owner, editable, docsMissing, actions){
           <input id="cm-text" placeholder="What was communicated?" style="flex:1;min-width:180px">
           <button class="btn btn-p btn-sm" onclick="A.stComm('${c.id}',${ji},${selIdx})">Log</button></div>`:""}
         ${s.comms.length? `<ul class="tl">${s.comms.slice().reverse().map(m=>`<li>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip chip-${m.type==="WHATSAPP"?"green":m.type==="EMAIL"?"blue":m.type==="CALL"?"indigo":"grey"}">${m.type}</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip chip-${m.type==="ESCALATION"?"red":m.type==="WHATSAPP"?"green":m.type==="EMAIL"?"blue":m.type==="CALL"?"indigo":"grey"}">${m.type}</span>
             <b style="font-size:13px">${esc(m.by)}</b><span class="cap">${esc(m.when)} · ${m.dir==="IN"?"inbound":m.dir==="OUT"?"outbound":"internal"}</span></div>
             <div style="margin-top:4px;font-size:13px">${esc(m.text)}</div></li>`).join("")}</ul>`
           : '<div class="empty cap">No communication logged on this step yet.</div>'}
@@ -1794,8 +1824,13 @@ function vCpHome(){
           <span class="cap num" style="width:18px">${si+1}</span>
           <span style="font-size:13px;font-weight:500;flex:1;min-width:160px">${esc(st.name)}</span>
           ${st.signoff && st.signoffState==="REQUESTED" ? `<button class="btn btn-p btn-sm" onclick="A.signoffOpen('${c.id}',${k},${si})">✍ Review & sign off</button>`:""}
+          ${st.clientEsc?'<span class="chip chip-red">🚨 Escalated</span>'
+            : st.status!=="DONE"&&j2.gate!=="LOCKED"?`<button class="btn btn-sm" onclick="A.escToggle('${k}-${si}')">🚨 Escalate</button>`:""}
           ${chipStatus(st)}
-        </div>`).join("")}
+        </div>
+        ${S.escOpen===k+"-"+si?`<div style="display:flex;gap:8px;padding:4px 4px 10px 32px;flex-wrap:wrap">
+          <input id="esc-${k}-${si}" placeholder="What is the concern? (required — goes straight to the onboarding manager)" style="flex:1;min-width:220px;font-size:13px">
+          <button class="btn btn-p btn-sm" onclick="A.cpEscalate('${c.id}',${k},${si})">Send escalation</button></div>`:""}`).join("")}
         <p class="cap" style="margin-top:10px">Step-level progress only — who is working on each step and internal notes stay with the EduNext team.</p>
       </div>`:""}
     </div>`;
