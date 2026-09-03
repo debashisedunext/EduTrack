@@ -795,3 +795,24 @@ jobs:
           name: edutrack-api-jar
           path: backend/api/target/edutrack-api-*.jar
           if-no-files-found: error
+
+      # `mvn package` above already builds the whole reactor, `worker`
+      # included — this only makes sure the jar it produces is not silently
+      # dropped. Nonprod has been running the api jar alone: `worker` owns
+      # the `@Scheduled` pass that fills `daily_ticket_stats` and
+      # `resource_daily_stats` (A-051), so without a second process there
+      # the dashboard's Today's Progress and Weekly Progress tabs read
+      # nothing but zeroes forever, not just until the next five-minute
+      # tick — the table stays empty because nothing is running the job.
+      # There is no embedded-worker-inside-api profile (PLAN.md §2.3
+      # describes one as an option, not something built), so until one
+      # exists, the two jars are two processes to deploy.
+      - name: Verify the worker jar exists
+        run: |
+          JAR=$(ls backend/worker/target/edutrack-worker-*.jar | head -1)
+          echo "✓ $JAR"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: edutrack-worker-jar
+          path: backend/worker/target/edutrack-worker-*.jar
+          if-no-files-found: error
