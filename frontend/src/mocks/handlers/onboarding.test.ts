@@ -144,10 +144,15 @@ describe('A-118 · PAN is masked on the way out', () => {
   })
 
   it('keeps PAN off the list row entirely', async () => {
-    const row = (await listClients())[0] as Record<string, unknown>
+    const [row] = await listClients()
     // Identity data belongs to the detail, where the masking rule and its audit
     // apply — not to a list that leaks it a page at a time.
-    expect(row).not.toHaveProperty('pan')
+    //
+    // Asserted over the parsed keys rather than by casting the row: `ClientRow`
+    // has no index signature, so `as Record<string, unknown>` is a compile
+    // error, and widening through `unknown` to silence it would assert against
+    // a type rather than against what the handler actually sent.
+    expect(Object.keys(row)).not.toContain('pan')
   })
 
   it('does not let the search parameter match on PAN', async () => {
