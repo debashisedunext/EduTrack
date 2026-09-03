@@ -886,6 +886,10 @@ Stream D's in phase 1. Email only this phase — WhatsApp is out of scope, recor
 - [ ] **B-119** **CSAT** — a public one-question page, storage, and a summary. The design fires a toast saying the survey was sent and there is nothing behind it; this is that nothing.
 
 ### Dashboard and reports
+### Dashboard and reports
+
+- [ ] **B-127** **Dashboard v1.2 cards + drill slide-over** — Ongoing Projects, This Week's Deadlines (services + prerequisites), Today's Delivery, Overdue Clients, Client Escalations; every card opens the S-06 right panel listing matching clients, rows opening the client.
+- [ ] **B-128** **Delayed-projects grid + implementor workload & performance grid** — delayed rows with expected completion and delayed-by days; one row per implementor including the bench, with on-track/not-started/delayed/at-risk/blocked/ahead counts and a performance score.
 
 - [ ] **B-120** **`ob_dashboard_summary` refresh job** — lives in `worker/onboarding/stats/` and is **yours**, named in CODEOWNERS from day one. Phase 1 hit this exact shape with `worker/stats/` and it cost three unannounced edits to another stream's directory before anyone wrote it down.
 - [ ] **B-121** **OB-02 — onboarding dashboard** — RAG board, funnel, stuck list, breach list, TAT tiles. Reads the summary table, never a live count.

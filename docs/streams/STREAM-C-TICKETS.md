@@ -494,9 +494,15 @@ The heart of the module, and the closest analogue to the work you already did on
 - [ ] **C-107** **Skip a step** — Manager and Admin only, reason mandatory, history row. Absent from the design; required by the module plan §3 and §4.
 - [ ] **C-108** **Backup owner** — assignment plus leave-aware inheritance against the working calendar. The column is in the schema and the affordance is nowhere in the design.
 
+### Service dependencies & sequencing
+
+- [ ] **C-123** **Service-level dependency engine** — a dependent journey instantiates held (no activation, no clocks) until the client's dependency journey completes, then unlocks with a notification; vacuous when the dependency's product wasn't bought. Module Service page: product filter, ↑/↓ card sequencing driving instantiation/display order, cycle-free depends-on picker.
+
 ### The gate
 
 - [ ] **C-118** 🔴 **PrerequisiteGateService** — every mandatory task VERIFIED (non-mandatory VERIFIED or SKIPPED) flips all LOCKED journeys OPEN, activates dependency-free steps, starts clocks, fires kickoff automation. No override — the only valve is skipping non-mandatory tasks.
+
+- [ ] **C-125** **Ribbon SD/FD + animated status emojis + v1.2 terminology sweep** — completed services show start/finish dates with on-time/early/delayed markers (state label once, not twice); animated 👍🙌👎👏😢 per status, reduced-motion safe; Module Service / Task List / day-TAT captions across all screens.
 
 ### Screens
 
@@ -516,7 +522,10 @@ Stream D's in phase 1. It lands here because every input it reads — step state
 
 ## OB5 — Client portal
 
-### Portal screens
+### Portal screens### Portal screens
+
+- [ ] **C-126** **Portal escalation flow** — Escalate on any running service with a mandatory comment; red chip until staff resolve; staff banner + resolve-and-acknowledge; ESCALATION entry on the communication timeline.
+
 
 - [ ] **C-121** **CP-01..CP-04** — portal login + forced password change, module chooser, onboarding home (interactive prerequisites above read-only journey accordions — no owners, no internal comms), prerequisite task detail with uploads and comments.
 - [ ] **C-122** **CP-05..CP-07** — sign-off list deep-linking the §8 flow, and read-only my-tickets filtered to client-visible content.

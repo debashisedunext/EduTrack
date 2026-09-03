@@ -561,6 +561,8 @@ Nothing else in phase 2 starts until the gate and the schema exist. This milesto
 - [ ] **A-108** **`ob_dashboard_summary`** — pre-aggregated. Dashboards never run a live `COUNT(*)`.
 - [ ] **A-109** 🔴 **`user_module_access` and the grants** — `edutrack_app` holds per-table grants and eighteen tables arrive at once. Run `make grants` inside this task, not after it: the failure is `Schema-validation: missing table [x]` at startup, which names a table that plainly exists and cost two debugging sessions in phase 1.
 
+- [ ] **A-128** **Service dependency & escalation schema** — `ob_journey_templates.sequence` + `depends_on_template_id` (cycle-free, service-level), and `ob_client_escalations` (one open per service; comment, raised_by contact, resolved_by/at).
+
 ### Client identity — the portal bridge
 
 - [ ] **A-125** **`client_accounts` + CLIENT principal** — identity-layer table (nullable refs to both client masters, CHECK at-least-one), Argon2id, generated username, must-change; JWT `principal_type: CLIENT` with its own refresh-token family.

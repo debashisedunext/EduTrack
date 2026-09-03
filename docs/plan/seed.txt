@@ -118,3 +118,12 @@ C-120 | 1 | C-110 | i
 C-121 | 4 | A-126,B-125 | i
 C-122 | 2 | C-121,A-127 | i
 D-101 | 3 | B-110 | i
+
+# v1.2 — service dependencies, dashboard rework, portal escalations
+A-128 | 1 | A-103 | i
+B-127 | 3 | B-119,C-113 | i
+B-128 | 2 | B-127 | i
+C-123 | 3 | C-118,A-128 | i
+C-125 | 2 | C-110 | i
+C-126 | 2 | C-121,A-128 | i
+D-102 | 1 | B-110 | i

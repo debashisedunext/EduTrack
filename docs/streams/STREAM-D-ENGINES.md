@@ -225,5 +225,8 @@ Answer during M5:
 ## OB3 — Notifications
 
 ### WhatsApp
+### WhatsApp
+
+- [ ] **D-102** **Escalation notification events** — client escalation raised → immediate, unmutable alert to manager + service owner (email + WhatsApp); resolved → acknowledgement to the SPOC.
 
 - [ ] **D-101** **WhatsApp provider adapter** — behind the outbox with delivery webhooks (sent/delivered/read/failed); business templates submitted during OB1 so approval lead time never blocks OB3.
