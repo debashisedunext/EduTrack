@@ -233,7 +233,23 @@ class SchemaIntegrationIT {
                         // layer that makes S-16's "never editable" a refusal
                         // rather than a convention, and a silent drop is exactly
                         // what this assertion exists to notice.
-                        "trg_audit_no_update", "trg_audit_no_delete");
+                        "trg_audit_no_update", "trg_audit_no_delete",
+                        // A-105 · ob_step_clock_events, append-only.
+                        // A-106 · the onboarding append-only pair, hash-chained
+                        // (ob_step_communications, ob_step_history).
+                        //
+                        // All four were missing from this list — neither A-105
+                        // nor A-106 updated it when their migrations landed, so
+                        // this assertion has been red on develop's own tip since
+                        // A-106 merged, independently of anything in this branch
+                        // (verified against develop HEAD directly). Flagged here
+                        // rather than fixed quietly, on the same "name it or the
+                        // build stays red for whoever touches this file next"
+                        // reasoning the rest of this assertion already argues
+                        // for. Stream A sign-off requested.
+                        "trg_ob_clock_no_update", "trg_ob_clock_no_delete",
+                        "trg_ob_comms_no_update", "trg_ob_comms_no_delete",
+                        "trg_ob_history_no_update", "trg_ob_history_no_delete");
             }
         }
     }
