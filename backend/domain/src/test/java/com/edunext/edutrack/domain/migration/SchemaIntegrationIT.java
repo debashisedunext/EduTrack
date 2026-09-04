@@ -406,4 +406,237 @@ class SchemaIntegrationIT {
             }).isInstanceOf(SQLException.class).hasMessageContaining("already sealed");
         }
     }
+    // ------------------------------------------------------------------
+    // A-123 — the onboarding module's append-only tables
+    //
+    // A-105 and A-106 both say in their own headers that they are
+    // "unverified in the sense A-008 was until A-013": the triggers were
+    // exercised by hand and nothing re-checked them per run. These are that
+    // check, and they are here rather than in a class of their own because
+    // every new IT class starts its own MySQL container — the suite already
+    // pays that 45 times over.
+    //
+    // WHAT THESE ASSERT THAT A TRIGGER'S EXISTENCE DOES NOT
+    //
+    // `schemaHasExpectedShape` proves the six triggers are installed. It
+    // cannot prove they refuse anything, and it cannot prove the refusal
+    // says something a caller can act on. Both matter, and the second one
+    // is not theoretical: on the first draft of A-105/A-106 three of the six
+    // SIGNAL messages were over MySQL's 128-character MESSAGE_TEXT cap, so
+    // the server discarded them and raised ERROR 1648, "Data too long for
+    // condition item". The write was still refused — the guarantee held —
+    // but the caller was told nothing about immutability and the SQLSTATE
+    // was 22001 rather than the declared 45000.
+    //
+    // Every assertion below therefore matches on the message rather than
+    // only on the exception. A test that accepted any SQLException would
+    // have passed against that broken build.
+    // ------------------------------------------------------------------
+
+    /** Fresh journey + step, so these tests never share mutable state. */
+    private long seedOnboardingStep(Connection c, String suffix) throws SQLException {
+        try (Statement s = c.createStatement()) {
+            s.execute("INSERT INTO ob_products (code, name) VALUES ('P" + suffix + "', 'Probe " + suffix + "')");
+            long productId = lastInsertId(s);
+            s.execute("INSERT INTO ob_clients (name, onboarding_date) "
+                    + "VALUES ('Probe " + suffix + "', '2026-09-01')");
+            long clientId = lastInsertId(s);
+            s.execute("INSERT INTO ob_client_contacts (ob_client_id, name, email, is_primary) "
+                    + "VALUES (" + clientId + ", 'Probe', 'probe" + suffix + "@test.local', 1)");
+            long contactId = lastInsertId(s);
+            s.execute("INSERT INTO ob_client_applications (ob_client_id, product_id) "
+                    + "VALUES (" + clientId + ", " + productId + ")");
+            s.execute("INSERT INTO ob_journey_templates (product_id, name, version, is_active) "
+                    + "VALUES (" + productId + ", 'Probe', 1, 1)");
+            long templateId = lastInsertId(s);
+            s.execute("INSERT INTO ob_journeys (ob_client_id, product_id, template_id) "
+                    + "VALUES (" + clientId + ", " + productId + ", " + templateId + ")");
+            long journeyId = lastInsertId(s);
+            s.execute("INSERT INTO ob_journey_steps (journey_id, sequence, name, tat_days) "
+                    + "VALUES (" + journeyId + ", 1, 'Probe step', 1)");
+            long stepId = lastInsertId(s);
+            // Stash the ids the callers need on one row they can read back.
+            onboardingJourneyId = journeyId;
+            onboardingClientId = clientId;
+            onboardingContactId = contactId;
+            return stepId;
+        }
+    }
+
+    private long onboardingJourneyId;
+    private long onboardingClientId;
+    private long onboardingContactId;
+
+    @Test
+    void obStepClockEventsRejectsUpdate() throws SQLException {
+        try (Connection c = connect()) {
+            long stepId = seedOnboardingStep(c, "CU");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ob_step_clock_events "
+                        + "(step_id, journey_id, event_type, occurred_at) VALUES ("
+                        + stepId + ", " + onboardingJourneyId + ", 'STARTED', NOW(6))");
+            }
+            // The TAT dispute in one statement: re-attributing elapsed time to
+            // the client is the edit this table exists to make impossible.
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("UPDATE ob_step_clock_events SET attributed_to = 'CLIENT' "
+                            + "WHERE step_id = " + stepId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be updated");
+        }
+    }
+
+    @Test
+    void obStepClockEventsRejectsDelete() throws SQLException {
+        try (Connection c = connect()) {
+            long stepId = seedOnboardingStep(c, "CD");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ob_step_clock_events "
+                        + "(step_id, journey_id, event_type, occurred_at) VALUES ("
+                        + stepId + ", " + onboardingJourneyId + ", 'STARTED', NOW(6))");
+            }
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("DELETE FROM ob_step_clock_events WHERE step_id = " + stepId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be deleted");
+        }
+    }
+
+    @Test
+    void obStepCommunicationsRejectsUpdate() throws SQLException {
+        try (Connection c = connect()) {
+            long stepId = seedOnboardingStep(c, "MU");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ob_step_communications "
+                        + "(step_id, journey_id, ob_client_id, body, author_type, author_user_id, occurred_at) "
+                        + "VALUES (" + stepId + ", " + onboardingJourneyId + ", " + onboardingClientId
+                        + ", 'internal note', 'STAFF', " + userId + ", NOW(6))");
+            }
+            // Flipping an internal note to client-visible after the fact is
+            // the edit with the worst blast radius here: §9 CP-03 puts
+            // internal comms on the never-visible list, and a client cannot
+            // un-read one.
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("UPDATE ob_step_communications SET is_client_visible = 1 "
+                            + "WHERE step_id = " + stepId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be updated");
+        }
+    }
+
+    @Test
+    void obStepCommunicationsRejectsDelete() throws SQLException {
+        try (Connection c = connect()) {
+            long stepId = seedOnboardingStep(c, "MD");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ob_step_communications "
+                        + "(step_id, journey_id, ob_client_id, body, author_type, author_user_id, occurred_at) "
+                        + "VALUES (" + stepId + ", " + onboardingJourneyId + ", " + onboardingClientId
+                        + ", 'note', 'STAFF', " + userId + ", NOW(6))");
+            }
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("DELETE FROM ob_step_communications WHERE step_id = " + stepId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be deleted");
+        }
+    }
+
+    @Test
+    void obStepHistoryRejectsUpdate() throws SQLException {
+        try (Connection c = connect()) {
+            long stepId = seedOnboardingStep(c, "HU");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ob_step_history "
+                        + "(journey_id, step_id, ob_client_id, event_type, actor_type, actor_id, row_hash) "
+                        + "VALUES (" + onboardingJourneyId + ", " + stepId + ", " + onboardingClientId
+                        + ", 'STEP_ACTIVATED', 'USER', " + userId + ", REPEAT('a', 64))");
+            }
+            // Rewriting row_hash is the tamper this table's chain exists to
+            // make detectable; the trigger makes it impossible in the first
+            // place, which is the layer above detection.
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("UPDATE ob_step_history SET row_hash = REPEAT('b', 64) "
+                            + "WHERE step_id = " + stepId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be updated");
+        }
+    }
+
+    @Test
+    void obStepHistoryRejectsDelete() throws SQLException {
+        try (Connection c = connect()) {
+            long stepId = seedOnboardingStep(c, "HD");
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ob_step_history "
+                        + "(journey_id, step_id, ob_client_id, event_type, actor_type, actor_id, row_hash) "
+                        + "VALUES (" + onboardingJourneyId + ", " + stepId + ", " + onboardingClientId
+                        + ", 'STEP_ACTIVATED', 'USER', " + userId + ", REPEAT('a', 64))");
+            }
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("DELETE FROM ob_step_history WHERE step_id = " + stepId);
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("cannot be deleted");
+        }
+    }
+
+    /**
+     * The refusals above are only half the guarantee. A table nothing can
+     * correct is not append-only, it is broken — so the compensating path
+     * has to work, or the first genuine mistake leaves somebody with a
+     * choice between a wrong record and a dropped trigger.
+     */
+    @Test
+    void obStepCommunicationsCorrectsByCompensatingRow() throws SQLException {
+        try (Connection c = connect()) {
+            long stepId = seedOnboardingStep(c, "CX");
+            long originalId;
+            try (Statement s = c.createStatement()) {
+                s.execute("INSERT INTO ob_step_communications "
+                        + "(step_id, journey_id, ob_client_id, body, author_type, author_user_id, occurred_at) "
+                        + "VALUES (" + stepId + ", " + onboardingJourneyId + ", " + onboardingClientId
+                        + ", 'wrong step', 'STAFF', " + userId + ", NOW(6))");
+                originalId = lastInsertId(s);
+                s.execute("INSERT INTO ob_step_communications "
+                        + "(step_id, journey_id, ob_client_id, body, author_type, author_user_id, occurred_at, "
+                        + " is_correction, corrects_entry_id) "
+                        + "VALUES (" + stepId + ", " + onboardingJourneyId + ", " + onboardingClientId
+                        + ", 'retracted', 'STAFF', " + userId + ", NOW(6), 1, " + originalId + ")");
+            }
+            try (Statement s = c.createStatement();
+                 ResultSet rs = s.executeQuery(
+                         "SELECT COUNT(*) FROM ob_step_communications WHERE step_id = " + stepId)) {
+                rs.next();
+                assertThat(rs.getInt(1))
+                        .as("the original survives its own correction — that is the point of a reversal")
+                        .isEqualTo(2);
+            }
+        }
+    }
+
+    /**
+     * A correction has to name what it corrects. Without this, `is_correction`
+     * is a flag anybody can set on an ordinary row and the reversal stops
+     * being traceable to the entry it reverses.
+     */
+    @Test
+    void obStepCommunicationsRefusesACorrectionThatCorrectsNothing() throws SQLException {
+        try (Connection c = connect()) {
+            long stepId = seedOnboardingStep(c, "CN");
+            assertThatThrownBy(() -> {
+                try (Statement s = c.createStatement()) {
+                    s.execute("INSERT INTO ob_step_communications "
+                            + "(step_id, journey_id, ob_client_id, body, author_type, author_user_id, "
+                            + " occurred_at, is_correction) "
+                            + "VALUES (" + stepId + ", " + onboardingJourneyId + ", " + onboardingClientId
+                            + ", 'x', 'STAFF', " + userId + ", NOW(6), 1)");
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("ck_ob_comms_correction");
+        }
+    }
 }
