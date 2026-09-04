@@ -1,8 +1,20 @@
 package com.edunext.edutrack.domain.onboarding;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
-public interface ObJourneyRepository extends JpaRepository<ObJourney, Long> {
+/**
+ * ⚠ <b>A-112 · do not call this from feature code.</b> Every journey read goes
+ * through {@code ScopedJourneys}, which is the only class permitted to compose
+ * {@code OnboardingScopeResolver}'s specification in — exactly the arrangement
+ * {@code TicketRepository} and {@code ScopedTickets} have for §10.2, and for
+ * the same reason: a guard that feature code must remember to apply is a guard
+ * that is applied almost everywhere. {@code ScopeGuardRulesTest} fails the
+ * build if any class in {@code api} outside {@code api.security.scope} touches
+ * this interface.
+ */
+public interface ObJourneyRepository extends JpaRepository<ObJourney, Long>,
+        JpaSpecificationExecutor<ObJourney> {
 
     /**
      * "One per client per product" among live (non-archived) journeys —

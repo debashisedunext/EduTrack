@@ -80,7 +80,15 @@ class AccessTokenIssuer {
                 // access to a module that did not exist when it was signed.
                 // Writing it unconditionally means the two readings — absent
                 // and empty — never have to be told apart.
-                .claim("modules", user.modules());
+                .claim("modules", user.modules())
+                // A-112 · the role held inside each module, for
+                // OnboardingScopeResolver. Written unconditionally for the
+                // same reason `modules` is: an absent claim must mean "no role
+                // in any module", so a token minted before this task is scoped
+                // to nothing rather than defaulting into the role that sees
+                // every journey. An empty map is a claim; a missing one is a
+                // silence CallerIdentity would have to interpret.
+                .claim("moduleRoles", user.moduleRoles());
 
         // A-026. The flag has to travel in the token, not only in the response
         // body: the body is a suggestion the client may ignore, and this is the

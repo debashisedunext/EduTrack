@@ -573,7 +573,7 @@ Nothing else in phase 2 starts until the gate and the schema exist. This milesto
 
 - [ ] **A-110** 🔴 **`modules` JWT claim** — extend `CallerIdentity` rather than adding a second principal shape. Both chains, real and `dev-noauth`.
 - [ ] **A-111** 🔴 **ModuleGuard** — runs before RolesGuard on every `/api/v1/onboarding/**` route. No entitlement → **404**, same no-existence-leak rule as ticket scoping.
-- [ ] **A-112** 🔴 **`OnboardingScopeResolver` and `ScopedJourneys`** — Step Owner sees journeys containing their steps, Sales sees `created_by = me`, Manager/Admin/Viewer see all. Out-of-scope IDs answer 404. **Until this lands nobody writes their own filtering** — `dev-noauth` exists so they do not have to.
+- [x] **A-112** 🔴 **`OnboardingScopeResolver` and `ScopedJourneys`** — Step Owner sees journeys containing their steps, Sales sees `created_by = me`, Manager/Admin/Viewer see all. Out-of-scope IDs answer 404. **Until this lands nobody writes their own filtering** — `dev-noauth` exists so they do not have to.
 - [ ] **A-113** **PAN encryption and the reveal audit** — AES-GCM, key from the vault A-075 stood up. Mask to the **last four only**, and make revealing an explicit action rather than a role-based default, so §11's audit rule has a discrete event to log.
 - [ ] **A-114** **Permission-matrix entries** — all six onboarding roles against every route as it lands.
 - [ ] **A-115** **ArchUnit: the two modules stay separable** — no import from `feature/tickets`, `feature/transitions` or `components/ribbon`; append-only enforcement on the two new chained tables.

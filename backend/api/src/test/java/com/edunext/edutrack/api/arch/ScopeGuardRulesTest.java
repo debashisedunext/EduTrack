@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.arch;
 
 import com.edunext.edutrack.api.security.scope.ScopedTickets;
 import com.edunext.edutrack.api.security.scope.UnscopedAccess;
+import com.edunext.edutrack.domain.onboarding.ObJourneyRepository;
 import com.edunext.edutrack.domain.tickets.TicketRepository;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.lang.ArchRule;
@@ -56,6 +57,35 @@ class ScopeGuardRulesTest {
                         is AND-ed onto the caller's scope and cannot replace it. If this \
                         class really has no caller to scope by, say so with \
                         @UnscopedAccess and the reason.""");
+
+        rule.check(ProductionClasses.get());
+    }
+
+    /**
+     * A-112 · the same rule for the second module.
+     *
+     * <p>Its own test rather than a second {@code areAssignableTo} on the rule
+     * above, so a failure names which guard was bypassed. The two modules have
+     * separate resolvers, separate doors and separate 404s, and a combined
+     * message reading "ScopedTickets or ScopedJourneys" is one a developer has
+     * to decode before they can act on it.
+     *
+     * <p>{@link UnscopedAccess} exempts here too. It has no onboarding
+     * declarations today and that is the expected state — the ticketing
+     * exemptions are an inbound mail webhook and a fixture generator, and
+     * onboarding has no equivalent yet. If one appears it must carry a reason,
+     * which {@link #everyBypassStatesItsReason} already enforces for both
+     * modules at once.
+     */
+    @Test
+    void journeysAreReadThroughTheScopeGuardAndNotThroughTheRepository() {
+        ArchRule rule = noClasses()
+                .that().resideInAPackage(API)
+                .and().resideOutsideOfPackage(SCOPE_PACKAGE)
+                .and().areNotAnnotatedWith(UnscopedAccess.class)
+                .should().dependOnClassesThat().areAssignableTo(ObJourneyRepository.class)
+                .because("""
+                        an out-of-scope journey must be indistinguishable from one that does                         not exist, and ObJourneyRepository answers both truthfully. Call                         ScopedJourneys — pass your own filter as the criteria argument, which                         is AND-ed onto the caller's scope and cannot replace it. If this                         class really has no caller to scope by, say so with                         @UnscopedAccess and the reason.""");
 
         rule.check(ProductionClasses.get());
     }
