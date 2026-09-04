@@ -730,6 +730,15 @@ final class PermissionMatrix {
             {"label":"Matrix Fixture Doc","required":true}""";
 
     /**
+     * C-104 · {@code ObJourneyStepLifecycleDtos.BlockStepRequest}: {@code reasonCode}
+     * is {@code @NotBlank}. The step id names no real row — the same standing
+     * rule {@code REORDER_JOURNEY_TEMPLATE_STEPS} documents: an allowed role is
+     * entitled to reach the service and be refused there, not by this fixture.
+     */
+    private static final String BLOCK_JOURNEY_STEP = """
+            {"reasonCode":"client-unresponsive","note":"Matrix fixture"}""";
+
+    /**
      * One row per routed handler.
      *
      * <p>Grouped by controller, in route order, so this file can be read
@@ -1996,7 +2005,20 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/onboarding/journey-template-steps/{stepId}/docs",
                     ADD_JOURNEY_TEMPLATE_STEP_DOC),
             everyRole("DELETE", "/api/v1/onboarding/journey-template-step-items/{itemId}"),
-            everyRole("DELETE", "/api/v1/onboarding/journey-template-step-docs/{docId}"));
+            everyRole("DELETE", "/api/v1/onboarding/journey-template-step-docs/{docId}"),
+
+            // ── C-104 · step lifecycle ─────────────────────────────────────────
+            //
+            // isAuthenticated() rather than a capability, same reasoning as the
+            // C-102 block just above — see ObJourneyStepLifecycleController's own
+            // class javadoc. The row-scope rule this task does own (only a step's
+            // owner or backup owner may act) is not a §2 platform role and is
+            // enforced in the service, not here.
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/start"),
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/complete"),
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/block", BLOCK_JOURNEY_STEP),
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/waiting-on-client"),
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/resume"));
 
     /**
      * One route and what each role may do with it.

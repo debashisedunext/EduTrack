@@ -7642,6 +7642,147 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  # ── C-104 · step lifecycle ───────────────────────────────────────────────
+  #
+  # Five actions on ObJourneyStepStatus's PENDING → IN_PROGRESS ⇄ {BLOCKED,
+  # WAITING_ON_CLIENT} → DONE shape; SKIPPED is C-107's own transition and is
+  # not among them. Deliberately does not include a completion-gate check
+  # (C-106), a dependency-graph check on start (C-119), or due_at maths
+  # (C-105) — see ObJourneyStepLifecycleService's own class javadoc for why
+  # each is a later task's rather than folded in here.
+  #
+  # Auth: authenticated() only, same interim state as the journey-templates
+  # block above — see ObJourneyStepLifecycleController's own class javadoc.
+  # The row-scope rule this task does own (only a step's owner or backup
+  # owner may act) is enforced in the service and answered as 422, not by a
+  # role check here.
+
+  /onboarding/journey-steps/{stepId}/start:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: startObJourneyStep
+      summary: Start a step (C-104)
+      description: |
+        `PENDING` → `IN_PROGRESS`. `422` if the journey's gate is still
+        `LOCKED` or the journey is held by another; `422` if the caller is
+        neither the step's owner nor its backup owner; `422` if the step is
+        not `PENDING`. No dependency-graph check yet — that refusal, "naming
+        the blocker", is C-119's.
+      responses:
+        '200':
+          description: Started.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: Journey not open, caller not the owner/backup owner, or the step is not `PENDING`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/journey-steps/{stepId}/complete:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: completeObJourneyStep
+      summary: Complete a step (C-104)
+      description: |
+        `IN_PROGRESS` → `DONE`. No completion-gate check — every
+        sub-category answered and sign-off accepted (plan §5.8) is C-106's
+        own server-side gate, layered on top of this transition.
+      responses:
+        '200':
+          description: Completed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: Caller not the owner/backup owner, or the step is not `IN_PROGRESS`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/journey-steps/{stepId}/block:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: blockObJourneyStep
+      summary: Block a step with a mandatory reason (C-104)
+      description: |
+        `IN_PROGRESS` → `BLOCKED`. `reasonCode` is mandatory (plan's
+        addition 5, "blocked-with-reason") — `400` if blank. Internal
+        `BLOCKED` does not pause the TAT clock; see `waiting-on-client` for
+        the state that does.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObBlockJourneyStepRequest' }
+      responses:
+        '200':
+          description: Blocked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: Caller not the owner/backup owner, or the step is not `IN_PROGRESS`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/journey-steps/{stepId}/waiting-on-client:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: markObJourneyStepWaitingOnClient
+      summary: Mark a step waiting on the client (C-104)
+      description: |
+        `IN_PROGRESS` → `WAITING_ON_CLIENT`. Unlike internal `BLOCKED`, this
+        state pauses the TAT clock and attributes the wait to the client —
+        the clock-event row that actually pauses it is C-105's; this route
+        only flips the status the scanner reads.
+      responses:
+        '200':
+          description: Marked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: Caller not the owner/backup owner, or the step is not `IN_PROGRESS`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/journey-steps/{stepId}/resume:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: resumeObJourneyStep
+      summary: Resume a blocked or waiting-on-client step (C-104)
+      description: |
+        `BLOCKED` → `IN_PROGRESS` or `WAITING_ON_CLIENT` → `IN_PROGRESS`.
+        Clears the block reason and note. `due_at` is left untouched —
+        recomputing it against the working calendar on resume is C-105's own
+        line in the backlog, not this route's.
+      responses:
+        '200':
+          description: Resumed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: Caller not the owner/backup owner, or the step is neither `BLOCKED` nor `WAITING_ON_CLIENT`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   # ════════════════════════════════════════════════ onboarding · clients ══════
 
   /onboarding/clients:
@@ -8046,6 +8187,15 @@ components:
       required: true
       schema: { type: integer, format: int64 }
       description: An `ob_journey_template_step_docs` id — one required-document entry.
+    ObJourneyStepId:
+      name: stepId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        C-104 · an `ob_journey_steps` id — a Service on a running journey,
+        snapshotted from an `ob_journey_template_steps` row at instantiation
+        (C-103). Not the same id space as `ObJourneyTemplateStepId`.
     ObClientId:
       name: obClientId
       in: path
@@ -13824,6 +13974,49 @@ components:
               type: array
               items: { type: integer, format: int64 }
               description: Steps in the same template that still depend on the one this call tried to remove.
+
+    # ── C-104 · step lifecycle ───────────────────────────────────────────────
+    ObJourneyStepStatus:
+      type: string
+      enum: [PENDING, IN_PROGRESS, BLOCKED, WAITING_ON_CLIENT, DONE, SKIPPED]
+      description: |
+        `ob_journey_steps.status`. `PENDING` covers both "gate still locked"
+        and "dependency not met" — C-104 only ever writes
+        `IN_PROGRESS`/`BLOCKED`/`WAITING_ON_CLIENT`/`DONE`; `SKIPPED` is
+        C-107's own transition.
+    ObJourneyStep:
+      type: object
+      required: [id, journeyId, sequence, name, status]
+      properties:
+        id: { type: integer, format: int64 }
+        journeyId: { type: integer, format: int64 }
+        sequence: { type: integer }
+        name: { type: string, maxLength: 200 }
+        status: { $ref: '#/components/schemas/ObJourneyStepStatus' }
+        ownerUserId: { type: [integer, 'null'], format: int64, description: 'Null = unresolved — see C-103.' }
+        backupOwnerUserId: { type: [integer, 'null'], format: int64 }
+        blockedReasonCode: { type: [string, 'null'], maxLength: 40 }
+        blockedNote: { type: [string, 'null'], maxLength: 500 }
+        startedAt: { type: [string, 'null'], format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+        dueAt:
+          type: [string, 'null']
+          format: date-time
+          description: Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.
+      description: '`ob_journey_steps` — a Service on a running journey (C-103).'
+    ObJourneyStepResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ObJourneyStep' } }
+    ObBlockJourneyStepRequest:
+      type: object
+      required: [reasonCode]
+      properties:
+        reasonCode:
+          type: string
+          maxLength: 40
+          description: Mandatory (plan's addition 5, "blocked-with-reason") — powers "where is it stuck".
+        note: { type: [string, 'null'], maxLength: 500 }
 
     ObContact:
       type: object

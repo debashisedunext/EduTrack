@@ -623,7 +623,12 @@ export interface ObApplication {
   licenseStart: string | null; licenseEnd: string | null;
 }
 
-/** One service on a journey — a RAG dot on the OB-05 accordion strip. */
+/**
+ * One service on a journey — a RAG dot on the OB-05 accordion strip, and (C-104)
+ * the same row `/onboarding/journey-steps/{stepId}/*` acts on. One fixture, two
+ * consumers, on `ObJourney`'s own precedent of not keeping a second copy that
+ * could drift from it.
+ */
 export interface ObStep {
   id: number; sequence: number; name: string;
   status: 'PENDING' | 'IN_PROGRESS' | 'BLOCKED' | 'WAITING_ON_CLIENT' | 'DONE' | 'SKIPPED';
@@ -633,6 +638,18 @@ export interface ObStep {
   usedHours: number;
   /** The one service this waits for; null runs in parallel. */
   dependsOnStepId: number | null;
+  /**
+   * C-104 · optional so every step predating this task need not be touched —
+   * `?? null` at the handler boundary is what a step naming nobody already
+   * means on the real row (C-103).
+   */
+  ownerUserId?: number | null;
+  backupOwnerUserId?: number | null;
+  blockedReasonCode?: string | null;
+  blockedNote?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  dueAt?: string | null;
 }
 
 /** `ob_journeys` — one per purchased product, `UNIQUE(client_id, product_id)`. */
@@ -1736,17 +1753,25 @@ const OB_CLIENTS: ObClient[] = [
         steps: [
           { id: 1, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'DONE', tatDays: 3, usedHours: 19, dependsOnStepId: null },
           { id: 2, sequence: 2, name: 'Environment Provisioning', status: 'DONE', tatDays: 4, usedHours: 26.5, dependsOnStepId: 1 },
-          { id: 3, sequence: 3, name: 'Data Migration', status: 'BLOCKED', tatDays: 8, usedHours: 71, dependsOnStepId: 2 },
-          { id: 4, sequence: 4, name: 'User Training', status: 'WAITING_ON_CLIENT', tatDays: 5, usedHours: 12, dependsOnStepId: null },
-          { id: 5, sequence: 5, name: 'Go-live Readiness', status: 'PENDING', tatDays: 4, usedHours: 0, dependsOnStepId: 3 },
+          // C-104 · owned by user 3 (Ravi, the default currentUserId) so the
+          // lifecycle routes have a caller who passes ObStepOwnership.mayAct
+          // without swapping the mock's signed-in user.
+          { id: 3, sequence: 3, name: 'Data Migration', status: 'BLOCKED', tatDays: 8, usedHours: 71, dependsOnStepId: 2, ownerUserId: 3, blockedReasonCode: 'client-unresponsive', blockedNote: 'Awaiting the signed data-migration sign-off from Northwind.' },
+          { id: 4, sequence: 4, name: 'User Training', status: 'WAITING_ON_CLIENT', tatDays: 5, usedHours: 12, dependsOnStepId: null, ownerUserId: 3 },
+          // No dependency check yet (C-119's own task) — startable today even
+          // though its nominal dependency (step 3) is still BLOCKED, exactly
+          // as ObJourneyStepLifecycleService.start actually behaves.
+          { id: 5, sequence: 5, name: 'Go-live Readiness', status: 'PENDING', tatDays: 4, usedHours: 0, dependsOnStepId: 3, ownerUserId: 3 },
         ],
       },
       {
         // Held behind the ERP journey — bought, instantiated, past the gate,
-        // and still not started. Plan §5.5.
+        // and still not started. Plan §5.5. Owned by user 3 too, so a start
+        // attempt here fails on JourneyNotOpenException specifically, not on
+        // ownership.
         id: 2, productId: 2, gateStatus: 'OPEN', heldByJourneyId: 1,
         steps: [
-          { id: 6, sequence: 1, name: 'Device Rollout', status: 'PENDING', tatDays: 6, usedHours: 0, dependsOnStepId: null },
+          { id: 6, sequence: 1, name: 'Device Rollout', status: 'PENDING', tatDays: 6, usedHours: 0, dependsOnStepId: null, ownerUserId: 3 },
           { id: 7, sequence: 2, name: 'Attendance Policy Mapping', status: 'PENDING', tatDays: 3, usedHours: 0, dependsOnStepId: 6 },
         ],
       },
@@ -1769,7 +1794,9 @@ const OB_CLIENTS: ObClient[] = [
       {
         id: 3, productId: 1, gateStatus: 'LOCKED', heldByJourneyId: null,
         steps: [
-          { id: 8, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'PENDING', tatDays: 3, usedHours: 0, dependsOnStepId: null },
+          // C-104 · owned by user 3 too, so a start attempt here fails on
+          // JourneyNotOpenException (gate LOCKED) specifically, not on ownership.
+          { id: 8, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'PENDING', tatDays: 3, usedHours: 0, dependsOnStepId: null, ownerUserId: 3 },
           { id: 9, sequence: 2, name: 'Environment Provisioning', status: 'PENDING', tatDays: 4, usedHours: 0, dependsOnStepId: 8 },
           { id: 10, sequence: 3, name: 'Data Migration', status: 'PENDING', tatDays: 8, usedHours: 0, dependsOnStepId: 9 },
           { id: 11, sequence: 4, name: 'User Training', status: 'PENDING', tatDays: 5, usedHours: 0, dependsOnStepId: null },

@@ -336,3 +336,199 @@ export const removeObJourneyTemplateStepDocParams = zod.object({
   "docId": zod.number().describe('An `ob_journey_template_step_docs` id — one required-document entry.')
 })
 
+/**
+ * `PENDING` → `IN_PROGRESS`. `422` if the journey's gate is still
+`LOCKED` or the journey is held by another; `422` if the caller is
+neither the step's owner nor its backup owner; `422` if the step is
+not `PENDING`. No dependency-graph check yet — that refusal, "naming
+the blocker", is C-119's.
+
+ * @summary Start a step (C-104)
+ */
+export const startObJourneyStepParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const startObJourneyStepResponseDataNameMax = 200;
+
+export const startObJourneyStepResponseDataBlockedReasonCodeMax = 40;
+
+export const startObJourneyStepResponseDataBlockedNoteMax = 500;
+
+
+
+export const startObJourneyStepResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(startObJourneyStepResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(startObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(startObJourneyStepResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).')
+})
+
+/**
+ * `IN_PROGRESS` → `DONE`. No completion-gate check — every
+sub-category answered and sign-off accepted (plan §5.8) is C-106's
+own server-side gate, layered on top of this transition.
+
+ * @summary Complete a step (C-104)
+ */
+export const completeObJourneyStepParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const completeObJourneyStepResponseDataNameMax = 200;
+
+export const completeObJourneyStepResponseDataBlockedReasonCodeMax = 40;
+
+export const completeObJourneyStepResponseDataBlockedNoteMax = 500;
+
+
+
+export const completeObJourneyStepResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(completeObJourneyStepResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(completeObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(completeObJourneyStepResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).')
+})
+
+/**
+ * `IN_PROGRESS` → `BLOCKED`. `reasonCode` is mandatory (plan's
+addition 5, "blocked-with-reason") — `400` if blank. Internal
+`BLOCKED` does not pause the TAT clock; see `waiting-on-client` for
+the state that does.
+
+ * @summary Block a step with a mandatory reason (C-104)
+ */
+export const blockObJourneyStepParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const blockObJourneyStepBodyReasonCodeMax = 40;
+
+export const blockObJourneyStepBodyNoteMax = 500;
+
+
+
+export const blockObJourneyStepBody = zod.object({
+  "reasonCode": zod.string().max(blockObJourneyStepBodyReasonCodeMax).describe('Mandatory (plan\'s addition 5, \"blocked-with-reason\") — powers \"where is it stuck\".'),
+  "note": zod.string().max(blockObJourneyStepBodyNoteMax).nullish()
+})
+
+export const blockObJourneyStepResponseDataNameMax = 200;
+
+export const blockObJourneyStepResponseDataBlockedReasonCodeMax = 40;
+
+export const blockObJourneyStepResponseDataBlockedNoteMax = 500;
+
+
+
+export const blockObJourneyStepResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(blockObJourneyStepResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(blockObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(blockObJourneyStepResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).')
+})
+
+/**
+ * `IN_PROGRESS` → `WAITING_ON_CLIENT`. Unlike internal `BLOCKED`, this
+state pauses the TAT clock and attributes the wait to the client —
+the clock-event row that actually pauses it is C-105's; this route
+only flips the status the scanner reads.
+
+ * @summary Mark a step waiting on the client (C-104)
+ */
+export const markObJourneyStepWaitingOnClientParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const markObJourneyStepWaitingOnClientResponseDataNameMax = 200;
+
+export const markObJourneyStepWaitingOnClientResponseDataBlockedReasonCodeMax = 40;
+
+export const markObJourneyStepWaitingOnClientResponseDataBlockedNoteMax = 500;
+
+
+
+export const markObJourneyStepWaitingOnClientResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(markObJourneyStepWaitingOnClientResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(markObJourneyStepWaitingOnClientResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(markObJourneyStepWaitingOnClientResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).')
+})
+
+/**
+ * `BLOCKED` → `IN_PROGRESS` or `WAITING_ON_CLIENT` → `IN_PROGRESS`.
+Clears the block reason and note. `due_at` is left untouched —
+recomputing it against the working calendar on resume is C-105's own
+line in the backlog, not this route's.
+
+ * @summary Resume a blocked or waiting-on-client step (C-104)
+ */
+export const resumeObJourneyStepParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const resumeObJourneyStepResponseDataNameMax = 200;
+
+export const resumeObJourneyStepResponseDataBlockedReasonCodeMax = 40;
+
+export const resumeObJourneyStepResponseDataBlockedNoteMax = 500;
+
+
+
+export const resumeObJourneyStepResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(resumeObJourneyStepResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(resumeObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(resumeObJourneyStepResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).')
+})
+
