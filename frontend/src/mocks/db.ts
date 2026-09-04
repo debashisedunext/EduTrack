@@ -661,6 +661,56 @@ export interface ObClient {
   createdById: number; createdAt: string;
 }
 
+/**
+ * C-102 · `ob_journey_templates` — the OB-07 designer's own fixture.
+ *
+ * ⚠ Stream C, in Stream D's `mocks/` — the mock-coverage test refuses a
+ * contract operation with no handler, so this task's eleven
+ * `onboarding-journeys` routes bring their fixtures and handlers with them.
+ * Flagged rather than quiet, on the precedent `ObProduct`/`ObClient` set for
+ * A-118 above and `reportSchedules` set for A-065.
+ *
+ * **One row per *version***, not one row per product — `ObJourneyTemplateService`'s
+ * own header: `beginRevision` clones the active version into `version + 1` and
+ * the source row is never edited in place, so `id` names one version and
+ * `productId` is what ties versions of the same template together.
+ * `publishedAt == null` is the editable draft test the service uses
+ * (`requireEditable`); `isActive` is true for at most one version per product
+ * and does not by itself distinguish "never published" from "retired" — that
+ * needs `publishedAt` read alongside it, exactly as the generated model's own
+ * doc comment says.
+ */
+export interface ObJourneyTemplateRow {
+  id: number; productId: number; name: string; version: number; isActive: boolean;
+  sequence: number; dependsOnTemplateId: number | null;
+  publishedBy: number | null; publishedAt: string | null;
+}
+
+/** `ob_journey_template_steps` — a Service within a Module Service (C-102). */
+export interface ObJourneyTemplateStepRow {
+  id: number; templateId: number; sequence: number; name: string; description: string | null;
+  /** Working days, not hours — the v1.2 unit change. */
+  tatDays: number;
+  ownerUserId: number | null; ownerRole: string | null; backupOwnerUserId: number | null;
+  requiresSignoff: boolean;
+  /** Null means this step runs in parallel from journey start — plan §5.6. */
+  dependsOnStepId: number | null;
+}
+
+/** `ob_journey_template_step_items` — the Task List (C-102). */
+export interface ObJourneyTemplateStepItemRow {
+  id: number; stepId: number; sequence: number; label: string;
+  /** `false` marks an item the instance-side completion gate (C-106) will not require an answer to. */
+  mandatory: boolean;
+}
+
+/** `ob_journey_template_step_docs` — the per-step required-document checklist (C-102). */
+export interface ObJourneyTemplateStepDocRow {
+  id: number; stepId: number; sequence: number; label: string;
+  /** Only `required` rows gate step completion. */
+  required: boolean;
+}
+
 // ── the store ───────────────────────────────────────────────────────────────
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
@@ -703,6 +753,11 @@ export interface Db {
    */
   obProducts: ObProduct[];
   obClients: ObClient[];
+  /** C-102 · OB-07's designer. See {@link ObJourneyTemplateRow}'s own note on why this is here. */
+  obJourneyTemplates: ObJourneyTemplateRow[];
+  obJourneyTemplateSteps: ObJourneyTemplateStepRow[];
+  obJourneyTemplateStepItems: ObJourneyTemplateStepItemRow[];
+  obJourneyTemplateStepDocs: ObJourneyTemplateStepDocRow[];
   currentUserId: number;
   seq: Record<string, number>;
   /**
@@ -1752,6 +1807,63 @@ const OB_CLIENTS: ObClient[] = [
   },
 ];
 
+/**
+ * C-102 · two templates, chosen so both states OB-07 has to render are
+ * present on first open:
+ *
+ * - **Template 1** (ERP, `OB_PRODUCTS[0]`) is **published and active** —
+ *   `publishedAt` set, `isActive: true`. Read-only: no Add step, no item/doc
+ *   add, no reorder, `requireEditable`'s `409` on all of them. "Begin
+ *   revision" is the one write it offers. Its five steps are the same
+ *   Northwind fixture the OB-05 accordion already uses, and they are shaped
+ *   so `parallelGroups` has something to show: step 4 (User Training) has no
+ *   `dependsOnStepId`, so it sits in layer 0 beside step 1, not stranded
+ *   after step 3 the way five steps in a single chain would render — a
+ *   designer screen tested only against a straight line could not tell a
+ *   working parallel-groups panel from a decorative one.
+ * - **Template 2** (Biometric Attendance) is a **draft** — `publishedAt:
+ *   null`, `isActive: false` — matching `OB_PRODUCTS[1].hasActiveTemplate:
+ *   false`. Every write route is reachable here: two steps, the second
+ *   depending on the first, so removing the first is the `409
+ *   step-has-dependents` case, and the pair is enough to reorder. One step
+ *   carries a mandatory Task List item and a required doc, so both
+ *   checklists render with a row to remove rather than only their empty
+ *   states.
+ */
+const OB_JOURNEY_TEMPLATES: ObJourneyTemplateRow[] = [
+  {
+    id: 1, productId: 1, name: 'ERP Suite onboarding', version: 1, isActive: true,
+    sequence: 1, dependsOnTemplateId: null,
+    publishedBy: 1, publishedAt: iso('2026-06-20T09:00:00'),
+  },
+  {
+    id: 2, productId: 2, name: 'Biometric Attendance onboarding', version: 1, isActive: false,
+    sequence: 1, dependsOnTemplateId: null,
+    publishedBy: null, publishedAt: null,
+  },
+];
+
+const OB_JOURNEY_TEMPLATE_STEPS: ObJourneyTemplateStepRow[] = [
+  // Template 1 — published, read-only.
+  { id: 1, templateId: 1, sequence: 1, name: 'Kickoff & Requirement Sign-off', description: null, tatDays: 3, ownerUserId: null, ownerRole: 'PM', backupOwnerUserId: null, requiresSignoff: true, dependsOnStepId: null },
+  { id: 2, templateId: 1, sequence: 2, name: 'Environment Provisioning', description: null, tatDays: 4, ownerUserId: null, ownerRole: 'DEPLOYMENT', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: 1 },
+  { id: 3, templateId: 1, sequence: 3, name: 'Data Migration', description: 'Import from the client’s existing system.', tatDays: 8, ownerUserId: null, ownerRole: 'DEVELOPER', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: 2 },
+  { id: 4, templateId: 1, sequence: 4, name: 'User Training', description: null, tatDays: 5, ownerUserId: null, ownerRole: 'SUPPORT', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: null },
+  { id: 5, templateId: 1, sequence: 5, name: 'Go-live Readiness', description: null, tatDays: 4, ownerUserId: null, ownerRole: 'PM', backupOwnerUserId: null, requiresSignoff: true, dependsOnStepId: 3 },
+  // Template 2 — draft, every write reachable.
+  { id: 10, templateId: 2, sequence: 1, name: 'Device Rollout', description: null, tatDays: 6, ownerUserId: null, ownerRole: 'DEPLOYMENT', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: null },
+  { id: 11, templateId: 2, sequence: 2, name: 'Attendance Policy Mapping', description: null, tatDays: 3, ownerUserId: null, ownerRole: 'SUPPORT', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: 10 },
+];
+
+const OB_JOURNEY_TEMPLATE_STEP_ITEMS: ObJourneyTemplateStepItemRow[] = [
+  { id: 1, stepId: 10, sequence: 1, label: 'Confirm device count against the purchase order', mandatory: true },
+  { id: 2, stepId: 10, sequence: 2, label: 'Note the site electrician’s contact', mandatory: false },
+];
+
+const OB_JOURNEY_TEMPLATE_STEP_DOCS: ObJourneyTemplateStepDocRow[] = [
+  { id: 1, stepId: 10, sequence: 1, label: 'Device delivery challan', required: true },
+];
+
 export function createDb(): Db {
   // Before anything reads `pick` or `int` — see `rewindFixtureRandom`. Without
   // this, two calls to this function produce different fixtures.
@@ -1805,6 +1917,11 @@ export function createDb(): Db {
     // A-118 · the onboarding module. See OB_PRODUCTS / OB_CLIENTS.
     obProducts: structuredClone(OB_PRODUCTS),
     obClients: structuredClone(OB_CLIENTS),
+    // C-102 · see OB_JOURNEY_TEMPLATES's own note.
+    obJourneyTemplates: structuredClone(OB_JOURNEY_TEMPLATES),
+    obJourneyTemplateSteps: structuredClone(OB_JOURNEY_TEMPLATE_STEPS),
+    obJourneyTemplateStepItems: structuredClone(OB_JOURNEY_TEMPLATE_STEP_ITEMS),
+    obJourneyTemplateStepDocs: structuredClone(OB_JOURNEY_TEMPLATE_STEP_DOCS),
     calendar: {
       week: {
         weeklyOff: [6, 7],

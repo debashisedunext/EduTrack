@@ -34,6 +34,7 @@ import { ResourceListPage } from './features/masters/resources/ResourceListPage'
 import { RoleListPage } from './features/masters/roles/RoleListPage'
 import { StatusMasterPage } from './features/masters/statuses/StatusMasterPage'
 import { WorkflowDesignerPage } from './features/masters/designer/WorkflowDesignerPage'
+import { JourneyTemplateDesignerPage } from './features/onboarding/journeys/JourneyTemplateDesignerPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
 import { TaskTypeListPage } from './features/masters/taskTypes/TaskTypeListPage'
 import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
@@ -239,6 +240,21 @@ export default function App() {
             <Route
               path="/masters/workflow/designer/:templateId"
               element={<WorkflowDesignerPage />}
+            />
+            {/*
+              C-102 · OB-07's journey template designer. Its own route rather
+              than nested under `/masters/**` — the Onboarding module's
+              screens are disjoint from the ticketing masters (plan §1.2), the
+              same separation `db.ts`'s `obClients`/`obProducts` keep from
+              `clients`/`projects`. There is no onboarding sidebar or nav
+              section yet — nothing under `/onboarding/**` is routed at all
+              before this — so this route is reached only by a direct link
+              until that navigation exists; registering it is this task's
+              whole scope.
+            */}
+            <Route
+              path="/onboarding/journey-templates/:templateId"
+              element={<JourneyTemplateDesignerPage />}
             />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
