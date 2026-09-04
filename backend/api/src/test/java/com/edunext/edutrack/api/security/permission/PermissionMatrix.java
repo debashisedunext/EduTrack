@@ -1976,11 +1976,13 @@ final class PermissionMatrix {
             // V20260903_1915's user_module_access) that is not blueprint §2's six
             // and is not what this matrix or RolePermissions speaks; the guard
             // that would gate these routes by ONBOARDING module + module_role is
-            // A-110's JWT claim and A-111's ModuleGuard, neither of which exists
-            // yet. Encoding a §2 platform-role restriction here would assert a
-            // rule nobody has decided — every one of the six platform roles can
-            // reach these routes today, which is the true and complete answer
-            // until A-110/A-111 land and the module gate becomes the real guard.
+            // A-111's ModuleAccessGuard, whose own javadoc says plainly that
+            // nothing calls it yet — wiring it into SecurityConfig is a
+            // separate, later task. Encoding a §2 platform-role restriction
+            // here would assert a rule nobody has decided — every one of the
+            // six platform roles can reach these routes today, which is the
+            // true and complete answer until that wiring lands and the module
+            // gate becomes the real guard.
             everyRole("GET", "/api/v1/onboarding/journey-templates/{templateId}"),
             everyRole("POST", "/api/v1/onboarding/journey-templates", CREATE_JOURNEY_TEMPLATE),
             everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/revisions"),

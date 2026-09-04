@@ -39,21 +39,23 @@ import java.util.List;
  * <h2>Auth: {@code authenticated()} only, deliberately not more</h2>
  *
  * <p>Every {@code /onboarding/**} path in the contract is drawn behind
- * {@code ModuleGuard} (plan §2.1) answering {@code 404} to a caller without
- * {@code ONBOARDING} in their {@code modules} claim, and every OB Admin route
- * behind a role check on top of that. Neither exists yet — {@code
- * V20260903_1915}'s own header says the {@code user_module_access} table
- * "does not grant anything by itself" until A-110 puts {@code modules} in the
- * JWT and A-111 builds the guard that reads it. {@code SecurityConfig}'s own
- * javadoc calls this out as the right default: "a half-built authorisation
+ * {@code ModuleAccessGuard} (A-111, plan §2.1) answering {@code 404} to a
+ * caller without {@code ONBOARDING} in their {@code modules} claim, and every
+ * OB Admin route behind a role check on top of that. A-111's guard class
+ * exists now, but its own javadoc says plainly that nothing calls it yet —
+ * "there are no {@code /api/v1/onboarding/**} handlers to guard until B and C
+ * build them, so a gate wired into the chain today would be a filter with
+ * nothing behind it" — and wiring it into {@code SecurityConfig} is a
+ * separate, later task. {@code SecurityConfig}'s own javadoc calls the
+ * interim state out as the right default anyway: "a half-built authorisation
  * rule is worse than an absent one, because it reads as covered." So these
  * routes fall to {@code SecurityConfig}'s blanket {@code
  * .requestMatchers("/api/**").authenticated()} — reachable by any
- * authenticated user of either module until A-110/A-111 land, same as {@code
- * /onboarding/products} has been since it was declared with nothing behind
- * it. Not a gap this task introduces; a gap this task declines to paper over
- * with a bespoke filter, per CLAUDE.md's "do not write your own filtering as
- * a workaround." {@code @PreAuthorize("isAuthenticated()")} says so explicitly
+ * authenticated user of either module until that wiring lands, same as
+ * {@code /onboarding/products} has been since it was declared with nothing
+ * behind it. Not a gap this task introduces; a gap this task declines to
+ * paper over with a bespoke filter, per CLAUDE.md's "do not write your own
+ * filtering as a workaround." {@code @PreAuthorize("isAuthenticated()")} says so explicitly
  * rather than leaving it implicit — {@code RouteAuthorizationTest} requires
  * every route to declare a decision, and an undeclared one reads, in the
  * source, exactly like a route nobody thought about.
