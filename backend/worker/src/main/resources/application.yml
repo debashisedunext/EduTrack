@@ -181,7 +181,16 @@ edutrack:
     # wait rather than fail, so this is the only place they are visible.
     unroutable-report-interval: PT15M
     email:
-      # `logging` records what would have been sent without touching SMTP,
-      # and is the default until B-111 lands the templates that render a
-      # body. Switch to `smtp` only alongside B-111's transport.
+      # B-111 · `logging` renders the mail and records what would have been
+      # sent without touching SMTP; `smtp` sends the same rendered mail
+      # through the JavaMailSender `spring.mail.*` already configures, with
+      # the same `edutrack.mail.from` and Message-ID domain as ticket mail.
+      # There is no second transport to configure — only which of the two
+      # this deployment uses.
+      #
+      # Still `logging` by default, matching `edutrack.outbox.transport`
+      # above: onboarding mail goes to a client's named contacts, and a
+      # local database seeded from A-101's fixture corpus holds real-looking
+      # addresses. The default should not be the one that puts mail on a
+      # wire.
       transport: logging

@@ -112,6 +112,12 @@ api/feature/onboarding/notifications/   @Ayushedunext
 domain/onboarding/outbox/               @Ayushedunext
 worker/onboarding/outbox/               @Ayushedunext
 worker/onboarding/stats/                @Ayushedunext
+# B-111's mail layout. A resource, so none of the package rules above reach it,
+# and `/backend/worker/` would otherwise hand Stream D the wording of every
+# onboarding mail. Named on the file rather than on its directory because
+# `templates/mail/` also holds D-030's notification.html, which is Stream D's
+# and must stay theirs.
+resources/templates/mail/onboarding.html  @Ayushedunext
 
 # ---- Cross-cutting: the three append-only tables and the immutability core
 # always need Stream A's eyes, whoever is touching them.
