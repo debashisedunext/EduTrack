@@ -15,9 +15,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * C-104 · {@code /onboarding/journey-steps} — start, complete,
- * block-with-mandatory-reason, waiting-on-client, resume. See {@link
- * ObJourneyStepLifecycleService}'s own class javadoc for exactly which
- * three later tasks (C-105, C-106, C-119) this deliberately leaves alone.
+ * block-with-mandatory-reason, waiting-on-client, resume; {@code complete}
+ * now runs C-106's completion gate. See {@link ObJourneyStepLifecycleService}'s
+ * own class javadoc for exactly which two later tasks (C-105, C-119) this
+ * still deliberately leaves alone.
  *
  * <h2>Auth: {@code authenticated()} only, deliberately not more</h2>
  *
@@ -65,11 +66,14 @@ class ObJourneyStepLifecycleController {
 
     @PostMapping(value = "/{stepId}/complete", produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(operationId = "completeObJourneyStep",
-            summary = "Complete a step (C-104)",
+            summary = "Complete a step (C-104, gated by C-106)",
             description = """
-                    `IN_PROGRESS` → `DONE`. No completion-gate check — every \
-                    sub-category answered and sign-off accepted (plan §5.8) is C-106's own \
-                    server-side gate, layered on top of this transition.""")
+                    `IN_PROGRESS` → `DONE`. `422` (`ObCompletionGateProblem`) unless every \
+                    mandatory Task List item is answered, every required document is \
+                    attached and clean, and — where the step demands it — a client \
+                    sign-off has been accepted (plan §5.8, architect's addition 7, §8). \
+                    Any future client-facing acceptance flow (A-120) must call the same \
+                    service method rather than completing the step directly.""")
     ObJourneyStepLifecycleDtos.ObJourneyStepResponse complete(Authentication caller, @PathVariable long stepId) {
         ObJourneyStep step = service.complete(stepId, CallerIdentityAccess.requireUserId(caller));
         return ObJourneyStepLifecycleDtos.ObJourneyStepResponse.of(step);

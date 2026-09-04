@@ -22,8 +22,19 @@ import { currentUser, notFound, ok, problem, url, validationFailed } from './uti
  *    is not `OPEN` or `heldByJourneyId` is set. No dependency-graph check —
  *    that refusal, "naming the blocker", is C-119's, on both sides of the
  *    contract.
- * 3. **No completion gate on `complete`, no `due_at` maths anywhere** — C-106
- *    and C-105's own jobs, mirrored by omission here too.
+ * 3. **`complete` still completes unconditionally here — one place the mock
+ *    and the server now differ, on `CommentThread.tsx`'s own precedent for
+ *    naming a gap rather than leaving it to be found.** C-106 made
+ *    `ObJourneyStepLifecycleService#complete` real: every mandatory Task
+ *    List item answered, every required document attached and clean, and
+ *    an accepted sign-off where the step demands one. `ObStep` here has no
+ *    `requiresSignoff`, no linked Task List items and no attachment or
+ *    sign-off fixtures at the instance level — building that mirror would
+ *    mean inventing an entire fixture surface this task does not otherwise
+ *    need, for a rule `npm run dev` cannot exercise until the item-answer
+ *    and attachment/sign-off endpoints those fixtures would actually back
+ *    exist. Left for whichever task adds them. No `due_at` maths anywhere
+ *    either — C-105's own job, mirrored by omission.
  *
  * Fixture rows are `db.ts`'s `ObStep`/`ObJourney`, nested under `ObClient` —
  * reused rather than duplicated, since a second instance-row model next to

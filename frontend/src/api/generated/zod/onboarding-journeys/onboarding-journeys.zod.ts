@@ -375,11 +375,15 @@ export const startObJourneyStepResponse = zod.object({
 })
 
 /**
- * `IN_PROGRESS` → `DONE`. No completion-gate check — every
-sub-category answered and sign-off accepted (plan §5.8) is C-106's
-own server-side gate, layered on top of this transition.
+ * `IN_PROGRESS` → `DONE`. Refused (`422`) unless every mandatory Task
+List item is answered, every required document is attached and
+clean, and — where the step demands it — a client sign-off has been
+accepted (plan §5.8, architect's addition 7, §8). This is C-106's
+own server-side gate, and the single choke point: any future
+client-facing acceptance flow (A-120) must route through it rather
+than completing the step directly.
 
- * @summary Complete a step (C-104)
+ * @summary Complete a step (C-104, gated by C-106)
  */
 export const completeObJourneyStepParams = zod.object({
   "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')

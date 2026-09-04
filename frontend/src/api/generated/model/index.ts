@@ -461,6 +461,8 @@ export * from './obClientUpdateRequestDescription';
 export * from './obClientUpdateRequestLicenseType';
 export * from './obClientUpdateRequestSalesPersonId';
 export * from './obClientUpdateRequestStatusReason';
+export * from './obCompletionGateProblem';
+export * from './obCompletionGateProblemAllOf';
 export * from './obContact';
 export * from './obContactDesignation';
 export * from './obContactPhone';

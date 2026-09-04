@@ -1,15 +1,27 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
+import com.edunext.edutrack.domain.onboarding.ObAttachmentRepository;
+import com.edunext.edutrack.domain.onboarding.ObAttachmentScanStatus;
 import com.edunext.edutrack.domain.onboarding.ObGateStatus;
 import com.edunext.edutrack.domain.onboarding.ObJourney;
 import com.edunext.edutrack.domain.onboarding.ObJourneyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
+import com.edunext.edutrack.domain.onboarding.ObJourneyStepItem;
+import com.edunext.edutrack.domain.onboarding.ObJourneyStepItemRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepStatus;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDoc;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDocRepository;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepository;
+import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
+import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
+import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -37,9 +49,14 @@ class ObJourneyStepLifecycleServiceTest {
 
     private final ObJourneyStepRepository journeySteps = mock(ObJourneyStepRepository.class);
     private final ObJourneyRepository journeys = mock(ObJourneyRepository.class);
+    private final ObJourneyStepItemRepository stepItems = mock(ObJourneyStepItemRepository.class);
+    private final ObJourneyTemplateStepItemRepository templateStepItems = mock(ObJourneyTemplateStepItemRepository.class);
+    private final ObJourneyTemplateStepDocRepository templateStepDocs = mock(ObJourneyTemplateStepDocRepository.class);
+    private final ObAttachmentRepository attachments = mock(ObAttachmentRepository.class);
+    private final ObSignoffRepository signoffs = mock(ObSignoffRepository.class);
 
-    private final ObJourneyStepLifecycleService service =
-            new ObJourneyStepLifecycleService(journeySteps, journeys);
+    private final ObJourneyStepLifecycleService service = new ObJourneyStepLifecycleService(
+            journeySteps, journeys, stepItems, templateStepItems, templateStepDocs, attachments, signoffs);
 
     @BeforeEach
     void wireFakes() {
@@ -47,6 +64,12 @@ class ObJourneyStepLifecycleServiceTest {
                 Optional.ofNullable(stepRows.get(inv.<Long>getArgument(0))));
         when(journeys.findById(any())).thenAnswer(inv ->
                 Optional.ofNullable(journeyRows.get(inv.<Long>getArgument(0))));
+        // C-106's completion gate defaults to "nothing outstanding" — an
+        // empty Task List and no document checklist — so every C-104 test
+        // written before this task keeps completing exactly as it did.
+        when(stepItems.findByStepIdOrderBySequenceAsc(any())).thenReturn(List.of());
+        when(templateStepItems.findAllById(any())).thenReturn(List.of());
+        when(templateStepDocs.findByStepIdOrderBySequenceAsc(any())).thenReturn(List.of());
 
         ObJourney journey = new ObJourney();
         journey.setId(JOURNEY);
@@ -149,6 +172,183 @@ class ObJourneyStepLifecycleServiceTest {
 
         assertThatThrownBy(() -> service.complete(STEP, STRANGER))
                 .isInstanceOf(NotStepOwnerException.class);
+    }
+
+    // ── complete · C-106's completion gate ───────────────────────────────────
+
+    @Test
+    void completeRefusesAnUnansweredMandatoryItem() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        // No templateItemId — an admin's ad-hoc item. Defaults to mandatory.
+        ObJourneyStepItem item = stepItem(1L, null, null, "Signed agreement received");
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(item));
+
+        assertThatThrownBy(() -> service.complete(STEP, OWNER))
+                .isInstanceOf(CompletionGateException.class)
+                .satisfies(e -> {
+                    CompletionGateException gate = (CompletionGateException) e;
+                    assertThat(gate.unansweredMandatoryItems()).containsExactly("Signed agreement received");
+                    assertThat(gate.missingRequiredDocs()).isZero();
+                    assertThat(gate.signoffMissing()).isFalse();
+                });
+    }
+
+    @Test
+    void completeAllowsAnUnansweredNonMandatoryItem() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObJourneyStepItem item = stepItem(1L, 900L, null, "Optional note");
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(item));
+        when(templateStepItems.findAllById(List.of(900L))).thenReturn(List.of(templateItem(900L, false)));
+
+        ObJourneyStep completed = service.complete(STEP, OWNER);
+
+        assertThat(completed.getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
+    }
+
+    @Test
+    void completeRefusesAnUnansweredMandatoryTemplateBackedItem() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObJourneyStepItem item = stepItem(1L, 900L, null, "Signed PO attached?");
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(item));
+        when(templateStepItems.findAllById(List.of(900L))).thenReturn(List.of(templateItem(900L, true)));
+
+        assertThatThrownBy(() -> service.complete(STEP, OWNER))
+                .isInstanceOf(CompletionGateException.class);
+    }
+
+    @Test
+    void completeAllowsAnAnsweredMandatoryItem() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObJourneyStepItem item = stepItem(1L, null, true, "Signed agreement received");
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(item));
+
+        ObJourneyStep completed = service.complete(STEP, OWNER);
+
+        assertThat(completed.getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
+    }
+
+    @Test
+    void completeRefusesWhenARequiredDocumentIsNotAttached() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        step.setTemplateStepId(400L);
+        when(templateStepDocs.findByStepIdOrderBySequenceAsc(400L))
+                .thenReturn(List.of(templateDoc(true), templateDoc(false)));
+        when(attachments.countByStepIdAndScanStatusAndDeletedAtIsNull(STEP, ObAttachmentScanStatus.CLEAN))
+                .thenReturn(0L);
+
+        assertThatThrownBy(() -> service.complete(STEP, OWNER))
+                .isInstanceOf(CompletionGateException.class)
+                .satisfies(e -> assertThat(((CompletionGateException) e).missingRequiredDocs()).isEqualTo(1));
+    }
+
+    @Test
+    void completeAllowsWhenEveryRequiredDocumentIsAttachedAndClean() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        step.setTemplateStepId(400L);
+        when(templateStepDocs.findByStepIdOrderBySequenceAsc(400L)).thenReturn(List.of(templateDoc(true)));
+        when(attachments.countByStepIdAndScanStatusAndDeletedAtIsNull(STEP, ObAttachmentScanStatus.CLEAN))
+                .thenReturn(1L);
+
+        ObJourneyStep completed = service.complete(STEP, OWNER);
+
+        assertThat(completed.getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
+    }
+
+    @Test
+    void completeIgnoresDocumentChecklistWhenTheStepHasNoTemplateStepId() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+        ObJourneyStep completed = service.complete(STEP, OWNER);
+
+        assertThat(completed.getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
+    }
+
+    @Test
+    void completeRefusesWhenSignoffIsRequiredButNotYetSigned() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        step.setRequiresSignoff(true);
+
+        assertThatThrownBy(() -> service.complete(STEP, OWNER))
+                .isInstanceOf(CompletionGateException.class)
+                .satisfies(e -> assertThat(((CompletionGateException) e).signoffMissing()).isTrue());
+    }
+
+    @Test
+    void completeAllowsWhenTheRequiredSignoffIsSigned() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        step.setRequiresSignoff(true);
+        when(signoffs.existsByStepIdAndKindAndStatus(STEP, ObSignoffKind.STEP, ObSignoffStatus.SIGNED))
+                .thenReturn(true);
+
+        ObJourneyStep completed = service.complete(STEP, OWNER);
+
+        assertThat(completed.getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
+    }
+
+    @Test
+    void completeIgnoresSignoffWhenTheStepDoesNotRequireOne() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        step.setRequiresSignoff(false);
+
+        ObJourneyStep completed = service.complete(STEP, OWNER);
+
+        assertThat(completed.getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
+    }
+
+    @Test
+    void completeReportsAllThreeGateFailuresTogether() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        step.setTemplateStepId(400L);
+        step.setRequiresSignoff(true);
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP))
+                .thenReturn(List.of(stepItem(1L, null, null, "Signed agreement received")));
+        when(templateStepDocs.findByStepIdOrderBySequenceAsc(400L)).thenReturn(List.of(templateDoc(true)));
+        when(attachments.countByStepIdAndScanStatusAndDeletedAtIsNull(STEP, ObAttachmentScanStatus.CLEAN))
+                .thenReturn(0L);
+
+        assertThatThrownBy(() -> service.complete(STEP, OWNER))
+                .isInstanceOf(CompletionGateException.class)
+                .satisfies(e -> {
+                    CompletionGateException gate = (CompletionGateException) e;
+                    assertThat(gate.unansweredMandatoryItems()).containsExactly("Signed agreement received");
+                    assertThat(gate.missingRequiredDocs()).isEqualTo(1);
+                    assertThat(gate.signoffMissing()).isTrue();
+                });
+    }
+
+    private static ObJourneyStepItem stepItem(long id, Long templateItemId, Boolean answer, String label) {
+        ObJourneyStepItem item = new ObJourneyStepItem();
+        item.setId(id);
+        item.setStepId(STEP);
+        item.setTemplateItemId(templateItemId);
+        item.setLabel(label);
+        item.setAnswer(answer);
+        return item;
+    }
+
+    private static ObJourneyTemplateStepItem templateItem(long id, boolean mandatory) {
+        ObJourneyTemplateStepItem item = new ObJourneyTemplateStepItem();
+        item.setId(id);
+        item.setMandatory(mandatory);
+        return item;
+    }
+
+    private static ObJourneyTemplateStepDoc templateDoc(boolean required) {
+        ObJourneyTemplateStepDoc doc = new ObJourneyTemplateStepDoc();
+        doc.setId(1L);
+        doc.setRequired(required);
+        return doc;
     }
 
     // ── block ─────────────────────────────────────────────────────────────
