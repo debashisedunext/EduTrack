@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<!--/*
+  B-111 · the shell every onboarding mail (§7) is rendered into.
+
+  A second layout beside mail/notification.html rather than a generalisation of
+  it, and that is a decision rather than duplication. D-030's file is
+  ticket-shaped in the places that matter: it prints a ticket code in the
+  header, a facts table of project/stage/assignee, an "Open ticket" button, and
+  a footer telling the reader to comment on the ticket. Every one of those is
+  wrong in a mail to a client's SPOC about their implementation, and half of
+  them are wrong in a mail to a step owner. Generalising it would mean editing
+  Stream D's file to make every block conditional on which module queued the
+  mail — a cross-stream change to the most-read markup in the product, to save
+  a file that is mostly a table.
+
+  Deliberately 2004-era HTML, for D-030's reasons and unchanged by them: mail
+  clients are not browsers. Outlook renders with Word's engine, Gmail strips
+  <style> blocks and <head> entirely, and neither supports flexbox or grid. So
+  this is a table with inline styles and it should stay that way however wrong
+  it looks beside the app's own markup. Colours are inline hex because §12.1's
+  tokens are CSS custom properties and a mail cannot reach them.
+
+  th:utext appears on `body` and on nothing else. The body has already been
+  substituted and HTML-escaped by ObMailRenderer; escaping it again would print
+  &lt;p&gt; to the recipient. Every other value goes through th:text, which
+  escapes on output. Adding a second utext here is how a client's own
+  escalation comment becomes markup in a manager's inbox.
+
+  Every block is conditional. §7's events run from a go-live (a client, a date)
+  to an escalation (a client, a step, a level, an overrun), and a row reading
+  "Step" with nothing after it reads as a bug in the product rather than as an
+  absent field.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org">
+<body style="margin:0;padding:0;background:#f4f5f7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+         style="background:#f4f5f7;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+               style="width:600px;max-width:100%;background:#ffffff;border:1px solid #dfe3ed;
+                      border-radius:8px;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+                      color:#0b1220;">
+
+          <!--/* ── header: whose onboarding, and how urgent ────────────────── */-->
+          <tr>
+            <td style="padding:18px 24px 14px;border-bottom:1px solid #eceff6;">
+              <span style="font-size:13px;font-weight:600;color:#475069;">EduTrack</span>
+              <span style="font-size:13px;color:#7c859c;"> · Onboarding</span>
+
+              <!--/* Soft background, solid text — §12.1 as a rule, not a
+                   suggestion. The chip comes from the template's own urgency,
+                   never from the payload, so a breach mail cannot be queued as
+                   a quiet one. */-->
+              <span th:if="${chip_label != null and !chip_label.isEmpty()}"
+                    th:text="${chip_label}"
+                    th:style="'display:inline-block;margin-left:10px;padding:2px 9px;border-radius:999px;'
+                            + 'font-size:11px;font-weight:700;letter-spacing:.04em;'
+                            + 'background:' + ${chip_background} + ';color:' + ${chip_text} + ';'">Overdue</span>
+
+              <div th:if="${client_name != null and !client_name.isEmpty()}"
+                   style="margin-top:10px;font-size:16px;font-weight:650;line-height:1.35;">
+                <span th:text="${client_name}">Acme Ltd</span>
+                <span th:if="${product_name != null and !product_name.isEmpty()}"
+                      th:text="' — ' + ${product_name}"> — ERP Implementation</span>
+              </div>
+            </td>
+          </tr>
+
+          <!--/* ── the salutation ──────────────────────────────────────────── */-->
+          <!--/* Named where we know the name. A mail to a client SPOC that opens
+               with nothing reads as a broadcast, and this one is not. */-->
+          <tr th:if="${recipient_name != null and !recipient_name.isEmpty()}">
+            <td style="padding:18px 24px 0;font-size:14px;line-height:1.6;">
+              Hello <span th:text="${recipient_name}">Priya Nair</span>,
+            </td>
+          </tr>
+
+          <!--/* ── what happened ──────────────────────────────────────────── */-->
+          <tr>
+            <td style="padding:12px 24px 6px;font-size:14px;line-height:1.6;">
+              <div th:utext="${body}">The rendered template body goes here.</div>
+            </td>
+          </tr>
+
+          <!--/* ── the facts, for whoever needs them without reading prose ─── */-->
+          <!--/* owner_name is absent from a client's copy before it reaches
+               this file — ObMailRenderer strips it, because CP-03 shows a client
+               step status and not who is working on it. */-->
+          <tr>
+            <td style="padding:14px 24px 4px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="font-size:13px;color:#0b1220;">
+                <tr th:if="${step_title != null and !step_title.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;width:130px;">Step</td>
+                  <td style="padding:3px 0;" th:text="${step_title}">Data migration</td>
+                </tr>
+                <tr th:if="${prereq_title != null and !prereq_title.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;width:130px;">Task</td>
+                  <td style="padding:3px 0;" th:text="${prereq_title}">Signed agreement</td>
+                </tr>
+                <tr th:if="${owner_name != null and !owner_name.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;">Owner</td>
+                  <td style="padding:3px 0;" th:text="${owner_name}">Ravi Kumar</td>
+                </tr>
+                <tr th:if="${due_on != null and !due_on.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;">Due</td>
+                  <td style="padding:3px 0;" th:text="${due_on}">22 Sep 2026</td>
+                </tr>
+                <!--/* Only ever set on a breach or an escalation, where it is
+                     the whole point of the mail. */-->
+                <tr th:if="${overdue_by != null and !overdue_by.isEmpty()}">
+                  <td style="padding:3px 0;color:#b91c1c;">Overdue by</td>
+                  <td style="padding:3px 0;color:#b91c1c;font-weight:600;"
+                      th:text="${overdue_by}">2 working days</td>
+                </tr>
+                <tr th:if="${escalation_level != null and !escalation_level.isEmpty()}">
+                  <td style="padding:3px 0;color:#b91c1c;">Escalated to</td>
+                  <td style="padding:3px 0;color:#b91c1c;font-weight:600;"
+                      th:text="${escalation_level}">L2</td>
+                </tr>
+                <tr th:if="${live_on != null and !live_on.isEmpty()}">
+                  <td style="padding:3px 0;color:#7c859c;">Live from</td>
+                  <td style="padding:3px 0;" th:text="${live_on}">30 Sep 2026</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!--/* ── the one thing to do ─────────────────────────────────────── */-->
+          <!--/* No label means no button, and that is a template's choice: the
+               sign-off code mail deliberately has none, because the reader
+               already has the page open and a second entry point would send
+               them somewhere the code they were given no longer matches. */-->
+          <tr th:if="${action_label != null and !action_label.isEmpty()
+                       and action_url != null and !action_url.isEmpty()}">
+            <td style="padding:18px 24px 22px;">
+              <a th:href="${action_url}"
+                 th:text="${action_label}"
+                 style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;
+                        font-size:14px;font-weight:600;padding:11px 20px;border-radius:6px;">
+                Open the client
+              </a>
+            </td>
+          </tr>
+
+          <!--/* ── footer: two of them, and the difference is not cosmetic ──── */-->
+          <!--/* A client is told who to talk to, because replying here reaches
+               nobody — D-039's inbound parser is not wired, and telling somebody
+               they may reply would lose whatever they wrote, silently. Staff are
+               told where the setting lives instead. */-->
+          <tr th:if="${is_client}">
+            <td style="padding:14px 24px;border-top:1px solid #eceff6;font-size:12px;
+                       color:#7c859c;line-height:1.55;">
+              Replies to this address are not monitored — your implementation manager is
+              the fastest way to reach us, and the portal keeps everything in one place.
+              <br>
+              You are receiving this because you are a named contact for this
+              onboarding.
+            </td>
+          </tr>
+          <tr th:unless="${is_client}">
+            <td style="padding:14px 24px;border-top:1px solid #eceff6;font-size:12px;
+                       color:#7c859c;line-height:1.55;">
+              Replies to this address are not monitored — record what you know on the
+              step so it stays with the journey.
+              <br>
+              You are receiving this because you own or manage part of this onboarding.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
