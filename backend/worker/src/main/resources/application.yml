@@ -158,3 +158,30 @@ edutrack:
     # body — email_log carries a subject but no body column. Switch to `smtp`
     # only alongside a real template master.
     transport: logging
+
+  # B-110 · the onboarding outbox (ob_notification_outbox, A-107). Its own
+  # block rather than a reuse of edutrack.outbox above: the two queues drain
+  # different tables to different populations, and a ticketing mail burst
+  # should be tunable without touching the cadence a client's sign-off
+  # request leaves at. Same shape, same defaults, on purpose.
+  ob-outbox:
+    enabled: true
+    poll-interval: PT5S
+    batch-size: 10
+    # How long a claimed row stays SENDING before another worker may reclaim
+    # it. Must exceed the slowest realistic send, or an in-flight message is
+    # delivered twice.
+    lease: PT2M
+    # Three retries, then FAILED and an in-app failure notification.
+    max-attempts: 4
+    backoff-base: PT1M
+    backoff-cap: PT1H
+    # How often a queue filling with rows on channels this deployment has no
+    # adapter for — WHATSAPP until D-101 — is reported in the log. Such rows
+    # wait rather than fail, so this is the only place they are visible.
+    unroutable-report-interval: PT15M
+    email:
+      # `logging` records what would have been sent without touching SMTP,
+      # and is the default until B-111 lands the templates that render a
+      # body. Switch to `smtp` only alongside B-111's transport.
+      transport: logging
