@@ -650,6 +650,66 @@ export interface ObStep {
   startedAt?: string | null;
   finishedAt?: string | null;
   dueAt?: string | null;
+
+  /*
+   * A-118 · what the OB-06 panel needs on top of C-104's lifecycle fields.
+   * Optional for the same reason those are, and the panel's reads default
+   * them — a journey instantiated a moment ago genuinely has no checklist
+   * progress and no history.
+   */
+  description?: string | null;
+  requiresSignoff?: boolean;
+  /**
+   * Which side a stop is charged to. Only `CLIENT` pauses the clock, which is
+   * why C-104 gives it its own route rather than a flag on `block`.
+   */
+  blockedAttributedTo?: 'INTERNAL' | 'CLIENT' | null;
+  skipReason?: string | null;
+  skippedById?: number | null;
+  items?: ObStepItem[];
+  docs?: ObStepDoc[];
+  communications?: ObStepCommunicationRow[];
+  /** Append-only. The handlers push; nothing edits or removes. */
+  history?: ObStepHistoryRow[];
+}
+
+/** `ob_journey_step_items` — one checklist entry on a live service. */
+export interface ObStepItem {
+  id: number; sequence: number; label: string;
+  isMandatory: boolean; isDone: boolean;
+  doneAt?: string | null; doneById?: number | null;
+}
+
+/** `ob_journey_template_step_docs` instantiated — a required document slot. */
+export interface ObStepDoc {
+  id: number; label: string; isRequired: boolean;
+  /** Null until something is attached; `isSatisfied` is derived from it. */
+  attachmentId: number | null;
+}
+
+/** `ob_step_communications` — capture of what was said, not delivery. */
+export interface ObStepCommunicationRow {
+  id: number;
+  channel: 'CALL' | 'EMAIL' | 'MEETING' | 'WHATSAPP' | 'OTHER';
+  /** When it happened, which is not when it was typed. */
+  occurredAt: string;
+  summary: string;
+  isClientVisible: boolean;
+  recordedById: number;
+  createdAt: string;
+}
+
+/** `ob_step_history` — append-only and hash-chained in the real thing. */
+export interface ObStepHistoryRow {
+  id: number;
+  at: string;
+  actorId: number;
+  fromStatus: ObStep['status'] | null;
+  toStatus: ObStep['status'];
+  reasonCode?: string | null;
+  note?: string | null;
+  isCorrection?: boolean;
+  correctsEntryId?: number | null;
 }
 
 /** `ob_journeys` — one per purchased product, `UNIQUE(client_id, product_id)`. */
@@ -659,6 +719,15 @@ export interface ObJourney {
   /** Set while held behind a sibling journey's completion (plan §5.5). */
   heldByJourneyId: number | null;
   steps: ObStep[];
+
+  /* A-118 · optional for the reason ObStep's additions are. */
+  templateId?: number;
+  /** The version this journey is pinned to; a later revision does not move it. */
+  templateVersion?: number;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  /** Set by the archive route. Never unset — there is no un-archive. */
+  archivedAt?: string | null;
 }
 
 /** `ob_clients`. No payment columns — see {@link ObApplication}. */

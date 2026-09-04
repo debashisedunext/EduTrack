@@ -532,3 +532,686 @@ export const resumeObJourneyStepResponse = zod.object({
 }).describe('`ob_journey_steps` — a Service on a running journey (C-103).')
 })
 
+/**
+ * The cross-client list the dashboard cards open into. One row per
+journey, not per client: a client who bought three products is three
+rows here, which is what "journey-counted with a product dimension"
+(plan §9, OB-02) means and why a client-counted list cannot answer the
+same question.
+
+**Rows are scoped server-side by A-112's `OnboardingScopeResolver`**,
+never by a filter the caller sends. A Step Owner sees journeys
+containing their steps, Sales sees journeys for clients they created,
+Manager/Admin/Viewer see all. The filters below narrow that set; they
+cannot widen it, and an id outside the caller's scope is simply absent
+rather than refused — the same "absence, not refusal" contract §7's
+404 rule keeps for a single row.
+
+ * @summary Journeys across clients, filtered (OB-02 slide-overs, OB-03)
+ */
+export const listObJourneysQueryLimitDefault = 50;
+export const listObJourneysQueryLimitMax = 200;
+
+
+
+export const listObJourneysQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObJourneysQueryLimitMax).default(listObJourneysQueryLimitDefault),
+  "obClientId": zod.number().optional().describe('One client\'s journeys — the OB-05 accordion set.'),
+  "productId": zod.number().optional(),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).optional(),
+  "rag": zod.enum(['GREEN', 'AMBER', 'RED']).optional(),
+  "ownerUserId": zod.number().optional().describe('Journeys containing a step owned by this user — the implementor\ndimension of OB-02\'s workload grid. Matches the \*\*owner or the\nbackup owner\*\*, the same reading A-112\'s scope takes: a backup\nexists to cover a step, so a workload row that excluded them would\nunder-report exactly the person covering.\n'),
+  "state": zod.enum(['ACTIVE', 'COMPLETED', 'ARCHIVED', 'HELD']).optional().describe('A convenience over three nullable timestamp columns rather than a\nstored status: `ACTIVE` is started and not completed, `HELD` is\n`heldByJourneyId` set. Defaults to `ACTIVE` — a list that included\narchived journeys by default would grow without bound and quietly\nchange what every card counts.\n')
+})
+
+export const listObJourneysResponseDataItemPercentCompleteMin = 0;
+export const listObJourneysResponseDataItemPercentCompleteMax = 100;
+
+
+
+export const listObJourneysResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "clientName": zod.string().describe('Denormalised onto the row so a list of two hundred journeys does\nnot become two hundred client reads. The id is beside it for\nnavigation; this is for the eye.\n'),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while the gate is `LOCKED` — nothing is running to colour.'),
+  "percentComplete": zod.number().min(listObJourneysResponseDataItemPercentCompleteMin).max(listObJourneysResponseDataItemPercentCompleteMax),
+  "currentStep": zod.union([zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n'),zod.null()]).optional().describe('The service in progress, or null when none is — a journey behind\nits gate, held behind a sibling, or finished. The Delayed Projects\ngrid\'s \"module in progress\" and \"current stage\" columns are this\none field.\n'),
+  "owner": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Owner of `currentStep`, not of the journey — journeys have no owner of their own.'),
+  "heldByJourneyId": zod.number().nullish(),
+  "totalTatDays": zod.number().optional(),
+  "elapsedTatDays": zod.number().optional().describe('Working days consumed against the calendar, client waits excluded.\nPaired with `totalTatDays` this is the `used \/ total` the OB-05\nstrip shows, and the difference is what \"delayed by\" counts.\n'),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "completedAt": zod.string().datetime({}).nullish(),
+  "archivedAt": zod.string().datetime({}).nullish()
+}).describe('One row of the cross-client journey list (OB-02, OB-03).')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * The accordion once expanded: every service with its owner, TAT, dates
+and dependency, which `ObStepDot` deliberately omits because the client
+portal renders the collapsed strip from the same schema.
+
+Steps are **not paginated**. This is one journey's services, bounded by
+what a ribbon can draw, and the ribbon needs all of them to draw any of
+them — the same reasoning `ObJourneyStrip.steps` gives.
+
+ * @summary The expanded ribbon for one journey (OB-05)
+ */
+export const getObJourneyParams = zod.object({
+  "journeyId": zod.number().describe('A-118 · an `ob_journeys` id — one client\'s instance of one product\'s\ntemplate, \*\*not\*\* a template id. The two are different tables and a\njourney pins the template \*version\* it was created from, so a journey\noutlives the template being revised underneath it.\n')
+})
+
+export const getObJourneyResponseDataPercentCompleteMin = 0;
+export const getObJourneyResponseDataPercentCompleteMax = 100;
+
+export const getObJourneyResponseDataStepsItemNameMax = 200;
+
+export const getObJourneyResponseDataStepsItemBlockedReasonCodeMax = 40;
+
+export const getObJourneyResponseDataStepsItemBlockedNoteMax = 500;
+
+
+
+export const getObJourneyResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "clientName": zod.string().describe('Denormalised onto the row so a list of two hundred journeys does\nnot become two hundred client reads. The id is beside it for\nnavigation; this is for the eye.\n'),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while the gate is `LOCKED` — nothing is running to colour.'),
+  "percentComplete": zod.number().min(getObJourneyResponseDataPercentCompleteMin).max(getObJourneyResponseDataPercentCompleteMax),
+  "currentStep": zod.union([zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n'),zod.null()]).optional().describe('The service in progress, or null when none is — a journey behind\nits gate, held behind a sibling, or finished. The Delayed Projects\ngrid\'s \"module in progress\" and \"current stage\" columns are this\none field.\n'),
+  "owner": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Owner of `currentStep`, not of the journey — journeys have no owner of their own.'),
+  "heldByJourneyId": zod.number().nullish(),
+  "totalTatDays": zod.number().optional(),
+  "elapsedTatDays": zod.number().optional().describe('Working days consumed against the calendar, client waits excluded.\nPaired with `totalTatDays` this is the `used \/ total` the OB-05\nstrip shows, and the difference is what \"delayed by\" counts.\n'),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "completedAt": zod.string().datetime({}).nullish(),
+  "archivedAt": zod.string().datetime({}).nullish()
+}).describe('One row of the cross-client journey list (OB-02, OB-03).').and(zod.object({
+  "templateId": zod.number(),
+  "templateVersion": zod.number().describe('The version this journey was instantiated from and is pinned\nto. A template revised after this journey started does not\nchange it — which is why the step rows are copies rather than\nreferences, and why a TAT report years later still means what\nit meant on the day.\n'),
+  "steps": zod.array(zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(getObJourneyResponseDataStepsItemNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(getObJourneyResponseDataStepsItemBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(getObJourneyResponseDataStepsItemBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).').and(zod.object({
+  "description": zod.string().nullish(),
+  "clockState": zod.enum(['RUNNING', 'PAUSED', 'STOPPED']).optional().describe('What the TAT clock is doing, derived from `ob_step_clock_events` and\nnever stored. `PAUSED` means and only means `WAITING_ON_CLIENT`: an\ninternal `BLOCKED` step is still `RUNNING`, because plan §5.7 charges\ninternal delay to us and client delay to the client.\n\nNamed in `ObRag`\'s description as one of the three states the\nprototype\'s single chip wrongly folded into health. This is that\nstate, given its own field.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "tatDays": zod.number().optional(),
+  "requiresSignoff": zod.boolean().optional(),
+  "dependsOnStepId": zod.number().nullish(),
+  "skipReason": zod.string().nullish(),
+  "skippedByUserId": zod.number().nullish()
+})).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n')).describe('Every service in sequence, unpaginated. See `ObJourneyStrip`\nfor why: the ribbon needs all of them to draw any of them.\n'),
+  "parallelGroups": zod.array(zod.array(zod.number())).optional().describe('Layer 0 first, each entry the step ids that could be in\nprogress at once — the same recomputed-on-read layering\n`GET \/onboarding\/journey-templates\/{templateId}` returns,\napplied to the instance\'s own dependency graph.\n')
+})).describe('The expanded OB-05 accordion.')
+})
+
+/**
+ * Sets `archivedAt` and removes the journey from every count and every
+default list. **Not a delete** — the steps, their history and their
+clock events are append-only and stay exactly as they were, which is
+the whole reason this is an archive rather than a removal.
+
+There is no un-archive. Restoring one would mean deciding what its TAT
+clock did while it was gone, and the honest answer for a client who
+resumed a product is a new journey on the current template version.
+
+ * @summary Withdraw a journey the client is no longer taking
+ */
+export const archiveObJourneyParams = zod.object({
+  "journeyId": zod.number().describe('A-118 · an `ob_journeys` id — one client\'s instance of one product\'s\ntemplate, \*\*not\*\* a template id. The two are different tables and a\njourney pins the template \*version\* it was created from, so a journey\noutlives the template being revised underneath it.\n')
+})
+
+export const archiveObJourneyHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const archiveObJourneyBodyReasonMin = 3;
+export const archiveObJourneyBodyReasonMax = 500;
+
+
+
+export const archiveObJourneyBody = zod.object({
+  "reason": zod.string().min(archiveObJourneyBodyReasonMin).max(archiveObJourneyBodyReasonMax).describe('Mandatory and free text, unlike a block reason. A block is counted\nin a report and so must come from a master; an archive is rare,\nread by a person, and the useful thing to record is the sentence\nsomebody would otherwise put in an email.\n')
+})
+
+export const archiveObJourneyResponseDataPercentCompleteMin = 0;
+export const archiveObJourneyResponseDataPercentCompleteMax = 100;
+
+export const archiveObJourneyResponseDataStepsItemNameMax = 200;
+
+export const archiveObJourneyResponseDataStepsItemBlockedReasonCodeMax = 40;
+
+export const archiveObJourneyResponseDataStepsItemBlockedNoteMax = 500;
+
+
+
+export const archiveObJourneyResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "clientName": zod.string().describe('Denormalised onto the row so a list of two hundred journeys does\nnot become two hundred client reads. The id is beside it for\nnavigation; this is for the eye.\n'),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while the gate is `LOCKED` — nothing is running to colour.'),
+  "percentComplete": zod.number().min(archiveObJourneyResponseDataPercentCompleteMin).max(archiveObJourneyResponseDataPercentCompleteMax),
+  "currentStep": zod.union([zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n'),zod.null()]).optional().describe('The service in progress, or null when none is — a journey behind\nits gate, held behind a sibling, or finished. The Delayed Projects\ngrid\'s \"module in progress\" and \"current stage\" columns are this\none field.\n'),
+  "owner": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Owner of `currentStep`, not of the journey — journeys have no owner of their own.'),
+  "heldByJourneyId": zod.number().nullish(),
+  "totalTatDays": zod.number().optional(),
+  "elapsedTatDays": zod.number().optional().describe('Working days consumed against the calendar, client waits excluded.\nPaired with `totalTatDays` this is the `used \/ total` the OB-05\nstrip shows, and the difference is what \"delayed by\" counts.\n'),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "completedAt": zod.string().datetime({}).nullish(),
+  "archivedAt": zod.string().datetime({}).nullish()
+}).describe('One row of the cross-client journey list (OB-02, OB-03).').and(zod.object({
+  "templateId": zod.number(),
+  "templateVersion": zod.number().describe('The version this journey was instantiated from and is pinned\nto. A template revised after this journey started does not\nchange it — which is why the step rows are copies rather than\nreferences, and why a TAT report years later still means what\nit meant on the day.\n'),
+  "steps": zod.array(zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(archiveObJourneyResponseDataStepsItemNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(archiveObJourneyResponseDataStepsItemBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(archiveObJourneyResponseDataStepsItemBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).').and(zod.object({
+  "description": zod.string().nullish(),
+  "clockState": zod.enum(['RUNNING', 'PAUSED', 'STOPPED']).optional().describe('What the TAT clock is doing, derived from `ob_step_clock_events` and\nnever stored. `PAUSED` means and only means `WAITING_ON_CLIENT`: an\ninternal `BLOCKED` step is still `RUNNING`, because plan §5.7 charges\ninternal delay to us and client delay to the client.\n\nNamed in `ObRag`\'s description as one of the three states the\nprototype\'s single chip wrongly folded into health. This is that\nstate, given its own field.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "tatDays": zod.number().optional(),
+  "requiresSignoff": zod.boolean().optional(),
+  "dependsOnStepId": zod.number().nullish(),
+  "skipReason": zod.string().nullish(),
+  "skippedByUserId": zod.number().nullish()
+})).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n')).describe('Every service in sequence, unpaginated. See `ObJourneyStrip`\nfor why: the ribbon needs all of them to draw any of them.\n'),
+  "parallelGroups": zod.array(zod.array(zod.number())).optional().describe('Layer 0 first, each entry the step ids that could be in\nprogress at once — the same recomputed-on-read layering\n`GET \/onboarding\/journey-templates\/{templateId}` returns,\napplied to the instance\'s own dependency graph.\n')
+})).describe('The expanded OB-05 accordion.')
+})
+
+/**
+ * One service in full: checklist items, required documents and what they
+have against them, the clock, and the block or skip reason if either
+applies. **This is also the only source of the `ETag`** that `PATCH`
+and the transitions below require as `If-Match`.
+
+ * @summary The step update panel (OB-06)
+ */
+export const getObJourneyStepParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const getObJourneyStepResponseDataNameMax = 200;
+
+export const getObJourneyStepResponseDataBlockedReasonCodeMax = 40;
+
+export const getObJourneyStepResponseDataBlockedNoteMax = 500;
+
+
+
+export const getObJourneyStepResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(getObJourneyStepResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(getObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(getObJourneyStepResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).').and(zod.object({
+  "description": zod.string().nullish(),
+  "clockState": zod.enum(['RUNNING', 'PAUSED', 'STOPPED']).optional().describe('What the TAT clock is doing, derived from `ob_step_clock_events` and\nnever stored. `PAUSED` means and only means `WAITING_ON_CLIENT`: an\ninternal `BLOCKED` step is still `RUNNING`, because plan §5.7 charges\ninternal delay to us and client delay to the client.\n\nNamed in `ObRag`\'s description as one of the three states the\nprototype\'s single chip wrongly folded into health. This is that\nstate, given its own field.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "tatDays": zod.number().optional(),
+  "requiresSignoff": zod.boolean().optional(),
+  "dependsOnStepId": zod.number().nullish(),
+  "skipReason": zod.string().nullish(),
+  "skippedByUserId": zod.number().nullish()
+})).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n').and(zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean(),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "label": zod.string(),
+  "isRequired": zod.boolean().describe('A required document with nothing against it refuses `finish` with `ob-step-docs-missing`.'),
+  "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
+  "attachmentId": zod.number().nullish()
+})),
+  "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n')
+})).describe('The OB-06 panel.')
+})
+
+/**
+ * Owner, backup owner, TAT and due date — the fields a manager adjusts
+without the step changing state. **Status is not among them.** Moving a
+step between states is what the transition routes below are for, each
+with its own required reason and its own 422s; a status field here
+would be a second way to make the same move with none of that, and the
+two would drift within a release.
+
+ * @summary Reassign or re-plan one service (OB-06)
+ */
+export const updateObJourneyStepParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const updateObJourneyStepHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObJourneyStepBodyTatDaysMin = 0;
+
+
+
+export const updateObJourneyStepBody = zod.object({
+  "ownerUserId": zod.number().nullish(),
+  "backupOwnerUserId": zod.number().nullish(),
+  "tatDays": zod.number().min(updateObJourneyStepBodyTatDaysMin).optional(),
+  "dueAt": zod.string().datetime({}).nullish()
+}).describe('Every field optional; absent means unchanged. `status` is deliberately\nabsent from this schema — see the operation\'s description.\n')
+
+export const updateObJourneyStepResponseDataNameMax = 200;
+
+export const updateObJourneyStepResponseDataBlockedReasonCodeMax = 40;
+
+export const updateObJourneyStepResponseDataBlockedNoteMax = 500;
+
+
+
+export const updateObJourneyStepResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(updateObJourneyStepResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(updateObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(updateObJourneyStepResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).').and(zod.object({
+  "description": zod.string().nullish(),
+  "clockState": zod.enum(['RUNNING', 'PAUSED', 'STOPPED']).optional().describe('What the TAT clock is doing, derived from `ob_step_clock_events` and\nnever stored. `PAUSED` means and only means `WAITING_ON_CLIENT`: an\ninternal `BLOCKED` step is still `RUNNING`, because plan §5.7 charges\ninternal delay to us and client delay to the client.\n\nNamed in `ObRag`\'s description as one of the three states the\nprototype\'s single chip wrongly folded into health. This is that\nstate, given its own field.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "tatDays": zod.number().optional(),
+  "requiresSignoff": zod.boolean().optional(),
+  "dependsOnStepId": zod.number().nullish(),
+  "skipReason": zod.string().nullish(),
+  "skippedByUserId": zod.number().nullish()
+})).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n').and(zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean(),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "label": zod.string(),
+  "isRequired": zod.boolean().describe('A required document with nothing against it refuses `finish` with `ob-step-docs-missing`.'),
+  "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
+  "attachmentId": zod.number().nullish()
+})),
+  "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n')
+})).describe('The OB-06 panel.')
+})
+
+/**
+ * `SKIPPED` with a mandatory reason and the actor recorded in
+`skippedBy`. Skipping is how a journey completes when a service does
+not apply, and it is deliberately an explicit act with a name against
+it rather than a silent tick: services that "did not apply" are what a
+TAT-compliance report has to exclude, and it can only exclude what it
+can see was excluded on purpose.
+
+A service another one depends on can be skipped — the dependent
+becomes startable, exactly as if it had completed.
+
+ * @summary Drop a service this client does not need (Manager/Admin)
+ */
+export const skipObJourneyStepParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const skipObJourneyStepHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n'),
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const skipObJourneyStepBodyReasonMin = 3;
+export const skipObJourneyStepBodyReasonMax = 500;
+
+
+
+export const skipObJourneyStepBody = zod.object({
+  "reason": zod.string().min(skipObJourneyStepBodyReasonMin).max(skipObJourneyStepBodyReasonMax)
+})
+
+export const skipObJourneyStepResponseDataNameMax = 200;
+
+export const skipObJourneyStepResponseDataBlockedReasonCodeMax = 40;
+
+export const skipObJourneyStepResponseDataBlockedNoteMax = 500;
+
+
+
+export const skipObJourneyStepResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(skipObJourneyStepResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(skipObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(skipObJourneyStepResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).').and(zod.object({
+  "description": zod.string().nullish(),
+  "clockState": zod.enum(['RUNNING', 'PAUSED', 'STOPPED']).optional().describe('What the TAT clock is doing, derived from `ob_step_clock_events` and\nnever stored. `PAUSED` means and only means `WAITING_ON_CLIENT`: an\ninternal `BLOCKED` step is still `RUNNING`, because plan §5.7 charges\ninternal delay to us and client delay to the client.\n\nNamed in `ObRag`\'s description as one of the three states the\nprototype\'s single chip wrongly folded into health. This is that\nstate, given its own field.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "tatDays": zod.number().optional(),
+  "requiresSignoff": zod.boolean().optional(),
+  "dependsOnStepId": zod.number().nullish(),
+  "skipReason": zod.string().nullish(),
+  "skippedByUserId": zod.number().nullish()
+})).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n').and(zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean(),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "label": zod.string(),
+  "isRequired": zod.boolean().describe('A required document with nothing against it refuses `finish` with `ob-step-docs-missing`.'),
+  "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
+  "attachmentId": zod.number().nullish()
+})),
+  "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n')
+})).describe('The OB-06 panel.')
+})
+
+/**
+ * Idempotent by design and **deliberately without `If-Match`**: two
+people ticking two different items on the same service is the normal
+case, and a precondition drawn from the step's tag would make the
+second one fail for touching a sibling. The race this leaves open —
+both ticking the *same* item — has no loser, because the outcome is
+identical either way.
+
+ * @summary Tick or untick one checklist entry
+ */
+export const updateObJourneyStepItemParams = zod.object({
+  "itemId": zod.number().describe('A-118 · an `ob_journey_step_items` id — one checklist entry on a live\nservice, not the `ObJourneyTemplateStepItemId` it was instantiated\nfrom.\n')
+})
+
+export const updateObJourneyStepItemBody = zod.object({
+  "isDone": zod.boolean()
+})
+
+export const updateObJourneyStepItemResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean(),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})
+})
+
+/**
+ * @summary What was said about this service, and to whom (plan §6)
+ */
+export const listObStepCommunicationsParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const listObStepCommunicationsQueryLimitDefault = 50;
+export const listObStepCommunicationsQueryLimitMax = 200;
+
+
+
+export const listObStepCommunicationsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObStepCommunicationsQueryLimitMax).default(listObStepCommunicationsQueryLimitDefault)
+})
+
+export const listObStepCommunicationsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "channel": zod.enum(['CALL', 'EMAIL', 'MEETING', 'WHATSAPP', 'OTHER']),
+  "occurredAt": zod.string().datetime({}).describe('When the conversation happened, which is not when it was typed —\npeople record a Friday call on Monday, and a communication audit\nthat ordered by entry time would misreport every one of them.\n'),
+  "summary": zod.string(),
+  "isClientVisible": zod.boolean().describe('False by default. True publishes it to the portal thread, and\nthere is no way to unpublish something a client has already read.\n'),
+  "recordedBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),
+  "createdAt": zod.string().datetime({}).optional()
+})),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * Capture, not delivery. This records that a conversation happened —
+the outbound mail and WhatsApp the module actually sends are §7's
+notification engine, and conflating them would put a note somebody
+typed into a client's inbox.
+
+**`isClientVisible` defaults to false.** An internal note that reaches
+the portal because a default went the other way is not recoverable by
+deleting it afterwards.
+
+ * @summary Record a call, mail or meeting against this service
+ */
+export const createObStepCommunicationParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const createObStepCommunicationHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createObStepCommunicationBodySummaryMax = 4000;
+
+export const createObStepCommunicationBodyIsClientVisibleDefault = false;
+
+export const createObStepCommunicationBody = zod.object({
+  "channel": zod.enum(['CALL', 'EMAIL', 'MEETING', 'WHATSAPP', 'OTHER']),
+  "occurredAt": zod.string().datetime({}),
+  "summary": zod.string().min(1).max(createObStepCommunicationBodySummaryMax),
+  "isClientVisible": zod.boolean().optional()
+})
+
+/**
+ * `ob_step_history` is append-only and hash-chained. **There is no
+`PATCH`, `PUT` or `DELETE` on this path and there will not be one** —
+CONVENTIONS §8, and the same guarantee `ticket_history` carries. A
+correction is a new compensating entry, not an edit.
+
+ * @summary Every state change on this service, oldest first
+ */
+export const listObStepHistoryParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const listObStepHistoryQueryLimitDefault = 50;
+export const listObStepHistoryQueryLimitMax = 200;
+
+
+
+export const listObStepHistoryQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObStepHistoryQueryLimitMax).default(listObStepHistoryQueryLimitDefault)
+})
+
+export const listObStepHistoryResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "at": zod.string().datetime({}),
+  "actor": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),
+  "fromStatus": zod.union([zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),zod.null()]).describe('Null on the first entry — instantiation has nothing to come from.'),
+  "toStatus": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
+  "reasonCode": zod.string().nullish(),
+  "note": zod.string().nullish(),
+  "isCorrection": zod.boolean().optional().describe('A compensating entry, the only way to correct this log. The entry\nit corrects is named in `correctsEntryId` and \*\*stays exactly\nwhere it was\*\* — an accounting reversal, not an edit.\n'),
+  "correctsEntryId": zod.number().nullish()
+}).describe('One row of `ob_step_history`, which is append-only and hash-chained.\nRead-only on the wire because it is read-only in the database, behind\na trigger that rejects `UPDATE` and `DELETE`.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+

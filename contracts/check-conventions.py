@@ -27,6 +27,7 @@ VERBS = ("get", "post", "put", "patch", "delete")
 
 # §5 — idempotent setters, or a write already guarded another way.
 NO_IF_MATCH = {
+    "/onboarding/journey-step-items/{itemId}": "A-118 — ticking a checklist entry. Two people ticking two DIFFERENT items on the same service is the normal case, and the only tag available is the step's, from getObJourneyStep: honouring it would fail the second person for touching a sibling item. The race this leaves open is both ticking the SAME item, which has no loser — the outcome is identical either way. The same argument as /projects/{id}/members/{userId}, where the tag would have to come from a collection with none of its own",
     "/me/password":                        "currentPassword already proves current state",
     "/users/{userId}/status":              "idempotent setter, last write wins is correct",
     "/clients/{clientId}/status":          "idempotent setter, last write wins is correct",
@@ -82,6 +83,7 @@ APPEND_ONLY = ("/history", "/effort-logs", "/audit-logs")
 # already says "add it to ROWLESS_403 with a reason" and there was nowhere to
 # put one. Membership tests read the same either way.
 ROWLESS_403 = {
+    "/onboarding/journey-steps/{stepId}/skip": "A-118 — skipping is Manager/Admin only, and the caller reaching this route has already read the step through getObJourneyStep, which A-112's scope resolver let them see. So the refusal cannot be concealing an existence: a 404 here would deny a row the same caller just rendered in the OB-06 panel. The capability is decided before the step id is resolved, exactly as /import-batches/{batchId}/reverse argues for the one route that deletes client rows. Out-of-scope steps are still 404 — that is the scope guard, not this gate",
     "/audit-logs":                        "Admin-only regardless of what is in it",
     "/masters/roles":                     "Admin-only screen; there is no row yet on a create",
     "/masters/workflow-templates": "B-041 — master data, not row-scoped, and there is no row yet on a create. The collection read is open to all six roles because every ticket page renders a ribbon that names its template, so a 403 on the POST concedes only what the GET already told the same caller: which templates exist. Admin-only is about authoring the workflow, not about seeing it — B-039's argument for the transition matrix, one table over",

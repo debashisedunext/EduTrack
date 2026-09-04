@@ -4,6 +4,7 @@ import { fileHandlers } from './files';
 import { onboardingHandlers } from './onboarding';
 import { onboardingJourneyInstanceHandlers } from './onboardingJourneyInstances';
 import { onboardingJourneyHandlers } from './onboardingJourneys';
+import { obJourneyHandlers } from './onboardingSteps';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
 import { slaHandlers } from './sla';
@@ -47,6 +48,9 @@ export const handlers = [
   ...onboardingJourneyHandlers,
   // C-104 · the step-lifecycle routes. See onboardingJourneyInstances.ts.
   ...onboardingJourneyInstanceHandlers,
+  // A-118 · the reads C-104's transitions do not cover — the journey list and
+  // ribbon, the step panel, checklist, communications and history.
+  ...obJourneyHandlers,
 
   // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the
   // `/api/v1` prefix, because a signed URL points at MinIO and not at the API —
