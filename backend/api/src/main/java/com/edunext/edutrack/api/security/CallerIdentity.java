@@ -8,6 +8,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -57,13 +58,24 @@ import java.util.Optional;
  *                   {@code /api/v1/onboarding/**} route (onboarding plan §2.1).
  *                   <b>Empty means no modules, never all of them</b> — see
  *                   {@link #hasModule}.
+ * @param moduleRoles A-112 · the caller's role <em>within</em> each module they
+ *                   hold, keyed by module code — {@code {"ONBOARDING": "OB_SALES"}}.
+ *                   Distinct from {@code roleCode}, which is the ticketing-era
+ *                   role and says nothing about onboarding: a user is
+ *                   {@code SUPPORT} there and {@code OB_SALES} here, and
+ *                   {@code OnboardingScopeResolver} switches on the latter.
+ *                   <b>Absent means no role in that module, never a
+ *                   privileged one</b> — see {@link #moduleRole}.
  */
-public record CallerIdentity(long userId, String roleCode, List<Long> projectIds, List<String> modules) {
+public record CallerIdentity(long userId, String roleCode, List<Long> projectIds,
+                             List<String> modules, Map<String, String> moduleRoles) {
 
     static final String ROLE_CLAIM = "role";
     static final String PROJECTS_CLAIM = "projects";
     /** A-110. Written unconditionally by {@code AccessTokenIssuer}, so absent means empty. */
     static final String MODULES_CLAIM = "modules";
+    /** A-112. Written unconditionally alongside {@link #MODULES_CLAIM}, so absent means empty. */
+    static final String MODULE_ROLES_CLAIM = "moduleRoles";
 
     public CallerIdentity {
         projectIds = projectIds == null ? List.of() : List.copyOf(projectIds);
@@ -79,6 +91,28 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
                 .filter(value -> !value.isEmpty())
                 .distinct()
                 .toList();
+        // Keys upper-cased for the same reason `hasModule` compares
+        // case-insensitively — the code is minted from a database column and
+        // matched against a Java constant. Values are NOT upper-cased here
+        // beyond trimming: `moduleRole` hands the raw grant to a switch that
+        // treats anything unrecognised as deny-all, and silently repairing a
+        // malformed role would hide the misconfiguration rather than refuse it.
+        moduleRoles = moduleRoles == null ? Map.of() : moduleRoles.entrySet().stream()
+                .filter(entry -> entry.getKey() != null && !entry.getKey().isBlank())
+                .filter(entry -> entry.getValue() != null && !entry.getValue().isBlank())
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        entry -> entry.getKey().trim().toUpperCase(Locale.ROOT),
+                        entry -> entry.getValue().trim(),
+                        (first, second) -> first));
+    }
+
+    /**
+     * A-112 · the pre-moduleRoles shape. Empty is deny, for the reason the
+     * three-argument constructor below gives at length: a caller that says
+     * nothing about its role inside a module has no role inside it.
+     */
+    public CallerIdentity(long userId, String roleCode, List<Long> projectIds, List<String> modules) {
+        this(userId, roleCode, projectIds, modules, Map.of());
     }
 
     /**
@@ -101,7 +135,7 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
      * </ul>
      */
     public CallerIdentity(long userId, String roleCode, List<Long> projectIds) {
-        this(userId, roleCode, projectIds, List.of());
+        this(userId, roleCode, projectIds, List.of(), Map.of());
     }
 
     /**
@@ -123,6 +157,32 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
             return false;
         }
         return modules.stream().anyMatch(module.trim()::equalsIgnoreCase);
+    }
+
+    /**
+     * A-112 · this caller's role inside {@code module}, if they have one.
+     *
+     * <p><b>Empty is deny.</b> {@code OnboardingScopeResolver} turns an empty
+     * into its deny-all specification, which is the same direction
+     * {@link #hasModule} takes for an absent grant and the same direction the
+     * class javadoc takes for an unreadable identity. A token minted before
+     * this claim existed therefore has no role in any module — so it is scoped
+     * to nothing rather than defaulting into the one role that sees every
+     * journey.
+     *
+     * <p>Deliberately <em>not</em> cross-checked against {@link #modules}. The
+     * two claims are minted from the same row of {@code user_module_access} in
+     * the same query, so they cannot disagree; and if they ever did,
+     * {@code ModuleAccessGuard} already refuses the request on {@link #hasModule}
+     * before a resolver is consulted. Re-deciding entitlement here would put
+     * the module gate in two places, which is the arrangement that lets one of
+     * them be relaxed without the other.
+     */
+    public Optional<String> moduleRole(String module) {
+        if (module == null || module.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(moduleRoles.get(module.trim().toUpperCase(Locale.ROOT)));
     }
 
     /**
@@ -152,7 +212,8 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
             return Optional.empty();
         }
         return Optional.of(new CallerIdentity(
-                userId, role, idList(jwt.getClaim(PROJECTS_CLAIM)), stringList(jwt.getClaim(MODULES_CLAIM))));
+                userId, role, idList(jwt.getClaim(PROJECTS_CLAIM)),
+                stringList(jwt.getClaim(MODULES_CLAIM)), stringMap(jwt.getClaim(MODULE_ROLES_CLAIM))));
     }
 
     private static Optional<CallerIdentity> fromDevPrincipal(DevPrincipal dev) {
@@ -161,7 +222,8 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
             return Optional.empty();
         }
         return Optional.of(new CallerIdentity(
-                dev.userId(), role, idList(dev.projectIds()), stringList(dev.modules())));
+                dev.userId(), role, idList(dev.projectIds()),
+                stringList(dev.modules()), stringMap(dev.moduleRoles())));
     }
 
     private static String normalisedRole(String role) {
@@ -212,6 +274,24 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
                 .filter(value -> !value.isEmpty())
                 .distinct()
                 .toList();
+    }
+
+    /**
+     * A-112 · the {@code moduleRoles} claim, read with {@link #stringList}'s
+     * caution. A claim that is present but not an object, or whose entries are
+     * not strings, yields an empty map — which is deny for every module, the
+     * safe direction.
+     */
+    private static Map<String, String> stringMap(Object claim) {
+        if (!(claim instanceof Map<?, ?> values)) {
+            return Map.of();
+        }
+        return values.entrySet().stream()
+                .filter(entry -> entry.getKey() instanceof String && entry.getValue() instanceof String)
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        entry -> (String) entry.getKey(),
+                        entry -> (String) entry.getValue(),
+                        (first, second) -> first));
     }
 
     private static List<Long> idList(Object claim) {

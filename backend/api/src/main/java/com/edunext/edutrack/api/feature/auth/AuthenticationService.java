@@ -10,6 +10,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -262,6 +263,12 @@ class AuthenticationService {
         // bite immediately, the answer is the A-025 blacklist by jti, not a
         // per-request read of user_module_access.
         List<String> modules = users.findModuleCodesByUserId(user.id());
+        // A-112 · the role inside each of those modules, for
+        // OnboardingScopeResolver. Same table, same live-grants predicate and
+        // the same 15-minute staleness the paragraph above accepts for
+        // `modules` — a role changed mid-session takes effect on the next
+        // access token, not on the next request.
+        Map<String, String> moduleRoles = users.findModuleRolesByUserId(user.id());
 
         return new AuthenticatedUser(
                 user.id(),
@@ -285,7 +292,8 @@ class AuthenticationService {
                 permissions,
                 projectIds,
                 reporteeIds,
-                modules);
+                modules,
+                moduleRoles);
     }
 
     private static String randomSecret() {

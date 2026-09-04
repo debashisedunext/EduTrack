@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.auth;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * A-020 · who the caller turned out to be, once the password verified.
@@ -28,13 +29,27 @@ record AuthenticatedUser(
         List<Long> projectIds,
         List<Long> reporteeIds,
         /** A-110 · module codes from {@code user_module_access}, live grants only. */
-        List<String> modules
+        List<String> modules,
+        /**
+         * A-112 · the role held inside each of those modules, keyed by module
+         * code. Same row, same query, same staleness bargain as {@code modules}.
+         */
+        Map<String, String> moduleRoles
 ) {
     AuthenticatedUser {
         permissions = List.copyOf(permissions);
         projectIds = List.copyOf(projectIds);
         reporteeIds = List.copyOf(reporteeIds);
         modules = List.copyOf(modules);
+        moduleRoles = Map.copyOf(moduleRoles);
+    }
+
+    /** A-112 · the pre-moduleRoles shape. Empty is deny — see {@code CallerIdentity}. */
+    AuthenticatedUser(long id, String username, String email, String fullName, String roleCode,
+                      String timezone, boolean mustChangePassword, List<String> permissions,
+                      List<Long> projectIds, List<Long> reporteeIds, List<String> modules) {
+        this(id, username, email, fullName, roleCode, timezone, mustChangePassword,
+                permissions, projectIds, reporteeIds, modules, Map.of());
     }
 
     /** A-110 · the pre-modules shape. Empty is deny — see {@code CallerIdentity}. */
@@ -42,6 +57,6 @@ record AuthenticatedUser(
                       String timezone, boolean mustChangePassword, List<String> permissions,
                       List<Long> projectIds, List<Long> reporteeIds) {
         this(id, username, email, fullName, roleCode, timezone, mustChangePassword,
-                permissions, projectIds, reporteeIds, List.of());
+                permissions, projectIds, reporteeIds, List.of(), Map.of());
     }
 }

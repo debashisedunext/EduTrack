@@ -8,7 +8,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * A-020 · the read side of authentication.
@@ -127,6 +129,26 @@ class AuthUserRepository {
      */
     private static final String MODULE_CODES_FOR_USER = """
             SELECT uma.module
+              FROM user_module_access uma
+             WHERE uma.user_id = ? AND uma.revoked_at IS NULL
+             ORDER BY uma.module
+            """;
+
+    /**
+     * A-112 · the same live grants, with the role held inside each module.
+     *
+     * <p>A second query rather than widening {@link #MODULE_CODES_FOR_USER},
+     * so A-110's contract and its tests are untouched. Both run once per
+     * login against {@code uq_user_module_access_live}, which covers
+     * {@code (user_id, module, live_key)} — so this is an index read of at
+     * most two rows, not a scan, and login is not a hot path.
+     *
+     * <p>{@code revoked_at IS NULL} for the reason A-110 gives above: a
+     * revoked grant is still a row, and a role read from one would answer
+     * "what could this person do in August".
+     */
+    private static final String MODULE_ROLES_FOR_USER = """
+            SELECT uma.module, uma.module_role
               FROM user_module_access uma
              WHERE uma.user_id = ? AND uma.revoked_at IS NULL
              ORDER BY uma.module
@@ -387,6 +409,23 @@ class AuthUserRepository {
     /** A-110 · live module grants, for the {@code modules} claim. */
     List<String> findModuleCodesByUserId(long userId) {
         return jdbc.sql(MODULE_CODES_FOR_USER).param(userId).query(String.class).list();
+    }
+
+    /**
+     * A-112 · module code to the role held inside it, live grants only.
+     *
+     * <p>The unique key makes a duplicate module impossible, so the merge
+     * function below is unreachable rather than a policy. It is present
+     * because {@code Collectors.toMap} throws without one, and a login that
+     * 500s on a row the schema forbids is a worse failure than one that picks
+     * the first of two.
+     */
+    Map<String, String> findModuleRolesByUserId(long userId) {
+        return jdbc.sql(MODULE_ROLES_FOR_USER).param(userId)
+                .query((rs, rowNum) -> Map.entry(rs.getString("module"), rs.getString("module_role")))
+                .list().stream()
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue,
+                        (first, second) -> first));
     }
 
     // ── A-021 · lockout state ───────────────────────────────────────────────

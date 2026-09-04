@@ -60,7 +60,22 @@ Admin is an always-true predicate, not a `null` specification, so "unrestricted"
 
 **Adding a ticket query:** call `ScopedTickets`, and pass your own filter as the `criteria` argument — it is `AND`-ed onto the scope and cannot replace it. **Do not autowire `TicketRepository`** — since A-037 that is a build failure, not a convention.
 
-If your class genuinely has no caller to scope by, annotate it `@UnscopedAccess("why")` and say so in the reason. Two classes do today, both because they answer something other than a user: `InboundReplyService` (a mail server) and `SingleTicketFixture` (seed data, `fixtures` profile). The reason is mandatory and a blank one fails the build — an exemption you cannot justify in a sentence is one to reconsider rather than to write. The `worker` SLA scanners are outside the rule rather than exempt from it: they are a different module, with no request and no caller at all.
+If your class genuinely has no caller to scope by, annotate it `@UnscopedAccess("why")` and say so in the reason. Three classes do today: `InboundReplyService` (a mail server) and `SingleTicketFixture` (seed data, `fixtures` profile), both because they answer something other than a user; and `ObJourneyInstantiationService` (A-112), because its two uniqueness guards must see rows the caller cannot — "one live journey per client per product" is a fact about the client, not about the caller, and scoping it would let a Sales user create a duplicate journey for a client another Sales user boarded. The reason is mandatory and a blank one fails the build — an exemption you cannot justify in a sentence is one to reconsider rather than to write. The `worker` SLA scanners are outside the rule rather than exempt from it: they are a different module, with no request and no caller at all.
+
+### The onboarding module (A-112)
+
+A second module, a second scope, built the same way: `OnboardingScopeResolver` turns the caller into a `Specification<ObJourney>`, and `ScopedJourneys` is the only place it gets composed in. `ScopeGuardRulesTest` enforces that separately from the ticket rule, so a failure names which guard was bypassed.
+
+| Module role | Sees |
+|---|---|
+| `OB_ADMIN`, `OB_MANAGER`, `OB_VIEWER` | every journey |
+| `OB_SALES` | journeys whose client they created (`ob_clients.created_by`) |
+| `OB_STEP_OWNER` | journeys containing their steps — as owner **or** as backup owner |
+| anything else, including `TICKETING_MEMBER` | nothing |
+
+**It switches on the module role, not on `roleCode`.** A user is `SUPPORT` in ticketing and `OB_SALES` in onboarding, and the two say nothing about each other — so a ticketing `ADMIN` with no onboarding grant sees no journeys at all. The module role arrives in the `moduleRoles` JWT claim, minted from the same `user_module_access` row as A-110's `modules`; an absent claim means no role in any module, which is deny.
+
+Read-only is *not* expressed here. `OB_VIEWER` and `OB_MANAGER` get an identical specification — they see the same journeys, and what separates them is what they may do with one. That is A-114's permission matrix, deliberately kept a separate question.
 
 ### 404, never 403 (A-035)
 
@@ -71,6 +86,8 @@ Two different questions produce two different codes, and getting them the wrong 
 | the role lacks the capability | **403** | it is a fact about the caller, not about any ticket |
 | the ticket is not in the caller's scope | **404** | a 403 confirms the ticket exists |
 | the ticket id was never issued | **404** | genuinely absent |
+
+The onboarding module keeps the same contract with its own `JourneyNotFoundException`, thrown from `ScopedJourneys.require` — and A-111's `ModuleAccessGuard` already answers 404 rather than 403 for a caller with no entitlement to the module at all, so no layer of that module discloses existence.
 
 The last two are not "both mapped to 404" — they are the *same* `TicketNotFoundException`, thrown from the same line in `ScopedTickets.require`, so the responses cannot drift apart. It carries no reason code: a value that was never recorded cannot leak into a log, a `detail` string or a debug header.
 

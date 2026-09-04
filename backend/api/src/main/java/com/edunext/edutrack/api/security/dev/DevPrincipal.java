@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.security.dev;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * A-012. The shape every fake login takes under the {@code dev-noauth}
@@ -27,8 +28,27 @@ public record DevPrincipal(
          * in production — which is the behaviour three developers would build
          * against for weeks before anyone saw the difference.
          */
-        List<String> modules
+        List<String> modules,
+        /**
+         * A-112 · this fake principal's role inside each module, keyed by
+         * module code. Present here for the same reason {@code modules} is:
+         * {@code OnboardingScopeResolver} switches on it, and a claim that
+         * lived only on the real chain would give dev-noauth a different
+         * scope from production — which is precisely the difference three
+         * developers would build against without noticing.
+         */
+        Map<String, String> moduleRoles
 ) {
+    /**
+     * A-112 · the pre-moduleRoles shape. Empty rather than a default role,
+     * so the neutral principal is scoped to nothing; {@code DevNoAuthProperties}
+     * is where dev's permissive default belongs, in one place and on purpose.
+     */
+    public DevPrincipal(Long userId, String username, String fullName, String role,
+                        List<Long> projectIds, List<Long> reporteeIds, List<String> modules) {
+        this(userId, username, fullName, role, projectIds, reporteeIds, modules, Map.of());
+    }
+
     /**
      * A-110 · the pre-modules shape, for callers that say nothing about
      * entitlement. Empty rather than both modules, so the neutral default is
@@ -37,6 +57,6 @@ public record DevPrincipal(
      */
     public DevPrincipal(Long userId, String username, String fullName, String role,
                         List<Long> projectIds, List<Long> reporteeIds) {
-        this(userId, username, fullName, role, projectIds, reporteeIds, List.of());
+        this(userId, username, fullName, role, projectIds, reporteeIds, List.of(), Map.of());
     }
 }

@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.onboarding.instances;
 
 import com.edunext.edutrack.domain.onboarding.ObGateStatus;
 import com.edunext.edutrack.domain.onboarding.ObJourney;
+import com.edunext.edutrack.api.security.scope.UnscopedAccess;
 import com.edunext.edutrack.domain.onboarding.ObJourneyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepItem;
@@ -48,6 +49,8 @@ import java.util.Map;
  * </ul>
  */
 @Service
+@UnscopedAccess("""
+        A-112 · this class performs no scoped read. Its three uses of \n        ObJourneyRepository are two uniqueness guards and a save, and the \n        guards MUST see rows the caller cannot: "one live journey per client \n        per product" and "one open gate per client" are facts about the \n        client, not about the caller. Routing them through ScopedJourneys \n        would let a Sales user create a second journey for a client another \n        Sales user boarded, because the first one is invisible to them — \n        turning a scope guard into a data-integrity bug. The 404 rule still \n        applies to every read of the journey this creates; it is just not \n        this class that performs one.""")
 public class ObJourneyInstantiationService {
 
     private final ObJourneyRepository journeys;
