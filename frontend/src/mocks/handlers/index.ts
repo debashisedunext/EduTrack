@@ -2,6 +2,7 @@ import { delay, http } from 'msw';
 import { dashboardTabHandlers } from './dashboardTabs';
 import { fileHandlers } from './files';
 import { onboardingHandlers } from './onboarding';
+import { onboardingJourneyHandlers } from './onboardingJourneys';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
 import { slaHandlers } from './sla';
@@ -41,6 +42,8 @@ export const handlers = [
   // ticketing route, so position here is presentation only — the module's
   // whole premise is that its paths, tables and schemas are disjoint.
   ...onboardingHandlers,
+  // C-102 · the OB-07 template designer's own routes. See onboardingJourneys.ts.
+  ...onboardingJourneyHandlers,
 
   // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the
   // `/api/v1` prefix, because a signed URL points at MinIO and not at the API —
