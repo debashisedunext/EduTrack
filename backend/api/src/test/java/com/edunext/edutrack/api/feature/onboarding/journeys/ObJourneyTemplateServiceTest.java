@@ -263,7 +263,7 @@ class ObJourneyTemplateServiceTest {
             ObJourneyTemplateStep kickoff =
                     service.addStep(v1.getId(), "Kickoff", "desc", 2, null, "PM", null, false, null);
             service.addStep(v1.getId(), "Data migration", null, 5, null, "DEV", null, true, kickoff.getId());
-            service.addStepItem(kickoff.getId(), "Signed requirement sheet received");
+            service.addStepItem(kickoff.getId(), "Signed requirement sheet received", true);
             service.addStepDoc(kickoff.getId(), "Signed requirement sheet", true);
             service.publish(v1.getId(), ADMIN);
 
@@ -362,8 +362,8 @@ class ObJourneyTemplateServiceTest {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
             ObJourneyTemplateStep step = service.addStep(draft.getId(), "Kickoff", null, 1, null, null, null, false, null);
 
-            service.addStepItem(step.getId(), "Item A");
-            ObJourneyTemplateStepItem itemB = service.addStepItem(step.getId(), "Item B");
+            service.addStepItem(step.getId(), "Item A", true);
+            ObJourneyTemplateStepItem itemB = service.addStepItem(step.getId(), "Item B", true);
 
             assertThat(itemB.getSequence()).isEqualTo(2);
             assertThat(stepItems.findByStepIdOrderBySequenceAsc(step.getId())).hasSize(2);
@@ -383,6 +383,228 @@ class ObJourneyTemplateServiceTest {
 
             service.removeStepDoc(doc.getId());
             assertThat(stepDocs.findByStepIdOrderBySequenceAsc(step.getId())).isEmpty();
+        }
+
+        @Test
+        @DisplayName("an item's mandatory flag is whatever the caller asked for, both ways")
+        void mandatoryFlagRoundTrips() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep step = service.addStep(draft.getId(), "Kickoff", null, 1, null, null, null, false, null);
+
+            ObJourneyTemplateStepItem mandatoryItem = service.addStepItem(step.getId(), "Mandatory item", true);
+            ObJourneyTemplateStepItem optionalItem = service.addStepItem(step.getId(), "Optional item", false);
+
+            assertThat(mandatoryItem.isMandatory()).isTrue();
+            assertThat(optionalItem.isMandatory()).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("beginRevision — the mandatory flag travels with the clone")
+    class CloneCarriesMandatoryFlag {
+
+        @Test
+        @DisplayName("an item marked optional on the source stays optional on the clone")
+        void optionalItemStaysOptionalAfterRevision() {
+            ObJourneyTemplate v1 = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep kickoff =
+                    service.addStep(v1.getId(), "Kickoff", null, 2, null, "PM", null, false, null);
+            service.addStepItem(kickoff.getId(), "Mandatory item", true);
+            service.addStepItem(kickoff.getId(), "Optional item", false);
+            service.publish(v1.getId(), ADMIN);
+
+            ObJourneyTemplate v2 = service.beginRevision(v1.getId(), ADMIN);
+
+            ObJourneyTemplateStep clonedKickoff = steps.findByTemplateIdOrderBySequenceAsc(v2.getId()).get(0);
+            List<ObJourneyTemplateStepItem> clonedItems =
+                    stepItems.findByStepIdOrderBySequenceAsc(clonedKickoff.getId());
+
+            assertThat(clonedItems).hasSize(2);
+            assertThat(clonedItems)
+                    .as("the clone's mandatory flags are not silently reset to the column default")
+                    .extracting(ObJourneyTemplateStepItem::isMandatory)
+                    .containsExactly(true, false);
+        }
+    }
+
+    @Nested
+    @DisplayName("reorderSteps — the OB-07 ↑/↓ control")
+    class Reorder {
+
+        @Test
+        @DisplayName("persists the caller's exact ordering as sequence 1..N")
+        void persistsRequestedOrder() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep b = service.addStep(draft.getId(), "B", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep c = service.addStep(draft.getId(), "C", null, 1, null, null, null, false, null);
+
+            service.reorderSteps(draft.getId(), List.of(c.getId(), a.getId(), b.getId()));
+
+            List<ObJourneyTemplateStep> reordered = steps.findByTemplateIdOrderBySequenceAsc(draft.getId());
+            assertThat(reordered).extracting(ObJourneyTemplateStep::getId)
+                    .containsExactly(c.getId(), a.getId(), b.getId());
+            assertThat(reordered).extracting(ObJourneyTemplateStep::getSequence)
+                    .containsExactly(1, 2, 3);
+        }
+
+        @Test
+        @DisplayName("swapping two adjacent steps' positions does not trip the (template_id, sequence) unique index")
+        void adjacentSwapDoesNotCollide() {
+            // The collision case named in the service's own javadoc: writing
+            // step A's new sequence to what step B currently holds, before B
+            // has been moved off it, would violate
+            // uq_ob_journey_template_steps_seq under a real unique index. An
+            // in-memory fake cannot enforce that constraint, so this test
+            // proves the two-pass shape ran (final state is the swap) rather
+            // than proving MySQL accepted it — that half is CI's job against
+            // a real database.
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep first = service.addStep(draft.getId(), "First", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep second = service.addStep(draft.getId(), "Second", null, 1, null, null, null, false, null);
+
+            service.reorderSteps(draft.getId(), List.of(second.getId(), first.getId()));
+
+            List<ObJourneyTemplateStep> reordered = steps.findByTemplateIdOrderBySequenceAsc(draft.getId());
+            assertThat(reordered).extracting(ObJourneyTemplateStep::getId)
+                    .containsExactly(second.getId(), first.getId());
+            assertThat(reordered).extracting(ObJourneyTemplateStep::getSequence)
+                    .containsExactly(1, 2);
+        }
+
+        @Test
+        @DisplayName("a list missing a step is refused")
+        void missingStepRefused() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
+            service.addStep(draft.getId(), "B", null, 1, null, null, null, false, null);
+
+            assertThatThrownBy(() -> service.reorderSteps(draft.getId(), List.of(a.getId())))
+                    .isInstanceOf(StepReorderMismatchException.class);
+        }
+
+        @Test
+        @DisplayName("a list naming an id twice is refused")
+        void duplicateIdRefused() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep b = service.addStep(draft.getId(), "B", null, 1, null, null, null, false, null);
+
+            assertThatThrownBy(() -> service.reorderSteps(draft.getId(), List.of(a.getId(), a.getId())))
+                    .isInstanceOf(StepReorderMismatchException.class);
+
+            // Refused before anything is written — b's original sequence still stands.
+            assertThat(steps.findById(b.getId()).orElseThrow().getSequence()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("a list naming a step from a different template is refused")
+        void foreignStepRefused() {
+            ObJourneyTemplate draftOne = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep a = service.addStep(draftOne.getId(), "A", null, 1, null, null, null, false, null);
+            ObJourneyTemplate draftTwo = service.createTemplate(600L, "Biometric Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep x = service.addStep(draftTwo.getId(), "X", null, 1, null, null, null, false, null);
+
+            assertThatThrownBy(() -> service.reorderSteps(draftOne.getId(), List.of(x.getId())))
+                    .isInstanceOf(StepReorderMismatchException.class);
+            assertThatThrownBy(() -> service.reorderSteps(draftOne.getId(), List.of(a.getId(), x.getId())))
+                    .isInstanceOf(StepReorderMismatchException.class);
+        }
+
+        @Test
+        @DisplayName("a published template cannot be reordered")
+        void publishedTemplateRefused() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
+            service.publish(draft.getId(), ADMIN);
+
+            assertThatThrownBy(() -> service.reorderSteps(draft.getId(), List.of(a.getId())))
+                    .isInstanceOf(TemplateNotEditableException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("parallelGroups — the computed layering OB-07 renders as concurrent groups")
+    class ParallelGroups {
+
+        @Test
+        @DisplayName("every step with no dependency is layer 0, all in one group")
+        void allParallelIsOneGroup() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep b = service.addStep(draft.getId(), "B", null, 1, null, null, null, false, null);
+
+            List<List<ObJourneyTemplateStep>> groups = service.parallelGroups(draft.getId());
+
+            assertThat(groups).hasSize(1);
+            assertThat(groups.get(0)).extracting(ObJourneyTemplateStep::getId)
+                    .containsExactlyInAnyOrder(a.getId(), b.getId());
+        }
+
+        @Test
+        @DisplayName("a straight chain is one step per layer")
+        void chainIsOnePerLayer() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep b = service.addStep(draft.getId(), "B", null, 1, null, null, null, false, a.getId());
+            ObJourneyTemplateStep c = service.addStep(draft.getId(), "C", null, 1, null, null, null, false, b.getId());
+
+            List<List<ObJourneyTemplateStep>> groups = service.parallelGroups(draft.getId());
+
+            assertThat(groups).hasSize(3);
+            assertThat(groups.get(0)).extracting(ObJourneyTemplateStep::getId).containsExactly(a.getId());
+            assertThat(groups.get(1)).extracting(ObJourneyTemplateStep::getId).containsExactly(b.getId());
+            assertThat(groups.get(2)).extracting(ObJourneyTemplateStep::getId).containsExactly(c.getId());
+        }
+
+        @Test
+        @DisplayName("a fork — two steps both depending on the same root — land in the same later layer")
+        void forkLandsSiblingsInSameLayer() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep kickoff =
+                    service.addStep(draft.getId(), "Kickoff", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep migration =
+                    service.addStep(draft.getId(), "Migration", null, 1, null, null, null, false, kickoff.getId());
+            ObJourneyTemplateStep training =
+                    service.addStep(draft.getId(), "Training", null, 1, null, null, null, false, kickoff.getId());
+
+            List<List<ObJourneyTemplateStep>> groups = service.parallelGroups(draft.getId());
+
+            assertThat(groups).hasSize(2);
+            assertThat(groups.get(0)).extracting(ObJourneyTemplateStep::getId).containsExactly(kickoff.getId());
+            assertThat(groups.get(1)).extracting(ObJourneyTemplateStep::getId)
+                    .containsExactlyInAnyOrder(migration.getId(), training.getId());
+        }
+
+        @Test
+        @DisplayName("a multi-layer mix of chains and forks layers by longest path from a root")
+        void mixedGraphLayersByLongestPath() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep root =
+                    service.addStep(draft.getId(), "Root", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep branchA =
+                    service.addStep(draft.getId(), "BranchA", null, 1, null, null, null, false, root.getId());
+            ObJourneyTemplateStep branchAChild =
+                    service.addStep(draft.getId(), "BranchAChild", null, 1, null, null, null, false, branchA.getId());
+            ObJourneyTemplateStep branchB =
+                    service.addStep(draft.getId(), "BranchB", null, 1, null, null, null, false, root.getId());
+
+            List<List<ObJourneyTemplateStep>> groups = service.parallelGroups(draft.getId());
+
+            assertThat(groups).hasSize(3);
+            assertThat(groups.get(0)).extracting(ObJourneyTemplateStep::getId).containsExactly(root.getId());
+            assertThat(groups.get(1)).extracting(ObJourneyTemplateStep::getId)
+                    .containsExactlyInAnyOrder(branchA.getId(), branchB.getId());
+            assertThat(groups.get(2)).extracting(ObJourneyTemplateStep::getId)
+                    .containsExactly(branchAChild.getId());
+        }
+
+        @Test
+        @DisplayName("an empty template has no groups")
+        void emptyTemplateHasNoGroups() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+
+            assertThat(service.parallelGroups(draft.getId())).isEmpty();
         }
     }
 }

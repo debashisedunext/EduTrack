@@ -17,6 +17,13 @@ import java.time.Instant;
  * is snapshotted onto answers True/False per item, and a False answer needs
  * a remark; that gate lives on {@code ob_journey_step_items} (A-104), not
  * here. This table is only the versioned definition.
+ *
+ * <p>{@link #mandatory} (C-102, {@code V20260903_2000}) defaults to
+ * {@code true} — every item predates this column and was already being
+ * treated as mandatory by the instance-side completion gate, so {@code true}
+ * is the value that preserves existing behaviour rather than a neutral
+ * placeholder. The instance-side gate actually reading this flag is C-106's
+ * job; this is only where the OB-07 designer authors it.
  */
 @Entity
 @Table(name = "ob_journey_template_step_items")
@@ -34,6 +41,9 @@ public class ObJourneyTemplateStepItem {
 
     @Column(name = "label", nullable = false, length = 300)
     private String label;
+
+    @Column(name = "is_mandatory", nullable = false)
+    private boolean mandatory = true;
 
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", insertable = false, updatable = false)
@@ -73,6 +83,14 @@ public class ObJourneyTemplateStepItem {
 
     public void setLabel(String label) {
         this.label = label;
+    }
+
+    public boolean isMandatory() {
+        return mandatory;
+    }
+
+    public void setMandatory(boolean mandatory) {
+        this.mandatory = mandatory;
     }
 
     public Instant getCreatedAt() {

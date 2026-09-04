@@ -1,0 +1,44 @@
+-- =====================================================================
+-- C-102 · OB-07 journey template designer — the mandatory-flag gap
+--
+-- Table altered: ob_journey_template_step_items (+1 TINYINT(1))
+-- Source: docs/streams/STREAM-C-TICKETS.md line 485 — "per-item mandatory
+--         flags" is one of the five designer pieces the prototype never
+--         wired up, and this is the one genuinely missing from the schema
+--         rather than merely missing a REST surface.
+--
+-- NOTE FOR STREAM A: this table was authored by A-103
+-- (V20260903_1420__ob_journey_templates.sql). It is not one of the
+-- CLAUDE.md hash-chained append-only tables (ticket_history,
+-- ticket_effort_logs, ticket_stage_transitions), so the mandatory
+-- Stream-A review those three require does not apply here — but the
+-- table is still yours in the sense that authored it, so flagging the
+-- change rather than letting it arrive silently.
+--
+-- WHY DEFAULT 1, NOT 0
+--
+-- Plan §5.8, quoted verbatim in A-103's own migration comment: "a service
+-- completes only when every item is answered." Nothing before this
+-- migration distinguishes a mandatory item from an optional one, which
+-- means every item that exists today is *already* being treated as
+-- mandatory by the instance-side completion gate (A-104's
+-- ob_journey_step_items). DEFAULT 1 is not a neutral placeholder — it is
+-- the only value that leaves every row written before this migration
+-- meaning exactly what it already meant. DEFAULT 0 would silently make
+-- every existing template item optional the moment this migration ran,
+-- which is a behaviour change wearing a schema migration's clothes.
+--
+-- WHY ONLY THE TEMPLATE-SIDE TABLE
+--
+-- ob_journey_step_items (A-104) is the per-instance snapshot this table's
+-- rows are copied onto when a journey is instantiated, and it is where
+-- the actual completion gate is enforced against a real client's answers.
+-- Extending the gate to *read* a mandatory flag is C-106's job — this
+-- migration only gives the OB-07 designer somewhere to author the flag on
+-- the definition side. A template-side flag with nothing downstream
+-- reading it yet is inert, not wrong: the same shape as C-101's own
+-- versioning landing before OB-07 had a REST surface to drive it.
+-- =====================================================================
+
+ALTER TABLE ob_journey_template_step_items
+  ADD COLUMN is_mandatory TINYINT(1) NOT NULL DEFAULT 1 AFTER label;
