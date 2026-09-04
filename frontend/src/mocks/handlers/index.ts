@@ -2,6 +2,7 @@ import { delay, http } from 'msw';
 import { dashboardTabHandlers } from './dashboardTabs';
 import { fileHandlers } from './files';
 import { onboardingHandlers } from './onboarding';
+import { onboardingJourneyInstanceHandlers } from './onboardingJourneyInstances';
 import { onboardingJourneyHandlers } from './onboardingJourneys';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
@@ -44,6 +45,8 @@ export const handlers = [
   ...onboardingHandlers,
   // C-102 · the OB-07 template designer's own routes. See onboardingJourneys.ts.
   ...onboardingJourneyHandlers,
+  // C-104 · the step-lifecycle routes. See onboardingJourneyInstances.ts.
+  ...onboardingJourneyInstanceHandlers,
 
   // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the
   // `/api/v1` prefix, because a signed URL points at MinIO and not at the API —
