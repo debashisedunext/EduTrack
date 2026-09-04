@@ -9,7 +9,9 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Generated;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.generator.EventType;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
@@ -51,12 +53,16 @@ public class ObSignoff {
     @Column(name = "status", nullable = false, length = 12)
     private ObSignoffStatus status = ObSignoffStatus.PENDING;
 
+    /** Hex SHA-256, {@code CHAR(64)} — the {@link SqlTypes#CHAR} code is what makes
+     * {@code ddl-auto=validate} agree; without it Hibernate expects {@code VARCHAR}. */
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "token_hash", nullable = false, length = 64)
     private String tokenHash;
 
     @Column(name = "token_expires_at", nullable = false)
     private Instant tokenExpiresAt;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "otp_hash", length = 64)
     private String otpHash;
 
@@ -69,7 +75,7 @@ public class ObSignoff {
     @Column(name = "requested_by")
     private Long requestedBy;
 
-    @Column(name = "requested_at")
+    @Column(name = "requested_at", nullable = false)
     private Instant requestedAt;
 
     @Column(name = "sent_to_contact_id", nullable = false)

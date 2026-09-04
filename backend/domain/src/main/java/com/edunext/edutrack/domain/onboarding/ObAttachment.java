@@ -9,7 +9,9 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Generated;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.generator.EventType;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
@@ -56,7 +58,7 @@ public class ObAttachment {
     @Column(name = "uploaded_by_contact")
     private Long uploadedByContact;
 
-    @Column(name = "file_name", nullable = false)
+    @Column(name = "file_name", nullable = false, length = 255)
     private String fileName;
 
     @Column(name = "content_type", nullable = false, length = 120)
@@ -68,6 +70,9 @@ public class ObAttachment {
     @Column(name = "storage_key", nullable = false, length = 400)
     private String storageKey;
 
+    /** Hex SHA-256, {@code CHAR(64)} — the {@link SqlTypes#CHAR} code is what makes
+     * {@code ddl-auto=validate} agree; without it Hibernate expects {@code VARCHAR}. */
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "content_sha256", length = 64)
     private String contentSha256;
 
