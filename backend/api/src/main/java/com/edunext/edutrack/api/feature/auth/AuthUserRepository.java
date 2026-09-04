@@ -116,6 +116,22 @@ class AuthUserRepository {
              ORDER BY pm.project_id
             """;
 
+    /**
+     * A-110 · the modules this user may reach, from {@code user_module_access}
+     * (A-109).
+     *
+     * <p>{@code revoked_at IS NULL} rather than a status column, because that
+     * table revokes rather than deletes so an access audit can answer "who
+     * could see this module in August". A revoked grant is still a row and
+     * must not reach the token.
+     */
+    private static final String MODULE_CODES_FOR_USER = """
+            SELECT uma.module
+              FROM user_module_access uma
+             WHERE uma.user_id = ? AND uma.revoked_at IS NULL
+             ORDER BY uma.module
+            """;
+
     /** Direct reportees only. §2's manager scope is one level, not the whole tree. */
     private static final String REPORTEE_IDS_FOR_USER = """
             SELECT u.id
@@ -366,6 +382,11 @@ class AuthUserRepository {
 
     List<Long> findReporteeIdsByManagerId(long managerId) {
         return jdbc.sql(REPORTEE_IDS_FOR_USER).param(managerId).query(Long.class).list();
+    }
+
+    /** A-110 · live module grants, for the {@code modules} claim. */
+    List<String> findModuleCodesByUserId(long userId) {
+        return jdbc.sql(MODULE_CODES_FOR_USER).param(userId).query(String.class).list();
     }
 
     // ── A-021 · lockout state ───────────────────────────────────────────────

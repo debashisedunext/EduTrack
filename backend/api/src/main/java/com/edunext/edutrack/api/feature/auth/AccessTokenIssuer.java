@@ -67,7 +67,20 @@ class AccessTokenIssuer {
                 .claim("role", user.roleCode())
                 .claim("permissions", user.permissions())
                 .claim("projects", user.projectIds())
-                .claim("reportees", user.reporteeIds());
+                .claim("reportees", user.reporteeIds())
+                // A-110 · which modules this caller may reach. Read by
+                // ModuleAccessGuard (A-111) before RolesGuard on every
+                // /api/v1/onboarding/** route.
+                //
+                // Always stamped, even when empty, unlike mustChangePassword
+                // below. That flag is fail-open by design — an absent claim
+                // means "no forced change", which keeps older tokens working.
+                // This one must be fail-CLOSED: an absent modules claim has to
+                // mean "no modules", or a token minted before this task grants
+                // access to a module that did not exist when it was signed.
+                // Writing it unconditionally means the two readings — absent
+                // and empty — never have to be told apart.
+                .claim("modules", user.modules());
 
         // A-026. The flag has to travel in the token, not only in the response
         // body: the body is a suggestion the client may ignore, and this is the

@@ -29,7 +29,7 @@ class DevNoAuthFilterTest {
     @Test
     void stampsEveryRequestWithTheConfiguredPrincipal() throws Exception {
         var properties = new DevNoAuthProperties(
-                4L, "dev.ravi", "Ravi (fake)", "DEVELOPER", List.of(1L, 2L), List.of());
+                4L, "dev.ravi", "Ravi (fake)", "DEVELOPER", List.of(1L, 2L), List.of(), List.of("TICKETING", "ONBOARDING"));
 
         new DevNoAuthFilter(properties).doFilter(
                 new MockHttpServletRequest("GET", "/api/v1/tickets"),
@@ -63,7 +63,7 @@ class DevNoAuthFilterTest {
     @Test
     void grantsTheRolesPermissionsAndNotSomebodyElses() throws Exception {
         var properties = new DevNoAuthProperties(
-                4L, "dev.ravi", "Ravi (fake)", "DEVELOPER", List.of(), List.of());
+                4L, "dev.ravi", "Ravi (fake)", "DEVELOPER", List.of(), List.of(), List.of("TICKETING", "ONBOARDING"));
 
         new DevNoAuthFilter(properties).doFilter(
                 new MockHttpServletRequest("GET", "/api/v1/tickets"),
@@ -97,7 +97,7 @@ class DevNoAuthFilterTest {
     @Test
     void anUnknownRoleGrantsNoPermissions() throws Exception {
         var properties = new DevNoAuthProperties(
-                9L, "dev.new", "New (fake)", "AUDITOR", List.of(), List.of());
+                9L, "dev.new", "New (fake)", "AUDITOR", List.of(), List.of(), List.of("TICKETING", "ONBOARDING"));
 
         new DevNoAuthFilter(properties).doFilter(
                 new MockHttpServletRequest("GET", "/api/v1/tickets"),
@@ -111,7 +111,7 @@ class DevNoAuthFilterTest {
 
     @Test
     void defaultsApplyWhenAllPropertiesAreOmitted() {
-        var properties = new DevNoAuthProperties(null, null, null, null, null, null);
+        var properties = new DevNoAuthProperties(null, null, null, null, null, null, List.of("TICKETING", "ONBOARDING"));
 
         assertThat(properties.userId()).isEqualTo(1L);
         assertThat(properties.username()).isEqualTo("dev.admin");

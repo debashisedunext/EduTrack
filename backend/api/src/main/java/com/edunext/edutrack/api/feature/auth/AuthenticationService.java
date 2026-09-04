@@ -251,6 +251,17 @@ class AuthenticationService {
         List<String> permissions = users.findPermissionCodesByRoleId(user.roleId());
         List<Long> projectIds = users.findProjectIdsByUserId(user.id());
         List<Long> reporteeIds = users.findReporteeIdsByManagerId(user.id());
+        // A-110. A fourth query on the login path, and only on the login path —
+        // the claim rides in the token from here, so ModuleAccessGuard reads a
+        // signed string rather than hitting this table per request.
+        //
+        // The cost of that is the cost of every claim: a grant revoked mid-session
+        // stays honoured until the access token expires, 15 minutes at most.
+        // Accepted for the same reason `role` and `projects` accept it, and worth
+        // stating rather than discovering — if a module ever needs revocation to
+        // bite immediately, the answer is the A-025 blacklist by jti, not a
+        // per-request read of user_module_access.
+        List<String> modules = users.findModuleCodesByUserId(user.id());
 
         return new AuthenticatedUser(
                 user.id(),
@@ -273,7 +284,8 @@ class AuthenticationService {
                 user.mustChangePassword() || passwordPolicy.isExpired(user.passwordChangedAt()),
                 permissions,
                 projectIds,
-                reporteeIds);
+                reporteeIds,
+                modules);
     }
 
     private static String randomSecret() {

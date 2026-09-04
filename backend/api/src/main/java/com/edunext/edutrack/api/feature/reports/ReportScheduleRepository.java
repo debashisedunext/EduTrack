@@ -292,7 +292,8 @@ class ReportScheduleRepository {
                 .query((rs, n) -> new CallerIdentity(
                         rs.getLong("id"),
                         rs.getString("roleCode"),
-                        projectsOf(rs.getLong("id"))))
+                        projectsOf(rs.getLong("id")),
+                        modulesOf(rs.getLong("id"))))
                 .optional();
     }
 
@@ -306,6 +307,25 @@ class ReportScheduleRepository {
                         + "WHERE user_id = :id AND is_active = 1 ORDER BY project_id")
                 .param("id", userId)
                 .query(Long.class)
+                .list();
+    }
+
+    /**
+     * A-110 · live module grants, mirroring {@link #projectsOf} exactly — and
+     * for the sharper version of its own reason.
+     *
+     * <p>This rebuilds a caller with no request and no token behind them, so
+     * every claim the token would have carried has to be read fresh. Reading
+     * the modules is what keeps a scheduled report honest about entitlement: a
+     * grant revoked on Friday must not still be scoping Monday's email, and
+     * passing an empty list instead would have been safe for today's ticketing
+     * reports and quietly wrong for the first onboarding one (§10).
+     */
+    private List<String> modulesOf(long userId) {
+        return jdbc.sql("SELECT module FROM user_module_access "
+                        + "WHERE user_id = :id AND revoked_at IS NULL ORDER BY module")
+                .param("id", userId)
+                .query(String.class)
                 .list();
     }
 

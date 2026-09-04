@@ -26,11 +26,22 @@ record AuthenticatedUser(
         boolean mustChangePassword,
         List<String> permissions,
         List<Long> projectIds,
-        List<Long> reporteeIds
+        List<Long> reporteeIds,
+        /** A-110 · module codes from {@code user_module_access}, live grants only. */
+        List<String> modules
 ) {
     AuthenticatedUser {
         permissions = List.copyOf(permissions);
         projectIds = List.copyOf(projectIds);
         reporteeIds = List.copyOf(reporteeIds);
+        modules = List.copyOf(modules);
+    }
+
+    /** A-110 · the pre-modules shape. Empty is deny — see {@code CallerIdentity}. */
+    AuthenticatedUser(long id, String username, String email, String fullName, String roleCode,
+                      String timezone, boolean mustChangePassword, List<String> permissions,
+                      List<Long> projectIds, List<Long> reporteeIds) {
+        this(id, username, email, fullName, roleCode, timezone, mustChangePassword,
+                permissions, projectIds, reporteeIds, List.of());
     }
 }
