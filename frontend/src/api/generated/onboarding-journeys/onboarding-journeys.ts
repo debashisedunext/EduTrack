@@ -67,6 +67,8 @@ import type {
 
 import type {
   ConflictResponse,
+  ObBlockJourneyStepRequest,
+  ObJourneyStepResponse,
   ObJourneyTemplateCreateRequest,
   ObJourneyTemplateDetailResponse,
   ObJourneyTemplateResponse,
@@ -870,6 +872,344 @@ export const useRemoveObJourneyTemplateStepDoc = <TError = ObModuleGatedResponse
       > => {
 
       const mutationOptions = getRemoveObJourneyTemplateStepDocMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `PENDING` → `IN_PROGRESS`. `422` if the journey's gate is still
+`LOCKED` or the journey is held by another; `422` if the caller is
+neither the step's owner nor its backup owner; `422` if the step is
+not `PENDING`. No dependency-graph check yet — that refusal, "naming
+the blocker", is C-119's.
+
+ * @summary Start a step (C-104)
+ */
+export const startObJourneyStep = (
+    stepId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/start`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getStartObJourneyStepMutationOptions = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startObJourneyStep>>, TError,{stepId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof startObJourneyStep>>, TError,{stepId: number}, TContext> => {
+
+const mutationKey = ['startObJourneyStep'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startObJourneyStep>>, {stepId: number}> = (props) => {
+          const {stepId} = props ?? {};
+
+          return  startObJourneyStep(stepId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartObJourneyStepMutationResult = NonNullable<Awaited<ReturnType<typeof startObJourneyStep>>>
+    
+    export type StartObJourneyStepMutationError = ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Start a step (C-104)
+ */
+export const useStartObJourneyStep = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startObJourneyStep>>, TError,{stepId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof startObJourneyStep>>,
+        TError,
+        {stepId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getStartObJourneyStepMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `IN_PROGRESS` → `DONE`. No completion-gate check — every
+sub-category answered and sign-off accepted (plan §5.8) is C-106's
+own server-side gate, layered on top of this transition.
+
+ * @summary Complete a step (C-104)
+ */
+export const completeObJourneyStep = (
+    stepId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/complete`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getCompleteObJourneyStepMutationOptions = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeObJourneyStep>>, TError,{stepId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof completeObJourneyStep>>, TError,{stepId: number}, TContext> => {
+
+const mutationKey = ['completeObJourneyStep'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof completeObJourneyStep>>, {stepId: number}> = (props) => {
+          const {stepId} = props ?? {};
+
+          return  completeObJourneyStep(stepId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CompleteObJourneyStepMutationResult = NonNullable<Awaited<ReturnType<typeof completeObJourneyStep>>>
+    
+    export type CompleteObJourneyStepMutationError = ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Complete a step (C-104)
+ */
+export const useCompleteObJourneyStep = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeObJourneyStep>>, TError,{stepId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof completeObJourneyStep>>,
+        TError,
+        {stepId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getCompleteObJourneyStepMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `IN_PROGRESS` → `BLOCKED`. `reasonCode` is mandatory (plan's
+addition 5, "blocked-with-reason") — `400` if blank. Internal
+`BLOCKED` does not pause the TAT clock; see `waiting-on-client` for
+the state that does.
+
+ * @summary Block a step with a mandatory reason (C-104)
+ */
+export const blockObJourneyStep = (
+    stepId: number,
+    obBlockJourneyStepRequest: ObBlockJourneyStepRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/block`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obBlockJourneyStepRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getBlockObJourneyStepMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof blockObJourneyStep>>, TError,{stepId: number;data: ObBlockJourneyStepRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof blockObJourneyStep>>, TError,{stepId: number;data: ObBlockJourneyStepRequest}, TContext> => {
+
+const mutationKey = ['blockObJourneyStep'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof blockObJourneyStep>>, {stepId: number;data: ObBlockJourneyStepRequest}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  blockObJourneyStep(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BlockObJourneyStepMutationResult = NonNullable<Awaited<ReturnType<typeof blockObJourneyStep>>>
+    export type BlockObJourneyStepMutationBody = ObBlockJourneyStepRequest
+    export type BlockObJourneyStepMutationError = ValidationFailedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Block a step with a mandatory reason (C-104)
+ */
+export const useBlockObJourneyStep = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof blockObJourneyStep>>, TError,{stepId: number;data: ObBlockJourneyStepRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof blockObJourneyStep>>,
+        TError,
+        {stepId: number;data: ObBlockJourneyStepRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getBlockObJourneyStepMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `IN_PROGRESS` → `WAITING_ON_CLIENT`. Unlike internal `BLOCKED`, this
+state pauses the TAT clock and attributes the wait to the client —
+the clock-event row that actually pauses it is C-105's; this route
+only flips the status the scanner reads.
+
+ * @summary Mark a step waiting on the client (C-104)
+ */
+export const markObJourneyStepWaitingOnClient = (
+    stepId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/waiting-on-client`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getMarkObJourneyStepWaitingOnClientMutationOptions = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markObJourneyStepWaitingOnClient>>, TError,{stepId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof markObJourneyStepWaitingOnClient>>, TError,{stepId: number}, TContext> => {
+
+const mutationKey = ['markObJourneyStepWaitingOnClient'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markObJourneyStepWaitingOnClient>>, {stepId: number}> = (props) => {
+          const {stepId} = props ?? {};
+
+          return  markObJourneyStepWaitingOnClient(stepId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkObJourneyStepWaitingOnClientMutationResult = NonNullable<Awaited<ReturnType<typeof markObJourneyStepWaitingOnClient>>>
+    
+    export type MarkObJourneyStepWaitingOnClientMutationError = ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Mark a step waiting on the client (C-104)
+ */
+export const useMarkObJourneyStepWaitingOnClient = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markObJourneyStepWaitingOnClient>>, TError,{stepId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof markObJourneyStepWaitingOnClient>>,
+        TError,
+        {stepId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getMarkObJourneyStepWaitingOnClientMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `BLOCKED` → `IN_PROGRESS` or `WAITING_ON_CLIENT` → `IN_PROGRESS`.
+Clears the block reason and note. `due_at` is left untouched —
+recomputing it against the working calendar on resume is C-105's own
+line in the backlog, not this route's.
+
+ * @summary Resume a blocked or waiting-on-client step (C-104)
+ */
+export const resumeObJourneyStep = (
+    stepId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/resume`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getResumeObJourneyStepMutationOptions = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeObJourneyStep>>, TError,{stepId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof resumeObJourneyStep>>, TError,{stepId: number}, TContext> => {
+
+const mutationKey = ['resumeObJourneyStep'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resumeObJourneyStep>>, {stepId: number}> = (props) => {
+          const {stepId} = props ?? {};
+
+          return  resumeObJourneyStep(stepId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResumeObJourneyStepMutationResult = NonNullable<Awaited<ReturnType<typeof resumeObJourneyStep>>>
+    
+    export type ResumeObJourneyStepMutationError = ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Resume a blocked or waiting-on-client step (C-104)
+ */
+export const useResumeObJourneyStep = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeObJourneyStep>>, TError,{stepId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof resumeObJourneyStep>>,
+        TError,
+        {stepId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getResumeObJourneyStepMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
