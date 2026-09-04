@@ -77,9 +77,17 @@ final class ObJourneyTemplateDtos {
         }
     }
 
-    record TemplateResponse(Template data) {
-        static TemplateResponse of(ObJourneyTemplate t) {
-            return new TemplateResponse(Template.of(t));
+    // Named ObJourneyTemplateResponse rather than the shorter TemplateResponse
+    // deliberately: springdoc names an OpenAPI schema component from a Java
+    // class's simple name, and NotificationTemplateDtos already has its own
+    // TemplateResponse. Two DTOs sharing a simple name collide in the served
+    // component registry — one silently overwrites the other — which is
+    // invisible in either feature's own code and only shows up as the wrong
+    // fields on someone else's endpoint. ContractConformanceTest caught this
+    // exact collision.
+    record ObJourneyTemplateResponse(Template data) {
+        static ObJourneyTemplateResponse of(ObJourneyTemplate t) {
+            return new ObJourneyTemplateResponse(Template.of(t));
         }
     }
 

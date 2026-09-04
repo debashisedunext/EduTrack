@@ -698,6 +698,38 @@ final class PermissionMatrix {
     private static final String EMPTY_PATCH = "{}";
 
     /**
+     * C-102 · {@code ObJourneyTemplateDtos.CreateTemplateRequest}: {@code productId}
+     * is {@code @NotNull} and {@code name} is {@code @NotBlank}. The product id
+     * names no real row — an allowed row is entitled to reach the handler and
+     * fail past the guard, and a denied row never gets that far, the same
+     * distinction every other fixture in this file measures.
+     */
+    private static final String CREATE_JOURNEY_TEMPLATE = """
+            {"productId":1,"name":"Matrix Fixture Template","sequence":1}""";
+
+    /** C-102 · {@code AddStepRequest}: {@code name} is {@code @NotBlank}, {@code tatDays} is {@code @Min(1)}. */
+    private static final String ADD_JOURNEY_TEMPLATE_STEP = """
+            {"name":"Matrix Fixture Step","tatDays":1,"requiresSignoff":false}""";
+
+    /**
+     * C-102 · {@code ReorderStepsRequest}: {@code stepIds} is {@code @NotEmpty}.
+     * The id names no real step — this route's own guard is {@code If-Match},
+     * checked in the controller before the service runs, and an allowed role
+     * is entitled to reach that check and be refused by it, on this file's
+     * standing rule that a fixture need not succeed past authorisation.
+     */
+    private static final String REORDER_JOURNEY_TEMPLATE_STEPS = """
+            {"stepIds":[1]}""";
+
+    /** C-102 · {@code AddStepItemRequest}: {@code label} is {@code @NotBlank}. */
+    private static final String ADD_JOURNEY_TEMPLATE_STEP_ITEM = """
+            {"label":"Matrix Fixture Item","mandatory":true}""";
+
+    /** C-102 · {@code AddStepDocRequest}: {@code label} is {@code @NotBlank}. */
+    private static final String ADD_JOURNEY_TEMPLATE_STEP_DOC = """
+            {"label":"Matrix Fixture Doc","required":true}""";
+
+    /**
      * One row per routed handler.
      *
      * <p>Grouped by controller, in route order, so this file can be read
@@ -1933,7 +1965,36 @@ final class PermissionMatrix {
             // the handler. Every role therefore reaches them too, which is
             // harmless and is not the property that protects these routes.
             everyRole("POST", "/api/v1/webhooks/email/bounce", RAW_BYTES),
-            everyRole("POST", "/api/v1/webhooks/email/inbound", RAW_BYTES));
+            everyRole("POST", "/api/v1/webhooks/email/inbound", RAW_BYTES),
+
+            // ── C-102 · OB-07 journey template designer ───────────────────────
+            //
+            // isAuthenticated() rather than a capability, on all eleven routes,
+            // and this is a temporary honest answer rather than an oversight —
+            // see ObJourneyTemplateController's own class javadoc. The onboarding
+            // module has its own role vocabulary (OB Admin, OB Manager, ...,
+            // V20260903_1915's user_module_access) that is not blueprint §2's six
+            // and is not what this matrix or RolePermissions speaks; the guard
+            // that would gate these routes by ONBOARDING module + module_role is
+            // A-110's JWT claim and A-111's ModuleGuard, neither of which exists
+            // yet. Encoding a §2 platform-role restriction here would assert a
+            // rule nobody has decided — every one of the six platform roles can
+            // reach these routes today, which is the true and complete answer
+            // until A-110/A-111 land and the module gate becomes the real guard.
+            everyRole("GET", "/api/v1/onboarding/journey-templates/{templateId}"),
+            everyRole("POST", "/api/v1/onboarding/journey-templates", CREATE_JOURNEY_TEMPLATE),
+            everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/revisions"),
+            everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/publish"),
+            everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/steps", ADD_JOURNEY_TEMPLATE_STEP),
+            everyRole("PUT", "/api/v1/onboarding/journey-templates/{templateId}/steps/order",
+                    REORDER_JOURNEY_TEMPLATE_STEPS),
+            everyRole("DELETE", "/api/v1/onboarding/journey-template-steps/{stepId}"),
+            everyRole("POST", "/api/v1/onboarding/journey-template-steps/{stepId}/items",
+                    ADD_JOURNEY_TEMPLATE_STEP_ITEM),
+            everyRole("POST", "/api/v1/onboarding/journey-template-steps/{stepId}/docs",
+                    ADD_JOURNEY_TEMPLATE_STEP_DOC),
+            everyRole("DELETE", "/api/v1/onboarding/journey-template-step-items/{itemId}"),
+            everyRole("DELETE", "/api/v1/onboarding/journey-template-step-docs/{docId}"));
 
     /**
      * One route and what each role may do with it.

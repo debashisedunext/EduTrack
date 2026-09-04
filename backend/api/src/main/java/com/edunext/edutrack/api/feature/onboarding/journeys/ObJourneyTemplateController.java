@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -52,11 +53,15 @@ import java.util.List;
  * /onboarding/products} has been since it was declared with nothing behind
  * it. Not a gap this task introduces; a gap this task declines to paper over
  * with a bespoke filter, per CLAUDE.md's "do not write your own filtering as
- * a workaround."
+ * a workaround." {@code @PreAuthorize("isAuthenticated()")} says so explicitly
+ * rather than leaving it implicit — {@code RouteAuthorizationTest} requires
+ * every route to declare a decision, and an undeclared one reads, in the
+ * source, exactly like a route nobody thought about.
  */
 @RestController
 @RequestMapping("/api/v1/onboarding")
 @Tag(name = "onboarding-journeys")
+@PreAuthorize("isAuthenticated()")
 class ObJourneyTemplateController {
 
     private final ObJourneyTemplateService service;
@@ -112,13 +117,13 @@ class ObJourneyTemplateController {
                     Refused with `409` once the product already has a template row, draft \
                     or published — from that point on, editing goes through `POST \
                     /onboarding/journey-templates/{templateId}/revisions`.""")
-    ObJourneyTemplateDtos.TemplateResponse create(
+    ObJourneyTemplateDtos.ObJourneyTemplateResponse create(
             Authentication caller,
             @Valid @RequestBody ObJourneyTemplateDtos.CreateTemplateRequest request) {
         ObJourneyTemplate created = service.createTemplate(
                 request.productId(), request.name(), request.sequence(),
                 request.dependsOnTemplateId(), CallerIdentityAccess.requireUserId(caller));
-        return ObJourneyTemplateDtos.TemplateResponse.of(created);
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(created);
     }
 
     @PostMapping(value = "/journey-templates/{templateId}/revisions",
@@ -130,9 +135,9 @@ class ObJourneyTemplateController {
                     clones. The source version is never written — every journey pinned to \
                     it keeps rendering exactly what it always has. `409` if `templateId` is \
                     not the product's currently active version.""")
-    ObJourneyTemplateDtos.TemplateResponse beginRevision(Authentication caller, @PathVariable long templateId) {
+    ObJourneyTemplateDtos.ObJourneyTemplateResponse beginRevision(Authentication caller, @PathVariable long templateId) {
         ObJourneyTemplate draft = service.beginRevision(templateId, CallerIdentityAccess.requireUserId(caller));
-        return ObJourneyTemplateDtos.TemplateResponse.of(draft);
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(draft);
     }
 
     @PostMapping(value = "/journey-templates/{templateId}/publish",
@@ -144,9 +149,9 @@ class ObJourneyTemplateController {
                     transaction. `422` if the draft has no steps — a published template \
                     with none could never activate a journey. `409` if this version has \
                     already been published once.""")
-    ObJourneyTemplateDtos.TemplateResponse publish(Authentication caller, @PathVariable long templateId) {
+    ObJourneyTemplateDtos.ObJourneyTemplateResponse publish(Authentication caller, @PathVariable long templateId) {
         ObJourneyTemplate published = service.publish(templateId, CallerIdentityAccess.requireUserId(caller));
-        return ObJourneyTemplateDtos.TemplateResponse.of(published);
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(published);
     }
 
     @PostMapping(value = "/journey-templates/{templateId}/steps",

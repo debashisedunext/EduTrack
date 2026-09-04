@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,10 +24,14 @@ import org.springframework.web.bind.annotation.RestController;
  * (deleting a single item or doc directly by its own id, the same split
  * {@code /projects/{id}/members/{userId}} makes between a collection and one
  * member of it).
+ *
+ * <p>Auth: {@code isAuthenticated()} only — see {@link ObJourneyTemplateController}'s
+ * class javadoc for why nothing stronger exists yet.
  */
 @RestController
 @RequestMapping("/api/v1/onboarding/journey-template-steps")
 @Tag(name = "onboarding-journeys")
+@PreAuthorize("isAuthenticated()")
 class ObJourneyTemplateStepController {
 
     private final ObJourneyTemplateService service;

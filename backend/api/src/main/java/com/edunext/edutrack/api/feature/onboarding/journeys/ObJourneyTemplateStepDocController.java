@@ -3,6 +3,7 @@ package com.edunext.edutrack.api.feature.onboarding.journeys;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,10 +14,14 @@ import org.springframework.web.bind.annotation.RestController;
  * C-102 · {@code DELETE /onboarding/journey-template-step-docs/{docId}} —
  * one required-document entry, addressed directly by its own id, the same
  * split {@link ObJourneyTemplateStepItemController} makes for step items.
+ *
+ * <p>Auth: {@code isAuthenticated()} only — see {@link ObJourneyTemplateController}'s
+ * class javadoc for why nothing stronger exists yet.
  */
 @RestController
 @RequestMapping("/api/v1/onboarding/journey-template-step-docs")
 @Tag(name = "onboarding-journeys")
+@PreAuthorize("isAuthenticated()")
 class ObJourneyTemplateStepDocController {
 
     private final ObJourneyTemplateService service;

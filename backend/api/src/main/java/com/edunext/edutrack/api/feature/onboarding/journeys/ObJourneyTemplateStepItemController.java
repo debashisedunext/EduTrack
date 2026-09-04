@@ -3,6 +3,7 @@ package com.edunext.edutrack.api.feature.onboarding.journeys;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,10 +15,14 @@ import org.springframework.web.bind.annotation.RestController;
  * one Task List entry, addressed directly by its own id rather than nested
  * under its step, since deleting one needs nothing about the step beyond
  * what {@code ObJourneyTemplateService#removeStepItem} already resolves.
+ *
+ * <p>Auth: {@code isAuthenticated()} only — see {@link ObJourneyTemplateController}'s
+ * class javadoc for why nothing stronger exists yet.
  */
 @RestController
 @RequestMapping("/api/v1/onboarding/journey-template-step-items")
 @Tag(name = "onboarding-journeys")
+@PreAuthorize("isAuthenticated()")
 class ObJourneyTemplateStepItemController {
 
     private final ObJourneyTemplateService service;

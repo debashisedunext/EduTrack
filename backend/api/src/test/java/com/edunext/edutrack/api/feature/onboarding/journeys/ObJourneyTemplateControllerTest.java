@@ -101,7 +101,7 @@ class ObJourneyTemplateControllerTest {
         ObJourneyTemplate created = template(2L, false);
         when(service.createTemplate(500L, "ERP Rollout", 1, null, 7L)).thenReturn(created);
 
-        ObJourneyTemplateDtos.TemplateResponse response = controller.create(authenticated(7L),
+        ObJourneyTemplateDtos.ObJourneyTemplateResponse response = controller.create(authenticated(7L),
                 new ObJourneyTemplateDtos.CreateTemplateRequest(500L, "ERP Rollout", 1, null));
 
         assertThat(response.data().id()).isEqualTo(2L);
@@ -114,7 +114,7 @@ class ObJourneyTemplateControllerTest {
         ObJourneyTemplate draft = template(3L, false);
         when(service.beginRevision(1L, 9L)).thenReturn(draft);
 
-        ObJourneyTemplateDtos.TemplateResponse response = controller.beginRevision(authenticated(9L), 1L);
+        ObJourneyTemplateDtos.ObJourneyTemplateResponse response = controller.beginRevision(authenticated(9L), 1L);
 
         assertThat(response.data().id()).isEqualTo(3L);
         verify(service).beginRevision(1L, 9L);
