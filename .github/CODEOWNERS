@@ -99,6 +99,20 @@ api/realtime/                           @debashisedunext
 /frontend/src/features/chat/            @debashisedunext
 /frontend/src/features/notifications/   @debashisedunext
 
+# ---- Phase 2 · the onboarding carve-outs PHASE-2-BUILD-PLAN.md §7 names ----
+#
+# Placed AFTER the stream blocks because later rules override earlier ones:
+# `/backend/worker/` above would otherwise claim worker/onboarding/outbox/ for
+# Stream D, which is the phase-1 worker/stats/ collision arriving again. The
+# plan asks for both B carve-outs under worker/onboarding/ to be named "on day
+# one"; B-110 is that day for the outbox, and stats/ is listed alongside it so
+# B-120 does not have to remember. An empty rule for unwritten work is the
+# same deliberate shape as the five frontend rules the header describes.
+api/feature/onboarding/notifications/   @Ayushedunext
+domain/onboarding/outbox/               @Ayushedunext
+worker/onboarding/outbox/               @Ayushedunext
+worker/onboarding/stats/                @Ayushedunext
+
 # ---- Cross-cutting: the three append-only tables and the immutability core
 # always need Stream A's eyes, whoever is touching them.
 #
