@@ -58,6 +58,32 @@ class ObMailLinks {
     }
 
     /**
+     * B-112 · where an OB-13 bell entry goes — the same destination, relative.
+     *
+     * <p>Here rather than in the renderer so the promise this class makes stays
+     * true: when OB-05 lands, this is still the one file that has to agree with
+     * it. Relative because the reader is already inside the app; an absolute URL
+     * in an in-app link sends somebody through a fresh page load to the origin
+     * they are on, and breaks entirely behind a proxy that rewrites the host.
+     *
+     * <p><strong>The payload's {@code action_url} is deliberately not consulted,
+     * which is the opposite of {@link #actionUrl}.</strong> That value is minted
+     * for a <em>mail</em> recipient, and on the two token-bearing events —
+     * a sign-off request and a password reset — it carries a one-time token
+     * belonging to a client. Following it from a staff bell would hand a member
+     * of staff a credential link, and doing so silently, because the entry would
+     * look exactly like every other. The row's own ids are the honest source.
+     *
+     * @return an app-relative path, or null when the row names no client and
+     *         there is nothing better than the module's home to offer
+     */
+    String inAppPath(ObOutboxMessage message) {
+        return message.obClientId() == null
+                ? null
+                : STAFF_CLIENT + message.obClientId();
+    }
+
+    /**
      * @param explicitUrl the payload's {@code action_url}, or null
      * @return an absolute URL, never null
      */

@@ -2018,7 +2018,26 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/complete"),
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/block", BLOCK_JOURNEY_STEP),
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/waiting-on-client"),
-            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/resume"));
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/resume"),
+
+            // ── B-112 · OB-13, the onboarding notification centre ─────────────
+            //
+            // Every role, and here that is the permanent answer rather than the
+            // interim one the block above describes. Blueprint §2 grants no
+            // notification capability because receiving notifications is not
+            // one: a role that could not read its own bell would be a role that
+            // never learns a service was assigned to it — the same reasoning
+            // that puts S-26's own /api/v1/notifications routes on everyRole.
+            //
+            // What differs from those four is what a reachable route actually
+            // yields. Every statement behind these is scoped to the caller's own
+            // recipient_user_id, so a platform role with no onboarding access
+            // reaches the route and gets an empty list — nothing ever addressed
+            // them an entry. The module gate that would make it a 404 instead is
+            // still A-111's, unwired, exactly as above.
+            everyRole("GET", "/api/v1/onboarding/notifications"),
+            everyRole("PATCH", "/api/v1/onboarding/notifications/{notificationId}/read"),
+            everyRole("PATCH", "/api/v1/onboarding/notifications/read-all"));
 
     /**
      * One route and what each role may do with it.

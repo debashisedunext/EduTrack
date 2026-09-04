@@ -118,6 +118,15 @@ worker/onboarding/stats/                @Ayushedunext
 # `templates/mail/` also holds D-030's notification.html, which is Stream D's
 # and must stay theirs.
 resources/templates/mail/onboarding.html  @Ayushedunext
+# B-112's OB-13 screens. The plan's ownership map (PHASE-2-BUILD-PLAN.md §210)
+# already assigns `api/feature/onboarding/notifications/` — the rule above — to
+# Stream B along with the notification centre; this is its frontend half, which
+# no existing rule reaches. `/frontend/src/features/onboarding/` deliberately is
+# *not* claimed whole: C-102's journey designer lives there too and is Stream
+# C's, so the rule is on the sub-directory rather than the parent. An empty
+# parent that belongs to nobody is the header's "right path for unwritten work"
+# case, and it stays with the catch-all until whoever builds the shell claims it.
+/frontend/src/features/onboarding/notifications/  @Ayushedunext
 
 # ---- Cross-cutting: the three append-only tables and the immutability core
 # always need Stream A's eyes, whoever is touching them.

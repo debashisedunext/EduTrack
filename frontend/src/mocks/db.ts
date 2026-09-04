@@ -797,6 +797,36 @@ export interface ObJourneyTemplateStepDocRow {
   required: boolean;
 }
 
+/**
+ * `ob_notifications` — one OB-13 bell entry (B-112).
+ *
+ * **Not `notifications`.** That is S-26's store, keyed on Stream D's event
+ * vocabulary and grouped by its tabs; this is the onboarding module's own, and
+ * the two are kept apart here for the reason `obClients` is kept apart from
+ * `clients` — the mock is the first place that separation is either held or
+ * quietly lost.
+ *
+ * `recipientUserId` is a `users` id and is never null: an entry is addressed to
+ * one member of staff. There is no client-contact recipient because §9's portal
+ * screens have no notification centre for one to appear on.
+ */
+export interface ObNotificationRow {
+  id: number;
+  recipientUserId: number;
+  eventKey: string;
+  /** ASSIGNMENT | ESCALATION | REMINDER | UPDATE. A string, so an unknown value costs the tab and not the row. */
+  category: string;
+  title: string;
+  body: string | null;
+  /** App-relative. Derived from the ids below by the worker, never from a mail payload. */
+  linkUrl: string | null;
+  obClientId: number | null;
+  journeyId: number | null;
+  stepId: number | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
 // ── the store ───────────────────────────────────────────────────────────────
 export interface Db {
   users: User[]; projects: Project[]; clients: Client[]; contacts: Contact[];
@@ -844,6 +874,8 @@ export interface Db {
   obJourneyTemplateSteps: ObJourneyTemplateStepRow[];
   obJourneyTemplateStepItems: ObJourneyTemplateStepItemRow[];
   obJourneyTemplateStepDocs: ObJourneyTemplateStepDocRow[];
+  /** B-112 · OB-13. See {@link ObNotificationRow} on why this is not `notifications`. */
+  obNotifications: ObNotificationRow[];
   currentUserId: number;
   seq: Record<string, number>;
   /**
@@ -1926,6 +1958,80 @@ const OB_CLIENTS: ObClient[] = [
  *   checklists render with a row to remove rather than only their empty
  *   states.
  */
+/**
+ * B-112 · OB-13's fixture bell.
+ *
+ * Addressed to user 3 — `currentUserId`, so the screen has content on first
+ * load — except the last two, which belong to somebody else and exist to prove
+ * the scoping. A centre that showed every row would let a screen "work" against
+ * a mock while the real one returns an empty list, which is the failure the
+ * mock exists to prevent.
+ *
+ * Shaped so every tab has something and neither the read nor the unread state
+ * is the only one on screen: three unread across three categories, and the
+ * ordering is by id descending, newest first, which is what the endpoint
+ * returns.
+ */
+const OB_NOTIFICATIONS: ObNotificationRow[] = [
+  {
+    id: 1, recipientUserId: 3, eventKey: 'STEP_ASSIGNED', category: 'ASSIGNMENT',
+    title: 'Data Migration — Northwind Technologies Pvt Ltd',
+    body: 'Assigned to you, due 12 Sep 2026.',
+    linkUrl: '/onboarding/clients/1', obClientId: 1, journeyId: 1, stepId: 3,
+    isRead: true, createdAt: '2026-09-01T04:30:00Z',
+  },
+  {
+    id: 2, recipientUserId: 3, eventKey: 'GATE_OPENED', category: 'UPDATE',
+    title: 'Acme Private Limited has cleared prerequisites',
+    body: 'Their journeys have started and the first services are now running.',
+    linkUrl: '/onboarding/clients/2', obClientId: 2, journeyId: 3, stepId: null,
+    isRead: true, createdAt: '2026-09-01T09:15:00Z',
+  },
+  {
+    id: 3, recipientUserId: 3, eventKey: 'TAT_REMINDER', category: 'REMINDER',
+    title: 'Due 05 Sep 2026: Environment Provisioning',
+    body: 'Acme Private Limited is waiting on this one.',
+    linkUrl: '/onboarding/clients/2', obClientId: 2, journeyId: 3, stepId: 9,
+    isRead: true, createdAt: '2026-09-02T03:00:00Z',
+  },
+  {
+    id: 4, recipientUserId: 3, eventKey: 'PREREQ_SUBMITTED', category: 'ASSIGNMENT',
+    title: 'Ready to verify: Signed statement of work',
+    body: 'Contoso Education Trust has submitted it. Their clock is paused while it waits with us.',
+    linkUrl: '/onboarding/clients/3', obClientId: 3, journeyId: null, stepId: null,
+    isRead: false, createdAt: '2026-09-03T06:45:00Z',
+  },
+  {
+    id: 5, recipientUserId: 3, eventKey: 'TAT_BREACHED', category: 'ESCALATION',
+    title: 'Overdue by 2 days: Data Migration',
+    body: 'The onboarding for Northwind Technologies Pvt Ltd is held up until this closes.',
+    linkUrl: '/onboarding/clients/1', obClientId: 1, journeyId: 1, stepId: 3,
+    isRead: false, createdAt: '2026-09-03T11:20:00Z',
+  },
+  {
+    id: 6, recipientUserId: 3, eventKey: 'CLIENT_ESCALATION_RAISED', category: 'ESCALATION',
+    title: 'Contoso Education Trust has raised an escalation',
+    body: 'We were told training would start last week and nobody has been in touch.',
+    linkUrl: '/onboarding/clients/3', obClientId: 3, journeyId: 4, stepId: null,
+    isRead: false, createdAt: '2026-09-04T02:05:00Z',
+  },
+  // Somebody else's. Never visible to user 3 — the scoping, not decoration.
+  {
+    id: 7, recipientUserId: 5, eventKey: 'GO_LIVE', category: 'UPDATE',
+    title: 'Northwind Technologies Pvt Ltd is live',
+    body: 'Every journey is complete and signed off. Handover to support can begin.',
+    linkUrl: '/onboarding/clients/1', obClientId: 1, journeyId: 1, stepId: null,
+    isRead: false, createdAt: '2026-09-04T03:10:00Z',
+  },
+  {
+    id: 8, recipientUserId: 5, eventKey: 'ESCALATION_RAISED', category: 'ESCALATION',
+    title: 'Escalated to L2: User Training',
+    body: 'It has been overdue long enough to climb the escalation matrix.',
+    linkUrl: '/onboarding/clients/1', obClientId: 1, journeyId: 1, stepId: 4,
+    isRead: false, createdAt: '2026-09-04T03:12:00Z',
+  },
+];
+
 const OB_JOURNEY_TEMPLATES: ObJourneyTemplateRow[] = [
   {
     id: 1, productId: 1, name: 'ERP Suite onboarding', version: 1, isActive: true,
@@ -2018,6 +2124,8 @@ export function createDb(): Db {
     obJourneyTemplateSteps: structuredClone(OB_JOURNEY_TEMPLATE_STEPS),
     obJourneyTemplateStepItems: structuredClone(OB_JOURNEY_TEMPLATE_STEP_ITEMS),
     obJourneyTemplateStepDocs: structuredClone(OB_JOURNEY_TEMPLATE_STEP_DOCS),
+    // B-112 · OB-13. See OB_NOTIFICATIONS's own note.
+    obNotifications: structuredClone(OB_NOTIFICATIONS),
     calendar: {
       week: {
         weeklyOff: [6, 7],

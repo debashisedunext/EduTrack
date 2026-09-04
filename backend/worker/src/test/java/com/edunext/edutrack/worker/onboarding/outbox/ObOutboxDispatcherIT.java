@@ -56,10 +56,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * test drives {@link ObOutboxDispatcher#pollOnce()} by hand with a clock it
  * controls — otherwise the poller drains rows out from under the assertions.
  *
- * <p>Two adapters are registered: the shipped {@link EmailChannelAdapter}
- * over the logging transport, and a scripted one on {@code IN_APP} that the
- * failure tests steer. Nothing ships an IN_APP adapter (B-112 will), which is
- * what makes the channel free for the purpose.
+ * <p>Two adapters are in the registry these tests drive: the shipped
+ * {@link EmailChannelAdapter} over the logging transport, and a scripted one on
+ * {@code IN_APP} that the failure tests steer. <b>The registry is assembled in
+ * {@link #reset()} rather than autowired</b> — B-112 ships a real
+ * {@link InAppChannelAdapter} and {@link ChannelAdapterRegistry} refuses two
+ * adapters for one channel, so the scripted one can no longer be a bean. See
+ * the field for why the fix is a hand-built registry and not an excluded bean.
  */
 @Testcontainers
 @SpringBootTest(classes = WorkerApplication.class)
@@ -111,11 +114,6 @@ class ObOutboxDispatcherIT {
         Clock testClock() {
             return CLOCK;
         }
-
-        @Bean
-        ObChannelAdapter scriptedInAppAdapter() {
-            return IN_APP;
-        }
     }
 
     @Autowired
@@ -124,8 +122,29 @@ class ObOutboxDispatcherIT {
     @Autowired
     ObOutboxEnqueuer enqueuer;
 
+    /**
+     * The shipped EMAIL adapter, paired with the scripted one in the registry
+     * {@link #reset()} builds.
+     */
     @Autowired
-    ChannelAdapterRegistry adapters;
+    EmailChannelAdapter emailAdapter;
+
+    /**
+     * <b>Built here rather than autowired, since B-112.</b> The scripted
+     * adapter used to be a {@code @Bean} on {@code IN_APP}, which was free
+     * because nothing shipped one. B-112 ships {@link InAppChannelAdapter}, and
+     * {@link ChannelAdapterRegistry} refuses two adapters for one channel at
+     * startup — correctly; that rule is what stops a message going out twice on
+     * two transports, and switching it off for a test would be removing the
+     * guarantee to test around it.
+     *
+     * <p>Excluding the shipped bean from the context would have worked too, and
+     * is worse: it makes the context under test differ from the real one in a
+     * way nothing in the file says out loud. This registry is assembled from
+     * beans that are all really there, and the dispatcher was already
+     * hand-built from it two lines below for the same reason.
+     */
+    private ChannelAdapterRegistry adapters;
 
     @Autowired
     ObOutboxProperties shippedProperties;
@@ -156,6 +175,9 @@ class ObOutboxDispatcherIT {
         // journeys and steps; steps reference journeys; journeys reference
         // the client's purchase and a template; the template a product.
         jdbc.update("DELETE FROM notifications");
+        // B-112. Before the outbox: an entry references the queue row it was
+        // delivered from.
+        jdbc.update("DELETE FROM ob_notifications");
         jdbc.update("DELETE FROM ob_notification_outbox");
         jdbc.update("DELETE FROM ob_journey_steps");
         jdbc.update("DELETE FROM ob_journeys");
@@ -171,6 +193,7 @@ class ObOutboxDispatcherIT {
         clock.set(Instant.now().truncatedTo(ChronoUnit.MILLIS));
         TestAdapters.IN_APP.reset();
 
+        adapters = new ChannelAdapterRegistry(List.of(emailAdapter, TestAdapters.IN_APP));
         dispatcher = new ObOutboxDispatcher(repository, adapters, shippedProperties, failureNotifier, clock);
 
         staffId = insertUser("asha", "PM");
