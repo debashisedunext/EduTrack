@@ -52,14 +52,77 @@ import java.util.Optional;
  * @param userId     the numeric user id — {@code sub}, never the username
  * @param roleCode   upper-cased role code, one of {@code RolePermissions.ROLE_CODES}
  * @param projectIds projects this caller belongs to; the PM/Support row scope of §10.2
+ * @param modules    A-110 · module codes this caller may reach. Read by
+ *                   {@code ModuleAccessGuard} before RolesGuard on every
+ *                   {@code /api/v1/onboarding/**} route (onboarding plan §2.1).
+ *                   <b>Empty means no modules, never all of them</b> — see
+ *                   {@link #hasModule}.
  */
-public record CallerIdentity(long userId, String roleCode, List<Long> projectIds) {
+public record CallerIdentity(long userId, String roleCode, List<Long> projectIds, List<String> modules) {
 
     static final String ROLE_CLAIM = "role";
     static final String PROJECTS_CLAIM = "projects";
+    /** A-110. Written unconditionally by {@code AccessTokenIssuer}, so absent means empty. */
+    static final String MODULES_CLAIM = "modules";
 
     public CallerIdentity {
         projectIds = projectIds == null ? List.of() : List.copyOf(projectIds);
+        // Normalised here rather than in hasModule, because a record that
+        // stores what it was given and compares leniently is a record whose
+        // answer depends on which constructor was used. `stringList` already
+        // trims what it reads off a claim; this covers every other way one of
+        // these is built — a test, a scheduled report rebuilding an identity
+        // from the database — with the same rule.
+        modules = modules == null ? List.of() : modules.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .distinct()
+                .toList();
+    }
+
+    /**
+     * A-110 · the pre-modules shape, for every caller that has nothing to say
+     * about entitlement.
+     *
+     * <p>Added rather than widening the canonical constructor across 56 call
+     * sites in four streams' test files. Two reasons, and the second is the
+     * real one:
+     *
+     * <ul>
+     *   <li>Most of those files are Stream B's, C's and D's (TEAM-PLAN §6), and
+     *       a claim added by Stream A should not require edits in their tests.
+     *   <li><b>Empty is the correct answer for all of them anyway.</b> A test
+     *       that says nothing about modules is a test about ticketing, and
+     *       ticketing routes are not guarded — while any onboarding route
+     *       reached with this identity is refused, which is the direction this
+     *       whole feature commits to. Defaulting the other way would have made
+     *       every existing test silently entitled.
+     * </ul>
+     */
+    public CallerIdentity(long userId, String roleCode, List<Long> projectIds) {
+        this(userId, roleCode, projectIds, List.of());
+    }
+
+    /**
+     * A-110 · whether this caller may reach {@code module}.
+     *
+     * <p><b>Empty is deny, exactly as an empty {@code projectIds} is deny for a
+     * PM.</b> The class javadoc above already commits to that direction for an
+     * unreadable identity; this keeps a readable identity with an unreadable or
+     * missing claim on the same side of it. A token we signed before this claim
+     * existed therefore reaches no module, which is the answer that cannot leak
+     * one.
+     *
+     * <p>Case-insensitive, because the claim is minted from a database column
+     * and compared against a constant in Java — two places a case can drift
+     * apart, and neither of them is worth a 404 nobody can explain.
+     */
+    public boolean hasModule(String module) {
+        if (module == null || module.isBlank()) {
+            return false;
+        }
+        return modules.stream().anyMatch(module.trim()::equalsIgnoreCase);
     }
 
     /**
@@ -88,7 +151,8 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
         if (userId == null || role == null) {
             return Optional.empty();
         }
-        return Optional.of(new CallerIdentity(userId, role, idList(jwt.getClaim(PROJECTS_CLAIM))));
+        return Optional.of(new CallerIdentity(
+                userId, role, idList(jwt.getClaim(PROJECTS_CLAIM)), stringList(jwt.getClaim(MODULES_CLAIM))));
     }
 
     private static Optional<CallerIdentity> fromDevPrincipal(DevPrincipal dev) {
@@ -96,7 +160,8 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
         if (dev.userId() == null || role == null) {
             return Optional.empty();
         }
-        return Optional.of(new CallerIdentity(dev.userId(), role, idList(dev.projectIds())));
+        return Optional.of(new CallerIdentity(
+                dev.userId(), role, idList(dev.projectIds()), stringList(dev.modules())));
     }
 
     private static String normalisedRole(String role) {
@@ -127,6 +192,28 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
      * present but unreadable yields an <em>empty</em> list, which for a PM is
      * deny-all — the safe direction.
      */
+    /**
+     * A-110 · the {@code modules} claim, read with {@link #idList}'s caution
+     * and none of its numeric assumptions.
+     *
+     * <p>Blank entries are dropped rather than kept as empty strings, so a
+     * claim of {@code ["", "ONBOARDING"]} cannot be read as granting a module
+     * whose code is the empty string — which {@code hasModule} already refuses
+     * to ask about, but the two guards belong on the same side of that.
+     */
+    private static List<String> stringList(Object claim) {
+        if (!(claim instanceof List<?> values)) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .distinct()
+                .toList();
+    }
+
     private static List<Long> idList(Object claim) {
         if (!(claim instanceof List<?> values)) {
             return List.of();

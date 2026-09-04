@@ -56,7 +56,12 @@ public class DevNoAuthFilter extends OncePerRequestFilter {
                 properties.fullName(),
                 properties.role(),
                 properties.projectIds(),
-                properties.reporteeIds());
+                properties.reporteeIds(),
+                // A-110. Both modules by default (see DevNoAuthProperties), so
+                // the onboarding screens B and C are building are reachable in
+                // dev — and overridable to a narrower list, which is how the
+                // 404 path gets tried by hand before anyone trusts it.
+                properties.modules());
 
         // Same authority convention the real chain uses (A-032/A-033):
         // hasRole("ADMIN") == authority "ROLE_ADMIN", and the dotted capability
