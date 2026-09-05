@@ -2,8 +2,10 @@ package com.edunext.edutrack.api.feature.onboarding.instances;
 
 import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepStatus;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.openapitools.jackson.nullable.JsonNullable;
 
 import java.time.Instant;
 import java.util.List;
@@ -38,6 +40,23 @@ final class ObJourneyStepLifecycleDtos {
     /** C-107 · {@code ObStepSkipRequest} — {@code reason} is mandatory, plan §3/§4. */
     record ObStepSkipRequest(
             @NotBlank @Size(min = 3, max = 500) String reason) {
+    }
+
+    /**
+     * C-108 · {@code ObJourneyStepUpdateRequest} — every field optional,
+     * absent meaning "leave unchanged" (the contract's own line). {@code
+     * ownerUserId}/{@code backupOwnerUserId}/{@code dueAt} are also
+     * explicitly clearable: the schema types them nullable, and the mock
+     * (built ahead, per {@code onboardingSteps.ts}'s own `!== undefined`
+     * checks) already treats a literal {@code null} as "clear this field"
+     * rather than folding it into "unchanged" — so the real backend has to
+     * draw the same distinction, which no plain Java type can without help.
+     * {@link JsonNullable} is that help; {@code tatDays} stays a plain
+     * {@code Integer} since the schema never allows it to be {@code null}.
+     */
+    record ObJourneyStepUpdateRequest(
+            JsonNullable<Long> ownerUserId, JsonNullable<Long> backupOwnerUserId,
+            @Min(0) Integer tatDays, JsonNullable<Instant> dueAt) {
     }
 
     // ── responses ─────────────────────────────────────────────────────
@@ -145,9 +164,15 @@ final class ObJourneyStepLifecycleDtos {
             String description, ObStepClockState clockState, ObRag rag,
             int tatDays, boolean requiresSignoff, Long dependsOnStepId,
             String skipReason, Long skippedByUserId,
-            List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs) {
+            List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs,
+            Long effectiveOwnerUserId) {
 
-        static ObJourneyStepDetail of(ObJourneyStep s) {
+        /**
+         * C-108 · {@code effectiveOwnerUserId} needs {@link ObBackupOwnerResolver},
+         * which needs a repository call this static factory cannot make on its
+         * own — see the two-argument overload, which every caller now uses.
+         */
+        static ObJourneyStepDetail of(ObJourneyStep s, Long effectiveOwnerUserId) {
             return new ObJourneyStepDetail(
                     s.getId(), s.getJourneyId(), s.getSequence(), s.getName(), s.getStatus(),
                     s.getOwnerUserId(), s.getBackupOwnerUserId(),
@@ -156,13 +181,13 @@ final class ObJourneyStepLifecycleDtos {
                     s.getDescription(), ObStepClockState.of(s.getStatus()), null,
                     s.getTatDays(), s.isRequiresSignoff(), s.getDependsOnStepId(),
                     s.getSkipReason(), s.getSkippedBy(),
-                    List.of(), List.of());
+                    List.of(), List.of(), effectiveOwnerUserId);
         }
     }
 
     record ObJourneyStepDetailResponse(ObJourneyStepDetail data) {
-        static ObJourneyStepDetailResponse of(ObJourneyStep s) {
-            return new ObJourneyStepDetailResponse(ObJourneyStepDetail.of(s));
+        static ObJourneyStepDetailResponse of(ObJourneyStep s, Long effectiveOwnerUserId) {
+            return new ObJourneyStepDetailResponse(ObJourneyStepDetail.of(s, effectiveOwnerUserId));
         }
     }
 }
