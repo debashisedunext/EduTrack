@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.onboarding.instances;
 
 import com.edunext.edutrack.domain.onboarding.ObGateStatus;
 import com.edunext.edutrack.domain.onboarding.ObJourney;
+import com.edunext.edutrack.api.security.scope.UnscopedAccess;
 import com.edunext.edutrack.domain.onboarding.ObJourneyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepRepository;
@@ -41,6 +42,10 @@ import java.time.Instant;
  * </ul>
  */
 @Service
+@UnscopedAccess("""
+        A-112's guard, C-104's transitions: this class reads ObJourneyRepository         once, and not as a caller-scoped read. requireOwnership has already         refused anyone who is neither the step's owner nor its backup, and         OnboardingScopeResolver grants OB_STEP_OWNER exactly the journeys         containing their steps — owner or backup, deliberately — so a caller         who reaches the findById below is provably in scope for that journey         already. The read is of the step's own parent, for gate_status and         held_by_journey_id, and it can disclose nothing the caller did not         just prove they may act on.
+
+        Routing it through ScopedJourneys would also be worse than redundant         here: this method takes a callerId, not an Authentication, so it would         need a second principal shape threaded through five transitions to         re-answer a question requireOwnership has already answered — and a         scope miss would surface as the IllegalStateException below, a 500,         where the whole point of the guard is a 404.""")
 public class ObJourneyStepLifecycleService {
 
     private final ObJourneyStepRepository journeySteps;

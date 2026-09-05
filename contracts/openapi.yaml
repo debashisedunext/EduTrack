@@ -8001,6 +8001,359 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  # ── A-118 · journey instances and the step panel ───────────────────────────
+  # The template side (OB-07) is above; this is what a template becomes once a
+  # client buys the product. `ObJourneyStrip` deliberately stops at the
+  # collapsed accordion — "the expanded view and the step panel are their own
+  # reads" — and these are those reads.
+
+  /onboarding/journeys:
+    get:
+      tags: [onboarding-journeys]
+      operationId: listObJourneys
+      summary: Journeys across clients, filtered (OB-02 slide-overs, OB-03)
+      description: |
+        The cross-client list the dashboard cards open into. One row per
+        journey, not per client: a client who bought three products is three
+        rows here, which is what "journey-counted with a product dimension"
+        (plan §9, OB-02) means and why a client-counted list cannot answer the
+        same question.
+
+        **Rows are scoped server-side by A-112's `OnboardingScopeResolver`**,
+        never by a filter the caller sends. A Step Owner sees journeys
+        containing their steps, Sales sees journeys for clients they created,
+        Manager/Admin/Viewer see all. The filters below narrow that set; they
+        cannot widen it, and an id outside the caller's scope is simply absent
+        rather than refused — the same "absence, not refusal" contract §7's
+        404 rule keeps for a single row.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: obClientId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: One client's journeys — the OB-05 accordion set.
+        - name: productId
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: gateStatus
+          in: query
+          schema: { $ref: '#/components/schemas/ObGateStatus' }
+        - name: rag
+          in: query
+          schema: { $ref: '#/components/schemas/ObRag' }
+        - name: ownerUserId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: |
+            Journeys containing a step owned by this user — the implementor
+            dimension of OB-02's workload grid. Matches the **owner or the
+            backup owner**, the same reading A-112's scope takes: a backup
+            exists to cover a step, so a workload row that excluded them would
+            under-report exactly the person covering.
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, COMPLETED, ARCHIVED, HELD]
+          description: |
+            A convenience over three nullable timestamp columns rather than a
+            stored status: `ACTIVE` is started and not completed, `HELD` is
+            `heldByJourneyId` set. Defaults to `ACTIVE` — a list that included
+            archived journeys by default would grow without bound and quietly
+            change what every card counts.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/journeys/{journeyId}:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyId' }]
+    get:
+      tags: [onboarding-journeys]
+      operationId: getObJourney
+      summary: The expanded ribbon for one journey (OB-05)
+      description: |
+        The accordion once expanded: every service with its owner, TAT, dates
+        and dependency, which `ObStepDot` deliberately omits because the client
+        portal renders the collapsed strip from the same schema.
+
+        Steps are **not paginated**. This is one journey's services, bounded by
+        what a ribbon can draw, and the ribbon needs all of them to draw any of
+        them — the same reasoning `ObJourneyStrip.steps` gives.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: |
+                Content-derived from the journey and every step on it, so a
+                step edit moves the journey's tag. Broader than any single
+                step write needs, and deliberately so: one tag to reason about
+                rather than a second, narrower one per step.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/journeys/{journeyId}/archive:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: archiveObJourney
+      summary: Withdraw a journey the client is no longer taking
+      description: |
+        Sets `archivedAt` and removes the journey from every count and every
+        default list. **Not a delete** — the steps, their history and their
+        clock events are append-only and stay exactly as they were, which is
+        the whole reason this is an archive rather than a removal.
+
+        There is no un-archive. Restoring one would mean deciding what its TAT
+        clock did while it was gone, and the honest answer for a client who
+        resumed a product is a new journey on the current template version.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObJourneyArchiveRequest' }
+      responses:
+        '200':
+          description: Archived.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            `ob-journey-already-archived` — archiving is idempotent in effect
+            but reported, so a second click is not silently treated as a new
+            decision with a new reason.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/journey-steps/{stepId}:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    get:
+      tags: [onboarding-journeys]
+      operationId: getObJourneyStep
+      summary: The step update panel (OB-06)
+      description: |
+        One service in full: checklist items, required documents and what they
+        have against them, the clock, and the block or skip reason if either
+        applies. **This is also the only source of the `ETag`** that `PATCH`
+        and the transitions below require as `If-Match`.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    patch:
+      tags: [onboarding-journeys]
+      operationId: updateObJourneyStep
+      summary: Reassign or re-plan one service (OB-06)
+      description: |
+        Owner, backup owner, TAT and due date — the fields a manager adjusts
+        without the step changing state. **Status is not among them.** Moving a
+        step between states is what the transition routes below are for, each
+        with its own required reason and its own 422s; a status field here
+        would be a second way to make the same move with none of that, and the
+        two would drift within a release.
+      parameters:
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObJourneyStepUpdateRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422':
+          description: |
+            `ob-step-terminal` — a `DONE` or `SKIPPED` service is not
+            re-plannable; its recorded TAT is what the reports are built on.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/journey-steps/{stepId}/skip:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: skipObJourneyStep
+      summary: Drop a service this client does not need (Manager/Admin)
+      description: |
+        `SKIPPED` with a mandatory reason and the actor recorded in
+        `skippedBy`. Skipping is how a journey completes when a service does
+        not apply, and it is deliberately an explicit act with a name against
+        it rather than a silent tick: services that "did not apply" are what a
+        TAT-compliance report has to exclude, and it can only exclude what it
+        can see was excluded on purpose.
+
+        A service another one depends on can be skipped — the dependent
+        becomes startable, exactly as if it had completed.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObStepSkipRequest' }
+      responses:
+        '200':
+          description: Skipped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            The caller's module role does not permit skipping. A role failure
+            that does not depend on the row existing, so `403` rather than
+            `404` — §7's distinction.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422':
+          description: |
+            `ob-step-terminal` — already done or already skipped.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/journey-step-items/{itemId}:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepItemId' }]
+    patch:
+      tags: [onboarding-journeys]
+      operationId: updateObJourneyStepItem
+      summary: Tick or untick one checklist entry
+      description: |
+        Idempotent by design and **deliberately without `If-Match`**: two
+        people ticking two different items on the same service is the normal
+        case, and a precondition drawn from the step's tag would make the
+        second one fail for touching a sibling. The race this leaves open —
+        both ticking the *same* item — has no loser, because the outcome is
+        identical either way.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObJourneyStepItemUpdateRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepItemResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            `ob-step-terminal` — the service is closed; its checklist is the
+            record of what was done, not a live document.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/journey-steps/{stepId}/communications:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    get:
+      tags: [onboarding-journeys]
+      operationId: listObStepCommunications
+      summary: What was said about this service, and to whom (plan §6)
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObStepCommunicationListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    post:
+      tags: [onboarding-journeys]
+      operationId: createObStepCommunication
+      summary: Record a call, mail or meeting against this service
+      description: |
+        Capture, not delivery. This records that a conversation happened —
+        the outbound mail and WhatsApp the module actually sends are §7's
+        notification engine, and conflating them would put a note somebody
+        typed into a client's inbox.
+
+        **`isClientVisible` defaults to false.** An internal note that reaches
+        the portal because a default went the other way is not recoverable by
+        deleting it afterwards.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObStepCommunicationCreateRequest' }
+      responses:
+        '201':
+          description: Recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObStepCommunicationResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/journey-steps/{stepId}/history:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    get:
+      tags: [onboarding-journeys]
+      operationId: listObStepHistory
+      summary: Every state change on this service, oldest first
+      description: |
+        `ob_step_history` is append-only and hash-chained. **There is no
+        `PATCH`, `PUT` or `DELETE` on this path and there will not be one** —
+        CONVENTIONS §8, and the same guarantee `ticket_history` carries. A
+        correction is a new compensating entry, not an edit.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObStepHistoryListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+
 # ══════════════════════════════════════════════════════════ components ═══════
 components:
 
@@ -8206,6 +8559,25 @@ components:
         masters are disjoint tables and the ids do not correspond; a client
         present in both is joined at the identity layer by an explicit audited
         link, never by a shared key.
+    ObJourneyId:
+      name: journeyId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A-118 · an `ob_journeys` id — one client's instance of one product's
+        template, **not** a template id. The two are different tables and a
+        journey pins the template *version* it was created from, so a journey
+        outlives the template being revised underneath it.
+    ObJourneyStepItemId:
+      name: itemId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A-118 · an `ob_journey_step_items` id — one checklist entry on a live
+        service, not the `ObJourneyTemplateStepItemId` it was instantiated
+        from.
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -14319,4 +14691,324 @@ components:
       required: [data]
       properties:
         data: { type: array, items: { $ref: '#/components/schemas/ObClient' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    # ── A-118 · journey instances and the step panel ─────────────────────────
+
+    ObStepClockState:
+      type: string
+      enum: [RUNNING, PAUSED, STOPPED]
+      description: |
+        What the TAT clock is doing, derived from `ob_step_clock_events` and
+        never stored. `PAUSED` means and only means `WAITING_ON_CLIENT`: an
+        internal `BLOCKED` step is still `RUNNING`, because plan §5.7 charges
+        internal delay to us and client delay to the client.
+
+        Named in `ObRag`'s description as one of the three states the
+        prototype's single chip wrongly folded into health. This is that
+        state, given its own field.
+    ObJourneySummary:
+      type: object
+      required: [id, obClientId, clientName, product, gateStatus, percentComplete]
+      properties:
+        id: { type: integer, format: int64 }
+        obClientId: { type: integer, format: int64 }
+        clientName:
+          type: string
+          description: |
+            Denormalised onto the row so a list of two hundred journeys does
+            not become two hundred client reads. The id is beside it for
+            navigation; this is for the eye.
+        product: { $ref: '#/components/schemas/ObProductRef' }
+        gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
+        rag:
+          oneOf:
+            - { $ref: '#/components/schemas/ObRag' }
+            - { type: 'null' }
+          description: Null while the gate is `LOCKED` — nothing is running to colour.
+        percentComplete: { type: integer, minimum: 0, maximum: 100 }
+        currentStep:
+          oneOf:
+            - { $ref: '#/components/schemas/ObStepDot' }
+            - { type: 'null' }
+          description: |
+            The service in progress, or null when none is — a journey behind
+            its gate, held behind a sibling, or finished. The Delayed Projects
+            grid's "module in progress" and "current stage" columns are this
+            one field.
+        owner:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: Owner of `currentStep`, not of the journey — journeys have no owner of their own.
+        heldByJourneyId:
+          type: [integer, 'null']
+          format: int64
+        totalTatDays: { type: integer }
+        elapsedTatDays:
+          type: number
+          format: double
+          description: |
+            Working days consumed against the calendar, client waits excluded.
+            Paired with `totalTatDays` this is the `used / total` the OB-05
+            strip shows, and the difference is what "delayed by" counts.
+        startedAt: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        archivedAt: { type: [string, 'null'], format: date-time }
+      description: One row of the cross-client journey list (OB-02, OB-03).
+    ObJourneyListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObJourneySummary' }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ObJourneyDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ObJourneySummary' }
+        - type: object
+          required: [templateId, templateVersion, steps]
+          properties:
+            templateId: { type: integer, format: int64 }
+            templateVersion:
+              type: integer
+              description: |
+                The version this journey was instantiated from and is pinned
+                to. A template revised after this journey started does not
+                change it — which is why the step rows are copies rather than
+                references, and why a TAT report years later still means what
+                it meant on the day.
+            steps:
+              type: array
+              items: { $ref: '#/components/schemas/ObJourneyStepView' }
+              description: |
+                Every service in sequence, unpaginated. See `ObJourneyStrip`
+                for why: the ribbon needs all of them to draw any of them.
+            parallelGroups:
+              type: array
+              items:
+                type: array
+                items: { type: integer, format: int64 }
+              description: |
+                Layer 0 first, each entry the step ids that could be in
+                progress at once — the same recomputed-on-read layering
+                `GET /onboarding/journey-templates/{templateId}` returns,
+                applied to the instance's own dependency graph.
+      description: The expanded OB-05 accordion.
+    ObJourneyDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObJourneyDetail' }
+    ObJourneyArchiveRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          description: |
+            Mandatory and free text, unlike a block reason. A block is counted
+            in a report and so must come from a master; an archive is rare,
+            read by a person, and the useful thing to record is the sentence
+            somebody would otherwise put in an email.
+    ObJourneyStepView:
+      allOf:
+        - { $ref: '#/components/schemas/ObJourneyStep' }
+        - type: object
+          properties:
+            description: { type: [string, 'null'] }
+            clockState: { $ref: '#/components/schemas/ObStepClockState' }
+            rag:
+              oneOf:
+                - { $ref: '#/components/schemas/ObRag' }
+                - { type: 'null' }
+            tatDays: { type: integer }
+            requiresSignoff: { type: boolean }
+            dependsOnStepId:
+              type: [integer, 'null']
+              format: int64
+            skipReason: { type: [string, 'null'] }
+            skippedByUserId: { type: [integer, 'null'], format: int64 }
+      description: |
+        A-118 · what the ribbon and the OB-06 panel need on top of C-104's
+        lifecycle shape.
+
+        **Built on `ObJourneyStep` rather than beside it.** C-104 defined that
+        schema for the five transition routes and its server returns it; a
+        second, fuller step object would mean two shapes for one row and a
+        client having to know which route gave it which. The fields here are
+        additive — plan, health, and the dependency the ribbon draws — and
+        none of them contradicts the base.
+
+        `skippedByUserId` is an id rather than a `UserRef`, matching
+        `ownerUserId` on the base for the same reason: one convention applied
+        to a whole schema beats a better one applied to half of it.
+    ObJourneyStepDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObJourneyStepDetail' }
+    ObJourneyStepDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ObJourneyStepView' }
+        - type: object
+          required: [items, docs]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/ObJourneyStepItem' }
+            docs:
+              type: array
+              items: { $ref: '#/components/schemas/ObJourneyStepDoc' }
+            elapsedHours:
+              type: number
+              format: double
+              description: |
+                Working hours consumed on this service, client waits excluded,
+                summed from `ob_step_clock_events` at read time. Never stored:
+                a cached total that disagreed with the events it claims to sum
+                would be argued about rather than trusted.
+      description: The OB-06 panel.
+    ObJourneyStepUpdateRequest:
+      type: object
+      description: |
+        Every field optional; absent means unchanged. `status` is deliberately
+        absent from this schema — see the operation's description.
+      properties:
+        ownerUserId: { type: [integer, 'null'], format: int64 }
+        backupOwnerUserId: { type: [integer, 'null'], format: int64 }
+        tatDays: { type: integer, minimum: 0 }
+        dueAt: { type: [string, 'null'], format: date-time }
+    ObStepSkipRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    ObJourneyStepItem:
+      type: object
+      required: [id, stepId, sequence, label, isMandatory, isDone]
+      properties:
+        id: { type: integer, format: int64 }
+        stepId: { type: integer, format: int64 }
+        sequence: { type: integer }
+        label: { type: string }
+        isMandatory:
+          type: boolean
+          description: A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.
+        isDone: { type: boolean }
+        doneAt: { type: [string, 'null'], format: date-time }
+        doneBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+    ObJourneyStepItemResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObJourneyStepItem' }
+    ObJourneyStepItemUpdateRequest:
+      type: object
+      required: [isDone]
+      properties:
+        isDone: { type: boolean }
+    ObJourneyStepDoc:
+      type: object
+      required: [id, stepId, label, isRequired, isSatisfied]
+      properties:
+        id: { type: integer, format: int64 }
+        stepId: { type: integer, format: int64 }
+        label: { type: string }
+        isRequired:
+          type: boolean
+          description: A required document with nothing against it refuses `finish` with `ob-step-docs-missing`.
+        isSatisfied:
+          type: boolean
+          description: |
+            Whether an attachment exists for this entry. Computed rather than
+            stored, so deleting the attachment reopens the requirement instead
+            of leaving a flag saying it was met once.
+        attachmentId: { type: [integer, 'null'], format: int64 }
+    ObStepCommunication:
+      type: object
+      required: [id, stepId, channel, occurredAt, summary, isClientVisible, recordedBy]
+      properties:
+        id: { type: integer, format: int64 }
+        stepId: { type: integer, format: int64 }
+        channel:
+          type: string
+          enum: [CALL, EMAIL, MEETING, WHATSAPP, OTHER]
+        occurredAt:
+          type: string
+          format: date-time
+          description: |
+            When the conversation happened, which is not when it was typed —
+            people record a Friday call on Monday, and a communication audit
+            that ordered by entry time would misreport every one of them.
+        summary: { type: string }
+        isClientVisible:
+          type: boolean
+          description: |
+            False by default. True publishes it to the portal thread, and
+            there is no way to unpublish something a client has already read.
+        recordedBy: { $ref: '#/components/schemas/UserRef' }
+        createdAt: { type: string, format: date-time }
+    ObStepCommunicationResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObStepCommunication' }
+    ObStepCommunicationListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObStepCommunication' }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ObStepCommunicationCreateRequest:
+      type: object
+      required: [channel, occurredAt, summary]
+      properties:
+        channel:
+          type: string
+          enum: [CALL, EMAIL, MEETING, WHATSAPP, OTHER]
+        occurredAt: { type: string, format: date-time }
+        summary: { type: string, minLength: 1, maxLength: 4000 }
+        isClientVisible: { type: boolean, default: false }
+    ObStepHistoryEntry:
+      type: object
+      required: [id, stepId, at, actor, fromStatus, toStatus]
+      properties:
+        id: { type: integer, format: int64 }
+        stepId: { type: integer, format: int64 }
+        at: { type: string, format: date-time }
+        actor: { $ref: '#/components/schemas/UserRef' }
+        fromStatus:
+          oneOf:
+            - { $ref: '#/components/schemas/ObStepStatus' }
+            - { type: 'null' }
+          description: Null on the first entry — instantiation has nothing to come from.
+        toStatus: { $ref: '#/components/schemas/ObStepStatus' }
+        reasonCode: { type: [string, 'null'] }
+        note: { type: [string, 'null'] }
+        isCorrection:
+          type: boolean
+          description: |
+            A compensating entry, the only way to correct this log. The entry
+            it corrects is named in `correctsEntryId` and **stays exactly
+            where it was** — an accounting reversal, not an edit.
+        correctsEntryId: { type: [integer, 'null'], format: int64 }
+      description: |
+        One row of `ob_step_history`, which is append-only and hash-chained.
+        Read-only on the wire because it is read-only in the database, behind
+        a trigger that rejects `UPDATE` and `DELETE`.
+    ObStepHistoryListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObStepHistoryEntry' }
         meta: { $ref: '#/components/schemas/Meta' }
