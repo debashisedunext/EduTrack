@@ -7693,11 +7693,15 @@ paths:
     post:
       tags: [onboarding-journeys]
       operationId: completeObJourneyStep
-      summary: Complete a step (C-104)
+      summary: Complete a step (C-104, gated by C-106)
       description: |
-        `IN_PROGRESS` → `DONE`. No completion-gate check — every
-        sub-category answered and sign-off accepted (plan §5.8) is C-106's
-        own server-side gate, layered on top of this transition.
+        `IN_PROGRESS` → `DONE`. Refused (`422`) unless every mandatory Task
+        List item is answered, every required document is attached and
+        clean, and — where the step demands it — a client sign-off has been
+        accepted (plan §5.8, architect's addition 7, §8). This is C-106's
+        own server-side gate, and the single choke point: any future
+        client-facing acceptance flow (A-120) must route through it rather
+        than completing the step directly.
       responses:
         '200':
           description: Completed.
@@ -7706,10 +7710,14 @@ paths:
               schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
         '422':
-          description: Caller not the owner/backup owner, or the step is not `IN_PROGRESS`.
+          description: |
+            Caller not the owner/backup owner, the step is not
+            `IN_PROGRESS`, or the completion gate is not satisfied — the
+            three gate reasons appear as extension properties and are all
+            absent for the other two causes.
           content:
             application/problem+json:
-              schema: { $ref: '#/components/schemas/Problem' }
+              schema: { $ref: '#/components/schemas/ObCompletionGateProblem' }
 
   /onboarding/journey-steps/{stepId}/block:
     parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
@@ -14497,6 +14505,31 @@ components:
               type: array
               items: { type: integer, format: int64 }
               description: Steps in the same template that still depend on the one this call tried to remove.
+
+    ObCompletionGateProblem:
+      allOf:
+        - { $ref: '#/components/schemas/Problem' }
+        - type: object
+          properties:
+            unansweredMandatoryItems:
+              type: array
+              items: { type: string }
+              description: |
+                Labels of mandatory Task List items with no answer yet.
+                Empty when this is not why completion was refused.
+            missingRequiredDocs:
+              type: integer
+              format: int64
+              description: |
+                How many required-document checklist entries the step's
+                clean, non-tombstoned attachments do not yet reach. `0` when
+                this is not why completion was refused.
+            signoffMissing:
+              type: boolean
+              description: |
+                The step requires client sign-off and no `SIGNED` sign-off
+                exists for it yet. `false` when this is not why completion
+                was refused.
 
     # ── C-104 · step lifecycle ───────────────────────────────────────────────
     ObJourneyStepStatus:

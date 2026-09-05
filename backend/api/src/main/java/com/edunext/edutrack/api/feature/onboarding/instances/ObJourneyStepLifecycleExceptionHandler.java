@@ -21,6 +21,8 @@ class ObJourneyStepLifecycleExceptionHandler {
     private static final URI STEP_OWNER_REQUIRED = URI.create("https://edutrack/errors/step-owner-required");
     private static final URI INVALID_STEP_TRANSITION = URI.create("https://edutrack/errors/invalid-step-transition");
     private static final URI JOURNEY_NOT_OPEN = URI.create("https://edutrack/errors/journey-not-open");
+    private static final URI COMPLETION_GATE_NOT_SATISFIED =
+            URI.create("https://edutrack/errors/completion-gate-not-satisfied");
 
     /** No {@code ob_journey_steps} row for the given id. */
     @ExceptionHandler(JourneyStepNotFoundException.class)
@@ -63,6 +65,22 @@ class ObJourneyStepLifecycleExceptionHandler {
         problem.setType(JOURNEY_NOT_OPEN);
         problem.setTitle("This journey is not open for step activity yet");
         problem.setDetail(e.getMessage());
+        return ResponseEntity.unprocessableEntity().body(problem);
+    }
+
+    /**
+     * 422 — C-106's completion gate. All three failure kinds are reported
+     * on the same problem body; see the exception's own javadoc.
+     */
+    @ExceptionHandler(CompletionGateException.class)
+    ResponseEntity<ProblemDetail> handleCompletionGateNotSatisfied(CompletionGateException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(COMPLETION_GATE_NOT_SATISFIED);
+        problem.setTitle("This step is not ready to complete");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("unansweredMandatoryItems", e.unansweredMandatoryItems());
+        problem.setProperty("missingRequiredDocs", e.missingRequiredDocs());
+        problem.setProperty("signoffMissing", e.signoffMissing());
         return ResponseEntity.unprocessableEntity().body(problem);
     }
 }

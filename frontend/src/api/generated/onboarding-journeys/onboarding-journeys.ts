@@ -71,6 +71,7 @@ import type {
   ListObStepCommunicationsParams,
   ListObStepHistoryParams,
   ObBlockJourneyStepRequest,
+  ObCompletionGateProblem,
   ObJourneyArchiveRequest,
   ObJourneyDetailResponse,
   ObJourneyListResponse,
@@ -959,11 +960,15 @@ export const useStartObJourneyStep = <TError = ObModuleGatedResponse | Problem,
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * `IN_PROGRESS` → `DONE`. No completion-gate check — every
-sub-category answered and sign-off accepted (plan §5.8) is C-106's
-own server-side gate, layered on top of this transition.
+ * `IN_PROGRESS` → `DONE`. Refused (`422`) unless every mandatory Task
+List item is answered, every required document is attached and
+clean, and — where the step demands it — a client sign-off has been
+accepted (plan §5.8, architect's addition 7, §8). This is C-106's
+own server-side gate, and the single choke point: any future
+client-facing acceptance flow (A-120) must route through it rather
+than completing the step directly.
 
- * @summary Complete a step (C-104)
+ * @summary Complete a step (C-104, gated by C-106)
  */
 export const completeObJourneyStep = (
     stepId: number,
@@ -979,7 +984,7 @@ export const completeObJourneyStep = (
   
 
 
-export const getCompleteObJourneyStepMutationOptions = <TError = ObModuleGatedResponse | Problem,
+export const getCompleteObJourneyStepMutationOptions = <TError = ObModuleGatedResponse | ObCompletionGateProblem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeObJourneyStep>>, TError,{stepId: number}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof completeObJourneyStep>>, TError,{stepId: number}, TContext> => {
 
@@ -1006,12 +1011,12 @@ const {mutation: mutationOptions} = options ?
 
     export type CompleteObJourneyStepMutationResult = NonNullable<Awaited<ReturnType<typeof completeObJourneyStep>>>
     
-    export type CompleteObJourneyStepMutationError = ObModuleGatedResponse | Problem
+    export type CompleteObJourneyStepMutationError = ObModuleGatedResponse | ObCompletionGateProblem
 
     /**
- * @summary Complete a step (C-104)
+ * @summary Complete a step (C-104, gated by C-106)
  */
-export const useCompleteObJourneyStep = <TError = ObModuleGatedResponse | Problem,
+export const useCompleteObJourneyStep = <TError = ObModuleGatedResponse | ObCompletionGateProblem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeObJourneyStep>>, TError,{stepId: number}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof completeObJourneyStep>>,
