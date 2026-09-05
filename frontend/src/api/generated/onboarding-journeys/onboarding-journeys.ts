@@ -67,9 +67,19 @@ import type {
 
 import type {
   ConflictResponse,
+  ListObJourneysParams,
+  ListObStepCommunicationsParams,
+  ListObStepHistoryParams,
   ObBlockJourneyStepRequest,
   ObCompletionGateProblem,
+  ObJourneyArchiveRequest,
+  ObJourneyDetailResponse,
+  ObJourneyListResponse,
+  ObJourneyStepDetailResponse,
+  ObJourneyStepItemResponse,
+  ObJourneyStepItemUpdateRequest,
   ObJourneyStepResponse,
+  ObJourneyStepUpdateRequest,
   ObJourneyTemplateCreateRequest,
   ObJourneyTemplateDetailResponse,
   ObJourneyTemplateResponse,
@@ -81,7 +91,12 @@ import type {
   ObJourneyTemplateStepResponse,
   ObJourneyTemplateStepWriteRequest,
   ObModuleGatedResponse,
+  ObStepCommunicationCreateRequest,
+  ObStepCommunicationListResponse,
+  ObStepCommunicationResponse,
   ObStepHasDependentsProblem,
+  ObStepHistoryListResponse,
+  ObStepSkipRequest,
   PreconditionFailedResponse,
   Problem,
   UnauthorizedResponse,
@@ -1218,4 +1233,877 @@ export const useResumeObJourneyStep = <TError = ObModuleGatedResponse | Problem,
 
       return useMutation(mutationOptions, queryClient);
     }
+    /**
+ * The cross-client list the dashboard cards open into. One row per
+journey, not per client: a client who bought three products is three
+rows here, which is what "journey-counted with a product dimension"
+(plan §9, OB-02) means and why a client-counted list cannot answer the
+same question.
+
+**Rows are scoped server-side by A-112's `OnboardingScopeResolver`**,
+never by a filter the caller sends. A Step Owner sees journeys
+containing their steps, Sales sees journeys for clients they created,
+Manager/Admin/Viewer see all. The filters below narrow that set; they
+cannot widen it, and an id outside the caller's scope is simply absent
+rather than refused — the same "absence, not refusal" contract §7's
+404 rule keeps for a single row.
+
+ * @summary Journeys across clients, filtered (OB-02 slide-overs, OB-03)
+ */
+export const listObJourneys = (
+    params?: ListObJourneysParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyListResponse>(
+      {url: `/onboarding/journeys`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObJourneysQueryKey = (params?: ListObJourneysParams,) => {
+    return [
+    `/onboarding/journeys`, ...(params ? [params]: [])
+    ] as const;
+    }
+
     
+export const getListObJourneysQueryOptions = <TData = Awaited<ReturnType<typeof listObJourneys>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(params?: ListObJourneysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneys>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObJourneysQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObJourneys>>> = ({ signal }) => listObJourneys(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObJourneys>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObJourneysQueryResult = NonNullable<Awaited<ReturnType<typeof listObJourneys>>>
+export type ListObJourneysQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObJourneys<TData = Awaited<ReturnType<typeof listObJourneys>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  ListObJourneysParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneys>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObJourneys>>,
+          TError,
+          Awaited<ReturnType<typeof listObJourneys>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObJourneys<TData = Awaited<ReturnType<typeof listObJourneys>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObJourneysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneys>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObJourneys>>,
+          TError,
+          Awaited<ReturnType<typeof listObJourneys>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObJourneys<TData = Awaited<ReturnType<typeof listObJourneys>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObJourneysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneys>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Journeys across clients, filtered (OB-02 slide-overs, OB-03)
+ */
+
+export function useListObJourneys<TData = Awaited<ReturnType<typeof listObJourneys>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObJourneysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneys>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObJourneysQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * The accordion once expanded: every service with its owner, TAT, dates
+and dependency, which `ObStepDot` deliberately omits because the client
+portal renders the collapsed strip from the same schema.
+
+Steps are **not paginated**. This is one journey's services, bounded by
+what a ribbon can draw, and the ribbon needs all of them to draw any of
+them — the same reasoning `ObJourneyStrip.steps` gives.
+
+ * @summary The expanded ribbon for one journey (OB-05)
+ */
+export const getObJourney = (
+    journeyId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyDetailResponse>(
+      {url: `/onboarding/journeys/${journeyId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObJourneyQueryKey = (journeyId?: number,) => {
+    return [
+    `/onboarding/journeys/${journeyId}`
+    ] as const;
+    }
+
+    
+export const getGetObJourneyQueryOptions = <TData = Awaited<ReturnType<typeof getObJourney>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(journeyId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourney>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObJourneyQueryKey(journeyId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObJourney>>> = ({ signal }) => getObJourney(journeyId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(journeyId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObJourney>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObJourneyQueryResult = NonNullable<Awaited<ReturnType<typeof getObJourney>>>
+export type GetObJourneyQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObJourney<TData = Awaited<ReturnType<typeof getObJourney>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ journeyId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourney>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObJourney>>,
+          TError,
+          Awaited<ReturnType<typeof getObJourney>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObJourney<TData = Awaited<ReturnType<typeof getObJourney>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ journeyId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourney>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObJourney>>,
+          TError,
+          Awaited<ReturnType<typeof getObJourney>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObJourney<TData = Awaited<ReturnType<typeof getObJourney>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ journeyId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourney>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The expanded ribbon for one journey (OB-05)
+ */
+
+export function useGetObJourney<TData = Awaited<ReturnType<typeof getObJourney>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ journeyId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourney>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObJourneyQueryOptions(journeyId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Sets `archivedAt` and removes the journey from every count and every
+default list. **Not a delete** — the steps, their history and their
+clock events are append-only and stay exactly as they were, which is
+the whole reason this is an archive rather than a removal.
+
+There is no un-archive. Restoring one would mean deciding what its TAT
+clock did while it was gone, and the honest answer for a client who
+resumed a product is a new journey on the current template version.
+
+ * @summary Withdraw a journey the client is no longer taking
+ */
+export const archiveObJourney = (
+    journeyId: number,
+    obJourneyArchiveRequest: ObJourneyArchiveRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyDetailResponse>(
+      {url: `/onboarding/journeys/${journeyId}/archive`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obJourneyArchiveRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getArchiveObJourneyMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof archiveObJourney>>, TError,{journeyId: number;data: ObJourneyArchiveRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof archiveObJourney>>, TError,{journeyId: number;data: ObJourneyArchiveRequest}, TContext> => {
+
+const mutationKey = ['archiveObJourney'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof archiveObJourney>>, {journeyId: number;data: ObJourneyArchiveRequest}> = (props) => {
+          const {journeyId,data} = props ?? {};
+
+          return  archiveObJourney(journeyId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ArchiveObJourneyMutationResult = NonNullable<Awaited<ReturnType<typeof archiveObJourney>>>
+    export type ArchiveObJourneyMutationBody = ObJourneyArchiveRequest
+    export type ArchiveObJourneyMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Withdraw a journey the client is no longer taking
+ */
+export const useArchiveObJourney = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof archiveObJourney>>, TError,{journeyId: number;data: ObJourneyArchiveRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof archiveObJourney>>,
+        TError,
+        {journeyId: number;data: ObJourneyArchiveRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getArchiveObJourneyMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * One service in full: checklist items, required documents and what they
+have against them, the clock, and the block or skip reason if either
+applies. **This is also the only source of the `ETag`** that `PATCH`
+and the transitions below require as `If-Match`.
+
+ * @summary The step update panel (OB-06)
+ */
+export const getObJourneyStep = (
+    stepId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepDetailResponse>(
+      {url: `/onboarding/journey-steps/${stepId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObJourneyStepQueryKey = (stepId?: number,) => {
+    return [
+    `/onboarding/journey-steps/${stepId}`
+    ] as const;
+    }
+
+    
+export const getGetObJourneyStepQueryOptions = <TData = Awaited<ReturnType<typeof getObJourneyStep>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(stepId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourneyStep>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObJourneyStepQueryKey(stepId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObJourneyStep>>> = ({ signal }) => getObJourneyStep(stepId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(stepId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObJourneyStep>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObJourneyStepQueryResult = NonNullable<Awaited<ReturnType<typeof getObJourneyStep>>>
+export type GetObJourneyStepQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObJourneyStep<TData = Awaited<ReturnType<typeof getObJourneyStep>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourneyStep>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObJourneyStep>>,
+          TError,
+          Awaited<ReturnType<typeof getObJourneyStep>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObJourneyStep<TData = Awaited<ReturnType<typeof getObJourneyStep>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourneyStep>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObJourneyStep>>,
+          TError,
+          Awaited<ReturnType<typeof getObJourneyStep>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObJourneyStep<TData = Awaited<ReturnType<typeof getObJourneyStep>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourneyStep>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The step update panel (OB-06)
+ */
+
+export function useGetObJourneyStep<TData = Awaited<ReturnType<typeof getObJourneyStep>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObJourneyStep>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObJourneyStepQueryOptions(stepId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Owner, backup owner, TAT and due date — the fields a manager adjusts
+without the step changing state. **Status is not among them.** Moving a
+step between states is what the transition routes below are for, each
+with its own required reason and its own 422s; a status field here
+would be a second way to make the same move with none of that, and the
+two would drift within a release.
+
+ * @summary Reassign or re-plan one service (OB-06)
+ */
+export const updateObJourneyStep = (
+    stepId: number,
+    obJourneyStepUpdateRequest: ObJourneyStepUpdateRequest,
+ ) => {
+      
+      
+      return http<ObJourneyStepDetailResponse>(
+      {url: `/onboarding/journey-steps/${stepId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obJourneyStepUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObJourneyStepMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyStep>>, TError,{stepId: number;data: ObJourneyStepUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyStep>>, TError,{stepId: number;data: ObJourneyStepUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateObJourneyStep'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObJourneyStep>>, {stepId: number;data: ObJourneyStepUpdateRequest}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  updateObJourneyStep(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObJourneyStepMutationResult = NonNullable<Awaited<ReturnType<typeof updateObJourneyStep>>>
+    export type UpdateObJourneyStepMutationBody = ObJourneyStepUpdateRequest
+    export type UpdateObJourneyStepMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Reassign or re-plan one service (OB-06)
+ */
+export const useUpdateObJourneyStep = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyStep>>, TError,{stepId: number;data: ObJourneyStepUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObJourneyStep>>,
+        TError,
+        {stepId: number;data: ObJourneyStepUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObJourneyStepMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `SKIPPED` with a mandatory reason and the actor recorded in
+`skippedBy`. Skipping is how a journey completes when a service does
+not apply, and it is deliberately an explicit act with a name against
+it rather than a silent tick: services that "did not apply" are what a
+TAT-compliance report has to exclude, and it can only exclude what it
+can see was excluded on purpose.
+
+A service another one depends on can be skipped — the dependent
+becomes startable, exactly as if it had completed.
+
+ * @summary Drop a service this client does not need (Manager/Admin)
+ */
+export const skipObJourneyStep = (
+    stepId: number,
+    obStepSkipRequest: ObStepSkipRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepDetailResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/skip`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obStepSkipRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getSkipObJourneyStepMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skipObJourneyStep>>, TError,{stepId: number;data: ObStepSkipRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof skipObJourneyStep>>, TError,{stepId: number;data: ObStepSkipRequest}, TContext> => {
+
+const mutationKey = ['skipObJourneyStep'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof skipObJourneyStep>>, {stepId: number;data: ObStepSkipRequest}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  skipObJourneyStep(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SkipObJourneyStepMutationResult = NonNullable<Awaited<ReturnType<typeof skipObJourneyStep>>>
+    export type SkipObJourneyStepMutationBody = ObStepSkipRequest
+    export type SkipObJourneyStepMutationError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Drop a service this client does not need (Manager/Admin)
+ */
+export const useSkipObJourneyStep = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skipObJourneyStep>>, TError,{stepId: number;data: ObStepSkipRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof skipObJourneyStep>>,
+        TError,
+        {stepId: number;data: ObStepSkipRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSkipObJourneyStepMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Idempotent by design and **deliberately without `If-Match`**: two
+people ticking two different items on the same service is the normal
+case, and a precondition drawn from the step's tag would make the
+second one fail for touching a sibling. The race this leaves open —
+both ticking the *same* item — has no loser, because the outcome is
+identical either way.
+
+ * @summary Tick or untick one checklist entry
+ */
+export const updateObJourneyStepItem = (
+    itemId: number,
+    obJourneyStepItemUpdateRequest: ObJourneyStepItemUpdateRequest,
+ ) => {
+      
+      
+      return http<ObJourneyStepItemResponse>(
+      {url: `/onboarding/journey-step-items/${itemId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obJourneyStepItemUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObJourneyStepItemMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyStepItem>>, TError,{itemId: number;data: ObJourneyStepItemUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyStepItem>>, TError,{itemId: number;data: ObJourneyStepItemUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateObJourneyStepItem'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObJourneyStepItem>>, {itemId: number;data: ObJourneyStepItemUpdateRequest}> = (props) => {
+          const {itemId,data} = props ?? {};
+
+          return  updateObJourneyStepItem(itemId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObJourneyStepItemMutationResult = NonNullable<Awaited<ReturnType<typeof updateObJourneyStepItem>>>
+    export type UpdateObJourneyStepItemMutationBody = ObJourneyStepItemUpdateRequest
+    export type UpdateObJourneyStepItemMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Tick or untick one checklist entry
+ */
+export const useUpdateObJourneyStepItem = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyStepItem>>, TError,{itemId: number;data: ObJourneyStepItemUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObJourneyStepItem>>,
+        TError,
+        {itemId: number;data: ObJourneyStepItemUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObJourneyStepItemMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * @summary What was said about this service, and to whom (plan §6)
+ */
+export const listObStepCommunications = (
+    stepId: number,
+    params?: ListObStepCommunicationsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObStepCommunicationListResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/communications`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObStepCommunicationsQueryKey = (stepId?: number,
+    params?: ListObStepCommunicationsParams,) => {
+    return [
+    `/onboarding/journey-steps/${stepId}/communications`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObStepCommunicationsQueryOptions = <TData = Awaited<ReturnType<typeof listObStepCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(stepId: number,
+    params?: ListObStepCommunicationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepCommunications>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObStepCommunicationsQueryKey(stepId,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObStepCommunications>>> = ({ signal }) => listObStepCommunications(stepId,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(stepId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObStepCommunications>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObStepCommunicationsQueryResult = NonNullable<Awaited<ReturnType<typeof listObStepCommunications>>>
+export type ListObStepCommunicationsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObStepCommunications<TData = Awaited<ReturnType<typeof listObStepCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number,
+    params: undefined |  ListObStepCommunicationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepCommunications>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObStepCommunications>>,
+          TError,
+          Awaited<ReturnType<typeof listObStepCommunications>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObStepCommunications<TData = Awaited<ReturnType<typeof listObStepCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number,
+    params?: ListObStepCommunicationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepCommunications>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObStepCommunications>>,
+          TError,
+          Awaited<ReturnType<typeof listObStepCommunications>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObStepCommunications<TData = Awaited<ReturnType<typeof listObStepCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number,
+    params?: ListObStepCommunicationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepCommunications>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary What was said about this service, and to whom (plan §6)
+ */
+
+export function useListObStepCommunications<TData = Awaited<ReturnType<typeof listObStepCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number,
+    params?: ListObStepCommunicationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepCommunications>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObStepCommunicationsQueryOptions(stepId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Capture, not delivery. This records that a conversation happened —
+the outbound mail and WhatsApp the module actually sends are §7's
+notification engine, and conflating them would put a note somebody
+typed into a client's inbox.
+
+**`isClientVisible` defaults to false.** An internal note that reaches
+the portal because a default went the other way is not recoverable by
+deleting it afterwards.
+
+ * @summary Record a call, mail or meeting against this service
+ */
+export const createObStepCommunication = (
+    stepId: number,
+    obStepCommunicationCreateRequest: ObStepCommunicationCreateRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObStepCommunicationResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/communications`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obStepCommunicationCreateRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateObStepCommunicationMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObStepCommunication>>, TError,{stepId: number;data: ObStepCommunicationCreateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createObStepCommunication>>, TError,{stepId: number;data: ObStepCommunicationCreateRequest}, TContext> => {
+
+const mutationKey = ['createObStepCommunication'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createObStepCommunication>>, {stepId: number;data: ObStepCommunicationCreateRequest}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  createObStepCommunication(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateObStepCommunicationMutationResult = NonNullable<Awaited<ReturnType<typeof createObStepCommunication>>>
+    export type CreateObStepCommunicationMutationBody = ObStepCommunicationCreateRequest
+    export type CreateObStepCommunicationMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse
+
+    /**
+ * @summary Record a call, mail or meeting against this service
+ */
+export const useCreateObStepCommunication = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObStepCommunication>>, TError,{stepId: number;data: ObStepCommunicationCreateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createObStepCommunication>>,
+        TError,
+        {stepId: number;data: ObStepCommunicationCreateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateObStepCommunicationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `ob_step_history` is append-only and hash-chained. **There is no
+`PATCH`, `PUT` or `DELETE` on this path and there will not be one** —
+CONVENTIONS §8, and the same guarantee `ticket_history` carries. A
+correction is a new compensating entry, not an edit.
+
+ * @summary Every state change on this service, oldest first
+ */
+export const listObStepHistory = (
+    stepId: number,
+    params?: ListObStepHistoryParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObStepHistoryListResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/history`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObStepHistoryQueryKey = (stepId?: number,
+    params?: ListObStepHistoryParams,) => {
+    return [
+    `/onboarding/journey-steps/${stepId}/history`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObStepHistoryQueryOptions = <TData = Awaited<ReturnType<typeof listObStepHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(stepId: number,
+    params?: ListObStepHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepHistory>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObStepHistoryQueryKey(stepId,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObStepHistory>>> = ({ signal }) => listObStepHistory(stepId,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(stepId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObStepHistory>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObStepHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof listObStepHistory>>>
+export type ListObStepHistoryQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObStepHistory<TData = Awaited<ReturnType<typeof listObStepHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number,
+    params: undefined |  ListObStepHistoryParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepHistory>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObStepHistory>>,
+          TError,
+          Awaited<ReturnType<typeof listObStepHistory>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObStepHistory<TData = Awaited<ReturnType<typeof listObStepHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number,
+    params?: ListObStepHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepHistory>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObStepHistory>>,
+          TError,
+          Awaited<ReturnType<typeof listObStepHistory>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObStepHistory<TData = Awaited<ReturnType<typeof listObStepHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number,
+    params?: ListObStepHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepHistory>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Every state change on this service, oldest first
+ */
+
+export function useListObStepHistory<TData = Awaited<ReturnType<typeof listObStepHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ stepId: number,
+    params?: ListObStepHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObStepHistory>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObStepHistoryQueryOptions(stepId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
