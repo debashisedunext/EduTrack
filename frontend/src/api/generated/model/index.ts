@@ -564,6 +564,7 @@ export * from './obJourneyStepBlockedNote';
 export * from './obJourneyStepBlockedReasonCode';
 export * from './obJourneyStepDetail';
 export * from './obJourneyStepDetailAllOf';
+export * from './obJourneyStepDetailAllOfEffectiveOwnerUserId';
 export * from './obJourneyStepDetailResponse';
 export * from './obJourneyStepDoc';
 export * from './obJourneyStepDocAttachmentId';

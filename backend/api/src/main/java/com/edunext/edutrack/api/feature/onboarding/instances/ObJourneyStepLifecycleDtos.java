@@ -4,9 +4,11 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepRagService;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepStatus;
 import com.edunext.edutrack.domain.onboarding.ObRag;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import org.openapitools.jackson.nullable.JsonNullable;
 
 import java.time.Instant;
 import java.util.List;
@@ -41,6 +43,23 @@ final class ObJourneyStepLifecycleDtos {
     /** C-107 · {@code ObStepSkipRequest} — {@code reason} is mandatory, plan §3/§4. */
     record ObStepSkipRequest(
             @NotBlank @Size(min = 3, max = 500) String reason) {
+    }
+
+    /**
+     * C-108 · {@code ObJourneyStepUpdateRequest} — every field optional,
+     * absent meaning "leave unchanged" (the contract's own line). {@code
+     * ownerUserId}/{@code backupOwnerUserId}/{@code dueAt} are also
+     * explicitly clearable: the schema types them nullable, and the mock
+     * (built ahead, per {@code onboardingSteps.ts}'s own `!== undefined`
+     * checks) already treats a literal {@code null} as "clear this field"
+     * rather than folding it into "unchanged" — so the real backend has to
+     * draw the same distinction, which no plain Java type can without help.
+     * {@link JsonNullable} is that help; {@code tatDays} stays a plain
+     * {@code Integer} since the schema never allows it to be {@code null}.
+     */
+    record ObJourneyStepUpdateRequest(
+            JsonNullable<Long> ownerUserId, JsonNullable<Long> backupOwnerUserId,
+            @Min(0) Integer tatDays, JsonNullable<Instant> dueAt) {
     }
 
     // ── responses ─────────────────────────────────────────────────────
@@ -162,10 +181,18 @@ final class ObJourneyStepLifecycleDtos {
             String description, ObStepClockState clockState, ObRag rag,
             int tatDays, boolean requiresSignoff, Long dependsOnStepId,
             String skipReason, Long skippedByUserId,
-            List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs) {
+            List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs,
+            Long effectiveOwnerUserId) {
 
-        static ObJourneyStepDetail of(ObJourneyStep s, ObRag rag) {
-            return of(s, rag, List.of(), List.of());
+        /**
+         * C-108 · {@code effectiveOwnerUserId} needs {@link ObBackupOwnerResolver},
+         * which needs a repository call this static factory cannot make on its
+         * own — so it arrives here already resolved, exactly as C-114's {@code
+         * rag} does from {@link ObJourneyStepRagService}. Every caller passes
+         * all three.
+         */
+        static ObJourneyStepDetail of(ObJourneyStep s, ObRag rag, Long effectiveOwnerUserId) {
+            return of(s, rag, List.of(), List.of(), effectiveOwnerUserId);
         }
 
         /**
@@ -173,13 +200,13 @@ final class ObJourneyStepLifecycleDtos {
          * GET /onboarding/journey-steps/{stepId}} answers.
          *
          * <p>The empty-list overload above is kept rather than replaced:
-         * {@code skip}'s response and the {@code ETag} precondition both use
-         * it, and neither needs a checklist. Making them pay for two extra
-         * queries to send fields the caller is not reading would be a cost
-         * with no reader.
+         * {@code skip}'s response, {@code PATCH}'s response and the {@code
+         * ETag} precondition all use it, and none needs a checklist. Making
+         * them pay for two extra queries to send fields the caller is not
+         * reading would be a cost with no reader.
          */
         static ObJourneyStepDetail of(ObJourneyStep s, ObRag rag,
-                List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs) {
+                List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs, Long effectiveOwnerUserId) {
             return new ObJourneyStepDetail(
                     s.getId(), s.getJourneyId(), s.getSequence(), s.getName(), s.getStatus(),
                     s.getOwnerUserId(), s.getBackupOwnerUserId(),
@@ -188,18 +215,19 @@ final class ObJourneyStepLifecycleDtos {
                     s.getDescription(), ObStepClockState.of(s.getStatus()), rag,
                     s.getTatDays(), s.isRequiresSignoff(), s.getDependsOnStepId(),
                     s.getSkipReason(), s.getSkippedBy(),
-                    items, docs);
+                    items, docs, effectiveOwnerUserId);
         }
     }
 
     record ObJourneyStepDetailResponse(ObJourneyStepDetail data) {
-        static ObJourneyStepDetailResponse of(ObJourneyStep s, ObRag rag) {
-            return new ObJourneyStepDetailResponse(ObJourneyStepDetail.of(s, rag));
+        static ObJourneyStepDetailResponse of(ObJourneyStep s, ObRag rag, Long effectiveOwnerUserId) {
+            return new ObJourneyStepDetailResponse(ObJourneyStepDetail.of(s, rag, effectiveOwnerUserId));
         }
 
         static ObJourneyStepDetailResponse of(ObJourneyStep s, ObRag rag,
-                List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs) {
-            return new ObJourneyStepDetailResponse(ObJourneyStepDetail.of(s, rag, items, docs));
+                List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs, Long effectiveOwnerUserId) {
+            return new ObJourneyStepDetailResponse(
+                    ObJourneyStepDetail.of(s, rag, items, docs, effectiveOwnerUserId));
         }
     }
 

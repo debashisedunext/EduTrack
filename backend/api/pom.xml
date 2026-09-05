@@ -59,6 +59,13 @@
       <version>${shedlock.version}</version>
     </dependency>
     <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId></dependency>
+    <!-- C-108. absent-vs-explicit-null on ObJourneyStepUpdateRequest's three
+         clearable fields — the contract's own "absent means unchanged" only
+         means something if a caller can also send a literal `null` and have
+         it read differently, which no plain Java type can distinguish from
+         omission. The same library openapi-generator's own Spring codegen
+         reaches for, not a bespoke deserializer for three fields. -->
+    <dependency><groupId>org.openapitools</groupId><artifactId>jackson-databind-nullable</artifactId><version>0.2.6</version></dependency>
     <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId></dependency>
     <dependency><groupId>software.amazon.awssdk</groupId><artifactId>s3</artifactId></dependency>
     <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></dependency>
