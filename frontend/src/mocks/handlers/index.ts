@@ -5,6 +5,7 @@ import { onboardingHandlers } from './onboarding';
 import { onboardingJourneyInstanceHandlers } from './onboardingJourneyInstances';
 import { onboardingJourneyHandlers } from './onboardingJourneys';
 import { obJourneyHandlers } from './onboardingSteps';
+import { obNotificationHandlers } from './obNotifications';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
 import { slaHandlers } from './sla';
@@ -51,6 +52,9 @@ export const handlers = [
   // A-118 · the reads C-104's transitions do not cover — the journey list and
   // ribbon, the step panel, checklist, communications and history.
   ...obJourneyHandlers,
+  // B-112 · OB-13. Its own file rather than rows in onboarding.ts, because the
+  // notification centre is its own store and its own tab vocabulary.
+  ...obNotificationHandlers,
 
   // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the
   // `/api/v1` prefix, because a signed URL points at MinIO and not at the API —

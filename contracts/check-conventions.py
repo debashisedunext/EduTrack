@@ -34,6 +34,8 @@ NO_IF_MATCH = {
     "/clients/bulk-status":                "idempotent setter, like the single-client route it batches — and one If-Match cannot speak for 200 rows, while per-row tags would fail the whole batch because somebody touched one unrelated client",
     "/notifications/{notificationId}/read": "idempotent, a race is harmless",
     "/notifications/read-all":             "idempotent, a race is harmless",
+    "/onboarding/notifications/{notificationId}/read": "B-112 — OB-13's half of the two routes directly above, and the same argument unchanged: idempotent, and a race is harmless. Both are scoped to the caller's own entries, so the only concurrent writer is the same person in another tab, and the loser wanted the state the winner produced. `is_read = 0` is in the UPDATE's WHERE, so the second write changes nothing at all rather than restamping `read_at`",
+    "/onboarding/notifications/read-all":  "B-112 — idempotent, a race is harmless. As above, and additionally there is no tag to precondition on: the list read this would follow carries a cursor and an unread count, not a version of a set that is growing while you read it",
     "/tickets/{ticketId}/priority":        "reason mandatory and every change logged, so concurrent changes are visible not lost",
     "/tickets/{ticketId}/comments/{commentId}": "author-only inside a 5-minute window",
     "/chat/threads/{threadId}/messages/{messageId}": "author-only inside a 5-minute window",

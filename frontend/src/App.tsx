@@ -35,6 +35,7 @@ import { RoleListPage } from './features/masters/roles/RoleListPage'
 import { StatusMasterPage } from './features/masters/statuses/StatusMasterPage'
 import { WorkflowDesignerPage } from './features/masters/designer/WorkflowDesignerPage'
 import { JourneyTemplateDesignerPage } from './features/onboarding/journeys/JourneyTemplateDesignerPage'
+import { ObNotificationCentrePage } from './features/onboarding/notifications/ObNotificationCentrePage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
 import { TaskTypeListPage } from './features/masters/taskTypes/TaskTypeListPage'
 import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
@@ -256,6 +257,23 @@ export default function App() {
               path="/onboarding/journey-templates/:templateId"
               element={<JourneyTemplateDesignerPage />}
             />
+            {/*
+              B-112 · OB-13's full page. Beside the designer route above and for
+              the same reason it is not under `/masters/**` — the Onboarding
+              module's screens are disjoint from the ticketing masters (plan
+              §1.2), and this list is emphatically not S-26's: separate store,
+              separate tabs, separate event catalogue.
+
+              Routed now rather than with the onboarding shell, because it is
+              what B-114's daily digest links at. PHASE-2-BUILD-PLAN.md §73
+              asked for the page for precisely that reason — "a full page is
+              needed for history and for the digest links to land somewhere" —
+              and a destination that arrives after the mail pointing at it is a
+              mail with a broken link. There is still no onboarding nav section,
+              so this is reached by link until B-108/B-109 build one; the bell
+              popover mounts on that shell when it lands.
+            */}
+            <Route path="/onboarding/notifications" element={<ObNotificationCentrePage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
                 fields, so create and edit are dialogs on the grid rather than a

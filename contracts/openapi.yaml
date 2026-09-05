@@ -116,6 +116,12 @@ tags:
       prerequisite gate that holds them. Module-gated: see `ObModuleGated`.
   - name: onboarding-masters
     description: Products and the per-product journey templates they bind to. OB-07.
+  - name: onboarding-notifications
+    description: |
+      B-112 · OB-13, the onboarding notification centre — the bell popover and
+      the full history page the daily digest links land on. A separate centre
+      from `notifications` (S-26), not a filter on it: separate store, separate
+      tabs, separate event catalogue.
   - name: onboarding-journeys
     description: |
       C-102 · the OB-07 template designer — services, their ordering and
@@ -8354,6 +8360,94 @@ paths:
         '404': { $ref: '#/components/responses/ObModuleGated' }
 
 
+  # ══════════════════════════════════════ onboarding · notifications ══════
+
+  /onboarding/notifications:
+    get:
+      tags: [onboarding-notifications]
+      operationId: listObNotifications
+      summary: Onboarding notification centre (OB-13)
+      description: |
+        **The bell popover and the full page are the same endpoint.** "The last
+        eight" is a `limit`, not a second route — two would mean two places to
+        keep the tab filter and the badge honest.
+
+        **This is not `GET /notifications`.** The two centres share neither a
+        store, a tab vocabulary nor an event catalogue: onboarding entries live
+        in `ob_notifications`, are keyed on the module's own
+        `ObNotificationEvent`, and group under All / Assignments / Escalations /
+        Reminders. A `module` parameter on S-26's route would have been the only
+        thing the two had in common, and would have had to fan out to two
+        tables underneath. Plan §1.2's separability, followed through.
+
+        **Staff only, by construction.** An entry is addressed to a `users` row.
+        §9's portal screens have no notification centre, so an `IN_APP` message
+        queued for a client contact is refused at delivery with a reason rather
+        than written where nobody can read it.
+
+        Entries are ordered by id, never `created_at`: one gate opening
+        notifies four owners in the same microsecond, and a cursor over a
+        non-unique key either repeats a row or skips one.
+      parameters:
+        - name: tab
+          in: query
+          schema: { type: string, enum: [all, assignments, escalations, reminders], default: all }
+          description: >
+            A view over the entry's category. `UPDATE` entries — a gate opened,
+            a go-live, a prerequisite verified — have no tab and appear under
+            `all`, which is what `all` is for.
+        - { name: unreadOnly, in: query, schema: { type: boolean } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: >
+            OK. `meta.unreadCount` is the caller's total unread, never the count
+            within the current tab — it drives the bell badge, which must not
+            change as you click between tabs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObNotificationListResponse' }
+        '400':
+          description: >
+            Unknown `tab`, or a `cursor` that did not come from
+            `meta.nextCursor`. An unrecognised tab is rejected rather than
+            treated as `all`, which would show a caller who mistyped it
+            everything and look correct.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/notifications/read-all:
+    patch:
+      tags: [onboarding-notifications]
+      operationId: markAllObNotificationsRead
+      summary: Mark every onboarding notification as read
+      description: >
+        Takes no `tab`, deliberately: a "mark all read" that left some unread is
+        a lie the badge contradicts a second later.
+      responses:
+        '204': { description: All read. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/notifications/{notificationId}/read:
+    parameters: [{ $ref: '#/components/parameters/ObNotificationId' }]
+    patch:
+      tags: [onboarding-notifications]
+      operationId: markObNotificationRead
+      summary: Mark one onboarding notification as read
+      description: >
+        Already-read answers `204` alongside just-marked: the caller asked for a
+        state and it holds either way. Re-reading does not restamp `read_at`, or
+        "when did you see this" becomes "when did you last open the list".
+      responses:
+        '204': { description: Read. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
 # ══════════════════════════════════════════════════════════ components ═══════
 components:
 
@@ -8397,6 +8491,16 @@ components:
       in: path
       required: true
       schema: { type: integer, format: int64 }
+    ObNotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        An `ob_notifications` id. An entry that is not the caller's answers
+        `404`, not `403` — a `403` would confirm that entry 91 exists and
+        belongs to somebody else, which is CONVENTIONS.md §7 on a row that
+        happens to be a notification.
     ContactId:
       name: contactId
       in: path
@@ -13702,6 +13806,53 @@ components:
         isRead: { type: boolean }
         createdAt: { type: string, format: date-time }
         deepLink: { type: string }
+    ObNotification:
+      type: object
+      description: |
+        B-112 · one OB-13 entry. `title` and `body` are the wording resolved at
+        delivery, stored rather than re-derived on read — a payload is
+        superseded as the journey moves, and re-rendering would make a
+        three-week-old notification describe today's state.
+      properties:
+        id: { type: integer, format: int64 }
+        eventKey:
+          type: string
+          examples: [TAT_BREACHED]
+          description: >
+            The stored `ObNotificationEvent` name. Sent as the raw string rather
+            than a closed enum, so an entry written by a newer deploy renders
+            instead of failing the whole page.
+        category:
+          type: string
+          examples: [ESCALATION]
+          description: >
+            OB-13's tab. Also a raw string, and for the same reason — an unknown
+            value should cost the grouping, not the row.
+        title: { type: string, maxLength: 200 }
+        body: { type: [string, 'null'] }
+        obClientId: { type: [integer, 'null'], format: int64 }
+        journeyId: { type: [integer, 'null'], format: int64 }
+        stepId: { type: [integer, 'null'], format: int64 }
+        isRead: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        deepLink:
+          type: [string, 'null']
+          examples: ['/onboarding/clients/42']
+          description: >
+            App-relative, and derived from the entry's own ids rather than from
+            the mail payload's `action_url` — that value is minted for a mail
+            recipient and on two events carries a client's one-time token.
+    ObNotificationListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ObNotification' } }
+        meta:
+          allOf:
+            - { $ref: '#/components/schemas/Meta' }
+            - type: object
+              properties:
+                unreadCount: { type: integer }
     NotificationListResponse:
       type: object
       required: [data]
