@@ -214,6 +214,37 @@ enum ObMailTemplate {
             """,
             "Open the client", Urgency.NONE),
 
+    // ───────────────────────────────────────────────────────── the daily digest
+
+    /**
+     * B-114's one mail a day to a manager.
+     *
+     * <p><strong>The prose here is the whole template, and the table is not.</strong>
+     * Every other constant in this file is the entire body of its mail. This one
+     * is the two sentences above a list {@link ObDigestBody} builds from the
+     * payload's rows and appends, because a list is not something a
+     * {@code {{placeholder}}} can be. The split is what keeps the wording
+     * editable on OB-12 when B-113 moves these constants into rows — an Admin
+     * can rewrite the sentences without being handed a table to maintain.
+     *
+     * <p>{@link Urgency#ATTENTION} rather than {@code BREACH}. Some of what the
+     * table lists is genuinely overdue and some of it is a client who has gone
+     * quiet, and a mail that shouts every morning is a mail that is filtered by
+     * the end of the month — which is the one outcome that makes the digest
+     * worse than not sending it.
+     */
+    MANAGER_DIGEST(ObNotificationEvent.MANAGER_DIGEST, ObMailAudience.STAFF,
+            "Onboarding — {{stuck_count}} stuck across {{client_count}} client(s)",
+            "Onboarding — work that has stopped moving",
+            """
+            <p>These services under you have not moved for longer than
+            {{threshold}}. Nothing here has raised an alert of its own: a step
+            waiting on a client stops its own clock, so it will not breach and
+            nobody will be told about it again.</p>
+            <p>The oldest has been sitting for {{oldest_stalled_for}}.</p>
+            """,
+            "Open onboarding", Urgency.ATTENTION),
+
     // ───────────────────────────────────────────── the client's own escalation
 
     CLIENT_ESCALATION_RAISED(ObNotificationEvent.CLIENT_ESCALATION_RAISED, ObMailAudience.STAFF,

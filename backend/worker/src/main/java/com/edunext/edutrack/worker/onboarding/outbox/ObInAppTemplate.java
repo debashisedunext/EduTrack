@@ -141,6 +141,31 @@ enum ObInAppTemplate {
             "What it was waiting on is complete, so its first service is now yours.",
             "What it was waiting on is complete, so its first service is now yours."),
 
+    // ───────────────────────────────────────────────────────── the daily digest
+
+    /**
+     * B-114's digest, worded as a bell entry.
+     *
+     * <p><strong>Nothing queues this on IN_APP today, and the constant is not
+     * padding.</strong> B-114 sends the digest by mail only. But the catalogue
+     * has no holes by design — the queue admits any (event, channel,
+     * recipient) an enqueuer chooses, and the alternative to a wording here is
+     * the generic notice for a case somebody deliberately queued. The class
+     * note makes the same argument for the events whose mail only ever reaches
+     * a client.
+     *
+     * <p>The count is the whole entry, because the list is not something a
+     * bell row can hold: {@code ObDigestBody}'s table lives in the mail, and a
+     * bell entry's job is to get the reader to the module. Neither line
+     * references {@link ObNotificationEvent#STUCK_ROWS} — a JSON array
+     * rendered into one line would print as {@code [{client=…}]}.
+     */
+    MANAGER_DIGEST(ObNotificationEvent.MANAGER_DIGEST,
+            "{{stuck_count}} stuck across {{client_count}} client(s)",
+            "Onboarding work has stopped moving",
+            "None of it has raised an alert of its own — it has been still for longer than {{threshold}}.",
+            "None of it has raised an alert of its own. The mail lists what and for how long."),
+
     // ───────────────────────────────────────────── the client's own escalation
 
     CLIENT_ESCALATION_RAISED(ObNotificationEvent.CLIENT_ESCALATION_RAISED,

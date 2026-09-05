@@ -11,6 +11,7 @@ import org.thymeleaf.templatemode.TemplateMode;
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,7 +43,7 @@ class ObMailRendererTest {
         resolver.setTemplateMode(TemplateMode.HTML);
         SpringTemplateEngine thymeleaf = new SpringTemplateEngine();
         thymeleaf.setTemplateResolver(resolver);
-        renderer = new ObMailRenderer(new ObMailLinks(BASE), thymeleaf);
+        renderer = new ObMailRenderer(new ObMailLinks(BASE), new ObDigestBody(), thymeleaf);
     }
 
     // ─────────────────────────────────────────────── the one that must not fail
@@ -321,6 +322,100 @@ class ObMailRendererTest {
         // "Overdue by" with nothing after it reads as a bug in the product.
         assertThat(content.html()).doesNotContain("Overdue by").doesNotContain("Escalated to");
         assertThat(content.html()).doesNotContain("Owner");
+    }
+
+    // ────────────────────────────────────────────────────────── B-114's digest
+
+    @Test
+    @DisplayName("the digest's rows arrive as a table under its prose")
+    void theDigestCarriesItsList() {
+        // The one body this class does not substitute. Asserted here rather
+        // than only in ObDigestBodyTest because the seam is what could break:
+        // a table that renders perfectly and is never appended is a digest
+        // that tells a manager how many things are stuck and not which.
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("stuck_count", 2);
+        payload.put("client_count", 2);
+        payload.put("threshold", "2 working days");
+        payload.put("oldest_stalled_for", "9 working days");
+        payload.put(ObNotificationEvent.STUCK_ROWS, List.of(
+                Map.of("client", "Horizon Academy", "product", "LMS", "step", "Data migration",
+                        "owner", "Ravi Kumar", "state", "Waiting on client",
+                        "stalled_for", "9 working days"),
+                Map.of("client", "Acme Ltd", "step", "UAT", "state", "Overdue",
+                        "stalled_for", "3 working days")));
+
+        ObMailContent content = renderer.render(staff(ObNotificationEvent.MANAGER_DIGEST, payload));
+
+        assertThat(content.subject()).isEqualTo("Onboarding — 2 stuck across 2 client(s)");
+        // The template's prose wraps, so the threshold is asserted on its own
+        // rather than as part of a sentence that carries a newline.
+        assertThat(content.html())
+                .contains("have not moved for longer than")
+                .contains("2 working days. Nothing here has raised an alert")
+                .contains("The oldest has been sitting for 9 working days.")
+                .contains("Horizon Academy")
+                .contains("Data migration")
+                .contains("Acme Ltd");
+    }
+
+    @Test
+    @DisplayName("the rows never become markup, however they are named")
+    void theDigestEscapesItsRows() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("stuck_count", 1);
+        payload.put("client_count", 1);
+        payload.put("threshold", "2 working days");
+        payload.put(ObNotificationEvent.STUCK_ROWS, List.of(
+                Map.of("client", "<script>alert(1)</script>", "step", "UAT",
+                        "state", "Blocked", "stalled_for", "3 working days")));
+
+        ObMailContent content = renderer.render(staff(ObNotificationEvent.MANAGER_DIGEST, payload));
+
+        // The layout prints this body through its one th:utext, so the table is
+        // the only markup in the module that is not escaped on output. Every
+        // value inside it has to be escaped on the way in.
+        assertThat(content.html()).doesNotContain("<script>").contains("&lt;script&gt;");
+    }
+
+    @Test
+    @DisplayName("a digest with no rows is still a mail, not a generic notice")
+    void aDigestWithNoRowsStillReads() {
+        // Nothing enqueues one — the scheduler does not mail a manager with an
+        // empty list. But a row that lost its array in transit should still say
+        // something true rather than falling to "this build has no wording".
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("stuck_count", 4);
+        payload.put("client_count", 2);
+        payload.put("threshold", "2 working days");
+
+        ObMailContent content = renderer.render(staff(ObNotificationEvent.MANAGER_DIGEST, payload));
+
+        assertThat(content.subject()).isEqualTo("Onboarding — 4 stuck across 2 client(s)");
+        assertThat(content.html()).doesNotContain("no wording for");
+    }
+
+    @Test
+    @DisplayName("the digest names no single client in the header")
+    void theDigestHeaderIsNotOneClients() {
+        // ObMailLinks falls back to OB-03 when the row has no client id, and the
+        // layout prints no client line. A digest that led with one client's name
+        // would read as though it were only about them.
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("stuck_count", 1);
+        payload.put("client_count", 1);
+        payload.put("threshold", "2 working days");
+        payload.put(ObNotificationEvent.STUCK_ROWS, List.of(
+                Map.of("client", "Horizon Academy", "step", "UAT",
+                        "state", "Blocked", "stalled_for", "3 working days")));
+
+        ObMailContent content = renderer.render(new ObOutboxMessage(
+                103, ObNotificationEvent.MANAGER_DIGEST.key(), ObChannel.EMAIL,
+                new ObRecipient.Staff(5),
+                new ObOutboxMessage.RecipientDetails("Meera Iyer", "meera@edunext.test", null, false, true),
+                null, null, null, payload, 0));
+
+        assertThat(content.html()).contains(BASE + "/onboarding/clients");
     }
 
     // ───────────────────────────────────────────────────── the catalogue's gaps

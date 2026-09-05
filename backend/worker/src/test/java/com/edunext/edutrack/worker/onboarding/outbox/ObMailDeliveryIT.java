@@ -76,7 +76,7 @@ class ObMailDeliveryIT {
         SpringTemplateEngine thymeleaf = new SpringTemplateEngine();
         thymeleaf.setTemplateResolver(resolver);
         ObMailRenderer renderer = new ObMailRenderer(
-                new ObMailLinks("https://edutrack.example"), thymeleaf);
+                new ObMailLinks("https://edutrack.example"), new ObDigestBody(), thymeleaf);
 
         transport = new SmtpObMailTransport(sender, renderer,
                 new ObMailThread("edutrack.test"), "no-reply@edutrack.test");

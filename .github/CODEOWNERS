@@ -112,6 +112,10 @@ api/feature/onboarding/notifications/   @Ayushedunext
 domain/onboarding/outbox/               @Ayushedunext
 worker/onboarding/outbox/               @Ayushedunext
 worker/onboarding/stats/                @Ayushedunext
+# B-114's manager digest. Third package under worker/onboarding/, same reason
+# as the two above: without it `/backend/worker/` hands Stream D a scheduler
+# that queues Stream B's mail.
+worker/onboarding/digest/               @Ayushedunext
 # B-111's mail layout. A resource, so none of the package rules above reach it,
 # and `/backend/worker/` would otherwise hand Stream D the wording of every
 # onboarding mail. Named on the file rather than on its directory because
