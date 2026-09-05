@@ -17294,6 +17294,16 @@ components:
                 summed from `ob_step_clock_events` at read time. Never stored:
                 a cached total that disagreed with the events it claims to sum
                 would be argued about rather than trusted.
+            effectiveOwnerUserId:
+              type: [integer, 'null']
+              format: int64
+              description: |
+                C-108 · who owns this service *today* — the backup owner when
+                `ownerUserId` is on approved leave today, or when there is no
+                resolved `ownerUserId` at all; `ownerUserId` otherwise. Derived
+                against the working calendar at read time and never stored, so
+                it is deliberately excluded from this response's own `ETag` —
+                it can change overnight with nothing here having been written.
       description: The OB-06 panel.
     ObJourneyStepUpdateRequest:
       type: object

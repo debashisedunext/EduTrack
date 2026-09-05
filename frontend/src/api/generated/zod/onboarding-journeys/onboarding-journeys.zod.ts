@@ -878,7 +878,8 @@ export const getObJourneyStepResponse = zod.object({
   "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
   "attachmentId": zod.number().nullish()
 })),
-  "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n')
+  "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n'),
+  "effectiveOwnerUserId": zod.number().nullish().describe('C-108 · who owns this service \*today\* — the backup owner when\n`ownerUserId` is on approved leave today, or when there is no\nresolved `ownerUserId` at all; `ownerUserId` otherwise. Derived\nagainst the working calendar at read time and never stored, so\nit is deliberately excluded from this response\'s own `ETag` —\nit can change overnight with nothing here having been written.\n')
 })).describe('The OB-06 panel.')
 })
 
@@ -967,7 +968,8 @@ export const updateObJourneyStepResponse = zod.object({
   "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
   "attachmentId": zod.number().nullish()
 })),
-  "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n')
+  "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n'),
+  "effectiveOwnerUserId": zod.number().nullish().describe('C-108 · who owns this service \*today\* — the backup owner when\n`ownerUserId` is on approved leave today, or when there is no\nresolved `ownerUserId` at all; `ownerUserId` otherwise. Derived\nagainst the working calendar at read time and never stored, so\nit is deliberately excluded from this response\'s own `ETag` —\nit can change overnight with nothing here having been written.\n')
 })).describe('The OB-06 panel.')
 })
 
@@ -1058,7 +1060,8 @@ export const skipObJourneyStepResponse = zod.object({
   "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
   "attachmentId": zod.number().nullish()
 })),
-  "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n')
+  "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n'),
+  "effectiveOwnerUserId": zod.number().nullish().describe('C-108 · who owns this service \*today\* — the backup owner when\n`ownerUserId` is on approved leave today, or when there is no\nresolved `ownerUserId` at all; `ownerUserId` otherwise. Derived\nagainst the working calendar at read time and never stored, so\nit is deliberately excluded from this response\'s own `ETag` —\nit can change overnight with nothing here having been written.\n')
 })).describe('The OB-06 panel.')
 })
 

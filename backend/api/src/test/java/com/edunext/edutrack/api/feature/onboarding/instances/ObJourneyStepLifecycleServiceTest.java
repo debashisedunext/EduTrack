@@ -22,6 +22,7 @@ import com.edunext.edutrack.domain.onboarding.ObStepHistory;
 import com.edunext.edutrack.domain.onboarding.ObStepHistoryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openapitools.jackson.nullable.JsonNullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -583,5 +584,128 @@ class ObJourneyStepLifecycleServiceTest {
         ObStepHistory entry = historyRows.get(1);
         assertThat(entry.getPrevHash()).isEqualTo("a".repeat(64));
         assertThat(entry.getRowHash()).isNotEqualTo(entry.getPrevHash());
+    }
+
+    // ── update (C-108) ───────────────────────────────────────────────────
+
+    private static final long NEW_OWNER = 20L;
+    private static final long NEW_BACKUP = 21L;
+
+    /** {@code STRANGER} as the caller throughout — see {@link #updateIsNotRowScopedByOwnership}. */
+    private ObJourneyStep update(JsonNullable<Long> ownerUserId, JsonNullable<Long> backupOwnerUserId,
+            Integer tatDays, JsonNullable<java.time.Instant> dueAt) {
+        return service.update(STEP, STRANGER, MANAGER_ROLE, ownerUserId, backupOwnerUserId, tatDays, dueAt);
+    }
+
+    @Test
+    void updateReassignsOwnerAndBackupOwner() {
+        ObJourneyStep updated = update(JsonNullable.of(NEW_OWNER), JsonNullable.of(NEW_BACKUP), null,
+                JsonNullable.undefined());
+
+        assertThat(updated.getOwnerUserId()).isEqualTo(NEW_OWNER);
+        assertThat(updated.getBackupOwnerUserId()).isEqualTo(NEW_BACKUP);
+    }
+
+    @Test
+    void updateReplansTatDaysAndDueAt() {
+        java.time.Instant newDueAt = java.time.Instant.parse("2026-11-01T00:00:00Z");
+
+        ObJourneyStep updated = update(JsonNullable.undefined(), JsonNullable.undefined(), 5,
+                JsonNullable.of(newDueAt));
+
+        assertThat(updated.getTatDays()).isEqualTo(5);
+        assertThat(updated.getDueAt()).isEqualTo(newDueAt);
+    }
+
+    @Test
+    void updateLeavesAbsentFieldsUnchanged() {
+        ObJourneyStep step = stepRows.get(STEP);
+        long originalOwner = step.getOwnerUserId();
+        long originalBackup = step.getBackupOwnerUserId();
+        int originalTatDays = step.getTatDays();
+
+        ObJourneyStep updated = update(JsonNullable.undefined(), JsonNullable.undefined(), null,
+                JsonNullable.undefined());
+
+        assertThat(updated.getOwnerUserId()).isEqualTo(originalOwner);
+        assertThat(updated.getBackupOwnerUserId()).isEqualTo(originalBackup);
+        assertThat(updated.getTatDays()).isEqualTo(originalTatDays);
+    }
+
+    @Test
+    void updateClearsBackupOwnerOnAnExplicitNull() {
+        ObJourneyStep updated = update(JsonNullable.undefined(), JsonNullable.of(null), null,
+                JsonNullable.undefined());
+
+        assertThat(updated.getBackupOwnerUserId()).isNull();
+    }
+
+    @Test
+    void updateIsNotRowScopedByOwnership() {
+        // STRANGER owns nothing on this step — a manager reassigning it is
+        // exactly the override requireModerator (not requireOwnership) exists
+        // to allow. See the service's own class javadoc on update().
+        ObJourneyStep updated = update(JsonNullable.of(NEW_OWNER), JsonNullable.undefined(), null,
+                JsonNullable.undefined());
+
+        assertThat(updated.getOwnerUserId()).isEqualTo(NEW_OWNER);
+    }
+
+    @Test
+    void updateRefusesACallerHoldingTheWrongOnboardingRole() {
+        assertThatThrownBy(() -> service.update(STEP, STRANGER, WRONG_ROLE,
+                JsonNullable.of(NEW_OWNER), JsonNullable.undefined(), null, JsonNullable.undefined()))
+                .isInstanceOf(NotAnOnboardingModeratorException.class);
+    }
+
+    @Test
+    void updateAnswersNotFoundForACallerWithNoOnboardingStandingAtAll() {
+        assertThatThrownBy(() -> service.update(STEP, STRANGER, null,
+                JsonNullable.of(NEW_OWNER), JsonNullable.undefined(), null, JsonNullable.undefined()))
+                .isInstanceOf(JourneyStepNotFoundException.class);
+    }
+
+    @Test
+    void updateRefusesAnAlreadyDoneStep() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.DONE);
+
+        assertThatThrownBy(() -> update(JsonNullable.of(NEW_OWNER), JsonNullable.undefined(), null,
+                JsonNullable.undefined()))
+                .isInstanceOf(StepAlreadyTerminalException.class);
+    }
+
+    @Test
+    void updateRefusesAnAlreadySkippedStep() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.SKIPPED);
+
+        assertThatThrownBy(() -> update(JsonNullable.of(NEW_OWNER), JsonNullable.undefined(), null,
+                JsonNullable.undefined()))
+                .isInstanceOf(StepAlreadyTerminalException.class);
+    }
+
+    @Test
+    void updateWritesOneFieldChangedHistoryRowPerChangedField() {
+        update(JsonNullable.of(NEW_OWNER), JsonNullable.of(NEW_BACKUP), 5, JsonNullable.undefined());
+
+        assertThat(historyRows).hasSize(3);
+        assertThat(historyRows).allSatisfy(entry -> assertThat(entry.getEventType()).isEqualTo("FIELD_CHANGED"));
+        assertThat(historyRows.stream().map(ObStepHistory::getFieldName))
+                .containsExactlyInAnyOrder("owner_user_id", "backup_owner_user_id", "tat_days");
+    }
+
+    @Test
+    void updateWritesNoHistoryRowWhenNothingActuallyChanges() {
+        ObJourneyStep step = stepRows.get(STEP);
+        update(JsonNullable.of(step.getOwnerUserId()), JsonNullable.of(step.getBackupOwnerUserId()),
+                step.getTatDays(), JsonNullable.undefined());
+
+        assertThat(historyRows).isEmpty();
+    }
+
+    @Test
+    void updateFailsCleanlyForAnUnknownStep() {
+        assertThatThrownBy(() -> service.update(404L, STRANGER, MANAGER_ROLE,
+                JsonNullable.of(NEW_OWNER), JsonNullable.undefined(), null, JsonNullable.undefined()))
+                .isInstanceOf(JourneyStepNotFoundException.class);
     }
 }

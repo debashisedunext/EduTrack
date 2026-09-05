@@ -20,6 +20,7 @@ import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
 import com.edunext.edutrack.domain.onboarding.ObStepHistory;
+import org.openapitools.jackson.nullable.JsonNullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -76,6 +77,15 @@ import java.util.stream.Collectors;
  * the first method in this class to write anywhere other than the {@code
  * ob_journey_steps} row it mutates — see its own javadoc and {@link
  * #appendSkippedHistory}.
+ *
+ * <h2>C-108 · update</h2>
+ *
+ * <p>{@link #update} is not a transition at all — {@code status} is
+ * deliberately absent from its request shape (the contract's own line).
+ * Reassignment, re-planning TAT and re-planning the due date are what it
+ * covers, gated by {@link #requireModerator} exactly like {@link #skip}
+ * rather than {@link #requireOwnership}: an owner reassigning themselves off
+ * their own step is the one rewrite this route must not permit silently.
  */
 @Service
 @UnscopedAccess("""
@@ -344,6 +354,61 @@ public class ObJourneyStepLifecycleService {
         return step;
     }
 
+    /**
+     * C-108 · owner, backup owner, TAT and due date — the fields a manager
+     * adjusts without the step changing state (contract's own operation
+     * description for {@code PATCH .../journey-steps/{stepId}}). {@code
+     * ownerUserId}/{@code backupOwnerUserId}/{@code dueAt} are {@link
+     * JsonNullable} — {@link JsonNullable#isPresent()} false means "absent,
+     * leave unchanged"; present-with-{@code null} means "clear it". {@code
+     * tatDays} stays a plain, nullable {@code Integer}: the schema never
+     * allows it to be cleared, only left absent.
+     *
+     * <p>Gated the same way {@link #skip} is — {@link #requireModerator},
+     * not {@link #requireOwnership} — on the same reasoning: reassigning a
+     * step off its own owner, or re-planning its TAT, is exactly the kind of
+     * override a step's owner should not be able to grant themselves.
+     *
+     * @throws JourneyStepNotFoundException        no such step, <em>or</em> the caller holds no
+     *                                              standing in {@code ONBOARDING} at all
+     * @throws NotAnOnboardingModeratorException   the caller holds a role in {@code ONBOARDING},
+     *                                              and it is neither {@code OB_MANAGER} nor {@code OB_ADMIN}
+     * @throws StepAlreadyTerminalException        the step is already {@code DONE} or {@code SKIPPED} —
+     *                                              its recorded TAT is what TAT reports are built on
+     */
+    @Transactional
+    public ObJourneyStep update(long stepId, long callerId, String moduleRole,
+            JsonNullable<Long> ownerUserId, JsonNullable<Long> backupOwnerUserId,
+            Integer tatDays, JsonNullable<Instant> dueAt) {
+        ObJourneyStep step = requireStep(stepId);
+        requireModerator(stepId, moduleRole);
+        requireNotTerminal(step);
+
+        ObJourney journey = journeys.findById(step.getJourneyId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "journey step " + stepId + " points at journey " + step.getJourneyId() + " which does not exist"));
+
+        if (ownerUserId.isPresent() && !Objects.equals(ownerUserId.get(), step.getOwnerUserId())) {
+            appendFieldChangedHistory(journey, step, callerId, "owner_user_id",
+                    step.getOwnerUserId(), ownerUserId.get());
+            step.setOwnerUserId(ownerUserId.get());
+        }
+        if (backupOwnerUserId.isPresent() && !Objects.equals(backupOwnerUserId.get(), step.getBackupOwnerUserId())) {
+            appendFieldChangedHistory(journey, step, callerId, "backup_owner_user_id",
+                    step.getBackupOwnerUserId(), backupOwnerUserId.get());
+            step.setBackupOwnerUserId(backupOwnerUserId.get());
+        }
+        if (tatDays != null && tatDays != step.getTatDays()) {
+            appendFieldChangedHistory(journey, step, callerId, "tat_days", step.getTatDays(), tatDays);
+            step.setTatDays(tatDays);
+        }
+        if (dueAt.isPresent() && !Objects.equals(dueAt.get(), step.getDueAt())) {
+            appendFieldChangedHistory(journey, step, callerId, "due_at", step.getDueAt(), dueAt.get());
+            step.setDueAt(dueAt.get());
+        }
+        return step;
+    }
+
     /** C-107 · a plain read, for the controller's {@code ETag} precondition check — no transition, no lock. */
     public ObJourneyStep getStep(long stepId) {
         return requireStep(stepId);
@@ -431,6 +496,27 @@ public class ObJourneyStepLifecycleService {
         entry.setActorId(actorId);
         entry.setActorType("USER");
         entry.setRemarks(reason);
+        stepJournal.append(entry);
+    }
+
+    /**
+     * C-108 · one {@code FIELD_CHANGED} row per field {@link #update} actually
+     * changes — {@code TicketWriteService#patch}'s own convention one module
+     * over ("one FIELD_CHANGED history row per field that actually
+     * differs"), reused here rather than invented fresh.
+     */
+    private void appendFieldChangedHistory(ObJourney journey, ObJourneyStep step, long actorId,
+                                            String fieldName, Object oldValue, Object newValue) {
+        ObStepHistory entry = new ObStepHistory();
+        entry.setJourneyId(journey.getId());
+        entry.setStepId(step.getId());
+        entry.setObClientId(journey.getObClientId());
+        entry.setEventType("FIELD_CHANGED");
+        entry.setFieldName(fieldName);
+        entry.setOldValue(oldValue == null ? null : oldValue.toString());
+        entry.setNewValue(newValue == null ? null : newValue.toString());
+        entry.setActorId(actorId);
+        entry.setActorType("USER");
         stepJournal.append(entry);
     }
 }

@@ -46,25 +46,14 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObJourneyStepItem } from './obJourneyStepItem';
-import type { ObJourneyStepDoc } from './obJourneyStepDoc';
-import type { ObJourneyStepDetailAllOfEffectiveOwnerUserId } from './obJourneyStepDetailAllOfEffectiveOwnerUserId';
 
-export type ObJourneyStepDetailAllOf = {
-  items: ObJourneyStepItem[];
-  docs: ObJourneyStepDoc[];
-  /** Working hours consumed on this service, client waits excluded,
-summed from `ob_step_clock_events` at read time. Never stored:
-a cached total that disagreed with the events it claims to sum
-would be argued about rather than trusted.
- */
-  elapsedHours?: number;
-  /** C-108 · who owns this service *today* — the backup owner when
+/**
+ * C-108 · who owns this service *today* — the backup owner when
 `ownerUserId` is on approved leave today, or when there is no
 resolved `ownerUserId` at all; `ownerUserId` otherwise. Derived
 against the working calendar at read time and never stored, so
 it is deliberately excluded from this response's own `ETag` —
 it can change overnight with nothing here having been written.
+
  */
-  effectiveOwnerUserId?: ObJourneyStepDetailAllOfEffectiveOwnerUserId;
-};
+export type ObJourneyStepDetailAllOfEffectiveOwnerUserId = number | null;

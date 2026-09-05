@@ -147,6 +147,24 @@ function stepItemDto(item: ObStepItem, stepId: number, db: Db) {
   };
 }
 
+/**
+ * C-108 · who owns this service today — the backup owner when the primary
+ * owner is on approved leave today, or when there is no resolved owner at
+ * all; the owner otherwise. Mirrors `sla.ts`'s own (module-private)
+ * `leaveOn` query rather than importing it — a three-line local check is
+ * cheaper than coupling this file to that one for it, on this file's own
+ * "two files rather than two similarly-named helpers in one" precedent.
+ */
+function effectiveOwnerUserId(step: ObStep, db: Db): number | null {
+  if (step.ownerUserId == null) return step.backupOwnerUserId ?? null;
+  if (step.backupOwnerUserId == null) return step.ownerUserId;
+  const today = new Date().toISOString().slice(0, 10);
+  const ownerOnLeave = db.calendar.leaves.some(
+    (l) => l.userId === step.ownerUserId && l.status === 'APPROVED' && l.startDate <= today && today <= l.endDate,
+  );
+  return ownerOnLeave ? step.backupOwnerUserId : step.ownerUserId;
+}
+
 function stepDetailDto(step: ObStep, db: Db, journeyId: number) {
   return {
     ...stepDto(step, journeyId),
@@ -161,6 +179,7 @@ function stepDetailDto(step: ObStep, db: Db, journeyId: number) {
       attachmentId: d.attachmentId,
     })),
     elapsedHours: step.usedHours,
+    effectiveOwnerUserId: effectiveOwnerUserId(step, db),
   };
 }
 
