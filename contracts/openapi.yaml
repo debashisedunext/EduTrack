@@ -8367,6 +8367,2175 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
 
+  # ─────────────────────────────────────────────── prerequisites (OB-14) ────
+  #
+  # A-118 · the client's own checklist, and the hard gate in front of every
+  # journey (plan §5.3). Two halves, and they are different shapes:
+  #
+  #   the master   — one org-wide versioned task set, authored by an OB Admin
+  #   the instance — a per-client snapshot of it, worked by the client
+  #
+  # **The master is singular where journey templates are plural**, and that is
+  # the one structural difference worth stating before reading the paths.
+  # `ob_journey_templates` is keyed by product — one active version *per
+  # product* — because a journey describes the delivery of a thing that was
+  # bought. Prerequisites describe the client's own responsibilities, which
+  # plan §4 makes the same set for everybody regardless of what they bought.
+  # So there is no id in these paths: `/onboarding/prereq-template` is the
+  # resource, and a version is a query parameter on it rather than a row you
+  # address.
+  /onboarding/prereq-template:
+    get:
+      tags: [onboarding-masters]
+      operationId: getObPrereqTemplate
+      summary: The prerequisites master, one version (OB-14)
+      description: |
+        B-124's screen, and the set `createObClient` snapshots at boarding.
+
+        Defaults to the **active** version. `version` asks for an older one —
+        the reason to want it is a client boarded months ago whose instance
+        pins a version nobody can otherwise read, which is the same question
+        `ObJourney.templateVersion` raises on the journey side.
+
+        Tasks are **not paginated**. This is one version's set, and every
+        caller needs all of it: the wizard snapshots the whole thing, the
+        OB-14 editor draws the whole thing, and a partial answer would let a
+        client be boarded against half a checklist. `/masters/task-types`'
+        argument, on a set the product deliberately keeps short — plan §14
+        names "mandatory list kept short in the master" as the mitigation for
+        the gate stalling every journey.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+        - name: version
+          in: query
+          schema: { type: integer, minimum: 1 }
+          description: |
+            Omit for the active version. There is no way to ask for "the
+            draft" by name — a draft is whatever `isDraft` is true on, and
+            `beginObPrereqTemplateRevision` returns it directly.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: |
+                Content-derived from the version and every task on it, so
+                adding, removing or editing a task moves it. This is the tag
+                `updateObPrereqTemplateTask`'s `If-Match` comes from — the
+                pairing CONVENTIONS §5 requires be made by hand, because
+                `check-conventions.py` cannot see it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqTemplateResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/prereq-template/revisions:
+    post:
+      tags: [onboarding-masters]
+      operationId: beginObPrereqTemplateRevision
+      summary: Clone the active version into an editable draft (OB-14)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Tasks and their reference docs are cloned. The source version is never
+        written, so every client already boarded against it keeps rendering
+        exactly the checklist they agreed to — plan §1.1 #2, stated there for
+        journey templates and applying here word for word.
+
+        `409` if a draft already exists. One draft at a time, because two
+        would each be "the next version" and publishing either would silently
+        discard the other.
+      responses:
+        '201':
+          description: Created — the draft, one version higher.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqTemplateResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: A draft already exists — publish or discard it first.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-template/publish:
+    post:
+      tags: [onboarding-masters]
+      operationId: publishObPrereqTemplate
+      summary: The draft becomes the active version (OB-14)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        The version it supersedes is retired in the same transaction.
+
+        **Clients already boarded are untouched**, including those whose gate
+        is still locked. It is tempting to migrate an in-flight client onto a
+        newer checklist — they have not finished the old one — and it is the
+        wrong call: a task the client has already submitted would be replaced
+        by one they have never seen, and a mandatory addition would re-lock a
+        gate that had opened. Plan §1.1 #2 makes snapshotting apply to the
+        prerequisites master by name.
+      responses:
+        '200':
+          description: Published.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqTemplateResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: No draft exists, or this version was already published.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            The draft has no mandatory task. Refused at publish time rather
+            than left to surface later: a checklist with nothing mandatory
+            clears its own gate the moment it is instantiated, so every
+            journey would open at boarding and the gate would look present
+            while doing nothing. Plan §5.3 calls the gate a hard one; this is
+            where that is enforced.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-template/tasks:
+    post:
+      tags: [onboarding-masters]
+      operationId: addObPrereqTemplateTask
+      summary: Add a task to the draft (OB-14)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Appended at the end; use `reorderObPrereqTemplateTasks` to place it.
+
+        `409` if there is no draft. Editing an active version in place would
+        change what an in-flight client is being asked for, which is the whole
+        thing versioning exists to prevent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqTemplateTaskWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqTemplateTaskResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: No draft to add to.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-template/tasks/order:
+    put:
+      tags: [onboarding-masters]
+      operationId: reorderObPrereqTemplateTasks
+      summary: Re-sequence the draft's tasks (OB-14)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        The whole set, in the order wanted. A partial list is `400` rather
+        than a silent partial reorder — the request names positions, and
+        positions only mean anything against the complete set.
+
+        Order here is presentation only. **Prerequisites have no dependency
+        model**: unlike journey steps (plan §5.6) every task is available from
+        the moment the instance exists, because the client works their own
+        checklist in whatever order suits them and nothing on it activates
+        anything else. The sequence decides what OB-14 and CP-03 draw first,
+        nothing more.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqTemplateTaskOrderRequest' }
+      responses:
+        '200':
+          description: Reordered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqTemplateResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: No draft to reorder.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  /onboarding/prereq-template-tasks/{templateTaskId}:
+    parameters: [{ $ref: '#/components/parameters/ObPrereqTemplateTaskId' }]
+    patch:
+      tags: [onboarding-masters]
+      operationId: updateObPrereqTemplateTask
+      summary: Edit a draft task (OB-14)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        **This is where OB-14 diverges from OB-07, and the divergence is
+        deliberate rather than an inconsistency to tidy up later.** A journey
+        template's steps have no `PATCH` — C-102 composes a draft by adding,
+        removing and reordering, and changing a step's TAT means removing it
+        and adding it back. That works there because a journey template is
+        per-product and one Admin owns one product's design.
+
+        The prerequisites master is org-wide and singular. There is exactly
+        one draft for the whole organisation, so two Admins editing it at once
+        is the normal case rather than the unlucky one — and delete-plus-re-add
+        would lose the task's position, its reference docs and, on a set where
+        `isMandatory` decides whether a gate can ever open, is a heavier
+        operation than the edit it stands in for.
+
+        So: a real `PATCH`, and a real `If-Match`. The tag comes from
+        `getObPrereqTemplate` — the pairing CONVENTIONS §5 insists be made by
+        hand, since the tag is on the parent rather than on this row. A stale
+        editor is refused with `412` instead of quietly overwriting a
+        colleague's change to the same checklist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqTemplateTaskWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqTemplateTaskResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: |
+            This task belongs to a published version. Revise first — an
+            edit here would rewrite what a boarded client was asked for.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      tags: [onboarding-masters]
+      operationId: removeObPrereqTemplateTask
+      summary: Remove a task from the draft (OB-14)
+      description: |
+        Reference documents on the task go with it. Nothing else points at a
+        prerequisite task — there is no dependency graph here to re-point,
+        which is why this has no equivalent of
+        `removeObJourneyTemplateStep`'s `dependentStepIds` conflict.
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: This task belongs to a published version.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-template-tasks/{templateTaskId}/docs:
+    parameters: [{ $ref: '#/components/parameters/ObPrereqTemplateTaskId' }]
+    post:
+      tags: [onboarding-masters]
+      operationId: addObPrereqTemplateTaskDoc
+      summary: Attach a reference document to a draft task (OB-14)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        The Admin's own document, shown **to the client** on CP-04 — a sample
+        filled form, a specimen letter, the format a data extract must arrive
+        in. Plan §4 calls these "admin-attached reference documents" and they
+        are the half of `ob_attachments` carrying `kind: REFERENCE`; what the
+        client sends back is `SUBMISSION`, on the instance rather than here.
+
+        The file is uploaded through the module's shared attachment route and
+        this records the resulting `attachmentId` against the task. A document
+        the client cannot open is worse than none, so the type policy and the
+        AV scan are the same ones every other upload passes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqTemplateTaskDocWriteRequest' }
+      responses:
+        '201':
+          description: Attached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqTemplateTaskDocResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: This task belongs to a published version.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-template-task-docs/{docId}:
+    parameters: [{ $ref: '#/components/parameters/ObPrereqTemplateTaskDocId' }]
+    delete:
+      tags: [onboarding-masters]
+      operationId: removeObPrereqTemplateTaskDoc
+      summary: Detach a reference document from a draft task (OB-14)
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: This document's task belongs to a published version.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  # ── the per-client instance (B-125) ───────────────────────────────────────
+  /onboarding/clients/{obClientId}/prereqs:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    get:
+      tags: [onboarding]
+      operationId: getObClientPrereqs
+      summary: One client's prerequisites, and the state of their gate (OB-05, CP-03)
+      description: |
+        The accordion that sits **above** the journey accordions on OB-05, and
+        the interactive half of CP-03. Its strip is `gateStatus` plus
+        `mandatoryVerified / mandatoryTotal`; expanded, it is `tasks`.
+
+        Tasks are **not paginated** — the instance is a snapshot of one
+        template version, so the bound is the master's own (see
+        `getObPrereqTemplate`), and both the progress bar and the gate
+        arithmetic need the complete set to mean anything. A page-two task
+        nobody fetched is a mandatory task nobody knows is outstanding.
+
+        ## The gate is reported here, not decided here
+
+        `gateStatus` is the same value every journey on this client carries,
+        and it is derived by C-118's `PrerequisiteGateService` from the task
+        rows below — every mandatory task `VERIFIED`, every non-mandatory one
+        `VERIFIED` or `SKIPPED`. It is repeated on this response so the
+        accordion strip can render without reading a journey, not because
+        there is a second copy of the truth.
+
+        **There is no endpoint that opens the gate**, and that is a deliberate
+        absence rather than a slice still to come. Plan §5.3: "There is no
+        'open gate anyway' override — the only valve is skipping non-mandatory
+        tasks." The gate opens as a *consequence* of the last mandatory
+        verification, inside the same transaction as
+        `verifyObClientPrereqTask`. The same shape `ObGateStatus` already
+        states for journeys, and the same reasoning
+        `getObJourneyStep`'s panel gives for having no status field on its
+        `PATCH`: one way to make a move, with its own rules, rather than two.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: |
+                Derived from the header row and every task on it. `POST
+                /onboarding/clients/{obClientId}/prereq-tasks` is preconditioned
+                on it — see that operation for why a create takes an `If-Match`
+                at all.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientPrereqsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/clients/{obClientId}/prereq-tasks:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    post:
+      tags: [onboarding]
+      operationId: addObClientPrereqTask
+      summary: Add an ad-hoc task to one client's checklist (OB-05)
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      description: |
+        Plan §4 allows "snapshot instances **and ad-hoc per-client tasks**" —
+        a client whose situation needs something the master does not ask
+        everybody for. It does not go back into the master; this client's
+        instance is the only place it exists.
+
+        ## Why a create takes `If-Match`, which CONVENTIONS §5 does not require
+
+        Because an ad-hoc task can be mandatory, and adding a mandatory task
+        **re-locks a gate that may have just opened**. The precondition is
+        against the client's prerequisite `ETag`, so an Admin adding a task
+        from a screen rendered before another Admin verified the last
+        mandatory one is refused with `412` rather than silently reversing a
+        gate-open — which would stop clocks that had already started and
+        contradict a kickoff mail already sent.
+
+        That is a lost-update in every sense the convention cares about; what
+        makes it unusual is only that the row being lost is not the one being
+        written. Listing it here rather than exempting it: the tag exists,
+        `getObClientPrereqs` serves it, and the race is real.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObClientPrereqTaskCreateRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientPrereqTaskResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  /onboarding/prereq-tasks/{prereqTaskId}:
+    parameters: [{ $ref: '#/components/parameters/ObClientPrereqTaskId' }]
+    get:
+      tags: [onboarding]
+      operationId: getObClientPrereqTask
+      summary: One prerequisite task in full (CP-04)
+      description: |
+        The client's task page: description, the Admin's reference documents,
+        their own submissions, and the comment thread. Staff read the same
+        shape from OB-05.
+
+        **Identical for both principals, and that is on purpose.** A
+        prerequisite is the one object in this module a client and a staff
+        member genuinely share — plan §11's never-visible list (owners,
+        internal comms, block reasons, TAT internals) is about *journeys*, and
+        none of it is on this row. There is nothing here to hide, so there is
+        no second serializer to drift.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientPrereqTaskDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    patch:
+      tags: [onboarding]
+      operationId: updateObClientPrereqTask
+      summary: Edit a task's wording or due date (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        Staff only, and only the three fields below. `dueAt` is recomputed
+        against the working calendar when `tatDays` moves, never taken
+        literally from the client — CLAUDE.md's rule that all duration maths
+        goes through the calendar, on the one clock in this module that runs
+        against the client rather than against us.
+
+        **`status` is not a field here**, exactly as it is not one on
+        `updateObJourneyStep`. Moving a task between states is what the four
+        transition routes below are for, each with its own required reason and
+        its own refusals. A status field here would be a second way to make
+        the same move with none of them — and one of those moves opens the
+        gate for every journey the client has.
+
+        **`isMandatory` is not a field here either**, and that is the sharper
+        one. Flipping it is not an edit, it is a change to whether the gate
+        can open: false→true re-locks a cleared gate, true→false clears one
+        that was holding. Both are reachable through the routes that own those
+        consequences — `skipObClientPrereqTask` for the valve plan §5.3
+        allows, and adding a task for the other direction. Neither belongs in
+        a field update whose contract says nothing about journeys.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObClientPrereqTaskUpdateRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientPrereqTaskResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422':
+          description: |
+            The task is `VERIFIED` or `SKIPPED`. A settled task is not
+            reworded — the client agreed to what it said.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-tasks/{prereqTaskId}/submit:
+    parameters: [{ $ref: '#/components/parameters/ObClientPrereqTaskId' }]
+    post:
+      tags: [onboarding]
+      operationId: submitObClientPrereqTask
+      summary: Mark a task done and send it for verification (CP-04)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        `PENDING` → `SUBMITTED`, and notifies the verifier (plan §7).
+
+        Callable by **the client principal and by staff**, which is the one
+        place in this module where that is true, and it is not a convenience:
+        plan §4 records `submitted_via` precisely because a SPOC frequently
+        emails a document to their implementor instead of using the portal.
+        Without a staff path the implementor would have to leave it
+        outstanding or log in as the client, and the second is how shared
+        credentials start. Who submitted is recorded either way.
+
+        `422` if the task is already `SUBMITTED`, `VERIFIED` or `SKIPPED`.
+        Re-submitting a returned task is the normal loop and is allowed —
+        that is `PENDING` again.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqSubmitRequest' }
+      responses:
+        '200':
+          description: Submitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientPrereqTaskResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            `ob-prereq-not-submittable` — the task is not `PENDING`. The
+            problem body names the status it is in.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-tasks/{prereqTaskId}/verify:
+    parameters: [{ $ref: '#/components/parameters/ObClientPrereqTaskId' }]
+    post:
+      tags: [onboarding]
+      operationId: verifyObClientPrereqTask
+      summary: Accept a submission — and, on the last one, open the gate (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        `SUBMITTED` → `VERIFIED`. Staff only — a client cannot verify their
+        own work, which is the entire point of the state existing.
+
+        ## This is the route that starts the module
+
+        Plan §5.3 evaluates the gate on **every** prerequisite transition, and
+        this is the transition that clears the last mandatory task. In the
+        same transaction, if the gate is then satisfied:
+
+        1. every `LOCKED` journey on this client flips `OPEN`;
+        2. every dependency-free step activates — several at once, because
+           plan §5.6 makes dependency-free steps parallel;
+        3. clocks start, and the scanner begins seeing these steps for the
+           first time;
+        4. the kickoff automation fires to the SPOC and the step owners.
+
+        `data.gateOpened` says whether that happened, so OB-05 can re-read the
+        journeys rather than guessing from a task count it would have to
+        recompute. A journey held behind a sibling (plan §5.5) stays held —
+        the gate and the service dependency are two different holds and
+        clearing one does not clear the other.
+
+        None of that is reachable any other way. There is no
+        `POST /onboarding/clients/{id}/gate` and there will not be one.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqVerifyRequest' }
+      responses:
+        '200':
+          description: Verified.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqGateResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            `ob-prereq-not-verifiable` — the task is not `SUBMITTED`. Verifying
+            straight from `PENDING` is refused rather than allowed as a
+            shortcut: `submittedAt` and `submittedVia` are what plan §5.4
+            attributes client-side waiting time with, and a task that skipped
+            them has no defensible clock.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-tasks/{prereqTaskId}/return:
+    parameters: [{ $ref: '#/components/parameters/ObClientPrereqTaskId' }]
+    post:
+      tags: [onboarding]
+      operationId: returnObClientPrereqTask
+      summary: Send a submission back to the client (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        `SUBMITTED` → `PENDING`, with a **mandatory comment** saying what is
+        wrong. Staff only.
+
+        The comment is required rather than encouraged because this is the one
+        message the client is guaranteed to read, and "returned" with no
+        reason is a round trip that teaches them nothing. It is written to the
+        task's thread, so it lands in the same place as everything else said
+        about the task rather than only in the notification.
+
+        The clock is **not** reset. Plan §5.4 attributes prerequisite time to
+        the client, and a return that restarted it would let an incomplete
+        submission buy an extension.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqReturnRequest' }
+      responses:
+        '200':
+          description: Returned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientPrereqTaskResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: '`ob-prereq-not-returnable` — the task is not `SUBMITTED`.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-tasks/{prereqTaskId}/skip:
+    parameters: [{ $ref: '#/components/parameters/ObClientPrereqTaskId' }]
+    post:
+      tags: [onboarding]
+      operationId: skipObClientPrereqTask
+      summary: Waive a non-mandatory task — the gate's only valve (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        → `SKIPPED`, reason mandatory, OB Admin and Onboarding Manager only.
+
+        ## The only valve, and it is deliberately narrow
+
+        Plan §5.3 leaves exactly one way to move a gate that a client cannot
+        clear, and this is it. **Mandatory tasks cannot be skipped** — `422`,
+        not a permission the right role unlocks — because a skippable
+        mandatory task is not a mandatory task, and the gate would then be a
+        convention rather than a guarantee. Plan §14's mitigation for the
+        stalling risk is "the mandatory list kept short in the master", which
+        is a decision made in OB-14 at authoring time, not one made per client
+        under pressure.
+
+        Skipping the last outstanding non-mandatory task can open the gate,
+        with all four consequences `verifyObClientPrereqTask` lists — so this
+        answers the same `ObPrereqGateResult`.
+
+        The skip notifies the manager digest (plan §7) rather than silently
+        clearing. A waiver nobody sees is how the short mandatory list stops
+        being short.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqSkipRequest' }
+      responses:
+        '200':
+          description: Skipped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqGateResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            Manager and Admin only. `403` rather than `404` for the reason
+            `skipObJourneyStep` records: the caller has already read this task
+            through `getObClientPrereqTask`, so denying its existence would
+            refuse a row they are looking at. Out-of-scope tasks are still
+            `404` — that is the scope guard, not this gate.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            `ob-prereq-mandatory-not-skippable` — the task is mandatory. Or
+            `ob-prereq-not-skippable`, for one already `VERIFIED` or
+            `SKIPPED`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/prereq-tasks/{prereqTaskId}/comments:
+    parameters: [{ $ref: '#/components/parameters/ObClientPrereqTaskId' }]
+    get:
+      tags: [onboarding]
+      operationId: listObPrereqComments
+      summary: The task's comment thread, oldest first (CP-04, OB-05)
+      description: |
+        `ob_prereq_comments` is **append-only** — two author columns, one for
+        a staff `users` row and one for an `ob_client_contacts` row, exactly
+        as `ob_step_communications` carries two. Exactly one is set on any
+        row, and `authorType` says which.
+
+        No `PATCH` or `DELETE` on this path, and there will not be one
+        (CONVENTIONS §8). This thread is half of the record of what a client
+        was asked for and what they said back; a deletable comment is a
+        conversation either side can rewrite after a dispute starts.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqCommentListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    post:
+      tags: [onboarding]
+      operationId: addObPrereqComment
+      summary: Say something about this task (CP-04, OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Both principals. The author is taken from the token and is never in
+        the body — a client who could name their own author id could write as
+        a member of staff.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqCommentCreateRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqCommentResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/prereq-tasks/{prereqTaskId}/history:
+    parameters: [{ $ref: '#/components/parameters/ObClientPrereqTaskId' }]
+    get:
+      tags: [onboarding]
+      operationId: listObPrereqHistory
+      summary: Every state change on this task, oldest first (OB-05)
+      description: |
+        `ob_prereq_history` is append-only and hash-chained, on the same
+        trigger pattern as `ob_step_history` (PHASE-2-BUILD-PLAN §9). **No
+        `PATCH`, `PUT` or `DELETE` on this path, ever** — CONVENTIONS §8.
+
+        This is the chain that makes a waiver defensible months later: who
+        skipped a mandatory-adjacent task, when, and with what reason. A
+        correction is a new compensating entry naming the one it corrects,
+        never an edit.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObPrereqHistoryListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  # ──────────────────────────────── the dashboard (OB-02) and reports (OB-10) ──
+  #
+  # A-118 · **`/onboarding/dashboard/*` rather than new keys on
+  # `/dashboard/widget/{widgetKey}`, and `/onboarding/reports` rather than new
+  # entries in the eighteen-report catalogue.** That is the largest structural
+  # decision in this half of the contract, so it is recorded once here instead
+  # of repeated on each operation.
+  #
+  # Three reasons, in the order they bind:
+  #
+  # 1. **A-115 forbids the coupling.** ArchUnit asserts the two modules stay
+  #    separable, and a shared `widgetKey` enum is exactly the import it exists
+  #    to refuse: the ticketing dashboard would carry onboarding's vocabulary in
+  #    its own closed enum, and every onboarding tile added later would be a
+  #    change to a ticketing contract.
+  # 2. **The shapes are not the same.** `WidgetResponse` is a series of points,
+  #    each with a `drillDown` query string — the right model for a donut or a
+  #    stacked bar. OB-02 is seven counters, a slide-over list and two grids.
+  #    Forcing the grids through a series schema would mean a series whose
+  #    points are rows.
+  # 3. **The gate is on the route tree.** `ModuleGuard` runs before `RolesGuard`
+  #    on `/onboarding/**` (plan §2.1). A caller without the entitlement must
+  #    not learn the module is deployed — and a 404 on one key of a shared
+  #    ticketing route, beside fourteen keys that work, tells them precisely
+  #    that.
+  #
+  # What is genuinely shared is what plan §2 already lists as shared: the export
+  # machinery, the working calendar, the summary-refresh pattern. Not the
+  # vocabulary.
+  /onboarding/dashboard/summary:
+    get:
+      tags: [onboarding]
+      operationId: getObDashboardSummary
+      summary: The OB-02 card board (OB-02)
+      description: |
+        Seven counters, one round trip. The board's whole first paint.
+
+        **Every number here is read from `ob_dashboard_summary` and
+        `ob_client_escalations`' own aggregate, never counted live** —
+        CLAUDE.md's rule, and the reason `computedAt` is on the response: a
+        dashboard that cannot say how stale it is invites somebody to compare
+        it against a list and file a bug about the difference.
+
+        Counting is **journey-counted with a product dimension** (plan §9), so
+        a client who bought three products contributes three to
+        `ongoingProjects`. The two exceptions are stated on the fields
+        themselves and are both client-counted on purpose: `overdueClients`
+        and `clientEscalations`, because a client late on four services is one
+        client to chase, not four.
+
+        Scoped by A-112's `OnboardingScopeResolver` like every other read. A
+        Step Owner's board counts the journeys containing their steps — the
+        same set `listObJourneys` would return them — so the card and the
+        slide-over it opens can never disagree.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+        - name: productId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: |
+            One product's column of the summary table. Omit for every product
+            the caller can see — which is a sum over rows, not a separate
+            stored total, so the two cannot drift.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: |
+                Derived from `computedAt` and the applied scope. The summary
+                refreshes on a timer, so a board polling faster than the
+                refresh gets `304` and costs nothing — `/dashboard/widget`'s
+                argument, on a table with the same refresh shape.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObDashboardSummaryResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/dashboard/cards/{cardKey}/items:
+    parameters:
+      - name: cardKey
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/ObDashboardCardKey' }
+    get:
+      tags: [onboarding]
+      operationId: listObDashboardCardItems
+      summary: The slide-over behind one card (OB-02)
+      description: |
+        Plan §9: "every card clicks open a right slide-over listing the
+        matching clients with product, item, owner, due and status, each row
+        opening the client" — the S-06 pattern.
+
+        ## Why this is not a `drillDown` query string
+
+        The ticketing dashboard deep-links each series point to a pre-filtered
+        ticket list, because there *is* a ticket list and every point is a set
+        of tickets. Here the rows are **items, not clients and not journeys**:
+        `thisWeeksDeadlines` mixes services with prerequisite tasks, which
+        plan §9 requires by name ("all client tasks — services *and*
+        prerequisites"), and no existing list returns both. `listObJourneys`
+        cannot answer it; a client list certainly cannot.
+
+        So the slide-over is its own read, and `ObDashboardItem` is
+        deliberately a union with an `itemType` rather than two lists the
+        screen would have to interleave by date itself.
+
+        **The count comes from the summary table and this list does not.** A
+        card's number is pre-aggregated; its rows are a bounded query run when
+        somebody clicks. They can therefore differ by up to one refresh
+        interval, and that is the honest trade rather than a defect — the
+        alternative is a live `COUNT(*)` behind every card on every paint,
+        which CLAUDE.md forbids for exactly the reason it would be slow. The
+        response repeats `computedAt` from the card so a screen can say which
+        number it is showing.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: productId
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: ownerUserId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: |
+            Narrows to one implementor — how the workload grid's cells open
+            into this same slide-over. Matches owner **or backup owner**, the
+            reading `listObJourneys` takes and for the same reason: a backup
+            exists to cover a step, so excluding them would under-report the
+            person actually covering it.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObDashboardItemListResponse' }
+        '400':
+          description: |
+            An unrecognised `cardKey`, or a `cursor` that did not come from
+            `meta.nextCursor`. Refused rather than treated as a default card,
+            which would show a caller who mistyped a list that looked correct.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/dashboard/delayed-projects:
+    get:
+      tags: [onboarding]
+      operationId: listObDelayedProjects
+      summary: The Delayed Projects grid (OB-02)
+      description: |
+        Plan §9's first grid, below the card board: client, start date,
+        products bought, module in progress, current stage, responsible,
+        expected completion, delayed-by days.
+
+        One row per **journey**, not per client, which is what makes "module
+        in progress" and "current stage" answerable — a client with an ERP
+        journey three weeks late and a Biometric journey on track is one
+        delayed project, not a client with an averaged status. `productsBought`
+        is on the row anyway, because the grid names it as a column and it is
+        a fact about the client rather than the journey.
+
+        Ordered by `delayedByDays` descending: the grid exists to be worked
+        from the top.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: productId
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: ownerUserId
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: minDelayDays
+          in: query
+          schema: { type: integer, minimum: 1 }
+          description: |
+            Hide the barely-late. A grid that lists everything one day over
+            gets ignored, which costs more than it shows.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObDelayedProjectListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/dashboard/implementor-workload:
+    get:
+      tags: [onboarding]
+      operationId: listObImplementorWorkload
+      summary: The Implementor workload & performance grid (OB-02)
+      description: |
+        Plan §9's second grid, reading `ob_implementor_daily_stats`.
+
+        ## Two things this route must do that its schema cannot enforce
+
+        **A row is returned for an implementor with zero clients.** Plan §9
+        says so explicitly — "one row per implementor *including those with
+        zero clients*" — and A-108's migration comment flags it as the
+        requirement most likely to be lost, because the natural query groups
+        by owner over open steps and produces nothing at all for somebody who
+        has just finished everything. The grid would then show a
+        fully-delivered implementor as *absent* rather than as clear, which is
+        the opposite reading. The population is everyone holding an
+        `OB_STEP_OWNER` grant in `user_module_access`, left-joined to their
+        stats.
+
+        **`performanceScore` is computed on read, never stored.** A-108 again,
+        and the reason is that the weighting is a product decision that will
+        be tuned: a score stored under last month's weights cannot be
+        recomputed under this month's, so every historical row would quietly
+        mean something different from the ones beside it. The four completion
+        counters are the inputs and are on the row, so a caller can check the
+        arithmetic — or ignore the score entirely and sort on the counters.
+
+        The six workload columns **partition** `clientsOpen` and sum to it.
+        That is an arithmetic contract, stated in A-108's DDL and repeated
+        here because it is the property a screen will assume and nothing
+        checks at runtime.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: statDate
+          in: query
+          schema: { type: string, format: date }
+          description: |
+            Defaults to the most recent computed day. An explicit date reads
+            history — the grid's own trend, and the only way to ask "what did
+            this look like before the reallocation".
+        - name: includeInactive
+          in: query
+          schema: { type: boolean, default: false }
+          description: |
+            Include implementors whose module grant has been revoked. Off by
+            default; on when reading a historical `statDate`, where excluding
+            them would silently drop the workload of somebody who has since
+            left and make the past look lighter than it was.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObImplementorWorkloadListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/reports:
+    get:
+      tags: [onboarding]
+      operationId: listObReports
+      summary: The onboarding report catalogue (OB-10)
+      description: |
+        What this deployment can run, so the hub's card grid does not have to
+        know — `listReports`' argument, applied to the module's own set.
+
+        **Served rather than hardcoded, and unbuilt reports are listed with
+        `available: false` and a reason.** Both are A-063's calls and both
+        matter more here than there, because this catalogue is *known* to be
+        arriving in two parts: PHASE-2-BUILD-PLAN §3 #8 builds the seven the
+        design draws, and holds the other five — breach log, escalation log,
+        owner workload, communication audit, CSAT summary — as OB4b pending a
+        client decision (§11.6). A hub that hid them would make an undecided
+        report indistinguishable from one that does not exist, which is the
+        state the decision is about.
+
+        **`reportKey` is a string here and everywhere, never an enum.** The
+        same reason `NotificationTemplate.eventCode` is not one: the list
+        grows by a release, and a closed enum in the contract would make each
+        addition a breaking change to every generated client.
+      responses:
+        '200':
+          description: Every onboarding report this deployment knows about, built or not.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObReportCatalogueResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/reports/{reportKey}:
+    parameters:
+      - name: reportKey
+        in: path
+        required: true
+        schema: { type: string, examples: [journey-funnel] }
+    get:
+      tags: [onboarding]
+      operationId: runObReport
+      summary: Run an onboarding report (OB-10)
+      description: |
+        One parameterised runner, as on the ticketing side. `?export=` streams
+        the file instead of returning JSON, through the **existing** export
+        infrastructure — plan §10 says so, and it is the one piece of the
+        reports stack the two modules genuinely share, because a workbook
+        writer has no domain in it.
+
+        Returns an `ETag`. These reads are expensive and are re-run every time
+        somebody toggles a filter back and forth.
+
+        **Row scope is applied server-side and the request cannot widen it.**
+        A Step Owner's funnel covers the journeys containing their steps; a
+        Sales user's covers the clients they created. `ownerUserId` is
+        **ignored rather than refused** for a Step Owner, on `runReport`'s
+        precedent: answering it would let one implementor read a colleague's
+        scorecard by guessing a user id, and `403` would wrongly imply a grant
+        exists that could be given. `meta.appliedScope` states what was
+        actually applied.
+
+        **`404` for a key that does not exist and for one that is not built
+        yet.** The catalogue is where "exists but unbuilt" is expressed with a
+        reason a person can read; by the time a caller is running a key there
+        are no rows to describe and no columns to name.
+
+        `export=pdf` is deliberately absent from the enum. The module's only
+        PDF is B-116's archived sign-off certificate, which is a legal record
+        generated once and stored, not a rendering of a filtered grid.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+        - { name: export, in: query, schema: { type: string, enum: [xlsx, csv] } }
+        - { name: productId, in: query, schema: { type: integer, format: int64 } }
+        - { name: obClientId, in: query, schema: { type: integer, format: int64 } }
+        - { name: ownerUserId, in: query, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - name: rag
+          in: query
+          schema: { $ref: '#/components/schemas/ObRag' }
+      responses:
+        '200':
+          description: Rows and columns, or the exported file.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObReportResponse' }
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  # ────────────────────────────────── sign-off (OB-09) and escalation (§5.11) ──
+  /onboarding/signoffs:
+    get:
+      tags: [onboarding]
+      operationId: listObSignoffs
+      summary: Sign-offs across clients (OB-05, OB-10)
+      description: |
+        `ob_signoffs`, scoped by A-112 like every other read. Feeds the
+        sign-off-pending report and the OB-05 panel.
+
+        **Nothing here exposes `tokenHash` or `otpHash`, on any response in
+        this document.** The token is emailed once and is not recoverable from
+        the table — A-107's DDL stores only its SHA-256 precisely so a leak of
+        the row does not yield a working link, and putting the hash on the
+        wire would hand an attacker the one value they need to brute-force
+        offline. `resendObSignoff` mints a new token rather than re-reading
+        the old one, which is why there is no operation that returns it.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: obClientId, in: query, schema: { type: integer, format: int64 } }
+        - { name: journeyId, in: query, schema: { type: integer, format: int64 } }
+        - name: kind
+          in: query
+          schema: { $ref: '#/components/schemas/ObSignoffKind' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ObSignoffStatus' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSignoffListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/journeys/{journeyId}/signoffs:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyId' }]
+    post:
+      tags: [onboarding]
+      operationId: requestObSignoff
+      summary: Ask a client to sign off a service, or the go-live (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Mints a single-use token, stores only its SHA-256, and emails the link
+        to a contact on this client. The token is in the response to **nobody**
+        — not to the requester either. A staff member who could read it could
+        sign on the client's behalf, which is the one thing this record exists
+        to make impossible.
+
+        `kind: STEP` names a `stepId`; `kind: GO_LIVE` must not — A-107's
+        `ck_ob_signoffs_step_matches_kind` enforces the pairing and this
+        answers `400` before it gets there.
+
+        `422` for a `GO_LIVE` request while any service on the journey is
+        unfinished. Plan §5.9 makes Live-Green require every journey complete;
+        asking a client to sign off a delivery that is still running is how a
+        sign-off record stops meaning anything.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObSignoffRequestBody' }
+      responses:
+        '201':
+          description: |
+            Requested and sent. `data.tokenExpiresAt` is on the response so
+            the screen can say when the link dies; the token itself is not.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSignoffResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: |
+            A `PENDING` sign-off already exists for this step, or this
+            journey's go-live. Use `resendObSignoff` — a second live token for
+            one decision means two links that both work and a record that
+            cannot say which one was clicked.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            `ob-signoff-journey-incomplete` for a premature `GO_LIVE`, or
+            `ob-signoff-step-not-signoffable` for a step whose template did
+            not flag it for sign-off.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/signoffs/{signoffId}:
+    parameters: [{ $ref: '#/components/parameters/ObSignoffId' }]
+    get:
+      tags: [onboarding]
+      operationId: getObSignoff
+      summary: One sign-off, with its acceptance record (OB-05)
+      description: |
+        The recorded-acceptance evidence — who signed, when, from what IP and
+        user agent. PHASE-2-BUILD-PLAN decision 5 chose recorded acceptance
+        over statutory e-sign for v1, and **this response is what that
+        decision produces**: the four fields below are the legal record, so
+        they are read-only everywhere and there is no operation that edits
+        them.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSignoffDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/signoffs/{signoffId}/resend:
+    parameters: [{ $ref: '#/components/parameters/ObSignoffId' }]
+    post:
+      tags: [onboarding]
+      operationId: resendObSignoff
+      summary: Send a fresh link — the old one stops working (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        **Mints a new token and invalidates the previous one in the same
+        transaction.** Not "sends the same link again", which is what the word
+        resend suggests and would be wrong: `uq_ob_signoffs_token` is unique
+        because two sign-offs sharing a token is a cross-client leak, and a
+        reissue that left the old hash live would leave two working links to
+        one decision with nothing to say which was used.
+
+        The OTP attempt counter resets with it. A contact who mistyped a code
+        three times and asked for a new link should not inherit their own
+        lockout — the lockout exists to slow an attacker guessing at a link
+        they hold, and the link they held is now dead.
+      responses:
+        '200':
+          description: Sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSignoffResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            Already `SIGNED`, `OBJECTED` or `CANCELLED`. A settled decision is
+            not re-asked; request a new sign-off instead.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/signoffs/{signoffId}/cancel:
+    parameters: [{ $ref: '#/components/parameters/ObSignoffId' }]
+    post:
+      tags: [onboarding]
+      operationId: cancelObSignoff
+      summary: Withdraw a request that should not have been sent (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        → `CANCELLED`, and the token stops working immediately.
+
+        The row is **not** deleted, and the status is `CANCELLED` rather than
+        the row disappearing, because "we asked and then withdrew" is a fact a
+        client may remember and ask about. Deleting it would leave the staff
+        side unable to answer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObSignoffCancelRequest' }
+      responses:
+        '200':
+          description: Cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSignoffResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: Already settled — `SIGNED` or `OBJECTED`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/signoffs/{signoffId}/certificate:
+    parameters: [{ $ref: '#/components/parameters/ObSignoffId' }]
+    get:
+      tags: [onboarding]
+      operationId: getObSignoffCertificate
+      summary: The archived acceptance PDF (OB-05)
+      description: |
+        B-116's document, streamed from object storage. `pdf_storage_key`
+        holds the key, never the bytes, and this route is the only way to
+        reach it — the key is not on any response, so a caller cannot address
+        the bucket directly.
+
+        `404` until the sign-off is `SIGNED`. A certificate for a decision
+        nobody has made does not exist, and generating a placeholder would put
+        an unsigned document into the one place people look for signed ones.
+      responses:
+        '200':
+          description: The PDF.
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  # ── the public token surface (A-120, A-121) ───────────────────────────────
+  #
+  # OB-09 and the CSAT page. **Unauthenticated, and the only routes in this
+  # module that are.** Four properties hold across all four operations and are
+  # stated once here rather than four times below:
+  #
+  # 1. **The token travels in the request body, never in the path or the query
+  #    string.** A URL carrying it lands in browser history, in the `Referer`
+  #    of every asset the page loads, and in the access log of anything between
+  #    the client and us. `ob_signoffs` goes to the trouble of storing only a
+  #    SHA-256 so that our own database cannot yield a working link; putting
+  #    the plaintext in a URL would give it away at the other end. This is why
+  #    there is no `GET` here and why OB-09 is a POST-then-render page.
+  # 2. **Errors are generic and identical.** A bad token, an expired token, a
+  #    cancelled sign-off and a token that never existed all answer the same
+  #    `401` with the same body. Distinguishing them would turn this into an
+  #    oracle, and the caller who deserves a specific answer — the real contact
+  #    — has an email telling them what to do.
+  # 3. **Rate limited hard**, per token and per source, answering `429` with
+  #    `Retry-After`. A-120's own words: aggressive limits, no enumeration.
+  # 4. **Nothing about the client is returned before the OTP is verified.**
+  #    Step one confirms a code was sent; it does not say to whom, and it does
+  #    not name the client, the product or the service. A link on its own
+  #    proves possession of an email; it does not prove identity, and plan §8
+  #    makes the OTP the thing that does.
+  /public/onboarding/signoff/otp:
+    post:
+      tags: [onboarding]
+      operationId: requestObSignoffOtp
+      summary: Send the one-time code for a sign-off link (OB-09)
+      security: []
+      description: |
+        A-121 · hashes the supplied token, finds the `PENDING` sign-off it
+        addresses, and emails a code to `sentToContactId` — **the contact on
+        the row, never an address in the request.** A body that could name its
+        own recipient would let anyone holding a leaked link redirect the code
+        to themselves, which would make the second factor a formality.
+
+        `202` whatever happens, with no body. It does not say whether a code
+        was sent, because saying so is the enumeration oracle point 2 above
+        exists to close.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObSignoffTokenRequest' }
+      responses:
+        '202':
+          description: |
+            Accepted. **Returned for an unknown, expired, cancelled or
+            already-signed token too** — deliberately indistinguishable from
+            the successful case.
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /public/onboarding/signoff/otp/verify:
+    post:
+      tags: [onboarding]
+      operationId: verifyObSignoffOtp
+      summary: Exchange the code for a short-lived session, and the page (OB-09)
+      security: []
+      description: |
+        A-121 · the point at which the caller becomes identified and the page
+        can be rendered. Returns a **session token, not a JWT**: it is opaque,
+        it is good for this one sign-off, it expires in minutes, and it is not
+        a principal — it authorises three operations on one row and nothing
+        else. A CLIENT-principal login is a different thing entirely and is
+        A-125's.
+
+        `otp_attempts` is persisted rather than held in Redis, which A-107's
+        DDL argues at the schema: a lockout that resets when the process
+        restarts is not a lockout. Attempts are per sign-off, and exhausting
+        them kills the token — a fresh one needs `resendObSignoff` from the
+        staff side, which is a human deciding to re-ask rather than a counter
+        healing itself.
+
+        The response carries what OB-09 renders: the client, the product, the
+        service and its checklist. That is the first moment any of it leaves
+        the building, and it is after the code has been proved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObSignoffOtpVerifyRequest' }
+      responses:
+        '200':
+          description: Verified.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSignoffSessionResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: |
+            One body for every failure — wrong code, expired code, expired
+            token, unknown token, attempts exhausted, sign-off already
+            settled. See point 2 above; a caller who can tell "wrong code"
+            from "no such link" can enumerate links.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /public/onboarding/signoff/accept:
+    post:
+      tags: [onboarding]
+      operationId: acceptObSignoff
+      summary: The client accepts (OB-09)
+      security: []
+      description: |
+        Records the acceptance — contact, timestamp, IP and user agent — and
+        then puts the step through **the same completion gate every other
+        route uses**.
+
+        ## The gate, and why acceptance can succeed while the step does not
+
+        PHASE-2-BUILD-PLAN §3 #4 found the prototype's bug and ruled on it:
+        `stComplete` enforced three gates (every checklist item answered,
+        every required document attached, sign-off accepted) and `signoffAccept`
+        enforced none, so a client could accept a service whose required
+        documents were never attached and it would go `DONE`.
+
+        The ruling is *one* gate, server-side, and acceptance routes through
+        it. So this operation has two outcomes and the response distinguishes
+        them:
+
+        - gate satisfied → the sign-off is `SIGNED` **and** the step completes;
+        - gate not satisfied → the sign-off is `SIGNED` and **the step stays
+          `IN_PROGRESS`**, with `gateFailures` naming what is missing.
+
+        The acceptance is **never discarded** in the second case. The client
+        did accept, they are not the ones who left a document unattached, and
+        asking them to click twice for our own incomplete record is the
+        version of this that loses a signature. `data.stepCompleted` is what
+        the page renders on.
+
+        For a `GO_LIVE` sign-off the same shape applies to the client's
+        overall status: accepting the last one flips them Live-Green, and
+        `data.clientWentLive` says whether this call was that one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObSignoffAcceptRequest' }
+      responses:
+        '200':
+          description: Accepted and recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSignoffAcceptResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: The session token is unknown, expired, or already used. One generic body.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /public/onboarding/signoff/object:
+    post:
+      tags: [onboarding]
+      operationId: objectObSignoff
+      summary: The client objects, and the service reverts (OB-09)
+      security: []
+      description: |
+        → `OBJECTED`, with a mandatory note, and **the step reverts** — plan
+        §8: "objection reverts the step". It goes back to `IN_PROGRESS` with
+        the objection written to its communication timeline and its owner
+        notified immediately, because an objection nobody sees is a delivery
+        everybody believes is finished.
+
+        The note is required. An objection with no reason gives the owner
+        nothing to fix and guarantees a second round trip.
+
+        There is no un-object. A client who changes their mind is a new
+        sign-off request, which is a staff action with its own record — the
+        alternative is a row whose final state depends on how many times
+        somebody clicked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObSignoffObjectRequest' }
+      responses:
+        '200':
+          description: Objection recorded; the service has reverted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSignoffResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: The session token is unknown, expired, or already used. One generic body.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /public/onboarding/signoff/csat:
+    post:
+      tags: [onboarding]
+      operationId: submitObCsat
+      summary: The one-question go-live survey (OB-09)
+      security: []
+      description: |
+        Plan §1.1 #9's CSAT, and PHASE-2-BUILD-PLAN §3 #9's finding that it
+        had no capture surface at all — the prototype fired a toast saying a
+        survey had been sent and nothing rendered a question or stored an
+        answer.
+
+        It rides this token surface rather than getting one of its own,
+        because the moment to ask is the moment the client accepts the
+        go-live, and a second link emailed afterwards is a second thing to
+        ignore. Offered **only** after a `GO_LIVE` acceptance; `422` on a step
+        sign-off's session.
+
+        Optional by construction: `acceptObSignoff` completes without it, and
+        a client who closes the tab has still gone live. A survey that blocks
+        a delivery is a survey that gets answered dishonestly.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObCsatRequest' }
+      responses:
+        '200':
+          description: Recorded. Thank-you state.
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: The session token is unknown, expired, or already used. One generic body.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            Not a go-live session, or this go-live has already been surveyed.
+            One answer per client, per plan §1.1 #9's "one-question survey
+            with the final sign-off".
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  # ── escalations ───────────────────────────────────────────────────────────
+  #
+  # A-118 · **two tables, two routes, and they are not the same feature.**
+  #
+  #   `ob_escalations`        the internal ladder. Raised by C's scanner when a
+  #                           TAT breaches: L1 at breach, L2 at +4 working
+  #                           hours, L3 at +8 (PHASE-2-BUILD-PLAN §2). Nobody
+  #                           outside the organisation ever sees one.
+  #   `ob_client_escalations` raised *by the client*, from the portal, against
+  #                           one service, with a comment (plan §4). A red chip
+  #                           the client can see until staff resolve it.
+  #
+  # Collapsing them into one list with a `source` field was considered and is
+  # wrong: they have different audiences, different lifecycles (a ladder rung
+  # is acknowledged then resolved; a client escalation is only resolved), and
+  # one of them is visible to the person who raised it. A shared route would
+  # make "is this visible to the client" a field somebody has to remember to
+  # check before writing a resolution note.
+  /onboarding/escalations:
+    get:
+      tags: [onboarding]
+      operationId: listObEscalations
+      summary: The internal escalation ladder (OB-02, OB-10)
+      description: |
+        `ob_escalations`, open ones first and oldest first within that — the
+        list exists to be cleared from the top.
+
+        Scoped by A-112. `escalatedTo` is the natural filter for "what has
+        been escalated to me", which is the query
+        `ix_ob_escalations_to (escalated_to, open_key)` was shaped for.
+
+        A rung with `escalatedTo` null is one the matrix resolved nobody for.
+        A-107's DDL calls that "itself worth seeing on the dashboard", so it
+        is returned rather than hidden — an escalation addressed to nobody is
+        a configuration error, and suppressing it would make the ladder look
+        like it was working.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: obClientId, in: query, schema: { type: integer, format: int64 } }
+        - { name: journeyId, in: query, schema: { type: integer, format: int64 } }
+        - { name: escalatedTo, in: query, schema: { type: integer, format: int64 } }
+        - name: level
+          in: query
+          schema: { $ref: '#/components/schemas/ObEscalationLevel' }
+        - name: state
+          in: query
+          schema: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED] }
+          description: |
+            Defaults to `OPEN`, which here means unresolved — an acknowledged
+            rung is still open, because acknowledging says somebody has seen
+            it and not that anything is fixed. `ACKNOWLEDGED` narrows to that
+            subset; the two are not alternatives.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObEscalationListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/escalations/{escalationId}/acknowledge:
+    parameters: [{ $ref: '#/components/parameters/ObEscalationId' }]
+    post:
+      tags: [onboarding]
+      operationId: acknowledgeObEscalation
+      summary: Say you have seen this rung (OB-02)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Stamps `acknowledgedBy` and `acknowledgedAt`. **It does not stop the
+        ladder.** L2 still follows at +4 working hours and L3 at +8 unless the
+        underlying breach is actually resolved — acknowledging is a claim
+        about attention, not about the service, and a ladder an acknowledgement
+        could silence would be one a busy person silences by reflex.
+
+        Idempotent in effect: acknowledging an already-acknowledged rung
+        returns it unchanged rather than moving the timestamp, so the record
+        keeps saying when it was *first* seen.
+      responses:
+        '200':
+          description: Acknowledged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObEscalationResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: Already resolved.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/escalations/{escalationId}/resolve:
+    parameters: [{ $ref: '#/components/parameters/ObEscalationId' }]
+    post:
+      tags: [onboarding]
+      operationId: resolveObEscalation
+      summary: Close a rung of the ladder (OB-02)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Resolution note mandatory — this is the row a breach review reads
+        afterwards, and "resolved" with no account of what was done answers
+        none of the questions such a review asks.
+
+        Resolving L1 does **not** resolve L2 or L3.
+        `uq_ob_escalations_open (step_id, level, open_key)` lets the ladder
+        hold all three rungs at once by design, and each was sent to a
+        different person: closing a manager's rung because the owner closed
+        theirs would tell the manager the problem was handled when nobody told
+        them it was.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObEscalationResolveRequest' }
+      responses:
+        '200':
+          description: Resolved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObEscalationResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: Already resolved.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/client-escalations:
+    get:
+      tags: [onboarding]
+      operationId: listObClientEscalations
+      summary: Escalations raised by clients from the portal (OB-02)
+      description: |
+        `ob_client_escalations` — the OB-02 card, and the red chips on OB-05.
+
+        **Raising one is not on this route tree.** The client does it from
+        CP-03, which lives under `/portal/onboarding/**` with its own
+        principal type and its own DTOs — plan §2.3 forks at the route tree
+        rather than with per-endpoint conditionals, and A-125's
+        `client_accounts` and A-126's `ClientScopeResolver` are what define
+        that principal. Declaring a half of it here, before the principal
+        exists, would be a contract for a caller nothing can authenticate.
+        This is the staff side: see them, and resolve them.
+
+        One open escalation per service, enforced by
+        `uq_ob_client_escalations_open`, so a client cannot flood a queue by
+        clicking twice.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: obClientId, in: query, schema: { type: integer, format: int64 } }
+        - { name: journeyId, in: query, schema: { type: integer, format: int64 } }
+        - name: state
+          in: query
+          schema: { type: string, enum: [OPEN, RESOLVED] }
+          description: Defaults to `OPEN`.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientEscalationListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/client-escalations/{escalationId}/resolve:
+    parameters: [{ $ref: '#/components/parameters/ObClientEscalationId' }]
+    post:
+      tags: [onboarding]
+      operationId: resolveObClientEscalation
+      summary: Answer a client's escalation (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Resolution note mandatory, and **it goes to the client** — plan §7
+        makes resolving acknowledge back to them, and plan §4 mirrors the
+        escalation into the service's communication timeline as an
+        `ESCALATION` entry. So this note is outward-facing in a way
+        `resolveObEscalation`'s is not, which is the one difference worth
+        knowing between two operations that otherwise look identical.
+
+        There is no acknowledge step. The internal ladder has one because a
+        rung travels between colleagues; a client wants an answer, and
+        "somebody has seen this" is not one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObEscalationResolveRequest' }
+      responses:
+        '200':
+          description: Resolved, and the client notified.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientEscalationResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: Already resolved.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  # ─────────── module access (OB-08), settings (OB-11), notifications (OB-12/13) ──
+  /onboarding/module-access:
+    get:
+      tags: [onboarding-masters]
+      operationId: listObModuleAccess
+      summary: Who can reach a module, and as what (OB-08)
+      description: |
+        A-117 · `user_module_access`, the table A-111's `ModuleGuard` and
+        A-110's `modules` claim are both built from.
+
+        **Revoked grants are returned, not hidden**, when `includeRevoked` is
+        set. A-109's DDL revokes rather than deletes for a reason it states
+        plainly: an access audit has to answer "who could see this module in
+        August", and that question is asked *after* something has been seen
+        that should not have been. A screen that could only show live grants
+        would be unable to answer it.
+
+        Listing is Admin-only, and the module is a query parameter rather than
+        a path segment because OB-08 shows both modules' grants for one person
+        side by side — a dual-access user is the case the screen exists for.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: module
+          in: query
+          schema: { $ref: '#/components/schemas/ObModule' }
+        - { name: userId, in: query, schema: { type: integer, format: int64 } }
+        - name: moduleRole
+          in: query
+          schema: { $ref: '#/components/schemas/ObModuleRole' }
+        - name: includeRevoked
+          in: query
+          schema: { type: boolean, default: false }
+          description: |
+            Off by default: the everyday question is who has access now. On
+            for an audit, where the answer must include grants that have since
+            been withdrawn.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObModuleAccessListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            OB Admin only. `403` rather than `404` because this is
+            organisation-wide administration rather than a scoped row — there
+            is no grant whose existence a `404` could protect, and the caller
+            has already passed `ModuleGuard` to get here at all.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    post:
+      tags: [onboarding-masters]
+      operationId: grantObModuleAccess
+      summary: Grant a user access to a module (OB-08)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Audited: `grantedBy` and `grantedAt` are stamped from the token and
+        are not in the body.
+
+        **The new grant does not reach the user until their next token.** The
+        `modules` claim is minted at login (A-110) and access tokens live
+        fifteen minutes, so a grant made now is effective within fifteen
+        minutes rather than instantly. That is a deliberate consequence of
+        putting entitlement in the claim rather than reading the table on
+        every request, and it is stated here because the OB-08 screen should
+        say so rather than let an admin conclude the grant failed.
+
+        The reverse direction is the one that matters and it is not
+        symmetrical: a **revoke** is likewise not instant, so
+        `revokeObModuleAccess` says what to do when it needs to be.
+
+        `409` if the user already holds a live grant for this module.
+        `uq_user_module_access_live` allows exactly one, because two would
+        mean two `module_role`s and nothing says which the guard should
+        believe. Changing somebody's role is revoke-then-grant, which leaves
+        both facts in the audit trail rather than overwriting the first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObModuleAccessGrantRequest' }
+      responses:
+        '201':
+          description: Granted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObModuleAccessResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: OB Admin only — as on the list above.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: This user already holds a live grant for this module.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/module-access/{grantId}/revoke:
+    parameters: [{ $ref: '#/components/parameters/ObModuleAccessGrantId' }]
+    post:
+      tags: [onboarding-masters]
+      operationId: revokeObModuleAccess
+      summary: Withdraw a grant (OB-08)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        `POST .../revoke`, **not `DELETE`**, and the row survives. A-109
+        revokes by stamping `revokedAt` and `revokedBy` so the audit can say
+        who withdrew access and when; a `DELETE` would leave nothing to answer
+        with, which is precisely the question asked after an incident.
+
+        `live_key` goes null in the same statement, so the partial unique
+        index stops counting this grant and the user may be granted the module
+        again later without colliding with their own history.
+
+        ## Revocation is not instant, and this is the one place that matters
+
+        The `modules` claim is in the access token, so a user holding a valid
+        token keeps the entitlement until it expires — up to fifteen minutes.
+        For an ordinary role change that is fine. For a revocation prompted by
+        something going wrong it is not, and the answer is not to make
+        `ModuleGuard` hit the database on every request: it is to revoke the
+        user's refresh-token family, which the auth kernel already exposes and
+        which ends the session rather than narrowing it. `data.tokenLagSeconds`
+        states the worst case so OB-08 can offer that as the next action
+        instead of leaving an admin to assume the revoke did not work.
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObModuleAccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: OB Admin only.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            Already revoked, or this is the last live `OB_ADMIN` grant in the
+            organisation. The second is refused rather than allowed: a module
+            with no administrator cannot grant anybody access to itself, and
+            recovering from it means a database edit.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/settings:
+    get:
+      tags: [onboarding-masters]
+      operationId: getObSettings
+      summary: TAT thresholds, scanner cadence and the escalation matrix (OB-11)
+      description: |
+        B-113 · the constants PHASE-2-BUILD-PLAN §2 locked, **as
+        configuration rather than as constants**: amber at 75% of TAT, the
+        scanner every 5 minutes, and the ladder at breach → +4 working hours →
+        +8.
+
+        Those are the seeded values, not the contract. The reason they are
+        editable at all is that every one of them is a judgement about a
+        particular organisation's pace, and the version that is wrong for a
+        client is the version nobody can change without a release.
+
+        Returns an `ETag`, and it is the only source of the tag `PUT
+        /onboarding/settings` requires — the pairing CONVENTIONS §5 says to
+        make by hand, and the gap B-016 closed on `/projects/{id}` after the
+        precondition had been declared for months with nowhere to satisfy it.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSettingsResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            OB Admin only, reads included — org-wide settings are not a
+            row-scoped resource, so a `403` tells a non-Admin only what the
+            `404` from `ModuleGuard` already would.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    put:
+      tags: [onboarding-masters]
+      operationId: updateObSettings
+      summary: Replace the onboarding settings (OB-11)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        A **wholesale replace behind one Save button**, which is why it is a
+        `PUT` and why `If-Match` is not optional here — the worst case for a
+        lost update, exactly as `PUT /projects/{id}/settings` argues. Two
+        admins on OB-11 at once would otherwise have the second silently
+        discard the first's escalation matrix along with the threshold they
+        did not touch.
+
+        ## What changing these does to work already in flight
+
+        **Thresholds are read forward, never retroactively.** Lowering amber
+        from 75% to 60% re-colours every open step on the scanner's next pass;
+        it does not re-open a step that already breached under the old
+        setting, and it does not re-send an escalation that has already gone.
+        A settings change that reissued historical notifications would mail
+        every owner in the organisation about steps they closed last week.
+
+        `scannerIntervalMinutes` takes effect at the next sweep rather than
+        immediately, for the same reason a cron does.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObSettingsWriteRequest' }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObSettingsResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: OB Admin only.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  /onboarding/notification-templates:
+    get:
+      tags: [onboarding-masters]
+      operationId: listObNotificationTemplates
+      summary: The module's notification wording (OB-12)
+      description: |
+        B-113 · one row per `(eventCode, channel)`, the identity
+        `NotificationTemplate` uses one module over and for the same reasons.
+
+        ## Why this is not `/masters/notification-templates`
+
+        The ticketing surface is genuinely close, and reusing it was the first
+        thing considered. Three things stop it, and only the third is fatal on
+        its own:
+
+        1. **The channels differ.** `NotificationChannel` is
+           `IN_APP · EMAIL · PUSH`. This module's `ObChannel` is
+           `EMAIL · WHATSAPP · IN_APP` — no push, and a `WHATSAPP` value that
+           A-107 keeps deliberately (PHASE-2-BUILD-PLAN §6.1: the enum value
+           costs nothing now and adding it later is a migration against a
+           table with production rows). Neither enum is a subset of the other.
+        2. **The categories differ.** `MENTION` and `STATUS_REQUEST` mean
+           nothing here; `PREREQUISITE` and `SIGNOFF` mean nothing there.
+        3. **A-115 forbids the import.** ArchUnit asserts the two modules stay
+           separable, and one screen writing rows another module's renderer
+           resolves is the coupling it exists to refuse.
+
+        **Phase 2 sends email only.** PHASE-2-BUILD-PLAN §6.1 defers WhatsApp
+        entirely — no provider, no adapter, no webhook — so a `WHATSAPP`
+        template can be authored and stored and nothing will dispatch it.
+        `isDeliverable` says so per row, rather than letting OB-12 present a
+        template that will sit in `PENDING` forever looking configured.
+      parameters:
+        - name: channel
+          in: query
+          schema: { $ref: '#/components/schemas/ObChannel' }
+        - name: category
+          in: query
+          schema: { $ref: '#/components/schemas/ObNotificationCategory' }
+      responses:
+        '200':
+          description: Every template, built or not.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObNotificationTemplateListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: OB Admin only, reads included — as on `/onboarding/settings`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/notification-templates/vocabulary:
+    get:
+      tags: [onboarding-masters]
+      operationId: getObNotificationTemplateVocabulary
+      summary: Event codes, channels, recipients and merge tags (OB-12)
+      description: |
+        What OB-12's editor may offer, served rather than hardcoded — the
+        argument `getNotificationTemplateVocabulary` makes: a client holding
+        its own copy of the vocabulary is a second copy of the server's, and a
+        new event would silently fail to appear.
+
+        Plan §7 lists the module's new events, and they are the reason this
+        matters more here than one module over: the list is still growing
+        while OB3 is built. A body containing a merge tag that is not in this
+        vocabulary is refused at write time rather than rendering as literal
+        text in a client's inbox.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObNotificationVocabularyResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: OB Admin only — a catalogue of enum values, Admin-only because the screen it feeds is.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/notification-templates/{templateId}:
+    parameters: [{ $ref: '#/components/parameters/ObNotificationTemplateId' }]
+    patch:
+      tags: [onboarding-masters]
+      operationId: updateObNotificationTemplate
+      summary: Reword a notification (OB-12)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        `If-Match` for the reason `/masters/notification-templates/{id}`
+        carries one, restated because it is the strongest case in either
+        module: the field most likely to be edited is a long body two admins
+        can plausibly be rewording at once, and a lost update here is silent
+        **and outward-facing** — the losing edit vanishes and what reaches a
+        client is wording nobody chose.
+
+        `(eventCode, channel)` is the row's identity and is immutable. Neither
+        is in the request body; changing either is a different template.
+
+        `409` on switching off a mandatory one. `isMandatory` is derived from
+        the category rather than stored — `ESCALATION` and `SIGNOFF` mail
+        cannot be silenced — so the screen should render the toggle as a
+        locked statement rather than a control whose only outcome is a
+        refusal.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObNotificationTemplateUpdateRequest' }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObNotificationTemplateResponse' }
+        '400':
+          description: |
+            Bean Validation failed, **or the body contains a merge tag that is
+            not in the vocabulary.** Refused rather than stored: an unknown
+            tag renders as literal braces in a client's inbox, and the only
+            place to catch it is before it is saved.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ValidationProblem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: OB Admin only.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: '`isActive: false` on a mandatory template.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
 
   # ══════════════════════════════════════ onboarding · notifications ══════
 
@@ -8690,6 +10859,77 @@ components:
         A-118 · an `ob_journey_step_items` id — one checklist entry on a live
         service, not the `ObJourneyTemplateStepItemId` it was instantiated
         from.
+    ObPrereqTemplateTaskId:
+      name: templateTaskId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A-118 · an `ob_prereq_template_tasks` id — a task on a *version of the
+        master*, not on anybody's checklist. Editing one changes what future
+        clients are asked for and nothing about a client already boarded.
+    ObPrereqTemplateTaskDocId:
+      name: docId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: A-118 · an `ob_prereq_template_task_docs` id.
+    ObClientPrereqTaskId:
+      name: prereqTaskId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A-118 · an `ob_client_prereq_tasks` id — one task on one client's
+        checklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.
+        Not the same id space as the master task it came from, for the reason
+        `ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:
+        the instance outlives revisions of the thing it was copied from.
+    ObSignoffId:
+      name: signoffId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A-118 · an `ob_signoffs` id. Addresses the row from the **staff** side
+        only; the client reaches the same row by a token in a request body and
+        never by this id — see the block comment above the public routes.
+    ObEscalationId:
+      name: escalationId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A-118 · an `ob_escalations` id — a rung of the internal ladder. Not
+        the same id space as `ObClientEscalationId`, and the two tables are
+        deliberately separate; see the block comment above
+        `/onboarding/escalations`.
+    ObClientEscalationId:
+      name: escalationId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: A-118 · an `ob_client_escalations` id — one raised by a client from CP-03.
+    ObModuleAccessGrantId:
+      name: grantId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A-118 · a `user_module_access` id. Addresses **one grant**, not a
+        user's access in general: a user may hold a live grant for one module
+        and a revoked one for another, and revoking is done to a grant rather
+        than to a person.
+    ObNotificationTemplateId:
+      name: templateId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        A-118 · an onboarding notification-template id. Not the same id space
+        as `/masters/notification-templates/{templateId}` — see
+        `listObNotificationTemplates` for why the two modules keep separate
+        tables.
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -15196,3 +17436,1633 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ObStepHistoryEntry' }
         meta: { $ref: '#/components/schemas/Meta' }
+
+    # ────────────────────────────────────────── prerequisites (OB-14, CP-04) ──
+    ObPrereqTaskStatus:
+      type: string
+      enum: [PENDING, SUBMITTED, VERIFIED, SKIPPED]
+      description: |
+        A-118 · plan §4's four, and the whole of the gate arithmetic is stated
+        over them: every mandatory task `VERIFIED`, every non-mandatory one
+        `VERIFIED` or `SKIPPED`.
+
+        There is no `RETURNED`. A returned submission is `PENDING` again —
+        that is what the client has to act on, and a fifth value would split
+        "the client owes us this" across two states that every count, every
+        reminder and every progress bar would then have to remember to add
+        together. What was returned, by whom and why is in the task's history
+        and in its comment thread, which is where the *event* belongs; the
+        status says whose move it is.
+
+        No `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather
+        than closed — plan §5.4 scans it as client-attributed time and sends
+        reminders, and a task that timed itself out would clear nothing while
+        making the gate look permanently unopenable.
+    ObPrereqSubmittedVia:
+      type: string
+      enum: [PORTAL, STAFF]
+      description: |
+        A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the
+        submission came in by — the client did it themselves, or a member of
+        staff recorded it on their behalf after it arrived by email.
+
+        Worth keeping rather than inferring from the submitter's type, because
+        the question it answers is about the *client's* engagement with the
+        portal, and that is what decides whether the portal is working.
+    ObPrereqAuthorType:
+      type: string
+      enum: [STAFF, CLIENT]
+      description: |
+        A-118 · which of `ob_prereq_comments`' two author columns is set. The
+        table carries a `users` id and an `ob_client_contacts` id and fills
+        exactly one, the same shape `ob_step_communications` uses and for the
+        same reason: a staff member and a client contact are rows in different
+        tables, and a single polymorphic id would need a discriminator anyway.
+
+    ObPrereqTemplateTaskDoc:
+      type: object
+      required: [id, templateTaskId, label, attachmentId]
+      properties:
+        id: { type: integer, format: int64 }
+        templateTaskId: { type: integer, format: int64 }
+        label: { type: string, maxLength: 200 }
+        attachmentId:
+          type: integer
+          format: int64
+          description: |
+            An `ob_attachments` row with `kind: REFERENCE` — the Admin's own
+            document, shown to the client. What comes back the other way is
+            `SUBMISSION` and hangs off the instance task, not off this.
+        fileName: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+      description: '`ob_prereq_template_task_docs` — a reference document on a master task.'
+    ObPrereqTemplateTaskDocWriteRequest:
+      type: object
+      required: [label, attachmentId]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 200 }
+        attachmentId: { type: integer, format: int64 }
+    ObPrereqTemplateTaskDocResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObPrereqTemplateTaskDoc' }
+
+    ObPrereqTemplateTask:
+      type: object
+      required: [id, sequence, title, tatDays, isMandatory, isActive, docs]
+      properties:
+        id: { type: integer, format: int64 }
+        sequence:
+          type: integer
+          description: |
+            Display order within the version. Presentation only — see
+            `reorderObPrereqTemplateTasks`: prerequisites have no dependency
+            model, so nothing activates anything else and the number decides
+            only what is drawn first.
+        title: { type: string, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 4000 }
+        tatDays:
+          type: integer
+          minimum: 1
+          description: |
+            Working **days**, per the v1.2 rename recorded in the module
+            plan's terminology note — the same unit journey step TATs are
+            defined and displayed in. `dueAt` on an instance is this many
+            working days from instantiation, against the org calendar and the
+            client's own, never a naive date addition.
+        isMandatory:
+          type: boolean
+          description: |
+            The gate cannot open while a mandatory task is outstanding, and
+            **a mandatory task cannot be skipped** — `skipObClientPrereqTask`
+            answers `422` rather than checking a role. That is what makes this
+            flag a guarantee instead of a default.
+
+            Which is why it is set here, at authoring time, and never on an
+            instance: plan §14's mitigation for "the gate stalls all journeys
+            on a slow client" is keeping the mandatory list short in the
+            master. A flag editable per client under delivery pressure would
+            not be that mitigation.
+        isActive: { type: boolean }
+        docs:
+          type: array
+          items: { $ref: '#/components/schemas/ObPrereqTemplateTaskDoc' }
+      description: '`ob_prereq_template_tasks` — one task on one version of the master.'
+    ObPrereqTemplateTaskWriteRequest:
+      type: object
+      required: [title, tatDays, isMandatory]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 4000 }
+        tatDays: { type: integer, minimum: 1, maximum: 365 }
+        isMandatory: { type: boolean }
+        isActive: { type: boolean, default: true }
+    ObPrereqTemplateTaskResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObPrereqTemplateTask' }
+    ObPrereqTemplateTaskOrderRequest:
+      type: object
+      required: [taskIds]
+      properties:
+        taskIds:
+          type: array
+          minItems: 1
+          items: { type: integer, format: int64 }
+          description: |
+            Every task in the draft, in the order wanted. A list missing any
+            of them is `400` — positions only mean something against the
+            complete set, and accepting a partial one would silently reorder
+            around tasks the caller could not see.
+
+    ObPrereqTemplate:
+      type: object
+      required: [version, isDraft, isActive, tasks]
+      properties:
+        version: { type: integer, minimum: 1 }
+        isDraft:
+          type: boolean
+          description: |
+            Editable. At most one draft exists at a time — see
+            `beginObPrereqTemplateRevision` for why two would be ambiguous
+            rather than merely untidy.
+        isActive:
+          type: boolean
+          description: |
+            The version new clients are snapshotted from. Exactly one version
+            is active; a draft is not active, and publishing swaps them in one
+            transaction.
+        publishedAt: { type: [string, 'null'], format: date-time }
+        publishedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        mandatoryCount:
+          type: integer
+          description: |
+            How many of `tasks` are mandatory. Derived, and on the response
+            because OB-14 states it above the list — an Admin adding a
+            fifteenth mandatory task should see the number they are making
+            worse while they do it, given plan §14 names a long mandatory list
+            as the way the gate stalls.
+        tasks:
+          type: array
+          items: { $ref: '#/components/schemas/ObPrereqTemplateTask' }
+      description: |
+        `ob_prereq_template_tasks` grouped by version — the org-wide
+        prerequisites master (OB-14).
+
+        **One master, not one per product.** `ob_journey_templates` is keyed
+        by product because a journey delivers a thing that was bought;
+        prerequisites are the client's own responsibilities, which plan §4
+        makes the same set regardless of what they bought. That is why these
+        paths carry no template id.
+    ObPrereqTemplateResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObPrereqTemplate' }
+
+    ObClientPrereqTask:
+      type: object
+      required: [id, obClientId, sequence, title, isMandatory, isAdHoc, status, dueAt]
+      properties:
+        id: { type: integer, format: int64 }
+        obClientId: { type: integer, format: int64 }
+        templateTaskId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            The master task this was snapshotted from, or null for an ad-hoc
+            one added to this client alone. Kept so a waiver can be read back
+            against the wording that was actually in force.
+        sequence: { type: integer }
+        title: { type: string, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 4000 }
+        isMandatory: { type: boolean }
+        isAdHoc:
+          type: boolean
+          description: |
+            Added for this client rather than snapshotted (plan §4). Worth a
+            field of its own rather than leaving the screen to infer it from
+            `templateTaskId` being null: OB-05 marks these, because "why is
+            this client being asked for something the others are not" is the
+            first question about one.
+        status: { $ref: '#/components/schemas/ObPrereqTaskStatus' }
+        dueAt:
+          type: string
+          format: date-time
+          description: |
+            Working-calendar derived from `tatDays`, never a naive addition —
+            CLAUDE.md's rule, and the reason a Friday task with a two-day TAT
+            is not overdue on Sunday.
+        isOverdue:
+          type: boolean
+          description: |
+            Past `dueAt` and not settled. Derived on read rather than stored,
+            so it cannot disagree with the timestamp beside it — the argument
+            `ob_implementor_daily_stats` makes for not storing its performance
+            score.
+        submittedAt: { type: [string, 'null'], format: date-time }
+        submittedVia:
+          oneOf:
+            - { $ref: '#/components/schemas/ObPrereqSubmittedVia' }
+            - { type: 'null' }
+        verifiedAt: { type: [string, 'null'], format: date-time }
+        verifiedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        skippedAt: { type: [string, 'null'], format: date-time }
+        skippedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        skipReason:
+          type: [string, 'null']
+          maxLength: 2000
+          description: |
+            Mandatory whenever `status` is `SKIPPED`, and the only field on
+            this row that a later dispute is likely to turn on. Never null on
+            a skipped task.
+        commentCount: { type: integer }
+        attachmentCount: { type: integer }
+      description: '`ob_client_prereq_tasks` — one task on one client''s checklist.'
+    ObClientPrereqTaskResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObClientPrereqTask' }
+    ObClientPrereqTaskDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ObClientPrereqTask' }
+        - type: object
+          required: [referenceDocs, submissions]
+          properties:
+            referenceDocs:
+              type: array
+              items: { $ref: '#/components/schemas/ObPrereqTemplateTaskDoc' }
+              description: |
+                The Admin's documents, carried through from the master task at
+                snapshot time. Empty on an ad-hoc task unless one was attached
+                to it directly.
+            submissions:
+              type: array
+              items: { $ref: '#/components/schemas/ObPrereqSubmissionFile' }
+              description: |
+                What the client sent back — `ob_attachments` with `kind:
+                SUBMISSION` and `uploadedByType: CLIENT`, or `STAFF` where an
+                implementor recorded a document that arrived by email.
+      description: |
+        CP-04 and the OB-05 task row expanded. One schema for both principals
+        — see `getObClientPrereqTask` for why a prerequisite is the one object
+        in this module that needs no separate portal serializer.
+    ObClientPrereqTaskDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObClientPrereqTaskDetail' }
+    ObPrereqSubmissionFile:
+      type: object
+      required: [attachmentId, fileName, sizeBytes, uploadedByType, uploadedAt]
+      properties:
+        attachmentId: { type: integer, format: int64 }
+        fileName: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        uploadedByType: { $ref: '#/components/schemas/ObPrereqAuthorType' }
+        uploadedAt: { type: string, format: date-time }
+    ObClientPrereqTaskCreateRequest:
+      type: object
+      required: [title, tatDays, isMandatory]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 4000 }
+        tatDays: { type: integer, minimum: 1, maximum: 365 }
+        isMandatory:
+          type: boolean
+          description: |
+            True re-locks a gate that has already opened — which is why the
+            create is preconditioned on the client's prerequisite `ETag`. See
+            `addObClientPrereqTask`.
+    ObClientPrereqTaskUpdateRequest:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 4000 }
+        tatDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: '`dueAt` is recomputed against the working calendar; it is not sent.'
+      description: |
+        Three fields, and deliberately not `status` or `isMandatory` — see
+        `updateObClientPrereqTask` for what each of those would let a field
+        update do to a gate.
+
+    ObPrereqSubmitRequest:
+      type: object
+      properties:
+        note: { type: [string, 'null'], maxLength: 4000 }
+        attachmentIds:
+          type: array
+          items: { type: integer, format: int64 }
+          description: |
+            Files already uploaded through the module's attachment route.
+            Optional: plan §4 lists uploads, comments and marking done as
+            three separate things a client may do, and a task whose whole
+            requirement is "confirm you have done this" has nothing to attach.
+    ObPrereqVerifyRequest:
+      type: object
+      properties:
+        note: { type: [string, 'null'], maxLength: 4000 }
+    ObPrereqReturnRequest:
+      type: object
+      required: [comment]
+      properties:
+        comment:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: |
+            What is wrong. Mandatory — see `returnObClientPrereqTask`. Written
+            to the task's thread as well as into the notification, so it is
+            readable in the place everything else about the task is.
+    ObPrereqSkipRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+
+    ObPrereqGateResult:
+      type: object
+      required: [task, gateStatus, gateOpened, mandatoryTotal, mandatoryVerified]
+      properties:
+        task: { $ref: '#/components/schemas/ObClientPrereqTask' }
+        gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
+        gateOpened:
+          type: boolean
+          description: |
+            **This transition is what opened it.** True at most once in a
+            client's life, on the verification or skip that cleared the last
+            outstanding task.
+
+            It is here so OB-05 knows to re-read the journeys rather than
+            inferring it from a count it would have to recompute — and
+            inferring it wrongly is a live hazard, because `gateStatus` is
+            `OPEN` on every subsequent call too. A screen that refreshed the
+            ribbon whenever the gate reads open would refresh it forever.
+        openedJourneyIds:
+          type: array
+          items: { type: integer, format: int64 }
+          description: |
+            The journeys that flipped `LOCKED` → `OPEN` in this transaction.
+            Empty unless `gateOpened`.
+
+            **Not necessarily every journey the client has.** One held behind
+            a sibling journey (plan §5.5) stays held: the gate and the service
+            dependency are two different holds, and clearing one does not
+            clear the other. Naming the ids rather than saying "all of them"
+            is what keeps that distinction visible to the screen.
+        mandatoryTotal: { type: integer }
+        mandatoryVerified: { type: integer }
+      description: |
+        What `verifyObClientPrereqTask` and `skipObClientPrereqTask` answer:
+        the task as it now stands, plus what that did to the gate.
+    ObPrereqGateResultResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObPrereqGateResult' }
+
+    ObClientPrereqs:
+      type: object
+      required: [obClientId, templateVersion, status, gateStatus, mandatoryTotal, mandatoryVerified, tasks]
+      properties:
+        obClientId: { type: integer, format: int64 }
+        templateVersion:
+          type: integer
+          description: |
+            The master version this instance was snapshotted from. Pinned:
+            publishing a newer master leaves every boarded client on the
+            checklist they were actually given — plan §1.1 #2.
+        status:
+          type: string
+          enum: [IN_PROGRESS, CLEARED]
+          description: |
+            `ob_client_prereqs.status`. `CLEARED` is the header's record that
+            the gate condition was met, and it is not a second opinion about
+            `gateStatus` — the two move in the same transaction.
+        clearedAt: { type: [string, 'null'], format: date-time }
+        gateStatus:
+          allOf: [{ $ref: '#/components/schemas/ObGateStatus' }]
+          description: |
+            The same value every journey on this client carries. Repeated here
+            so the OB-05 strip can render without reading a journey — derived
+            from the tasks below by C-118, never a third place the truth is
+            kept.
+        mandatoryTotal:
+          type: integer
+          description: The denominator of the strip's progress bar.
+        mandatoryVerified: { type: integer }
+        optionalOutstanding:
+          type: integer
+          description: |
+            Non-mandatory tasks neither verified nor skipped. These hold the
+            gate too — plan §5.3 requires every non-mandatory task be
+            `VERIFIED` **or** `SKIPPED` — and the progress bar counts only
+            mandatory ones, so without this number a screen showing 4/4
+            mandatory beside a locked gate looks broken.
+        tasks:
+          type: array
+          items: { $ref: '#/components/schemas/ObClientPrereqTask' }
+      description: |
+        `ob_client_prereqs` and its tasks — the accordion above the journeys
+        on OB-05, and the interactive half of CP-03.
+    ObClientPrereqsResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObClientPrereqs' }
+
+    ObPrereqComment:
+      type: object
+      required: [id, prereqTaskId, authorType, body, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        prereqTaskId: { type: integer, format: int64 }
+        authorType: { $ref: '#/components/schemas/ObPrereqAuthorType' }
+        staffAuthor:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: Set when `authorType` is `STAFF`, null otherwise.
+        clientAuthor:
+          oneOf:
+            - { $ref: '#/components/schemas/ObContact' }
+            - { type: 'null' }
+          description: Set when `authorType` is `CLIENT`, null otherwise.
+        body: { type: string, maxLength: 4000 }
+        isSystem:
+          type: boolean
+          description: |
+            Written by a transition rather than typed — the mandatory comment
+            `returnObClientPrereqTask` requires is the only one so far. Marked
+            so CP-04 can render it as an event rather than as something a
+            person chose to say, and so a client cannot be answered by a
+            string the server composed.
+        createdAt: { type: string, format: date-time }
+      description: |
+        `ob_prereq_comments` — append-only. Two author columns, exactly one
+        set, the shape `ob_step_communications` already uses.
+    ObPrereqCommentCreateRequest:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 4000 }
+    ObPrereqCommentResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObPrereqComment' }
+    ObPrereqCommentListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObPrereqComment' }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    ObPrereqHistoryEntry:
+      type: object
+      required: [id, prereqTaskId, at, actorType, toStatus, isCorrection]
+      properties:
+        id: { type: integer, format: int64 }
+        prereqTaskId: { type: integer, format: int64 }
+        at: { type: string, format: date-time }
+        actorType: { $ref: '#/components/schemas/ObPrereqAuthorType' }
+        staffActor:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        clientActor:
+          oneOf:
+            - { $ref: '#/components/schemas/ObContact' }
+            - { type: 'null' }
+        fromStatus:
+          oneOf:
+            - { $ref: '#/components/schemas/ObPrereqTaskStatus' }
+            - { type: 'null' }
+          description: Null on the first entry — instantiation has nothing to come from.
+        toStatus: { $ref: '#/components/schemas/ObPrereqTaskStatus' }
+        reason:
+          type: [string, 'null']
+          maxLength: 2000
+          description: |
+            The skip reason or the return comment, copied here at the moment
+            it was given. Copied rather than referenced because the chain has
+            to be readable on its own: a history that pointed at a comment row
+            would be a hash-chained record whose meaning lived in a table with
+            no chain of its own.
+        isCorrection:
+          type: boolean
+          description: |
+            A compensating entry — the only way to correct this log. The entry
+            it corrects stays exactly where it is, named in
+            `correctsEntryId`. An accounting reversal, not an edit.
+        correctsEntryId: { type: [integer, 'null'], format: int64 }
+      description: |
+        One row of `ob_prereq_history`, append-only and hash-chained on the
+        same trigger pattern as `ob_step_history`. Read-only on the wire
+        because it is read-only in the database.
+    ObPrereqHistoryListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObPrereqHistoryEntry' }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    # ─────────────────────────────── dashboard (OB-02) and reports (OB-10) ────
+    ObDashboardCardKey:
+      type: string
+      enum:
+        [ongoing-projects, this-weeks-deadlines, todays-delivery,
+         overdue-clients, live, at-risk, client-escalations]
+      description: |
+        A-118 · plan §9's seven cards, as a closed vocabulary.
+
+        Closed here where `reportKey` is deliberately open, and the difference
+        is which document owns the list. The card board is a **fixed layout**
+        the design draws — an eighth card is a change to OB-02's composition
+        and to this contract, and gets read. The report catalogue is a
+        *catalogue*: §3 #8 already knows five more are coming, so an enum
+        there would make each arrival a breaking client change.
+
+        The same distinction `/dashboard/widget/{widgetKey}` and `/reports`
+        already make one module over, and it holds for the same reason.
+    ObDashboardCard:
+      type: object
+      required: [key, count]
+      properties:
+        key: { $ref: '#/components/schemas/ObDashboardCardKey' }
+        count: { type: integer }
+        deltaFromYesterday:
+          type: [integer, 'null']
+          description: |
+            Change against the previous computed day, or null on the first day
+            a deployment has data. A count with no direction says nothing
+            about whether anybody is winning.
+      description: One card on the OB-02 board.
+    ObDashboardSummary:
+      type: object
+      required: [cards, computedAt]
+      properties:
+        cards:
+          type: array
+          items: { $ref: '#/components/schemas/ObDashboardCard' }
+          description: |
+            All seven, always, in `ObDashboardCardKey` order — a card whose
+            count is zero is drawn as zero rather than omitted. An absent card
+            and a card reading nought are different claims, and only one of
+            them is true when nothing is overdue.
+        computedAt:
+          type: string
+          format: date-time
+          description: |
+            When `ob_dashboard_summary` was last refreshed. On the response
+            because these numbers are pre-aggregated and a board that cannot
+            say how stale it is invites a bug report about the difference
+            between it and a list.
+        appliedScope:
+          type: string
+          description: |
+            What A-112 narrowed the counts to, in a sentence — "journeys
+            containing your services", "clients you created", "all clients".
+            The same honesty `runReport.meta.appliedScope` provides: a Step
+            Owner comparing their board against a colleague's should be able
+            to see why the numbers differ without asking.
+      description: |
+        The OB-02 card board. Read from `ob_dashboard_summary`, never counted
+        live — CLAUDE.md.
+    ObDashboardSummaryResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObDashboardSummary' }
+
+    ObDashboardItemType:
+      type: string
+      enum: [SERVICE, PREREQUISITE]
+      description: |
+        A-118 · which kind of thing a slide-over row is. Plan §9 requires the
+        deadline cards to count "all client tasks — services **and**
+        prerequisites", so the list behind them mixes two tables and the row
+        has to say which one it came from.
+
+        The alternative — two lists the screen interleaves by due date — was
+        rejected because the interleaving is the whole point of the card, and
+        doing it client-side means paginating two cursors in lockstep.
+    ObDashboardItem:
+      type: object
+      required: [itemType, itemId, obClientId, obClientName, title, status, dueAt]
+      properties:
+        itemType: { $ref: '#/components/schemas/ObDashboardItemType' }
+        itemId:
+          type: integer
+          format: int64
+          description: |
+            An `ob_journey_steps` id when `itemType` is `SERVICE`, an
+            `ob_client_prereq_tasks` id when it is `PREREQUISITE`. **Two id
+            spaces behind one field**, which is why `itemType` is required and
+            why a row cannot be acted on without reading it first.
+        obClientId: { type: integer, format: int64 }
+        obClientName: { type: string }
+        journeyId:
+          type: [integer, 'null']
+          format: int64
+          description: Null on a prerequisite — the gate sits in front of every journey, not inside one.
+        product:
+          oneOf:
+            - { $ref: '#/components/schemas/ObProductRef' }
+            - { type: 'null' }
+          description: Null on a prerequisite, for the same reason `journeyId` is.
+        title:
+          type: string
+          description: The service name or the prerequisite task title — plan §9's "item" column.
+        owner:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: |
+            Null on a prerequisite, whose counterparty is the client rather
+            than an implementor. The grid's "owner" column is empty on those
+            rows rather than filled with whoever will verify it — verification
+            is not ownership, and naming a verifier here would make the
+            workload grid double-count them.
+        status:
+          type: string
+          description: |
+            An `ObJourneyStepStatus` or an `ObPrereqTaskStatus` depending on
+            `itemType`. A plain string rather than a union of the two enums:
+            this is a display column on a slide-over, and a generated client
+            forced to discriminate between two enums to render a chip would
+            gain nothing it could act on.
+        dueAt: { type: string, format: date-time }
+        isOverdue: { type: boolean }
+      description: |
+        One row of an OB-02 slide-over. Deliberately a union across services
+        and prerequisites — see `ObDashboardItemType`.
+    ObDashboardItemListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObDashboardItem' }
+        meta:
+          allOf: [{ $ref: '#/components/schemas/Meta' }]
+          description: |
+            Carries `computedAt` alongside the cursor, repeating the card's
+            own so a screen can say which number these rows belong to. The
+            count is pre-aggregated and this list is live, so they may differ
+            by up to one refresh interval — see `listObDashboardCardItems`.
+
+    ObDelayedProject:
+      type: object
+      required: [journeyId, obClientId, obClientName, product, delayedByDays]
+      properties:
+        journeyId: { type: integer, format: int64 }
+        obClientId: { type: integer, format: int64 }
+        obClientName: { type: string }
+        startedAt: { type: [string, 'null'], format: date-time }
+        productsBought:
+          type: array
+          items: { $ref: '#/components/schemas/ObProductRef' }
+          description: |
+            Every product this client bought, not just this journey's — plan
+            §9 names it as a column and it is a fact about the client. The
+            row's own product is `product`.
+        product: { $ref: '#/components/schemas/ObProductRef' }
+        currentStep:
+          oneOf:
+            - { $ref: '#/components/schemas/ObStepDot' }
+            - { type: 'null' }
+          description: |
+            Plan §9's "current stage". Null on a journey whose every step is
+            blocked or not yet activated — which is itself the interesting
+            case, and rendering it as a gap is more honest than picking an
+            arbitrary step to name.
+        responsible:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        expectedCompletionAt: { type: [string, 'null'], format: date-time }
+        delayedByDays:
+          type: integer
+          minimum: 1
+          description: |
+            **Working days, through the calendar** — CLAUDE.md, and the one
+            number on this grid that a naive subtraction would get visibly
+            wrong. A journey due Friday and unfinished on Monday is one
+            working day late, not three, and a grid that said three would
+            spike every Monday until readers learned to discount it. The same
+            correction A-073's handoff-latency chart had to make.
+      description: One row of plan §9's Delayed Projects grid.
+    ObDelayedProjectListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObDelayedProject' }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    ObImplementorWorkload:
+      type: object
+      required:
+        [user, clientsOpen, onTrack, notStarted, delayed, atRisk,
+         blockedWaiting, aheadOfSchedule, completedOnTime, completedEarly,
+         completedLate, statDate]
+      properties:
+        user: { $ref: '#/components/schemas/UserRef' }
+        isActive:
+          type: boolean
+          description: |
+            Whether this implementor still holds a live `OB_STEP_OWNER` grant.
+            False rows appear only with `includeInactive`, or on a historical
+            `statDate` where dropping them would make the past look lighter
+            than it was.
+        clientsOpen:
+          type: integer
+          description: |
+            **The six columns below partition this and sum to it.** An
+            arithmetic contract, stated in A-108's DDL and repeated here
+            because it is the property a screen will assume and nothing checks
+            at runtime. Zero is a real and expected value — see
+            `listObImplementorWorkload` on why a row exists at all for
+            somebody with no clients.
+        onTrack: { type: integer }
+        notStarted: { type: integer }
+        delayed: { type: integer }
+        atRisk: { type: integer }
+        blockedWaiting: { type: integer }
+        aheadOfSchedule: { type: integer }
+        completedOnTime: { type: integer }
+        completedEarly: { type: integer }
+        completedLate: { type: integer }
+        blockedHours:
+          type: integer
+          description: Working hours this implementor's services spent blocked or waiting.
+        performanceScore:
+          type: [number, 'null']
+          description: |
+            Plan §9's chip — on-time and early completions weighted against
+            delays and blocks, on a 0–100 scale.
+
+            **Derived on read, never stored**, and A-108's DDL says why at
+            length: the weighting is a product decision that will be tuned,
+            and a score stored under last month's weights cannot be recomputed
+            under this month's, so history would stratify. The inputs are the
+            four counters above, so a caller can check it — or ignore it and
+            sort on them.
+
+            Null for an implementor with no completions yet. Scoring somebody
+            who has finished nothing produces a number that looks like
+            judgement and is arithmetic on an empty set.
+        statDate:
+          type: string
+          format: date
+          description: Which day's stats this row is. Echoed so a screen reading history cannot mislabel it.
+      description: |
+        One row of plan §9's Implementor workload & performance grid, from
+        `ob_implementor_daily_stats`.
+    ObImplementorWorkloadListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObImplementorWorkload' }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    ObReportCategory:
+      type: string
+      enum: [DELIVERY, CLIENT, QUALITY, PIPELINE]
+      description: |
+        A-118 · how OB-10 groups its cards. Four rather than the ticketing
+        hub's set, because plan §10's twelve reports do not divide the same
+        way: funnel and time-to-live are about `DELIVERY`, stuck-and-aging and
+        sign-off-pending about a `CLIENT`, TAT compliance and CSAT about
+        `QUALITY`, and the sales pipeline about `PIPELINE`.
+    ObReportFilterKind:
+      type: string
+      enum: [dateRange, product, client, owner, rag]
+      description: |
+        Which controls a report honours. The viewer renders exactly these, so
+        a control the runner would ignore is never drawn — `ReportFilterKind`'s
+        argument, on the module's own five.
+    ObReportDescriptor:
+      type: object
+      required: [key, title, category, filters, available]
+      properties:
+        key: { type: string, examples: [journey-funnel] }
+        title: { type: string, examples: [Journey funnel by product] }
+        description:
+          type: string
+          description: One line, on the card. What question the report answers.
+        category: { $ref: '#/components/schemas/ObReportCategory' }
+        chart:
+          type: [string, 'null']
+          enum: [line, bar, stacked-bar, funnel, donut, null]
+          description: |
+            The visual, or null for a table-only report. The viewer shows a
+            chart **and** a table when this is set, never a chart alone — a
+            chart cannot be read for exact values and this is a reporting
+            screen.
+        filters:
+          type: array
+          items: { $ref: '#/components/schemas/ObReportFilterKind' }
+        available:
+          type: boolean
+          description: |
+            False for a report declared but not built. The five of
+            PHASE-2-BUILD-PLAN §3 #8 held as OB4b are declared and unavailable
+            rather than absent — see `listObReports`.
+        unavailableReason:
+          type: [string, 'null']
+          description: |
+            Why it cannot be run yet, in a sentence a user can read. Present
+            exactly when `available` is false.
+    ObReportCatalogueResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [reports]
+          properties:
+            reports:
+              type: array
+              items: { $ref: '#/components/schemas/ObReportDescriptor' }
+            scopeNote:
+              type: [string, 'null']
+              description: |
+                What this caller's rows will be narrowed to, if anything —
+                "your services only" for a Step Owner. Null for a role that
+                sees everything.
+    ObReportResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [reportKey, columns, rows]
+          properties:
+            reportKey: { type: string }
+            columns:
+              type: array
+              items:
+                type: object
+                required: [key, label, type]
+                properties:
+                  key: { type: string }
+                  label: { type: string }
+                  type:
+                    type: string
+                    enum: [string, number, percent, duration, date, rag]
+                    description: |
+                      `rag` renders as a chip rather than as text, and
+                      `duration` is **working hours** throughout this module —
+                      every duration here has already been through the
+                      calendar, so a client formatting it must not re-derive
+                      it from two timestamps.
+            rows:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+        meta:
+          type: object
+          properties:
+            appliedScope:
+              type: string
+              description: |
+                What the rows were actually narrowed to. On the response
+                because a filter the caller sent may have been ignored — see
+                `runObReport` on `ownerUserId`.
+            computedAt: { type: [string, 'null'], format: date-time }
+
+    # ──────────────────────────────────── sign-off (OB-09) and escalations ────
+    ObSignoffKind:
+      type: string
+      enum: [STEP, GO_LIVE]
+      description: |
+        A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a
+        `GO_LIVE` one does not, and A-107's
+        `ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in
+        the database.
+    ObSignoffStatus:
+      type: string
+      enum: [PENDING, SIGNED, OBJECTED, EXPIRED, CANCELLED]
+      description: |
+        A-118 · `ob_signoffs.status`.
+
+        `EXPIRED` is reached by the token's TTL passing, not by an operation —
+        there is no route that expires a sign-off, because the thing that
+        expires it is time. `CANCELLED` is the deliberate withdrawal, and the
+        two are kept apart because "we changed our mind" and "they never
+        clicked" are different answers to the same question from a client.
+    ObSignoff:
+      type: object
+      required: [id, obClientId, journeyId, kind, status, requestedAt, sentToContact, tokenExpiresAt]
+      properties:
+        id: { type: integer, format: int64 }
+        obClientId: { type: integer, format: int64 }
+        journeyId: { type: integer, format: int64 }
+        stepId:
+          type: [integer, 'null']
+          format: int64
+          description: Set for `STEP`, null for `GO_LIVE`.
+        kind: { $ref: '#/components/schemas/ObSignoffKind' }
+        status: { $ref: '#/components/schemas/ObSignoffStatus' }
+        requestedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        requestedAt: { type: string, format: date-time }
+        sentToContact: { $ref: '#/components/schemas/ObContact' }
+        tokenExpiresAt:
+          type: string
+          format: date-time
+          description: |
+            When the link stops working. On the response so OB-05 can say so;
+            the token it belongs to is not, on any response in this document —
+            see `listObSignoffs`.
+        signedAt: { type: [string, 'null'], format: date-time }
+        objectedAt: { type: [string, 'null'], format: date-time }
+        hasCertificate:
+          type: boolean
+          description: |
+            Whether `getObSignoffCertificate` will return a PDF. Derived from
+            `pdf_storage_key` being set — the key itself is never on the wire,
+            so a caller cannot address object storage directly.
+      description: |
+        `ob_signoffs`, minus every secret on it. **`tokenHash`, `otpHash`,
+        `otpExpiresAt` and `otpAttempts` appear on no response.** A-107 stores
+        the token only as a SHA-256 so that reading the table does not yield a
+        working link; serialising the hash would undo that for an attacker
+        with an offline dictionary.
+    ObSignoffResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObSignoff' }
+    ObSignoffListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObSignoff' }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ObSignoffDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ObSignoff' }
+        - type: object
+          properties:
+            signedByContact:
+              oneOf:
+                - { $ref: '#/components/schemas/ObContact' }
+                - { type: 'null' }
+            signedIp:
+              type: [string, 'null']
+              maxLength: 45
+              description: |
+                Recorded acceptance, half one. PHASE-2-BUILD-PLAN decision 5
+                chose this over statutory e-sign for v1: what makes the record
+                stand up is that we can say who accepted, when, and from
+                where. Read-only — no operation writes these after the fact.
+            signedUserAgent:
+              type: [string, 'null']
+              maxLength: 500
+              description: Recorded acceptance, half two.
+            objectionNote: { type: [string, 'null'], maxLength: 2000 }
+    ObSignoffDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObSignoffDetail' }
+    ObSignoffRequestBody:
+      type: object
+      required: [kind, sentToContactId]
+      properties:
+        kind: { $ref: '#/components/schemas/ObSignoffKind' }
+        stepId:
+          type: [integer, 'null']
+          format: int64
+          description: Required for `STEP`, must be absent for `GO_LIVE`.
+        sentToContactId:
+          type: integer
+          format: int64
+          description: |
+            An `ob_client_contacts` id on this client. Named explicitly rather
+            than defaulted to the primary SPOC, because the person who signs
+            off a data migration is frequently not the person who signs the
+            contract, and a default that is usually right is one nobody
+            checks.
+    ObSignoffCancelRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+
+    ObSignoffTokenRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: |
+            The value from the emailed link. **In the body, never in the URL**
+            — see the block comment above `/public/onboarding/signoff/otp` for
+            why a query string would leak it to browser history, `Referer`
+            headers and every access log in between.
+    ObSignoffOtpVerifyRequest:
+      type: object
+      required: [token, otp]
+      properties:
+        token: { type: string, minLength: 1, maxLength: 200 }
+        otp:
+          type: string
+          pattern: '^[0-9]{6}$'
+          description: |
+            Six digits. Attempts are counted on the sign-off row and persisted
+            — A-107: a lockout that resets when the process restarts is not a
+            lockout.
+    ObSignoffSession:
+      type: object
+      required: [sessionToken, expiresAt, kind, obClientName, csatOffered]
+      properties:
+        sessionToken:
+          type: string
+          description: |
+            Opaque, short-lived, and good for this one sign-off. **Not a JWT
+            and not a principal** — it authorises `accept`, `object` and
+            `csat` on one row. A CLIENT login that can read journeys is
+            A-125's `client_accounts`, which is a different thing with a
+            different lifetime.
+        expiresAt: { type: string, format: date-time }
+        kind: { $ref: '#/components/schemas/ObSignoffKind' }
+        obClientName: { type: string }
+        productName: { type: [string, 'null'] }
+        stepTitle: { type: [string, 'null'] }
+        checklist:
+          type: array
+          items: { $ref: '#/components/schemas/ObJourneyStepItem' }
+          description: |
+            What the client is being asked to accept. Empty for a `GO_LIVE`
+            sign-off, which is about the journey rather than one service.
+        csatOffered:
+          type: boolean
+          description: |
+            Whether `submitObCsat` will be accepted after acceptance — true
+            only on a `GO_LIVE` session that has not already been surveyed.
+            On the session rather than discovered by a `422`, so OB-09 knows
+            whether to render the question before the client clicks.
+      description: |
+        What OB-09 renders, returned only after the OTP is proved. Nothing
+        here is available from the link alone — see point 4 of the block
+        comment above the public routes.
+    ObSignoffSessionResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObSignoffSession' }
+    ObSignoffAcceptRequest:
+      type: object
+      required: [sessionToken, acceptedName]
+      properties:
+        sessionToken: { type: string }
+        acceptedName:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: |
+            Typed by the signatory. Part of the recorded-acceptance record
+            alongside the IP and user agent the server captures — a name the
+            person entered themselves is what distinguishes acceptance from a
+            click.
+        note: { type: [string, 'null'], maxLength: 2000 }
+    ObSignoffAcceptResult:
+      type: object
+      required: [signoff, stepCompleted, gateFailures, clientWentLive]
+      properties:
+        signoff: { $ref: '#/components/schemas/ObSignoffDetail' }
+        stepCompleted:
+          type: boolean
+          description: |
+            Whether the service actually completed. **False is a normal
+            outcome, not an error** — the acceptance is recorded either way
+            and the sign-off is `SIGNED`; what failed is our own completion
+            gate. PHASE-2-BUILD-PLAN §3 #4 is the ruling this implements.
+        gateFailures:
+          type: array
+          items: { type: string }
+          description: |
+            Stable reason codes for what the gate refused —
+            `ob-step-items-unanswered`, `ob-step-docs-missing`. Empty when
+            `stepCompleted` is true.
+
+            A code rather than a sentence, because OB-09 shows the client "your
+            acceptance is recorded; we are finishing our side" while the same
+            codes tell the owner exactly what to attach. One field, two
+            audiences, and only the internal one needs the detail.
+        clientWentLive:
+          type: boolean
+          description: |
+            This acceptance was the last one, every journey is complete, and
+            the client is Live-Green (plan §5.9). At most once in a client's
+            life; false on every `STEP` sign-off.
+    ObSignoffAcceptResultResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObSignoffAcceptResult' }
+    ObSignoffObjectRequest:
+      type: object
+      required: [sessionToken, note]
+      properties:
+        sessionToken: { type: string }
+        note:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Mandatory — an objection with no reason guarantees a second round trip.
+    ObCsatRequest:
+      type: object
+      required: [sessionToken, score]
+      properties:
+        sessionToken: { type: string }
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: |
+            Plan §1.1 #9's one question. Five points rather than ten: this is
+            asked once, at the end, of somebody who is finished with us, and
+            the difference between a 6 and a 7 out of ten is noise nobody can
+            act on.
+        comment: { type: [string, 'null'], maxLength: 2000 }
+
+    ObEscalationLevel:
+      type: string
+      enum: [L1, L2, L3]
+      description: |
+        A-118 · `ob_escalations.level`. PHASE-2-BUILD-PLAN §2 fixes the
+        timings and makes them admin-editable: L1 at breach, L2 at +4 working
+        hours, L3 at +8. The intervals are configuration
+        (`ObEscalationSettings`); the three rungs are not.
+    ObEscalation:
+      type: object
+      required: [id, obClientId, journeyId, stepId, level, reason, escalatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        obClientId: { type: integer, format: int64 }
+        journeyId: { type: integer, format: int64 }
+        stepId: { type: integer, format: int64 }
+        stepTitle: { type: string }
+        obClientName: { type: string }
+        level: { $ref: '#/components/schemas/ObEscalationLevel' }
+        reason:
+          type: string
+          description: |
+            `TAT_BREACH`, `AMBER`, `BLOCKED_TOO_LONG` and whatever C's scanner
+            adds. A string rather than an enum for the reason
+            `NotificationTemplate.eventCode` is one: the producer owns the
+            list and it grows with the scanner, so a closed enum here would
+            make each new trigger a breaking change to every client.
+        escalatedTo:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: |
+            Null when the matrix resolved nobody — returned rather than
+            hidden, because an escalation addressed to nobody is a
+            configuration error and suppressing it makes the ladder look like
+            it is working. A-107's DDL calls this out by name.
+        escalatedAt: { type: string, format: date-time }
+        acknowledgedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        acknowledgedAt: { type: [string, 'null'], format: date-time }
+        resolvedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+        resolutionNote: { type: [string, 'null'], maxLength: 2000 }
+      description: '`ob_escalations` — one rung of the internal ladder. Never visible to a client.'
+    ObEscalationResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObEscalation' }
+    ObEscalationListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObEscalation' }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ObEscalationResolveRequest:
+      type: object
+      required: [note]
+      properties:
+        note:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: |
+            Mandatory. On `resolveObClientEscalation` this note **goes to the
+            client**; on `resolveObEscalation` it does not. Same field, two
+            audiences — worth knowing before writing one.
+    ObClientEscalation:
+      type: object
+      required: [id, obClientId, journeyId, stepId, raisedByContact, comment, raisedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        obClientId: { type: integer, format: int64 }
+        obClientName: { type: string }
+        journeyId: { type: integer, format: int64 }
+        stepId: { type: integer, format: int64 }
+        stepTitle: { type: string }
+        raisedByContact:
+          allOf: [{ $ref: '#/components/schemas/ObContact' }]
+          description: |
+            An `ob_client_contacts` row, **not** a `UserRef` — an external
+            principal. A-128's DDL keeps a separate column for exactly this
+            reason, the same split `ob_prereq_comments` makes between its two
+            author columns.
+        comment: { type: string, maxLength: 2000 }
+        raisedAt: { type: string, format: date-time }
+        resolvedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+        resolutionNote: { type: [string, 'null'], maxLength: 2000 }
+      description: |
+        `ob_client_escalations` — raised by a client from CP-03 against one
+        service. One open per service, so a client cannot flood the queue.
+    ObClientEscalationResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObClientEscalation' }
+    ObClientEscalationListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObClientEscalation' }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    # ──────────── module access (OB-08), settings (OB-11), notifications (OB-12/13) ──
+    ObModule:
+      type: string
+      enum: [TICKETING, ONBOARDING]
+      description: |
+        A-118 · `user_module_access.module`. A `CHECK` constraint rather than a
+        foreign key, and A-109's DDL calls it platform-defined for that
+        reason: a module is a deployment fact, not a row somebody adds.
+
+        So an enum here is right where `reportKey` and `eventCode` are open
+        strings — a third module arrives by a release and a migration, and it
+        should break every generated client until each has been looked at.
+    ObModuleRole:
+      type: string
+      enum: [OB_ADMIN, OB_MANAGER, OB_SALES, OB_STEP_OWNER, OB_VIEWER, TICKETING_MEMBER]
+      description: |
+        A-118 · the module's own role vocabulary, **independent of
+        `users.role_id`**. A user's platform role says what they are in
+        ticketing; this says what they are here, and the two do not have to
+        agree — plan §3's six onboarding roles are not blueprint §2's six.
+
+        `TICKETING_MEMBER` is the degenerate value on the other module's
+        grants: ticketing distinguishes its roles through `users.role_id`
+        already, so a second vocabulary for it would be two places to change
+        one fact. Its presence in this enum is what lets one table serve both
+        modules without a nullable column.
+
+        Closed, because `ck_user_module_access_module_role` is closed. A
+        seventh value is a migration.
+    ObModuleAccessGrant:
+      type: object
+      required: [id, user, module, moduleRole, grantedAt, isLive]
+      properties:
+        id: { type: integer, format: int64 }
+        user: { $ref: '#/components/schemas/UserRef' }
+        module: { $ref: '#/components/schemas/ObModule' }
+        moduleRole: { $ref: '#/components/schemas/ObModuleRole' }
+        grantedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: |
+            Null on a grant made by a migration rather than by a person — the
+            seed data that gives the first administrator their own access.
+            Kept nullable rather than pointing at a synthetic system user,
+            which would read as a person in an audit.
+        grantedAt: { type: string, format: date-time }
+        isLive:
+          type: boolean
+          description: |
+            Not revoked. Mirrors `live_key`, which is the generated column the
+            partial unique index is built on — one live grant per (user,
+            module), because two would mean two `moduleRole`s and nothing says
+            which the guard should believe.
+        revokedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        revokedAt: { type: [string, 'null'], format: date-time }
+        tokenLagSeconds:
+          type: integer
+          description: |
+            How long a token minted before this change can still carry the old
+            entitlement — the access-token lifetime. On the response so OB-08
+            can tell an admin that a revoke is not instantaneous and offer to
+            end the user's sessions, rather than leaving them to conclude the
+            revoke failed. See `revokeObModuleAccess`.
+      description: '`user_module_access` — one grant, live or revoked.'
+    ObModuleAccessResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObModuleAccessGrant' }
+    ObModuleAccessListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObModuleAccessGrant' }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ObModuleAccessGrantRequest:
+      type: object
+      required: [userId, module, moduleRole]
+      properties:
+        userId: { type: integer, format: int64 }
+        module: { $ref: '#/components/schemas/ObModule' }
+        moduleRole: { $ref: '#/components/schemas/ObModuleRole' }
+
+    ObEscalationRung:
+      type: object
+      required: [level, afterWorkingHours, recipient]
+      properties:
+        level: { $ref: '#/components/schemas/ObEscalationLevel' }
+        afterWorkingHours:
+          type: integer
+          minimum: 0
+          description: |
+            Working hours after the breach, **not wall-clock** — CLAUDE.md's
+            calendar rule, and the reason a Friday-evening breach escalates on
+            Monday morning rather than at two on Saturday. Zero on L1, which
+            fires at the breach itself.
+
+            PHASE-2-BUILD-PLAN §2 seeds 0 / 4 / 8.
+        recipient:
+          type: string
+          enum: [STEP_OWNER, BACKUP_OWNER, ONBOARDING_MANAGER, OB_ADMIN]
+          description: |
+            **A role, resolved when the rung fires, not a user id.** Storing a
+            person would send L2 to somebody who has since left, and would
+            need re-editing every time the team changed. Resolution is
+            leave-aware against the working calendar — plan §1.1 #4's backup
+            owner is the whole point of `BACKUP_OWNER` being a distinct value
+            rather than a fallback baked into `STEP_OWNER`.
+
+            Resolving to nobody is allowed and is visible:
+            `ObEscalation.escalatedTo` is null and the rung still exists, so a
+            misconfigured matrix shows up on OB-02 instead of silently
+            swallowing breaches.
+      description: One rung of the ladder, as configuration.
+    ObSettings:
+      type: object
+      required: [amberThresholdPercent, scannerIntervalMinutes, ladder]
+      properties:
+        amberThresholdPercent:
+          type: integer
+          minimum: 1
+          maximum: 99
+          description: |
+            Warn at this percentage of a step's TAT. Seeded at 75
+            (PHASE-2-BUILD-PLAN §2), and plan §1.1 #3's "Amber before Red".
+
+            Capped below 100 rather than at it: an amber threshold of 100%
+            fires at the same moment as the breach it is supposed to precede,
+            which is a warning with no warning in it.
+        scannerIntervalMinutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+          description: |
+            How often the TAT sweep runs. Seeded at 5. Takes effect at the
+            next sweep, not immediately.
+        ladder:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { $ref: '#/components/schemas/ObEscalationRung' }
+          description: |
+            Exactly three rungs, one per `ObEscalationLevel`. Fixed at three
+            because `ObEscalationLevel` is closed and
+            `uq_ob_escalations_open (step_id, level, open_key)` is keyed on
+            it — a fourth rung would have no level to be, and a matrix
+            allowing one would be configuration the database cannot store.
+
+            The **intervals** are configuration; the number of rungs is not.
+        updatedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        updatedAt: { type: [string, 'null'], format: date-time }
+      description: |
+        OB-11. The constants PHASE-2-BUILD-PLAN §2 locked, held as
+        configuration — see `getObSettings` for why they are editable at all.
+    ObSettingsResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObSettings' }
+    ObSettingsWriteRequest:
+      type: object
+      required: [amberThresholdPercent, scannerIntervalMinutes, ladder]
+      properties:
+        amberThresholdPercent: { type: integer, minimum: 1, maximum: 99 }
+        scannerIntervalMinutes: { type: integer, minimum: 1, maximum: 60 }
+        ladder:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { $ref: '#/components/schemas/ObEscalationRung' }
+      description: |
+        The whole settings object. A wholesale replace rather than a patch —
+        see `updateObSettings` on why that makes `If-Match` load-bearing here.
+
+        `400` if the rungs are not in ascending `afterWorkingHours` order. A
+        ladder whose L3 fires before its L2 is not a ladder, and the failure
+        would show up weeks later as an escalation that reached a manager
+        before the owner it was meant to give a chance to.
+
+    ObChannel:
+      type: string
+      enum: [EMAIL, WHATSAPP, IN_APP]
+      description: |
+        A-118 · `ob_notification_outbox.channel`, and deliberately **not**
+        `NotificationChannel`, which is `IN_APP · EMAIL · PUSH`. Neither is a
+        subset of the other and the two modules stay separable (A-115); the
+        backend has held them apart since A-107's `ObChannel`.
+
+        **`WHATSAPP` is here while nothing sends it.** PHASE-2-BUILD-PLAN §6.1
+        defers WhatsApp out of phase 2 entirely — no provider account, no
+        template submission, no adapter, no webhook — and keeps the enum value
+        anyway, because the value costs nothing now and adding it later is a
+        migration against a table with production rows. A `WHATSAPP` template
+        can be authored and stored; `ObNotificationTemplate.isDeliverable`
+        says nothing will dispatch it.
+    ObNotificationCategory:
+      type: string
+      enum: [PREREQUISITE, SERVICE, ESCALATION, SIGNOFF, ACCOUNT]
+      description: |
+        A-118 · what kind of thing happened. OB-13's tabs group on it and
+        OB-12's mandatory-mail rule is stated over it: `ESCALATION` and
+        `SIGNOFF` mail cannot be switched off.
+
+        Five values, none of them shared with `NotificationTemplate.category`'s
+        five — `MENTION` and `STATUS_REQUEST` mean nothing here, and
+        `PREREQUISITE` and `SIGNOFF` mean nothing there. That non-overlap is
+        one of the three reasons `listObNotificationTemplates` gives for not
+        reusing the ticketing surface.
+    ObNotificationTemplate:
+      type: object
+      required: [id, eventCode, category, channel, isActive, isMandatory, isDeliverable, bodyTemplate]
+      properties:
+        id: { type: integer, format: int64 }
+        eventCode:
+          type: string
+          description: |
+            One of plan §7's events. A string rather than an enum, for the
+            reason `NotificationTemplate.eventCode` is one: the producers own
+            the list and it grows with them. Served by
+            `getObNotificationTemplateVocabulary`.
+        category: { $ref: '#/components/schemas/ObNotificationCategory' }
+        channel: { $ref: '#/components/schemas/ObChannel' }
+        recipients:
+          type: array
+          minItems: 1
+          items: { type: string }
+          description: |
+            Never empty. A template with no recipients is a row that looks
+            configured and sends nothing; switching it off says so instead.
+        subjectTemplate:
+          type: [string, 'null']
+          maxLength: 255
+          description: Required for `EMAIL`; null on `IN_APP`, which has a title rather than a subject.
+        bodyTemplate:
+          type: string
+          description: |
+            HTML for `EMAIL`, plain text otherwise. May contain any merge tag
+            from the vocabulary and is refused at write time if it contains
+            one that is not — an unknown tag renders as literal braces in a
+            client's inbox, and this is the last place to catch it.
+        isActive: { type: boolean }
+        isMandatory:
+          type: boolean
+          description: |
+            **Derived, never stored** — `channel == EMAIL` and the category is
+            `ESCALATION` or `SIGNOFF`. True means `isActive` cannot be set
+            false. A stored column would be a second copy of a rule
+            deliberately stated over the category, so that an escalation event
+            added next month is covered the moment it is declared.
+        isDeliverable:
+          type: boolean
+          description: |
+            Whether an adapter exists for this channel in this deployment.
+            **False for every `WHATSAPP` row in phase 2** (PHASE-2-BUILD-PLAN
+            §6.1), so OB-12 can render it as "authored, not yet sending"
+            rather than presenting a template that will queue forever looking
+            configured. B-110's dispatcher leaves such rows `PENDING` by
+            design; this is that fact, made visible on the screen where
+            somebody would otherwise wonder.
+    ObNotificationTemplateResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObNotificationTemplate' }
+    ObNotificationTemplateListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObNotificationTemplate' }
+    ObNotificationTemplateUpdateRequest:
+      type: object
+      properties:
+        subjectTemplate: { type: [string, 'null'], maxLength: 255 }
+        bodyTemplate: { type: string, minLength: 1, maxLength: 20000 }
+        recipients:
+          type: array
+          minItems: 1
+          items: { type: string }
+        isActive: { type: boolean }
+      description: |
+        `eventCode` and `channel` are absent: together they are the row's
+        identity, the unique key is over them, and the renderer resolves by
+        them. Changing either is a different template.
+    ObNotificationEventOption:
+      type: object
+      required: [code, category, mandatoryMail]
+      properties:
+        code: { type: string }
+        category: { $ref: '#/components/schemas/ObNotificationCategory' }
+        mandatoryMail:
+          type: boolean
+          description: |
+            The `EMAIL` template for this event cannot be switched off. Lets
+            OB-12 lock the toggle before the click rather than after the
+            `409`.
+    ObNotificationVocabularyResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [events, channels, recipients, mergeTags]
+          properties:
+            events:
+              type: array
+              items: { $ref: '#/components/schemas/ObNotificationEventOption' }
+            channels:
+              type: array
+              items: { $ref: '#/components/schemas/ObChannel' }
+            recipients:
+              type: array
+              items: { type: string }
+            mergeTags:
+              type: array
+              items: { type: string }
+              description: |
+                Every tag a body may contain. Served rather than documented,
+                so a tag added with a new event is offered the same day.
+

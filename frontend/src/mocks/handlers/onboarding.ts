@@ -62,7 +62,9 @@ const maskPan = (pan: string | null): string | null =>
 const AMBER_AT = 0.75;
 const HOURS_PER_DAY = 9;
 
-function stepRag(step: ObStep): 'GREEN' | 'AMBER' | 'RED' | null {
+/** Exported for `onboardingAdmin.ts` (A-118) — a third copy of this rule is
+ * how one of them ends up disagreeing with the other two about amber. */
+export function stepRag(step: ObStep): 'GREEN' | 'AMBER' | 'RED' | null {
   if (step.status === 'DONE' || step.status === 'SKIPPED') return 'GREEN';
   if (step.status === 'PENDING' || step.status === 'WAITING_ON_CLIENT') return null;
   if (step.status === 'BLOCKED') return 'RED';

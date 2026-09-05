@@ -874,6 +874,29 @@ export interface Db {
   obJourneyTemplateSteps: ObJourneyTemplateStepRow[];
   obJourneyTemplateStepItems: ObJourneyTemplateStepItemRow[];
   obJourneyTemplateStepDocs: ObJourneyTemplateStepDocRow[];
+  /**
+   * A-118 · the prerequisites layer (OB-14), and the module's sign-off,
+   * escalation, access, settings and notification-template surfaces.
+   *
+   * Held on `Db` for the reason every neighbour above is: state outside this
+   * object survives `resetDb()`, and the failure that produces is a test which
+   * passes alone and fails in a full run.
+   *
+   * OB-13's notification centre itself is B-112's, two lines down.
+   */
+  obPrereqVersions: ObPrereqTemplateVersionRow[];
+  obPrereqTemplateTasks: ObPrereqTemplateTaskRow[];
+  obClientPrereqs: ObClientPrereqRow[];
+  obClientPrereqTasks: ObClientPrereqTaskRow[];
+  obPrereqComments: ObPrereqCommentRow[];
+  obPrereqHistory: ObPrereqHistoryRow[];
+  obSignoffs: ObSignoffRow[];
+  obSignoffSessions: ObSignoffSessionRow[];
+  obEscalations: ObEscalationRow[];
+  obClientEscalations: ObClientEscalationRow[];
+  obModuleAccess: ObModuleAccessRow[];
+  obSettings: ObSettingsRow;
+  obNotificationTemplates: ObNotificationTemplateRow[];
   /** B-112 · OB-13. See {@link ObNotificationRow} on why this is not `notifications`. */
   obNotifications: ObNotificationRow[];
   currentUserId: number;
@@ -1857,7 +1880,17 @@ const OB_CLIENTS: ObClient[] = [
           // C-104 · owned by user 3 (Ravi, the default currentUserId) so the
           // lifecycle routes have a caller who passes ObStepOwnership.mayAct
           // without swapping the mock's signed-in user.
-          { id: 3, sequence: 3, name: 'Data Migration', status: 'BLOCKED', tatDays: 8, usedHours: 71, dependsOnStepId: 2, ownerUserId: 3, blockedReasonCode: 'client-unresponsive', blockedNote: 'Awaiting the signed data-migration sign-off from Northwind.' },
+          { id: 3, sequence: 3, name: 'Data Migration', status: 'BLOCKED', tatDays: 8, usedHours: 71, dependsOnStepId: 2, ownerUserId: 3, blockedReasonCode: 'client-unresponsive', blockedNote: 'Awaiting the signed data-migration sign-off from Northwind.',
+            // A-118 · the only step here with a Task List. Nothing in this
+            // fixture had one, which left OB-06 with no checklist to draw and
+            // the completion gate with nothing to refuse — so the one case
+            // PHASE-2-BUILD-PLAN §3 #4 rules on (a client accepting a service
+            // whose own gate has not been met) was unreachable in the mock.
+            items: [
+              { id: 31, sequence: 1, label: 'Staff master reconciled', isMandatory: true, isDone: true, doneAt: '2026-08-28T09:00:00.000Z', doneById: 3 },
+              { id: 32, sequence: 2, label: 'Student master reconciled', isMandatory: true, isDone: false, doneAt: null, doneById: null },
+              { id: 33, sequence: 3, label: 'Legacy ledger archived', isMandatory: false, isDone: false, doneAt: null, doneById: null },
+            ] },
           { id: 4, sequence: 4, name: 'User Training', status: 'WAITING_ON_CLIENT', tatDays: 5, usedHours: 12, dependsOnStepId: null, ownerUserId: 3 },
           // No dependency check yet (C-119's own task) — startable today even
           // though its nominal dependency (step 3) is still BLOCKED, exactly
@@ -2124,6 +2157,21 @@ export function createDb(): Db {
     obJourneyTemplateSteps: structuredClone(OB_JOURNEY_TEMPLATE_STEPS),
     obJourneyTemplateStepItems: structuredClone(OB_JOURNEY_TEMPLATE_STEP_ITEMS),
     obJourneyTemplateStepDocs: structuredClone(OB_JOURNEY_TEMPLATE_STEP_DOCS),
+    // A-118 · the prerequisites layer and the OB-08/09/11/12 surfaces.
+    obPrereqVersions: structuredClone(OB_PREREQ_VERSIONS),
+    obPrereqTemplateTasks: structuredClone(OB_PREREQ_TEMPLATE_TASKS),
+    obClientPrereqs: structuredClone(OB_CLIENT_PREREQS),
+    obClientPrereqTasks: structuredClone(OB_CLIENT_PREREQ_TASKS),
+    // Nobody has said anything on a task yet, which is the honest empty state.
+    obPrereqComments: [],
+    obPrereqHistory: [],
+    obSignoffs: structuredClone(OB_SIGNOFFS),
+    obSignoffSessions: [],
+    obEscalations: structuredClone(OB_ESCALATIONS),
+    obClientEscalations: structuredClone(OB_CLIENT_ESCALATIONS),
+    obModuleAccess: structuredClone(OB_MODULE_ACCESS),
+    obSettings: structuredClone(OB_SETTINGS),
+    obNotificationTemplates: structuredClone(OB_NOTIFICATION_TEMPLATES),
     // B-112 · OB-13. See OB_NOTIFICATIONS's own note.
     obNotifications: structuredClone(OB_NOTIFICATIONS),
     calendar: {
@@ -2717,6 +2765,327 @@ function seedFiller(db: Db) {
     { id: nextId(db, 'notification'), userId: 3, eventKey: 'SLA_BREACH', title: 'CRM-26-00347 breached its SLA', body: 'Escalated High → Critical.', ticketId: 'CRM-26-00347', isRead: true, deepLink: '/tickets/CRM-26-00347', createdAt: iso('2026-08-13T00:15:00') },
   );
 }
+
+
+// ── A-118 · prerequisites, sign-off, escalation, module access, settings ────
+//
+// ⚠️ **Stream A, in Stream D's `mocks/` (D-004)** — the same flag
+// `ObJourneyTemplateRow` and `reportSchedules` already carry above, and for the
+// same reason: `coverage.test.ts` refuses a contract operation with no handler,
+// so the routes this task adds bring their fixtures with them.
+//
+// Additive only. Nothing above is edited.
+
+/** `ob_prereq_template_tasks` — one task on one version of the OB-14 master. */
+export interface ObPrereqTemplateTaskRow {
+  id: number; templateVersion: number; sequence: number;
+  title: string; description: string | null; tatDays: number;
+  isMandatory: boolean; isActive: boolean;
+  docs: { id: number; label: string; attachmentId: number; fileName: string; sizeBytes: number }[];
+}
+
+/**
+ * One *version* of the prerequisites master, not one row per task.
+ *
+ * **Singular where `ObJourneyTemplateRow` is per-product**: prerequisites are
+ * the client's own responsibilities, which plan §4 makes the same set whatever
+ * they bought. So there is no `productId` here and the contract's paths carry
+ * no template id.
+ */
+export interface ObPrereqTemplateVersionRow {
+  version: number; isDraft: boolean; isActive: boolean;
+  publishedAt: string | null; publishedById: number | null;
+}
+
+/** `ob_client_prereqs` — the per-client header. */
+export interface ObClientPrereqRow {
+  obClientId: number; templateVersion: number;
+  status: 'IN_PROGRESS' | 'CLEARED'; clearedAt: string | null;
+}
+
+export type ObPrereqStatus = 'PENDING' | 'SUBMITTED' | 'VERIFIED' | 'SKIPPED';
+
+/** `ob_client_prereq_tasks` — a snapshot instance, or an ad-hoc per-client task. */
+export interface ObClientPrereqTaskRow {
+  id: number; obClientId: number; templateTaskId: number | null;
+  sequence: number; title: string; description: string | null;
+  isMandatory: boolean; isAdHoc: boolean;
+  status: ObPrereqStatus; dueAt: string;
+  submittedAt: string | null; submittedVia: 'PORTAL' | 'STAFF' | null;
+  verifiedAt: string | null; verifiedById: number | null;
+  skippedAt: string | null; skippedById: number | null; skipReason: string | null;
+  referenceDocs: { id: number; label: string; attachmentId: number; fileName: string; sizeBytes: number }[];
+  submissions: { attachmentId: number; fileName: string; sizeBytes: number; uploadedByType: 'STAFF' | 'CLIENT'; uploadedAt: string }[];
+}
+
+/** `ob_prereq_comments` — append-only, two author columns, exactly one set. */
+export interface ObPrereqCommentRow {
+  id: number; prereqTaskId: number;
+  authorType: 'STAFF' | 'CLIENT';
+  staffAuthorId: number | null; clientContactId: number | null;
+  body: string; isSystem: boolean; createdAt: string;
+}
+
+/** `ob_prereq_history` — append-only and hash-chained. Handlers only push. */
+export interface ObPrereqHistoryRow {
+  id: number; prereqTaskId: number; at: string;
+  actorType: 'STAFF' | 'CLIENT';
+  staffActorId: number | null; clientActorId: number | null;
+  fromStatus: ObPrereqStatus | null; toStatus: ObPrereqStatus;
+  reason: string | null; isCorrection: boolean; correctsEntryId: number | null;
+}
+
+/**
+ * `ob_signoffs`.
+ *
+ * `token` is held in **plaintext here and nowhere else**. The real table stores
+ * only a SHA-256 (A-107) so that reading it does not yield a working link; a
+ * mock has to be able to hand the link back to a test, and this field is the
+ * whole of that difference. No handler serialises it.
+ */
+export interface ObSignoffRow {
+  id: number; obClientId: number; journeyId: number; stepId: number | null;
+  kind: 'STEP' | 'GO_LIVE';
+  status: 'PENDING' | 'SIGNED' | 'OBJECTED' | 'EXPIRED' | 'CANCELLED';
+  token: string; tokenExpiresAt: string;
+  otp: string | null; otpAttempts: number;
+  requestedById: number | null; requestedAt: string;
+  sentToContactId: number;
+  signedByContactId: number | null; signedAt: string | null;
+  signedIp: string | null; signedUserAgent: string | null;
+  objectedAt: string | null; objectionNote: string | null;
+  pdfStorageKey: string | null;
+  csatScore: number | null; csatComment: string | null;
+}
+
+/** A verified public session — opaque, short-lived, one sign-off. Not a principal. */
+export interface ObSignoffSessionRow {
+  token: string; signoffId: number; expiresAt: string; used: boolean;
+}
+
+/** `ob_escalations` — the internal ladder. Never visible to a client. */
+export interface ObEscalationRow {
+  id: number; obClientId: number; journeyId: number; stepId: number;
+  level: 'L1' | 'L2' | 'L3'; reason: string;
+  escalatedToId: number | null; escalatedAt: string;
+  acknowledgedById: number | null; acknowledgedAt: string | null;
+  resolvedById: number | null; resolvedAt: string | null; resolutionNote: string | null;
+}
+
+/** `ob_client_escalations` — raised by a client from CP-03. One open per service. */
+export interface ObClientEscalationRow {
+  id: number; obClientId: number; journeyId: number; stepId: number;
+  raisedByContactId: number; comment: string; raisedAt: string;
+  resolvedById: number | null; resolvedAt: string | null; resolutionNote: string | null;
+}
+
+/** `user_module_access` — revoked rather than deleted, so an audit can answer. */
+export interface ObModuleAccessRow {
+  id: number; userId: number;
+  module: 'TICKETING' | 'ONBOARDING';
+  moduleRole: 'OB_ADMIN' | 'OB_MANAGER' | 'OB_SALES' | 'OB_STEP_OWNER' | 'OB_VIEWER' | 'TICKETING_MEMBER';
+  grantedById: number | null; grantedAt: string;
+  revokedById: number | null; revokedAt: string | null;
+}
+
+/** OB-11. PHASE-2-BUILD-PLAN §2's locked values, held as configuration. */
+export interface ObSettingsRow {
+  amberThresholdPercent: number;
+  scannerIntervalMinutes: number;
+  ladder: { level: 'L1' | 'L2' | 'L3'; afterWorkingHours: number; recipient: string }[];
+  updatedById: number | null; updatedAt: string | null;
+}
+
+/** OB-12. The module's own templates — `ObChannel`, not `NotificationChannel`. */
+export interface ObNotificationTemplateRow {
+  id: number; eventCode: string;
+  category: 'PREREQUISITE' | 'SERVICE' | 'ESCALATION' | 'SIGNOFF' | 'ACCOUNT';
+  channel: 'EMAIL' | 'WHATSAPP' | 'IN_APP';
+  recipients: string[];
+  subjectTemplate: string | null; bodyTemplate: string;
+  isActive: boolean;
+}
+
+
+const OB_PREREQ_VERSIONS: ObPrereqTemplateVersionRow[] = [
+  { version: 1, isDraft: false, isActive: true, publishedAt: '2026-07-01T09:00:00.000Z', publishedById: 1 },
+];
+
+/**
+ * Five tasks, three mandatory.
+ *
+ * Deliberately **short and mostly mandatory-light**: plan §14's mitigation for
+ * "the gate stalls all journeys on a slow client" is keeping the mandatory list
+ * short, and a fixture that modelled a fifteen-item mandatory checklist would
+ * teach every screen built against it the wrong shape of the problem.
+ */
+const OB_PREREQ_TEMPLATE_TASKS: ObPrereqTemplateTaskRow[] = [
+  {
+    id: 1, templateVersion: 1, sequence: 1, title: 'Signed service agreement',
+    description: 'Countersigned copy of the agreement shared at contracting.',
+    tatDays: 3, isMandatory: true, isActive: true,
+    docs: [{ id: 1, label: 'Specimen agreement', attachmentId: 9001, fileName: 'specimen-agreement.pdf', sizeBytes: 184_320 }],
+  },
+  {
+    id: 2, templateVersion: 1, sequence: 2, title: 'Primary contact confirmation',
+    description: 'Confirm the SPOC who will own onboarding on your side.',
+    tatDays: 2, isMandatory: true, isActive: true, docs: [],
+  },
+  {
+    id: 3, templateVersion: 1, sequence: 3, title: 'Master data extract',
+    description: 'Staff, student and department masters in the supplied format.',
+    tatDays: 7, isMandatory: true, isActive: true,
+    docs: [{ id: 2, label: 'Extract format (XLSX)', attachmentId: 9002, fileName: 'master-data-format.xlsx', sizeBytes: 42_496 }],
+  },
+  {
+    id: 4, templateVersion: 1, sequence: 4, title: 'Branding assets',
+    description: 'Logo and colour references for the tenant theme.',
+    tatDays: 5, isMandatory: false, isActive: true, docs: [],
+  },
+  {
+    id: 5, templateVersion: 1, sequence: 5, title: 'Nominate training attendees',
+    description: 'Names and emails for the admin training cohort.',
+    tatDays: 10, isMandatory: false, isActive: true, docs: [],
+  },
+];
+
+/**
+ * Three clients, three gate states — cleared, locked, cleared.
+ *
+ * **Acme (client 2) is the locked one**, because Acme is who owns the journey
+ * already seeded `gateStatus: 'LOCKED'` above. That pairing is the whole point
+ * and it is easy to get wrong: a fixture whose header said `CLEARED` while the
+ * client's own journey said `LOCKED` would let a screen ship that reads one and
+ * trusts the other, and neither would look wrong on its own.
+ */
+const OB_CLIENT_PREREQS: ObClientPrereqRow[] = [
+  { obClientId: 1, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-07-24T11:20:00.000Z' },
+  { obClientId: 2, templateVersion: 1, status: 'IN_PROGRESS', clearedAt: null },
+  { obClientId: 3, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-08-02T15:05:00.000Z' },
+];
+
+function prereqInstancesFor(
+  obClientId: number,
+  idBase: number,
+  states: ObPrereqStatus[],
+): ObClientPrereqTaskRow[] {
+  return OB_PREREQ_TEMPLATE_TASKS.map((t, i) => {
+    const status = states[i];
+    const settled = status === 'VERIFIED';
+    return {
+      id: idBase + i, obClientId, templateTaskId: t.id, sequence: t.sequence,
+      title: t.title, description: t.description,
+      isMandatory: t.isMandatory, isAdHoc: false,
+      status,
+      dueAt: `2026-0${obClientId === 2 ? 8 : 7}-${String(10 + t.sequence).padStart(2, '0')}T12:00:00.000Z`,
+      submittedAt: status === 'PENDING' ? null : '2026-07-20T09:00:00.000Z',
+      submittedVia: status === 'PENDING' ? null : 'PORTAL',
+      verifiedAt: settled ? '2026-07-21T09:00:00.000Z' : null,
+      verifiedById: settled ? 2 : null,
+      skippedAt: status === 'SKIPPED' ? '2026-07-22T09:00:00.000Z' : null,
+      skippedById: status === 'SKIPPED' ? 1 : null,
+      skipReason: status === 'SKIPPED' ? 'Client supplied branding directly to the design team.' : null,
+      referenceDocs: t.docs,
+      submissions: status === 'PENDING' ? [] : [
+        { attachmentId: 9100 + idBase + i, fileName: `${t.title.toLowerCase().replace(/\W+/g, '-')}.pdf`, sizeBytes: 120_000, uploadedByType: 'CLIENT', uploadedAt: '2026-07-20T09:00:00.000Z' },
+      ],
+    };
+  });
+}
+
+const OB_CLIENT_PREREQ_TASKS: ObClientPrereqTaskRow[] = [
+  ...prereqInstancesFor(1, 101, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'SKIPPED', 'VERIFIED']),
+  // The locked gate — Acme, whose journey 3 is the seeded LOCKED one. One
+  // mandatory task submitted and awaiting verification, one still pending:
+  // both of the states a verifier's queue is made of.
+  ...prereqInstancesFor(2, 111, ['VERIFIED', 'SUBMITTED', 'PENDING', 'PENDING', 'PENDING']),
+  ...prereqInstancesFor(3, 121, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'SKIPPED']),
+];
+
+const OB_SIGNOFFS: ObSignoffRow[] = [
+  {
+    id: 1, obClientId: 1, journeyId: 1, stepId: 3, kind: 'STEP', status: 'PENDING',
+    token: 'ob-signoff-demo-token-1', tokenExpiresAt: '2026-09-30T12:00:00.000Z',
+    otp: null, otpAttempts: 0,
+    requestedById: 2, requestedAt: '2026-09-01T10:00:00.000Z', sentToContactId: 1,
+    signedByContactId: null, signedAt: null, signedIp: null, signedUserAgent: null,
+    objectedAt: null, objectionNote: null, pdfStorageKey: null,
+    csatScore: null, csatComment: null,
+  },
+  {
+    id: 2, obClientId: 3, journeyId: 4, stepId: 13, kind: 'STEP', status: 'SIGNED',
+    token: 'ob-signoff-demo-token-2', tokenExpiresAt: '2026-08-20T12:00:00.000Z',
+    otp: null, otpAttempts: 0,
+    requestedById: 2, requestedAt: '2026-08-10T10:00:00.000Z', sentToContactId: 4,
+    signedByContactId: 4, signedAt: '2026-08-11T09:14:00.000Z',
+    signedIp: '203.0.113.24', signedUserAgent: 'Mozilla/5.0 (Macintosh)',
+    objectedAt: null, objectionNote: null,
+    pdfStorageKey: 'ob-signoffs/2/certificate.pdf',
+    csatScore: null, csatComment: null,
+  },
+];
+
+const OB_ESCALATIONS: ObEscalationRow[] = [
+  {
+    id: 1, obClientId: 1, journeyId: 1, stepId: 3, level: 'L1', reason: 'TAT_BREACH',
+    escalatedToId: 3, escalatedAt: '2026-09-02T08:00:00.000Z',
+    acknowledgedById: 3, acknowledgedAt: '2026-09-02T09:10:00.000Z',
+    resolvedById: null, resolvedAt: null, resolutionNote: null,
+  },
+  {
+    id: 2, obClientId: 1, journeyId: 1, stepId: 3, level: 'L2', reason: 'TAT_BREACH',
+    // Resolved nobody. A-107's DDL calls this "worth seeing on the dashboard",
+    // so the fixture has one — a matrix gap is invisible until something shows it.
+    escalatedToId: null, escalatedAt: '2026-09-02T12:00:00.000Z',
+    acknowledgedById: null, acknowledgedAt: null,
+    resolvedById: null, resolvedAt: null, resolutionNote: null,
+  },
+];
+
+const OB_CLIENT_ESCALATIONS: ObClientEscalationRow[] = [
+  {
+    id: 1, obClientId: 1, journeyId: 1, stepId: 3, raisedByContactId: 1,
+    comment: 'We have heard nothing on the data migration for eight working days.',
+    raisedAt: '2026-09-03T06:30:00.000Z',
+    resolvedById: null, resolvedAt: null, resolutionNote: null,
+  },
+];
+
+const OB_MODULE_ACCESS: ObModuleAccessRow[] = [
+  { id: 1, userId: 1, module: 'ONBOARDING', moduleRole: 'OB_ADMIN', grantedById: null, grantedAt: '2026-07-01T09:00:00.000Z', revokedById: null, revokedAt: null },
+  { id: 2, userId: 2, module: 'ONBOARDING', moduleRole: 'OB_MANAGER', grantedById: 1, grantedAt: '2026-07-01T09:05:00.000Z', revokedById: null, revokedAt: null },
+  { id: 3, userId: 3, module: 'ONBOARDING', moduleRole: 'OB_STEP_OWNER', grantedById: 1, grantedAt: '2026-07-01T09:06:00.000Z', revokedById: null, revokedAt: null },
+  { id: 4, userId: 5, module: 'ONBOARDING', moduleRole: 'OB_SALES', grantedById: 1, grantedAt: '2026-07-02T09:00:00.000Z', revokedById: null, revokedAt: null },
+  // One revoked grant, so OB-08's audit view has something to show and the
+  // `includeRevoked` filter has something to filter.
+  { id: 5, userId: 4, module: 'ONBOARDING', moduleRole: 'OB_VIEWER', grantedById: 1, grantedAt: '2026-07-03T09:00:00.000Z', revokedById: 1, revokedAt: '2026-08-14T11:00:00.000Z' },
+];
+
+const OB_SETTINGS: ObSettingsRow = {
+  // PHASE-2-BUILD-PLAN §2's locked values, seeded rather than hardcoded.
+  amberThresholdPercent: 75,
+  scannerIntervalMinutes: 5,
+  ladder: [
+    { level: 'L1', afterWorkingHours: 0, recipient: 'STEP_OWNER' },
+    { level: 'L2', afterWorkingHours: 4, recipient: 'ONBOARDING_MANAGER' },
+    { level: 'L3', afterWorkingHours: 8, recipient: 'OB_ADMIN' },
+  ],
+  updatedById: null, updatedAt: null,
+};
+
+const OB_NOTIFICATION_TEMPLATES: ObNotificationTemplateRow[] = [
+  { id: 1, eventCode: 'PREREQ_SUBMITTED', category: 'PREREQUISITE', channel: 'EMAIL', recipients: ['VERIFIER'], subjectTemplate: '{{client_name}} submitted {{task_title}}', bodyTemplate: '<p>{{client_name}} has submitted <b>{{task_title}}</b> for verification.</p>', isActive: true },
+  { id: 2, eventCode: 'PREREQ_RETURNED', category: 'PREREQUISITE', channel: 'EMAIL', recipients: ['CLIENT_SPOC'], subjectTemplate: 'Action needed: {{task_title}}', bodyTemplate: '<p>{{task_title}} needs another look: {{reason}}</p>', isActive: true },
+  { id: 3, eventCode: 'GATE_OPENED', category: 'SERVICE', channel: 'EMAIL', recipients: ['CLIENT_SPOC', 'STEP_OWNER'], subjectTemplate: 'Onboarding has started for {{client_name}}', bodyTemplate: '<p>All prerequisites are clear. Your onboarding is under way.</p>', isActive: true },
+  { id: 4, eventCode: 'TAT_BREACH', category: 'ESCALATION', channel: 'EMAIL', recipients: ['STEP_OWNER'], subjectTemplate: '{{step_title}} has breached its TAT', bodyTemplate: '<p>{{step_title}} for {{client_name}} is past its due date.</p>', isActive: true },
+  { id: 5, eventCode: 'SIGNOFF_REQUESTED', category: 'SIGNOFF', channel: 'EMAIL', recipients: ['CLIENT_CONTACT'], subjectTemplate: 'Please sign off {{step_title}}', bodyTemplate: '<p>Follow the link to review and sign off.</p>', isActive: true },
+  // A WHATSAPP row that nothing will dispatch — PHASE-2-BUILD-PLAN §6.1.
+  // Present so `isDeliverable: false` has something to be false about, which is
+  // the state OB-12 has to render and would otherwise never meet.
+  { id: 6, eventCode: 'SIGNOFF_REQUESTED', category: 'SIGNOFF', channel: 'WHATSAPP', recipients: ['CLIENT_CONTACT'], subjectTemplate: null, bodyTemplate: 'Please sign off {{step_title}} — {{link}}', isActive: true },
+  { id: 7, eventCode: 'CLIENT_ESCALATION_RAISED', category: 'ESCALATION', channel: 'IN_APP', recipients: ['ONBOARDING_MANAGER', 'STEP_OWNER'], subjectTemplate: null, bodyTemplate: '{{client_name}} escalated {{step_title}}.', isActive: true },
+];
+
 
 let db: Db = createDb();
 
